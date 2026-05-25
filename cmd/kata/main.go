@@ -74,6 +74,7 @@ func newRootCmd() *cobra.Command {
 		newLabelsCmd(),
 		newAssignCmd(),
 		newUnassignCmd(),
+		newClaimCmd(),
 		newReadyCmd(),
 		newEventsCmd(),
 		newExportCmd(),
