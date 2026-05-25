@@ -86,10 +86,14 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// Atomically claim the issue (checks ownership and updates in one transaction)
 		result, err := cfg.DB.ClaimOwner(ctx, issue.ID, in.Body.Actor, in.Body.Force)
 		if err == db.ErrAlreadyClaimed {
+			currentOwner := "unknown"
+			if result.CurrentOwner != nil {
+				currentOwner = *result.CurrentOwner
+			}
 			return nil, api.NewError(409, "already_claimed",
-				fmt.Sprintf("issue is already claimed by %s", *result.CurrentOwner),
+				fmt.Sprintf("issue is already claimed by %s", currentOwner),
 				"use --force to reassign",
-				map[string]any{"current_owner": *result.CurrentOwner})
+				map[string]any{"current_owner": currentOwner})
 		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
