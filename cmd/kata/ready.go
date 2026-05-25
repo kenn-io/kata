@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
@@ -47,21 +46,30 @@ func newReadyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Build base URL
 			getURL := fmt.Sprintf("%s/api/v1/projects/%d/ready", baseURL, pid)
+
+			// Build query parameters
+			params := url.Values{}
 			if limit > 0 {
-				getURL += fmt.Sprintf("?limit=%d", limit)
+				params.Set("limit", fmt.Sprintf("%d", limit))
 			}
 			if unowned {
-				getURL += urlParamSep(getURL) + "unowned=true"
+				params.Set("unowned", "true")
 			}
 			if owner != "" {
-				getURL += urlParamSep(getURL) + "owner=" + url.QueryEscape(owner)
+				params.Set("owner", owner)
 			}
 			for _, l := range labels {
-				getURL += urlParamSep(getURL) + "label=" + url.QueryEscape(l)
+				params.Add("label", l)
 			}
 			for _, l := range noLabels {
-				getURL += urlParamSep(getURL) + "exclude_label=" + url.QueryEscape(l)
+				params.Add("exclude_label", l)
+			}
+
+			// Append query string if params exist
+			if len(params) > 0 {
+				getURL += "?" + params.Encode()
 			}
 			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, getURL, nil)
 			if err != nil {
@@ -107,12 +115,4 @@ func newReadyCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
 	cmd.Flags().StringSliceVar(&noLabels, "no-label", nil, "exclude issues with this label (repeatable)")
 	return cmd
-}
-
-// urlParamSep returns "?" if url has no query string, "&" otherwise.
-func urlParamSep(u string) string {
-	if strings.Contains(u, "?") {
-		return "&"
-	}
-	return "?"
 }
