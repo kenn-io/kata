@@ -464,6 +464,64 @@ func TestList_ExpandCollapse_LeafNoOp(t *testing.T) {
 	}
 }
 
+// TestList_ArrowExpandCollapse covers the right/left arrow bindings
+// added alongside the space toggle. Right expands a collapsed parent;
+// left collapses an expanded parent. Repeated presses in the same
+// direction must be no-ops so users can mash arrows without the row
+// flipping back and forth.
+func TestList_ArrowExpandCollapse(t *testing.T) {
+	api, km, sc := newListEnv()
+	parentSID := "p001"
+	lm := listModel{
+		issues: []Issue{
+			{ProjectID: 7, UID: "01TEST-p001", ShortID: parentSID, ChildCounts: &ChildCounts{Open: 1, Total: 1}},
+			{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", ParentShortID: &parentSID},
+		},
+	}
+
+	lm, cmd := lm.Update(tea.KeyMsg{Type: tea.KeyRight}, km, api, sc)
+	if cmd != nil {
+		t.Fatalf("right should not dispatch a command, got %T", cmd)
+	}
+	if len(lm.visibleRows()) != 2 {
+		t.Fatalf("after right: visible rows = %+v, want parent+child", lm.visibleRows())
+	}
+
+	// Right on an already-expanded row is a no-op (and must not toggle).
+	lm, _ = lm.Update(tea.KeyMsg{Type: tea.KeyRight}, km, api, sc)
+	if len(lm.visibleRows()) != 2 {
+		t.Fatalf("right again: visible rows = %+v, want still expanded", lm.visibleRows())
+	}
+
+	lm, _ = lm.Update(tea.KeyMsg{Type: tea.KeyLeft}, km, api, sc)
+	if len(lm.visibleRows()) != 1 {
+		t.Fatalf("after left: visible rows = %+v, want parent only", lm.visibleRows())
+	}
+
+	// Left on an already-collapsed row is a no-op.
+	lm, _ = lm.Update(tea.KeyMsg{Type: tea.KeyLeft}, km, api, sc)
+	if len(lm.visibleRows()) != 1 {
+		t.Fatalf("left again: visible rows = %+v, want still collapsed", lm.visibleRows())
+	}
+}
+
+// TestList_ArrowExpandCollapse_LeafNoOp mirrors the space-leaf case
+// for the arrow bindings: a row with no children must not get an
+// entry written to the expansion set.
+func TestList_ArrowExpandCollapse_LeafNoOp(t *testing.T) {
+	api, km, sc := newListEnv()
+	lm := listModel{issues: []Issue{{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1"}}}
+
+	next, _ := lm.Update(tea.KeyMsg{Type: tea.KeyRight}, km, api, sc)
+	if len(next.expanded) != 0 {
+		t.Fatalf("right on leaf: expanded = %+v, want empty", next.expanded)
+	}
+	next, _ = lm.Update(tea.KeyMsg{Type: tea.KeyLeft}, km, api, sc)
+	if len(next.expanded) != 0 {
+		t.Fatalf("left on leaf: expanded = %+v, want empty", next.expanded)
+	}
+}
+
 func TestList_SelectionPreservedAcrossRefetchWithParentInsertion(t *testing.T) {
 	parentSID := "p001"
 	lm := listModel{

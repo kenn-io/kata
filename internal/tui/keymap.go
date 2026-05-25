@@ -12,7 +12,7 @@ type keymap struct {
 	Up, Down, PageUp, PageDown, Home, End          key
 	ScrollUp, ScrollDown                           key
 	Open, NewIssue, NewChild, Search               key
-	ExpandCollapse                                 key
+	ExpandCollapse, Expand, Collapse               key
 	SortChildren                                   key
 	FilterStatus, FilterForm, ClearFilters         key
 	Close, Reopen                                  key
@@ -55,6 +55,8 @@ func newKeymap() keymap {
 		NewIssue:       key{Keys: []string{"n"}, Help: "new issue (form)"},
 		NewChild:       key{Keys: []string{"N"}, Help: "new child"},
 		ExpandCollapse: key{Keys: []string{" "}, Help: "expand/collapse"},
+		Expand:         key{Keys: []string{"right"}, Help: "expand"},
+		Collapse:       key{Keys: []string{"left"}, Help: "collapse"},
 		SortChildren:   key{Keys: []string{"o"}, Help: "toggle graph order"},
 		Search:         key{Keys: []string{"/"}, Help: "search"},
 		FilterStatus:   key{Keys: []string{"s"}, Help: "cycle status filter"},

@@ -17,6 +17,8 @@ g       first
 G       last
 enter   open detail
 space   expand/collapse
+right   expand
+left    collapse
 n       new issue (form)
 o       toggle graph order
 x       close

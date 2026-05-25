@@ -404,10 +404,15 @@ func (lm listModel) applyCursorKey(msg tea.KeyMsg, km keymap) (listModel, bool) 
 }
 
 func (lm listModel) applyExpandKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
-	if !km.ExpandCollapse.matches(msg) {
-		return lm, false
+	switch {
+	case km.ExpandCollapse.matches(msg):
+		return lm.toggleExpanded(), true
+	case km.Expand.matches(msg):
+		return lm.setExpanded(true), true
+	case km.Collapse.matches(msg):
+		return lm.setExpanded(false), true
 	}
-	return lm.toggleExpanded(), true
+	return lm, false
 }
 
 func (lm listModel) toggleExpanded() listModel {
@@ -415,13 +420,29 @@ func (lm listModel) toggleExpanded() listModel {
 	if !ok || !row.hasChildren {
 		return lm
 	}
+	return lm.setExpansion(row, !lm.expanded[row.key])
+}
+
+// setExpanded forces the targeted row to expanded (want=true) or
+// collapsed (want=false). Leaves rows without children untouched and
+// is a no-op when the row is already in the requested state, so the
+// right/left arrow bindings stay idempotent.
+func (lm listModel) setExpanded(want bool) listModel {
+	row, ok := lm.targetQueueRow()
+	if !ok || !row.hasChildren || lm.expanded[row.key] == want {
+		return lm
+	}
+	return lm.setExpansion(row, want)
+}
+
+func (lm listModel) setExpansion(row queueRow, want bool) listModel {
 	if lm.expanded == nil {
 		lm.expanded = expansionSet{}
 	}
-	if lm.expanded[row.key] {
-		delete(lm.expanded, row.key)
-	} else {
+	if want {
 		lm.expanded[row.key] = true
+	} else {
+		delete(lm.expanded, row.key)
 	}
 	return lm
 }
