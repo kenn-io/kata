@@ -423,10 +423,10 @@ func postUnassign(t *testing.T, env *testenv.Env, projectID, issueNumber int64, 
 
 // claimResp mirrors api.ClaimResponse for test decoding.
 type claimResp struct {
-	Issue         json.RawMessage `json:"issue"`
+	Issue         json.RawMessage  `json:"issue"`
 	Event         *json.RawMessage `json:"event,omitempty"`
-	Changed       bool            `json:"changed"`
-	PreviousOwner *string         `json:"previous_owner,omitempty"`
+	Changed       bool             `json:"changed"`
+	PreviousOwner *string          `json:"previous_owner,omitempty"`
 }
 
 // postClaim POSTs to /actions/claim and returns the response paired with the
