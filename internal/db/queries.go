@@ -813,11 +813,15 @@ func (d *DB) IssueUIDPrefixMatch(ctx context.Context, prefix string, limit int, 
 // with NULL priority match neither filter — they only surface when both are
 // nil.
 type ListIssuesParams struct {
-	ProjectID   int64
-	Status      string // "open" | "closed" | "" (any)
-	Priority    *int64 // nil = no filter; non-nil = exactly this value
-	MaxPriority *int64 // nil = no filter; non-nil = priority <= MaxPriority
-	Limit       int    // 0 = no limit
+	ProjectID     int64
+	Status        string   // "open" | "closed" | "" (any)
+	Priority      *int64   // nil = no filter; non-nil = exactly this value
+	MaxPriority   *int64   // nil = no filter; non-nil = priority <= MaxPriority
+	Limit         int      // 0 = no limit
+	Unowned       bool     // only issues where owner IS NULL
+	Owner         string   // only issues where owner = this value (empty = no filter)
+	Labels        []string // issues must have ALL these labels (AND logic)
+	ExcludeLabels []string // issues must NOT have any of these labels
 }
 
 // ListIssues returns issues in the given project, excluding soft-deleted rows.
@@ -835,6 +839,23 @@ func (d *DB) ListIssues(ctx context.Context, p ListIssuesParams) ([]Issue, error
 	if p.MaxPriority != nil {
 		q += ` AND i.priority IS NOT NULL AND i.priority <= ?`
 		args = append(args, *p.MaxPriority)
+	}
+	// Apply owner filters
+	if p.Unowned {
+		q += ` AND i.owner IS NULL`
+	} else if p.Owner != "" {
+		q += ` AND i.owner = ?`
+		args = append(args, p.Owner)
+	}
+	// Apply label filters (must have ALL these labels)
+	for _, label := range p.Labels {
+		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		args = append(args, label)
+	}
+	// Apply exclude label filters (must NOT have any of these labels)
+	for _, label := range p.ExcludeLabels {
+		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		args = append(args, label)
 	}
 	q += ` ORDER BY i.updated_at DESC, i.id DESC`
 	if p.Limit > 0 {

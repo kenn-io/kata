@@ -109,6 +109,11 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/issues",
 	}, func(ctx context.Context, in *api.ListIssuesRequest) (*api.ListIssuesResponse, error) {
+		// Validate mutual exclusion of --unowned and --owner
+		if in.Unowned && in.Owner != "" {
+			return nil, api.NewError(400, "validation",
+				"--unowned and --owner are mutually exclusive", "", nil)
+		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
@@ -121,11 +126,15 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		issues, err := cfg.DB.ListIssues(ctx, db.ListIssuesParams{
-			ProjectID:   in.ProjectID,
-			Status:      in.Status,
-			Priority:    priority,
-			MaxPriority: maxPriority,
-			Limit:       in.Limit,
+			ProjectID:     in.ProjectID,
+			Status:        in.Status,
+			Priority:      priority,
+			MaxPriority:   maxPriority,
+			Limit:         in.Limit,
+			Unowned:       in.Unowned,
+			Owner:         in.Owner,
+			Labels:        in.Labels,
+			ExcludeLabels: in.ExcludeLabels,
 		})
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)

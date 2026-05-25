@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
@@ -15,6 +16,10 @@ func newListCmd() *cobra.Command {
 	var limit int
 	var priority int
 	var maxPriority int
+	var unowned bool
+	var owner string
+	var labels []string
+	var noLabels []string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "list issues in this project",
@@ -27,6 +32,9 @@ func newListCmd() *cobra.Command {
 			}
 			if cmd.Flags().Changed("max-priority") && (maxPriority < 0 || maxPriority > 4) {
 				return &cliError{Message: "--max-priority must be between 0 and 4", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if unowned && owner != "" {
+				return &cliError{Message: "--unowned and --owner are mutually exclusive", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			ctx := cmd.Context()
 			start, err := resolveStartPath(flags.Workspace)
@@ -51,14 +59,35 @@ func newListCmd() *cobra.Command {
 			if apiStatus == "all" {
 				apiStatus = ""
 			}
-			url := fmt.Sprintf("%s/api/v1/projects/%d/issues?status=%s&limit=%d", baseURL, pid, apiStatus, limit)
+			// Build base URL
+			getURL := fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, pid)
+
+			// Build query parameters
+			params := url.Values{}
+			params.Set("status", apiStatus)
+			params.Set("limit", fmt.Sprintf("%d", limit))
 			if cmd.Flags().Changed("priority") {
-				url += fmt.Sprintf("&priority=%d", priority)
+				params.Set("priority", fmt.Sprintf("%d", priority))
 			}
 			if cmd.Flags().Changed("max-priority") {
-				url += fmt.Sprintf("&max_priority=%d", maxPriority)
+				params.Set("max_priority", fmt.Sprintf("%d", maxPriority))
 			}
-			httpStatus, bs, err := httpDoJSON(ctx, client, http.MethodGet, url, nil)
+			if unowned {
+				params.Set("unowned", "true")
+			}
+			if owner != "" {
+				params.Set("owner", owner)
+			}
+			for _, l := range labels {
+				params.Add("label", l)
+			}
+			for _, l := range noLabels {
+				params.Add("exclude_label", l)
+			}
+
+			// Append query string
+			getURL += "?" + params.Encode()
+			httpStatus, bs, err := httpDoJSON(ctx, client, http.MethodGet, getURL, nil)
 			if err != nil {
 				return err
 			}
@@ -109,5 +138,9 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 50, "max rows")
 	cmd.Flags().IntVar(&priority, "priority", 0, "exact priority filter (0..4); 0 = highest")
 	cmd.Flags().IntVar(&maxPriority, "max-priority", 0, "include only priority <= this value (0..4)")
+	cmd.Flags().BoolVar(&unowned, "unowned", false, "only issues with no owner")
+	cmd.Flags().StringVar(&owner, "owner", "", "only issues owned by this actor")
+	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
+	cmd.Flags().StringSliceVar(&noLabels, "no-label", nil, "exclude issues with this label (repeatable)")
 	return cmd
 }
