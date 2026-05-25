@@ -1432,34 +1432,28 @@ type ClaimResult struct {
 	CurrentOwner  *string // set when ErrAlreadyClaimed is returned
 }
 
-// ClaimOwner atomically claims an issue for the given actor. Uses BEGIN
-// IMMEDIATE to acquire a write lock upfront, preventing WAL snapshot races.
-// The conditional UPDATE ensures the claim only succeeds if the issue is
-// unowned or owned by the same actor (or force is true).
+// ClaimOwner atomically claims an issue for the given actor. The conditional
+// UPDATE ensures the claim only succeeds if the issue is unowned or owned by
+// the same actor (or force is true). Zero rows affected means another actor
+// owns the issue. The read-then-conditional-write pattern is safe because
+// SQLite's deferred transactions serialize at the write point.
 //
 // Returns ErrAlreadyClaimed if the issue is already owned by a different actor
 // and force is false. The ClaimResult.CurrentOwner field is set in this case.
 func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (ClaimResult, error) {
-	// Use BEGIN IMMEDIATE to acquire write lock before reading.
-	// This prevents WAL snapshot races where two readers both see owner IS NULL.
-	tx, err := d.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return ClaimResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Force immediate write lock acquisition in SQLite
-	if _, err := tx.ExecContext(ctx, "SELECT 1"); err != nil {
-		return ClaimResult{}, err
-	}
-
-	// Read current state (now protected by write lock)
+	// Read current state to get previous owner and check for no-op
 	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
 	if err != nil {
 		return ClaimResult{}, err
 	}
 
-	// Already owned by same actor: no-op (no race concern here)
+	// Already owned by same actor: no-op
 	if issue.Owner != nil && *issue.Owner == actor {
 		if err := tx.Commit(); err != nil {
 			return ClaimResult{}, err
@@ -1472,7 +1466,7 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 		}, nil
 	}
 
-	// Store previous owner before attempting update
+	// Store previous owner before update
 	var previousOwner *string
 	if issue.Owner != nil {
 		prev := *issue.Owner
@@ -1480,16 +1474,16 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 	}
 
 	// Conditional UPDATE: only succeeds if ownership state matches expectations.
+	// The WHERE clause prevents races - if another request claimed between our
+	// read and this write, zero rows will be affected.
 	var res sql.Result
 	if force {
-		// Force mode: unconditional update
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
 			 SET owner      = ?,
 			     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 			 WHERE id = ?`, actor, issueID)
 	} else {
-		// Normal mode: only update if unowned OR owned by same actor
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
 			 SET owner      = ?,
@@ -1515,6 +1509,12 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 			return ClaimResult{}, err
 		}
 		return ClaimResult{CurrentOwner: currentOwner}, ErrAlreadyClaimed
+	}
+
+	// Re-read the updated issue for response
+	issue, _, err = lookupIssueForEvent(ctx, tx, issueID)
+	if err != nil {
+		return ClaimResult{}, err
 	}
 
 	// Emit assigned event
