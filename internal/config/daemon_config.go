@@ -32,13 +32,15 @@ type DaemonConfig struct {
 
 // AuthConfig is the [auth] block of <KATA_HOME>/config.toml. An empty
 // Token disables bearer auth — appropriate for Unix-socket and loopback-TCP
-// deployments; non-loopback TCP requires a token unless the daemon is
-// started with --insecure-readonly.
+// deployments; non-loopback TCP requires either --insecure-readonly with no
+// token, or a token plus TrustPrivateNetwork.
 //
 // KATA_AUTH_TOKEN, when set, overrides the TOML value. Use it for
 // ephemeral or CI-only tokens that should never be persisted to disk.
+// KATA_TRUST_PRIVATE_NETWORK=1 is equivalent to trust_private_network = true.
 type AuthConfig struct {
-	Token string `toml:"token"`
+	Token               string `toml:"token"`
+	TrustPrivateNetwork bool   `toml:"trust_private_network"`
 }
 
 // TUIConfig holds TUI user preferences from <KATA_HOME>/config.toml.
@@ -86,7 +88,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is derived from KATA_HOME, not user input
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &DaemonConfig{}, nil
+			var cfg DaemonConfig
+			applyDaemonConfigEnv(&cfg)
+			return &cfg, nil
 		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
@@ -104,8 +108,20 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	}
 	cfg.Listen = strings.TrimSpace(cfg.Listen)
 	cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
+	applyDaemonConfigEnv(&cfg)
+	return &cfg, nil
+}
+
+func applyDaemonConfigEnv(cfg *DaemonConfig) {
 	if v := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")); v != "" {
 		cfg.Auth.Token = v
 	}
-	return &cfg, nil
+	if envTruthy("KATA_TRUST_PRIVATE_NETWORK") {
+		cfg.Auth.TrustPrivateNetwork = true
+	}
+}
+
+func envTruthy(name string) bool {
+	v := strings.TrimSpace(os.Getenv(name))
+	return v == "1" || strings.EqualFold(v, "true")
 }

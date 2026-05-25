@@ -20,13 +20,15 @@ const (
 )
 
 // authPolicy is the resolved auth posture at daemon start. Token == "" disables
-// bearer auth; InsecureReadonly is the dev escape hatch that allows GETs on
-// non-loopback TCP without a token. Both fields are also surfaced through
-// ServerConfig (see Task B3); this struct exists so the middleware itself
-// does not depend on ServerConfig.
+// bearer auth; TrustPrivateNetwork is the explicit operator opt-in that allows
+// token auth on non-loopback private-network TCP; InsecureReadonly is the dev
+// escape hatch that allows GETs on non-loopback TCP without a token. These
+// fields are also surfaced through ServerConfig; this struct exists so the
+// middleware itself does not depend on ServerConfig.
 type authPolicy struct {
-	Token            string
-	InsecureReadonly bool
+	Token               string
+	TrustPrivateNetwork bool
+	InsecureReadonly    bool
 }
 
 // requireBearer returns an HTTP middleware that enforces bearer-token auth
@@ -79,9 +81,10 @@ func requireBearer(p authPolicy) func(http.Handler) http.Handler {
 // convention as runDaemonWithListen: "" means Unix socket; "host:port"
 // means TCP. The matrix on non-loopback TCP is:
 //
-//	Token != ""                       -> REFUSE (token would travel in cleartext)
-//	Token == "" &&  InsecureReadonly  -> permit (dev-only GET access)
-//	Token == "" && !InsecureReadonly  -> REFUSE (would expose mutations to the LAN)
+//	Token != "" && TrustPrivateNetwork -> permit (operator accepts private-network confidentiality)
+//	Token != "" && !TrustPrivateNetwork -> REFUSE (token would travel in cleartext)
+//	Token == "" &&  InsecureReadonly   -> permit (dev-only GET access)
+//	Token == "" && !InsecureReadonly   -> REFUSE (would expose mutations to the LAN)
 //
 // The daemon does not terminate TLS, so a bearer token on plaintext non-
 // loopback HTTP is a passive-capture risk. Operators wanting cross-host
@@ -93,6 +96,9 @@ func checkAuthStartup(listen string, p authPolicy) error {
 		return nil
 	}
 	if p.Token != "" {
+		if p.TrustPrivateNetwork {
+			return nil
+		}
 		return fmt.Errorf("non-loopback TCP listen %q with a bearer token is not "+
 			"supported — the daemon does not terminate TLS, so the token would "+
 			"travel over plaintext HTTP; bind to a Unix socket or 127.0.0.1 and "+
@@ -109,8 +115,18 @@ func checkAuthStartup(listen string, p authPolicy) error {
 // CheckAuthStartup is the exported form used by the CLI entry point.
 func CheckAuthStartup(listen string, auth config.AuthConfig, insecureReadonly bool) error {
 	return checkAuthStartup(listen, authPolicy{
-		Token: auth.Token, InsecureReadonly: insecureReadonly,
+		Token:               auth.Token,
+		TrustPrivateNetwork: auth.TrustPrivateNetwork,
+		InsecureReadonly:    insecureReadonly,
 	})
+}
+
+func TrustPrivateNetworkWarning(listen string, auth config.AuthConfig) (string, bool) {
+	if !isNonLoopbackTCP(listen) || auth.Token == "" || !auth.TrustPrivateNetwork {
+		return "", false
+	}
+	return "kata daemon: WARNING: listening on non-loopback TCP with bearer auth; " +
+		"operator has asserted private-network confidentiality.", true
 }
 
 // isNonLoopbackTCP reports whether listen designates a TCP bind that's

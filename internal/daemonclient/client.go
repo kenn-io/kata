@@ -148,14 +148,14 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 	if err != nil {
 		return nil, err
 	}
-	token := resolveAuthToken()
+	auth := resolveAuthConfig()
 	var origin string
-	if token != "" {
-		if origin, err = checkBearerTargetSafe(baseURL); err != nil {
+	if auth.Token != "" {
+		if origin, err = checkBearerTargetSafe(baseURL, auth.TrustPrivateNetwork); err != nil {
 			return nil, err
 		}
 	}
-	c.Transport = withBearer(c.Transport, token, origin)
+	c.Transport = withBearer(c.Transport, auth.Token, origin, auth.TrustPrivateNetwork)
 	return c, nil
 }
 

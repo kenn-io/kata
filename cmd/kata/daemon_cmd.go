@@ -209,6 +209,9 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	if err := daemon.CheckAuthStartup(listen, dcfg.Auth, insecureReadonly); err != nil {
 		return err
 	}
+	if msg, ok := daemon.TrustPrivateNetworkWarning(listen, dcfg.Auth); ok {
+		fmt.Fprintln(os.Stderr, msg)
+	}
 	if err := ns.EnsureDirs(); err != nil {
 		return err
 	}

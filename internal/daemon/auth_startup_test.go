@@ -57,6 +57,45 @@ func TestAuthStartupGuard_TokenOnNonLoopback_Refuses(t *testing.T) {
 	}
 }
 
+func TestAuthStartupGuard_TokenOnNonLoopback_TrustPrivateNetwork_Permitted(t *testing.T) {
+	p := authPolicy{Token: "tok", TrustPrivateNetwork: true}
+	require.NoError(t, checkAuthStartup("100.64.0.5:7777", p))
+	require.NoError(t, checkAuthStartup("192.168.1.20:7777", p))
+}
+
+func TestAuthStartupGuard_TrustPrivateNetworkWithoutToken_StillRefuses(t *testing.T) {
+	err := checkAuthStartup("100.64.0.5:7777",
+		authPolicy{TrustPrivateNetwork: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-loopback TCP")
+}
+
+func TestTrustPrivateNetworkWarning(t *testing.T) {
+	msg, ok := TrustPrivateNetworkWarning("100.64.0.5:7777",
+		config.AuthConfig{Token: "tok", TrustPrivateNetwork: true})
+	require.True(t, ok)
+	assert.Contains(t, msg, "WARNING")
+	assert.Contains(t, msg, "non-loopback")
+	assert.Contains(t, msg, "private-network confidentiality")
+}
+
+func TestTrustPrivateNetworkWarning_OnlyWhenEffective(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		listen string
+		auth   config.AuthConfig
+	}{
+		{name: "loopback", listen: "127.0.0.1:7777", auth: config.AuthConfig{Token: "tok", TrustPrivateNetwork: true}},
+		{name: "no token", listen: "100.64.0.5:7777", auth: config.AuthConfig{TrustPrivateNetwork: true}},
+		{name: "no trust", listen: "100.64.0.5:7777", auth: config.AuthConfig{Token: "tok"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := TrustPrivateNetworkWarning(tc.listen, tc.auth)
+			assert.False(t, ok)
+		})
+	}
+}
+
 // TestAuthStartupGuard_TokenOnNonLoopback_InsecureReadonly_StillRefuses
 // covers the corner case where the operator combines a token with
 // --insecure-readonly on a non-loopback bind. The token would still leak
@@ -105,10 +144,11 @@ func TestAuthStartupGuard_LocalhostHostname_NoTokenOK(t *testing.T) {
 
 func TestServerConfig_AuthPolicyThreaded(t *testing.T) {
 	cfg := ServerConfig{
-		Auth:             config.AuthConfig{Token: "tok-123"},
+		Auth:             config.AuthConfig{Token: "tok-123", TrustPrivateNetwork: true},
 		InsecureReadonly: false,
 	}
 	got := cfg.authPolicy()
 	assert.Equal(t, "tok-123", got.Token)
+	assert.True(t, got.TrustPrivateNetwork)
 	assert.False(t, got.InsecureReadonly)
 }

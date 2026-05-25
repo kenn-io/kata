@@ -29,7 +29,7 @@ start of each session for the agent contract; the short version:
 
 For long-running work, `kata events --tail` streams NDJSON.
 
-## Remote-client mode (no auth)
+## Remote-client mode (private network)
 
 A daemon can serve clients on other hosts over a private network:
 
@@ -39,11 +39,14 @@ A daemon can serve clients on other hosts over a private network:
 - Client: `export KATA_SERVER=http://100.64.0.5:7777` or commit a
   gitignored `.kata.local.toml` with `[server] url = "..."` next to
   `.kata.toml`. `KATA_SERVER` env wins.
+- Optional bearer auth: set `[auth].token` plus
+  `[auth].trust_private_network = true` in `<KATA_HOME>/config.toml`, or use
+  `KATA_AUTH_TOKEN` plus `KATA_TRUST_PRIVATE_NETWORK=1`. The trust flag is
+  required for non-loopback HTTP because the daemon does not terminate TLS.
 - Init and resolution are both path-free whenever the client can
   derive the project name locally (existing `.kata.toml`, `--project`, or a
   git workspace): the client sends `name` and writes `.kata.toml` itself; the
   daemon never stats the client's filesystem.
   `kata init` falls back to a path-based request only when none of
   those sources are available, so the daemon (or its absence) emits
-  the existing validation error. No auth yet — network ACLs are the
-  boundary.
+  the existing validation error.

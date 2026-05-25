@@ -50,7 +50,11 @@ type ServerConfig struct {
 // middleware consumes. Keeping the conversion here means the middleware
 // stays unaware of ServerConfig and config.AuthConfig.
 func (c ServerConfig) authPolicy() authPolicy {
-	return authPolicy{Token: c.Auth.Token, InsecureReadonly: c.InsecureReadonly}
+	return authPolicy{
+		Token:               c.Auth.Token,
+		TrustPrivateNetwork: c.Auth.TrustPrivateNetwork,
+		InsecureReadonly:    c.InsecureReadonly,
+	}
 }
 
 // CloseThrottlePolicy is the runtime form of [close.throttle] in

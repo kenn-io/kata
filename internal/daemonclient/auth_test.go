@@ -195,6 +195,16 @@ func TestNewHTTPClient_RefusesBearerOnPlaintextNonLoopback(t *testing.T) {
 	assert.Contains(t, err.Error(), "plaintext")
 }
 
+func TestNewHTTPClient_AllowsBearerOnPlaintextNonLoopbackWhenTrustPrivateNetworkSet(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KATA_HOME", tmp)
+	t.Setenv("KATA_AUTH_TOKEN", "secret")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
+
+	_, err := NewHTTPClient(context.Background(), "http://100.64.0.5:7373", Opts{})
+	require.NoError(t, err)
+}
+
 // TestNewHTTPClient_AllowsBearerOnLoopback covers the safe-target arm of
 // checkBearerTargetSafe: 127.0.0.1 and [::1] keep the token in-host even
 // over plaintext HTTP.
@@ -276,6 +286,48 @@ func TestBearerTransport_RefusesPlaintextNonLoopbackPerRequest(t *testing.T) {
 	assert.Contains(t, err.Error(), "plaintext")
 }
 
+func TestBearerTransport_AllowsPlaintextNonLoopbackWhenTrustPrivateNetworkSet(t *testing.T) {
+	var got string
+	base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		got = req.Header.Get("Authorization")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       http.NoBody,
+			Request:    req,
+		}, nil
+	})
+	rt := withBearer(base, "secret", "http://100.64.0.5:7373", true)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"http://100.64.0.5:7373/api/v1/ping", nil)
+	require.NoError(t, err)
+
+	resp, err := rt.RoundTrip(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, "Bearer secret", got)
+}
+
+func TestBearerTransport_TrustPrivateNetworkStillRefusesCrossOrigin(t *testing.T) {
+	called := false
+	base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
+	})
+	rt := withBearer(base, "secret", "http://100.64.0.5:7373", true)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"http://100.64.0.6:7373/api/v1/ping", nil)
+	require.NoError(t, err)
+
+	resp, err := rt.RoundTrip(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cross-origin")
+	assert.False(t, called, "cross-origin request must not reach the base transport")
+}
+
 // TestBearerTransport_BlocksTokenOnRedirectToPlaintextNonLoopback is the
 // concrete regression test for the per-request guard. The test server
 // 302-redirects to a plaintext non-loopback URL; http.Client follows the
@@ -354,4 +406,10 @@ func writeAuthConfig(home, tok string) error {
 // writeRawConfig writes config.toml verbatim under home.
 func writeRawConfig(home, body string) error {
 	return os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

@@ -104,6 +104,30 @@ func TestReadDaemonConfig_ReadsAuthToken(t *testing.T) {
 	assert.Equal(t, "abc-123", cfg.Auth.Token)
 }
 
+func TestReadDaemonConfig_ReadsAuthTrustPrivateNetwork(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[auth]\ntrust_private_network = true\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.Auth.TrustPrivateNetwork)
+}
+
+func TestReadDaemonConfig_AuthTrustPrivateNetworkEnvOverridesTOML(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[auth]\ntrust_private_network = false\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.Auth.TrustPrivateNetwork)
+}
+
 func TestReadDaemonConfig_AuthTokenEnvOverridesTOML(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -115,6 +139,15 @@ func TestReadDaemonConfig_AuthTokenEnvOverridesTOML(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "from-env", cfg.Auth.Token,
 		"KATA_AUTH_TOKEN must override config.toml")
+}
+
+func TestReadDaemonConfig_AuthTokenEnvWorksWithoutTOML(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_AUTH_TOKEN", "from-env")
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "from-env", cfg.Auth.Token)
 }
 
 func TestReadDaemonConfig_AuthTokenAbsent(t *testing.T) {

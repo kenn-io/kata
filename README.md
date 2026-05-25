@@ -482,7 +482,7 @@ Future shared mode should be a distinct deployment:
 
 The local daemon should not be exposed directly to a LAN or public network.
 
-### Remote daemon (opt-in, no auth)
+### Remote daemon (opt-in private network)
 
 A kata daemon can serve clients on other hosts over a private network
 (loopback, RFC1918, CGNAT, link-local, ULA — public addresses are rejected):
@@ -523,9 +523,25 @@ url = "http://100.64.0.5:7777"
 `kata init` adds `.kata.local.toml` to `.gitignore` automatically.
 `KATA_SERVER` wins over the file when both are set.
 
-There is no authentication in this mode — network ACLs (firewall, VPN,
-tailnet) are the access boundary. Default behavior (no flag, no env, no local
-file) is unchanged: a local Unix-socket daemon is auto-started on demand.
+To require bearer auth on the private-network listener, set a token and
+explicitly assert that the network path already provides confidentiality and
+integrity:
+
+```toml
+listen = "100.64.0.5:7777"
+
+[auth]
+token = "change-me"
+trust_private_network = true
+```
+
+The environment equivalents are `KATA_AUTH_TOKEN` and
+`KATA_TRUST_PRIVATE_NETWORK=1`. Clients use the same token sources. Without
+`trust_private_network`, kata refuses a token-protected non-loopback HTTP
+listener because the daemon does not terminate TLS. Without a token, this mode
+remains unauthenticated and network ACLs (firewall, VPN, tailnet) are the
+access boundary. Default behavior (no flag, no env, no local file) is
+unchanged: a local Unix-socket daemon is auto-started on demand.
 
 ## Backup and restore
 
