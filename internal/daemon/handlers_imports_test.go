@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -285,4 +286,32 @@ func createImportTestProject(t *testing.T, env *testenv.Env, _ string, name stri
 	p, err := env.DB.CreateProject(context.Background(), name)
 	require.NoError(t, err)
 	return p
+}
+
+// TestImportEndpoint_AcceptsLargeBody guards against regressing to huma's
+// default 1 MiB MaxBodyBytes — large beads imports (a few hundred issues with
+// comments) easily exceed 1 MiB, and the importer does all of bd export + per-
+// issue bd comments before POSTing, so a 413 wastes minutes of upstream work.
+func TestImportEndpoint_AcceptsLargeBody(t *testing.T) {
+	env := testenv.New(t)
+	pid := createImportTestProject(t, env, "github.com/wesm/kata", "kata").ID
+	// 1.5 MiB body field puts the serialized request comfortably above
+	// huma's 1 MiB default but well under any reasonable per-endpoint cap.
+	largeBody := strings.Repeat("x", 1500000)
+	req := map[string]any{
+		"actor":  "importer",
+		"source": "beads",
+		"items": []map[string]any{{
+			"external_id": "beads-large",
+			"title":       "Imported",
+			"body":        largeBody,
+			"author":      "alice",
+			"status":      "open",
+			"created_at":  "2026-05-01T10:00:00Z",
+			"updated_at":  "2026-05-01T10:00:00Z",
+		}},
+	}
+	resp, raw := envDoRaw(t, env, http.MethodPost, importEndpointPath(pid), req, nil)
+	require.Equalf(t, http.StatusOK, resp.StatusCode,
+		"large import body rejected (status=%d body=%s)", resp.StatusCode, string(raw))
 }

@@ -16,6 +16,12 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "importIssues",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/imports",
+		// Imports batch many issues (plus comments and links) into a single
+		// POST. Huma's default 1 MiB cap (huma.go:1378) rejects realistic
+		// migrations from beads/JIRA/etc. — a few hundred issues with
+		// comments easily exceeds 1 MiB. 64 MiB covers ~25k issues at
+		// typical enrichment ratios while still bounding a runaway client.
+		MaxBodyBytes: 64 << 20,
 	}, func(ctx context.Context, in *api.ImportRequest) (*api.ImportResponse, error) {
 		if err := validateActor(in.Body.Actor); err != nil {
 			return nil, err
