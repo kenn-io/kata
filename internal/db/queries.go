@@ -850,12 +850,12 @@ func (d *DB) ListIssues(ctx context.Context, p ListIssuesParams) ([]Issue, error
 	// Apply label filters (must have ALL these labels)
 	for _, label := range p.Labels {
 		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
-		args = append(args, label)
+		args = append(args, strings.ToLower(label))
 	}
 	// Apply exclude label filters (must NOT have any of these labels)
 	for _, label := range p.ExcludeLabels {
 		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
-		args = append(args, label)
+		args = append(args, strings.ToLower(label))
 	}
 	q += ` ORDER BY i.updated_at DESC, i.id DESC`
 	if p.Limit > 0 {
@@ -1441,6 +1441,7 @@ type ClaimResult struct {
 // Returns ErrAlreadyClaimed if the issue is already owned by a different actor
 // and force is false. The ClaimResult.CurrentOwner field is set in this case.
 func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (ClaimResult, error) {
+	actor = strings.TrimSpace(actor)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return ClaimResult{}, err
@@ -1482,22 +1483,15 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 			`UPDATE issues
 			 SET owner      = ?,
 			     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE id = ?`, actor, issueID)
+			 WHERE id = ? AND deleted_at IS NULL`, actor, issueID)
 	} else {
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
 			 SET owner      = ?,
 			     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE id = ? AND (owner IS NULL OR owner = ?)`, actor, issueID, actor)
+			 WHERE id = ? AND deleted_at IS NULL AND (owner IS NULL OR owner = ?)`, actor, issueID, actor)
 	}
 	if err != nil {
-		// SQLite busy/locked errors during concurrent claims should be treated
-		// as conflicts. Fetch current owner outside the failed transaction.
-		if IsLockContention(err) {
-			_ = tx.Rollback()
-			currentOwner, _ := d.getIssueOwner(ctx, issueID)
-			return ClaimResult{CurrentOwner: currentOwner}, ErrAlreadyClaimed
-		}
 		return ClaimResult{}, fmt.Errorf("update owner: %w", err)
 	}
 
@@ -1509,13 +1503,7 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 	// Zero rows affected means the conditional WHERE didn't match:
 	// someone else claimed the issue between our read and write.
 	if rowsAffected == 0 {
-		// Re-read current owner within transaction for error message
-		var currentOwner *string
-		row := tx.QueryRowContext(ctx, `SELECT owner FROM issues WHERE id = ?`, issueID)
-		if err := row.Scan(&currentOwner); err != nil && err != sql.ErrNoRows {
-			return ClaimResult{}, err
-		}
-		return ClaimResult{CurrentOwner: currentOwner}, ErrAlreadyClaimed
+		return ClaimResult{CurrentOwner: issue.Owner}, ErrAlreadyClaimed
 	}
 
 	// Re-read the updated issue for response
@@ -1547,27 +1535,12 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 		return ClaimResult{}, err
 	}
 
-	updated, err := d.IssueByID(ctx, issueID)
-	if err != nil {
-		return ClaimResult{}, err
-	}
-
 	return ClaimResult{
-		Issue:         updated,
+		Issue:         issue,
 		Event:         &evt,
 		Changed:       true,
 		PreviousOwner: previousOwner,
 	}, nil
-}
-
-// getIssueOwner fetches just the owner field for an issue.
-func (d *DB) getIssueOwner(ctx context.Context, issueID int64) (*string, error) {
-	var owner *string
-	err := d.QueryRowContext(ctx, `SELECT owner FROM issues WHERE id = ?`, issueID).Scan(&owner)
-	if err != nil {
-		return nil, err
-	}
-	return owner, nil
 }
 
 // ReadyIssuesFilter holds optional filters for the ready query.
@@ -1602,13 +1575,13 @@ func (d *DB) ReadyIssues(ctx context.Context, projectID int64, limit int, filter
 	// Apply label filters (must have ALL these labels)
 	for _, label := range filter.Labels {
 		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
-		args = append(args, label)
+		args = append(args, strings.ToLower(label))
 	}
 
 	// Apply exclude label filters (must NOT have any of these labels)
 	for _, label := range filter.ExcludeLabels {
 		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
-		args = append(args, label)
+		args = append(args, strings.ToLower(label))
 	}
 
 	q += ` ORDER BY i.updated_at DESC, i.id DESC`

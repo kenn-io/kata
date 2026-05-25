@@ -125,6 +125,25 @@ func TestReadyIssues_FilterByLabel(t *testing.T) {
 	assert.NotContains(t, got, feature.ShortID)
 }
 
+func TestReadyIssues_LabelFiltersAreCaseInsensitive(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	bug := makeIssueWithLabels(t, ctx, d, p.ID, "bug issue", "tester", "bug")
+	feature := makeIssueWithLabels(t, ctx, d, p.ID, "feature issue", "tester", "feature")
+
+	rows, err := d.ReadyIssues(ctx, p.ID, 0, db.ReadyIssuesFilter{
+		Labels:        []string{"Bug"},
+		ExcludeLabels: []string{"Feature"},
+	})
+	require.NoError(t, err)
+	got := make([]string, 0, len(rows))
+	for _, r := range rows {
+		got = append(got, r.ShortID)
+	}
+
+	assert.Contains(t, got, bug.ShortID)
+	assert.NotContains(t, got, feature.ShortID)
+}
+
 func TestReadyIssues_FilterByNoLabel(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	bug := makeIssueWithLabels(t, ctx, d, p.ID, "bug issue", "tester", "bug")

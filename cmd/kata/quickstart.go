@@ -84,7 +84,7 @@ Use kata as the shared issue ledger for this workspace.
    # Claim it (fails if already claimed by another actor)
    kata claim <ref>
 
-   # Release a claim
+   # Release ownership
    kata unassign <ref>
 
 7. Use relationships deliberately. They live as flags on create + edit and

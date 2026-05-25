@@ -95,6 +95,20 @@ func TestClaim_ForceOverride(t *testing.T) {
 	assert.Equal(t, "agent2", *iss.Owner)
 }
 
+func TestClaim_ForceOverrideShowsPreviousOwner(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+
+	issue := createIssueViaHTTPFull(t, env, dir, "test claim force previous")
+	resetFlags(t)
+	runCLIAs(t, env, dir, "agent1", "claim", issue.ShortID)
+
+	resetFlags(t)
+	out := runCLIAs(t, env, dir, "agent2", "claim", "--force", issue.ShortID)
+
+	require.Contains(t, out, "claimed by agent2")
+	require.Contains(t, out, "was: agent1")
+}
+
 func TestClaim_WithComment(t *testing.T) {
 	env, dir := setupCLIEnv(t)
 

@@ -24,7 +24,7 @@ kata init                                         # bind this workspace to a kat
 kata create "fix login race"                      # returns the issue's short_id, e.g. abc4
 kata list                                         # list open issues
 kata show abc4                                    # inspect by short_id
-kata close abc4 --done --message "Fixed; tests green." --commit <sha>
+kata close abc4 --done --message "Fixed the issue and verified the relevant tests pass." --commit <sha>
 kata tui                                          # browse and triage interactively
 ```
 
@@ -195,7 +195,7 @@ kata list
 # Each issue prints its short_id (e.g. abc4); use it for follow-up commands.
 kata show abc4
 kata comment abc4 --body "Reproduced on macOS."
-kata close abc4 --done --message "Fixed; verified tests pass." --commit <sha>
+kata close abc4 --done --message "Fixed the issue and verified the relevant tests pass." --commit <sha>
 ```
 
 Open the TUI for human triage:
@@ -434,7 +434,7 @@ kata label add abc4 safari --json
 kata edit abc4 --blocks d4ex --json
 
 # Close when done
-kata close abc4 --done --message "Fixed; verified tests pass." --commit <sha> --json
+kata close abc4 --done --message "Fixed the issue and verified the relevant tests pass." --commit <sha> --json
 ```
 
 For long-running agents, poll events and remember the returned cursor; resume
@@ -466,7 +466,7 @@ kata claim "$ISSUE" || exit 1
 # Do the work...
 
 # Close when done
-kata close "$ISSUE" --done --message "Fixed" --commit "$SHA"
+kata close "$ISSUE" --done --message "Fixed the issue and verified the relevant tests pass." --commit "$SHA"
 ```
 
 The `kata ready` command supports filters for finding suitable work:

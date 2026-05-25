@@ -71,7 +71,8 @@ func printClaimMutation(cmd *cobra.Command, bs []byte) error {
 			ShortID string  `json:"short_id"`
 			Owner   *string `json:"owner"`
 		} `json:"issue"`
-		Changed bool `json:"changed"`
+		Changed       bool    `json:"changed"`
+		PreviousOwner *string `json:"previous_owner,omitempty"`
 	}
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
@@ -80,17 +81,21 @@ func printClaimMutation(cmd *cobra.Command, bs []byte) error {
 		return nil
 	}
 	if !b.Changed {
-		if b.Issue.Owner == nil {
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s already unclaimed (no-op)\n", b.Issue.ShortID)
-			return err
+		owner := ""
+		if b.Issue.Owner != nil {
+			owner = *b.Issue.Owner
 		}
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s already claimed by %s (no-op)\n", b.Issue.ShortID, *b.Issue.Owner)
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s already claimed by %s (no-op)\n", b.Issue.ShortID, owner)
 		return err
 	}
-	if b.Issue.Owner == nil {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s unclaimed\n", b.Issue.ShortID)
+	owner := ""
+	if b.Issue.Owner != nil {
+		owner = *b.Issue.Owner
+	}
+	if b.PreviousOwner != nil && *b.PreviousOwner != "" {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s claimed by %s (was: %s)\n", b.Issue.ShortID, owner, *b.PreviousOwner)
 		return err
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s claimed by %s\n", b.Issue.ShortID, *b.Issue.Owner)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "%s claimed by %s\n", b.Issue.ShortID, owner)
 	return err
 }

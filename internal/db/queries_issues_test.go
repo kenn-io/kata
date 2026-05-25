@@ -222,6 +222,22 @@ func TestListIssues_DefaultsToOpenOnlyAndExcludesDeleted(t *testing.T) {
 	assert.Len(t, got, 3)
 }
 
+func TestListIssues_LabelFiltersAreCaseInsensitive(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	bug := makeIssueWithLabels(t, ctx, d, p.ID, "bug issue", "tester", "bug")
+	feature := makeIssueWithLabels(t, ctx, d, p.ID, "feature issue", "tester", "feature")
+
+	got, err := d.ListIssues(ctx, db.ListIssuesParams{
+		ProjectID:     p.ID,
+		Labels:        []string{"Bug"},
+		ExcludeLabels: []string{"Feature"},
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, bug.ShortID, got[0].ShortID)
+	assert.NotEqual(t, feature.ShortID, got[0].ShortID)
+}
+
 // TestListAllIssues_CoversAllProjectsAndOrders pins #22's contract: with
 // ProjectID==0 every project's issues are returned, soft-deleted rows are
 // excluded, and the ordering is created_at DESC, id DESC.
