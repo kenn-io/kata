@@ -15,10 +15,21 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/ready",
 	}, func(ctx context.Context, in *api.ReadyRequest) (*api.ReadyResponse, error) {
+		// Validate mutual exclusion
+		if in.Unowned && in.Owner != "" {
+			return nil, api.NewError(400, "validation",
+				"--unowned and --owner are mutually exclusive", "", nil)
+		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		issues, err := cfg.DB.ReadyIssues(ctx, in.ProjectID, in.Limit, db.ReadyIssuesFilter{})
+		filter := db.ReadyIssuesFilter{
+			Unowned:       in.Unowned,
+			Owner:         in.Owner,
+			Labels:        in.Labels,
+			ExcludeLabels: in.ExcludeLabels,
+		}
+		issues, err := cfg.DB.ReadyIssues(ctx, in.ProjectID, in.Limit, filter)
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}

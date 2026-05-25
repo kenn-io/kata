@@ -53,3 +53,11 @@ func TestReady_RespectsLimit(t *testing.T) {
 	out := getReady(t, env, pid, "?limit=2")
 	assert.Len(t, out.Issues, 2)
 }
+
+func TestReady_UnownedAndOwnerMutuallyExclusive(t *testing.T) {
+	env := testenv.New(t)
+	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+
+	status, _ := env.Get(t, projectPath(pid)+"/ready?unowned=true&owner=alice")
+	assert.Equal(t, 400, status)
+}

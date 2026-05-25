@@ -638,8 +638,12 @@ type UnassignRequest struct {
 
 // ReadyRequest is GET /api/v1/projects/{id}/ready.
 type ReadyRequest struct {
-	ProjectID int64 `path:"project_id" required:"true"`
-	Limit     int   `query:"limit,omitempty"`
+	ProjectID     int64    `path:"project_id" required:"true"`
+	Limit         int      `query:"limit,omitempty"`
+	Unowned       bool     `query:"unowned,omitempty"`
+	Owner         string   `query:"owner,omitempty"`
+	Labels        []string `query:"label,omitempty"`
+	ExcludeLabels []string `query:"exclude_label,omitempty"`
 }
 
 // ReadyResponse is the ready-issue list.
