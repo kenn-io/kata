@@ -75,7 +75,19 @@ Use kata as the shared issue ledger for this workspace.
    kata label add abc4 safari --json
    kata edit abc4 --blocks d4ex --json
 
-6. Use relationships deliberately. They live as flags on create + edit and
+6. Find and claim available work (multi-agent environments):
+
+   # Find unclaimed work
+   kata ready --unowned --json
+   kata ready --unowned --label bug --no-label blocked --json
+
+   # Claim it (fails if already claimed by another actor)
+   kata claim <ref>
+
+   # Release a claim
+   kata unassign <ref>
+
+7. Use relationships deliberately. They live as flags on create + edit and
    are framed from the operating issue's POV — no argument-order traps:
 
    parent      = this issue is a sub-task of a larger issue
@@ -90,13 +102,13 @@ Use kata as the shared issue ledger for this workspace.
    fail loudly. Read parent before asserting a removal. The other
    --remove-* flags are idempotent (no-op when the link is already gone).
 
-7. To leave context alongside a mutation, pass --comment TEXT on
+8. To leave context alongside a mutation, pass --comment TEXT on
    close, reopen, edit, assign, unassign, or label add/rm. The
    mutation lands first; the comment is appended in a follow-up call.
    If the comment call fails, the error names the issue so you can
    retry with kata comment <ref> --body ...
 
-8. Do not run delete or purge unless the user explicitly asks for that exact
+9. Do not run delete or purge unless the user explicitly asks for that exact
    destructive action and issue ref.
 
 For long-running agents, poll events:

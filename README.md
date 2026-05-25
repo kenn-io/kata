@@ -243,6 +243,7 @@ kata comment <ref> [--body TEXT | --body-file PATH | --body-stdin]
 kata close <ref> --done --message <text> [--commit|--pr|--test|--reviewed|--evidence] [--comment TEXT]
 kata close <ref> [--wontfix|--duplicate-of <ref>|--superseded-by <ref>|--audit-no-change] [--comment TEXT]
 kata reopen <ref> [--comment TEXT]
+kata claim <ref> [--force] [--comment TEXT]
 ```
 
 `--comment TEXT` is available on `close`, `reopen`, `edit`, `assign`,
@@ -291,7 +292,7 @@ Structural guards still apply.
 `kata audit closes` lists close events with filters; specific lazy
 closes can be undone individually with `kata reopen <ref>`.
 
-Labels, ownership, and relationships:
+Labels, ownership, claiming, and relationships:
 
 ```sh
 kata label add <ref> <label> [--comment TEXT]
@@ -299,6 +300,7 @@ kata label rm <ref> <label> [--comment TEXT]
 kata labels
 kata assign <ref> <owner> [--comment TEXT]
 kata unassign <ref> [--comment TEXT]
+kata claim <ref> [--force] [--comment TEXT]
 ```
 
 Relationships ride on `kata create` and `kata edit` as repeatable flags,
@@ -330,7 +332,7 @@ Search, readiness, events, and project inspection:
 
 ```sh
 kata search <query> [--limit N] [--include-deleted]
-kata ready [--limit N]
+kata ready [--limit N] [--unowned] [--owner NAME] [--label LABEL] [--no-label LABEL]
 kata events [--after N] [--limit N]
 kata events --tail [--last-event-id N]
 kata digest --since 24h [--until ...] [--project-id N | --all-projects]
@@ -448,6 +450,34 @@ For live streams, `--tail` emits newline-delimited JSON:
 ```sh
 kata events --tail
 ```
+
+## Agent Task Claiming
+
+When multiple agents share a project, use `kata claim` to atomically assign work
+to the current actor. The claim fails if another actor already claimed the issue:
+
+```sh
+# Find unclaimed work
+ISSUE=$(kata ready --unowned --json | jq -r '.issues[0].short_id')
+
+# Claim it (fails if someone else claimed it first)
+kata claim "$ISSUE" || exit 1
+
+# Do the work...
+
+# Close when done
+kata close "$ISSUE" --done --message "Fixed" --commit "$SHA"
+```
+
+The `kata ready` command supports filters for finding suitable work:
+
+- `--unowned`: show only issues with no owner
+- `--owner NAME`: show only issues owned by NAME
+- `--label LABEL`: show only issues with LABEL (repeatable)
+- `--no-label LABEL`: exclude issues with LABEL (repeatable)
+
+These filters combine (AND logic). Unowned work is a common starting point for
+agents polling for available tasks.
 
 ## Sharing and multi-user workflows
 
