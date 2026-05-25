@@ -1398,9 +1398,17 @@ func ownerEqual(a, b *string) bool {
 	return *a == *b
 }
 
+// ReadyIssuesFilter holds optional filters for the ready query.
+type ReadyIssuesFilter struct {
+	Unowned       bool     // only issues where owner IS NULL
+	Owner         string   // only issues where owner = this value (empty = no filter)
+	Labels        []string // issues must have ALL these labels (AND logic)
+	ExcludeLabels []string // issues must NOT have any of these labels
+}
+
 // ReadyIssues returns open, non-deleted issues with no open `blocks` predecessor,
 // ordered by updated_at DESC. limit==0 means no limit.
-func (d *DB) ReadyIssues(ctx context.Context, projectID int64, limit int) ([]Issue, error) {
+func (d *DB) ReadyIssues(ctx context.Context, projectID int64, limit int, filter ReadyIssuesFilter) ([]Issue, error) {
 	q := issueSelect + `
 		WHERE i.project_id = ? AND i.status = 'open' AND i.deleted_at IS NULL
 		  AND NOT EXISTS (
@@ -1408,9 +1416,30 @@ func (d *DB) ReadyIssues(ctx context.Context, projectID int64, limit int) ([]Iss
 		    JOIN issues blocker ON blocker.id = l.from_issue_id
 		    WHERE l.type = 'blocks' AND l.to_issue_id = i.id
 		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
-		  )
-		ORDER BY i.updated_at DESC, i.id DESC`
+		  )`
 	args := []any{projectID}
+
+	// Apply owner filters
+	if filter.Unowned {
+		q += ` AND i.owner IS NULL`
+	} else if filter.Owner != "" {
+		q += ` AND i.owner = ?`
+		args = append(args, filter.Owner)
+	}
+
+	// Apply label filters (must have ALL these labels)
+	for _, label := range filter.Labels {
+		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		args = append(args, label)
+	}
+
+	// Apply exclude label filters (must NOT have any of these labels)
+	for _, label := range filter.ExcludeLabels {
+		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		args = append(args, label)
+	}
+
+	q += ` ORDER BY i.updated_at DESC, i.id DESC`
 	if limit > 0 {
 		q += fmt.Sprintf(` LIMIT %d`, limit)
 	}

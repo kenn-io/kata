@@ -6,6 +6,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 )
 
 func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
@@ -17,7 +18,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		issues, err := cfg.DB.ReadyIssues(ctx, in.ProjectID, in.Limit)
+		issues, err := cfg.DB.ReadyIssues(ctx, in.ProjectID, in.Limit, db.ReadyIssuesFilter{})
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
