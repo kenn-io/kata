@@ -102,11 +102,23 @@ func newListCmd() *cobra.Command {
 					return err
 				}
 			}
+			// Truncation hint: when we got exactly --limit rows back the
+			// daemon may have more. Print to stderr so pipelines stay
+			// clean (kata list | grep ...). Quiet suppresses it. Has a
+			// false positive when the project has exactly --limit issues,
+			// which we accept as a much smaller harm than silent
+			// truncation on projects above the default.
+			if !flags.Quiet && len(b.Issues) == limit {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(),
+					"... showing %d (raise --limit to see more)\n", limit); err != nil {
+					return err
+				}
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "open", "filter by status: open|closed|all")
-	cmd.Flags().IntVar(&limit, "limit", 50, "max rows")
+	cmd.Flags().IntVar(&limit, "limit", 200, "max rows")
 	cmd.Flags().IntVar(&priority, "priority", 0, "exact priority filter (0..4); 0 = highest")
 	cmd.Flags().IntVar(&maxPriority, "max-priority", 0, "include only priority <= this value (0..4)")
 	return cmd

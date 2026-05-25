@@ -60,3 +60,59 @@ func TestList_SanitizesAnsiAndNewlinesInTitle(t *testing.T) {
 		assert.NotEmpty(t, ln, "list output produced a blank row from injected newline")
 	}
 }
+
+// TestList_HintsWhenTruncated covers the silent-truncation pitfall: when the
+// returned page is exactly --limit rows, the CLI prints a stderr hint so users
+// realize there may be more. Hint goes to stderr so it doesn't pollute pipes
+// (kata list | grep ...) and is suppressed in --json mode.
+func TestList_HintsWhenTruncated(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"alpha", "beta", "gamma"} {
+		createIssue(t, env, pid, title)
+	}
+
+	stdout, stderr, err := runCLIWithErr(t, env, dir, "list", "--limit", "2")
+	require.NoError(t, err)
+	// Two rows on stdout, no hint on stdout.
+	rows := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	assert.Len(t, rows, 2, "stdout should carry exactly --limit rows")
+	assert.NotContains(t, stdout, "--limit", "hint must go to stderr, not stdout")
+	// Hint on stderr.
+	assert.Contains(t, stderr, "--limit",
+		"stderr should hint that more rows may exist (stderr=%q)", stderr)
+}
+
+// TestList_NoHintWhenAllRowsFit guards the false-negative direction: when the
+// page is shorter than --limit, no hint should fire.
+func TestList_NoHintWhenAllRowsFit(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"alpha", "beta"} {
+		createIssue(t, env, pid, title)
+	}
+
+	stdout, stderr, err := runCLIWithErr(t, env, dir, "list", "--limit", "10")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "alpha")
+	assert.Contains(t, stdout, "beta")
+	assert.NotContains(t, stderr, "--limit", "no hint expected when rows < limit")
+}
+
+// TestList_JSONOmitsHint pins that the JSON output path stays pure JSON. The
+// hint is human-facing; agents consuming --json must not get extra stderr
+// noise that breaks parsers expecting silent success.
+func TestList_JSONOmitsHint(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"alpha", "beta", "gamma"} {
+		createIssue(t, env, pid, title)
+	}
+
+	stdout, stderr, err := runCLIWithErr(t, env, dir, "--json", "list", "--limit", "2")
+	require.NoError(t, err)
+	assert.NotContains(t, stderr, "--limit", "JSON mode must suppress the hint")
+	// stdout should still parse as JSON.
+	var got struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Len(t, got.Issues, 2)
+}
