@@ -1493,7 +1493,7 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 	if err != nil {
 		// SQLite busy/locked errors during concurrent claims should be treated
 		// as conflicts. Fetch current owner outside the failed transaction.
-		if isSQLiteBusy(err) {
+		if IsLockContention(err) {
 			_ = tx.Rollback()
 			currentOwner, _ := d.getIssueOwner(ctx, issueID)
 			return ClaimResult{CurrentOwner: currentOwner}, ErrAlreadyClaimed
@@ -1558,18 +1558,6 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 		Changed:       true,
 		PreviousOwner: previousOwner,
 	}, nil
-}
-
-// isSQLiteBusy returns true if the error is a SQLite busy/locked error.
-func isSQLiteBusy(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "SQLITE_BUSY") ||
-		strings.Contains(msg, "SQLITE_LOCKED") ||
-		strings.Contains(msg, "database is locked") ||
-		strings.Contains(msg, "database table is locked")
 }
 
 // getIssueOwner fetches just the owner field for an issue.
