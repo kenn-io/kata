@@ -421,6 +421,28 @@ func postUnassign(t *testing.T, env *testenv.Env, projectID, issueNumber int64, 
 	return resp, out
 }
 
+// claimResp mirrors api.ClaimResponse for test decoding.
+type claimResp struct {
+	Issue         json.RawMessage `json:"issue"`
+	Event         *json.RawMessage `json:"event,omitempty"`
+	Changed       bool            `json:"changed"`
+	PreviousOwner *string         `json:"previous_owner,omitempty"`
+}
+
+// postClaim POSTs to /actions/claim and returns the response paired with the
+// decoded body. The body is only populated for 2xx responses.
+func postClaim(t *testing.T, env *testenv.Env, projectID, issueNumber int64, actor string, force bool) (*http.Response, claimResp) {
+	t.Helper()
+	var out claimResp
+	body := map[string]any{"actor": actor}
+	if force {
+		body["force"] = true
+	}
+	resp := envDoJSON(t, env, http.MethodPost, issuePath(projectID, issueNumber, "actions/claim"),
+		body, &out)
+	return resp, out
+}
+
 // lastEventPayload returns the JSON payload of the most recently inserted event
 // of eventType for projectID. Used by tests verifying side-effect events that
 // aren't surfaced in the HTTP response (e.g. the trailing unlink emitted by a

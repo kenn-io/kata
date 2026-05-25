@@ -66,3 +66,56 @@ func TestUnassign_HappyPath(t *testing.T) {
 	assert.Equal(t, "issue.unassigned", out.Event.Type)
 	assert.True(t, out.Changed)
 }
+
+func TestClaim_UnownedIssue(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	resp, out := postClaim(t, env, pid, n, "alice", false)
+	require.Equal(t, 200, resp.StatusCode)
+	assert.True(t, out.Changed)
+	assert.Nil(t, out.PreviousOwner)
+	require.NotNil(t, out.Event)
+}
+
+func TestClaim_AlreadyOwnedBySameActor(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	// First claim
+	resp, _ := postClaim(t, env, pid, n, "alice", false)
+	require.Equal(t, 200, resp.StatusCode)
+
+	// Second claim by same actor
+	resp, out := postClaim(t, env, pid, n, "alice", false)
+	require.Equal(t, 200, resp.StatusCode)
+	assert.False(t, out.Changed)
+	assert.Nil(t, out.Event)
+	assert.Nil(t, out.PreviousOwner)
+}
+
+func TestClaim_AlreadyOwnedByDifferentActor(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	// Claim by alice
+	resp, _ := postClaim(t, env, pid, n, "alice", false)
+	require.Equal(t, 200, resp.StatusCode)
+
+	// Try to claim by bob without force
+	resp, _ = postClaim(t, env, pid, n, "bob", false)
+	assert.Equal(t, 409, resp.StatusCode)
+}
+
+func TestClaim_ForceReassign(t *testing.T) {
+	env := testenv.New(t)
+	pid, n := setupOneIssue(t, env)
+	// Claim by alice
+	resp, _ := postClaim(t, env, pid, n, "alice", false)
+	require.Equal(t, 200, resp.StatusCode)
+
+	// Claim by bob with force
+	resp, out := postClaim(t, env, pid, n, "bob", true)
+	require.Equal(t, 200, resp.StatusCode)
+	assert.True(t, out.Changed)
+	require.NotNil(t, out.PreviousOwner)
+	assert.Equal(t, "alice", *out.PreviousOwner)
+	require.NotNil(t, out.Event)
+}
