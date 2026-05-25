@@ -101,7 +101,15 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *struct {
 		Include string `query:"include"`
 	}) (*api.ListProjectsResponse, error) {
-		ps, err := cfg.DB.ListProjects(ctx)
+		var (
+			ps  []db.Project
+			err error
+		)
+		if includeContains(in.Include, "archived") {
+			ps, err = cfg.DB.ListProjectsIncludingArchived(ctx)
+		} else {
+			ps, err = cfg.DB.ListProjects(ctx)
+		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
@@ -248,6 +256,32 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out := &api.RemoveProjectResponse{}
 		out.Body.Project = dbProjectToOut(project)
 		out.Body.Event = evt
+		return out, nil
+	})
+
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "restoreProject",
+		Method:      "POST",
+		Path:        "/api/v1/projects/{project_id}/restore",
+	}, func(ctx context.Context, in *api.RestoreProjectRequest) (*api.RestoreProjectResponse, error) {
+		if err := validateActor(in.Actor); err != nil {
+			return nil, err
+		}
+		project, evt, changed, err := cfg.DB.RestoreProject(ctx, in.ProjectID, in.Actor)
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
+		}
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		if changed && evt != nil {
+			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
+			cfg.Hooks.Enqueue(*evt)
+		}
+		out := &api.RestoreProjectResponse{}
+		out.Body.Project = dbProjectToOut(project)
+		out.Body.Event = evt
+		out.Body.Changed = changed
 		return out, nil
 	})
 
@@ -767,7 +801,7 @@ func upsertProject(ctx context.Context, store *db.DB, name string) (db.Project, 
 	if archived, archErr := store.ProjectByNameIncludingArchived(ctx, name); archErr == nil && archived.DeletedAt != nil {
 		return db.Project{}, false, api.NewError(409, "project_archived",
 			"project with this name was archived via `kata projects remove`",
-			"restore the project (not yet supported) or pick a different name",
+			`run "kata projects restore `+name+`" or pick a different name`,
 			map[string]any{"name": name, "deleted_at": archived.DeletedAt})
 	}
 	created, err := store.CreateProject(ctx, name)

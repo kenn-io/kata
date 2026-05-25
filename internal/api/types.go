@@ -556,6 +556,23 @@ type RemoveProjectResponse struct {
 	}
 }
 
+// RestoreProjectRequest is POST /api/v1/projects/{id}/restore. The action is
+// idempotent: already-active projects return changed=false with no event.
+type RestoreProjectRequest struct {
+	ProjectID int64  `path:"project_id" required:"true"`
+	Actor     string `query:"actor" required:"true"`
+}
+
+// RestoreProjectResponse carries the active project, optional project.restored
+// event, and changed=false for retry/no-op restores.
+type RestoreProjectResponse struct {
+	Body struct {
+		Project ProjectOut `json:"project"`
+		Event   *db.Event  `json:"event"`
+		Changed bool       `json:"changed"`
+	}
+}
+
 // DetachProjectAliasRequest is DELETE /api/v1/projects/{id}/aliases/{alias_id}.
 // Force=true overrides the last-alias refusal.
 type DetachProjectAliasRequest struct {

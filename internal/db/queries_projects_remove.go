@@ -117,6 +117,68 @@ func (d *DB) RemoveProject(ctx context.Context, p RemoveProjectParams) (Project,
 	return updated, &evt, nil
 }
 
+// RestoreProject clears projects.deleted_at and emits one project.restored
+// event. Active projects return a retry-safe no-op envelope: the project row,
+// nil event, and changed=false. Unknown projects return ErrNotFound.
+func (d *DB) RestoreProject(ctx context.Context, projectID int64, actor string) (Project, *Event, bool, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return Project{}, nil, false, fmt.Errorf("begin restore project: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, projectID))
+	if err != nil {
+		return Project{}, nil, false, err
+	}
+	if project.DeletedAt == nil {
+		if err := tx.Commit(); err != nil {
+			return Project{}, nil, false, fmt.Errorf("commit restore project noop: %w", err)
+		}
+		return project, nil, false, nil
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE projects SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`,
+		project.ID)
+	if err != nil {
+		return Project{}, nil, false, fmt.Errorf("restore project: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return Project{}, nil, false, fmt.Errorf("restore project rows affected: %w", err)
+	}
+	if n == 0 {
+		if err := tx.Commit(); err != nil {
+			return Project{}, nil, false, fmt.Errorf("commit restore project race noop: %w", err)
+		}
+		updated, err := d.ProjectByID(ctx, project.ID)
+		if err != nil {
+			return Project{}, nil, false, err
+		}
+		return updated, nil, false, nil
+	}
+
+	evt, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID:   project.ID,
+		ProjectName: project.Name,
+		Type:        "project.restored",
+		Actor:       actor,
+		Payload:     "{}",
+	})
+	if err != nil {
+		return Project{}, nil, false, err
+	}
+	updated, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, project.ID))
+	if err != nil {
+		return Project{}, nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Project{}, nil, false, fmt.Errorf("commit restore project: %w", err)
+	}
+	return updated, &evt, true, nil
+}
+
 // DetachAliasParams identifies a single alias to drop. ProjectID scopes the
 // lookup to a specific project so a stale handler preflight cannot resolve
 // to one project_id and then race a reassignment that points alias_id at a

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
@@ -25,9 +26,10 @@ type projectAliasRef struct {
 }
 
 type projectRef struct {
-	ID      int64             `json:"id"`
-	Name    string            `json:"name"`
-	Aliases []projectAliasRef `json:"aliases,omitempty"`
+	ID        int64             `json:"id"`
+	Name      string            `json:"name"`
+	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
+	Aliases   []projectAliasRef `json:"aliases,omitempty"`
 }
 
 // shortIDExtensionItem mirrors api.MergeShortIDExtension for decoding the
@@ -43,7 +45,7 @@ type shortIDExtensionItem struct {
 func newProjectsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "projects", Short: "list and inspect kata projects"}
 	cmd.AddCommand(projectsListCmd(), projectsShowCmd(), projectsRenameCmd(),
-		projectsMergeCmd(), projectsRemoveCmd(), projectsDetachCmd())
+		projectsMergeCmd(), projectsRemoveCmd(), projectsRestoreCmd(), projectsDetachCmd())
 	return cmd
 }
 
@@ -343,6 +345,22 @@ func resolveProjectSelector(ctx context.Context, client *http.Client, baseURL, s
 	if err != nil {
 		return projectRef{}, err
 	}
+	return resolveProjectSelectorFromRefs(selector, projects)
+}
+
+func resolveProjectSelectorIncludingArchived(ctx context.Context, client *http.Client, baseURL, selector string) (projectRef, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return projectRef{}, &cliError{Message: "project selector must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
+	}
+	projects, err := loadProjectRefsIncludingArchived(ctx, client, baseURL)
+	if err != nil {
+		return projectRef{}, err
+	}
+	return resolveProjectSelectorFromRefs(selector, projects)
+}
+
+func resolveProjectSelectorFromRefs(selector string, projects []projectRef) (projectRef, error) {
 	if id, parseErr := strconv.ParseInt(selector, 10, 64); parseErr == nil {
 		for _, project := range projects {
 			if project.ID == id {
@@ -366,7 +384,19 @@ func resolveProjectSelector(ctx context.Context, client *http.Client, baseURL, s
 }
 
 func loadProjectRefs(ctx context.Context, client *http.Client, baseURL string) ([]projectRef, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/projects", nil)
+	return loadProjectRefsWithArchived(ctx, client, baseURL, false)
+}
+
+func loadProjectRefsIncludingArchived(ctx context.Context, client *http.Client, baseURL string) ([]projectRef, error) {
+	return loadProjectRefsWithArchived(ctx, client, baseURL, true)
+}
+
+func loadProjectRefsWithArchived(ctx context.Context, client *http.Client, baseURL string, includeArchived bool) ([]projectRef, error) {
+	path := baseURL + "/api/v1/projects"
+	if includeArchived {
+		path += "?include=archived"
+	}
+	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -380,6 +410,9 @@ func loadProjectRefs(ctx context.Context, client *http.Client, baseURL string) (
 		return nil, err
 	}
 	for i := range list.Projects {
+		if list.Projects[i].DeletedAt != nil {
+			continue
+		}
 		status, detail, err := httpDoJSON(ctx, client, http.MethodGet,
 			fmt.Sprintf("%s/api/v1/projects/%d", baseURL, list.Projects[i].ID), nil)
 		if err != nil {
@@ -534,6 +567,67 @@ func projectsRemoveCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "archive even when open issues remain")
 	return cmd
+}
+
+func projectsRestoreCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restore <project>",
+		Short: "restore an archived project",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			baseURL, err := ensureDaemon(ctx)
+			if err != nil {
+				return err
+			}
+			client, err := httpClientFor(ctx, baseURL)
+			if err != nil {
+				return err
+			}
+			project, err := resolveProjectSelectorIncludingArchived(ctx, client, baseURL, args[0])
+			if err != nil {
+				return err
+			}
+			actor, _ := resolveActor(flags.As, nil)
+			path := fmt.Sprintf("%s/api/v1/projects/%d/restore?actor=%s",
+				baseURL, project.ID, url.QueryEscape(actor))
+			status, bs, err := httpDoJSON(ctx, client, http.MethodPost, path, nil)
+			if err != nil {
+				return err
+			}
+			if status >= 400 {
+				return apiErrFromBody(status, bs)
+			}
+			if flags.JSON {
+				var buf bytes.Buffer
+				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+					return err
+				}
+				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+				return err
+			}
+			var b struct {
+				Project struct {
+					ID   int64  `json:"id"`
+					Name string `json:"name"`
+				} `json:"project"`
+				Changed bool `json:"changed"`
+			}
+			if err := json.Unmarshal(bs, &b); err != nil {
+				return err
+			}
+			if !b.Changed {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(),
+					"project #%d (%s) is already active\n",
+					b.Project.ID, textsafe.Line(b.Project.Name))
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(),
+				"restored project #%d (%s); run 'kata init' in the workspace to reattach an alias\n",
+				b.Project.ID, textsafe.Line(b.Project.Name))
+			return err
+		},
+	}
 }
 
 // projectsDetachCmd drops a single alias from a project: DELETE

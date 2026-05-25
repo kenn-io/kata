@@ -125,6 +125,42 @@ func TestRemoveProject_ExcludedFromListAndResolve(t *testing.T) {
 	require.NotNil(t, got.DeletedAt)
 }
 
+func TestRestoreProject_ReactivatesArchivedProjectAndEmitsEvent(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p, err := d.CreateProject(ctx, "restore-me")
+	require.NoError(t, err)
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	got, evt, changed, err := d.RestoreProject(ctx, p.ID, "tester")
+	require.NoError(t, err)
+	assert.True(t, changed)
+	require.Nil(t, got.DeletedAt)
+	require.NotNil(t, evt)
+	assert.Equal(t, "project.restored", evt.Type)
+	assert.Equal(t, p.ID, evt.ProjectID)
+	assert.True(t, uid.Valid(evt.UID))
+
+	active, err := d.ProjectByName(ctx, "restore-me")
+	require.NoError(t, err)
+	assert.Equal(t, p.ID, active.ID)
+}
+
+func TestRestoreProject_ActiveProjectIsNoop(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p, err := d.CreateProject(ctx, "already-active")
+	require.NoError(t, err)
+
+	got, evt, changed, err := d.RestoreProject(ctx, p.ID, "tester")
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Nil(t, evt)
+	assert.Equal(t, p.ID, got.ID)
+	assert.Nil(t, got.DeletedAt)
+}
+
 // TestDetachProjectAlias_RemovesOneAndEmitsEvent pins the happy path: with
 // two aliases, one detaches cleanly and emits project.alias_removed.
 func TestDetachProjectAlias_RemovesOneAndEmitsEvent(t *testing.T) {

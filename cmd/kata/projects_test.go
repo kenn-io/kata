@@ -32,6 +32,36 @@ func TestProjects_ListJSONHasNoNextIssueNumber(t *testing.T) {
 	}
 }
 
+func TestProjects_RestoreArchivedProjectByName(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "retry-import")
+	require.NoError(t, err)
+	_, err = env.DB.AttachAlias(ctx, p.ID, "github.com/wesm/retry-import", "git", "/tmp/retry-import")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "projects", "restore", "retry-import")
+	assert.Contains(t, out, "restored project #"+itoa(p.ID)+" (retry-import)")
+	assert.Contains(t, out, "run 'kata init' in the workspace to reattach an alias")
+
+	got, err := env.DB.ProjectByName(ctx, "retry-import")
+	require.NoError(t, err)
+	assert.Equal(t, p.ID, got.ID)
+	assert.Nil(t, got.DeletedAt)
+}
+
+func TestProjects_RestoreActiveProjectIsNoop(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "active")
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "projects", "restore", "active")
+	assert.Contains(t, out, "project #"+itoa(p.ID)+" (active) is already active")
+}
+
 // TestProjects_ResetCounterCommandIsAbsent guards against the reset-counter
 // command being reintroduced after the v8 cutover removed its underlying
 // next_issue_number column (spec §9.5). The daemon's 404 on the endpoint is

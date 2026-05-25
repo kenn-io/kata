@@ -182,6 +182,80 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 }
 
+func TestListProjects_IncludeArchived(t *testing.T) {
+	ts, h := startDefaultTestServer(t)
+	active, err := h.db.CreateProject(t.Context(), "active")
+	require.NoError(t, err)
+	archived, err := h.db.CreateProject(t.Context(), "archived")
+	require.NoError(t, err)
+	_, _, err = h.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: archived.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/projects?include=archived", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+
+	var body struct {
+		Projects []struct {
+			ID        int64   `json:"id"`
+			Name      string  `json:"name"`
+			DeletedAt *string `json:"deleted_at"`
+		} `json:"projects"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &body))
+	require.Len(t, body.Projects, 2)
+	assert.Equal(t, active.ID, body.Projects[0].ID)
+	assert.Nil(t, body.Projects[0].DeletedAt)
+	assert.Equal(t, archived.ID, body.Projects[1].ID)
+	assert.NotNil(t, body.Projects[1].DeletedAt)
+}
+
+func TestRestoreProject_RestoresArchivedProject(t *testing.T) {
+	ts, h := startDefaultTestServer(t)
+	p, err := h.db.CreateProject(t.Context(), "archived")
+	require.NoError(t, err)
+	_, _, err = h.db.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	resp, bs := postJSON(t, ts, "/api/v1/projects/"+strconv.FormatInt(p.ID, 10)+"/restore?actor=tester", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+
+	var body struct {
+		Project struct {
+			ID        int64   `json:"id"`
+			DeletedAt *string `json:"deleted_at"`
+		} `json:"project"`
+		Event   *db.Event `json:"event"`
+		Changed bool      `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &body))
+	assert.True(t, body.Changed)
+	assert.Equal(t, p.ID, body.Project.ID)
+	assert.Nil(t, body.Project.DeletedAt)
+	require.NotNil(t, body.Event)
+	assert.Equal(t, "project.restored", body.Event.Type)
+}
+
+func TestRestoreProject_ActiveProjectIsNoop(t *testing.T) {
+	ts, h := startDefaultTestServer(t)
+	p, err := h.db.CreateProject(t.Context(), "active")
+	require.NoError(t, err)
+
+	resp, bs := postJSON(t, ts, "/api/v1/projects/"+strconv.FormatInt(p.ID, 10)+"/restore?actor=tester", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+
+	var body struct {
+		Project struct {
+			ID int64 `json:"id"`
+		} `json:"project"`
+		Event   *db.Event `json:"event"`
+		Changed bool      `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &body))
+	assert.False(t, body.Changed)
+	assert.Nil(t, body.Event)
+	assert.Equal(t, p.ID, body.Project.ID)
+}
+
 // TestResolve_AliasMissNameHit_FirstSeenAttach handles the case
 // where a client has a .kata.toml (so it sends a name) and a git
 // workspace whose alias is not yet attached on this daemon (e.g. first

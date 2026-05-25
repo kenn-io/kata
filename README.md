@@ -339,6 +339,8 @@ kata projects list
 kata projects show <project>
 kata projects rename <project> <name>
 kata projects merge <source> <target> [--rename-target NAME]
+kata projects remove <project> [--force]
+kata projects restore <project>
 kata export [--project NAME] [--output PATH]
 kata import --input PATH --target PATH [--force]
 ```
