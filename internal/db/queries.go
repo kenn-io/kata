@@ -1434,9 +1434,9 @@ type ClaimResult struct {
 
 // ClaimOwner atomically claims an issue for the given actor. The conditional
 // UPDATE ensures the claim only succeeds if the issue is unowned or owned by
-// the same actor (or force is true). Zero rows affected means another actor
-// owns the issue. The read-then-conditional-write pattern is safe because
-// SQLite's deferred transactions serialize at the write point.
+// the same actor (or force is true). If a concurrent claim causes a SQLite
+// busy/locked error during the UPDATE, we treat it as a conflict and return
+// ErrAlreadyClaimed after fetching the current owner.
 //
 // Returns ErrAlreadyClaimed if the issue is already owned by a different actor
 // and force is false. The ClaimResult.CurrentOwner field is set in this case.
@@ -1491,6 +1491,13 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 			 WHERE id = ? AND (owner IS NULL OR owner = ?)`, actor, issueID, actor)
 	}
 	if err != nil {
+		// SQLite busy/locked errors during concurrent claims should be treated
+		// as conflicts. Fetch current owner outside the failed transaction.
+		if isSQLiteBusy(err) {
+			_ = tx.Rollback()
+			currentOwner, _ := d.getIssueOwner(ctx, issueID)
+			return ClaimResult{CurrentOwner: currentOwner}, ErrAlreadyClaimed
+		}
 		return ClaimResult{}, fmt.Errorf("update owner: %w", err)
 	}
 
@@ -1551,6 +1558,28 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 		Changed:       true,
 		PreviousOwner: previousOwner,
 	}, nil
+}
+
+// isSQLiteBusy returns true if the error is a SQLite busy/locked error.
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") ||
+		strings.Contains(msg, "SQLITE_LOCKED") ||
+		strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "database table is locked")
+}
+
+// getIssueOwner fetches just the owner field for an issue.
+func (d *DB) getIssueOwner(ctx context.Context, issueID int64) (*string, error) {
+	var owner *string
+	err := d.QueryRowContext(ctx, `SELECT owner FROM issues WHERE id = ?`, issueID).Scan(&owner)
+	if err != nil {
+		return nil, err
+	}
+	return owner, nil
 }
 
 // ReadyIssuesFilter holds optional filters for the ready query.
