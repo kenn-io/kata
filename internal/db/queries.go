@@ -1432,8 +1432,10 @@ type ClaimResult struct {
 	CurrentOwner  *string // set when ErrAlreadyClaimed is returned
 }
 
-// ClaimOwner atomically claims an issue for the given actor. It checks
-// ownership and updates in a single transaction to prevent race conditions.
+// ClaimOwner atomically claims an issue for the given actor. Uses a
+// conditional UPDATE to prevent race conditions: the WHERE clause ensures
+// the claim only succeeds if the issue is unowned or owned by the same actor
+// (or force is true). Zero rows affected means another actor claimed it first.
 //
 // Returns ErrAlreadyClaimed if the issue is already owned by a different actor
 // and force is false. The ClaimResult.CurrentOwner field is set in this case.
@@ -1444,46 +1446,69 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Read current state
 	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
 	if err != nil {
 		return ClaimResult{}, err
 	}
 
-	// Check ownership state inside the transaction
-	if issue.Owner != nil {
-		// Already owned by same actor: no-op
-		if *issue.Owner == actor {
-			if err := tx.Commit(); err != nil {
-				return ClaimResult{}, err
-			}
-			return ClaimResult{
-				Issue:         issue,
-				Event:         nil,
-				Changed:       false,
-				PreviousOwner: nil,
-			}, nil
+	// Already owned by same actor: no-op (no race concern here)
+	if issue.Owner != nil && *issue.Owner == actor {
+		if err := tx.Commit(); err != nil {
+			return ClaimResult{}, err
 		}
-		// Owned by different actor: conflict unless force
-		if !force {
-			currentOwner := *issue.Owner
-			return ClaimResult{CurrentOwner: &currentOwner}, ErrAlreadyClaimed
-		}
+		return ClaimResult{
+			Issue:         issue,
+			Event:         nil,
+			Changed:       false,
+			PreviousOwner: nil,
+		}, nil
 	}
 
-	// Store previous owner before update
+	// Store previous owner before attempting update
 	var previousOwner *string
 	if issue.Owner != nil {
 		prev := *issue.Owner
 		previousOwner = &prev
 	}
 
-	// Perform the update
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues
-		 SET owner      = ?,
-		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ?`, actor, issueID); err != nil {
+	// Conditional UPDATE: only succeeds if ownership state matches expectations.
+	// This prevents races: if another request claims between our read and write,
+	// zero rows will be affected and we return ErrAlreadyClaimed.
+	var res sql.Result
+	if force {
+		// Force mode: unconditional update
+		res, err = tx.ExecContext(ctx,
+			`UPDATE issues
+			 SET owner      = ?,
+			     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 WHERE id = ?`, actor, issueID)
+	} else {
+		// Normal mode: only update if unowned OR owned by same actor
+		res, err = tx.ExecContext(ctx,
+			`UPDATE issues
+			 SET owner      = ?,
+			     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 WHERE id = ? AND (owner IS NULL OR owner = ?)`, actor, issueID, actor)
+	}
+	if err != nil {
 		return ClaimResult{}, fmt.Errorf("update owner: %w", err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return ClaimResult{}, fmt.Errorf("rows affected: %w", err)
+	}
+
+	// Zero rows affected means the conditional WHERE didn't match:
+	// someone else claimed the issue between our read and write.
+	if rowsAffected == 0 {
+		// Re-read to get current owner for error message
+		currentIssue, err := d.IssueByID(ctx, issueID)
+		if err != nil {
+			return ClaimResult{}, err
+		}
+		return ClaimResult{CurrentOwner: currentIssue.Owner}, ErrAlreadyClaimed
 	}
 
 	// Emit assigned event
