@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestUpdateOwner_AssignFromNil(t *testing.T) {
@@ -73,4 +74,51 @@ func TestUpdateOwner_ControlByteOwnerProducesValidJSON(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(evt.Payload), &payload))
 	assert.Equal(t, owner, payload.Owner)
+}
+
+// ClaimOwner tests
+
+func TestClaimOwner_UnownedIssue(t *testing.T) {
+	d, ctx, _, i := setupTestIssue(t)
+
+	result, err := d.ClaimOwner(ctx, i.ID, "agent1", false)
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+	require.NotNil(t, result.Issue.Owner)
+	assert.Equal(t, "agent1", *result.Issue.Owner)
+	require.NotNil(t, result.Event)
+	assert.Equal(t, "issue.assigned", result.Event.Type)
+	assert.Nil(t, result.PreviousOwner)
+}
+
+func TestClaimOwner_AlreadyOwnedBySameActor(t *testing.T) {
+	d, ctx, _, i := setupAssignedIssue(t, "agent1")
+
+	result, err := d.ClaimOwner(ctx, i.ID, "agent1", false)
+	require.NoError(t, err)
+	assert.False(t, result.Changed, "claiming own issue is no-op")
+	assert.Nil(t, result.Event)
+	require.NotNil(t, result.Issue.Owner)
+	assert.Equal(t, "agent1", *result.Issue.Owner)
+}
+
+func TestClaimOwner_AlreadyOwnedByDifferentActor(t *testing.T) {
+	d, ctx, _, i := setupAssignedIssue(t, "agent1")
+
+	result, err := d.ClaimOwner(ctx, i.ID, "agent2", false)
+	require.ErrorIs(t, err, db.ErrAlreadyClaimed)
+	require.NotNil(t, result.CurrentOwner)
+	assert.Equal(t, "agent1", *result.CurrentOwner)
+}
+
+func TestClaimOwner_ForceReassign(t *testing.T) {
+	d, ctx, _, i := setupAssignedIssue(t, "agent1")
+
+	result, err := d.ClaimOwner(ctx, i.ID, "agent2", true)
+	require.NoError(t, err)
+	assert.True(t, result.Changed)
+	require.NotNil(t, result.Issue.Owner)
+	assert.Equal(t, "agent2", *result.Issue.Owner)
+	require.NotNil(t, result.PreviousOwner)
+	assert.Equal(t, "agent1", *result.PreviousOwner)
 }

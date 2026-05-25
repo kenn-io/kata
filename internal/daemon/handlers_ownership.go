@@ -83,49 +83,28 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 
-		// Check if issue is already owned
-		if issue.Owner != nil {
-			// If owned by same actor, return no-op
-			if *issue.Owner == in.Body.Actor {
-				out := &api.ClaimResponse{}
-				out.Body.Issue = issue
-				out.Body.Event = nil
-				out.Body.Changed = false
-				out.Body.PreviousOwner = nil
-				return out, nil
-			}
-			// If owned by different actor and not forcing, return conflict
-			if !in.Body.Force {
-				return nil, api.NewError(409, "already_claimed",
-					fmt.Sprintf("issue is already claimed by %s", *issue.Owner),
-					"use --force to reassign",
-					map[string]any{"current_owner": *issue.Owner})
-			}
+		// Atomically claim the issue (checks ownership and updates in one transaction)
+		result, err := cfg.DB.ClaimOwner(ctx, issue.ID, in.Body.Actor, in.Body.Force)
+		if err == db.ErrAlreadyClaimed {
+			return nil, api.NewError(409, "already_claimed",
+				fmt.Sprintf("issue is already claimed by %s", *result.CurrentOwner),
+				"use --force to reassign",
+				map[string]any{"current_owner": *result.CurrentOwner})
 		}
-
-		// Store previous owner before update
-		var previousOwner *string
-		if issue.Owner != nil {
-			prev := *issue.Owner
-			previousOwner = &prev
-		}
-
-		// Assign to actor
-		owner := in.Body.Actor
-		updated, evt, changed, err := cfg.DB.UpdateOwner(ctx, issue.ID, &owner, in.Body.Actor)
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
-		if changed && evt != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*evt)
+
+		if result.Changed && result.Event != nil {
+			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: result.Event, ProjectID: in.ProjectID})
+			cfg.Hooks.Enqueue(*result.Event)
 		}
 
 		out := &api.ClaimResponse{}
-		out.Body.Issue = updated
-		out.Body.Event = evt
-		out.Body.Changed = changed
-		out.Body.PreviousOwner = previousOwner
+		out.Body.Issue = result.Issue
+		out.Body.Event = result.Event
+		out.Body.Changed = result.Changed
+		out.Body.PreviousOwner = result.PreviousOwner
 		return out, nil
 	})
 }

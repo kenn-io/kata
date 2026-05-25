@@ -1419,6 +1419,109 @@ func ownerEqual(a, b *string) bool {
 	return *a == *b
 }
 
+// ErrAlreadyClaimed is returned by ClaimOwner when the issue is already owned
+// by a different actor and force is false.
+var ErrAlreadyClaimed = errors.New("already claimed")
+
+// ClaimResult contains the result of a ClaimOwner operation.
+type ClaimResult struct {
+	Issue         Issue
+	Event         *Event
+	Changed       bool
+	PreviousOwner *string
+	CurrentOwner  *string // set when ErrAlreadyClaimed is returned
+}
+
+// ClaimOwner atomically claims an issue for the given actor. It checks
+// ownership and updates in a single transaction to prevent race conditions.
+//
+// Returns ErrAlreadyClaimed if the issue is already owned by a different actor
+// and force is false. The ClaimResult.CurrentOwner field is set in this case.
+func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (ClaimResult, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+
+	// Check ownership state inside the transaction
+	if issue.Owner != nil {
+		// Already owned by same actor: no-op
+		if *issue.Owner == actor {
+			if err := tx.Commit(); err != nil {
+				return ClaimResult{}, err
+			}
+			return ClaimResult{
+				Issue:         issue,
+				Event:         nil,
+				Changed:       false,
+				PreviousOwner: nil,
+			}, nil
+		}
+		// Owned by different actor: conflict unless force
+		if !force {
+			currentOwner := *issue.Owner
+			return ClaimResult{CurrentOwner: &currentOwner}, ErrAlreadyClaimed
+		}
+	}
+
+	// Store previous owner before update
+	var previousOwner *string
+	if issue.Owner != nil {
+		prev := *issue.Owner
+		previousOwner = &prev
+	}
+
+	// Perform the update
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE issues
+		 SET owner      = ?,
+		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE id = ?`, actor, issueID); err != nil {
+		return ClaimResult{}, fmt.Errorf("update owner: %w", err)
+	}
+
+	// Emit assigned event
+	bs, marshalErr := json.Marshal(struct {
+		Owner string `json:"owner"`
+	}{Owner: actor})
+	if marshalErr != nil {
+		return ClaimResult{}, fmt.Errorf("marshal assigned payload: %w", marshalErr)
+	}
+	evt, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID:   issue.ProjectID,
+		ProjectName: projectName,
+		IssueID:     &issue.ID,
+		Type:        "issue.assigned",
+		Actor:       actor,
+		Payload:     string(bs),
+	})
+	if err != nil {
+		return ClaimResult{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ClaimResult{}, err
+	}
+
+	updated, err := d.IssueByID(ctx, issueID)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+
+	return ClaimResult{
+		Issue:         updated,
+		Event:         &evt,
+		Changed:       true,
+		PreviousOwner: previousOwner,
+	}, nil
+}
+
 // ReadyIssuesFilter holds optional filters for the ready query.
 type ReadyIssuesFilter struct {
 	Unowned       bool     // only issues where owner IS NULL
