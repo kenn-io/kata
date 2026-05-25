@@ -42,3 +42,11 @@ func TestReady_FiltersBlocked(t *testing.T) {
 	assert.False(t, strings.Contains(out, "blocked"),
 		"blocked is hidden while blocker is open")
 }
+
+func TestReady_UnownedAndOwnerMutualExclusion(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	resetFlags(t)
+	_, err := runCLICapture(t, env, dir, "ready", "--unowned", "--owner", "alice")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
