@@ -536,12 +536,17 @@ trust_private_network = true
 ```
 
 The environment equivalents are `KATA_AUTH_TOKEN` and
-`KATA_TRUST_PRIVATE_NETWORK=1`. Clients use the same token sources. Without
-`trust_private_network`, kata refuses a token-protected non-loopback HTTP
-listener because the daemon does not terminate TLS. Without a token, this mode
-remains unauthenticated and network ACLs (firewall, VPN, tailnet) are the
-access boundary. Default behavior (no flag, no env, no local file) is
-unchanged: a local Unix-socket daemon is auto-started on demand.
+`KATA_TRUST_PRIVATE_NETWORK=1`. Clients use the same token sources. Mutable
+non-loopback HTTP requires both `token` and `trust_private_network`; without
+the trust flag, kata refuses the token-protected listener because the daemon
+does not terminate TLS.
+
+For unauthenticated private-network experiments, `kata daemon start --listen
+100.64.0.5:7777 --insecure-readonly` permits GET requests only; mutations and
+the event stream still require authentication. Network ACLs (firewall, VPN,
+tailnet) are the access boundary in that read-only dev mode. Default behavior
+(no flag, no env, no local file) is unchanged: a local Unix-socket daemon is
+auto-started on demand.
 
 ## Backup and restore
 

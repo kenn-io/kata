@@ -189,6 +189,7 @@ func TestNewHTTPClient_RefusesBearerOnPlaintextNonLoopback(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "secret")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
 	_, err := NewHTTPClient(context.Background(), "http://example.invalid:7373", Opts{})
 	require.Error(t, err)
