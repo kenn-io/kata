@@ -160,12 +160,36 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 	}
 	if mode == outputAgent {
 		if verb == "delete" {
-			return printAgentMutation(cmd, "delete", bs, func(w io.Writer, _ agentIssueMutation) error {
-				if err := writeAgentField(w, "Deleted", "true"); err != nil {
+			var m agentIssueMutation
+			if err := json.Unmarshal(bs, &m); err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if !flags.Quiet {
+				if _, err := fmt.Fprintf(out, "OK delete %s", m.Issue.ShortID); err != nil {
 					return err
 				}
-				return writeAgentField(w, "Undo", "kata restore "+shellQuoteArg(ref)+" --agent")
-			})
+				if !m.Changed {
+					if _, err := fmt.Fprint(out, " changed=false"); err != nil {
+						return err
+					}
+				}
+				if _, err := fmt.Fprintln(out); err != nil {
+					return err
+				}
+			}
+			if m.Issue.ShortID != "" && m.Issue.Title != "" {
+				if _, err := fmt.Fprintf(out, "Issue: %s %s\n", m.Issue.ShortID, agentValue(m.Issue.Title)); err != nil {
+					return err
+				}
+			}
+			if err := writeAgentField(out, "Status", "deleted"); err != nil {
+				return err
+			}
+			if err := writeAgentField(out, "Deleted", "true"); err != nil {
+				return err
+			}
+			return writeAgentField(out, "Undo", "kata restore "+shellQuoteArg(ref)+" --agent")
 		}
 		if verb == "purge" {
 			var b struct {

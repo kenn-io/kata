@@ -34,6 +34,8 @@ func TestDelete_AgentOutput(t *testing.T) {
 	out := runCLI(t, env, dir, "--agent", "delete", short, "--force", "--confirm", "DELETE kata#"+short)
 
 	assert.Regexp(t, `(?m)^OK delete \S+`, out)
+	assert.Contains(t, out, "Status: deleted")
+	assert.NotContains(t, out, "Status: open")
 	assert.Contains(t, out, "Undo: kata restore kata#"+short+" --agent")
 }
 

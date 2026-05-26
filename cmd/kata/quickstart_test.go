@@ -51,6 +51,8 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "--agent", "quickstart"))
 	assert.Truef(t, strings.HasPrefix(out, "OK quickstart\n"), "got %q", out)
+	assert.NotContains(t, out, "# kata agent quickstart")
+	assert.NotContains(t, out, "Remote daemon")
 	assert.Contains(t, out, "Use --agent for concise action summaries in agent logs.")
 	assert.Contains(t, out, "Use --json when your script needs complete structured data.")
 }

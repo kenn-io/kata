@@ -195,6 +195,7 @@ func printEventsAgent(cmd *cobra.Command, bs []byte) error {
 		Events        []struct {
 			EventID      int64   `json:"event_id"`
 			Type         string  `json:"type"`
+			ProjectName  string  `json:"project_name"`
 			IssueShortID *string `json:"issue_short_id"`
 			Actor        string  `json:"actor"`
 		} `json:"events"`
@@ -213,9 +214,11 @@ func printEventsAgent(cmd *cobra.Command, bs []byte) error {
 	}
 	for _, e := range b.Events {
 		id := fmt.Sprint(e.EventID)
+		project := e.ProjectName
 		if err := writeAgentKVRow(out,
 			agentRowField("id", id),
 			agentRowField("type", e.Type),
+			agentOptionalRowField("project", &project),
 			agentOptionalRowField("issue", e.IssueShortID),
 			agentRowField("actor", e.Actor),
 		); err != nil {
@@ -397,6 +400,7 @@ func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
 	var e struct {
 		EventID      int64   `json:"event_id"`
 		Type         string  `json:"type"`
+		ProjectName  string  `json:"project_name"`
 		IssueShortID *string `json:"issue_short_id"`
 		Actor        string  `json:"actor"`
 	}
@@ -413,6 +417,11 @@ func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
 	}
 	if e.IssueShortID != nil && *e.IssueShortID != "" {
 		if _, err := fmt.Fprintf(out, " issue=%s", agentValue(*e.IssueShortID)); err != nil {
+			return streamResult{}, err
+		}
+	}
+	if e.ProjectName != "" {
+		if _, err := fmt.Fprintf(out, " project=%s", agentValue(e.ProjectName)); err != nil {
 			return streamResult{}, err
 		}
 	}

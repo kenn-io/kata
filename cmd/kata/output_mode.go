@@ -367,11 +367,12 @@ func writeAgentField(w io.Writer, name, value string) error {
 }
 
 func agentFencedText(s string) string {
+	clean := textsafe.Block(s)
 	fence := "```"
-	for strings.Contains(s, fence) {
+	for strings.Contains(clean, fence) {
 		fence += "`"
 	}
-	return fence + "text\n" + textsafe.Block(s) + "\n" + fence + "\n"
+	return fence + "text\n" + clean + "\n" + fence + "\n"
 }
 
 func firstLine(s string) string {

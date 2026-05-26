@@ -55,6 +55,19 @@ func TestImportBeadsMissingProjectUnattended(t *testing.T) {
 	assert.Contains(t, ce.Message, "run kata init first")
 }
 
+func TestImportBeadsAgentMissingProjectDoesNotPrompt(t *testing.T) {
+	resetFlags(t)
+	stubIsTTY(t, true)
+	env := testenv.New(t)
+	dir := t.TempDir()
+
+	out, err := runBeadsImportTTY(t, env, dir, "y\n", "--agent")
+
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, ce.Message, "run kata init first")
+	assert.NotContains(t, out, "Run kata init now?")
+}
+
 func TestImportBeadsFromLiveBD(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	installFakeBD(t)

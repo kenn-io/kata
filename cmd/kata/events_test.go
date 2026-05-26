@@ -69,8 +69,8 @@ func TestEvents_OneShotAgentOutput(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	require.Len(t, lines, 3, "agent output should be header plus one row per event: %q", out)
 	assert.Equal(t, "OK events count=2 next_after_id=2", lines[0])
-	assert.Equal(t, "- id=1 type=issue.created issue="+first+" actor=wesm", lines[1])
-	assert.Equal(t, "- id=2 type=issue.created issue="+second+" actor=wesm", lines[2])
+	assert.Equal(t, "- id=1 type=issue.created project=kata issue="+first+" actor=wesm", lines[1])
+	assert.Equal(t, "- id=2 type=issue.created project=kata issue="+second+" actor=wesm", lines[2])
 }
 
 func TestEvents_OneShotAgentResetRequired(t *testing.T) {
@@ -102,6 +102,19 @@ func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
 	assert.Len(t, b.Events, 2, "all-projects must include both projects")
 }
 
+func TestEvents_OneShotAllProjectsAgentIncludesProject(t *testing.T) {
+	env := testenv.New(t)
+	dirA := initBoundWorkspace(t, env.URL, "https://github.com/wesm/a.git")
+	dirB := initBoundWorkspace(t, env.URL, "https://github.com/wesm/b.git")
+	createIssueViaHTTP(t, env, dirA, "a-issue")
+	createIssueViaHTTP(t, env, dirB, "b-issue")
+
+	out := requireCmdOutput(t, env, "events", "--all-projects", "--agent")
+
+	assert.Contains(t, out, "project=a")
+	assert.Contains(t, out, "project=b")
+}
+
 func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 	env := testenv.New(t)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
@@ -127,7 +140,7 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, len(lines), 2, "expected at least 2 agent event lines, got: %q", out)
 	for _, l := range lines[:2] {
-		assert.Regexp(t, `^OK event id=\d+ type=issue\.created issue=\S+ actor=tester$`, l)
+		assert.Regexp(t, `^OK event id=\d+ type=issue\.created issue=\S+ project=kata actor=tester$`, l)
 		assert.NotContains(t, l, "{", "agent tail output must not be NDJSON")
 	}
 	assert.Contains(t, lines[0], "issue="+first)

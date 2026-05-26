@@ -241,7 +241,7 @@ func beadsInitRequiredError() error {
 }
 
 func isBeadsImportUnattended(cmd *cobra.Command) bool {
-	if flags.JSON || flags.Quiet {
+	if currentOutputMode() != outputHuman || flags.Quiet {
 		return true
 	}
 	in, ok := cmd.InOrStdin().(*os.File)

@@ -612,12 +612,10 @@ func agentEditChangeNames(cmd *cobra.Command, changes *mutationChanges) []string
 
 func agentHasLinkChanges(cmd *cobra.Command, changes *mutationChanges) bool {
 	if changes != nil {
-		if changes.ParentSet != nil || changes.ParentRemoved != nil ||
+		return changes.ParentSet != nil || changes.ParentRemoved != nil ||
 			len(changes.BlocksAdded) > 0 || len(changes.BlocksRemoved) > 0 ||
 			len(changes.BlockedByAdded) > 0 || len(changes.BlockedByRemoved) > 0 ||
-			len(changes.RelatedAdded) > 0 || len(changes.RelatedRemoved) > 0 {
-			return true
-		}
+			len(changes.RelatedAdded) > 0 || len(changes.RelatedRemoved) > 0
 	}
 	for _, flag := range []string{
 		"parent", "blocks", "blocked-by", "related",

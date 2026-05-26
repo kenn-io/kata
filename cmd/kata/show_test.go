@@ -71,6 +71,18 @@ func TestShow_AgentOutputLinkRowsUseExistingLinkResponseFields(t *testing.T) {
 	assert.NotContains(t, out, `title="blocked title"`)
 }
 
+func TestShow_AgentOutputLinkRowsUsePOVLabels(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	blocker := createIssue(t, env, pid, "blocker")
+	blocked := createIssue(t, env, pid, "blocked")
+	createLinkViaHTTP(t, env, pid, blocker, "blocks", blocked)
+
+	out := runCLI(t, env, dir, "--agent", "show", blocked)
+
+	assert.Contains(t, out, "- type=blocked-by issue="+blocker)
+	assert.NotContains(t, out, "- type=blocks issue="+blocker)
+}
+
 // TestShow_LinkLabelInvertsOnToSide verifies that when show runs against
 // the link's "to" side, the rendered LABEL inverts to read from the
 // viewer's perspective: the parent slot's "to" end is the parent of

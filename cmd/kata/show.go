@@ -209,9 +209,9 @@ func printShowAgent(w io.Writer, b struct {
 			return err
 		}
 		for _, l := range b.Links {
-			_, other := linkLabelFromPOV(l.Type, b.Issue.UID, l.From, l.To)
+			label, other := linkLabelFromPOV(l.Type, b.Issue.UID, l.From, l.To)
 			if err := writeAgentKVRow(w,
-				agentRowField("type", l.Type),
+				agentRowField("type", label),
 				agentRowField("issue", other),
 			); err != nil {
 				return err

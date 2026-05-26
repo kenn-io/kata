@@ -58,3 +58,10 @@ func TestAgentFencedText_ExtendsFenceForBackticks(t *testing.T) {
 	assert.Contains(t, got, "````text\n")
 	assert.True(t, strings.HasSuffix(got, "\n````\n"))
 }
+
+func TestAgentFencedText_ChoosesFenceAfterSanitizing(t *testing.T) {
+	got := agentFencedText("``\x00` inside")
+	assert.Contains(t, got, "````text\n")
+	assert.Contains(t, got, "``` inside")
+	assert.True(t, strings.HasSuffix(got, "\n````\n"))
+}

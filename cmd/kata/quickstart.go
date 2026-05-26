@@ -148,6 +148,16 @@ spawning a local daemon. The default (no env, no .kata.local.toml) is
 unchanged: a local Unix-socket daemon is auto-started on demand.
 `
 
+const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
+Search before creating or updating work.
+Use --agent for concise action summaries in agent logs.
+Use --json when your script needs complete structured data.
+If work is incomplete, label needs-review and comment with what remains.
+Close only verified work with substantive prose and typed evidence.
+Do not run delete or purge unless explicitly asked for that exact action and issue ref.
+Poll kata events with a saved cursor; reset cached state on reset_required.
+`
+
 func newQuickstartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "quickstart",
@@ -166,7 +176,7 @@ func newQuickstartCmd() *cobra.Command {
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
 			case outputAgent:
-				_, err := fmt.Fprint(cmd.OutOrStdout(), "OK quickstart\n"+agentQuickstartText)
+				_, err := fmt.Fprint(cmd.OutOrStdout(), "OK quickstart\n"+agentQuickstartCompactText)
 				return err
 			}
 			_, err := fmt.Fprint(cmd.OutOrStdout(), agentQuickstartText)
