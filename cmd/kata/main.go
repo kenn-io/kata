@@ -175,9 +175,39 @@ func resolvedOutputModeForError(root *cobra.Command, args []string) (outputMode,
 	}
 	mode, err := resolveOutputModeArgsForCommand(args, flags.Format, flags.JSON, flags.Agent, importLegacy, root)
 	if err != nil {
-		return outputHuman, err
+		return outputModeHintForResolutionError(importLegacy), err
 	}
 	return mode, nil
+}
+
+func outputModeHintForResolutionError(importLegacy bool) outputMode {
+	formats := flags.FormatValues
+	if len(formats) == 0 && flags.Format != "" {
+		formats = []string{flags.Format}
+	}
+	selected := make([]outputMode, 0, len(formats)+2)
+	for _, format := range formats {
+		switch mode := outputMode(outputFormatValue(format, importLegacy)); mode {
+		case outputHuman, outputJSON, outputAgent:
+			selected = append(selected, mode)
+		}
+	}
+	if flags.JSON {
+		selected = append(selected, outputJSON)
+	}
+	if flags.Agent {
+		selected = append(selected, outputAgent)
+	}
+	if len(selected) == 0 {
+		return outputHuman
+	}
+	first := selected[0]
+	for _, mode := range selected[1:] {
+		if mode != first {
+			return outputHuman
+		}
+	}
+	return first
 }
 
 func commandNameForError(root *cobra.Command, args []string, runEReached bool) string {

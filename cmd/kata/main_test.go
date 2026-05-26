@@ -196,6 +196,16 @@ func TestEmitError_OutputModeErrorPrecedesUnknownCommand(t *testing.T) {
 	assert.NotContains(t, stderr, "unknown command")
 }
 
+func TestEmitError_AgentAliasWithInvalidFormatStillUsesAgent(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "--format", "xml", "version")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR version usage:"),
+		"stderr should use agent mode, got %q", stderr)
+	assert.Contains(t, stderr, "unsupported output format")
+}
+
 func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
