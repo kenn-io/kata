@@ -6,9 +6,11 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"go.kenn.io/kata/internal/textsafe"
 )
 
 type outputMode string
@@ -224,6 +226,32 @@ func emitAgentError(w io.Writer, command string, err error) {
 		command = "kata"
 	}
 	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, firstLine(cli.Message)) //nolint:gosec // G705: CLI stderr error text, not HTML.
+}
+
+func agentValue(s string) string {
+	clean := textsafe.Block(s)
+	if clean == "" {
+		return `""`
+	}
+	if strings.IndexFunc(clean, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '"' || r == '\\' || unicode.IsControl(r)
+	}) >= 0 {
+		return strconv.Quote(clean)
+	}
+	return clean
+}
+
+func writeAgentField(w io.Writer, name, value string) error {
+	_, err := fmt.Fprintf(w, "%s: %s\n", name, value)
+	return err
+}
+
+func agentFencedText(s string) string {
+	fence := "```"
+	for strings.Contains(s, fence) {
+		fence += "`"
+	}
+	return fence + "text\n" + textsafe.Block(s) + "\n" + fence + "\n"
 }
 
 func firstLine(s string) string {

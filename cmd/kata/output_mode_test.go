@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,4 +44,17 @@ func TestResolveOutputModeArgs_BadFormatOutsideImport(t *testing.T) {
 	_, err := resolveOutputModeArgs([]string{"--format", "xml"}, "", false, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported output format")
+}
+
+func TestAgentValue_Quoting(t *testing.T) {
+	assert.Equal(t, "abc4", agentValue("abc4"))
+	assert.Equal(t, strconv.Quote("Fix login race"), agentValue("Fix login race"))
+	assert.Equal(t, strconv.Quote(`quoted "title"`), agentValue(`quoted "title"`))
+	assert.Equal(t, strconv.Quote("bad\nline"), agentValue("bad\nline"))
+}
+
+func TestAgentFencedText_ExtendsFenceForBackticks(t *testing.T) {
+	got := agentFencedText("``` inside")
+	assert.Contains(t, got, "````text\n")
+	assert.True(t, strings.HasSuffix(got, "\n````\n"))
 }
