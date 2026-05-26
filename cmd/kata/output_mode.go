@@ -83,7 +83,4 @@ func emitAgentError(w io.Writer, command string, err error) {
 		command = "kata"
 	}
 	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, cli.Message)
-	if cli.Code != "" {
-		_, _ = fmt.Fprintf(w, "Code: %s\n", cli.Code)
-	}
 }

@@ -36,6 +36,7 @@ var runEEntered bool
 var errorCommandName string
 
 func newRootCmd() *cobra.Command {
+	runEEntered = false
 	flags.Mode = ""
 	errorCommandName = ""
 	cmd := &cobra.Command{
@@ -118,8 +119,9 @@ func main() {
 		<-ctx.Done()
 		stop()
 	}()
-	if err := newRootCmd().ExecuteContext(ctx); err != nil {
-		emitErrorForMode(os.Stderr, err, resolvedOutputModeForError(os.Args[1:]), runEEntered)
+	cmd := newRootCmd()
+	if err := cmd.ExecuteContext(ctx); err != nil {
+		emitRootError(os.Stderr, cmd, os.Args[1:], err, runEEntered)
 		os.Exit(exitCodeForErr(err, runEEntered))
 	}
 }
@@ -139,9 +141,19 @@ func emitErrorForMode(w io.Writer, err error, mode outputMode, runEReached bool)
 	case outputJSON:
 		emitJSONError(w, err, runEReached)
 	case outputAgent:
-		emitAgentError(w, commandNameForError(runEReached), cliErrorForErr(err, runEReached))
+		emitAgentError(w, commandNameForError(nil, nil, runEReached), cliErrorForErr(err, runEReached))
 	default:
 		emitHumanError(w, err, runEReached)
+	}
+}
+
+func emitRootError(w io.Writer, cmd *cobra.Command, args []string, err error, runEReached bool) {
+	mode := resolvedOutputModeForError(args)
+	switch mode {
+	case outputAgent:
+		emitAgentError(w, commandNameForError(cmd, args, runEReached), cliErrorForErr(err, runEReached))
+	default:
+		emitErrorForMode(w, err, mode, runEReached)
 	}
 }
 
@@ -156,14 +168,76 @@ func resolvedOutputModeForError(args []string) outputMode {
 	return mode
 }
 
-func commandNameForError(runEReached bool) string {
-	if !runEReached {
-		return "kata"
-	}
+func commandNameForError(root *cobra.Command, args []string, runEReached bool) string {
 	if errorCommandName != "" {
 		return errorCommandName
 	}
+	if !runEReached {
+		if cmd := commandFromArgs(root, args); cmd != nil && cmd != root {
+			return commandLeaf(cmd)
+		}
+	}
 	return "kata"
+}
+
+func commandFromArgs(root *cobra.Command, args []string) *cobra.Command {
+	if root == nil {
+		return nil
+	}
+	cmd := root
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		if strings.HasPrefix(arg, "-") {
+			if flagArgConsumesValue(cmd, arg) && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		next := childCommandByName(cmd, arg)
+		if next == nil {
+			break
+		}
+		cmd = next
+	}
+	return cmd
+}
+
+func childCommandByName(cmd *cobra.Command, name string) *cobra.Command {
+	if cmd == nil {
+		return nil
+	}
+	for _, child := range cmd.Commands() {
+		if child.Name() == name {
+			return child
+		}
+		for _, alias := range child.Aliases {
+			if alias == name {
+				return child
+			}
+		}
+	}
+	return nil
+}
+
+func flagArgConsumesValue(cmd *cobra.Command, arg string) bool {
+	name := strings.TrimLeft(arg, "-")
+	if eq := strings.IndexByte(name, '='); eq >= 0 {
+		return false
+	}
+	if name == "" {
+		return false
+	}
+	flag := cmd.Flags().Lookup(name)
+	if flag == nil {
+		flag = cmd.PersistentFlags().Lookup(name)
+	}
+	if flag == nil {
+		flag = cmd.InheritedFlags().Lookup(name)
+	}
+	return flag != nil && flag.Value.Type() != "bool"
 }
 
 func commandLeaf(cmd *cobra.Command) string {

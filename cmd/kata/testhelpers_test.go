@@ -62,6 +62,9 @@ func executeRootCapture(t *testing.T, ctx context.Context, args ...string) (stdo
 	cmd.SetArgs(args)
 	cmd.SetContext(ctx)
 	err = cmd.Execute()
+	if err != nil {
+		emitRootError(&se, cmd, args, err, runEEntered)
+	}
 	return so.String(), se.String(), err
 }
 

@@ -156,22 +156,33 @@ func TestEmitError_HumanMode_StillPrintsKataPrefix(t *testing.T) {
 }
 
 func TestEmitError_AgentMode_CommandError(t *testing.T) {
-	cli := &cliError{Message: "comment body is required", Kind: kindValidation, ExitCode: ExitValidation}
+	cli := &cliError{
+		Message:  "comment body is required",
+		Code:     "comment_body_required",
+		Kind:     kindValidation,
+		ExitCode: ExitValidation,
+	}
 	var buf bytes.Buffer
 	emitAgentError(&buf, "comment", cli)
-	assert.Contains(t, buf.String(), "ERR comment validation: comment body is required\n")
+	assert.Equal(t, "ERR comment validation: comment body is required\n", buf.String())
 }
 
-func TestEmitError_AgentMode_ParseError(t *testing.T) {
+func TestEmitError_AgentMode_UnknownCommandUsesKata(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
 	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "cretae")
 	require.Error(t, err)
-	var buf bytes.Buffer
-	buf.WriteString(stderr)
-	emitErrorForMode(&buf, err, resolvedOutputModeForError([]string{"--agent", "cretae"}), runEEntered)
-	assert.Truef(t, strings.HasPrefix(buf.String(), "ERR kata usage:"),
-		"stderr should start with agent usage error, got %q", buf.String())
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR kata usage:"),
+		"stderr should start with agent usage error, got %q", stderr)
+}
+
+func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "show")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR show usage:"),
+		"stderr should start with agent usage error for show, got %q", stderr)
 }
 
 // TestEmitError_NonCliError_SynthesizesEnvelope confirms a plain
