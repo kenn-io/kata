@@ -69,11 +69,19 @@ Resolve this as part of the feature:
 - Add `kata import --source-format <kata|beads>` for the import source type.
 - Move import examples and tests to `--source-format`.
 - Reserve `--format` globally for output mode on every command.
-- If a user runs `kata import --format beads`, return a usage error with a
-  hint: `use --source-format beads; --format now controls output mode`.
+- For one release, keep legacy `kata import --format kata|beads` as a silent
+  fallback for the source format when `--source-format` is not also set.
+  `--json` and `--agent` aliases may still select output mode during this
+  fallback window.
+- If both legacy `--format kata|beads` and `--source-format` are passed, return
+  a usage error asking the caller to use only `--source-format`.
+- After the deprecation window, remove the legacy source-format use of
+  `--format`. At that point `kata import --format beads` returns a usage error
+  with a hint: `use --source-format beads; --format controls output mode`.
 
-This is a small compatibility break, but it keeps the universal output flag
-simple and prevents command-specific shadowing.
+This keeps the transition graceful while making the final contract simple:
+`--format` is the universal output mode, and `--source-format` is the import
+source selector.
 
 ## 3. Agent Format Contract
 
@@ -85,7 +93,8 @@ Contract rules:
   for failure. `--quiet --agent` may suppress success framing, but not errors.
 - Success goes to stdout. Failure goes to stderr and exits nonzero.
 - The second token is the command or record kind: `create`, `comment`, `list`,
-  `show`, `event`, `kata`, and so on.
+  `show`, `event`, and so on. `kata` is used only for top-level parse errors
+  before a subcommand dispatches.
 - Remaining first-line fields use stable positional fields only where specified
   by this document; otherwise they are `key=value`.
 - Field order is part of the contract.
@@ -215,15 +224,15 @@ Owner: wesm
 Delete and purge:
 
 ```text
-OK delete kata#abc4
-Issue: kata#abc4 "Fix login race"
+OK delete abc4
+Issue: abc4 "Fix login race"
 Status: deleted
-Undo: kata restore kata#abc4 --agent
+Undo: kata restore abc4 --agent
 ```
 
 ```text
-OK purge kata#abc4
-Issue: kata#abc4 "Fix login race"
+OK purge abc4
+Issue: abc4 "Fix login race"
 Status: purged
 ```
 
@@ -256,7 +265,7 @@ OK show abc4
 Issue: abc4 "Fix login race"
 Status: open
 Owner: wesm
-Labels: bug, safari
+Labels: bug,safari
 Priority: 2
 Body:
 ```text
@@ -298,6 +307,20 @@ OK projects count=2
 Digest and audit commands follow the same pattern: an `OK <command>
 count=<n>` header followed by one line per returned record, using `key=value`
 fields.
+
+Empty successful reads emit the normal header with `count=0` and no row lines:
+
+```text
+OK search count=0 query="login race"
+OK list count=0
+```
+
+List-valued fields use comma-separated values with no spaces. In block fields,
+the same rule applies:
+
+```text
+Labels: bug,safari
+```
 
 ### 5.3 Other Non-Interactive Commands
 
@@ -357,8 +380,13 @@ Rules:
 - `show --agent` emits full issue bodies and comments unless the command has an
   explicit limit flag.
 - No silent truncation is allowed.
-- If truncation is introduced later, it must be marked with fixed fields before
-  the fenced block.
+- If truncation is introduced later, the truncation metadata fields immediately
+  precede the `Body:`, `Comment:`, or other text-field line they describe.
+- Truncation metadata is emitted as a pair: `<Field>-Truncated: true` and
+  `<Field>-Bytes: <full-byte-count>`. Do not emit one without the other.
+- List rows may be followed by a fenced text block when the row represents a
+  record with body content, as comments do in `show --agent`. The fence starts
+  at column 0, not indented under the `-` row.
 
 Example:
 
@@ -421,10 +449,17 @@ Pin the contract with focused CLI tests:
   - `--json` equals `--format json`.
   - `--agent` equals `--format agent`.
   - matching aliases are accepted.
+  - equal-mode combinations such as `--format agent --agent` are accepted.
   - conflicting output modes fail with usage.
-  - `kata import --source-format beads` replaces the old source-format flag.
-  - `kata import --format beads` fails with the migration hint.
+  - `kata import --source-format beads` selects the import source format.
+  - during the deprecation window, `kata import --format beads` is accepted as
+    a legacy source-format fallback.
+  - passing both legacy `--format beads` and `--source-format` fails with the
+    migration hint.
   - `kata tui --agent` fails with usage.
+- Version discovery:
+  - `kata version --agent` emits `agent_format=1`.
+  - `kata version --json` includes `agent_format`.
 - Agent errors:
   - validation error emits `ERR <command> validation: ...` on stderr.
   - cobra parse error emits `ERR kata usage: ...` on stderr.
@@ -434,11 +469,14 @@ Pin the contract with focused CLI tests:
     assign, delete, restore, purge.
 - Reads:
   - list, show, search, ready, labels, projects, events, digest, audit.
+  - empty reads emit `count=0` and no placeholder row.
 - Streaming:
   - `events --tail --agent` emits one line per event.
   - `events --tail --json` remains NDJSON.
 - Text safety:
   - no ANSI/control leakage in agent single-line fields.
+  - a title containing an embedded `"` is escaped so the row remains
+    well-formed.
   - multiline bodies are fenced.
   - embedded backticks do not break fences.
 - Quickstart:
