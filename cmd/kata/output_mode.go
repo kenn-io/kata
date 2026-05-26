@@ -191,6 +191,7 @@ func resolveOutputModeArgsForCommand(
 ) (outputMode, error) {
 	cmd := root
 	formats := append([]string(nil), flags.FormatValues...)
+	commandPathStopped := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -198,8 +199,12 @@ func resolveOutputModeArgsForCommand(
 		}
 		name, value, hasValue, ok := splitLongFlag(arg)
 		if !ok {
-			if next := childCommandByName(cmd, arg); next != nil {
-				cmd = next
+			if !commandPathStopped {
+				if next := childCommandByName(cmd, arg); next != nil {
+					cmd = next
+				} else {
+					commandPathStopped = true
+				}
 			}
 			continue
 		}

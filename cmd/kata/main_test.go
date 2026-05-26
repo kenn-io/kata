@@ -287,6 +287,16 @@ func TestEmitError_RawModeScanSkipsCreateBodyJSONValue(t *testing.T) {
 	assert.Falsef(t, strings.HasPrefix(stderr, "{"), "stderr should not be JSON, got %q", stderr)
 }
 
+func TestEmitError_InvalidCommandPathDoesNotSwallowJSON(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "typo", "create", "--body", "--json")
+	require.Error(t, err)
+	got := parseErrorEnvelope(t, []byte(stderr))
+	assert.Equal(t, "usage", got.Error.Kind)
+	assert.Contains(t, got.Error.Message, "unknown command")
+}
+
 func TestEmitError_RawModeScanSkipsCreateBodyAgentValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
