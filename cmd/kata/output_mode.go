@@ -19,6 +19,8 @@ const (
 	outputHuman outputMode = "human"
 	outputJSON  outputMode = "json"
 	outputAgent outputMode = "agent"
+
+	agentFormatVersion = 1
 )
 
 func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMode, error) {
@@ -51,6 +53,19 @@ func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMod
 		}
 	}
 	return first, nil
+}
+
+func currentOutputMode() outputMode {
+	if flags.Mode != "" {
+		return flags.Mode
+	}
+	if flags.Agent {
+		return outputAgent
+	}
+	if flags.JSON {
+		return outputJSON
+	}
+	return outputHuman
 }
 
 func resolveOutputModeForCommand(cmd *cobra.Command) (outputMode, error) {

@@ -14,7 +14,13 @@ func newWhoamiCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			actor, source := resolveActor(flags.As, nil)
-			if flags.JSON {
+			mode := currentOutputMode()
+			if mode == outputAgent {
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK whoami actor=%s source=%s\n",
+					agentValue(actor), agentValue(source))
+				return err
+			}
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, map[string]string{"actor": actor, "source": source}); err != nil {
 					return err

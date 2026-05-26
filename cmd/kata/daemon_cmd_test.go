@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
@@ -74,6 +75,24 @@ func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
 	require.NoError(t, json.Unmarshal(out, &got))
 	assert.Equal(t, 1, got.KataAPIVersion)
 	assert.JSONEq(t, "[]", string(got.Daemons))
+}
+
+func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+
+	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
+	assert.Equal(t, "OK daemon status=stopped\n", string(out))
+}
+
+func TestHealth_AgentReportsOK(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	cmd := newRootCmd()
+	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+
+	out := executeRoot(t, cmd, "--agent", "health")
+	assert.Contains(t, string(out), "OK health")
 }
 
 func TestDaemonStart_ListenFlagRejectsPublicAddress(t *testing.T) {

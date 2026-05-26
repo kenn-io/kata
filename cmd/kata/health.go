@@ -34,7 +34,12 @@ func newHealthCmd() *cobra.Command {
 			if status >= 400 {
 				return apiErrFromBody(status, bs)
 			}
-			if flags.JSON {
+			mode := currentOutputMode()
+			if mode == outputAgent {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "OK health")
+				return err
+			}
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err

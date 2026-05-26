@@ -65,6 +65,21 @@ func TestVersion_JSONEnvelope(t *testing.T) {
 	assert.Equal(t, runtime.GOARCH, got.Arch)
 }
 
+func TestVersion_AgentIncludesFormatVersion(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "--agent", "version"))
+	assert.Contains(t, out, "OK version ")
+	assert.Contains(t, out, "agent_format=1")
+}
+
+func TestVersion_JSONIncludesAgentFormat(t *testing.T) {
+	resetFlags(t)
+	out := executeRoot(t, newRootCmd(), "--json", "version")
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, float64(agentFormatVersion), got["agent_format"])
+}
+
 func TestVersion_IsWiredOnRoot(t *testing.T) {
 	resetFlags(t)
 	root := newRootCmd()

@@ -75,7 +75,15 @@ func daemonStatusCmd() *cobra.Command {
 					})
 				}
 			}
-			if flags.JSON {
+			switch currentOutputMode() {
+			case outputAgent:
+				status := "stopped"
+				if len(out.Daemons) > 0 {
+					status = "running"
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s\n", status)
+				return err
+			case outputJSON:
 				return emitJSON(cmd.OutOrStdout(), out)
 			}
 			if len(out.Daemons) == 0 {

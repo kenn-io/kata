@@ -35,6 +35,12 @@ func TestWhoami_FormatJSONAliasAffectsSuccessfulOutput(t *testing.T) {
 	assert.Equal(t, "flag", got.Source)
 }
 
+func TestWhoami_AgentIncludesActorAndSource(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "--agent", "whoami", "--as", "tester"))
+	assert.Equal(t, "OK whoami actor=tester source=flag\n", out)
+}
+
 func TestHealth_PrintsSchemaVersion(t *testing.T) {
 	env := testenv.New(t)
 	out := requireCmdOutput(t, env, "health")

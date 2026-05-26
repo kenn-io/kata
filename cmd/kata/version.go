@@ -17,15 +17,21 @@ func newVersionCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
-			if flags.JSON {
+			switch currentOutputMode() {
+			case outputAgent:
+				_, err := fmt.Fprintf(out, "OK version version=%s agent_format=%d\n",
+					agentValue(version.Version), agentFormatVersion)
+				return err
+			case outputJSON:
 				var buf bytes.Buffer
-				payload := map[string]string{
-					"version": version.Version,
-					"commit":  version.Commit,
-					"built":   version.BuildDate,
-					"go":      runtime.Version(),
-					"os":      runtime.GOOS,
-					"arch":    runtime.GOARCH,
+				payload := map[string]any{
+					"version":      version.Version,
+					"commit":       version.Commit,
+					"built":        version.BuildDate,
+					"go":           runtime.Version(),
+					"os":           runtime.GOOS,
+					"arch":         runtime.GOARCH,
+					"agent_format": agentFormatVersion,
 				}
 				if err := emitJSON(&buf, payload); err != nil {
 					return err
