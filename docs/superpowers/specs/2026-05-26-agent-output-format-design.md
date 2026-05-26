@@ -302,7 +302,7 @@ Comments:
 Reproduced on macOS.
 ```
 Links:
-- type=blocks issue=def7 title="Control channel"
+- type=blocks issue=def7
 ````
 
 Ready:
@@ -350,6 +350,10 @@ Labels: bug,safari
 Nullable free-form fields are omitted when absent. Do not emit sentinel values
 such as `owner=unowned` or `owner=null`, because users can choose those exact
 strings as real owner names.
+
+`show --agent` link rows use only fields available in the existing show
+response. They include `type` and `issue`; they do not include peer titles
+unless the show response grows that field in a future agent format version.
 
 ### 5.3 Other Non-Interactive Commands
 

@@ -505,6 +505,11 @@ comment body
 
 Fence starts at column 0.
 
+For links, emit only fields available in the existing show response. Current
+link rows include `type` and `issue`; do not fake `title=` because link peer
+titles are not present in the response and this plan forbids daemon API changes
+or extra per-link fetches for agent formatting.
+
 - [ ] **Step 5: Run focused tests**
 
 Run: `go test ./cmd/kata -run 'Test(List|Search|Ready|Labels|Show)'`
