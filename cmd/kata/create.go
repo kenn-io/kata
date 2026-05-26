@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -439,6 +440,7 @@ func printMutation(cmd *cobra.Command, bs []byte) error {
 // summary. The wire payload (JSON-mode output) is left unchanged —
 // the `applied` argument only seeds the human-mode renderer.
 func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationChanges) error {
+	mode := currentOutputMode()
 	var b struct {
 		Issue struct {
 			ShortID string `json:"short_id"`
@@ -451,13 +453,23 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
-	if flags.JSON {
+	if mode == outputJSON {
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
+	}
+	if mode == outputAgent {
+		return printAgentMutation(cmd, commandLeaf(cmd), bs, func(w io.Writer, m agentIssueMutation) error {
+			if m.Issue.ClosedReason != nil {
+				if err := writeAgentField(w, "Reason", agentValue(*m.Issue.ClosedReason)); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
 	if flags.Quiet {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), b.Issue.ShortID)

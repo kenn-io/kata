@@ -149,13 +149,50 @@ func runDestructive(cmd *cobra.Command, baseURL string, pid int64, pathRef, disp
 // printDestructive renders the destructive-action response in the active
 // output mode (JSON envelope, quiet, or one-line human).
 func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
-	if flags.JSON {
+	mode := currentOutputMode()
+	if mode == outputJSON {
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
+	}
+	if mode == outputAgent {
+		if verb == "delete" {
+			return printAgentMutation(cmd, "delete", bs, func(w io.Writer, m agentIssueMutation) error {
+				if err := writeAgentField(w, "Deleted", "true"); err != nil {
+					return err
+				}
+				return writeAgentField(w, "Undo", "kata restore "+shellQuoteArg(ref)+" --agent")
+			})
+		}
+		if verb == "purge" {
+			var b struct {
+				PurgeLog struct {
+					ShortID    *string `json:"short_id"`
+					IssueTitle string  `json:"issue_title"`
+				} `json:"purge_log"`
+			}
+			if err := json.Unmarshal(bs, &b); err != nil {
+				return err
+			}
+			shortID := ref
+			if b.PurgeLog.ShortID != nil && *b.PurgeLog.ShortID != "" {
+				shortID = *b.PurgeLog.ShortID
+			}
+			if !flags.Quiet {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK purge %s\n", shortID); err != nil {
+					return err
+				}
+			}
+			if b.PurgeLog.IssueTitle != "" {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Issue: %s %s\n", shortID, agentValue(b.PurgeLog.IssueTitle)); err != nil {
+					return err
+				}
+			}
+			return writeAgentField(cmd.OutOrStdout(), "Purged", "true")
+		}
 	}
 	if flags.Quiet {
 		return nil
@@ -170,6 +207,31 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 		return err
 	}
 	return nil
+}
+
+func shellQuoteArg(s string) string {
+	if isShellSafeArg(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func isShellSafeArg(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case strings.ContainsRune("@%_+=:,./-", r):
+		case r == '#' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // httpDoJSONWithHeader mirrors httpDoJSON but lets callers attach extra

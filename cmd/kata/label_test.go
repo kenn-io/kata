@@ -16,6 +16,15 @@ func TestLabelAdd_HappyPath(t *testing.T) {
 	assert.Contains(t, out, "needs-review")
 }
 
+func TestLabelAdd_AgentOutput(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
+
+	out := runCLI(t, env, dir, "--agent", "label", "add", ref, "needs-review")
+
+	assert.Regexp(t, `(?m)^OK label \S+ changed=true`, out)
+	assert.Contains(t, out, "Action: added")
+}
+
 func TestLabelRm_HappyPath(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -74,13 +75,29 @@ func runAssign(cmd *cobra.Command, raw, owner string, unassign bool) error {
 // nothing; JSON mode emits the daemon body under the kata_api_version
 // envelope; otherwise prints a single human-readable line.
 func printAssignMutation(cmd *cobra.Command, bs []byte, unassign bool) error {
-	if flags.JSON {
+	mode := currentOutputMode()
+	if mode == outputJSON {
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
+	}
+	if mode == outputAgent {
+		verb := "assign"
+		if unassign {
+			verb = "unassign"
+		}
+		return printAgentMutation(cmd, verb, bs, func(w io.Writer, m agentIssueMutation) error {
+			if unassign {
+				return writeAgentField(w, "Owner-Cleared", "true")
+			}
+			if m.Issue.Owner != nil {
+				return writeAgentField(w, "Owner", agentValue(*m.Issue.Owner))
+			}
+			return nil
+		})
 	}
 	var b struct {
 		Issue struct {

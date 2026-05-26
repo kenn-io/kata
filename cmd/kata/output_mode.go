@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +23,69 @@ const (
 
 	agentFormatVersion = 1
 )
+
+type agentIssueMutation struct {
+	Issue struct {
+		ShortID      string  `json:"short_id"`
+		QualifiedID  string  `json:"qualified_id"`
+		Title        string  `json:"title"`
+		Status       string  `json:"status"`
+		ClosedReason *string `json:"closed_reason"`
+		Owner        *string `json:"owner"`
+		DeletedAt    *string `json:"deleted_at"`
+	} `json:"issue"`
+	Changed bool `json:"changed"`
+	Reused  bool `json:"reused,omitempty"`
+}
+
+func printAgentMutation(cmd *cobra.Command, verb string, bs []byte, extra func(io.Writer, agentIssueMutation) error) error {
+	var m agentIssueMutation
+	if err := json.Unmarshal(bs, &m); err != nil {
+		return err
+	}
+	return printAgentMutationDecoded(cmd.OutOrStdout(), verb, m, false, extra)
+}
+
+func printAgentMutationDecoded(
+	w io.Writer,
+	verb string,
+	m agentIssueMutation,
+	includeChangedTrue bool,
+	extra func(io.Writer, agentIssueMutation) error,
+) error {
+	if !flags.Quiet {
+		if _, err := fmt.Fprintf(w, "OK %s %s", verb, m.Issue.ShortID); err != nil {
+			return err
+		}
+		if m.Reused {
+			if _, err := fmt.Fprint(w, " reused=true"); err != nil {
+				return err
+			}
+		}
+		if !m.Changed || includeChangedTrue {
+			if _, err := fmt.Fprintf(w, " changed=%t", m.Changed); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(w); err != nil {
+			return err
+		}
+	}
+	if m.Issue.ShortID != "" && m.Issue.Title != "" {
+		if _, err := fmt.Fprintf(w, "Issue: %s %s\n", m.Issue.ShortID, agentValue(m.Issue.Title)); err != nil {
+			return err
+		}
+	}
+	if m.Issue.Status != "" {
+		if err := writeAgentField(w, "Status", agentValue(m.Issue.Status)); err != nil {
+			return err
+		}
+	}
+	if extra != nil {
+		return extra(w, m)
+	}
+	return nil
+}
 
 func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMode, error) {
 	var selected []outputMode

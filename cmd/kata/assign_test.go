@@ -19,6 +19,26 @@ func TestAssign_RoundTrip(t *testing.T) {
 	assert.True(t, strings.Contains(uOut, "unassigned"))
 }
 
+func TestAssign_AgentOutput(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "x")
+
+	out := runCLI(t, env, dir, "--agent", "assign", ref, "wesm")
+
+	assert.Regexp(t, `(?m)^OK assign \S+`, out)
+	assert.Contains(t, out, "Owner: wesm")
+}
+
+func TestUnassign_AgentOutput(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "x")
+	runCLI(t, env, dir, "assign", ref, "wesm")
+
+	resetFlags(t)
+	out := runCLI(t, env, dir, "--agent", "unassign", ref)
+
+	assert.Regexp(t, `(?m)^OK unassign \S+`, out)
+	assert.Contains(t, out, "Owner-Cleared: true")
+}
+
 func TestAssign_WithComment_AppendsComment(t *testing.T) {
 	env, dir, pid, ref := setupWorkspaceWithIssue(t, "x")
 

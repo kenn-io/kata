@@ -24,6 +24,17 @@ func TestPurge_ForceWithConfirmRemovesEverything(t *testing.T) {
 	assert.Contains(t, f.buf.String(), "purged")
 }
 
+func TestPurge_AgentOutput(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	short := createIssueViaHTTP(t, env, dir, "vaporize")
+
+	out := runCLI(t, env, dir, "--agent", "purge", short, "--force", "--confirm", "PURGE kata#"+short)
+
+	assert.Regexp(t, `(?m)^OK purge `+short, out)
+	assert.Contains(t, out, `Issue: `+short+` vaporize`)
+	assert.Contains(t, out, "Purged: true")
+}
+
 // TestPurge_NoTTYNoConfirmIsConfirmRequired mirrors the delete coverage:
 // non-terminal stdin + missing --confirm must surface as exit 6
 // confirm_required, not as a confirm_mismatch from an empty TTY read.

@@ -25,6 +25,16 @@ func TestCreate_PrintsIssueShortIDInQuietMode(t *testing.T) {
 	assert.NotContains(t, out, "\n", "quiet mode must emit a single line")
 }
 
+func TestCreate_AgentOutput(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+
+	out := runCLI(t, env, dir, "--agent", "create", "first issue")
+
+	assert.Regexp(t, `(?m)^OK create \S+`, out)
+	assert.Contains(t, out, `Issue: `)
+	assert.Contains(t, out, `Status: open`)
+}
+
 func TestCreate_WithInitialLabelsAndParent(t *testing.T) {
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
@@ -137,6 +147,16 @@ func TestCreate_WithIdempotencyKeyReusesOnRepeat(t *testing.T) {
 	second := runCLI(t, env, dir, "--quiet", "create",
 		"first issue", "--idempotency-key", "K1")
 	assert.Equal(t, first, second, "same key + fingerprint must return existing issue short_id")
+}
+
+func TestCreate_AgentOutputIdempotencyReuse(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+
+	runCLI(t, env, dir, "--agent", "create", "first issue", "--idempotency-key", "K")
+	resetFlags(t)
+	second := runCLI(t, env, dir, "--agent", "create", "first issue", "--idempotency-key", "K")
+
+	assert.Contains(t, second, "reused=true changed=false")
 }
 
 // TestCreate_IdempotentReuseHumanModeOmitsLinksSummary pins that a

@@ -24,6 +24,33 @@ func TestCloseReopen_RoundTrip(t *testing.T) {
 	assert.Contains(t, out, "open")
 }
 
+func TestClose_AgentOutput(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+
+	out := runCLI(t, env, dir, "--agent", "close", ref,
+		"--done",
+		"--message", "Fixed Safari callback double-submit and ran tests.",
+		"--commit", "abc1234")
+
+	assert.Regexp(t, `(?m)^OK close \S+`, out)
+	assert.Contains(t, out, "Status: closed")
+	assert.Contains(t, out, "Reason: done")
+}
+
+func TestReopen_AgentOutput(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+	runCLI(t, env, dir, "close", ref,
+		"--done",
+		"--message", "Fixed Safari callback double-submit and ran tests.",
+		"--commit", "abc1234")
+
+	resetFlags(t)
+	out := runCLI(t, env, dir, "--agent", "reopen", ref)
+
+	assert.Regexp(t, `(?m)^OK reopen \S+`, out)
+	assert.Contains(t, out, "Status: open")
+}
+
 func TestCloseCmd_CanonicalDoneRequiresEvidence(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 

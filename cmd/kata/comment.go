@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -56,13 +57,18 @@ func newCommentCmd() *cobra.Command {
 		if status >= 400 {
 			return apiErrFromBody(status, bs)
 		}
-		if flags.JSON {
+		switch currentOutputMode() {
+		case outputJSON:
 			var buf bytes.Buffer
 			if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 				return err
 			}
 			_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 			return err
+		case outputAgent:
+			return printAgentMutation(cmd, "comment", bs, func(w io.Writer, _ agentIssueMutation) error {
+				return writeAgentField(w, "Comment", "appended")
+			})
 		}
 		if !flags.Quiet {
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), "comment appended")

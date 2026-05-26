@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -38,7 +39,12 @@ func newRestoreCmd() *cobra.Command {
 			if status >= 400 {
 				return apiErrFromBody(status, bs)
 			}
-			if !flags.Quiet && !flags.JSON {
+			if currentOutputMode() == outputAgent {
+				return printAgentMutation(cmd, "restore", bs, func(w io.Writer, _ agentIssueMutation) error {
+					return writeAgentField(w, "Deleted", "false")
+				})
+			}
+			if !flags.Quiet && currentOutputMode() == outputHuman {
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s restored\n", issue.RefForAPI)
 				return err
 			}
