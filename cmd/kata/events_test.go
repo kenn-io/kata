@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -57,6 +59,31 @@ func TestEvents_OneShotJSON(t *testing.T) {
 	assert.Equal(t, int64(1), b.NextAfterID)
 }
 
+func TestEvents_OneShotAgentOutput(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	first := runCLI(t, env, dir, "--quiet", "--as", "wesm", "create", "first")
+	second := runCLI(t, env, dir, "--quiet", "--as", "wesm", "create", "second")
+
+	out := runCLI(t, env, dir, "--agent", "events")
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	require.Len(t, lines, 3, "agent output should be header plus one row per event: %q", out)
+	assert.Equal(t, "OK events count=2 next_after_id=2", lines[0])
+	assert.Equal(t, "- id=1 type=issue.created issue="+first+" actor=wesm", lines[1])
+	assert.Equal(t, "- id=2 type=issue.created issue="+second+" actor=wesm", lines[2])
+}
+
+func TestEvents_OneShotAgentResetRequired(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	short := createIssueViaHTTP(t, env, dir, "doomed")
+
+	runCLI(t, env, dir, "purge", short, "--force", "--confirm", "PURGE kata#"+short)
+
+	out := runCLI(t, env, dir, "--agent", "events", "--after", "0")
+
+	assert.Regexp(t, `^OK events reset_required=true reset_after_id=\d+\n?$`, out)
+}
+
 func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
 	env := testenv.New(t)
 	dirA := initBoundWorkspace(t, env.URL, "https://github.com/wesm/a.git")
@@ -73,6 +100,73 @@ func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &b))
 	assert.Len(t, b.Events, 2, "all-projects must include both projects")
+}
+
+func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
+	env := testenv.New(t)
+	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
+
+	ctx, cancel := context.WithTimeout(contextWithBaseURL(context.Background(), env.URL), 5*time.Second)
+	defer cancel()
+	a := startAsyncCLI(t, ctx, "--workspace", dir, "--agent", "events", "--tail")
+	defer a.stop()
+
+	time.Sleep(200 * time.Millisecond)
+	first := createIssueViaHTTP(t, env, dir, "first")
+	second := createIssueViaHTTP(t, env, dir, "second")
+
+	out := a.awaitOutput(func(s string) bool {
+		return strings.Count(s, "OK event ") >= 2
+	}, 2*time.Second)
+
+	lines := []string{}
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	require.GreaterOrEqual(t, len(lines), 2, "expected at least 2 agent event lines, got: %q", out)
+	for _, l := range lines[:2] {
+		assert.Regexp(t, `^OK event id=\d+ type=issue\.created issue=\S+ actor=tester$`, l)
+		assert.NotContains(t, l, "{", "agent tail output must not be NDJSON")
+	}
+	assert.Contains(t, lines[0], "issue="+first)
+	assert.Contains(t, lines[1], "issue="+second)
+}
+
+func TestEvents_TailAgentProgressUsesSSEID(t *testing.T) {
+	input := strings.Join([]string{
+		"id: 42",
+		"event: issue.created",
+		`data: {"event_id":7,"type":"issue.created","issue_short_id":"abc4","actor":"wesm"}`,
+		"",
+		"",
+	}, "\n")
+	var out bytes.Buffer
+
+	res, err := parseSSEStream(bufio.NewReader(strings.NewReader(input)), 0, &out, outputAgent)
+
+	require.NoError(t, err)
+	assert.Equal(t, "OK event id=7 type=issue.created issue=abc4 actor=wesm\n", out.String())
+	assert.Equal(t, int64(42), res.Progress.lastID)
+}
+
+func TestEvents_TailAgentResetRequired(t *testing.T) {
+	input := strings.Join([]string{
+		"id: 100",
+		"event: sync.reset_required",
+		`data: {"reset_after_id":100}`,
+		"",
+		"",
+	}, "\n")
+	var out bytes.Buffer
+
+	res, err := parseSSEStream(bufio.NewReader(strings.NewReader(input)), 0, &out, outputAgent)
+
+	require.NoError(t, err)
+	require.NotNil(t, res.Reset)
+	assert.Equal(t, int64(100), res.Reset.newCursor)
+	assert.Equal(t, "OK events reset_required=true reset_after_id=100\n", out.String())
 }
 
 func TestEvents_TailEmitsNDJSON(t *testing.T) {

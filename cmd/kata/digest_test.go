@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,21 @@ func TestDigest_HumanRender(t *testing.T) {
 	assert.Contains(t, out, first)
 	assert.Contains(t, out, second)
 	assert.Contains(t, out, "created")
+}
+
+func TestDigest_AgentOutputShape(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	short := createIssueViaHTTP(t, env, dir, "first")
+
+	out := runCLI(t, env, dir, "--agent", "digest", "--since", "1h")
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	require.GreaterOrEqual(t, len(lines), 2, "agent digest should include header and rows: %q", out)
+	assert.Regexp(t, `^OK digest count=\d+`, lines[0])
+	assert.Contains(t, lines[1], "actor=tester")
+	assert.Contains(t, lines[1], "issue="+short)
+	assert.Contains(t, lines[1], "actions=created")
+	assert.NotContains(t, out, "\x1b", "agent output must not contain ANSI escape bytes")
 }
 
 // TestDigest_OutputShape pins the JSON wire shape: per-issue rows carry

@@ -116,13 +116,17 @@ func runEventsPoll(cmd *cobra.Command, opts eventsPollOptions) error {
 	if status >= 400 {
 		return apiErrFromBody(status, bs)
 	}
-	if flags.JSON {
+	mode := currentOutputMode()
+	if mode == outputJSON {
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
+	}
+	if mode == outputAgent {
+		return printEventsAgent(cmd, bs)
 	}
 	return printEventsHuman(cmd, bs)
 }
@@ -184,6 +188,43 @@ func printEventsHuman(cmd *cobra.Command, bs []byte) error {
 	return nil
 }
 
+func printEventsAgent(cmd *cobra.Command, bs []byte) error {
+	var b struct {
+		ResetRequired bool  `json:"reset_required"`
+		ResetAfterID  int64 `json:"reset_after_id"`
+		Events        []struct {
+			EventID      int64   `json:"event_id"`
+			Type         string  `json:"type"`
+			IssueShortID *string `json:"issue_short_id"`
+			Actor        string  `json:"actor"`
+		} `json:"events"`
+		NextAfterID int64 `json:"next_after_id"`
+	}
+	if err := json.Unmarshal(bs, &b); err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	if b.ResetRequired {
+		_, err := fmt.Fprintf(out, "OK events reset_required=true reset_after_id=%d\n", b.ResetAfterID)
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "OK events count=%d next_after_id=%d\n", len(b.Events), b.NextAfterID); err != nil {
+		return err
+	}
+	for _, e := range b.Events {
+		id := fmt.Sprint(e.EventID)
+		if err := writeAgentKVRow(out,
+			agentRowField("id", id),
+			agentRowField("type", e.Type),
+			agentOptionalRowField("issue", e.IssueShortID),
+			agentRowField("actor", e.Actor),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type eventsTailOptions struct {
 	ProjectIDArg int64
 	AllProjects  bool
@@ -235,13 +276,14 @@ func runEventsTail(cmd *cobra.Command, opts eventsTailOptions) error {
 		return err
 	}
 	out := cmd.OutOrStdout()
+	mode := currentOutputMode()
 	cursor := opts.LastEventID
 	backoff := tailBackoffStart
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		res, sErr := streamOnce(ctx, client, url, cursor, out)
+		res, sErr := streamOnce(ctx, client, url, cursor, out, mode)
 		if errors.Is(sErr, errTerminalHTTP) {
 			return sErr
 		}
@@ -315,10 +357,9 @@ func (f *frameState) empty() bool {
 
 // flush writes the frame to out and returns the typed result. Callers
 // must call reset() afterward (deferred by the caller, not here, so the
-// return path is single-purpose). Output is always NDJSON: one envelope
-// per line, plus a synthetic reset envelope on sync.reset_required so
-// consumers can match on reset_required.
-func (f *frameState) flush(out io.Writer) (streamResult, error) {
+// return path is single-purpose). JSON/human tail output stays NDJSON;
+// agent tail output uses compact one-line records.
+func (f *frameState) flush(out io.Writer, mode outputMode) (streamResult, error) {
 	if f.event == "sync.reset_required" {
 		var r struct {
 			ResetAfterID int64 `json:"reset_after_id"`
@@ -326,15 +367,24 @@ func (f *frameState) flush(out io.Writer) (streamResult, error) {
 		if err := json.Unmarshal([]byte(f.data), &r); err != nil {
 			return streamResult{}, fmt.Errorf("parse reset frame: %w", err)
 		}
-		env := resetEnvelope{ResetRequired: true, ResetAfterID: r.ResetAfterID}
-		body, err := json.Marshal(env)
-		if err != nil {
-			return streamResult{}, fmt.Errorf("encode reset envelope: %w", err)
-		}
-		if _, err := fmt.Fprintln(out, string(body)); err != nil {
-			return streamResult{}, err
+		if mode == outputAgent {
+			if _, err := fmt.Fprintf(out, "OK events reset_required=true reset_after_id=%d\n", r.ResetAfterID); err != nil {
+				return streamResult{}, err
+			}
+		} else {
+			env := resetEnvelope{ResetRequired: true, ResetAfterID: r.ResetAfterID}
+			body, err := json.Marshal(env)
+			if err != nil {
+				return streamResult{}, fmt.Errorf("encode reset envelope: %w", err)
+			}
+			if _, err := fmt.Fprintln(out, string(body)); err != nil {
+				return streamResult{}, err
+			}
 		}
 		return streamResult{Reset: &streamResetSignal{newCursor: r.ResetAfterID}}, nil
+	}
+	if mode == outputAgent {
+		return f.flushAgentEvent(out)
 	}
 	if _, err := fmt.Fprintln(out, f.data); err != nil {
 		return streamResult{}, err
@@ -343,7 +393,41 @@ func (f *frameState) flush(out io.Writer) (streamResult, error) {
 	return streamResult{Progress: streamProgress{lastID: n}}, nil
 }
 
-func streamOnce(ctx context.Context, client *http.Client, baseURL string, cursor int64, out io.Writer) (streamResult, error) {
+func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
+	var e struct {
+		EventID      int64   `json:"event_id"`
+		Type         string  `json:"type"`
+		IssueShortID *string `json:"issue_short_id"`
+		Actor        string  `json:"actor"`
+	}
+	if err := json.Unmarshal([]byte(f.data), &e); err != nil {
+		return streamResult{}, fmt.Errorf("parse event frame: %w", err)
+	}
+	id := e.EventID
+	if id == 0 {
+		id, _ = strconv.ParseInt(f.id, 10, 64)
+	}
+	progressID, _ := strconv.ParseInt(f.id, 10, 64)
+	if _, err := fmt.Fprintf(out, "OK event id=%d type=%s", id, agentValue(e.Type)); err != nil {
+		return streamResult{}, err
+	}
+	if e.IssueShortID != nil && *e.IssueShortID != "" {
+		if _, err := fmt.Fprintf(out, " issue=%s", agentValue(*e.IssueShortID)); err != nil {
+			return streamResult{}, err
+		}
+	}
+	if e.Actor != "" {
+		if _, err := fmt.Fprintf(out, " actor=%s", agentValue(e.Actor)); err != nil {
+			return streamResult{}, err
+		}
+	}
+	if _, err := fmt.Fprintln(out); err != nil {
+		return streamResult{}, err
+	}
+	return streamResult{Progress: streamProgress{lastID: progressID}}, nil
+}
+
+func streamOnce(ctx context.Context, client *http.Client, baseURL string, cursor int64, out io.Writer, mode outputMode) (streamResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
 	if err != nil {
 		return streamResult{Progress: streamProgress{lastID: cursor}}, err
@@ -370,12 +454,12 @@ func streamOnce(ctx context.Context, client *http.Client, baseURL string, cursor
 		return streamResult{Progress: streamProgress{lastID: cursor}},
 			fmt.Errorf("http %d: %s", resp.StatusCode, string(bs))
 	}
-	return parseSSEStream(bufio.NewReader(resp.Body), cursor, out)
+	return parseSSEStream(bufio.NewReader(resp.Body), cursor, out, mode)
 }
 
 // parseSSEStream pulls SSE frames off rd until EOF or a reset frame and
-// emits each event's data: line as NDJSON via flushFrame on out.
-func parseSSEStream(rd *bufio.Reader, cursor int64, out io.Writer) (streamResult, error) {
+// emits each event in the caller-selected output mode.
+func parseSSEStream(rd *bufio.Reader, cursor int64, out io.Writer, mode outputMode) (streamResult, error) {
 	var f frameState
 	progress := streamProgress{lastID: cursor}
 	for {
@@ -391,7 +475,7 @@ func parseSSEStream(rd *bufio.Reader, cursor int64, out io.Writer) (streamResult
 			if f.empty() {
 				continue
 			}
-			res, ferr := f.flush(out)
+			res, ferr := f.flush(out, mode)
 			f.reset()
 			if ferr != nil {
 				return streamResult{Progress: progress}, ferr

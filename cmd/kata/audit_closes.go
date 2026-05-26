@@ -79,13 +79,17 @@ analysis. The text output is a wide table; pass --json for tooling.`,
 			if status >= 400 {
 				return apiErrFromBody(status, bs)
 			}
-			if flags.JSON {
+			mode := currentOutputMode()
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
+			}
+			if mode == outputAgent {
+				return printAuditClosesAgent(cmd, bs)
 			}
 			return printAuditClosesTable(cmd, bs)
 		},
@@ -136,6 +140,38 @@ func printAuditClosesTable(cmd *cobra.Command, bs []byte) error {
 			r.Time, r.Actor, r.Issue, parent, r.Reason,
 			strings.Join(r.EvidenceTypes, ","),
 			flagsCol); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printAuditClosesAgent(cmd *cobra.Command, bs []byte) error {
+	var resp struct {
+		Rows []api.AuditCloseRow `json:"rows"`
+	}
+	if err := json.Unmarshal(bs, &resp); err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(out, "OK audit count=%d\n", len(resp.Rows)); err != nil {
+		return err
+	}
+	for _, r := range resp.Rows {
+		fields := []agentField{
+			agentRowField("time", r.Time),
+			agentRowField("actor", r.Actor),
+			agentRowField("issue", r.Issue),
+		}
+		if r.Parent != "" {
+			fields = append(fields, agentRowField("parent", r.Parent))
+		}
+		fields = append(fields,
+			agentRowField("reason", r.Reason),
+			agentRowListField("evidence", r.EvidenceTypes),
+			agentRowListField("flags", r.Flags),
+		)
+		if err := writeAgentKVRow(out, fields...); err != nil {
 			return err
 		}
 	}

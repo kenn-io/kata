@@ -103,13 +103,17 @@ cross-project digest.`,
 			if status >= 400 {
 				return apiErrFromBody(status, bs)
 			}
-			if flags.JSON {
+			mode := currentOutputMode()
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
+			}
+			if mode == outputAgent {
+				return printDigestAgent(cmd, bs)
 			}
 			return printDigestHuman(cmd, bs)
 		},
@@ -255,6 +259,52 @@ func printDigestHuman(cmd *cobra.Command, bs []byte) error {
 			}
 			if _, err := fmt.Fprintf(out, "  %-14s %s\n",
 				prefix, textsafe.Line(strings.Join(iss.Actions, ", "))); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func printDigestAgent(cmd *cobra.Command, bs []byte) error {
+	var b struct {
+		Since      time.Time `json:"since"`
+		Until      time.Time `json:"until"`
+		EventCount int       `json:"event_count"`
+		Actors     []struct {
+			Actor  string `json:"actor"`
+			Issues []struct {
+				ProjectName  string   `json:"project_name"`
+				IssueShortID string   `json:"issue_short_id"`
+				Actions      []string `json:"actions"`
+			} `json:"issues"`
+		} `json:"actors"`
+	}
+	if err := json.Unmarshal(bs, &b); err != nil {
+		return err
+	}
+	count := 0
+	for _, a := range b.Actors {
+		count += len(a.Issues)
+	}
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(out, "OK digest count=%d events=%d since=%s until=%s\n",
+		count, b.EventCount,
+		agentValue(b.Since.Format(time.RFC3339)),
+		agentValue(b.Until.Format(time.RFC3339))); err != nil {
+		return err
+	}
+	for _, a := range b.Actors {
+		for _, iss := range a.Issues {
+			fields := []agentField{
+				agentRowField("actor", a.Actor),
+				agentRowField("issue", iss.IssueShortID),
+				agentRowListField("actions", iss.Actions),
+			}
+			if iss.ProjectName != "" {
+				fields = append(fields, agentRowField("project", iss.ProjectName))
+			}
+			if err := writeAgentKVRow(out, fields...); err != nil {
 				return err
 			}
 		}

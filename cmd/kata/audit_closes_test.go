@@ -52,6 +52,24 @@ func TestAuditCloses_TextOutputRendersRows(t *testing.T) {
 		"text output must include the close reason")
 }
 
+func TestAuditCloses_AgentOutputShape(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "issue one")
+	runCLIAs(t, env, dir, "tester", "close", ref, "--done",
+		"--message", "Fixed the issue and ran the auth tests thoroughly.",
+		"--commit", "abc1234")
+
+	out := runCLI(t, env, dir, "--agent", "audit", "closes")
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	require.GreaterOrEqual(t, len(lines), 2, "agent audit should include header and rows: %q", out)
+	assert.Regexp(t, `^OK audit count=\d+`, lines[0])
+	assert.Contains(t, lines[1], "actor=tester")
+	assert.Contains(t, lines[1], "issue="+ref)
+	assert.Contains(t, lines[1], "reason=done")
+	assert.Contains(t, lines[1], "evidence=commit")
+	assert.NotContains(t, out, "\x1b", "agent output must not contain ANSI escape bytes")
+}
+
 // TestAuditCloses_FilterByActor verifies --actor narrows results to a
 // single actor's closes.
 func TestAuditCloses_FilterByActor(t *testing.T) {
