@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // kata tui needs a TTY, so we exercise the registration via --help;
@@ -41,6 +45,24 @@ func TestTUI_RejectsInvalidUIDFormatBeforeTTYCheck(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "uid format must be one of none, short, full") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTUI_RejectsAgentOutputBeforeLaunch(t *testing.T) {
+	for _, args := range [][]string{
+		{"--agent", "tui"},
+		{"tui", "--agent"},
+		{"--format", "agent", "tui"},
+		{"tui", "--format", "agent"},
+	} {
+		stdout, stderr, err := executeRootCapture(t, context.Background(), args...)
+		require.Error(t, err, "args %v", args)
+		ce := requireCLIError(t, err, ExitUsage)
+		assert.Equal(t, kindUsage, ce.Kind)
+		assert.Contains(t, ce.Message, "kata tui does not support --agent")
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, "kata tui does not support --agent")
+		assert.NotContains(t, stderr, "terminal")
 	}
 }
 

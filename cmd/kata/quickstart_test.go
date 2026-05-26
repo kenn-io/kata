@@ -15,6 +15,8 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, "kata agent quickstart")
 	assert.Contains(t, out, "Search before creating")
 	assert.Contains(t, out, "Do not run delete or purge")
+	assert.Contains(t, out, "Use --agent for concise action summaries in agent logs.")
+	assert.Contains(t, out, "Use --json when your script needs complete structured data.")
 }
 
 func TestQuickstart_PromotesCloseStep(t *testing.T) {
@@ -40,4 +42,14 @@ func TestQuickstart_JSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(out, &got))
 	assert.Equal(t, 1, got.APIVersion)
 	assert.Contains(t, got.Quickstart, "kata agent quickstart")
+	assert.Contains(t, got.Quickstart, "Use --agent for concise action summaries in agent logs.")
+	assert.Contains(t, got.Quickstart, "Use --json when your script needs complete structured data.")
+	assert.Contains(t, got.Quickstart, "kata events --after 0 --limit 100 --json")
+}
+
+func TestQuickstart_AgentInstructionsAliasMentionsAgentOutput(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "agent-instructions"))
+	assert.Contains(t, out, "Use --agent for concise action summaries in agent logs.")
+	assert.Contains(t, out, "Use --json when your script needs complete structured data.")
 }

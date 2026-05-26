@@ -29,6 +29,9 @@ or pass --mouse for one run. Hold Option (macOS) or Shift (Linux) for native
 terminal text selection while mouse tracking is enabled.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if currentOutputMode() == outputAgent {
+				return &cliError{Message: "kata tui does not support --agent; run without output formatting", Kind: kindUsage, ExitCode: ExitUsage}
+			}
 			ctx := cmd.Context()
 			if ctx == nil {
 				ctx = context.Background()

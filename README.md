@@ -395,7 +395,8 @@ Session setup:
 
 - Run from the project workspace, or pass `--workspace <path>`.
 - Set `KATA_AUTHOR` once at session start.
-- Prefer `--json` for reads and writes when you need to parse output.
+- Use `--agent` for concise action summaries in agent logs.
+- Use `--json` when your script needs complete structured data.
 
 Per-task guidelines:
 

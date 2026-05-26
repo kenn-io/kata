@@ -12,8 +12,8 @@ const agentQuickstartText = `# kata agent quickstart
 Use kata as the shared issue ledger for this workspace.
 
 1. Run from the workspace (--workspace overrides; --project picks
-   another). Author = $KATA_AUTHOR > $USER > git user.name. --json for
-   parsing. If uninitialized, report that kata init is needed.
+   another). Author = $KATA_AUTHOR > $USER > git user.name.
+   If uninitialized, report that kata init is needed.
    Issue refs are short_ids derived from each issue's ULID (e.g. abc4).
    Cross-project: kata#abc4. Full 26-char ULIDs also resolve. Legacy
    numeric refs (12, kata#12) no longer work.
@@ -49,6 +49,9 @@ Use kata as the shared issue ledger for this workspace.
    The daemon refuses parent-close while open children remain. Reviewers
    can replay activity with kata audit closes and undo a specific lazy
    close with kata reopen <ref>.
+
+   Use --agent for concise action summaries in agent logs.
+   Use --json when your script needs complete structured data.
 
 3. Search before creating:
 
