@@ -395,8 +395,9 @@ Session setup:
 
 - Run from the project workspace, or pass `--workspace <path>`.
 - Set `KATA_AUTHOR` once at session start.
-- Use `--agent` for concise action summaries in agent logs.
-- Use `--json` when your script needs complete structured data.
+- Default to `--agent` for ordinary kata reads and mutations in agent logs.
+- Use `--json` only when your script needs complete structured data, for
+  example when piping into `jq`.
 
 Per-task guidelines:
 
@@ -417,27 +418,27 @@ Use relationships deliberately. The link types mean:
 | `related` | Useful context, but not ordering. |
 
 Example session (using `abc4` as a placeholder for the issue's actual
-short_id, which `kata create --json` and `kata search --json` both
+short_id, which `kata create --agent` and `kata search --agent` both
 return):
 
 ```sh
 # Search before creating
-kata search "login race" --json
+kata search "login race" --agent
 
 # If no existing issue fits, create with an idempotency key
 kata create "fix login race" \
   --body "Observed double-submit in Safari callback." \
   --idempotency-key "login-race-2026-05-02" \
-  --json
+  --agent
 
 # Update an existing issue rather than open a duplicate
-kata show abc4 --json
-kata comment abc4 --body "Found another reproduction path." --json
-kata label add abc4 safari --json
-kata edit abc4 --blocks d4ex --json
+kata show abc4 --agent
+kata comment abc4 --body "Found another reproduction path." --agent
+kata label add abc4 safari --agent
+kata edit abc4 --blocks d4ex --agent
 
 # Close when done
-kata close abc4 --done --message "Fixed the issue and verified the relevant tests pass." --commit <sha> --json
+kata close abc4 --done --message "Fixed the issue and verified the relevant tests pass." --commit <sha> --agent
 ```
 
 For long-running agents, poll events and remember the returned cursor; resume
@@ -445,13 +446,14 @@ from it on the next call. If a response says `reset_required`, discard cached
 kata state and resume from the reset cursor.
 
 ```sh
-kata events --after 0 --limit 100 --json
+kata events --after 0 --limit 100 --agent
 ```
 
-For live streams, `--tail` emits newline-delimited JSON:
+For live streams, use `--agent` for one line per event in agent logs. Use
+`--json` only when a consumer expects newline-delimited JSON:
 
 ```sh
-kata events --tail
+kata events --tail --agent
 ```
 
 ## Agent Task Claiming
@@ -464,12 +466,12 @@ to the current actor. The claim fails if another actor already claimed the issue
 ISSUE=$(kata ready --unowned --json | jq -r '.issues[0].short_id')
 
 # Claim it (fails if someone else claimed it first)
-kata claim "$ISSUE" || exit 1
+kata claim "$ISSUE" --agent || exit 1
 
 # Do the work...
 
 # Close when done
-kata close "$ISSUE" --done --message "Fixed the issue and verified the relevant tests pass." --commit "$SHA"
+kata close "$ISSUE" --done --message "Fixed the issue and verified the relevant tests pass." --commit "$SHA" --agent
 ```
 
 The `kata ready` command supports filters for finding suitable work:

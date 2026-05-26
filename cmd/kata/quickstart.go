@@ -50,39 +50,40 @@ Use kata as the shared issue ledger for this workspace.
    can replay activity with kata audit closes and undo a specific lazy
    close with kata reopen <ref>.
 
-   Use --agent for concise action summaries in agent logs.
-   Use --json when your script needs complete structured data.
+   Default to --agent for ordinary kata reads and mutations in agent logs.
+   Use --json only when your script needs complete structured data, for
+   example when piping into jq.
 
 3. Search before creating:
 
-   kata search "login race" --json
-   kata search --project foo "login race" --json
+   kata search "login race" --agent
+   kata search --project foo "login race" --agent
 
 4. If no existing issue fits, create with an idempotency key:
 
    kata create "fix login race" \
      --body "Observed double-submit in Safari callback." \
      --idempotency-key "login-race-2026-05-02" \
-     --json
+     --agent
 
    kata create --project foo "fix login race" \
      --body "Observed double-submit in Safari callback." \
      --idempotency-key "foo-login-race-2026-05-02" \
-     --json
+     --agent
 
 5. Prefer updating existing issues over creating duplicates:
 
-   kata show abc4 --json
-   kata show --project foo abc4 --json
-   kata comment abc4 --body "Found another reproduction path." --json
-   kata label add abc4 safari --json
-   kata edit abc4 --blocks d4ex --json
+   kata show abc4 --agent
+   kata show --project foo abc4 --agent
+   kata comment abc4 --body "Found another reproduction path." --agent
+   kata label add abc4 safari --agent
+   kata edit abc4 --blocks d4ex --agent
 
 6. Find and claim available work (multi-agent environments):
 
    # Find unclaimed work
-   kata ready --unowned --json
-   kata ready --unowned --label bug --no-label blocked --json
+   kata ready --unowned --agent
+   kata ready --unowned --label bug --no-label blocked --agent
 
    # Claim it (fails if already claimed by another actor)
    kata claim <ref>
@@ -98,8 +99,8 @@ Use kata as the shared issue ledger for this workspace.
    blocked_by  = the target must be resolved before this issue can proceed
    related     = useful context, but not ordering
 
-   kata create "fix auth flow" --parent abc4 --blocked-by d4ex --related j7m2 --json
-   kata edit abc4 --remove-blocks d4ex --related j7m2 --json
+   kata create "fix auth flow" --parent abc4 --blocked-by d4ex --related j7m2 --agent
+   kata edit abc4 --remove-blocks d4ex --related j7m2 --agent
 
    --remove-parent <ref> is strict: it must equal the current parent or
    fail loudly. Read parent before asserting a removal. The other
@@ -116,16 +117,17 @@ Use kata as the shared issue ledger for this workspace.
 
 For long-running agents, poll events:
 
-   kata events --after 0 --limit 100 --json
+   kata events --after 0 --limit 100 --agent
 
 Remember the returned cursor and resume from it. If a response says
 reset_required, discard cached kata state and resume from the reset cursor.
 
 For live streams:
 
-   kata events --tail
+   kata events --tail --agent
 
-The tail stream emits newline-delimited JSON.
+The agent tail stream emits one OK event line per event. Use --json only
+when a consumer expects newline-delimited JSON.
 
 # Remote daemon (optional)
 
@@ -150,8 +152,8 @@ unchanged: a local Unix-socket daemon is auto-started on demand.
 
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
 Search before creating or updating work.
-Use --agent for concise action summaries in agent logs.
-Use --json when your script needs complete structured data.
+Default to --agent for ordinary kata reads and mutations in agent logs.
+Use --json only when your script needs complete structured data.
 If work is incomplete, label needs-review and comment with what remains.
 Close only verified work with substantive prose and typed evidence.
 Do not run delete or purge unless explicitly asked for that exact action and issue ref.
