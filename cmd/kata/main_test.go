@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,7 +15,9 @@ import (
 
 func TestRoot_HelpListsUniversalFlags(t *testing.T) {
 	out := string(executeRoot(t, newRootCmd(), "--help"))
+	assert.Contains(t, out, "--format")
 	assert.Contains(t, out, "--json")
+	assert.Contains(t, out, "--agent")
 	assert.Contains(t, out, "--quiet")
 	assert.Contains(t, out, "--as")
 	assert.Contains(t, out, "--workspace")
@@ -150,6 +153,25 @@ func TestEmitError_HumanMode_StillPrintsKataPrefix(t *testing.T) {
 	var buf bytes.Buffer
 	emitError(&buf, cli, false, true)
 	assert.Contains(t, buf.String(), "kata: title must not be empty")
+}
+
+func TestEmitError_AgentMode_CommandError(t *testing.T) {
+	cli := &cliError{Message: "comment body is required", Kind: kindValidation, ExitCode: ExitValidation}
+	var buf bytes.Buffer
+	emitAgentError(&buf, "comment", cli)
+	assert.Contains(t, buf.String(), "ERR comment validation: comment body is required\n")
+}
+
+func TestEmitError_AgentMode_ParseError(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "cretae")
+	require.Error(t, err)
+	var buf bytes.Buffer
+	buf.WriteString(stderr)
+	emitErrorForMode(&buf, err, resolvedOutputModeForError([]string{"--agent", "cretae"}), runEEntered)
+	assert.Truef(t, strings.HasPrefix(buf.String(), "ERR kata usage:"),
+		"stderr should start with agent usage error, got %q", buf.String())
 }
 
 // TestEmitError_NonCliError_SynthesizesEnvelope confirms a plain

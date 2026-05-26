@@ -1,0 +1,39 @@
+package main
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestResolveOutputMode(t *testing.T) {
+	cases := []struct {
+		name    string
+		format  string
+		json    bool
+		agent   bool
+		want    outputMode
+		wantErr string
+	}{
+		{name: "default human", want: outputHuman},
+		{name: "format json", format: "json", want: outputJSON},
+		{name: "json alias", json: true, want: outputJSON},
+		{name: "agent alias", agent: true, want: outputAgent},
+		{name: "matching agent flags", format: "agent", agent: true, want: outputAgent},
+		{name: "conflicting modes", format: "human", json: true, wantErr: "conflicting output modes"},
+		{name: "bad format", format: "xml", wantErr: "unsupported output format"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveOutputModeValues(tc.format, tc.json, tc.agent)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

@@ -17,7 +17,10 @@ import (
 
 // globalFlags carries the universal flags applied on every command.
 type globalFlags struct {
+	Format    string
 	JSON      bool
+	Agent     bool
+	Mode      outputMode
 	Quiet     bool
 	As        string
 	Workspace string
@@ -30,19 +33,30 @@ var flags globalFlags
 // It stays false when cobra fails during argument/flag parsing, allowing main()
 // to distinguish a parse error (ExitUsage) from an operational failure (ExitInternal).
 var runEEntered bool
+var errorCommandName string
 
 func newRootCmd() *cobra.Command {
+	flags.Mode = ""
+	errorCommandName = ""
 	cmd := &cobra.Command{
 		Use:           "kata",
 		Short:         "kata — lightweight issue tracker for agents",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			runEEntered = true
+			errorCommandName = commandLeaf(cmd)
+			mode, err := resolveOutputModeValues(flags.Format, flags.JSON, flags.Agent)
+			if err != nil {
+				return err
+			}
+			flags.Mode = mode
 			return nil
 		},
 	}
+	cmd.PersistentFlags().StringVar(&flags.Format, "format", "", "output format: human|json|agent")
 	cmd.PersistentFlags().BoolVar(&flags.JSON, "json", false, "emit machine-readable JSON")
+	cmd.PersistentFlags().BoolVar(&flags.Agent, "agent", false, "emit concise agent-readable text")
 	cmd.PersistentFlags().BoolVarP(&flags.Quiet, "quiet", "q", false, "suppress non-essential output")
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
@@ -105,23 +119,96 @@ func main() {
 		stop()
 	}()
 	if err := newRootCmd().ExecuteContext(ctx); err != nil {
-		emitError(os.Stderr, err, flags.JSON, runEEntered)
+		emitErrorForMode(os.Stderr, err, resolvedOutputModeForError(os.Args[1:]), runEEntered)
 		os.Exit(exitCodeForErr(err, runEEntered))
 	}
 }
 
-// emitError writes the error to w. When jsonMode is true, the output
-// is a JSON envelope shaped after the daemon's ErrorEnvelope plus a
-// `kind` and `exit_code` for client-side classification — agents can
-// branch on a stable taxonomy without grepping the human message.
-// When jsonMode is false, the human path stays "kata: <message>".
-//
-// The JSON envelope is always emitted to stderr (where the human
-// message also goes) so consumers don't have to reconfigure stream
-// routing per --json. Stdout stays reserved for successful command
-// output, so a partial-success run can emit useful stdout JSON and
-// an error envelope on stderr without the streams being mixed.
+// emitError preserves the legacy bool-shaped test/helper API while main uses
+// the resolved output mode.
 func emitError(w io.Writer, err error, jsonMode bool, runEReached bool) {
+	if jsonMode {
+		emitErrorForMode(w, err, outputJSON, runEReached)
+		return
+	}
+	emitErrorForMode(w, err, outputHuman, runEReached)
+}
+
+func emitErrorForMode(w io.Writer, err error, mode outputMode, runEReached bool) {
+	switch mode {
+	case outputJSON:
+		emitJSONError(w, err, runEReached)
+	case outputAgent:
+		emitAgentError(w, commandNameForError(runEReached), cliErrorForErr(err, runEReached))
+	default:
+		emitHumanError(w, err, runEReached)
+	}
+}
+
+func resolvedOutputModeForError(args []string) outputMode {
+	if flags.Mode != "" {
+		return flags.Mode
+	}
+	mode, err := resolveOutputModeArgs(args, flags.Format, flags.JSON, flags.Agent)
+	if err != nil {
+		return outputHuman
+	}
+	return mode
+}
+
+func commandNameForError(runEReached bool) string {
+	if !runEReached {
+		return "kata"
+	}
+	if errorCommandName != "" {
+		return errorCommandName
+	}
+	return "kata"
+}
+
+func commandLeaf(cmd *cobra.Command) string {
+	if cmd == nil {
+		return "kata"
+	}
+	parts := strings.Fields(cmd.CommandPath())
+	if len(parts) == 0 {
+		return "kata"
+	}
+	return parts[len(parts)-1]
+}
+
+// emitJSONError writes a JSON envelope shaped after the daemon's
+// ErrorEnvelope plus a `kind` and `exit_code` for client-side classification.
+// The JSON envelope is always emitted to stderr in main so stdout stays
+// reserved for successful command output.
+func emitJSONError(w io.Writer, err error, runEReached bool) {
+	cli := cliErrorForErr(err, runEReached)
+	env := struct {
+		Error struct {
+			Kind     errKind `json:"kind"`
+			Code     string  `json:"code,omitempty"`
+			Message  string  `json:"message"`
+			ExitCode int     `json:"exit_code"`
+		} `json:"error"`
+	}{}
+	env.Error.Kind = cli.Kind
+	env.Error.Code = cli.Code
+	env.Error.Message = cli.Message
+	env.Error.ExitCode = cli.ExitCode
+	bs, mErr := json.Marshal(env)
+	if mErr == nil {
+		_, _ = fmt.Fprintln(w, string(bs))
+		return
+	}
+	emitHumanError(w, err, runEReached)
+}
+
+func emitHumanError(w io.Writer, err error, runEReached bool) {
+	cli := cliErrorForErr(err, runEReached)
+	_, _ = fmt.Fprintln(w, "kata:", cli.Message)
+}
+
+func cliErrorForErr(err error, runEReached bool) *cliError {
 	var cli *cliError
 	if !errors.As(err, &cli) {
 		// Non-cliError: synthesize one so the JSON path has uniform
@@ -133,28 +220,7 @@ func emitError(w io.Writer, err error, jsonMode bool, runEReached bool) {
 			ExitCode: exit,
 		}
 	}
-	if jsonMode {
-		env := struct {
-			Error struct {
-				Kind     errKind `json:"kind"`
-				Code     string  `json:"code,omitempty"`
-				Message  string  `json:"message"`
-				ExitCode int     `json:"exit_code"`
-			} `json:"error"`
-		}{}
-		env.Error.Kind = cli.Kind
-		env.Error.Code = cli.Code
-		env.Error.Message = cli.Message
-		env.Error.ExitCode = cli.ExitCode
-		bs, mErr := json.Marshal(env)
-		if mErr == nil {
-			_, _ = fmt.Fprintln(w, string(bs))
-			return
-		}
-		// JSON marshal failed (shouldn't happen on a fixed shape) —
-		// fall through to plain text so the user still gets *something*.
-	}
-	_, _ = fmt.Fprintln(w, "kata:", cli.Message)
+	return cli
 }
 
 // exitCodeForErr returns the exit code an error should produce. When
