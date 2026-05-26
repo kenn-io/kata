@@ -116,12 +116,14 @@ func applyDaemonConfigEnv(cfg *DaemonConfig) {
 	if v := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")); v != "" {
 		cfg.Auth.Token = v
 	}
-	if envTruthy("KATA_TRUST_PRIVATE_NETWORK") {
+	if EnvTruthy("KATA_TRUST_PRIVATE_NETWORK") {
 		cfg.Auth.TrustPrivateNetwork = true
 	}
 }
 
-func envTruthy(name string) bool {
+// EnvTruthy reports whether an environment variable is set to a recognized
+// true value for kata config overlays.
+func EnvTruthy(name string) bool {
 	v := strings.TrimSpace(os.Getenv(name))
 	return v == "1" || strings.EqualFold(v, "true")
 }

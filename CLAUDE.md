@@ -33,16 +33,20 @@ For long-running work, `kata events --tail` streams NDJSON.
 
 A daemon can serve clients on other hosts over a private network:
 
-- Server: `kata daemon start --listen 100.64.0.5:7777`, or set
+- Server: for mutable remote access, set `[auth].token` plus
+  `[auth].trust_private_network = true` in `<KATA_HOME>/config.toml`, or
+  export `KATA_AUTH_TOKEN` plus `KATA_TRUST_PRIVATE_NETWORK=1`, then run
+  `kata daemon start --listen 100.64.0.5:7777`. Set
   `listen = "100.64.0.5:7777"` in `<KATA_HOME>/config.toml` so every
   daemon (including the auto-started one) binds TCP.
 - Client: `export KATA_SERVER=http://100.64.0.5:7777` or commit a
   gitignored `.kata.local.toml` with `[server] url = "..."` next to
   `.kata.toml`. `KATA_SERVER` env wins.
-- Optional bearer auth: set `[auth].token` plus
-  `[auth].trust_private_network = true` in `<KATA_HOME>/config.toml`, or use
-  `KATA_AUTH_TOKEN` plus `KATA_TRUST_PRIVATE_NETWORK=1`. The trust flag is
-  required for non-loopback HTTP because the daemon does not terminate TLS.
+- Unauthenticated private-network mode is `--insecure-readonly`, which permits
+  GET requests only. Mutations and the event stream require bearer auth.
+- Trusted plaintext bearer targets must be literal non-public IPs (loopback,
+  RFC1918, CGNAT, link-local, ULA). Public IPs and DNS hostnames require HTTPS
+  termination or an SSH tunnel.
 - Init and resolution are both path-free whenever the client can
   derive the project name locally (existing `.kata.toml`, `--project`, or a
   git workspace): the client sends `name` and writes `.kata.toml` itself; the
