@@ -221,7 +221,32 @@ Issue: abc4 "Fix login race"
 Owner: wesm
 ```
 
-Delete and purge:
+Unassign:
+
+```text
+OK unassign abc4 changed=true
+Issue: abc4 "Fix login race"
+Owner-Cleared: true
+```
+
+Reopen:
+
+```text
+OK reopen abc4
+Issue: abc4 "Fix login race"
+Status: open
+```
+
+Restore, delete, and purge:
+
+Restore:
+
+```text
+OK restore abc4 changed=true
+Issue: abc4 "Fix login race"
+Status: open
+Deleted: false
+```
 
 ```text
 OK delete abc4
@@ -246,8 +271,8 @@ List:
 ```text
 OK list count=3
 - issue=abc4 status=open priority=2 owner=wesm labels=bug,safari title="Fix login race"
-- issue=def7 status=open owner=unowned labels=architecture title="Control channel"
-- issue=j9k2 status=closed owner=unowned title="Old task"
+- issue=def7 status=open labels=architecture title="Control channel"
+- issue=j9k2 status=closed title="Old task"
 ```
 
 Search:
@@ -285,7 +310,7 @@ Ready:
 ```text
 OK ready count=2
 - issue=abc4 priority=1 owner=wesm title="Fix login race"
-- issue=def7 owner=unowned title="Control channel"
+- issue=def7 title="Control channel"
 ```
 
 Labels:
@@ -322,6 +347,10 @@ the same rule applies:
 Labels: bug,safari
 ```
 
+Nullable free-form fields are omitted when absent. Do not emit sentinel values
+such as `owner=unowned` or `owner=null`, because users can choose those exact
+strings as real owner names.
+
 ### 5.3 Other Non-Interactive Commands
 
 Every non-interactive command that emits CLI output must support `--format
@@ -339,7 +368,9 @@ Required coverage:
   ...` line.
 - `daemon logs --agent`: stream-safe one-line records, no multiline blocks.
 - `export`: `OK export output=<path>`.
-- `import`: `OK import target=<path> source_format=<kata|beads> ...`.
+- `import --source-format kata`: `OK import source_format=kata target=<db_path>`.
+- `import --source-format beads`: `OK import source_format=beads project=<name_or_id>
+  created=<n> updated=<n> unchanged=<n> comments=<n> links=<n>`.
 - `projects` subcommands: use `OK projects ...` for reads and `OK project
   action=<verb> ...` for mutations such as rename, merge, remove, restore, and
   detach.
@@ -465,8 +496,8 @@ Pin the contract with focused CLI tests:
   - cobra parse error emits `ERR kata usage: ...` on stderr.
   - JSON error mode remains unchanged.
 - Mutations:
-  - create, idempotent create reuse, comment, edit no-op, close, label,
-    assign, delete, restore, purge.
+  - create, idempotent create reuse, comment, edit no-op, close, reopen, label,
+    assign, unassign, delete, restore, purge.
 - Reads:
   - list, show, search, ready, labels, projects, events, digest, audit.
   - empty reads emit `count=0` and no placeholder row.
