@@ -160,7 +160,7 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 	}
 	if mode == outputAgent {
 		if verb == "delete" {
-			return printAgentMutation(cmd, "delete", bs, func(w io.Writer, m agentIssueMutation) error {
+			return printAgentMutation(cmd, "delete", bs, func(w io.Writer, _ agentIssueMutation) error {
 				if err := writeAgentField(w, "Deleted", "true"); err != nil {
 					return err
 				}
