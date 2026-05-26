@@ -121,6 +121,8 @@ func CheckAuthStartup(listen string, auth config.AuthConfig, insecureReadonly bo
 	})
 }
 
+// TrustPrivateNetworkWarning returns the startup warning shown when the daemon
+// is configured to send bearer tokens over trusted private-network HTTP.
 func TrustPrivateNetworkWarning(listen string, auth config.AuthConfig) (string, bool) {
 	if !isNonLoopbackTCP(listen) || auth.Token == "" || !auth.TrustPrivateNetwork {
 		return "", false
