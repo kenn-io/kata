@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,6 +35,41 @@ func TestImportCreatesTargetDB(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "kata", got.Name)
 	assert.Contains(t, out, target)
+}
+
+func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
+	_, input, target := setupImportTest(t)
+
+	_, err := runCmdOutput(t, nil, "import", "--format", "agent", "--input", input, "--target", target)
+	require.NoError(t, err)
+
+	d, err := db.Open(context.Background(), target)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+	got, err := d.ProjectByName(context.Background(), "kata")
+	require.NoError(t, err)
+	assert.Equal(t, "kata", got.Name)
+}
+
+func TestImportLegacyFormatConflictsWithSourceFormat(t *testing.T) {
+	setupKataEnv(t)
+
+	_, err := runCmdOutput(t, nil, "import", "--format", "beads", "--source-format", "kata")
+	ce := requireCLIError(t, err, ExitUsage)
+	assert.Contains(t, ce.Message, "--format beads cannot be combined with --source-format")
+}
+
+func TestImportLegacyFormatBeadsAllowsAgentOutputMode(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	setupKataEnv(t)
+
+	_, stderr, err := executeRootCapture(t, context.Background(),
+		"import", "--format", "beads", "--agent", "--input", "beads.jsonl")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR import validation:"),
+		"stderr should use agent mode for legacy beads import, got %q", stderr)
+	assert.Contains(t, stderr, "--input is not supported")
 }
 
 func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {

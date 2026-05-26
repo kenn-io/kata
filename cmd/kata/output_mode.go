@@ -6,6 +6,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 type outputMode string
@@ -50,6 +52,14 @@ func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMod
 	return first, nil
 }
 
+func resolveOutputModeForCommand(cmd *cobra.Command) (outputMode, error) {
+	format := flags.Format
+	if isImportCommand(cmd) && isImportLegacySourceFormat(format) {
+		format = ""
+	}
+	return resolveOutputModeValues(format, flags.JSON, flags.Agent)
+}
+
 func resolveOutputModeArgs(args []string, format string, jsonFlag, agentFlag bool) (outputMode, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -68,6 +78,19 @@ func resolveOutputModeArgs(args []string, format string, jsonFlag, agentFlag boo
 		}
 	}
 	return resolveOutputModeValues(format, jsonFlag, agentFlag)
+}
+
+func isImportCommand(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Name() == "import"
+}
+
+func isImportLegacySourceFormat(format string) bool {
+	switch strings.TrimSpace(format) {
+	case "kata", "beads":
+		return true
+	default:
+		return false
+	}
 }
 
 func emitAgentError(w io.Writer, command string, err error) {

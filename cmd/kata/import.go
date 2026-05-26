@@ -15,11 +15,15 @@ func newImportCmd() *cobra.Command {
 	var target string
 	var force bool
 	var newInstance bool
-	var format string
+	var sourceFormat string
 	cmd := &cobra.Command{
 		Use:   "import",
 		Short: "import a kata database export",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := resolveImportSourceFormat(cmd, sourceFormat)
+			if err != nil {
+				return err
+			}
 			switch strings.TrimSpace(format) {
 			case "", "kata":
 				return runKataJSONLImport(cmd, input, target, force, newInstance)
@@ -37,7 +41,7 @@ func newImportCmd() *cobra.Command {
 			}
 		},
 	}
-	cmd.Flags().StringVar(&format, "format", "kata", "import format (kata or beads)")
+	cmd.Flags().StringVar(&sourceFormat, "source-format", "kata", "import source format (kata or beads)")
 	cmd.Flags().StringVar(&input, "input", "", "path to JSONL export")
 	cmd.Flags().StringVar(&target, "target", "", "database path to create")
 	cmd.Flags().BoolVar(&force, "force", false, "replace existing target database")
@@ -46,11 +50,30 @@ func newImportCmd() *cobra.Command {
 	return cmd
 }
 
+func resolveImportSourceFormat(cmd *cobra.Command, sourceFormat string) (string, error) {
+	// During the import flag migration, root --format values human|json|agent
+	// select output mode, while kata|beads are temporary legacy import source
+	// values. The sets are intentionally disjoint so this fallback can be
+	// removed after the deprecation window without ambiguity.
+	legacy := strings.TrimSpace(flags.Format)
+	if isImportLegacySourceFormat(legacy) {
+		if cmd.Flags().Changed("source-format") {
+			return "", &cliError{
+				Message:  fmt.Sprintf("--format %s cannot be combined with --source-format; use --source-format only", legacy),
+				Kind:     kindUsage,
+				ExitCode: ExitUsage,
+			}
+		}
+		return legacy, nil
+	}
+	return strings.TrimSpace(sourceFormat), nil
+}
+
 func validateBeadsImportFlags(cmd *cobra.Command) error {
 	for _, name := range []string{"input", "target", "force", "new-instance"} {
 		if cmd.Flags().Changed(name) {
 			return &cliError{
-				Message:  fmt.Sprintf("--%s is not supported with --format beads", name),
+				Message:  fmt.Sprintf("--%s is not supported with --source-format beads", name),
 				Kind:     kindValidation,
 				ExitCode: ExitValidation,
 			}

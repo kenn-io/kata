@@ -47,7 +47,7 @@ func newRootCmd() *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			runEEntered = true
 			errorCommandName = commandLeaf(cmd)
-			mode, err := resolveOutputModeValues(flags.Format, flags.JSON, flags.Agent)
+			mode, err := resolveOutputModeForCommand(cmd)
 			if err != nil {
 				return err
 			}
