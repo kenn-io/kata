@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +37,13 @@ func daemonStartCmd() *cobra.Command {
 		Use:   "start",
 		Short: "start the daemon in foreground",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if currentOutputMode() == outputAgent {
+				return &cliError{
+					Message:  "kata daemon start does not support --agent; run without output formatting",
+					Kind:     kindUsage,
+					ExitCode: ExitUsage,
+				}
+			}
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			return runDaemonWithListen(ctx, listen, insecureReadonly)
@@ -131,16 +140,53 @@ func daemonStopCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			mode := currentOutputMode()
+			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
 				if daemon.ProcessAlive(r.PID) {
 					p, _ := os.FindProcess(r.PID)
 					_ = p.Signal(syscall.SIGTERM)
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", r.PID)
+					pids = append(pids, r.PID)
+					if mode == outputHuman {
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", r.PID)
+					}
 				}
+			}
+			switch mode {
+			case outputAgent:
+				switch len(pids) {
+				case 0:
+					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "OK daemon action=stop stopped=0")
+				case 1:
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK daemon action=stop pid=%d\n", pids[0])
+				default:
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK daemon action=stop stopped=%d pids=%s\n",
+						len(pids), agentValue(joinInts(pids, ",")))
+				}
+			case outputJSON:
+				return emitJSON(cmd.OutOrStdout(), daemonStopOutput{
+					Action:  "stop",
+					Stopped: len(pids),
+					PIDs:    pids,
+				})
 			}
 			return nil
 		},
 	}
+}
+
+type daemonStopOutput struct {
+	Action  string `json:"action"`
+	Stopped int    `json:"stopped"`
+	PIDs    []int  `json:"pids"`
+}
+
+func joinInts(values []int, sep string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strconv.Itoa(value))
+	}
+	return strings.Join(parts, sep)
 }
 
 func daemonReloadCmd() *cobra.Command {
@@ -173,13 +219,28 @@ func daemonReloadCmd() *cobra.Command {
 						Message: fmt.Sprintf("signal pid %d: %v", r.PID, err),
 					}
 				}
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(),
-					"reload signal sent to pid=%d (check daemon log for result)\n", r.PID)
+				switch currentOutputMode() {
+				case outputAgent:
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK daemon action=reload pid=%d\n", r.PID)
+				case outputJSON:
+					return emitJSON(cmd.OutOrStdout(), daemonReloadOutput{
+						Action: "reload",
+						PID:    r.PID,
+					})
+				default:
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(),
+						"reload signal sent to pid=%d (check daemon log for result)\n", r.PID)
+				}
 				return nil
 			}
 			return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: "no daemon running"}
 		},
 	}
+}
+
+type daemonReloadOutput struct {
+	Action string `json:"action"`
+	PID    int    `json:"pid"`
 }
 
 // runDaemon is the foreground daemon entry point. Used by `kata daemon start`

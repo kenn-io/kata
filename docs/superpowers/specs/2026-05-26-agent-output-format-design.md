@@ -368,8 +368,9 @@ Required coverage:
 - `version`: `OK version version=<version> agent_format=1`.
 - `health`: `OK health ok=<bool> daemon=<status>`.
 - `daemon status`: `OK daemon status=<status> ...`.
-- `daemon start`, `daemon stop`, `daemon reload`: one `OK daemon action=<verb>
-  ...` line.
+- `daemon stop`, `daemon reload`: one `OK daemon action=<verb> ...` line.
+- `daemon start`: foreground server command; reject agent output mode with a
+  usage error instead of launching because there is no final transcript result.
 - `daemon logs --agent`: stream-safe one-line records, no multiline blocks.
 - `export`: `OK export output=<path>`.
 - `import --source-format kata`: `OK import source_format=kata target=<db_path>`.
@@ -382,9 +383,9 @@ Required coverage:
   agent-oriented instructions prefer `--agent` for transcript output and
   `--json` for complete structured parsing.
 
-`kata tui` is interactive and does not have a meaningful agent transcript
-output. If `--format agent` or `--agent` is passed to `kata tui`, return a usage
-error instead of launching the TUI.
+`kata tui` is interactive and `kata daemon start` is a foreground server; neither
+has a meaningful final agent transcript output. If `--format agent` or `--agent`
+is passed to either command, return a usage error instead of launching.
 
 ### 5.4 Events
 

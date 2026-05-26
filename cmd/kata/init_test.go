@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -308,4 +309,149 @@ func TestInit_GitignoreAppendsToExisting(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "dist/")
 	assert.Contains(t, string(content), ".kata.local.toml")
+}
+
+func TestInit_AgentOutputReportsProjectWorkspaceAndChanged(t *testing.T) {
+	resetFlags(t)
+	flags.Agent = true
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+	daemonStub := newFakeDaemon(t)
+
+	out, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
+}
+
+func TestInit_AgentOutputChangedWhenExistingProjectBindsFreshWorkspace(t *testing.T) {
+	resetFlags(t)
+	flags.Agent = true
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(context.Background(), "kata")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	out, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
+}
+
+func TestInit_HumanOutputKeepsProjectCreatedSemanticsForFreshWorkspace(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(context.Background(), "kata")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	out, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "bound project kata\n", out)
+}
+
+func TestInit_AgentOutputChangedWhenOnlyGitignoreUpdated(t *testing.T) {
+	resetFlags(t)
+	flags.Agent = true
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(context.Background(), "kata")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"), //nolint:gosec // test fixture matches production .kata.toml mode
+		[]byte(`version = 1
+
+[project]
+identity = "github.com/wesm/kata"
+name     = "kata"
+`), 0o644))
+
+	out, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
+}
+
+func TestInit_AgentOutputQuotesProjectName(t *testing.T) {
+	resetFlags(t)
+	flags.Agent = true
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+	daemonStub := newFakeDaemon(t)
+
+	out, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{Project: "two words"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "OK init project=\"two words\" workspace="+agentValue(dir)+" changed=true\n", out)
+}
+
+func TestInit_MachineOutputSuppressesGitignoreWarning(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func()
+		wantOut   string
+	}{
+		{
+			name: "agent",
+			configure: func() {
+				flags.Agent = true
+			},
+			wantOut: "OK init project=kata workspace=",
+		},
+		{
+			name: "json",
+			configure: func() {
+				flags.JSON = true
+			},
+			wantOut: `"kata_api_version":1`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetFlags(t)
+			dir := t.TempDir()
+			runGit(t, dir, "init", "--quiet")
+			runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+			require.NoError(t, os.Mkdir(filepath.Join(dir, ".gitignore"), 0o755)) //nolint:gosec // test fixture under TempDir
+			daemonStub := newFakeDaemon(t)
+			tt.configure()
+
+			var out string
+			var err error
+			stderr := captureProcessStderr(t, func() {
+				out, err = callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
+			})
+
+			require.NoError(t, err)
+			assert.Contains(t, out, tt.wantOut)
+			assert.Empty(t, stderr)
+		})
+	}
+}
+
+func captureProcessStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = old })
+
+	fn()
+
+	require.NoError(t, w.Close())
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, r)
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+	os.Stderr = old
+	return buf.String()
 }

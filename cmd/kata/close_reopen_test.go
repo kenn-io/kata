@@ -37,6 +37,20 @@ func TestClose_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Reason: done")
 }
 
+func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
+
+	stdout, stderr, err := runCLIWithErr(t, env, dir, "--agent", "close", ref,
+		"--done",
+		"--message", "Fixed Safari callback double-submit and ran tests.",
+		"--commit", "abc1234",
+		"--dry-run")
+
+	require.NoError(t, err)
+	assert.Regexp(t, `(?m)^OK close \S+`, stdout)
+	assert.Empty(t, stderr)
+}
+
 func TestReopen_AgentOutput(t *testing.T) {
 	env, dir, _, ref := setupWorkspaceWithIssue(t, "test issue")
 	runCLI(t, env, dir, "close", ref,

@@ -109,6 +109,30 @@ func TestClaim_ForceOverrideShowsPreviousOwner(t *testing.T) {
 	require.Contains(t, out, "was: agent1")
 }
 
+func TestClaim_AgentOutputIncludesOwner(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	issue := createIssueViaHTTPFull(t, env, dir, "test claim agent")
+
+	resetFlags(t)
+	out := runCLIAs(t, env, dir, "agent1", "--agent", "claim", issue.ShortID)
+
+	assert.Regexp(t, `(?m)^OK claim \S+`, out)
+	assert.Contains(t, out, "Owner: agent1")
+}
+
+func TestClaim_AgentForceOutputIncludesPreviousOwner(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	issue := createIssueViaHTTPFull(t, env, dir, "test claim agent previous")
+	runCLIAs(t, env, dir, "agent1", "claim", issue.ShortID)
+
+	resetFlags(t)
+	out := runCLIAs(t, env, dir, "agent2", "--agent", "claim", "--force", issue.ShortID)
+
+	assert.Regexp(t, `(?m)^OK claim \S+`, out)
+	assert.Contains(t, out, "Owner: agent2")
+	assert.Contains(t, out, "Previous-Owner: agent1")
+}
+
 func TestClaim_WithComment(t *testing.T) {
 	env, dir := setupCLIEnv(t)
 

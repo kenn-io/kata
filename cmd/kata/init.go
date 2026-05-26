@@ -286,16 +286,18 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	}
 
 	dest := config.WriteDestination(in.Disc, in.StartPath)
-	if needsTomlWrite(in.ExistingToml, resp.Project.Name) {
+	tomlChanged := needsTomlWrite(in.ExistingToml, resp.Project.Name)
+	if tomlChanged {
 		if err := config.WriteProjectConfig(dest, resp.Project.Name); err != nil {
 			return "", fmt.Errorf("write .kata.toml: %w", err)
 		}
 	}
-	if err := ensureGitignoreEntry(dest, ".kata.local.toml"); err != nil {
-		fmt.Fprintf(os.Stderr, "kata: warning: could not update .gitignore: %v\n", err)
+	gitignoreChanged, err := ensureGitignoreEntry(dest, ".kata.local.toml")
+	if err != nil {
+		warnGitignoreUpdate(err)
 	}
 
-	return formatInitOutput(bs, resp.Project.Name, resp.Created)
+	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged)
 }
 
 // runStartPathInit is the fallback used when the client cannot derive a name
@@ -334,11 +336,21 @@ func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callI
 	if gitignoreDir == "" {
 		gitignoreDir = startPath
 	}
-	if err := ensureGitignoreEntry(gitignoreDir, ".kata.local.toml"); err != nil {
-		fmt.Fprintf(os.Stderr, "kata: warning: could not update .gitignore: %v\n", err)
+	gitignoreChanged, err := ensureGitignoreEntry(gitignoreDir, ".kata.local.toml")
+	if err != nil {
+		warnGitignoreUpdate(err)
 	}
 
-	return formatInitOutput(bs, resp.Project.Name, resp.Created)
+	// The path-based daemon flow writes workspace files remotely and exposes no
+	// local file-change bit today; project creation is the closest stable signal.
+	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged)
+}
+
+func warnGitignoreUpdate(err error) {
+	if currentOutputMode() != outputHuman {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "kata: warning: could not update .gitignore: %v\n", err)
 }
 
 // postProjects POSTs the request and returns the raw response body on
@@ -370,18 +382,22 @@ func needsTomlWrite(existing *config.ProjectConfig, name string) bool {
 	return existing.Project.Name != name
 }
 
-// formatInitOutput renders the human-readable or JSON form of the init
-// result, shared between the path-free and path-based flows.
-func formatInitOutput(bs []byte, name string, created bool) (string, error) {
-	if flags.JSON {
+// formatInitOutput renders the selected output mode for init, shared between
+// the path-free and path-based flows.
+func formatInitOutput(bs []byte, name, workspace string, projectCreated, changed bool) (string, error) {
+	switch currentOutputMode() {
+	case outputJSON:
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 			return "", fmt.Errorf("emit json: %w", err)
 		}
 		return buf.String(), nil
+	case outputAgent:
+		return fmt.Sprintf("OK init project=%s workspace=%s changed=%t\n",
+			agentValue(name), agentValue(workspace), changed), nil
 	}
 	action := "bound"
-	if created {
+	if projectCreated {
 		action = "created and bound"
 	}
 	return fmt.Sprintf("%s project %s\n", action, textsafe.Line(name)), nil
@@ -442,11 +458,10 @@ func mapStatusToExit(status int, _ string) int {
 	}
 }
 
-// ensureGitignoreEntry appends a single line to <dir>/.gitignore if
-// the entry is not already present. Creates the file if absent.
-// Idempotent: re-running on a file that already lists the entry is a
-// no-op.
-func ensureGitignoreEntry(dir, entry string) error {
+// ensureGitignoreEntry appends a single line to <dir>/.gitignore if the entry
+// is not already present. It creates the file if absent and returns whether the
+// file changed. Re-running on a file that already lists the entry is a no-op.
+func ensureGitignoreEntry(dir, entry string) (bool, error) {
 	path := filepath.Join(dir, ".gitignore")
 	existing, err := os.ReadFile(path) //nolint:gosec
 	switch {
@@ -455,7 +470,7 @@ func ensureGitignoreEntry(dir, entry string) error {
 		// pattern (e.g. ".kata.local.toml.bak").
 		for _, line := range strings.Split(string(existing), "\n") {
 			if strings.TrimSpace(line) == entry {
-				return nil
+				return false, nil
 			}
 		}
 		// Preserve trailing-newline convention: if the file ends without
@@ -467,16 +482,19 @@ func ensureGitignoreEntry(dir, entry string) error {
 		}
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644) //nolint:gosec // .gitignore is world-readable by convention; mode is unused by O_APPEND on existing files but golangci-lint flags it
 		if err != nil {
-			return err
+			return false, err
 		}
 		defer func() { _ = f.Close() }()
 		if _, err := f.WriteString(prefix + entry + "\n"); err != nil {
-			return err
+			return false, err
 		}
-		return nil
+		return true, nil
 	case errors.Is(err, os.ErrNotExist):
-		return os.WriteFile(path, []byte(entry+"\n"), 0o644) //nolint:gosec
+		if err := os.WriteFile(path, []byte(entry+"\n"), 0o644); err != nil { //nolint:gosec
+			return false, err
+		}
+		return true, nil
 	default:
-		return err
+		return false, err
 	}
 }

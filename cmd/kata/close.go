@@ -119,10 +119,9 @@ Instead, label and comment:
 				"evidence": parsed,
 				"dry_run":  dryRun,
 			}
-			// Route the dry-run banner to stderr (and suppress under
-			// --json / --quiet) so machine-parseable stdout isn't polluted
-			// with a non-JSON prefix.
-			if dryRun && !flags.JSON && !flags.Quiet {
+			// Route the dry-run banner to stderr only in human mode so
+			// machine-parseable output modes stay unprefixed.
+			if dryRun && currentOutputMode() == outputHuman && !flags.Quiet {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "close: dry-run (no mutations will occur)")
 			}
 			return runAction(cmd, args[0], "close", extra)

@@ -34,8 +34,9 @@ type agentIssueMutation struct {
 		Owner        *string `json:"owner"`
 		DeletedAt    *string `json:"deleted_at"`
 	} `json:"issue"`
-	Changed bool `json:"changed"`
-	Reused  bool `json:"reused,omitempty"`
+	Changed       bool    `json:"changed"`
+	Reused        bool    `json:"reused,omitempty"`
+	PreviousOwner *string `json:"previous_owner,omitempty"`
 }
 
 func printAgentMutation(cmd *cobra.Command, verb string, bs []byte, extra func(io.Writer, agentIssueMutation) error) error {

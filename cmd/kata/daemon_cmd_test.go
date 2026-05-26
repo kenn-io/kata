@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +85,154 @@ func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
 	assert.Equal(t, "OK daemon status=stopped\n", string(out))
+}
+
+func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) {
+	for _, args := range [][]string{
+		{"--agent", "daemon", "start", "--listen", "8.8.8.8:7777"},
+		{"--format", "agent", "daemon", "start", "--listen", "8.8.8.8:7777"},
+	} {
+		resetFlags(t)
+		setupKataEnv(t)
+
+		stdout, stderr, err := executeRootCapture(t, context.Background(), args...)
+
+		require.Error(t, err, "args %v", args)
+		ce := requireCLIError(t, err, ExitUsage)
+		assert.Equal(t, kindUsage, ce.Kind)
+		assert.Contains(t, ce.Message, "kata daemon start does not support --agent")
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, "kata daemon start does not support --agent")
+		assert.NotContains(t, stderr, "non-public")
+	}
+}
+
+func TestDaemonStop_AgentReportsStoppedPID(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	child := startSleepProcess(t)
+	writeRuntimePID(t, tmp, child.Process.Pid)
+
+	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "stop")
+
+	assert.Equal(t, "OK daemon action=stop pid="+strconv.Itoa(child.Process.Pid)+"\n", string(out))
+}
+
+func TestDaemonStop_AgentNoDaemonReportsNoop(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+
+	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "stop")
+
+	assert.Equal(t, "OK daemon action=stop stopped=0\n", string(out))
+}
+
+func TestDaemonStop_JSONReportsStoppedPIDs(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	child := startSleepProcess(t)
+	writeRuntimePID(t, tmp, child.Process.Pid)
+
+	out := executeRoot(t, newRootCmd(), "--json", "daemon", "stop")
+
+	var got struct {
+		KataAPIVersion int    `json:"kata_api_version"`
+		Action         string `json:"action"`
+		Stopped        int    `json:"stopped"`
+		PIDs           []int  `json:"pids"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, 1, got.KataAPIVersion)
+	assert.Equal(t, "stop", got.Action)
+	assert.Equal(t, 1, got.Stopped)
+	assert.Equal(t, []int{child.Process.Pid}, got.PIDs)
+}
+
+func TestDaemonStop_JSONReportsNoop(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+
+	out := executeRoot(t, newRootCmd(), "--json", "daemon", "stop")
+
+	var got struct {
+		KataAPIVersion int    `json:"kata_api_version"`
+		Action         string `json:"action"`
+		Stopped        int    `json:"stopped"`
+		PIDs           []int  `json:"pids"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, 1, got.KataAPIVersion)
+	assert.Equal(t, "stop", got.Action)
+	assert.Equal(t, 0, got.Stopped)
+	assert.Empty(t, got.PIDs)
+}
+
+func TestDaemonStop_AgentReportsMultiplePIDs(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	first := startSleepProcess(t)
+	second := startSleepProcess(t)
+	writeRuntimePID(t, tmp, first.Process.Pid)
+	writeRuntimePID(t, tmp, second.Process.Pid)
+
+	out := string(executeRoot(t, newRootCmd(), "--agent", "daemon", "stop"))
+
+	assert.Contains(t, out, "OK daemon action=stop stopped=2 pids=")
+	assert.Contains(t, out, strconv.Itoa(first.Process.Pid))
+	assert.Contains(t, out, strconv.Itoa(second.Process.Pid))
+}
+
+func TestDaemonStop_JSONReportsMultiplePIDs(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	first := startSleepProcess(t)
+	second := startSleepProcess(t)
+	writeRuntimePID(t, tmp, first.Process.Pid)
+	writeRuntimePID(t, tmp, second.Process.Pid)
+
+	out := executeRoot(t, newRootCmd(), "--json", "daemon", "stop")
+
+	var got struct {
+		KataAPIVersion int    `json:"kata_api_version"`
+		Action         string `json:"action"`
+		Stopped        int    `json:"stopped"`
+		PIDs           []int  `json:"pids"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, 1, got.KataAPIVersion)
+	assert.Equal(t, "stop", got.Action)
+	assert.Equal(t, 2, got.Stopped)
+	assert.ElementsMatch(t, []int{first.Process.Pid, second.Process.Pid}, got.PIDs)
+}
+
+func TestDaemonReload_AgentReportsReloadedPID(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	child := startSleepProcess(t)
+	writeRuntimePID(t, tmp, child.Process.Pid)
+
+	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "reload")
+
+	assert.Equal(t, "OK daemon action=reload pid="+strconv.Itoa(child.Process.Pid)+"\n", string(out))
+}
+
+func TestDaemonReload_JSONReportsReloadedPID(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	child := startSleepProcess(t)
+	writeRuntimePID(t, tmp, child.Process.Pid)
+
+	out := executeRoot(t, newRootCmd(), "--json", "daemon", "reload")
+
+	var got struct {
+		KataAPIVersion int    `json:"kata_api_version"`
+		Action         string `json:"action"`
+		PID            int    `json:"pid"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got))
+	assert.Equal(t, 1, got.KataAPIVersion)
+	assert.Equal(t, "reload", got.Action)
+	assert.Equal(t, child.Process.Pid, got.PID)
 }
 
 func TestHealth_AgentReportsOK(t *testing.T) {
@@ -190,4 +340,32 @@ func TestEnsureDaemon_ReturnsExistingURL(t *testing.T) {
 	url, err := ensureDaemon(context.Background())
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(url, "http://"))
+}
+
+func startSleepProcess(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "60") //nolint:gosec // test helper starts a controlled local process
+	require.NoError(t, cmd.Start())
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	})
+	return cmd
+}
+
+func writeRuntimePID(t *testing.T, home string, pid int) {
+	t.Helper()
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = daemon.WriteRuntimeFile(ns.DataDir, daemon.RuntimeRecord{
+		PID:       pid,
+		Address:   "unix://" + filepath.Join(home, "daemon.sock"),
+		DBPath:    filepath.Join(home, "kata.db"),
+		Version:   "v-test",
+		StartedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -54,17 +55,31 @@ func runClaim(cmd *cobra.Command, raw string, force bool) error {
 	return printClaimMutation(cmd, bs)
 }
 
-// printClaimMutation formats the claim response. Quiet mode prints
-// nothing; JSON mode emits the daemon body under the kata_api_version
-// envelope; otherwise prints a single human-readable line.
+// printClaimMutation formats the claim response for the selected output mode.
+// Quiet human mode prints nothing; JSON mode emits the daemon body under the
+// kata_api_version envelope; agent mode uses the mutation contract.
 func printClaimMutation(cmd *cobra.Command, bs []byte) error {
-	if flags.JSON {
+	mode := currentOutputMode()
+	if mode == outputJSON {
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 			return err
 		}
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
+	}
+	if mode == outputAgent {
+		return printAgentMutation(cmd, "claim", bs, func(w io.Writer, m agentIssueMutation) error {
+			if m.Issue.Owner != nil {
+				if err := writeAgentField(w, "Owner", agentValue(*m.Issue.Owner)); err != nil {
+					return err
+				}
+			}
+			if m.PreviousOwner != nil && *m.PreviousOwner != "" {
+				return writeAgentField(w, "Previous-Owner", agentValue(*m.PreviousOwner))
+			}
+			return nil
+		})
 	}
 	var b struct {
 		Issue struct {
