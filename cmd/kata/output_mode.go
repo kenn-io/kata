@@ -18,8 +18,6 @@ const (
 	outputAgent outputMode = "agent"
 )
 
-const agentFormatVersion = 1
-
 func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMode, error) {
 	var selected []outputMode
 	if format != "" {
@@ -121,7 +119,7 @@ func emitAgentError(w io.Writer, command string, err error) {
 	if command == "" {
 		command = "kata"
 	}
-	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, firstLine(cli.Message))
+	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, firstLine(cli.Message)) //nolint:gosec // G705: CLI stderr error text, not HTML.
 }
 
 func firstLine(s string) string {

@@ -289,7 +289,7 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
-	_, _ = fmt.Fprintln(w, "kata:", cli.Message)
+	_, _ = fmt.Fprintln(w, "kata:", cli.Message) //nolint:gosec // G705: CLI stderr error text, not HTML.
 }
 
 func cliErrorForErr(err error, runEReached bool) *cliError {
