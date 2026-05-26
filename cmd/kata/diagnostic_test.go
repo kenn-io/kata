@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,6 +18,21 @@ func TestWhoami_FlagOverride(t *testing.T) {
 	out := requireCmdOutput(t, nil, "whoami", "--as", "claude-4.7")
 	assert.Contains(t, out, "claude-4.7")
 	assert.Contains(t, out, "flag")
+}
+
+func TestWhoami_FormatJSONAliasAffectsSuccessfulOutput(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "--format", "json", "whoami", "--as", "tester"))
+
+	var got struct {
+		KataAPIVersion int    `json:"kata_api_version"`
+		Actor          string `json:"actor"`
+		Source         string `json:"source"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "output must be JSON: %s", out)
+	assert.Equal(t, 1, got.KataAPIVersion)
+	assert.Equal(t, "tester", got.Actor)
+	assert.Equal(t, "flag", got.Source)
 }
 
 func TestHealth_PrintsSchemaVersion(t *testing.T) {

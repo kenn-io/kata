@@ -176,6 +176,35 @@ func TestEmitError_AgentMode_UnknownCommandUsesKata(t *testing.T) {
 		"stderr should start with agent usage error, got %q", stderr)
 }
 
+func TestEmitError_AgentMode_ParseErrorSingleLine(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "cretae")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR kata usage:"),
+		"stderr should start with agent usage error, got %q", stderr)
+	assert.Equal(t, 1, strings.Count(stderr, "\n"), "agent error must be one physical line: %q", stderr)
+	assert.NotContains(t, stderr, "Did you mean")
+}
+
+func TestEmitError_OutputModeErrorPrecedesUnknownCommand(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--format", "xml", "cretae")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "unsupported output format")
+	assert.NotContains(t, stderr, "unknown command")
+}
+
+func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--json", "--agent", "cretae")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "conflicting output modes")
+	assert.NotContains(t, stderr, "unknown command")
+}
+
 func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)

@@ -52,6 +52,9 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			flags.Mode = mode
+			if mode == outputJSON {
+				flags.JSON = true
+			}
 			return nil
 		},
 	}
@@ -148,7 +151,10 @@ func emitErrorForMode(w io.Writer, err error, mode outputMode, runEReached bool)
 }
 
 func emitRootError(w io.Writer, cmd *cobra.Command, args []string, err error, runEReached bool) {
-	mode := resolvedOutputModeForError(cmd, args)
+	mode, modeErr := resolvedOutputModeForError(cmd, args)
+	if modeErr != nil {
+		err = modeErr
+	}
 	switch mode {
 	case outputAgent:
 		emitAgentError(w, commandNameForError(cmd, args, runEReached), cliErrorForErr(err, runEReached))
@@ -157,9 +163,9 @@ func emitRootError(w io.Writer, cmd *cobra.Command, args []string, err error, ru
 	}
 }
 
-func resolvedOutputModeForError(root *cobra.Command, args []string) outputMode {
+func resolvedOutputModeForError(root *cobra.Command, args []string) (outputMode, error) {
 	if flags.Mode != "" {
-		return flags.Mode
+		return flags.Mode, nil
 	}
 	importLegacy := false
 	if cmd := commandFromArgs(root, args); isImportCommand(cmd) {
@@ -167,9 +173,9 @@ func resolvedOutputModeForError(root *cobra.Command, args []string) outputMode {
 	}
 	mode, err := resolveOutputModeArgsForCommand(args, flags.Format, flags.JSON, flags.Agent, importLegacy)
 	if err != nil {
-		return outputHuman
+		return outputHuman, err
 	}
-	return mode
+	return mode, nil
 }
 
 func commandNameForError(root *cobra.Command, args []string, runEReached bool) string {

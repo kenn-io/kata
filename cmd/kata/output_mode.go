@@ -121,5 +121,12 @@ func emitAgentError(w io.Writer, command string, err error) {
 	if command == "" {
 		command = "kata"
 	}
-	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, cli.Message)
+	_, _ = fmt.Fprintf(w, "ERR %s %s: %s\n", command, cli.Kind, firstLine(cli.Message))
+}
+
+func firstLine(s string) string {
+	if idx := strings.IndexAny(s, "\r\n"); idx >= 0 {
+		return s[:idx]
+	}
+	return s
 }
