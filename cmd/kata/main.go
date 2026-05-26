@@ -171,7 +171,7 @@ func resolvedOutputModeForError(root *cobra.Command, args []string) (outputMode,
 	if cmd := commandFromArgs(root, args); isImportCommand(cmd) {
 		importLegacy = true
 	}
-	mode, err := resolveOutputModeArgsForCommand(args, flags.Format, flags.JSON, flags.Agent, importLegacy)
+	mode, err := resolveOutputModeArgsForCommand(args, flags.Format, flags.JSON, flags.Agent, importLegacy, root)
 	if err != nil {
 		return outputHuman, err
 	}

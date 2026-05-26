@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 type outputMode string
@@ -59,7 +60,7 @@ func resolveOutputModeForCommand(cmd *cobra.Command) (outputMode, error) {
 }
 
 func resolveOutputModeArgs(args []string, format string, jsonFlag, agentFlag bool) (outputMode, error) {
-	return resolveOutputModeArgsForCommand(args, format, jsonFlag, agentFlag, false)
+	return resolveOutputModeArgsForCommand(args, format, jsonFlag, agentFlag, false, nil)
 }
 
 func resolveOutputModeArgsForCommand(
@@ -67,7 +68,9 @@ func resolveOutputModeArgsForCommand(
 	format string,
 	jsonFlag, agentFlag bool,
 	importLegacy bool,
+	root *cobra.Command,
 ) (outputMode, error) {
+	cmd := root
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -75,10 +78,16 @@ func resolveOutputModeArgsForCommand(
 		}
 		name, value, hasValue, ok := splitLongFlag(arg)
 		if !ok {
+			if next := childCommandByName(cmd, arg); next != nil {
+				cmd = next
+			}
 			continue
 		}
 		switch name {
 		case "json":
+			if !rawFlagKnown(cmd, name) {
+				continue
+			}
 			if hasValue {
 				if parsed, err := strconv.ParseBool(value); err == nil {
 					jsonFlag = parsed
@@ -87,6 +96,9 @@ func resolveOutputModeArgsForCommand(
 				jsonFlag = true
 			}
 		case "agent":
+			if !rawFlagKnown(cmd, name) {
+				continue
+			}
 			if hasValue {
 				if parsed, err := strconv.ParseBool(value); err == nil {
 					agentFlag = parsed
@@ -95,14 +107,17 @@ func resolveOutputModeArgsForCommand(
 				agentFlag = true
 			}
 		case "format":
+			if !rawFlagKnown(cmd, name) {
+				continue
+			}
 			if hasValue {
 				format = value
 			} else if i+1 < len(args) {
 				format = args[i+1]
 				i++
 			}
-		case "as", "workspace", "project":
-			if !hasValue && i+1 < len(args) {
+		default:
+			if rawFlagConsumesValue(cmd, name) && !hasValue && i+1 < len(args) {
 				i++
 			}
 		}
@@ -122,6 +137,58 @@ func splitLongFlag(arg string) (name, value string, hasValue bool, ok bool) {
 		return before, after, true, true
 	}
 	return trimmed, "", false, true
+}
+
+func rawFlagKnown(cmd *cobra.Command, name string) bool {
+	if cmd == nil {
+		return isRootPersistentFlag(name)
+	}
+	return lookupRawFlag(cmd, name) != nil
+}
+
+func rawFlagConsumesValue(cmd *cobra.Command, name string) bool {
+	if cmd == nil {
+		return isRootStringFlag(name)
+	}
+	flag := lookupRawFlag(cmd, name)
+	return flag != nil && flag.Value.Type() != "bool"
+}
+
+func lookupRawFlag(cmd *cobra.Command, name string) *pflag.Flag {
+	if cmd == nil {
+		return nil
+	}
+	if flag := cmd.Flags().Lookup(name); flag != nil {
+		return flag
+	}
+	if flag := cmd.PersistentFlags().Lookup(name); flag != nil {
+		return flag
+	}
+	if flag := cmd.InheritedFlags().Lookup(name); flag != nil {
+		return flag
+	}
+	if root := cmd.Root(); root != nil {
+		return root.PersistentFlags().Lookup(name)
+	}
+	return nil
+}
+
+func isRootPersistentFlag(name string) bool {
+	switch name {
+	case "format", "json", "agent", "quiet", "as", "workspace", "project":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRootStringFlag(name string) bool {
+	switch name {
+	case "format", "as", "workspace", "project":
+		return true
+	default:
+		return false
+	}
 }
 
 func outputFormatValue(format string, importLegacy bool) string {

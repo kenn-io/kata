@@ -258,6 +258,24 @@ func TestEmitError_RawModeScanSkipsWorkspaceAgentValue(t *testing.T) {
 	assert.NotContains(t, stderr, "ERR ")
 }
 
+func TestEmitError_RawModeScanSkipsCreateBodyJSONValue(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "create", "--body", "--json")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
+	assert.Falsef(t, strings.HasPrefix(stderr, "{"), "stderr should not be JSON, got %q", stderr)
+}
+
+func TestEmitError_RawModeScanSkipsCreateBodyAgentValue(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "create", "--body", "--agent")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
+	assert.NotContains(t, stderr, "ERR ")
+}
+
 func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
