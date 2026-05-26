@@ -205,6 +205,41 @@ func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
 	assert.NotContains(t, stderr, "unknown command")
 }
 
+func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--json=true", "cretae")
+	require.Error(t, err)
+	got := parseErrorEnvelope(t, []byte(stderr))
+	assert.Equal(t, "usage", got.Error.Kind)
+	assert.Contains(t, got.Error.Message, "unknown command")
+}
+
+func TestEmitError_RawModeScanParsesAgentTrueValue(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--agent=true", "cretae")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR kata usage:"),
+		"stderr should use agent mode, got %q", stderr)
+}
+
+func TestEmitError_RawModeScanParsesJSONFalseValue(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--json=false", "cretae")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
+}
+
+func TestEmitError_RawModeScanParsesAgentFalseValue(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--agent=false", "cretae")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
+}
+
 func TestEmitError_RawModeScanSkipsWorkspaceFormatValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)

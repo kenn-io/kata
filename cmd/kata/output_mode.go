@@ -79,11 +79,19 @@ func resolveOutputModeArgsForCommand(
 		}
 		switch name {
 		case "json":
-			if !hasValue {
+			if hasValue {
+				if parsed, err := strconv.ParseBool(value); err == nil {
+					jsonFlag = parsed
+				}
+			} else {
 				jsonFlag = true
 			}
 		case "agent":
-			if !hasValue {
+			if hasValue {
+				if parsed, err := strconv.ParseBool(value); err == nil {
+					agentFlag = parsed
+				}
+			} else {
 				agentFlag = true
 			}
 		case "format":
