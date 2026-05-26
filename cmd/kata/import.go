@@ -122,9 +122,14 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	}); err != nil {
 		return err
 	}
-	if !flags.Quiet && !flags.JSON {
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "imported %s\n", target)
-		return err
+	if flags.Quiet || flags.JSON {
+		return nil
 	}
-	return nil
+	switch currentOutputMode() {
+	case outputAgent:
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK import source_format=kata target=%s\n", agentValue(target))
+	default:
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "imported %s\n", target)
+	}
+	return err
 }

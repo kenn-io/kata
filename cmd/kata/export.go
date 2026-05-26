@@ -71,11 +71,16 @@ func newExportCmd() *cobra.Command {
 			if err := f.Close(); err != nil {
 				return fmt.Errorf("close export output: %w", err)
 			}
-			if !flags.Quiet && !flags.JSON {
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "exported %s\n", output)
-				return err
+			if flags.Quiet || flags.JSON {
+				return nil
 			}
-			return nil
+			switch currentOutputMode() {
+			case outputAgent:
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK export output=%s\n", agentValue(output))
+			default:
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "exported %s\n", output)
+			}
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&output, "output", "", "path to write JSONL export")

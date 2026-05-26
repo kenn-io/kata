@@ -147,6 +147,62 @@ func TestDaemonLogs_Hooks_MalformedLineSkippedWithStderrWarning(t *testing.T) {
 	}
 }
 
+func TestDaemonLogs_Hooks_AgentSkipsMalformedLine(t *testing.T) {
+	_, dir, _ := setupHooksDir(t)
+	contents := "{\"event_id\":1,\"result\":\"ok\"}\nnot-json\n{\"event_id\":2,\"result\":\"ok\"}\n"
+	if err := os.WriteFile(filepath.Join(dir, "runs.jsonl"), []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resetFlags(t)
+	stdout, stderr, err := executeRootCapture(t, context.Background(), "--agent", "daemon", "logs", "--hooks")
+	require.NoError(t, err)
+
+	assert.Contains(t, stdout, "OK daemon_log event_id=1 result=ok")
+	assert.Contains(t, stdout, "OK daemon_log event_id=2 result=ok")
+	assert.NotContains(t, stdout, "not-json")
+	assert.NotContains(t, stdout, "raw=")
+	assert.Contains(t, stderr, "skipping malformed line")
+}
+
+func TestDaemonLogs_Hooks_AgentOutputOneLinePerRecord(t *testing.T) {
+	_, dir, _ := setupHooksDir(t)
+	writeRuns(t, dir, map[string][]map[string]any{
+		"runs.jsonl": {{
+			"event_id":   1,
+			"event_type": "issue.created",
+			"hook_index": 0,
+			"result":     "failed",
+			"exit_code":  1,
+			"stderr":     "first line\nsecond line",
+		}},
+	})
+	resetFlags(t)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "--agent", "daemon", "logs", "--hooks")
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	require.Len(t, lines, 1, "agent daemon logs must emit one physical line per record: %q", stdout)
+	assert.Contains(t, lines[0], "OK daemon_log")
+	assert.Contains(t, lines[0], "event_id=1")
+	assert.Contains(t, lines[0], "event_type=issue.created")
+	assert.Contains(t, lines[0], "hook_index=0")
+	assert.Contains(t, lines[0], "result=failed")
+	assert.Contains(t, lines[0], "exit_code=1")
+	assert.Contains(t, lines[0], `stderr="first line\nsecond line"`)
+	assert.NotContains(t, lines[0], "{")
+}
+
+func TestFormatAgentHookLogRecordFormatsDecodedRecord(t *testing.T) {
+	got := formatAgentHookLogRecord(map[string]json.RawMessage{
+		"event_id":   json.RawMessage(`1`),
+		"event_type": json.RawMessage(`"issue.created"`),
+		"stderr":     json.RawMessage(`"first line\nsecond line"`),
+	})
+
+	assert.Equal(t, `OK daemon_log event_id=1 event_type=issue.created stderr="first line\nsecond line"`, got)
+}
+
 // TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive guards the
 // awaitActiveFile contract that --tail will not latch onto a rotated
 // runs.jsonl.N when the active runs.jsonl is missing. Before the fix,

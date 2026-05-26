@@ -40,7 +40,7 @@ func TestImportCreatesTargetDB(t *testing.T) {
 func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
 	_, input, target := setupImportTest(t)
 
-	_, err := runCmdOutput(t, nil, "import", "--format", "agent", "--input", input, "--target", target)
+	out, err := runCmdOutput(t, nil, "import", "--format", "agent", "--source-format", "kata", "--input", input, "--target", target)
 	require.NoError(t, err)
 
 	d, err := db.Open(context.Background(), target)
@@ -49,6 +49,7 @@ func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
 	got, err := d.ProjectByName(context.Background(), "kata")
 	require.NoError(t, err)
 	assert.Equal(t, "kata", got.Name)
+	assert.Equal(t, "OK import source_format=kata target="+target+"\n", out)
 }
 
 func TestImportLegacyFormatConflictsWithSourceFormat(t *testing.T) {

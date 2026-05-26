@@ -105,6 +105,17 @@ func TestImportBeadsJSONSummaryFromLiveBD(t *testing.T) {
 	assert.Empty(t, summary.Errors)
 }
 
+func TestImportBeadsAgentSummaryFromLiveBD(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	installFakeBD(t)
+
+	out, err := runCLICapture(t, env, dir, "import", "--source-format", "beads", "--agent", "--as", "importer")
+	require.NoError(t, err)
+
+	assert.Equal(t, "OK import source_format=beads project="+itoa(pid)+" created=1 updated=0 unchanged=0 comments=1 links=0\n", out)
+	assert.NotContains(t, out, "target=")
+}
+
 // TestBeadsImport_AssignsShortIDs pins that imported beads issues pick
 // up a valid kata short_id from the auto-extend path — the importer
 // creates fresh kata ULIDs and the short_id flows through unchanged in

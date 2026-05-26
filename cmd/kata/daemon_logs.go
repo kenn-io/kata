@@ -157,7 +157,7 @@ func runHookLogOnce(stdout, stderr io.Writer, limit int, f *hookLogFilter) (acti
 		start = len(matches) - limit
 	}
 	for _, m := range matches[start:] {
-		writeLine(stdout, m)
+		writeHookLogRecord(stdout, []byte(m))
 	}
 	return mark, nil
 }
@@ -169,6 +169,47 @@ func runHookLogOnce(stdout, stderr io.Writer, limit int, f *hookLogFilter) (acti
 func writeLine(w io.Writer, s string) {
 	_, _ = w.Write([]byte(s))
 	_, _ = w.Write([]byte{'\n'})
+}
+
+func writeHookLogRecord(w io.Writer, raw []byte) {
+	if currentOutputMode() != outputAgent {
+		writeLine(w, string(raw))
+		return
+	}
+	var rec map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return
+	}
+	writeLine(w, formatAgentHookLogRecord(rec))
+}
+
+func formatAgentHookLogRecord(rec map[string]json.RawMessage) string {
+	keys := make([]string, 0, len(rec))
+	for k := range rec {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("OK daemon_log")
+	for _, k := range keys {
+		b.WriteByte(' ')
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(agentLogValue(rec[k]))
+	}
+	return b.String()
+}
+
+func agentLogValue(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return agentValue(s)
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return agentValue(string(raw))
+	}
+	return agentValue(buf.String())
 }
 
 // readMatchesFromFile reads one file and returns its matching records.
@@ -372,7 +413,7 @@ func emitOne(content []byte, lineNo int, path string, stdout, stderr io.Writer, 
 		}
 		return
 	}
-	writeLine(stdout, string(rec))
+	writeHookLogRecord(stdout, rec)
 }
 
 // hookRunsRoot returns $KATA_HOME/hooks/<dbhash> for the active KATA_DB.

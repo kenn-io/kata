@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,6 +34,90 @@ func TestProjects_ListJSONHasNoNextIssueNumber(t *testing.T) {
 	}
 }
 
+func TestProjects_ListAgentIncludesStats(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "kata")
+	require.NoError(t, err)
+	open, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "open", Author: "tester"})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "closed", Author: "tester"})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.CloseIssue(ctx, open.ID, "done", "tester", "", nil)
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "--agent", "projects", "list")
+
+	assert.Equal(t, "OK projects count=1\n- project=kata id="+itoa(p.ID)+" open=1 closed=1\n", out)
+}
+
+func TestProjects_ShowAgentUsesReadShape(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "kata")
+	require.NoError(t, err)
+	closed, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "closed", Author: "tester"})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "open", Author: "tester"})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.CloseIssue(ctx, closed.ID, "done", "tester", "", nil)
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "--agent", "projects", "show", itoa(p.ID))
+
+	assert.Equal(t, "OK projects count=1\n- project=kata id="+itoa(p.ID)+"\n", out)
+}
+
+func TestProjects_ShowAgentDoesNotFetchStats(t *testing.T) {
+	var statsRequests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/projects" && r.URL.Query().Get("include") == "stats":
+			statsRequests++
+			http.Error(w, "unexpected stats request", http.StatusTeapot)
+		case r.URL.Path == "/api/v1/projects":
+			_, _ = w.Write([]byte(`{"projects":[{"id":1,"name":"kata"}]}`))
+		case r.URL.Path == "/api/v1/projects/1":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"kata"},"aliases":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	resetFlags(t)
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+		"--agent", "projects", "show", "kata")
+	require.NoError(t, err)
+
+	assert.Equal(t, "OK projects count=1\n- project=kata id=1\n", stdout)
+	assert.Equal(t, 0, statsRequests)
+}
+
+func TestProjects_ShowNumericIDDoesNotListProjects(t *testing.T) {
+	var listRequests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects":
+			listRequests++
+			http.Error(w, "unexpected list request", http.StatusTeapot)
+		case "/api/v1/projects/1":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"kata"},"aliases":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	resetFlags(t)
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+		"--agent", "projects", "show", "1")
+	require.NoError(t, err)
+
+	assert.Equal(t, "OK projects count=1\n- project=kata id=1\n", stdout)
+	assert.Equal(t, 0, listRequests)
+}
+
 func TestProjects_RestoreArchivedProjectByName(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -50,6 +136,17 @@ func TestProjects_RestoreArchivedProjectByName(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, p.ID, got.ID)
 	assert.Nil(t, got.DeletedAt)
+}
+
+func TestProjects_RenameAgentOutput(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "old")
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "--agent", "projects", "rename", itoa(p.ID), "new name")
+
+	assert.Equal(t, "OK project action=rename id="+itoa(p.ID)+" project=\"new name\"\n", out)
 }
 
 func TestProjects_RestoreActiveProjectIsNoop(t *testing.T) {

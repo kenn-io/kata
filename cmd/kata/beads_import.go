@@ -146,7 +146,7 @@ func runBeadsImport(cmd *cobra.Command) error {
 	if status >= 400 {
 		return apiErrFromBody(status, bs)
 	}
-	return printBeadsImportResult(cmd, bs)
+	return printBeadsImportResult(cmd, bs, projectID)
 }
 
 func collectBeadsImportRequest(ctx context.Context, workspace, actor string) (beadsImportRequest, error) {
@@ -252,7 +252,7 @@ func isBeadsImportUnattended(cmd *cobra.Command) bool {
 	return !ok || !isTTY(out)
 }
 
-func printBeadsImportResult(cmd *cobra.Command, bs []byte) error {
+func printBeadsImportResult(cmd *cobra.Command, bs []byte, projectID int64) error {
 	if flags.JSON {
 		_, err := cmd.OutOrStdout().Write(bs)
 		return err
@@ -262,6 +262,12 @@ func printBeadsImportResult(cmd *cobra.Command, bs []byte) error {
 	}
 	var summary beadsImportSummary
 	if err := json.Unmarshal(bs, &summary); err != nil {
+		return err
+	}
+	if currentOutputMode() == outputAgent {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(),
+			"OK import source_format=beads project=%d created=%d updated=%d unchanged=%d comments=%d links=%d\n",
+			projectID, summary.Created, summary.Updated, summary.Unchanged, summary.Comments, summary.Links)
 		return err
 	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(),

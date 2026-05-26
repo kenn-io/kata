@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -64,14 +65,19 @@ func projectsListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/projects", nil)
+			mode := currentOutputMode()
+			path := baseURL + "/api/v1/projects"
+			if mode == outputAgent {
+				path += "?include=stats"
+			}
+			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, path, nil)
 			if err != nil {
 				return err
 			}
 			if status >= 400 {
 				return apiErrFromBody(status, bs)
 			}
-			if flags.JSON {
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err
@@ -81,12 +87,38 @@ func projectsListCmd() *cobra.Command {
 			}
 			var b struct {
 				Projects []struct {
-					ID   int64  `json:"id"`
-					Name string `json:"name"`
+					ID    int64  `json:"id"`
+					Name  string `json:"name"`
+					Stats *struct {
+						Open   int `json:"open"`
+						Closed int `json:"closed"`
+					} `json:"stats"`
 				} `json:"projects"`
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
+			}
+			if mode == outputAgent {
+				out := cmd.OutOrStdout()
+				if _, err := fmt.Fprintf(out, "OK projects count=%d\n", len(b.Projects)); err != nil {
+					return err
+				}
+				for _, p := range b.Projects {
+					open, closed := 0, 0
+					if p.Stats != nil {
+						open = p.Stats.Open
+						closed = p.Stats.Closed
+					}
+					if err := writeAgentKVRow(out,
+						agentRowField("project", p.Name),
+						agentRowField("id", fmt.Sprint(p.ID)),
+						agentRowField("open", fmt.Sprint(open)),
+						agentRowField("closed", fmt.Sprint(closed)),
+					); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 			for _, p := range b.Projects {
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%d  %s\n",
@@ -148,6 +180,12 @@ func projectsRenameCmd() *cobra.Command {
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
+			}
+			if currentOutputMode() == outputAgent {
+				return writeAgentProjectAction(cmd.OutOrStdout(), "rename",
+					agentRowField("id", fmt.Sprint(b.Project.ID)),
+					agentRowField("project", b.Project.Name),
+				)
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "renamed project #%d to %s\n",
 				b.Project.ID, textsafe.Line(b.Project.Name))
@@ -220,6 +258,28 @@ func projectsMergeCmd() *cobra.Command {
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
+			}
+			if currentOutputMode() == outputAgent {
+				if err := writeAgentProjectAction(cmd.OutOrStdout(), "merge",
+					agentRowField("source", fmt.Sprint(b.Source.ID)),
+					agentRowField("target", fmt.Sprint(b.Target.ID)),
+					agentRowField("project", b.Target.Name),
+					agentRowField("issues_moved", fmt.Sprint(b.IssuesMoved)),
+					agentRowField("aliases_moved", fmt.Sprint(b.AliasesMoved)),
+					agentRowField("events_moved", fmt.Sprint(b.EventsMoved)),
+				); err != nil {
+					return err
+				}
+				for _, ext := range b.ShortIDExtensions {
+					if err := writeAgentKVRow(cmd.OutOrStdout(),
+						agentRowField("uid", ext.UID),
+						agentRowField("pre_merge_short_id", ext.PreMergeShortID),
+						agentRowField("post_merge_short_id", ext.PostMergeShortID),
+					); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(),
 				"merged project #%d into #%d (%s); moved %s, %s, %s\n",
@@ -300,9 +360,15 @@ func projectsShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			project, err := resolveProjectSelector(ctx, client, baseURL, args[0])
-			if err != nil {
-				return err
+			project := projectRef{}
+			if id, parseErr := strconv.ParseInt(strings.TrimSpace(args[0]), 10, 64); parseErr == nil {
+				project.ID = id
+			} else {
+				var err error
+				project, err = resolveProjectSelector(ctx, client, baseURL, args[0])
+				if err != nil {
+					return err
+				}
 			}
 			status, bs, err := httpDoJSON(ctx, client, http.MethodGet,
 				fmt.Sprintf("%s/api/v1/projects/%d", baseURL, project.ID), nil)
@@ -328,6 +394,16 @@ func projectsShowCmd() *cobra.Command {
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
+			}
+			if currentOutputMode() == outputAgent {
+				out := cmd.OutOrStdout()
+				if _, err := fmt.Fprintln(out, "OK projects count=1"); err != nil {
+					return err
+				}
+				return writeAgentKVRow(out,
+					agentRowField("project", b.Project.Name),
+					agentRowField("id", fmt.Sprint(b.Project.ID)),
+				)
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "#%d %s\n",
 				b.Project.ID, textsafe.Line(b.Project.Name))
@@ -559,6 +635,12 @@ func projectsRemoveCmd() *cobra.Command {
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
 			}
+			if currentOutputMode() == outputAgent {
+				return writeAgentProjectAction(cmd.OutOrStdout(), "remove",
+					agentRowField("id", fmt.Sprint(project.ID)),
+					agentRowField("project", project.Name),
+				)
+			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(),
 				"archived project #%d (%s); events preserved, aliases dropped\n",
 				project.ID, textsafe.Line(project.Name))
@@ -615,6 +697,13 @@ func projectsRestoreCmd() *cobra.Command {
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
+			}
+			if currentOutputMode() == outputAgent {
+				return writeAgentProjectAction(cmd.OutOrStdout(), "restore",
+					agentRowField("id", fmt.Sprint(b.Project.ID)),
+					agentRowField("project", b.Project.Name),
+					agentRowField("changed", strconv.FormatBool(b.Changed)),
+				)
 			}
 			if !b.Changed {
 				_, err = fmt.Fprintf(cmd.OutOrStdout(),
@@ -684,6 +773,13 @@ func projectsDetachCmd() *cobra.Command {
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
 			}
+			if currentOutputMode() == outputAgent {
+				return writeAgentProjectAction(cmd.OutOrStdout(), "detach",
+					agentRowField("project_id", fmt.Sprint(projectID)),
+					agentRowField("alias_id", fmt.Sprint(aliasID)),
+					agentRowField("alias", selector),
+				)
+			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(),
 				"detached alias %q from project #%d\n", selector, projectID)
 			return err
@@ -691,6 +787,22 @@ func projectsDetachCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "drop the alias even when it's the only one for its project")
 	return cmd
+}
+
+func writeAgentProjectAction(w io.Writer, action string, fields ...agentField) error {
+	if _, err := fmt.Fprintf(w, "OK project action=%s", agentValue(action)); err != nil {
+		return err
+	}
+	for _, f := range fields {
+		if f.value == nil {
+			continue
+		}
+		if _, err := fmt.Fprintf(w, " %s=%s", f.name, agentValue(*f.value)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(w)
+	return err
 }
 
 // findAliasBySelector matches an alias_identity exactly across every

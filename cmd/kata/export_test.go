@@ -38,6 +38,28 @@ func TestExportWritesJSONLToOutput(t *testing.T) {
 	assert.Contains(t, out, outPath)
 }
 
+func TestExportAgentOutput(t *testing.T) {
+	home := setupKataEnv(t)
+	dbPath := filepath.Join(home, "kata.db")
+	d, err := db.Open(context.Background(), dbPath)
+	require.NoError(t, err)
+	p, err := d.CreateProject(context.Background(), "kata")
+	require.NoError(t, err)
+	_, _, err = d.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "agent export",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	outPath := filepath.Join(home, "agent.jsonl")
+	out, err := runCmdOutput(t, nil, "export", "--agent", "--output", outPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, "OK export output="+outPath+"\n", out)
+}
+
 func TestExportScopesByProjectName(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
