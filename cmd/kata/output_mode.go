@@ -34,10 +34,36 @@ type agentIssueMutation struct {
 		Owner        *string `json:"owner"`
 		DeletedAt    *string `json:"deleted_at"`
 	} `json:"issue"`
+	Event *struct {
+		Payload string `json:"payload"`
+	} `json:"event"`
+	Label struct {
+		Label string `json:"label"`
+	} `json:"label"`
 	Changed       bool    `json:"changed"`
 	Reused        bool    `json:"reused,omitempty"`
 	PreviousOwner *string `json:"previous_owner,omitempty"`
 }
+
+type outputFormatFlag struct {
+	value  *string
+	values *[]string
+}
+
+func (f outputFormatFlag) Set(s string) error {
+	*f.value = s
+	*f.values = append(*f.values, s)
+	return nil
+}
+
+func (f outputFormatFlag) String() string {
+	if f.value == nil {
+		return ""
+	}
+	return *f.value
+}
+
+func (f outputFormatFlag) Type() string { return "string" }
 
 func printAgentMutation(cmd *cobra.Command, verb string, bs []byte, extra func(io.Writer, agentIssueMutation) error) error {
 	var m agentIssueMutation
@@ -88,9 +114,16 @@ func printAgentMutationDecoded(
 	return nil
 }
 
-func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMode, error) {
+func resolveOutputModeFormats(formats []string, fallback string, importLegacy bool, jsonFlag, agentFlag bool) (outputMode, error) {
+	if len(formats) == 0 && fallback != "" {
+		formats = []string{fallback}
+	}
 	var selected []outputMode
-	if format != "" {
+	for _, format := range formats {
+		format = outputFormatValue(format, importLegacy)
+		if format == "" {
+			continue
+		}
 		switch outputMode(format) {
 		case outputHuman, outputJSON, outputAgent:
 			selected = append(selected, outputMode(format))
@@ -120,6 +153,10 @@ func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMod
 	return first, nil
 }
 
+func resolveOutputModeValues(format string, jsonFlag, agentFlag bool) (outputMode, error) {
+	return resolveOutputModeFormats(nil, format, false, jsonFlag, agentFlag)
+}
+
 func currentOutputMode() outputMode {
 	if flags.Mode != "" {
 		return flags.Mode
@@ -138,7 +175,7 @@ func resolveOutputModeForCommand(cmd *cobra.Command) (outputMode, error) {
 	if isImportCommand(cmd) && isImportLegacySourceFormat(format) {
 		format = ""
 	}
-	return resolveOutputModeValues(format, flags.JSON, flags.Agent)
+	return resolveOutputModeFormats(flags.FormatValues, format, isImportCommand(cmd), flags.JSON, flags.Agent)
 }
 
 func resolveOutputModeArgs(args []string, format string, jsonFlag, agentFlag bool) (outputMode, error) {
@@ -153,10 +190,11 @@ func resolveOutputModeArgsForCommand(
 	root *cobra.Command,
 ) (outputMode, error) {
 	cmd := root
+	formats := append([]string(nil), flags.FormatValues...)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
-			return resolveOutputModeValues(outputFormatValue(format, importLegacy), jsonFlag, agentFlag)
+			return resolveOutputModeFormats(formats, format, importLegacy, jsonFlag, agentFlag)
 		}
 		name, value, hasValue, ok := splitLongFlag(arg)
 		if !ok {
@@ -194,8 +232,10 @@ func resolveOutputModeArgsForCommand(
 			}
 			if hasValue {
 				format = value
+				formats = append(formats, value)
 			} else if i+1 < len(args) {
 				format = args[i+1]
+				formats = append(formats, args[i+1])
 				i++
 			}
 		default:
@@ -204,7 +244,7 @@ func resolveOutputModeArgsForCommand(
 			}
 		}
 	}
-	return resolveOutputModeValues(outputFormatValue(format, importLegacy), jsonFlag, agentFlag)
+	return resolveOutputModeFormats(formats, format, importLegacy, jsonFlag, agentFlag)
 }
 
 func splitLongFlag(arg string) (name, value string, hasValue bool, ok bool) {

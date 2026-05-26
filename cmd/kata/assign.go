@@ -89,7 +89,11 @@ func printAssignMutation(cmd *cobra.Command, bs []byte, unassign bool) error {
 		if unassign {
 			verb = "unassign"
 		}
-		return printAgentMutation(cmd, verb, bs, func(w io.Writer, m agentIssueMutation) error {
+		var m agentIssueMutation
+		if err := json.Unmarshal(bs, &m); err != nil {
+			return err
+		}
+		return printAgentMutationDecoded(cmd.OutOrStdout(), verb, m, true, func(w io.Writer, m agentIssueMutation) error {
 			if unassign {
 				return writeAgentField(w, "Owner-Cleared", "true")
 			}

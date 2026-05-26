@@ -177,6 +177,21 @@ func TestEdit_HumanModePrintsLinkSummary(t *testing.T) {
 		"human-mode no-op edit must say so explicitly: %q", out)
 }
 
+func TestEdit_AgentOutputIncludesChangedAndChanges(t *testing.T) {
+	env, dir := setupCLIEnv(t)
+	pid := resolvePIDViaHTTP(t, env.URL, dir)
+	subject := createIssue(t, env, pid, "subject")
+	target := createIssue(t, env, pid, "target")
+
+	out := runCLI(t, env, dir, "--agent", "edit", subject,
+		"--title", "renamed subject",
+		"--owner", "wesm",
+		"--blocks", target)
+
+	assert.Regexp(t, `(?m)^OK edit \S+ changed=true`, out)
+	assert.Contains(t, out, "Changes: title, owner, links")
+}
+
 // TestEdit_DistinctParentRefsRejected covers the at-most-one parent contract.
 // --parent A --parent B (or --remove-parent) must error rather than
 // silently last-winning so a typo can't mutate the wrong relationship.

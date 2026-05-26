@@ -23,6 +23,6 @@ func TestRestore_AgentOutput(t *testing.T) {
 	resetFlags(t)
 	out := runCLI(t, env, dir, "--agent", "restore", short)
 
-	assert.Regexp(t, `(?m)^OK restore \S+`, out)
+	assert.Regexp(t, `(?m)^OK restore \S+ changed=true`, out)
 	assert.Contains(t, out, "Deleted: false")
 }

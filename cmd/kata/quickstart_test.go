@@ -47,6 +47,14 @@ func TestQuickstart_JSON(t *testing.T) {
 	assert.Contains(t, got.Quickstart, "kata events --after 0 --limit 100 --json")
 }
 
+func TestQuickstart_AgentOutput(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newRootCmd(), "--agent", "quickstart"))
+	assert.Truef(t, strings.HasPrefix(out, "OK quickstart\n"), "got %q", out)
+	assert.Contains(t, out, "Use --agent for concise action summaries in agent logs.")
+	assert.Contains(t, out, "Use --json when your script needs complete structured data.")
+}
+
 func TestQuickstart_AgentInstructionsAliasMentionsAgentOutput(t *testing.T) {
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "agent-instructions"))

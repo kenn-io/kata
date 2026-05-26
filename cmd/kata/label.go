@@ -201,7 +201,10 @@ func printLabelMutation(cmd *cobra.Command, bs []byte) error {
 		if err := json.Unmarshal(bs, &m); err != nil {
 			return err
 		}
-		return printAgentMutationDecoded(cmd.OutOrStdout(), "label", m, true, func(w io.Writer, _ agentIssueMutation) error {
+		return printAgentMutationDecoded(cmd.OutOrStdout(), "label", m, true, func(w io.Writer, m agentIssueMutation) error {
+			if err := writeAgentField(w, "Label", agentValue(m.Label.Label)); err != nil {
+				return err
+			}
 			return writeAgentField(w, "Action", "added")
 		})
 	}
@@ -249,6 +252,9 @@ func printLabelRemoved(cmd *cobra.Command, bs []byte, ref, label string) error {
 			return err
 		}
 		return printAgentMutationDecoded(cmd.OutOrStdout(), "label", m, true, func(w io.Writer, _ agentIssueMutation) error {
+			if err := writeAgentField(w, "Label", agentValue(label)); err != nil {
+				return err
+			}
 			return writeAgentField(w, "Action", "removed")
 		})
 	}

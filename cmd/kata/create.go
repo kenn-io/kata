@@ -462,10 +462,30 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 		return err
 	}
 	if mode == outputAgent {
-		return printAgentMutation(cmd, commandLeaf(cmd), bs, func(w io.Writer, m agentIssueMutation) error {
+		var m agentIssueMutation
+		if err := json.Unmarshal(bs, &m); err != nil {
+			return err
+		}
+		verb := commandLeaf(cmd)
+		includeChangedTrue := verb == "edit"
+		return printAgentMutationDecoded(cmd.OutOrStdout(), verb, m, includeChangedTrue, func(w io.Writer, m agentIssueMutation) error {
 			if m.Issue.ClosedReason != nil {
 				if err := writeAgentField(w, "Reason", agentValue(*m.Issue.ClosedReason)); err != nil {
 					return err
+				}
+			}
+			if verb == "close" {
+				for _, evidence := range agentEvidenceSummaries(m) {
+					if err := writeAgentField(w, "Evidence", agentValue(evidence)); err != nil {
+						return err
+					}
+				}
+			}
+			if verb == "edit" && m.Changed {
+				if changes := agentEditChangeNames(cmd, b.Changes); len(changes) > 0 {
+					if err := writeAgentField(w, "Changes", strings.Join(changes, ", ")); err != nil {
+						return err
+					}
 				}
 			}
 			return nil
@@ -567,4 +587,85 @@ func summarizeChanges(c *mutationChanges, changed bool) string {
 		return ""
 	}
 	return "links: " + strings.Join(parts, ", ")
+}
+
+func agentEditChangeNames(cmd *cobra.Command, changes *mutationChanges) []string {
+	names := make([]string, 0, 5)
+	for _, item := range []struct {
+		flag string
+		name string
+	}{
+		{"title", "title"},
+		{"body", "body"},
+		{"owner", "owner"},
+		{"priority", "priority"},
+	} {
+		if cmd.Flags().Changed(item.flag) {
+			names = append(names, item.name)
+		}
+	}
+	if agentHasLinkChanges(cmd, changes) {
+		names = append(names, "links")
+	}
+	return names
+}
+
+func agentHasLinkChanges(cmd *cobra.Command, changes *mutationChanges) bool {
+	if changes != nil {
+		if changes.ParentSet != nil || changes.ParentRemoved != nil ||
+			len(changes.BlocksAdded) > 0 || len(changes.BlocksRemoved) > 0 ||
+			len(changes.BlockedByAdded) > 0 || len(changes.BlockedByRemoved) > 0 ||
+			len(changes.RelatedAdded) > 0 || len(changes.RelatedRemoved) > 0 {
+			return true
+		}
+	}
+	for _, flag := range []string{
+		"parent", "blocks", "blocked-by", "related",
+		"remove-parent", "remove-blocks", "remove-blocked-by", "remove-related",
+	} {
+		if cmd.Flags().Changed(flag) {
+			return true
+		}
+	}
+	return false
+}
+
+func agentEvidenceSummaries(m agentIssueMutation) []string {
+	if m.Event == nil || m.Event.Payload == "" {
+		return nil
+	}
+	var payload struct {
+		Evidence []struct {
+			Type      string   `json:"type"`
+			SHA       string   `json:"sha,omitempty"`
+			URL       string   `json:"url,omitempty"`
+			Command   string   `json:"command,omitempty"`
+			Paths     []string `json:"paths,omitempty"`
+			Rationale string   `json:"rationale,omitempty"`
+			IssueRef  string   `json:"issue_ref,omitempty"`
+		} `json:"evidence,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(m.Event.Payload), &payload); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(payload.Evidence))
+	for _, ev := range payload.Evidence {
+		switch ev.Type {
+		case "commit":
+			out = append(out, "commit:"+ev.SHA)
+		case "pr":
+			out = append(out, "pr:"+ev.URL)
+		case "test":
+			out = append(out, "test:"+ev.Command)
+		case "reviewed-paths":
+			out = append(out, "reviewed-paths:"+strings.Join(ev.Paths, ","))
+		case "no-change-audit":
+			out = append(out, "no-change-audit:"+ev.Rationale)
+		case "duplicate-of":
+			out = append(out, "duplicate-of:"+ev.IssueRef)
+		case "superseded-by":
+			out = append(out, "superseded-by:"+ev.IssueRef)
+		}
+	}
+	return out
 }

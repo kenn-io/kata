@@ -205,6 +205,16 @@ func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
 	assert.NotContains(t, stderr, "unknown command")
 }
 
+func TestOutputMode_RepeatedFormatConflicts(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	stdout, stderr, err := executeRootCapture(t, context.Background(),
+		"--format", "human", "--format", "json", "version")
+	require.Error(t, err)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "conflicting output modes")
+}
+
 func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)

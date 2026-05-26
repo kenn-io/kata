@@ -242,7 +242,7 @@ func TestHealth_AgentReportsOK(t *testing.T) {
 	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
 
 	out := executeRoot(t, cmd, "--agent", "health")
-	assert.Contains(t, string(out), "OK health")
+	assert.Equal(t, "OK health ok=true daemon=running\n", string(out))
 }
 
 func TestDaemonStart_ListenFlagRejectsPublicAddress(t *testing.T) {

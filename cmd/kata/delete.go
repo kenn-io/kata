@@ -191,7 +191,7 @@ func printDestructive(cmd *cobra.Command, ref, verb string, bs []byte) error {
 					return err
 				}
 			}
-			return writeAgentField(cmd.OutOrStdout(), "Purged", "true")
+			return writeAgentField(cmd.OutOrStdout(), "Status", "purged")
 		}
 	}
 	if flags.Quiet {

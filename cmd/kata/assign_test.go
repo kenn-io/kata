@@ -24,7 +24,7 @@ func TestAssign_AgentOutput(t *testing.T) {
 
 	out := runCLI(t, env, dir, "--agent", "assign", ref, "wesm")
 
-	assert.Regexp(t, `(?m)^OK assign \S+`, out)
+	assert.Regexp(t, `(?m)^OK assign \S+ changed=true`, out)
 	assert.Contains(t, out, "Owner: wesm")
 }
 
@@ -35,7 +35,7 @@ func TestUnassign_AgentOutput(t *testing.T) {
 	resetFlags(t)
 	out := runCLI(t, env, dir, "--agent", "unassign", ref)
 
-	assert.Regexp(t, `(?m)^OK unassign \S+`, out)
+	assert.Regexp(t, `(?m)^OK unassign \S+ changed=true`, out)
 	assert.Contains(t, out, "Owner-Cleared: true")
 }
 

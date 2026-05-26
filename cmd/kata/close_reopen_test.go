@@ -35,6 +35,7 @@ func TestClose_AgentOutput(t *testing.T) {
 	assert.Regexp(t, `(?m)^OK close \S+`, out)
 	assert.Contains(t, out, "Status: closed")
 	assert.Contains(t, out, "Reason: done")
+	assert.Contains(t, out, "Evidence: commit:abc1234")
 }
 
 func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {

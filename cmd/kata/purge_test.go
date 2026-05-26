@@ -32,7 +32,7 @@ func TestPurge_AgentOutput(t *testing.T) {
 
 	assert.Regexp(t, `(?m)^OK purge `+short, out)
 	assert.Contains(t, out, `Issue: `+short+` vaporize`)
-	assert.Contains(t, out, "Purged: true")
+	assert.Contains(t, out, "Status: purged")
 }
 
 // TestPurge_NoTTYNoConfirmIsConfirmRequired mirrors the delete coverage:

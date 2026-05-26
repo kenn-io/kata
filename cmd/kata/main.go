@@ -17,14 +17,15 @@ import (
 
 // globalFlags carries the universal flags applied on every command.
 type globalFlags struct {
-	Format    string
-	JSON      bool
-	Agent     bool
-	Mode      outputMode
-	Quiet     bool
-	As        string
-	Workspace string
-	Project   string
+	Format       string
+	FormatValues []string
+	JSON         bool
+	Agent        bool
+	Mode         outputMode
+	Quiet        bool
+	As           string
+	Workspace    string
+	Project      string
 }
 
 var flags globalFlags
@@ -58,7 +59,8 @@ func newRootCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.PersistentFlags().StringVar(&flags.Format, "format", "", "output format: human|json|agent")
+	cmd.PersistentFlags().Var(outputFormatFlag{value: &flags.Format, values: &flags.FormatValues},
+		"format", "output format: human|json|agent")
 	cmd.PersistentFlags().BoolVar(&flags.JSON, "json", false, "emit machine-readable JSON")
 	cmd.PersistentFlags().BoolVar(&flags.Agent, "agent", false, "emit concise agent-readable text")
 	cmd.PersistentFlags().BoolVarP(&flags.Quiet, "quiet", "q", false, "suppress non-essential output")

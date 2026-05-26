@@ -155,7 +155,8 @@ func newQuickstartCmd() *cobra.Command {
 		Short:   "print instructions for agents using kata",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if flags.JSON {
+			switch currentOutputMode() {
+			case outputJSON:
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, map[string]string{
 					"quickstart": agentQuickstartText,
@@ -163,6 +164,9 @@ func newQuickstartCmd() *cobra.Command {
 					return err
 				}
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+				return err
+			case outputAgent:
+				_, err := fmt.Fprint(cmd.OutOrStdout(), "OK quickstart\n"+agentQuickstartText)
 				return err
 			}
 			_, err := fmt.Fprint(cmd.OutOrStdout(), agentQuickstartText)

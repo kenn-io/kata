@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,7 +41,11 @@ func newRestoreCmd() *cobra.Command {
 				return apiErrFromBody(status, bs)
 			}
 			if currentOutputMode() == outputAgent {
-				return printAgentMutation(cmd, "restore", bs, func(w io.Writer, _ agentIssueMutation) error {
+				var m agentIssueMutation
+				if err := json.Unmarshal(bs, &m); err != nil {
+					return err
+				}
+				return printAgentMutationDecoded(cmd.OutOrStdout(), "restore", m, true, func(w io.Writer, _ agentIssueMutation) error {
 					return writeAgentField(w, "Deleted", "false")
 				})
 			}

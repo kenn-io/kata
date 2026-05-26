@@ -22,6 +22,7 @@ func TestLabelAdd_AgentOutput(t *testing.T) {
 	out := runCLI(t, env, dir, "--agent", "label", "add", ref, "needs-review")
 
 	assert.Regexp(t, `(?m)^OK label \S+ changed=true`, out)
+	assert.Contains(t, out, "Label: needs-review")
 	assert.Contains(t, out, "Action: added")
 }
 
@@ -31,6 +32,18 @@ func TestLabelRm_HappyPath(t *testing.T) {
 	runCLI(t, env, dir, "label", "add", ref, "bug")
 	out := runCLI(t, env, dir, "label", "rm", ref, "bug")
 	assert.True(t, strings.Contains(out, "removed") || strings.Contains(out, "unlabeled"))
+}
+
+func TestLabelRm_AgentOutput(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
+	runCLI(t, env, dir, "label", "add", ref, "bug")
+
+	resetFlags(t)
+	out := runCLI(t, env, dir, "--agent", "label", "rm", ref, "bug")
+
+	assert.Regexp(t, `(?m)^OK label \S+ changed=true`, out)
+	assert.Contains(t, out, "Label: bug")
+	assert.Contains(t, out, "Action: removed")
 }
 
 func TestLabelsList_PrintsCounts(t *testing.T) {

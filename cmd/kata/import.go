@@ -55,7 +55,7 @@ func resolveImportSourceFormat(cmd *cobra.Command, sourceFormat string) (string,
 	// select output mode, while kata|beads are temporary legacy import source
 	// values. The sets are intentionally disjoint so this fallback can be
 	// removed after the deprecation window without ambiguity.
-	legacy := strings.TrimSpace(flags.Format)
+	legacy := legacyImportSourceFormat()
 	if isImportLegacySourceFormat(legacy) {
 		if cmd.Flags().Changed("source-format") {
 			return "", &cliError{
@@ -67,6 +67,16 @@ func resolveImportSourceFormat(cmd *cobra.Command, sourceFormat string) (string,
 		return legacy, nil
 	}
 	return strings.TrimSpace(sourceFormat), nil
+}
+
+func legacyImportSourceFormat() string {
+	for _, format := range flags.FormatValues {
+		format = strings.TrimSpace(format)
+		if isImportLegacySourceFormat(format) {
+			return format
+		}
+	}
+	return strings.TrimSpace(flags.Format)
 }
 
 func validateBeadsImportFlags(cmd *cobra.Command) error {
