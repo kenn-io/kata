@@ -40,6 +40,16 @@ func TestSearch_ReturnsMatchedIssues(t *testing.T) {
 	assert.NotContains(t, out, "unrelated issue")
 }
 
+func TestSearch_AgentOutputEmptyEmitsOnlyHeader(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+
+	out, stderr, err := runCLIWithErr(t, env, dir, "--agent", "search", "login race")
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Equal(t, "OK search count=0 query=\"login race\"\n", out)
+}
+
 func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
 	f := newCLIFixture(t)
 	_ = requireCLIError(t, f.execute("search", "  "), ExitValidation)

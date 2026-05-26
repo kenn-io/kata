@@ -43,6 +43,17 @@ func TestReady_FiltersBlocked(t *testing.T) {
 		"blocked is hidden while blocker is open")
 }
 
+func TestReady_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "ready unowned")
+
+	out := runCLI(t, env, dir, "--agent", "ready")
+
+	assert.Contains(t, out, "OK ready count=1\n")
+	assert.Contains(t, out, `title="ready unowned"`)
+	assert.NotContains(t, out, "owner=")
+}
+
 func TestReady_UnownedAndOwnerMutualExclusion(t *testing.T) {
 	env, dir := setupCLIEnv(t)
 	resetFlags(t)

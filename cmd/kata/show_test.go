@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,49 @@ func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
 	// so it reads "parent: <parent_short_id>" — its parent is the parent issue.
 	assert.Contains(t, out, "--- links ---")
 	assert.Contains(t, out, "parent: "+parent)
+}
+
+func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	type createResp struct {
+		Issue struct {
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}
+	created := postJSON[createResp](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
+		map[string]any{
+			"actor":    "tester",
+			"title":    "Safari callback",
+			"body":     "Safari can double-submit the callback.",
+			"priority": int64(2),
+			"labels":   []string{"bug", "safari"},
+		})
+	runCLI(t, env, dir, "--as", "tester", "comment", created.Issue.ShortID, "--body", "Reproduced on macOS.")
+
+	out := runCLI(t, env, dir, "--agent", "show", created.Issue.ShortID)
+
+	assert.Contains(t, out, "OK show "+created.Issue.ShortID+"\n")
+	assert.Contains(t, out, "Issue: "+created.Issue.ShortID+" \"Safari callback\"\n")
+	assert.Contains(t, out, "Status: open\n")
+	assert.Contains(t, out, "Labels: bug,safari\n")
+	assert.Contains(t, out, "Priority: 2\n")
+	assert.Contains(t, out, "Body:\n```text\nSafari can double-submit the callback.\n```\n")
+	assert.Regexp(t, regexp.MustCompile(`(?m)^- author=tester created_at=[^ \n]+$`), out)
+	assert.Contains(t, out, "\n```text\nReproduced on macOS.\n```")
+	assert.NotContains(t, out, "Owner:")
+}
+
+func TestShow_AgentOutputLinkRowsUseExistingLinkResponseFields(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	blocker := createIssue(t, env, pid, "blocker")
+	blocked := createIssue(t, env, pid, "blocked title")
+	createLinkViaHTTP(t, env, pid, blocker, "blocks", blocked)
+
+	out := runCLI(t, env, dir, "--agent", "show", blocker)
+
+	assert.Contains(t, out, "Links:\n")
+	assert.Contains(t, out, "- type=blocks issue="+blocked)
+	assert.NotContains(t, out, `title="blocked title"`)
 }
 
 // TestShow_LinkLabelInvertsOnToSide verifies that when show runs against

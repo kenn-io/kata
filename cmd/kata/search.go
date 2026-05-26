@@ -89,7 +89,8 @@ func buildSearchURL(baseURL string, pid int64, query string, limit int, includeD
 // printSearchResults renders a search response in the active output mode:
 // JSON envelope, human-readable list, or "no matches" when empty.
 func printSearchResults(cmd *cobra.Command, bs []byte) error {
-	if flags.JSON {
+	mode := currentOutputMode()
+	if mode == outputJSON {
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 			return err
@@ -98,6 +99,7 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		return err
 	}
 	var b struct {
+		Query   string `json:"query"`
 		Results []struct {
 			Issue struct {
 				ShortID string `json:"short_id"`
@@ -110,6 +112,24 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	}
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
+	}
+	if mode == outputAgent {
+		out := cmd.OutOrStdout()
+		if _, err := fmt.Fprintf(out, "OK search count=%d query=%s\n", len(b.Results), agentValue(b.Query)); err != nil {
+			return err
+		}
+		for _, r := range b.Results {
+			if err := writeAgentKVRow(out,
+				agentRowField("issue", r.Issue.ShortID),
+				agentRowFloatField("score", r.Score),
+				agentRowField("status", r.Issue.Status),
+				agentRowListField("matched", r.MatchedIn),
+				agentRowField("title", r.Issue.Title),
+			); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if len(b.Results) == 0 {
 		if flags.Quiet {

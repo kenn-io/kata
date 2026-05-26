@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -39,6 +40,27 @@ func TestList_DefaultsToOpenIssuesInProject(t *testing.T) {
 	out := runCLI(t, env, dir, "list")
 	assert.Contains(t, out, "alpha")
 	assert.Contains(t, out, "beta")
+}
+
+func TestList_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "unowned task")
+
+	out := runCLI(t, env, dir, "--agent", "list")
+
+	assert.Contains(t, out, "OK list count=1\n")
+	assert.Contains(t, out, `title="unowned task"`)
+	assert.NotContains(t, out, "owner=")
+}
+
+func TestList_AgentOutputEscapesQuotedTitle(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, `quoted "title"`)
+
+	out := runCLI(t, env, dir, "--agent", "list")
+
+	assert.Contains(t, out, "OK list count=1\n")
+	assert.Contains(t, out, "title="+strconv.Quote(`quoted "title"`))
 }
 
 // TestList_SanitizesAnsiAndNewlinesInTitle covers hammer-test

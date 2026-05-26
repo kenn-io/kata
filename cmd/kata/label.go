@@ -141,7 +141,8 @@ func newLabelsCmd() *cobra.Command {
 			if status >= 400 {
 				return apiErrFromBody(status, bs)
 			}
-			if flags.JSON {
+			mode := currentOutputMode()
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err
@@ -157,6 +158,22 @@ func newLabelsCmd() *cobra.Command {
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
+			}
+			if mode == outputAgent {
+				out := cmd.OutOrStdout()
+				if _, err := fmt.Fprintf(out, "OK labels count=%d\n", len(b.Labels)); err != nil {
+					return err
+				}
+				for _, c := range b.Labels {
+					count := fmt.Sprint(c.Count)
+					if err := writeAgentKVRow(out,
+						agentRowField("label", c.Label),
+						agentRowField("count", count),
+					); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 			for _, c := range b.Labels {
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%-32s  %d\n", c.Label, c.Count); err != nil {

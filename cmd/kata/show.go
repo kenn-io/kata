@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -34,7 +35,8 @@ func newShowCmd() *cobra.Command {
 			if httpStatus >= 400 {
 				return apiErrFromBody(httpStatus, bs)
 			}
-			if flags.JSON {
+			mode := currentOutputMode()
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err
@@ -44,16 +46,19 @@ func newShowCmd() *cobra.Command {
 			}
 			var b struct {
 				Issue struct {
-					ShortID string `json:"short_id"`
-					UID     string `json:"uid"`
-					Title   string `json:"title"`
-					Body    string `json:"body"`
-					Status  string `json:"status"`
-					Author  string `json:"author"`
+					ShortID  string  `json:"short_id"`
+					UID      string  `json:"uid"`
+					Title    string  `json:"title"`
+					Body     string  `json:"body"`
+					Status   string  `json:"status"`
+					Author   string  `json:"author"`
+					Owner    *string `json:"owner"`
+					Priority *int64  `json:"priority"`
 				} `json:"issue"`
 				Comments []struct {
-					Author string `json:"author"`
-					Body   string `json:"body"`
+					Author    string `json:"author"`
+					Body      string `json:"body"`
+					CreatedAt string `json:"created_at"`
 				} `json:"comments"`
 				Labels []struct {
 					Label string `json:"label"`
@@ -66,6 +71,9 @@ func newShowCmd() *cobra.Command {
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
+			}
+			if mode == outputAgent {
+				return printShowAgent(cmd.OutOrStdout(), b)
 			}
 			out := cmd.OutOrStdout()
 			if _, err := fmt.Fprintf(out, "%s  %s  [%s]  by %s\n",
@@ -120,6 +128,97 @@ func newShowCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func printShowAgent(w io.Writer, b struct {
+	Issue struct {
+		ShortID  string  `json:"short_id"`
+		UID      string  `json:"uid"`
+		Title    string  `json:"title"`
+		Body     string  `json:"body"`
+		Status   string  `json:"status"`
+		Author   string  `json:"author"`
+		Owner    *string `json:"owner"`
+		Priority *int64  `json:"priority"`
+	} `json:"issue"`
+	Comments []struct {
+		Author    string `json:"author"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"created_at"`
+	} `json:"comments"`
+	Labels []struct {
+		Label string `json:"label"`
+	} `json:"labels"`
+	Links []struct {
+		Type string         `json:"type"`
+		From linkPeerForCLI `json:"from"`
+		To   linkPeerForCLI `json:"to"`
+	} `json:"links"`
+}) error {
+	if _, err := fmt.Fprintf(w, "OK show %s\n", b.Issue.ShortID); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Issue: %s %s\n", b.Issue.ShortID, agentValue(b.Issue.Title)); err != nil {
+		return err
+	}
+	if b.Issue.Status != "" {
+		if err := writeAgentField(w, "Status", agentValue(b.Issue.Status)); err != nil {
+			return err
+		}
+	}
+	if b.Issue.Owner != nil && *b.Issue.Owner != "" {
+		if err := writeAgentField(w, "Owner", agentValue(*b.Issue.Owner)); err != nil {
+			return err
+		}
+	}
+	if len(b.Labels) > 0 {
+		labels := make([]string, 0, len(b.Labels))
+		for _, l := range b.Labels {
+			labels = append(labels, l.Label)
+		}
+		if err := writeAgentField(w, "Labels", agentValue(strings.Join(labels, ","))); err != nil {
+			return err
+		}
+	}
+	if b.Issue.Priority != nil {
+		if err := writeAgentField(w, "Priority", fmt.Sprint(*b.Issue.Priority)); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprint(w, "Body:\n", agentFencedText(b.Issue.Body)); err != nil {
+		return err
+	}
+	if len(b.Comments) > 0 {
+		if _, err := fmt.Fprintln(w, "Comments:"); err != nil {
+			return err
+		}
+		for _, c := range b.Comments {
+			if err := writeAgentKVRow(w,
+				agentRowField("author", c.Author),
+				agentRowField("created_at", c.CreatedAt),
+			); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprint(w, agentFencedText(c.Body)); err != nil {
+				return err
+			}
+		}
+	}
+	if len(b.Links) > 0 {
+		if _, err := fmt.Fprintln(w, "Links:"); err != nil {
+			return err
+		}
+		for _, l := range b.Links {
+			_, other := linkLabelFromPOV(l.Type, b.Issue.UID, l.From, l.To)
+			if err := writeAgentKVRow(w,
+				agentRowField("type", l.Type),
+				agentRowField("issue", other),
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // linkPeerForCLI mirrors api.LinkPeer for the show command's decode path. UID

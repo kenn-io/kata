@@ -42,6 +42,18 @@ func TestLabelsList_PrintsCounts(t *testing.T) {
 	assert.Contains(t, out, "1")
 }
 
+func TestLabelsList_AgentOutputIncludesCount(t *testing.T) {
+	env, dir, _, ref := setupWorkspaceWithIssue(t, "a")
+
+	runCLI(t, env, dir, "label", "add", ref, "bug")
+	runCLI(t, env, dir, "label", "add", ref, "safari")
+	out := runCLI(t, env, dir, "--agent", "labels")
+
+	assert.Contains(t, out, "OK labels count=2\n")
+	assert.Contains(t, out, "- label=bug count=1\n")
+	assert.Contains(t, out, "- label=safari count=1")
+}
+
 // TestLabel_RejectsEmptyLabel covers hammer-test finding #8: label rm with an
 // empty value used to URL-encode to "" and hit /labels/?actor=... which the
 // daemon answered with a raw 404 page. Now both add and rm reject

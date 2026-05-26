@@ -78,7 +78,8 @@ func newReadyCmd() *cobra.Command {
 			if status >= 400 {
 				return apiErrFromBody(status, bs)
 			}
-			if flags.JSON {
+			mode := currentOutputMode()
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err
@@ -88,13 +89,31 @@ func newReadyCmd() *cobra.Command {
 			}
 			var b struct {
 				Issues []struct {
-					ShortID string  `json:"short_id"`
-					Title   string  `json:"title"`
-					Owner   *string `json:"owner,omitempty"`
+					ShortID  string  `json:"short_id"`
+					Title    string  `json:"title"`
+					Owner    *string `json:"owner,omitempty"`
+					Priority *int64  `json:"priority"`
 				} `json:"issues"`
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
+			}
+			if mode == outputAgent {
+				out := cmd.OutOrStdout()
+				if _, err := fmt.Fprintf(out, "OK ready count=%d\n", len(b.Issues)); err != nil {
+					return err
+				}
+				for _, i := range b.Issues {
+					if err := writeAgentKVRow(out,
+						agentRowField("issue", i.ShortID),
+						agentRowIntField("priority", i.Priority),
+						agentOptionalRowField("owner", i.Owner),
+						agentRowField("title", i.Title),
+					); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 			for _, i := range b.Issues {
 				ownerStr := "-"

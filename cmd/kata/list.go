@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
@@ -94,7 +96,8 @@ func newListCmd() *cobra.Command {
 			if httpStatus >= 400 {
 				return apiErrFromBody(httpStatus, bs)
 			}
-			if flags.JSON {
+			mode := currentOutputMode()
+			if mode == outputJSON {
 				var buf bytes.Buffer
 				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
 					return err
@@ -104,15 +107,36 @@ func newListCmd() *cobra.Command {
 			}
 			var b struct {
 				Issues []struct {
-					ShortID     string  `json:"short_id"`
-					QualifiedID string  `json:"qualified_id"`
-					Title       string  `json:"title"`
-					Status      string  `json:"status"`
-					Owner       *string `json:"owner"`
+					ShortID     string   `json:"short_id"`
+					QualifiedID string   `json:"qualified_id"`
+					Title       string   `json:"title"`
+					Status      string   `json:"status"`
+					Owner       *string  `json:"owner"`
+					Priority    *int64   `json:"priority"`
+					Labels      []string `json:"labels"`
 				} `json:"issues"`
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
+			}
+			if mode == outputAgent {
+				out := cmd.OutOrStdout()
+				if _, err := fmt.Fprintf(out, "OK list count=%d\n", len(b.Issues)); err != nil {
+					return err
+				}
+				for _, i := range b.Issues {
+					if err := writeAgentKVRow(out,
+						agentRowField("issue", i.ShortID),
+						agentRowField("status", i.Status),
+						agentRowIntField("priority", i.Priority),
+						agentOptionalRowField("owner", i.Owner),
+						agentRowListField("labels", i.Labels),
+						agentRowField("title", i.Title),
+					); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 			// Show owner in parens to match ready's convention. Owner
 			// is the actionable identity ("who's responsible") whereas
@@ -155,4 +179,57 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
 	cmd.Flags().StringSliceVar(&noLabels, "no-label", nil, "exclude issues with this label (repeatable)")
 	return cmd
+}
+
+type agentField struct {
+	name  string
+	value *string
+}
+
+func agentRowField(name, value string) agentField {
+	return agentField{name: name, value: &value}
+}
+
+func agentOptionalRowField(name string, value *string) agentField {
+	if value == nil || *value == "" {
+		return agentField{name: name}
+	}
+	return agentField{name: name, value: value}
+}
+
+func agentRowIntField(name string, value *int64) agentField {
+	if value == nil {
+		return agentField{name: name}
+	}
+	s := fmt.Sprint(*value)
+	return agentField{name: name, value: &s}
+}
+
+func agentRowFloatField(name string, value float64) agentField {
+	s := fmt.Sprintf("%.2f", value)
+	return agentField{name: name, value: &s}
+}
+
+func agentRowListField(name string, values []string) agentField {
+	if len(values) == 0 {
+		return agentField{name: name}
+	}
+	s := strings.Join(values, ",")
+	return agentField{name: name, value: &s}
+}
+
+func writeAgentKVRow(w io.Writer, fields ...agentField) error {
+	if _, err := fmt.Fprint(w, "-"); err != nil {
+		return err
+	}
+	for _, f := range fields {
+		if f.value == nil {
+			continue
+		}
+		if _, err := fmt.Fprintf(w, " %s=%s", f.name, agentValue(*f.value)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(w)
+	return err
 }
