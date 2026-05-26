@@ -72,6 +72,31 @@ func TestImportLegacyFormatBeadsAllowsAgentOutputMode(t *testing.T) {
 	assert.Contains(t, stderr, "--input is not supported")
 }
 
+func TestImportLegacyFormatBeadsParseErrorPreservesAgentMode(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	setupKataEnv(t)
+
+	_, stderr, err := executeRootCapture(t, context.Background(),
+		"import", "--format", "beads", "--agent", "--bogus")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "ERR import usage:"),
+		"stderr should use agent mode for legacy beads parse error, got %q", stderr)
+}
+
+func TestImportLegacyFormatBeadsParseErrorPreservesJSONMode(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	setupKataEnv(t)
+
+	_, stderr, err := executeRootCapture(t, context.Background(),
+		"import", "--format", "beads", "--json", "--bogus")
+	require.Error(t, err)
+	got := parseErrorEnvelope(t, []byte(stderr))
+	assert.Equal(t, "usage", got.Error.Kind)
+	assert.Contains(t, got.Error.Message, "unknown flag: --bogus")
+}
+
 func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	_, input, target := setupImportTest(t)
 	d, err := db.Open(context.Background(), target)

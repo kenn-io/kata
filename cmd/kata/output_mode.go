@@ -61,11 +61,20 @@ func resolveOutputModeForCommand(cmd *cobra.Command) (outputMode, error) {
 }
 
 func resolveOutputModeArgs(args []string, format string, jsonFlag, agentFlag bool) (outputMode, error) {
+	return resolveOutputModeArgsForCommand(args, format, jsonFlag, agentFlag, false)
+}
+
+func resolveOutputModeArgsForCommand(
+	args []string,
+	format string,
+	jsonFlag, agentFlag bool,
+	importLegacy bool,
+) (outputMode, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "--":
-			return resolveOutputModeValues(format, jsonFlag, agentFlag)
+			return resolveOutputModeValues(outputFormatValue(format, importLegacy), jsonFlag, agentFlag)
 		case arg == "--json":
 			jsonFlag = true
 		case arg == "--agent":
@@ -77,7 +86,14 @@ func resolveOutputModeArgs(args []string, format string, jsonFlag, agentFlag boo
 			format = strings.TrimPrefix(arg, "--format=")
 		}
 	}
-	return resolveOutputModeValues(format, jsonFlag, agentFlag)
+	return resolveOutputModeValues(outputFormatValue(format, importLegacy), jsonFlag, agentFlag)
+}
+
+func outputFormatValue(format string, importLegacy bool) string {
+	if importLegacy && isImportLegacySourceFormat(format) {
+		return ""
+	}
+	return format
 }
 
 func isImportCommand(cmd *cobra.Command) bool {

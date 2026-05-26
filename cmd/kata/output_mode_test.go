@@ -37,3 +37,9 @@ func TestResolveOutputMode(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveOutputModeArgs_BadFormatOutsideImport(t *testing.T) {
+	_, err := resolveOutputModeArgs([]string{"--format", "xml"}, "", false, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported output format")
+}

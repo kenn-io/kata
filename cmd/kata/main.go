@@ -148,7 +148,7 @@ func emitErrorForMode(w io.Writer, err error, mode outputMode, runEReached bool)
 }
 
 func emitRootError(w io.Writer, cmd *cobra.Command, args []string, err error, runEReached bool) {
-	mode := resolvedOutputModeForError(args)
+	mode := resolvedOutputModeForError(cmd, args)
 	switch mode {
 	case outputAgent:
 		emitAgentError(w, commandNameForError(cmd, args, runEReached), cliErrorForErr(err, runEReached))
@@ -157,11 +157,15 @@ func emitRootError(w io.Writer, cmd *cobra.Command, args []string, err error, ru
 	}
 }
 
-func resolvedOutputModeForError(args []string) outputMode {
+func resolvedOutputModeForError(root *cobra.Command, args []string) outputMode {
 	if flags.Mode != "" {
 		return flags.Mode
 	}
-	mode, err := resolveOutputModeArgs(args, flags.Format, flags.JSON, flags.Agent)
+	importLegacy := false
+	if cmd := commandFromArgs(root, args); isImportCommand(cmd) {
+		importLegacy = true
+	}
+	mode, err := resolveOutputModeArgsForCommand(args, flags.Format, flags.JSON, flags.Agent, importLegacy)
 	if err != nil {
 		return outputHuman
 	}
