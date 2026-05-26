@@ -205,6 +205,24 @@ func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
 	assert.NotContains(t, stderr, "unknown command")
 }
 
+func TestEmitError_RawModeScanSkipsWorkspaceFormatValue(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--workspace", "--format", "show")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
+	assert.NotContains(t, stderr, "unsupported output format")
+}
+
+func TestEmitError_RawModeScanSkipsWorkspaceAgentValue(t *testing.T) {
+	resetRunEEntered(t)
+	resetFlags(t)
+	_, stderr, err := executeRootCapture(t, context.Background(), "--workspace", "--agent", "show")
+	require.Error(t, err)
+	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
+	assert.NotContains(t, stderr, "ERR ")
+}
+
 func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)

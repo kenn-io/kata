@@ -70,21 +70,50 @@ func resolveOutputModeArgsForCommand(
 ) (outputMode, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		switch {
-		case arg == "--":
+		if arg == "--" {
 			return resolveOutputModeValues(outputFormatValue(format, importLegacy), jsonFlag, agentFlag)
-		case arg == "--json":
-			jsonFlag = true
-		case arg == "--agent":
-			agentFlag = true
-		case arg == "--format" && i+1 < len(args):
-			format = args[i+1]
-			i++
-		case strings.HasPrefix(arg, "--format="):
-			format = strings.TrimPrefix(arg, "--format=")
+		}
+		name, value, hasValue, ok := splitLongFlag(arg)
+		if !ok {
+			continue
+		}
+		switch name {
+		case "json":
+			if !hasValue {
+				jsonFlag = true
+			}
+		case "agent":
+			if !hasValue {
+				agentFlag = true
+			}
+		case "format":
+			if hasValue {
+				format = value
+			} else if i+1 < len(args) {
+				format = args[i+1]
+				i++
+			}
+		case "as", "workspace", "project":
+			if !hasValue && i+1 < len(args) {
+				i++
+			}
 		}
 	}
 	return resolveOutputModeValues(outputFormatValue(format, importLegacy), jsonFlag, agentFlag)
+}
+
+func splitLongFlag(arg string) (name, value string, hasValue bool, ok bool) {
+	if !strings.HasPrefix(arg, "--") || arg == "--" {
+		return "", "", false, false
+	}
+	trimmed := strings.TrimPrefix(arg, "--")
+	if trimmed == "" {
+		return "", "", false, false
+	}
+	if before, after, found := strings.Cut(trimmed, "="); found {
+		return before, after, true, true
+	}
+	return trimmed, "", false, true
 }
 
 func outputFormatValue(format string, importLegacy bool) string {
