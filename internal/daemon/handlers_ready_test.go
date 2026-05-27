@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -60,4 +62,78 @@ func TestReady_UnownedAndOwnerMutuallyExclusive(t *testing.T) {
 
 	status, _ := env.Get(t, projectPath(pid)+"/ready?unowned=true&owner=alice")
 	assert.Equal(t, 400, status)
+}
+
+// readyGlobalResp narrows the global response body to the fields these tests
+// assert on.
+type readyGlobalResp struct {
+	Issues []struct {
+		ShortID     string `json:"short_id"`
+		ProjectName string `json:"project_name"`
+	} `json:"issues"`
+}
+
+func getReadyGlobal(t *testing.T, env *testenv.Env, query string) readyGlobalResp {
+	t.Helper()
+	var out readyGlobalResp
+	envGetJSON(t, env, "/api/v1/ready"+query, &out)
+	return out
+}
+
+func TestReadyGlobal_ReturnsIssuesFromAllProjects(t *testing.T) {
+	env := testenv.New(t)
+	pid1, _, _ := setupTwoIssues(t, env)
+	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
+	createIssueViaHTTP(t, env, pid2, "from second project")
+
+	out := getReadyGlobal(t, env, "")
+
+	projects := map[string]bool{}
+	for _, i := range out.Issues {
+		projects[i.ProjectName] = true
+	}
+	assert.GreaterOrEqual(t, len(projects), 2,
+		"global ready returns issues from at least two projects, got %v", projects)
+	_ = pid1
+}
+
+func TestReadyGlobal_ExcludesArchivedProjects(t *testing.T) {
+	env := testenv.New(t)
+	pid1, _, _ := setupTwoIssues(t, env)
+	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
+	createIssueViaHTTP(t, env, pid2, "doomed")
+
+	// Look up pid2's name BEFORE archiving so we can assert no row carries it.
+	p2, err := env.DB.ProjectByID(t.Context(), pid2)
+	require.NoError(t, err)
+
+	// Archive pid2 directly via the DB (bypasses the open-issues guard with
+	// Force=true). This is the same pattern as the unit tests in
+	// internal/db/queries_ready_test.go.
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: pid2,
+		Actor:     "tester",
+		Force:     true,
+	})
+	require.NoError(t, err)
+
+	out := getReadyGlobal(t, env, "")
+	for _, i := range out.Issues {
+		assert.NotEqual(t, p2.Name, i.ProjectName,
+			"archived project's issues must not appear in /api/v1/ready")
+	}
+	_ = pid1
+}
+
+func TestReadyGlobal_LimitCapsTotalRows(t *testing.T) {
+	env := testenv.New(t)
+	pid1 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
+	for i := 0; i < 3; i++ {
+		createIssueViaHTTP(t, env, pid1, "p1")
+		createIssueViaHTTP(t, env, pid2, "p2")
+	}
+
+	out := getReadyGlobal(t, env, "?limit=2")
+	assert.Len(t, out.Issues, 2, "limit caps total rows across projects, not per-project")
 }

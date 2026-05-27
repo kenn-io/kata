@@ -37,4 +37,18 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Issues = issues
 		return out, nil
 	})
+
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "readyIssuesGlobal",
+		Method:      "GET",
+		Path:        "/api/v1/ready",
+	}, func(ctx context.Context, in *api.ReadyGlobalRequest) (*api.ReadyGlobalResponse, error) {
+		issues, err := cfg.DB.ReadyIssuesGlobal(ctx, in.Limit)
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		out := &api.ReadyGlobalResponse{}
+		out.Body.Issues = issues
+		return out, nil
+	})
 }
