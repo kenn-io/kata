@@ -135,7 +135,7 @@ absent (and therefore rejected for mutations).
 
 ### 3.4 Handler integration
 
-The 27 mutation call sites across 13 handler files currently do:
+The 26 mutation call sites across 13 handler files currently do:
 
 ```go
 if err := validateActor(in.Body.Actor); err != nil {
@@ -153,9 +153,11 @@ if err != nil {
 in.Body.Actor = actor
 ```
 
-(For query-actor operations the field is `in.Actor`.) Reassigning the struct
-field means the ~69 downstream `.Actor` reads — including the value passed to
-the DB as `Author` and to the throttle guards — keep working unchanged.
+(The actor field is `in.Body.Actor` for body operations and `in.Actor` for
+query operations; a few handlers copy it into a local variable first.)
+Reassigning whatever variable the handler passes downstream means the existing
+reads — including the value handed to the DB as `Author` and to the throttle
+guards — keep working unchanged.
 
 Read-only endpoints that use `actor` as a **filter** (events stream, digest,
 audit listings) do not call `validateActor`/`effectiveActor` and are left
@@ -166,23 +168,24 @@ exactly as they are.
 The `actor` body/query field keeps its `required:"true"` Huma tag. On a trusted
 listener the client still sends some actor value, which is simply ignored in
 favor of the header (acceptance criteria: "a conflicting body/query actor is
-ignored"). This keeps the change off all ~25 struct tags and means a client that
-omits actor entirely still gets the existing `422` — no behavior change. The
-proxy deployment forwards the kata client request, which always includes an
-actor, so this is invisible in practice.
+ignored"). This keeps the change off every actor struct tag and means a client
+that omits actor entirely still gets the existing required-field validation
+error — no behavior change. The proxy deployment forwards the kata client
+request, which always includes an actor, so this is invisible in practice.
 
 ## 4. Data Flow
 
-1. Client (or proxy-forwarded client) sends a mutating request.
-2. `requireBearer` admits or passes it through.
-3. `withTrustedActor` inspects the local addr:
-   - trusted listener + header set -> context gets authoritative actor;
-   - trusted listener + header missing -> context gets trusted-but-absent;
-   - otherwise -> context untouched.
-4. Huma routes to the handler; the handler calls `effectiveActor(ctx, supplied)`.
-5. Authoritative value wins; trusted-but-absent -> 400; otherwise supplied is
-   validated and used.
-6. The resolved actor flows on as the change `Author`, exactly as today.
+A mutating request flows through these stages in order:
+
+- Client (or proxy-forwarded client) sends a mutating request.
+- `requireBearer` admits or passes it through.
+- `withTrustedActor` inspects the local addr: trusted listener + header set ->
+  context gets the authoritative actor; trusted listener + header missing ->
+  context gets the trusted-but-absent marker; otherwise -> context untouched.
+- Huma routes to the handler; the handler calls `effectiveActor(ctx, supplied)`.
+- Authoritative value wins; trusted-but-absent -> 400; otherwise the supplied
+  actor is validated and used.
+- The resolved actor flows on as the change `Author`, exactly as today.
 
 ## 5. Error Handling
 
@@ -223,6 +226,9 @@ actor, so this is invisible in practice.
 - **Listener normalization tests:** `unix://`-prefixed entry matches a unix
   local addr; `host:port` entry matches a TCP local addr; wildcard entry does
   not match.
+- **Reads-not-blocked test:** with the feature on and on a trusted listener, a
+  header-less GET still returns its normal 2xx — verifying the middleware defers
+  rejection to `effectiveActor` and never blocks read paths.
 - **Integration test (`httptest`):** trusted listener credits the header value
   and ignores a conflicting body actor; a regression test confirming the
   feature-off path is byte-for-byte current behavior.
