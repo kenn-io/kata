@@ -694,6 +694,21 @@ type ReadyResponse struct {
 	}
 }
 
+// ReadyGlobalRequest is GET /api/v1/ready (no project_id; spans every
+// non-archived project).
+type ReadyGlobalRequest struct {
+	Limit int `query:"limit,omitempty"`
+}
+
+// ReadyGlobalResponse is the cross-project ready-issue list. Each row
+// carries the project name so clients can render qualified refs
+// (<project>#<short_id>) without a separate lookup.
+type ReadyGlobalResponse struct {
+	Body struct {
+		Issues []db.ReadyGlobalIssue `json:"issues"`
+	}
+}
+
 // LabelsListRequest is GET /api/v1/projects/{id}/labels (counts).
 type LabelsListRequest struct {
 	ProjectID int64 `path:"project_id" required:"true"`
