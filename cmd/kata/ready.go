@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
@@ -31,11 +32,11 @@ func newReadyCmd() *cobra.Command {
 			if unowned && owner != "" {
 				return &cliError{Message: "--unowned and --owner are mutually exclusive", Kind: kindValidation, ExitCode: ExitValidation}
 			}
-			if all && flags.Project != "" {
+			if all && strings.TrimSpace(flags.Project) != "" {
 				return &cliError{
 					Message:  "--project and --all are mutually exclusive",
-					Kind:     kindValidation,
-					ExitCode: ExitValidation,
+					Kind:     kindUsage,
+					ExitCode: ExitUsage,
 				}
 			}
 			ctx := cmd.Context()
