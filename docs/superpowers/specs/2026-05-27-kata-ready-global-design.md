@@ -44,8 +44,9 @@ Per-project (non-`--all`) output is unchanged.
 
 The daemon response is emitted as-is. Each issue gains:
 
-- `project` — the project's canonical name (string)
-- `project_id` — the project's numeric id (int)
+- `project_name` — the project's canonical name (string)
+- `project_id` — the project's numeric id (int, present via the embedded
+  `Issue` row)
 
 ### Ordering
 
