@@ -1604,6 +1604,50 @@ func (d *DB) ReadyIssues(ctx context.Context, projectID int64, limit int, filter
 	return out, rows.Err()
 }
 
+// ReadyIssuesGlobal returns ready issues across every non-archived project,
+// each paired with its project name. "Ready" matches ReadyIssues: open,
+// not soft-deleted, and not blocked by an open `blocks` predecessor.
+// Issues from archived projects (projects.deleted_at IS NOT NULL) are
+// excluded. Ordering matches ReadyIssues so behavior is consistent.
+func (d *DB) ReadyIssuesGlobal(ctx context.Context, limit int) ([]ReadyGlobalIssue, error) {
+	// issueSelect ends with "FROM issues i JOIN projects p ON p.id = i.project_id"
+	// We need to add p.name before FROM, so we build the SELECT from scratch.
+	q := `SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name AS project_name FROM issues i JOIN projects p ON p.id = i.project_id
+		WHERE i.status = 'open' AND i.deleted_at IS NULL
+		  AND p.deleted_at IS NULL
+		  AND NOT EXISTS (
+		    SELECT 1 FROM links l
+		    JOIN issues blocker ON blocker.id = l.from_issue_id
+		    WHERE l.type = 'blocks' AND l.to_issue_id = i.id
+		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
+		  )
+		ORDER BY i.updated_at DESC, i.id DESC`
+	if limit > 0 {
+		q += fmt.Sprintf(` LIMIT %d`, limit)
+	}
+	rows, err := d.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("ready issues global: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ReadyGlobalIssue
+	for rows.Next() {
+		var r ReadyGlobalIssue
+		if err := rows.Scan(
+			&r.Issue.ID, &r.Issue.UID, &r.Issue.ProjectID, &r.Issue.ProjectUID,
+			&r.Issue.ShortID, &r.Issue.Title, &r.Issue.Body, &r.Issue.Status,
+			&r.Issue.ClosedReason, &r.Issue.Owner, &r.Issue.Priority, &r.Issue.Author,
+			&r.Issue.Metadata, &r.Issue.Revision, &r.Issue.RecurrenceID, &r.Issue.OccurrenceKey,
+			&r.Issue.CreatedAt, &r.Issue.UpdatedAt, &r.Issue.ClosedAt, &r.Issue.DeletedAt,
+			&r.ProjectName,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (d *DB) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (Event, error) {
 	eventUID, err := katauid.New()
 	if err != nil {

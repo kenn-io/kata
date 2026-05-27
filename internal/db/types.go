@@ -100,6 +100,14 @@ type Issue struct {
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 }
 
+// ReadyGlobalIssue is an Issue paired with its project's canonical name. Used
+// only by ReadyIssuesGlobal so the cross-project ready view can render
+// qualified refs (`<project>#<short_id>`) without a follow-up project lookup.
+type ReadyGlobalIssue struct {
+	Issue
+	ProjectName string `json:"project_name"`
+}
+
 // Comment mirrors a row in comments.
 type Comment struct {
 	ID        int64     `json:"id"`

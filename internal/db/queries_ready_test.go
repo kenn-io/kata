@@ -225,3 +225,64 @@ func readyNumbers(t *testing.T, ctx context.Context, d *db.DB, projectID int64) 
 	}
 	return out
 }
+
+func TestReadyIssuesGlobal_ReturnsIssuesAcrossProjects(t *testing.T) {
+	d, ctx, p1 := setupTestProject(t)
+	p2, err := d.CreateProject(ctx, "second-project")
+	require.NoError(t, err)
+
+	a := makeIssue(t, ctx, d, p1.ID, "in p1", "tester")
+	b := makeIssue(t, ctx, d, p2.ID, "in p2", "tester")
+
+	rows, err := d.ReadyIssuesGlobal(ctx, 0)
+	require.NoError(t, err)
+
+	got := map[string]string{}
+	for _, r := range rows {
+		got[r.Issue.ShortID] = r.ProjectName
+	}
+	assert.Equal(t, p1.Name, got[a.ShortID])
+	assert.Equal(t, "second-project", got[b.ShortID])
+}
+
+func TestReadyIssuesGlobal_ExcludesArchivedProjects(t *testing.T) {
+	d, ctx, p1 := setupTestProject(t)
+	p2, err := d.CreateProject(ctx, "to-archive")
+	require.NoError(t, err)
+
+	keep := makeIssue(t, ctx, d, p1.ID, "keep", "tester")
+	hidden := makeIssue(t, ctx, d, p2.ID, "hidden", "tester")
+
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: p2.ID,
+		Actor:     "tester",
+		Force:     true,
+	})
+	require.NoError(t, err)
+
+	rows, err := d.ReadyIssuesGlobal(ctx, 0)
+	require.NoError(t, err)
+
+	got := map[string]bool{}
+	for _, r := range rows {
+		got[r.Issue.ShortID] = true
+	}
+	assert.True(t, got[keep.ShortID], "issue in active project is returned")
+	assert.False(t, got[hidden.ShortID], "issue in archived project is excluded")
+}
+
+func TestReadyIssuesGlobal_ExcludesBlockedIssues(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	blocker := makeIssue(t, ctx, d, p.ID, "blocker", "tester")
+	blocked := makeIssue(t, ctx, d, p.ID, "blocked", "tester")
+	makeLink(ctx, t, d, p.ID, blocker.ID, blocked.ID, "blocks")
+
+	rows, err := d.ReadyIssuesGlobal(ctx, 0)
+	require.NoError(t, err)
+	got := map[string]bool{}
+	for _, r := range rows {
+		got[r.Issue.ShortID] = true
+	}
+	assert.True(t, got[blocker.ShortID])
+	assert.False(t, got[blocked.ShortID])
+}
