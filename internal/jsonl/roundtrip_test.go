@@ -93,11 +93,11 @@ func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {
 		AdminActor:     db.BootstrapActor,
 	})
 	require.NoError(t, err)
-	_, _, err = src.RevokeAPIToken(ctx, tok.ID, db.BootstrapActor)
+	_, firstRevokedEvent, err := src.RevokeAPIToken(ctx, tok.ID, db.BootstrapActor)
 	require.NoError(t, err)
 	var firstRevokedAt string
 	require.NoError(t, src.QueryRowContext(ctx,
-		`SELECT CAST(revoked_at AS TEXT) FROM api_tokens WHERE id = ?`, tok.ID).Scan(&firstRevokedAt))
+		`SELECT CAST(created_at AS TEXT) FROM events WHERE id = ?`, firstRevokedEvent.ID).Scan(&firstRevokedAt))
 
 	system, err := src.SystemProject(ctx)
 	require.NoError(t, err)

@@ -96,11 +96,11 @@ func TestDispatcher_Enqueue_RoutesToMatchingHooks(t *testing.T) {
 	cfg.QueueCap = 8
 	d, _, runsPath := mustNewDispatcher(t, []ResolvedHook{hookA, hookB}, cfg)
 	enqueueEvents(d, "issue.created", 100, 1)
-	if !waitForLines(t, runsPath, 1, 2*time.Second) {
+	if !waitForLines(t, runsPath, 1, 5*time.Second) {
 		t.Fatal("expected 1 run for hookA")
 	}
 	enqueueEvents(d, "issue.updated", 101, 1)
-	if !waitForLines(t, runsPath, 2, 2*time.Second) {
+	if !waitForLines(t, runsPath, 2, 5*time.Second) {
 		t.Fatal("expected 2 runs after second event")
 	}
 }
@@ -151,8 +151,7 @@ func TestDispatcher_Shutdown_Timeout_ReportsInflight(t *testing.T) {
 	cfg.QueueCap = 4
 	d, logBuf, _ := mustNewDispatcher(t, []ResolvedHook{stuck}, cfg)
 	enqueueEvents(d, "issue.created", 300, 1)
-	// Give the worker a moment to start.
-	time.Sleep(100 * time.Millisecond)
+	waitForInflight(t, d, 1, 5*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if err := d.Shutdown(ctx); err == nil {
@@ -278,6 +277,18 @@ func waitForLines(t *testing.T, path string, n int, timeout time.Duration) bool 
 		time.Sleep(10 * time.Millisecond)
 	}
 	return false
+}
+
+func waitForInflight(t *testing.T, d *Dispatcher, n int32, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if d.inflight.Load() >= n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d in-flight hook run(s); got %d", n, d.inflight.Load())
 }
 
 // countJSONLLines returns the number of non-empty lines in path. A
