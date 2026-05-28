@@ -19,6 +19,7 @@ import (
 )
 
 func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
+	resetFlags(t)
 	setupKataEnv(t)
 
 	out := executeRoot(t, newDaemonCmd(), "status")
