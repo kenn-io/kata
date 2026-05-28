@@ -109,6 +109,9 @@ func (d *DB) MergeProjects(ctx context.Context, p MergeProjectsParams) (ProjectM
 	if err != nil {
 		return ProjectMergeResult{}, fmt.Errorf("load target project: %w", err)
 	}
+	if isSystemProject(source) || isSystemProject(target) {
+		return ProjectMergeResult{}, ErrNotFound
+	}
 	if source.DeletedAt != nil {
 		return ProjectMergeResult{}, ErrProjectMergeArchivedSource
 	}

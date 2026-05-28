@@ -199,11 +199,13 @@ func printTokenCreated(cmd *cobra.Command, out createTokenCLIResponse) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Copy this token now. It will not be shown again."); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Store it in the user's client config.toml or environment."); err != nil {
-		return err
+	if !flags.Quiet {
+		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Copy this token now. It will not be shown again."); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(cmd.OutOrStdout(), "Store it in the user's client config.toml or environment."); err != nil {
+			return err
+		}
 	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(), "token=%s\n", textsafe.Line(out.Plaintext))
 	return err

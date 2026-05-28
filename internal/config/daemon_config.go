@@ -114,7 +114,8 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 }
 
 func applyDaemonConfigEnv(cfg *DaemonConfig) {
-	if v := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")); v != "" &&
+		(!cfg.Auth.RequireTokenIdentity || !EnvTruthy("KATA_AUTOSTART")) {
 		cfg.Auth.Token = v
 	}
 	if EnvTruthy("KATA_TRUST_PRIVATE_NETWORK") {

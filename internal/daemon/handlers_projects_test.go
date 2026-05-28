@@ -961,6 +961,25 @@ func TestMergeProject_SourceMovesIntoSurvivingTarget(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestMergeProject_SystemProjectReturns404(t *testing.T) {
+	ts, h := startDefaultTestServer(t)
+	ctx := t.Context()
+	sys, err := h.db.SystemProject(ctx)
+	require.NoError(t, err)
+	target, err := h.db.CreateProject(ctx, "target")
+	require.NoError(t, err)
+
+	resp, bs := postJSON(t, ts, "/api/v1/projects/"+strconv.FormatInt(target.ID, 10)+"/merge", map[string]any{
+		"source_project_id": sys.ID,
+	})
+	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+
+	resp, bs = postJSON(t, ts, "/api/v1/projects/"+strconv.FormatInt(sys.ID, 10)+"/merge", map[string]any{
+		"source_project_id": target.ID,
+	})
+	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+}
+
 // TestRemoveProject_ArchivesAndDropsAliases pins #24's wire shape: DELETE
 // /api/v1/projects/{id}?actor=tester archives the project and removes its
 // aliases. List endpoint no longer surfaces the row; resolve against the

@@ -277,6 +277,24 @@ func TestMergeProjects_RejectsArchivedTarget(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrProjectMergeArchivedTarget)
 }
 
+func TestMergeProjects_RejectsSystemProject(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	sys, err := d.SystemProject(ctx)
+	require.NoError(t, err)
+	target := createProject(ctx, t, d, "tgt")
+
+	_, err = d.MergeProjects(ctx, db.MergeProjectsParams{
+		SourceProjectID: sys.ID, TargetProjectID: target.ID,
+	})
+	assert.ErrorIs(t, err, db.ErrNotFound)
+
+	_, err = d.MergeProjects(ctx, db.MergeProjectsParams{
+		SourceProjectID: target.ID, TargetProjectID: sys.ID,
+	})
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
 // TestMergeProjects_ExtendsCollidingSourceShortIDs pins the §5.2 merge rule:
 // source-side issues whose short_ids collide with target-side issues are
 // auto-extended to the next non-colliding length. Existing target short_ids

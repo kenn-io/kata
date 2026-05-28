@@ -574,7 +574,8 @@ For a shared daemon where each user should have a stable actor identity, mint
 per-user API tokens before enabling identity mode:
 
 ```sh
-KATA_AUTH_TOKEN=change-me kata tokens create --actor wesm --name laptop
+export KATA_AUTH_TOKEN=change-me
+kata tokens create --actor wesm --name laptop
 kata tokens list
 kata tokens revoke 1
 ```

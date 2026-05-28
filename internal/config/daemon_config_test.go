@@ -152,6 +152,19 @@ func TestReadDaemonConfig_AuthTokenEnvOverridesTOML(t *testing.T) {
 		"KATA_AUTH_TOKEN must override config.toml")
 }
 
+func TestReadDaemonConfig_AutostartIdentityModeKeepsConfiguredBootstrapToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "client-db-token")
+	t.Setenv("KATA_AUTOSTART", "1")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[auth]\ntoken = \"bootstrap-token\"\nrequire_token_identity = true\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "bootstrap-token", cfg.Auth.Token)
+}
+
 func TestReadDaemonConfig_AuthTokenEnvWorksWithoutTOML(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "from-env")

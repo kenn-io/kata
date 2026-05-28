@@ -34,6 +34,17 @@ func TestTokensCreateCommand_PrintsPlaintextOnce(t *testing.T) {
 	assert.Equal(t, "laptop", *resolved.Name)
 }
 
+func TestTokensCreateCommand_QuietSuppressesAdvisoryText(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+
+	out := requireCmdOutput(t, env, "--quiet", "tokens", "create", "--actor", "wesm")
+
+	assert.NotContains(t, out, "Copy this token now")
+	assert.NotContains(t, out, "Store it")
+	plaintext := extractTokenPlaintext(t, out)
+	assert.Equal(t, 1, strings.Count(out, plaintext))
+}
+
 func TestTokensListCommand_RedactsPlaintextAndHash(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	createOut := requireCmdOutput(t, env, "tokens", "create", "--actor", "wesm", "--name", "laptop")
