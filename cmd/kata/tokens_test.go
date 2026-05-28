@@ -21,6 +21,8 @@ func TestTokensCreateCommand_PrintsPlaintextOnce(t *testing.T) {
 	assert.Contains(t, out, "created token id=")
 	assert.Contains(t, out, "actor=wesm")
 	assert.Contains(t, out, "name=laptop")
+	assert.Contains(t, out, "Copy this token now. It will not be shown again.")
+	assert.Contains(t, out, "Store it in the user's client config.toml or environment.")
 	assert.NotContains(t, out, "token_hash")
 
 	plaintext := extractTokenPlaintext(t, out)

@@ -579,6 +579,11 @@ kata tokens list
 kata tokens revoke 1
 ```
 
+`tokens create` prints the plaintext bearer token exactly once. Copy it at
+creation time and store it in the user's client config or environment; the
+daemon stores only a SHA-256 hash and cannot retrieve or show an existing token
+later. Lost tokens should be revoked and recreated.
+
 Then enable identity mode on the daemon:
 
 ```toml

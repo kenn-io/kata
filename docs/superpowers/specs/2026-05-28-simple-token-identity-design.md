@@ -143,9 +143,12 @@ shape through JSONL cutover, and import replay reconstructs token rows from
 `token.created` and `token.revoked` events.
 
 `token_hash` is `hex(sha256(token))`. Tokens are generated with at least 256
-bits of randomness and printed only once at creation time. SHA-256 is the right
-fit for high-entropy random bearer tokens because indexed lookup stays O(1);
-password hash functions such as bcrypt or argon2 solve a different
+bits of randomness and printed only once at creation time so the operator or
+user can copy the plaintext bearer token into local client config or an
+environment variable. The daemon stores only the hash and cannot retrieve or
+show an existing token later; lost tokens are revoked and recreated. SHA-256 is
+the right fit for high-entropy random bearer tokens because indexed lookup
+stays O(1); password hash functions such as bcrypt or argon2 solve a different
 low-entropy-password problem and would complicate lookup.
 
 Multiple rows may share the same actor, such as `wesm` for both a laptop token
@@ -254,7 +257,8 @@ kata tokens revoke <id>
 ```
 
 `create` generates a random token, stores only its SHA-256 hash, and prints the
-plaintext token once. `list` never displays plaintext tokens or hashes.
+plaintext token once with an explicit "copy now; it will not be shown again"
+message. `list` never displays plaintext tokens or hashes.
 `revoke` sets `revoked_at`.
 
 Provisioning is restricted to:
