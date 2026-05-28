@@ -607,6 +607,30 @@ excluded from ordinary project lists, stats, poll responses, and event streams.
 `require_token_identity = true` cannot be combined with
 `--insecure-readonly`.
 
+This identity layer is deliberately small. It is meant for trusted teams on a
+private network that need reliable attribution and a paper trail, not a full
+authorization system. There is no users table, role model, or impersonation
+scope in this pass. Multiple tokens can map to the same actor, and future roles
+or external identity providers can be added without changing historical events
+because events store actor text snapshots.
+
+API tokens are event-sourced operational state. `api_tokens` is a projection
+rebuilt from `token.created` and `token.revoked` events during JSONL import or
+schema cutover. Those token events are included in backup/restore for the local
+daemon, but they are excluded from ordinary event feeds and should not be
+replicated as project history by future federation code without an explicit
+credential-migration design.
+
+Web apps or OAuth frontends can sit above this model without daemon-side OAuth.
+The web app should authenticate the user, map that identity to an existing kata
+actor handle, and call the daemon with a server-side kata bearer token. The
+browser should hold only the web-app session, never the daemon token. Because
+the daemon stores only token hashes, a web app cannot retrieve an existing
+plaintext token later; it must either vault plaintext tokens server-side or
+mint and revoke tokens as part of its own session lifecycle. OAuth deactivation
+also needs an explicit revoke, expiry, or session-coupled design, because
+first-pass kata tokens are revoke-only.
+
 For unauthenticated private-network experiments, `kata daemon start --listen
 100.64.0.5:7777 --insecure-readonly` permits GET requests only; mutations and
 the event stream still require authentication. Network ACLs (firewall, VPN,
