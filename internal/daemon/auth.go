@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -99,11 +100,6 @@ func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Han
 	}
 	presented := strings.TrimPrefix(got, authBearerPrefix)
 	if p.Token != "" && subtle.ConstantTimeCompare([]byte(presented), []byte(p.Token)) == 1 {
-		if isMutation(r.Method) && !isTokenAdminPath(r.URL.Path) {
-			api.WriteEnvelope(w, http.StatusForbidden, "bootstrap_token_write_forbidden",
-				"bootstrap token cannot perform attributed writes; use a user token")
-			return
-		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), Principal{
 			Kind: PrincipalBootstrap,
 		})))
@@ -116,6 +112,11 @@ func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Han
 	}
 	tok, err := tokenStore.ResolveAPIToken(r.Context(), presented)
 	if err != nil {
+		if !errors.Is(err, db.ErrNotFound) {
+			api.WriteEnvelope(w, http.StatusInternalServerError, "internal",
+				"token identity lookup failed")
+			return
+		}
 		api.WriteEnvelope(w, http.StatusForbidden, "token_invalid", "token invalid")
 		return
 	}
@@ -142,6 +143,9 @@ func isTokenAdminPath(path string) bool {
 // daemon with a TLS-terminating reverse proxy and bind the daemon to a
 // Unix socket or 127.0.0.1.
 func checkAuthStartup(listen string, p authPolicy) error {
+	if p.RequireTokenIdentity && p.Token == "" {
+		return fmt.Errorf("require_token_identity requires a bootstrap token")
+	}
 	if p.RequireTokenIdentity && p.InsecureReadonly {
 		return fmt.Errorf("require_token_identity cannot be combined with --insecure-readonly")
 	}

@@ -120,6 +120,12 @@ func TestAuthStartupGuard_RejectsInsecureReadonlyWithIdentityMode(t *testing.T) 
 	assert.Contains(t, err.Error(), "require_token_identity")
 }
 
+func TestAuthStartupGuard_RejectsIdentityModeWithoutBootstrapToken(t *testing.T) {
+	err := checkAuthStartup("", authPolicy{RequireTokenIdentity: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bootstrap")
+}
+
 // TestAuthStartupGuard_WildcardBindWithoutToken_Refuses covers the listen
 // shapes that bind every interface in Go's net.Listen — :port (empty host),
 // 0.0.0.0:port, and [::]:port. Each is reachable from anywhere on the

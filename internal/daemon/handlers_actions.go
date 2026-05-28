@@ -48,7 +48,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// claiming a TUI origin; require full validation in that case
 		// so duplicate/superseded closes still must carry their typed
 		// targets and won't corrupt the audit trail.
-		tuiBypass := tuiBypassAllowed(ctx, in.Body.Source, in.Body.Reason, in.Body.Actor)
+		tuiBypass := tuiBypassAllowed(ctx, in.Body.Source, in.Body.Reason)
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err

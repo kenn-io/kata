@@ -65,6 +65,9 @@ func (d *DB) RemoveProject(ctx context.Context, p RemoveProjectParams) (Project,
 	if err != nil {
 		return Project{}, nil, err
 	}
+	if isSystemProject(project) {
+		return Project{}, nil, ErrNotFound
+	}
 	if project.DeletedAt != nil {
 		return Project{}, nil, ErrProjectAlreadyArchived
 	}
@@ -130,6 +133,9 @@ func (d *DB) RestoreProject(ctx context.Context, projectID int64, actor string) 
 	project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, projectID))
 	if err != nil {
 		return Project{}, nil, false, err
+	}
+	if isSystemProject(project) {
+		return Project{}, nil, false, ErrNotFound
 	}
 	if project.DeletedAt == nil {
 		if err := tx.Commit(); err != nil {

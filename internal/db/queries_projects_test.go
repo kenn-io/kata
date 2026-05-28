@@ -295,6 +295,23 @@ func TestMergeProjects_RejectsSystemProject(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestRemoveAndRestoreProject_RejectSystemProject(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	sys, err := d.SystemProject(ctx)
+	require.NoError(t, err)
+
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: sys.ID,
+		Actor:     "tester",
+		Force:     true,
+	})
+	assert.ErrorIs(t, err, db.ErrNotFound)
+
+	_, _, _, err = d.RestoreProject(ctx, sys.ID, "tester")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
 // TestMergeProjects_ExtendsCollidingSourceShortIDs pins the §5.2 merge rule:
 // source-side issues whose short_ids collide with target-side issues are
 // auto-extended to the next non-colliding length. Existing target short_ids

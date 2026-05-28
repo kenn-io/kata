@@ -41,6 +41,21 @@ func TestSystemProjectInitializedAndHidden(t *testing.T) {
 	}
 }
 
+func TestEnsureSystemProjectRejectsConflictingSentinelUID(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	_, err := d.ExecContext(ctx, `DROP TRIGGER trg_projects_uid_immutable`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx,
+		`UPDATE projects SET uid = ? WHERE name = ?`,
+		"01HZNQ7VFPK1XGD8R5MABCD4EX", db.SystemProjectName)
+	require.NoError(t, err)
+
+	err = d.EnsureSystemProject(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), db.SystemProjectName)
+}
+
 func TestBatchProjectStatsHidesSystemProject(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
@@ -173,6 +188,29 @@ func TestResolveAPITokenLazilyUpdatesLastUsedAt(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got.LastUsedAt)
 	assert.Equal(t, firstUsed, *got.LastUsedAt)
+}
+
+func TestResolveAPITokenReturnsTokenWhenLastUsedUpdateFails(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "secret-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		CREATE TRIGGER fail_api_token_last_used
+		BEFORE UPDATE OF last_used_at ON api_tokens
+		BEGIN
+			SELECT RAISE(FAIL, 'last_used_at unavailable');
+		END`)
+	require.NoError(t, err)
+
+	got, err := d.ResolveAPIToken(ctx, "secret-token")
+	require.NoError(t, err)
+	assert.Equal(t, tok.ID, got.ID)
+	assert.Nil(t, got.LastUsedAt)
 }
 
 func TestResolveAPITokenRejectsRevokedToken(t *testing.T) {

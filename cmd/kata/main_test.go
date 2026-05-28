@@ -23,6 +23,27 @@ func TestRoot_HelpListsUniversalFlags(t *testing.T) {
 	assert.Contains(t, out, "--workspace")
 }
 
+func TestNewRootCmdResetsGlobalFlagState(t *testing.T) {
+	resetFlags(t)
+	flags.Format = "json"
+	flags.FormatValues = []string{"json"}
+	flags.JSON = true
+	flags.Agent = true
+	flags.Workspace = "/tmp/leaked"
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"version"})
+
+	require.NoError(t, cmd.Execute())
+	assert.False(t, flags.JSON)
+	assert.False(t, flags.Agent)
+	assert.Empty(t, flags.FormatValues)
+	assert.Empty(t, flags.Workspace)
+}
+
 // TestExitCodeFor_PureMapping pins the exit-code decision logic so a future
 // refactor can't silently revert ExitUsage vs ExitInternal classification.
 func TestExitCodeFor_PureMapping(t *testing.T) {

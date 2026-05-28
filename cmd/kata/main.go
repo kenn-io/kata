@@ -37,8 +37,8 @@ var runEEntered bool
 var errorCommandName string
 
 func newRootCmd() *cobra.Command {
+	flags = globalFlags{}
 	runEEntered = false
-	flags.Mode = ""
 	errorCommandName = ""
 	cmd := &cobra.Command{
 		Use:           "kata",

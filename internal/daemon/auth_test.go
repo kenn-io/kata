@@ -101,6 +101,22 @@ func TestAuthMiddleware_IdentityModeUnknownToken403(t *testing.T) {
 	assert.Contains(t, rr.Body.String(), `"token_invalid"`)
 }
 
+func TestAuthMiddleware_IdentityModeTokenLookupError500(t *testing.T) {
+	d := openAuthTestDB(t)
+	_, err := d.ExecContext(context.Background(), `DROP TABLE api_tokens`)
+	require.NoError(t, err)
+
+	mw := requireBearer(authPolicy{Token: "bootstrap-token", RequireTokenIdentity: true}, d)
+	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req.Header.Set("Authorization", "Bearer user-token")
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.Contains(t, rr.Body.String(), `"internal"`)
+}
+
 func TestAuthMiddleware_IdentityModeRevokedToken403(t *testing.T) {
 	d := openAuthTestDB(t)
 	tok, _, err := d.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
@@ -141,19 +157,18 @@ func TestAuthMiddleware_IdentityModeBootstrapTokenSetsPrincipal(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
-func TestAuthMiddleware_IdentityModeBootstrapTokenCannotMutateProjects(t *testing.T) {
+func TestAuthMiddleware_IdentityModeBootstrapTokenReachesPostHandlers(t *testing.T) {
 	d := openAuthTestDB(t)
 	mw := requireBearer(authPolicy{Token: "bootstrap-token", RequireTokenIdentity: true}, d)
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/resolve", nil)
 	req.Header.Set("Authorization", "Bearer bootstrap-token")
 
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusForbidden, rr.Code)
-	assert.Contains(t, rr.Body.String(), `"bootstrap_token_write_forbidden"`)
+	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
 func TestAuthMiddleware_IdentityModeBootstrapTokenCanAdminTokens(t *testing.T) {

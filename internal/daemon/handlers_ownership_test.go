@@ -1,10 +1,14 @@
 package daemon_test
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -55,6 +59,31 @@ func TestAssign_TrimsActorAndOwner(t *testing.T) {
 	assert.Equal(t, "alice", *out.Issue.Owner)
 	require.NotNil(t, out.Event)
 	assert.Equal(t, "issue.assigned", out.Event.Type)
+}
+
+func TestAssign_IdentityModeOverridesBodyActor(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	pid := mkProject(t, env, "github.com/test/a", "a")
+	issue := mkIssue(t, env, pid, "assign me")
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "alice-token",
+		Actor:          "alice",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	resp, bs := envDoRaw(t, env, http.MethodPost, issuePath(pid, issue.ID, "actions/assign"),
+		map[string]string{"actor": "someone_else", "owner": "bob"},
+		map[string]string{"Authorization": "Bearer alice-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+	var out struct {
+		Event *struct {
+			Actor string `json:"actor"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	require.NotNil(t, out.Event)
+	assert.Equal(t, "alice", out.Event.Actor)
 }
 
 func TestUnassign_BlankActorIs400(t *testing.T) {

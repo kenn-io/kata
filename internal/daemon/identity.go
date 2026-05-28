@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"strings"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -87,12 +86,12 @@ func tokenAdminAuditActor(ctx context.Context, fallback string) string {
 	return fallback
 }
 
-func tuiBypassAllowed(ctx context.Context, source, reason, requestActor string) bool {
+func tuiBypassAllowed(ctx context.Context, source, reason string) bool {
 	if source != "tui" || reason != "done" {
 		return false
 	}
 	if p, ok := PrincipalFromContext(ctx); ok && p.Kind == PrincipalDBToken {
-		return strings.TrimSpace(requestActor) == p.Actor
+		return false
 	}
 	return true
 }

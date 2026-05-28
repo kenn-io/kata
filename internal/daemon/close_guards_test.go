@@ -46,7 +46,7 @@ func TestCloseIssue_IdentityModeDoesNotTrustBodySourceTUI(t *testing.T) {
 	assert.Equal(t, "open", got.Status)
 }
 
-func TestCloseIssue_IdentityModeAllowsTUIBypassForMatchingTokenActor(t *testing.T) {
+func TestCloseIssue_IdentityModeDBTokenCannotUseTUIBypassForMatchingTokenActor(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	issue := mkIssue(t, env, pid, "close me")
@@ -61,15 +61,11 @@ func TestCloseIssue_IdentityModeAllowsTUIBypassForMatchingTokenActor(t *testing.
 		issuePathRef(pid, issue.ShortID, "actions/close"),
 		map[string]any{"actor": "alice", "source": "tui"},
 		map[string]string{"Authorization": "Bearer alice-token"})
-	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
 
 	got, err := env.DB.IssueByID(context.Background(), issue.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "closed", got.Status)
-	var actor string
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
-		`SELECT actor FROM events WHERE type = 'issue.closed' AND issue_id = ?`, issue.ID).Scan(&actor))
-	assert.Equal(t, "alice", actor)
+	assert.Equal(t, "open", got.Status)
 }
 
 // fetchEvents polls /api/v1/events for the project and returns every event in

@@ -47,10 +47,18 @@ func (d *DB) EnsureSystemProject(ctx context.Context) error {
 	_, err := d.ExecContext(ctx, `
 		INSERT INTO projects(uid, name)
 		VALUES(?, ?)
-		ON CONFLICT(name) DO UPDATE SET uid = excluded.uid
+		ON CONFLICT(name) DO NOTHING
 	`, SystemProjectUID, SystemProjectName)
 	if err != nil {
 		return fmt.Errorf("ensure system project: %w", err)
+	}
+	sys, err := d.SystemProject(ctx)
+	if err != nil {
+		return fmt.Errorf("ensure system project: %w", err)
+	}
+	if sys.UID != SystemProjectUID {
+		return fmt.Errorf("ensure system project: %s has uid %q, want %q",
+			SystemProjectName, sys.UID, SystemProjectUID)
 	}
 	return nil
 }
@@ -250,16 +258,16 @@ func (d *DB) ResolveAPIToken(ctx context.Context, plaintext string) (APIToken, e
 		     last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
 		   )`, hash)
 	if err != nil {
-		return APIToken{}, fmt.Errorf("update api token last used: %w", err)
+		return tok, nil
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return APIToken{}, fmt.Errorf("api token last used rows affected: %w", err)
+		return tok, nil
 	}
 	if n > 0 {
 		tok, err = scanAPIToken(d.QueryRowContext(ctx, apiTokenSelect+` WHERE id = ?`, tok.ID))
 		if err != nil {
-			return APIToken{}, err
+			return tok, nil
 		}
 	}
 	return tok, nil
