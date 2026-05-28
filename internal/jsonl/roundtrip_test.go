@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -103,11 +104,30 @@ func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {
 	require.NoError(t, err)
 	eventUID, err := uid.New()
 	require.NoError(t, err)
+	originUID := src.InstanceUID()
+	payload := fmt.Sprintf(`{"token_id":%d}`, tok.ID)
+	createdAt := "2026-05-28T23:59:59.000Z"
+	hlcPhysicalMS := int64(1780012799000)
+	hlcCounter := int64(99)
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID:               eventUID,
+		OriginInstanceUID: originUID,
+		ProjectUID:        system.UID,
+		ProjectName:       system.Name,
+		Type:              "token.revoked",
+		Actor:             db.BootstrapActor,
+		HLCPhysicalMS:     hlcPhysicalMS,
+		HLCCounter:        hlcCounter,
+		CreatedAt:         createdAt,
+		Payload:           json.RawMessage(payload),
+	})
+	require.NoError(t, err)
 	_, err = src.ExecContext(ctx, `
-		INSERT INTO events(uid, origin_instance_uid, project_id, project_name, type, actor, payload, created_at)
-		VALUES(?, ?, ?, ?, 'token.revoked', ?, ?, '2026-05-28T23:59:59.000Z')`,
-		eventUID, src.InstanceUID(), system.ID, system.Name, db.BootstrapActor,
-		fmt.Sprintf(`{"token_id":%d}`, tok.ID))
+		INSERT INTO events(uid, origin_instance_uid, project_id, project_name, type, actor, payload,
+		                   hlc_physical_ms, hlc_counter, content_hash, created_at)
+		VALUES(?, ?, ?, ?, 'token.revoked', ?, ?, ?, ?, ?, ?)`,
+		eventUID, originUID, system.ID, system.Name, db.BootstrapActor,
+		payload, hlcPhysicalMS, hlcCounter, hash, createdAt)
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -125,10 +145,155 @@ func assertRoundtripTableCounts(t *testing.T, src, dst *db.DB) {
 	t.Helper()
 	for _, table := range []string{
 		"projects", "project_aliases", "issues", "comments", "issue_labels",
-		"links", "events", "purge_log",
+		"links", "import_mappings", "federation_bindings", "federation_enrollments",
+		"federation_sync_status", "federation_quarantine", "issue_claims", "pending_claim_requests", "events", "purge_log",
 	} {
 		assertTableCount(t, src, dst, table)
 	}
+}
+
+func TestFederationSyncStatusRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	srcDB := openExportTestDB(t)
+	p, err := srcDB.CreateProject(ctx, "sync-status")
+	require.NoError(t, err)
+	require.NoError(t, srcDB.RecordFederationSyncPullStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:00.000Z")))
+	require.NoError(t, srcDB.RecordFederationSyncPullSuccess(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:01.000Z")))
+	require.NoError(t, srcDB.RecordFederationSyncPushStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:02.000Z")))
+	require.NoError(t, srcDB.RecordFederationSyncPushSuccess(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:03.000Z")))
+	require.NoError(t, srcDB.RecordFederationSyncReset(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:04.000Z")))
+	require.NoError(t, srcDB.RecordFederationSyncError(ctx, p.ID, fmt.Errorf("poll failed"), mustParseTime(t, "2026-05-23T01:00:05.000Z")))
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, srcDB, &buf, jsonl.ExportOptions{}))
+
+	dstDB := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
+
+	got, err := dstDB.FederationSyncStatusByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, p.ID, got.ProjectID)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:00.000Z"), got.LastPullStartedAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:01.000Z"), got.LastPullSuccessAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:02.000Z"), got.LastPushStartedAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:03.000Z"), got.LastPushSuccessAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:04.000Z"), got.LastResetAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:05.000Z"), got.LastErrorAt)
+	require.NotNil(t, got.LastError)
+	assert.Equal(t, "poll failed", *got.LastError)
+}
+
+func TestFederationQuarantineRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	srcDB := openExportTestDB(t)
+	p, err := srcDB.CreateProject(ctx, "quarantine")
+	require.NoError(t, err)
+	_, err = srcDB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 1,
+		PushEnabled:          true,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	created, err := srcDB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID:    p.ID,
+		Direction:    db.FederationQuarantineDirectionPush,
+		FirstEventID: 7,
+		LastEventID:  9,
+		EventUIDs:    []string{"evt-7", "evt-8"},
+		Error:        "poison",
+		CreatedAt:    mustParseTime(t, "2026-05-23T01:00:00.000Z"),
+	})
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, srcDB, &buf, jsonl.ExportOptions{}))
+	dstDB := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
+
+	got, err := dstDB.ActiveFederationQuarantine(ctx, p.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, got.ID)
+	assert.Equal(t, []string{"evt-7", "evt-8"}, got.EventUIDs)
+	assert.Equal(t, "poison", got.Error)
+}
+
+func TestClaimRoundTripRows(t *testing.T) {
+	ctx := context.Background()
+	srcDB := openExportTestDB(t)
+	p, err := srcDB.CreateProject(ctx, "claims")
+	require.NoError(t, err)
+	issue, _, err := srcDB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "claimed",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+
+	claimUID := "01J00000000000000000000001"
+	holderInstanceUID := "01J00000000000000000000002"
+	requestUID := "01J00000000000000000000003"
+	_, err = srcDB.ExecContext(ctx, `
+		INSERT INTO issue_claims(
+		  claim_uid, project_id, issue_id, issue_uid, holder,
+		  holder_instance_uid, client_kind, purpose, claim_kind,
+		  acquired_at, revision, updated_at
+		)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'hard', ?, 2, ?)`,
+		claimUID, p.ID, issue.ID, issue.UID, "tester",
+		holderInstanceUID, "cli", "editing",
+		"2026-05-23T12:00:00.000Z", "2026-05-23T12:30:00.000Z")
+	require.NoError(t, err)
+	_, err = srcDB.ExecContext(ctx, `
+		INSERT INTO pending_claim_requests(
+		  request_uid, project_id, issue_id, issue_uid, holder,
+		  holder_instance_uid, client_kind, claim_kind, ttl_seconds, purpose, requested_at,
+		  last_attempt_at, last_error
+		)
+		VALUES(?, ?, ?, ?, ?, ?, 'cli', 'timed', 900, ?, ?, ?, ?)`,
+		requestUID, p.ID, issue.ID, issue.UID, "tester",
+		holderInstanceUID, "offline edit", "2026-05-23T12:01:00.000Z",
+		"2026-05-23T12:02:00.000Z", "hub offline")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, srcDB, &buf, jsonl.ExportOptions{}))
+
+	dstDB := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
+
+	var gotClaimUID, gotIssueUID, gotHolderInstanceUID string
+	var gotReleasedAt sql.NullString
+	var gotRevision int64
+	require.NoError(t, dstDB.QueryRowContext(ctx, `
+		SELECT claim_uid, issue_uid, holder_instance_uid, CAST(released_at AS TEXT), revision
+		  FROM issue_claims
+		 WHERE claim_uid = ?`, claimUID).Scan(
+		&gotClaimUID, &gotIssueUID, &gotHolderInstanceUID, &gotReleasedAt, &gotRevision))
+	assert.Equal(t, claimUID, gotClaimUID)
+	assert.Equal(t, issue.UID, gotIssueUID)
+	assert.Equal(t, holderInstanceUID, gotHolderInstanceUID)
+	assert.False(t, gotReleasedAt.Valid, "active claim must stay unreleased")
+	assert.Equal(t, int64(2), gotRevision)
+
+	var gotRequestUID, gotPendingIssueUID, gotPendingHolderInstanceUID, gotPendingClientKind string
+	var gotRejectedAt, gotResolvedAt sql.NullString
+	require.NoError(t, dstDB.QueryRowContext(ctx, `
+		SELECT request_uid, issue_uid, holder_instance_uid, client_kind, CAST(rejected_at AS TEXT), CAST(resolved_at AS TEXT)
+		  FROM pending_claim_requests
+		 WHERE request_uid = ?`, requestUID).Scan(
+		&gotRequestUID, &gotPendingIssueUID, &gotPendingHolderInstanceUID,
+		&gotPendingClientKind, &gotRejectedAt, &gotResolvedAt))
+	assert.Equal(t, requestUID, gotRequestUID)
+	assert.Equal(t, issue.UID, gotPendingIssueUID)
+	assert.Equal(t, holderInstanceUID, gotPendingHolderInstanceUID)
+	assert.Equal(t, "cli", gotPendingClientKind)
+	assert.False(t, gotRejectedAt.Valid, "pending request must stay unrejected")
+	assert.False(t, gotResolvedAt.Valid, "pending request must stay unresolved")
 }
 
 func assertSQLiteSequenceRows(t *testing.T, src, dst *db.DB) {
@@ -220,6 +385,84 @@ func TestRoundtrip_PurgeLogEnvelopeCarriesShortID(t *testing.T) {
 		`SELECT short_id FROM purge_log WHERE project_id = ?`, p.ID).Scan(&got))
 	require.NotNil(t, got)
 	assert.Equal(t, issue.ShortID, *got)
+}
+
+func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
+	ctx := context.Background()
+	srcDB := openExportTestDB(t)
+	p, err := srcDB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	binding := db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 7,
+		PullCursorEventID:    6,
+		PushEnabled:          true,
+		PushCursorEventID:    5,
+		Enabled:              true,
+	}
+	_, err = srcDB.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, srcDB, &buf, jsonl.ExportOptions{}))
+
+	var bindingPayload map[string]any
+	scanner := bufio.NewScanner(bytes.NewReader(buf.Bytes()))
+	for scanner.Scan() {
+		var env jsonl.Envelope
+		require.NoError(t, json.Unmarshal(scanner.Bytes(), &env))
+		if env.Kind == jsonl.KindFederationBinding {
+			require.NoError(t, json.Unmarshal(env.Data, &bindingPayload))
+			break
+		}
+	}
+	require.NoError(t, scanner.Err())
+	require.NotNil(t, bindingPayload)
+	assert.Equal(t, true, bindingPayload["push_enabled"])
+	assert.Equal(t, float64(5), bindingPayload["push_cursor_event_id"])
+
+	dstDB := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
+	got, err := dstDB.FederationBindingByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.True(t, got.PushEnabled)
+	assert.Equal(t, int64(5), got.PushCursorEventID)
+}
+
+func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
+	ctx := context.Background()
+	srcDB := openExportTestDB(t)
+	p, err := srcDB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	tokenHash := strings.Repeat("b", 64)
+	plaintextToken := "plaintext-token-never-exported"
+	_, err = srcDB.ExecContext(ctx, `
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities)
+		VALUES(?, ?, ?, ?)`,
+		tokenHash, "01HZZZZZZZZZZZZZZZZZZZZZ02", p.ID, "pull,push")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, srcDB, &buf, jsonl.ExportOptions{}))
+	assert.Contains(t, buf.String(), tokenHash)
+	assert.NotContains(t, buf.String(), plaintextToken)
+
+	dstDB := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
+
+	var gotHash, gotSpoke, gotCapabilities string
+	var gotProjectID int64
+	require.NoError(t, dstDB.QueryRowContext(ctx, `
+		SELECT token_hash, spoke_instance_uid, project_id, capabilities
+		  FROM federation_enrollments`).Scan(&gotHash, &gotSpoke, &gotProjectID, &gotCapabilities))
+	assert.Equal(t, tokenHash, gotHash)
+	assert.Equal(t, "01HZZZZZZZZZZZZZZZZZZZZZ02", gotSpoke)
+	assert.Equal(t, p.ID, gotProjectID)
+	assert.Equal(t, "pull,push", gotCapabilities)
 }
 
 // TestRoundtrip_IssueEnvelopeCarriesShortID pins spec §8.1: the JSONL issue
@@ -676,10 +919,12 @@ func TestRoundtrip_NewEventPayloadBytesAreExact(t *testing.T) {
 		_, err := srcDB.ExecContext(ctx, `
 			INSERT INTO events
 			  (uid, origin_instance_uid, project_id, project_name,
-			   issue_id, issue_uid, type, actor, payload)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			   issue_id, issue_uid, type, actor, payload,
+			   hlc_physical_ms, hlc_counter, content_hash)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0,
+			        '0000000000000000000000000000000000000000000000000000000000000000')`,
 			eventUID, srcDB.InstanceUID(), p.ID, "p",
-			iss.ID, iss.UID, c.eventType, "tester", c.payload)
+			iss.ID, iss.UID, c.eventType, "tester", c.payload, i+1)
 		require.NoError(t, err)
 	}
 

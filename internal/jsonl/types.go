@@ -11,18 +11,24 @@ type Kind string
 
 // JSONL record kinds. Order matches the export sequence enforced by kindOrder.
 const (
-	KindMeta           Kind = "meta"
-	KindProject        Kind = "project"
-	KindProjectAlias   Kind = "project_alias"
-	KindRecurrence     Kind = "recurrence"
-	KindIssue          Kind = "issue"
-	KindComment        Kind = "comment"
-	KindIssueLabel     Kind = "issue_label"
-	KindLink           Kind = "link"
-	KindImportMapping  Kind = "import_mapping"
-	KindEvent          Kind = "event"
-	KindPurgeLog       Kind = "purge_log"
-	KindSQLiteSequence Kind = "sqlite_sequence"
+	KindMeta                 Kind = "meta"
+	KindProject              Kind = "project"
+	KindProjectAlias         Kind = "project_alias"
+	KindRecurrence           Kind = "recurrence"
+	KindIssue                Kind = "issue"
+	KindComment              Kind = "comment"
+	KindIssueLabel           Kind = "issue_label"
+	KindLink                 Kind = "link"
+	KindImportMapping        Kind = "import_mapping"
+	KindFederationBinding    Kind = "federation_binding"
+	KindFederationSyncStatus Kind = "federation_sync_status"
+	KindFederationQuarantine Kind = "federation_quarantine"
+	KindFederationEnrollment Kind = "federation_enrollment"
+	KindIssueClaim           Kind = "issue_claim"
+	KindPendingClaimRequest  Kind = "pending_claim_request"
+	KindEvent                Kind = "event"
+	KindPurgeLog             Kind = "purge_log"
+	KindSQLiteSequence       Kind = "sqlite_sequence"
 )
 
 // Sentinel errors returned by the decoder for malformed or out-of-order envelopes.
@@ -33,18 +39,24 @@ var (
 )
 
 var kindOrder = map[Kind]int{
-	KindMeta:           0,
-	KindProject:        1,
-	KindProjectAlias:   2,
-	KindRecurrence:     3,
-	KindIssue:          4,
-	KindComment:        5,
-	KindIssueLabel:     6,
-	KindLink:           7,
-	KindImportMapping:  8,
-	KindEvent:          9,
-	KindPurgeLog:       10,
-	KindSQLiteSequence: 11,
+	KindMeta:                 0,
+	KindProject:              1,
+	KindProjectAlias:         2,
+	KindRecurrence:           3,
+	KindIssue:                4,
+	KindComment:              5,
+	KindIssueLabel:           6,
+	KindLink:                 7,
+	KindImportMapping:        8,
+	KindFederationBinding:    9,
+	KindFederationSyncStatus: 10,
+	KindFederationQuarantine: 11,
+	KindFederationEnrollment: 12,
+	KindIssueClaim:           13,
+	KindPendingClaimRequest:  14,
+	KindEvent:                15,
+	KindPurgeLog:             16,
+	KindSQLiteSequence:       17,
 }
 
 // Envelope is one NDJSON record.

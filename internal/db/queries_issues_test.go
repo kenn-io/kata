@@ -2,11 +2,13 @@ package db_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func TestCreateIssue_AllocatesShortIDAndEmitsEvent(t *testing.T) {
@@ -26,6 +28,9 @@ func TestCreateIssue_AllocatesShortIDAndEmitsEvent(t *testing.T) {
 	assert.Equal(t, "agent-1", issue.Author)
 	assert.Equal(t, "issue.created", evt.Type)
 	assert.Equal(t, p.UID, evt.ProjectUID)
+	assert.Greater(t, evt.HLCPhysicalMS, int64(0))
+	assert.GreaterOrEqual(t, evt.HLCCounter, int64(0))
+	assert.Regexp(t, `^[a-f0-9]{64}$`, evt.ContentHash)
 	assert.NotNil(t, evt.IssueID)
 	require.NotNil(t, evt.IssueUID)
 	assert.Equal(t, issue.UID, *evt.IssueUID)
@@ -322,10 +327,21 @@ func TestCreateComment_EmitsEvent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "hi", cmt.Body)
+	assert.True(t, uid.Valid(cmt.UID))
 	assert.Equal(t, "issue.commented", evt.Type)
 	assert.Equal(t, p.UID, evt.ProjectUID)
 	require.NotNil(t, evt.IssueUID)
 	assert.Equal(t, issue.UID, *evt.IssueUID)
+	payload := unmarshalPayload[struct {
+		CommentUID string `json:"comment_uid"`
+		Author     string `json:"author"`
+		Body       string `json:"body"`
+		CreatedAt  string `json:"created_at"`
+	}](t, evt.Payload)
+	assert.Equal(t, cmt.UID, payload.CommentUID)
+	assert.Equal(t, "agent", payload.Author)
+	assert.Equal(t, "hi", payload.Body)
+	assert.NotEmpty(t, payload.CreatedAt)
 }
 
 func TestCloseIssue_SetsStatusAndEmitsEvent(t *testing.T) {
@@ -339,6 +355,12 @@ func TestCloseIssue_SetsStatusAndEmitsEvent(t *testing.T) {
 	assert.Equal(t, "done", *updated.ClosedReason)
 	assert.NotNil(t, updated.ClosedAt)
 	assert.Equal(t, "issue.closed", evt.Type)
+	payload := unmarshalPayload[struct {
+		Reason   string `json:"reason"`
+		ClosedAt string `json:"closed_at"`
+	}](t, evt.Payload)
+	assert.Equal(t, "done", payload.Reason)
+	assert.NotEmpty(t, payload.ClosedAt)
 }
 
 func TestCloseIssue_OnAlreadyClosedIsNoOp(t *testing.T) {
@@ -364,20 +386,60 @@ func TestReopenIssue_ClearsStatusAndEmitsEvent(t *testing.T) {
 	assert.Nil(t, updated.ClosedAt)
 	assert.Nil(t, updated.ClosedReason)
 	assert.Equal(t, "issue.reopened", evt.Type)
+	payload := unmarshalPayload[struct {
+		ReopenedAt string `json:"reopened_at"`
+	}](t, evt.Payload)
+	assert.NotEmpty(t, payload.ReopenedAt)
 }
 
 func TestEditIssue_SetsFieldsAndEmitsEvent(t *testing.T) {
 	d, ctx, _, issue := setupTestIssue(t)
 
 	newTitle := "new"
+	newBody := "new body"
 	updated, evt, changed, err := d.EditIssue(ctx, db.EditIssueParams{
-		IssueID: issue.ID, Title: &newTitle, Actor: "agent",
+		IssueID: issue.ID, Title: &newTitle, Body: &newBody, Actor: "agent",
 	})
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, "new", updated.Title)
+	assert.Equal(t, "new body", updated.Body)
 	require.NotNil(t, evt)
 	assert.Equal(t, "issue.updated", evt.Type)
+	payload := unmarshalPayload[struct {
+		Title    *string `json:"title"`
+		OldTitle *string `json:"old_title"`
+		Body     *string `json:"body"`
+	}](t, evt.Payload)
+	require.NotNil(t, payload.Title)
+	assert.Equal(t, "new", *payload.Title)
+	require.NotNil(t, payload.OldTitle)
+	assert.Equal(t, issue.Title, *payload.OldTitle)
+	require.NotNil(t, payload.Body)
+	assert.Equal(t, "new body", *payload.Body)
+}
+
+func TestEditIssue_UnassignOwnerPayloadIncludesExplicitNull(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	owner := "alice"
+	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID, Title: "owned", Author: "tester", Owner: &owner,
+	})
+	require.NoError(t, err)
+
+	clearOwner := ""
+	updated, evt, changed, err := d.EditIssue(ctx, db.EditIssueParams{
+		IssueID: issue.ID, Owner: &clearOwner, Actor: "agent",
+	})
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Nil(t, updated.Owner)
+	require.NotNil(t, evt)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(evt.Payload), &payload))
+	assert.Contains(t, payload, "owner")
+	assert.Nil(t, payload["owner"])
+	assert.Equal(t, "alice", payload["old_owner"])
 }
 
 func TestEditIssue_NoFieldsIsValidationError(t *testing.T) {

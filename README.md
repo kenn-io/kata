@@ -617,9 +617,9 @@ because events store actor text snapshots.
 API tokens are event-sourced operational state. `api_tokens` is a projection
 rebuilt from `token.created` and `token.revoked` events during JSONL import or
 schema cutover. Those token events are included in backup/restore for the local
-daemon, but they are excluded from ordinary event feeds and should not be
-replicated as project history by future federation code without an explicit
-credential-migration design.
+daemon, but they are excluded from ordinary event feeds and project federation.
+Federation enrollment tokens are separate spoke-to-hub transport credentials;
+see `docs/federation.md` for the token boundary.
 
 Web apps or OAuth frontends can sit above this model without daemon-side OAuth.
 The web app should authenticate the user, map that identity to an existing kata

@@ -151,6 +151,9 @@ func TestEvents_PayloadIncludesShortIDNotNumber(t *testing.T) {
 	envGetJSON(t, env, "/api/v1/projects/"+strconv.FormatInt(pid, 10)+"/events?after_id=0&limit=10", &raw)
 	require.NotEmpty(t, raw.Events, "expected at least one event")
 	first := raw.Events[0]
+	assert.NotZero(t, first["hlc_physical_ms"])
+	assert.NotNil(t, first["hlc_counter"])
+	assert.Regexp(t, `^[a-f0-9]{64}$`, first["content_hash"])
 	assert.Equal(t, created.ShortID, first["issue_short_id"])
 	assert.Equal(t, created.UID, first["issue_uid"])
 	_, hasNum := first["issue_number"]

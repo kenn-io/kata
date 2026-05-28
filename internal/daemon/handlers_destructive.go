@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -36,9 +37,15 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateConfirm(in.Confirm, "DELETE", project.Name, issue.ShortID); err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 		updated, evt, changed, err := cfg.DB.SoftDeleteIssue(ctx, issue.ID, actor)
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
@@ -68,9 +75,15 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 		updated, evt, changed, err := cfg.DB.RestoreIssue(ctx, issue.ID, actor)
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
+		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
@@ -108,6 +121,9 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateConfirm(in.Confirm, "PURGE", project.Name, issue.ShortID); err != nil {
 			return nil, err
 		}
+		if err := requireFederatedHubIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 		var reasonPtr *string
 		if in.Body.Reason != "" {
 			r := in.Body.Reason
@@ -117,10 +133,19 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			if errors.Is(err, db.ErrFederatedSpokeUnsupported) {
+				return nil, api.NewError(409, "federated_admin_required", err.Error(), "", nil)
+			}
+			return nil, federationReadOnlyError(err)
+		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
 		if pl.PurgeResetAfterEventID != nil {
+			if err := refreshFederationBaselineAfterPurge(ctx, cfg, in.ProjectID, actor); err != nil {
+				return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			}
 			cfg.Broadcaster.Broadcast(StreamMsg{
 				Kind:      "reset",
 				ResetID:   *pl.PurgeResetAfterEventID,
@@ -133,12 +158,22 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 }
 
+func refreshFederationBaselineAfterPurge(ctx context.Context, cfg ServerConfig, projectID int64, actor string) error {
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	_, _, err := cfg.DB.RefreshProjectFederationBaseline(refreshCtx, projectID, actor)
+	return err
+}
+
 // validateConfirm checks an X-Kata-Confirm header against the verb-specific
 // expected value ("DELETE <project>#<short_id>" or
 // "PURGE <project>#<short_id>"). Missing header → confirm_required; wrong
 // value → confirm_mismatch.
 func validateConfirm(got, verb, projectName, shortID string) error {
-	expected := fmt.Sprintf("%s %s#%s", verb, projectName, shortID)
+	return validateExactConfirm(got, fmt.Sprintf("%s %s#%s", verb, projectName, shortID))
+}
+
+func validateExactConfirm(got, expected string) error {
 	if got == "" {
 		return api.NewError(412, "confirm_required",
 			"this action requires X-Kata-Confirm",

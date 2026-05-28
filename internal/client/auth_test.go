@@ -1,4 +1,4 @@
-package daemonclient
+package client
 
 import (
 	"context"
@@ -148,6 +148,41 @@ func TestNewHTTPClientAttachesAuthHeader(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, "Bearer client-tok", got)
+}
+
+func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c, err := NewHTTPClientWithBearer(context.Background(), srv.URL, "explicit-token", Opts{})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		srv.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer explicit-token", got)
+}
+
+func TestNewHTTPClientWithBearerEmptyTokenSkipsSafetyCheck(t *testing.T) {
+	c, err := NewHTTPClientWithBearer(context.Background(), "http://example.invalid:7373", "", Opts{})
+
+	require.NoError(t, err)
+	assert.NotNil(t, c)
+}
+
+func TestNewHTTPClientWithBearerRefusesPlaintextNonLoopback(t *testing.T) {
+	_, err := NewHTTPClientWithBearer(context.Background(), "http://example.invalid:7373", "secret", Opts{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plaintext")
 }
 
 func TestNewHTTPClientStreamingAttachesAuthHeader(t *testing.T) {

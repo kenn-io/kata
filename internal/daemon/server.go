@@ -23,11 +23,12 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
-	DB          *db.DB
-	StartedAt   time.Time
-	Endpoint    DaemonEndpoint
-	Broadcaster *EventBroadcaster
-	Hooks       hooks.Sink
+	DB             *db.DB
+	StartedAt      time.Time
+	Endpoint       DaemonEndpoint
+	Broadcaster    *EventBroadcaster
+	FederationWake func()
+	Hooks          hooks.Sink
 	// CloseThrottle controls whether the sibling-burst and repeated-
 	// message guards run on close. Zero-value (Enabled=false) is taken
 	// as "guards on" so handler tests and existing test harness setups
@@ -205,6 +206,8 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerMetadata(humaAPI, cfg)
 	registerMove(humaAPI, cfg)
 	registerEventsHandlers(humaAPI, mux, cfg)
+	registerFederationHandlers(humaAPI, cfg)
+	registerClaimHandlers(humaAPI, cfg)
 	registerDigestHandlers(humaAPI, cfg)
 	registerAuditHandlers(humaAPI, cfg)
 }

@@ -54,6 +54,11 @@ func requireBearer(p authPolicy, tokenStores ...*db.DB) func(http.Handler) http.
 				next.ServeHTTP(w, r)
 				return
 			}
+			if isFederationTransportRoute(r.Method, r.URL.Path) ||
+				isClaimActionRoute(r.Method, r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if p.RequireTokenIdentity {
 				requireIdentityBearer(w, r, next, p, tokenStore)
 				return
@@ -125,6 +130,72 @@ func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Han
 
 func isTokenAdminPath(path string) bool {
 	return path == "/api/v1/tokens" || strings.HasPrefix(path, "/api/v1/tokens/")
+}
+
+func isClaimActionRoute(method, path string) bool {
+	rest, ok := strings.CutPrefix(path, "/api/v1/projects/")
+	if !ok {
+		return false
+	}
+	projectID, rest, ok := strings.Cut(rest, "/issues/")
+	if !ok || projectID == "" {
+		return false
+	}
+	for _, r := range projectID {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	_, suffix, ok := strings.Cut(rest, "/")
+	if !ok {
+		return false
+	}
+	if method == http.MethodGet {
+		return suffix == "lease"
+	}
+	if method != http.MethodPost {
+		return false
+	}
+	switch suffix {
+	case "lease/actions/acquire", "lease/actions/renew", "lease/actions/release", "lease/actions/force_release":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFederationTransportRoute(method, path string) bool {
+	var suffix string
+	switch method {
+	case http.MethodGet:
+		if strings.HasSuffix(path, "/federation/events") {
+			suffix = "/federation/events"
+		} else {
+			suffix = "/federation/metadata"
+		}
+	case http.MethodPost:
+		suffix = "/federation/events:ingest"
+	default:
+		return false
+	}
+
+	rest, ok := strings.CutPrefix(path, "/api/v1/projects/")
+	if !ok {
+		return false
+	}
+	projectID, ok := strings.CutSuffix(rest, suffix)
+	if !ok {
+		return false
+	}
+	if projectID == "" {
+		return false
+	}
+	for _, r := range projectID {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // checkAuthStartup refuses startup when the listen address would expose

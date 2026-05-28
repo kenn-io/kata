@@ -3,8 +3,10 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -34,11 +36,12 @@ func (d *DB) SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (
 	// Conditional UPDATE — gated on deleted_at IS NULL — closes the
 	// read-then-write race: a concurrent SoftDeleteIssue between our lookup
 	// and our UPDATE would otherwise let both transactions emit events.
+	deletedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	res, err := tx.ExecContext(ctx,
 		`UPDATE issues
-		 SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ? AND deleted_at IS NULL`, issueID)
+		 SET deleted_at = ?,
+		     updated_at = ?
+		 WHERE id = ? AND deleted_at IS NULL`, deletedAt, deletedAt, issueID)
 	if err != nil {
 		return Issue{}, nil, false, fmt.Errorf("soft delete issue: %w", err)
 	}
@@ -57,13 +60,19 @@ func (d *DB) SoftDeleteIssue(ctx context.Context, issueID int64, actor string) (
 		}
 		return updated, nil, false, nil
 	}
+	payload, err := json.Marshal(struct {
+		DeletedAt string `json:"deleted_at"`
+	}{DeletedAt: deletedAt})
+	if err != nil {
+		return Issue{}, nil, false, fmt.Errorf("soft delete payload: %w", err)
+	}
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   issue.ProjectID,
 		ProjectName: projectName,
 		IssueID:     &issue.ID,
 		Type:        "issue.soft_deleted",
 		Actor:       actor,
-		Payload:     "{}",
+		Payload:     string(payload),
 	})
 	if err != nil {
 		return Issue{}, nil, false, err
@@ -99,11 +108,12 @@ func (d *DB) RestoreIssue(ctx context.Context, issueID int64, actor string) (Iss
 	}
 	// Conditional UPDATE — gated on deleted_at IS NOT NULL — closes the
 	// read-then-write race symmetric to SoftDeleteIssue.
+	restoredAt := time.Now().UTC().Format(sqliteTimeFormat)
 	res, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET deleted_at = NULL,
-		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ? AND deleted_at IS NOT NULL`, issueID)
+		     updated_at = ?
+		 WHERE id = ? AND deleted_at IS NOT NULL`, restoredAt, issueID)
 	if err != nil {
 		return Issue{}, nil, false, fmt.Errorf("restore issue: %w", err)
 	}
@@ -122,13 +132,20 @@ func (d *DB) RestoreIssue(ctx context.Context, issueID int64, actor string) (Iss
 		}
 		return updated, nil, false, nil
 	}
+	payload, err := json.Marshal(struct {
+		RestoredAt string `json:"restored_at"`
+		UpdatedAt  string `json:"updated_at"`
+	}{RestoredAt: restoredAt, UpdatedAt: restoredAt})
+	if err != nil {
+		return Issue{}, nil, false, fmt.Errorf("restore payload: %w", err)
+	}
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   issue.ProjectID,
 		ProjectName: projectName,
 		IssueID:     &issue.ID,
 		Type:        "issue.restored",
 		Actor:       actor,
-		Payload:     "{}",
+		Payload:     string(payload),
 	})
 	if err != nil {
 		return Issue{}, nil, false, err
@@ -183,6 +200,9 @@ func (d *DB) PurgeIssue(ctx context.Context, issueID int64, actor string, reason
 
 	issue, projectName, err := lookupIssueIncludingDeleted(ctx, conn, issueID)
 	if err != nil {
+		return PurgeLog{}, err
+	}
+	if err := ensureFederatedSpokeUnsupportedTx(ctx, conn, issue.ProjectID); err != nil {
 		return PurgeLog{}, err
 	}
 
@@ -301,6 +321,14 @@ func purgeCascade(
 	if _, err := c.ExecContext(ctx,
 		`DELETE FROM issue_labels WHERE issue_id = ?`, issue.ID); err != nil {
 		return 0, fmt.Errorf("delete labels: %w", err)
+	}
+	if _, err := c.ExecContext(ctx,
+		`DELETE FROM pending_claim_requests WHERE issue_id = ?`, issue.ID); err != nil {
+		return 0, fmt.Errorf("delete pending claim requests: %w", err)
+	}
+	if _, err := c.ExecContext(ctx,
+		`DELETE FROM issue_claims WHERE issue_id = ?`, issue.ID); err != nil {
+		return 0, fmt.Errorf("delete issue claims: %w", err)
 	}
 
 	// Step 5: reserve an SSE cursor by bumping sqlite_sequence past the
@@ -432,6 +460,9 @@ func lookupIssueIncludingDeleted(ctx context.Context, r sqlReader, issueID int64
 	}
 	if err != nil {
 		return Issue{}, "", fmt.Errorf("lookup issue including deleted: %w", err)
+	}
+	if err := ensureProjectWritableTx(ctx, r, i.ProjectID); err != nil {
+		return Issue{}, "", err
 	}
 	return i, projectName, nil
 }

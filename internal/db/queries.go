@@ -32,6 +32,16 @@ func (d *DB) CreateProject(ctx context.Context, name string) (Project, error) {
 	if err != nil {
 		return Project{}, fmt.Errorf("generate project uid: %w", err)
 	}
+	return d.CreateProjectWithUID(ctx, name, projectUID)
+}
+
+// CreateProjectWithUID inserts a project with a caller-supplied stable UID.
+// Live local callers should use CreateProject; federation replica setup uses
+// this to make the local spoke project carry the hub project UID.
+func (d *DB) CreateProjectWithUID(ctx context.Context, name, projectUID string) (Project, error) {
+	if !katauid.Valid(projectUID) {
+		return Project{}, fmt.Errorf("invalid project uid %q", projectUID)
+	}
 	res, err := d.ExecContext(ctx,
 		`INSERT INTO projects(uid, name) VALUES(?, ?)`, projectUID, name)
 	if err != nil {
@@ -454,6 +464,9 @@ func (d *DB) CreateIssue(ctx context.Context, p CreateIssueParams) (Issue, Event
 		}
 		return Issue{}, Event{}, fmt.Errorf("lookup project for create: %w", err)
 	}
+	if err := ensureProjectWritableTx(ctx, tx, p.ProjectID); err != nil {
+		return Issue{}, Event{}, err
+	}
 
 	issueUID := p.UID
 	if issueUID == "" {
@@ -469,12 +482,13 @@ func (d *DB) CreateIssue(ctx context.Context, p CreateIssueParams) (Issue, Event
 	if err != nil {
 		return Issue{}, Event{}, err
 	}
+	createdAt := time.Now().UTC().Format(sqliteTimeFormat)
 
 	// Insert issue + optional owner/priority columns in one statement.
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO issues(uid, project_id, short_id, title, body, author, owner, priority)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-		issueUID, p.ProjectID, shortID, p.Title, p.Body, p.Author, owner, p.Priority)
+		`INSERT INTO issues(uid, project_id, short_id, title, body, author, owner, priority, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		issueUID, p.ProjectID, shortID, p.Title, p.Body, p.Author, owner, p.Priority, createdAt, createdAt)
 	if err != nil {
 		return Issue{}, Event{}, fmt.Errorf("insert issue: %w", err)
 	}
@@ -541,7 +555,25 @@ func (d *DB) CreateIssue(ctx context.Context, p CreateIssueParams) (Issue, Event
 		}
 	}
 
-	payload := buildCreatedPayload(labels, links, resolvedTargets, owner, p.Priority, p.IdempotencyKey, p.IdempotencyFingerprint)
+	payload, err := buildIssueCreatedPayload(issueCreatedPayload{
+		UID:                    issueUID,
+		ShortID:                shortID,
+		Title:                  p.Title,
+		Body:                   p.Body,
+		Author:                 p.Author,
+		Owner:                  owner,
+		Priority:               p.Priority,
+		Status:                 "open",
+		Metadata:               json.RawMessage(`{}`),
+		Labels:                 labels,
+		Links:                  createdLinkPayloads(links, resolvedTargets),
+		CreatedAt:              createdAt,
+		IdempotencyKey:         p.IdempotencyKey,
+		IdempotencyFingerprint: p.IdempotencyFingerprint,
+	})
+	if err != nil {
+		return Issue{}, Event{}, err
+	}
 
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   p.ProjectID,
@@ -576,59 +608,84 @@ type createdLinkTarget struct {
 	ShortID string
 }
 
-// buildCreatedPayload returns the issue.created event payload as JSON. Empty
-// initial state → "{}". Otherwise emits keys for whichever components are set,
-// preserving determinism (sorted labels) so events are byte-stable.
-//
-// targets is parallel to links (same length and order). Each link's peer
-// is captured at insertion time so the payload identifies the target
-// stably (UID) and renderably (short_id). Pass nil/empty when no links
-// are being recorded.
-func buildCreatedPayload(labels []string, links []InitialLink, targets []createdLinkTarget, owner *string, priority *int64, idempotencyKey, idempotencyFingerprint string) string {
-	type linkOut struct {
-		Type       string `json:"type"`
-		ToShortID  string `json:"to_short_id,omitempty"`
-		ToIssueUID string `json:"to_issue_uid,omitempty"`
-		Incoming   bool   `json:"incoming,omitempty"`
+type createdLinkOut struct {
+	Type       string `json:"type"`
+	ToShortID  string `json:"to_short_id,omitempty"`
+	ToIssueUID string `json:"to_issue_uid,omitempty"`
+	Incoming   bool   `json:"incoming,omitempty"`
+}
+
+type issueSnapshotComment struct {
+	CommentUID string `json:"comment_uid"`
+	Author     string `json:"author"`
+	Body       string `json:"body"`
+	CreatedAt  string `json:"created_at"`
+}
+
+type issueCreatedPayload struct {
+	UID                    string                 `json:"uid"`
+	ShortID                string                 `json:"short_id"`
+	Title                  string                 `json:"title"`
+	Body                   string                 `json:"body"`
+	Author                 string                 `json:"author"`
+	Owner                  *string                `json:"owner,omitempty"`
+	Priority               *int64                 `json:"priority,omitempty"`
+	Status                 string                 `json:"status"`
+	ClosedReason           *string                `json:"closed_reason,omitempty"`
+	ClosedAt               *string                `json:"closed_at,omitempty"`
+	DeletedAt              *string                `json:"deleted_at,omitempty"`
+	Metadata               json.RawMessage        `json:"metadata"`
+	Labels                 []string               `json:"labels,omitempty"`
+	Links                  []createdLinkOut       `json:"links,omitempty"`
+	Comments               []issueSnapshotComment `json:"comments,omitempty"`
+	CreatedAt              string                 `json:"created_at"`
+	UpdatedAt              string                 `json:"updated_at,omitempty"`
+	Revision               int64                  `json:"revision,omitempty"`
+	IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
+	IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
+	RecurrenceUID          string                 `json:"recurrence_uid,omitempty"`
+	OccurrenceKey          string                 `json:"occurrence_key,omitempty"`
+	Source                 string                 `json:"source,omitempty"`
+	ExternalID             string                 `json:"external_id,omitempty"`
+}
+
+func createdLinkPayloads(links []InitialLink, targets []createdLinkTarget) []createdLinkOut {
+	if len(links) == 0 {
+		return nil
 	}
-	type out struct {
-		Labels                 []string  `json:"labels,omitempty"`
-		Links                  []linkOut `json:"links,omitempty"`
-		Owner                  string    `json:"owner,omitempty"`
-		Priority               *int64    `json:"priority,omitempty"`
-		IdempotencyKey         string    `json:"idempotency_key,omitempty"`
-		IdempotencyFingerprint string    `json:"idempotency_fingerprint,omitempty"`
-	}
-	var o out
-	if len(labels) > 0 {
-		o.Labels = labels
-	}
-	if len(links) > 0 {
-		o.Links = make([]linkOut, 0, len(links))
-		for i, l := range links {
-			var t createdLinkTarget
-			if i < len(targets) {
-				t = targets[i]
-			}
-			o.Links = append(o.Links, linkOut{
-				Type:       l.Type,
-				ToShortID:  t.ShortID,
-				ToIssueUID: t.UID,
-				Incoming:   l.Incoming,
-			})
+	out := make([]createdLinkOut, 0, len(links))
+	for i, l := range links {
+		var t createdLinkTarget
+		if i < len(targets) {
+			t = targets[i]
 		}
+		out = append(out, createdLinkOut{
+			Type:       l.Type,
+			ToShortID:  t.ShortID,
+			ToIssueUID: t.UID,
+			Incoming:   l.Incoming,
+		})
 	}
-	if owner != nil {
-		o.Owner = *owner
+	return out
+}
+
+func buildIssueCreatedPayload(p issueCreatedPayload) (string, error) {
+	if len(p.Metadata) == 0 {
+		p.Metadata = json.RawMessage(`{}`)
 	}
-	o.Priority = priority
-	o.IdempotencyKey = idempotencyKey
-	o.IdempotencyFingerprint = idempotencyFingerprint
-	bs, err := json.Marshal(o)
+	bs, err := json.Marshal(p)
 	if err != nil {
-		return "{}"
+		return "", fmt.Errorf("marshal issue.created payload: %w", err)
 	}
-	return string(bs)
+	return string(bs), nil
+}
+
+func formatOptionalSQLiteTime(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	v := t.UTC().Format(sqliteTimeFormat)
+	return &v
 }
 
 func dedupeStrings(in []string) []string {
@@ -957,9 +1014,14 @@ func (d *DB) CreateComment(ctx context.Context, p CreateCommentParams) (Comment,
 		return Comment{}, Event{}, err
 	}
 
+	commentUID, err := katauid.New()
+	if err != nil {
+		return Comment{}, Event{}, fmt.Errorf("generate comment uid: %w", err)
+	}
+	createdAt := time.Now().UTC().Format(sqliteTimeFormat)
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO comments(issue_id, author, body) VALUES(?, ?, ?)`,
-		p.IssueID, p.Author, p.Body)
+		`INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?)`,
+		commentUID, p.IssueID, p.Author, p.Body, createdAt)
 	if err != nil {
 		return Comment{}, Event{}, fmt.Errorf("insert comment: %w", err)
 	}
@@ -969,19 +1031,32 @@ func (d *DB) CreateComment(ctx context.Context, p CreateCommentParams) (Comment,
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-		p.IssueID); err != nil {
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		createdAt, p.IssueID); err != nil {
 		return Comment{}, Event{}, fmt.Errorf("touch issue: %w", err)
 	}
 
-	payload := fmt.Sprintf(`{"comment_id":%d}`, commentID)
+	payloadBytes, err := json.Marshal(struct {
+		CommentUID string `json:"comment_uid"`
+		Author     string `json:"author"`
+		Body       string `json:"body"`
+		CreatedAt  string `json:"created_at"`
+	}{
+		CommentUID: commentUID,
+		Author:     p.Author,
+		Body:       p.Body,
+		CreatedAt:  createdAt,
+	})
+	if err != nil {
+		return Comment{}, Event{}, fmt.Errorf("marshal comment payload: %w", err)
+	}
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   issue.ProjectID,
 		ProjectName: projectName,
 		IssueID:     &issue.ID,
 		Type:        "issue.commented",
 		Actor:       p.Author,
-		Payload:     payload,
+		Payload:     string(payloadBytes),
 	})
 	if err != nil {
 		return Comment{}, Event{}, err
@@ -993,8 +1068,8 @@ func (d *DB) CreateComment(ctx context.Context, p CreateCommentParams) (Comment,
 
 	var c Comment
 	if err := d.QueryRowContext(ctx,
-		`SELECT id, issue_id, author, body, created_at FROM comments WHERE id = ?`,
-		commentID).Scan(&c.ID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
+		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE id = ?`,
+		commentID).Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
 		return Comment{}, Event{}, fmt.Errorf("read comment: %w", err)
 	}
 	return c, evt, nil
@@ -1015,6 +1090,23 @@ func (d *DB) CloseIssue(
 	reason, actor, message string,
 	evidence []Evidence,
 ) (Issue, *Event, bool, error) {
+	updated, events, changed, err := d.CloseIssueWithEvents(ctx, issueID, reason, actor, message, evidence)
+	if err != nil || len(events) == 0 {
+		return updated, nil, changed, err
+	}
+	return updated, &events[0], changed, nil
+}
+
+// CloseIssueWithEvents is CloseIssue plus generated claim audit events that
+// callers must deliver after commit. The returned events are ordered by
+// insertion id, with issue.closed first and generated claim audit events
+// following it.
+func (d *DB) CloseIssueWithEvents(
+	ctx context.Context,
+	issueID int64,
+	reason, actor, message string,
+	evidence []Evidence,
+) (Issue, []Event, bool, error) {
 	if reason == "" {
 		return Issue{}, nil, false, fmt.Errorf("close: reason is required")
 	}
@@ -1036,13 +1128,14 @@ func (d *DB) CloseIssue(
 	} else if hasOpen {
 		return Issue{}, nil, false, ErrOpenChildren
 	}
+	closedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET status        = 'closed',
 		     closed_reason = ?,
-		     closed_at     = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-		     updated_at    = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ?`, reason, issueID); err != nil {
+		     closed_at     = ?,
+		     updated_at    = ?
+		 WHERE id = ?`, reason, closedAt, closedAt, issueID); err != nil {
 		return Issue{}, nil, false, fmt.Errorf("close: %w", err)
 	}
 
@@ -1066,12 +1159,14 @@ func (d *DB) CloseIssue(
 	}
 	payloadBytes, err := json.Marshal(struct {
 		Reason        string     `json:"reason"`
+		ClosedAt      string     `json:"closed_at"`
 		Message       string     `json:"message,omitempty"`
 		Evidence      []Evidence `json:"evidence,omitempty"`
 		ParentUID     *string    `json:"parent_uid,omitempty"`
 		ParentShortID *string    `json:"parent_short_id,omitempty"`
 	}{
 		Reason:        reason,
+		ClosedAt:      closedAt,
 		Message:       message,
 		Evidence:      evidence,
 		ParentUID:     parentUIDForPayload,
@@ -1092,6 +1187,20 @@ func (d *DB) CloseIssue(
 	if err != nil {
 		return Issue{}, nil, false, err
 	}
+	events := []Event{evt}
+	auditEvents, err := d.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
+		ProjectID:         issue.ProjectID,
+		ProjectName:       projectName,
+		IssueID:           issue.ID,
+		IssueUID:          issue.UID,
+		EventType:         "issue.closed",
+		Actor:             actor,
+		HolderInstanceUID: d.InstanceUID(),
+	})
+	if err != nil {
+		return Issue{}, nil, false, err
+	}
+	events = append(events, auditEvents...)
 	if reason == "done" && issue.RecurrenceID != nil && issue.OccurrenceKey != nil {
 		if _, err := d.MaterializeNext(ctx, tx, *issue.RecurrenceID,
 			*issue.OccurrenceKey, actor); err != nil {
@@ -1105,7 +1214,7 @@ func (d *DB) CloseIssue(
 	if err != nil {
 		return Issue{}, nil, false, err
 	}
-	return updated, &evt, true, nil
+	return updated, events, true, nil
 }
 
 // CloseThrottleReason values for CloseThrottledPayload.Reason. Sibling-burst
@@ -1171,9 +1280,7 @@ func (d *DB) InsertCloseThrottledEvent(
 	return evt, nil
 }
 
-// ReopenIssue clears status=closed unless already open. The
-// issue.reopened event payload is always `{}`; bulk-reopen audit
-// metadata was removed when bulk mode was dropped.
+// ReopenIssue clears status=closed unless already open.
 func (d *DB) ReopenIssue(
 	ctx context.Context, issueID int64, actor string,
 ) (Issue, *Event, bool, error) {
@@ -1190,14 +1297,22 @@ func (d *DB) ReopenIssue(
 	if issue.Status == "open" {
 		return issue, nil, false, tx.Commit()
 	}
+	reopenedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET status        = 'open',
 		     closed_reason = NULL,
 		     closed_at     = NULL,
-		     updated_at    = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ?`, issueID); err != nil {
+		     updated_at    = ?
+		 WHERE id = ?`, reopenedAt, issueID); err != nil {
 		return Issue{}, nil, false, fmt.Errorf("reopen: %w", err)
+	}
+	payloadBytes, err := json.Marshal(struct {
+		ReopenedAt string `json:"reopened_at"`
+		UpdatedAt  string `json:"updated_at"`
+	}{ReopenedAt: reopenedAt, UpdatedAt: reopenedAt})
+	if err != nil {
+		return Issue{}, nil, false, fmt.Errorf("reopen payload: %w", err)
 	}
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   issue.ProjectID,
@@ -1205,7 +1320,7 @@ func (d *DB) ReopenIssue(
 		IssueID:     &issue.ID,
 		Type:        "issue.reopened",
 		Actor:       actor,
-		Payload:     "{}",
+		Payload:     string(payloadBytes),
 	})
 	if err != nil {
 		return Issue{}, nil, false, err
@@ -1245,20 +1360,16 @@ func (d *DB) EditIssue(ctx context.Context, p EditIssueParams) (Issue, *Event, b
 		return Issue{}, nil, false, err
 	}
 
-	sets := []string{`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`}
-	args := []any{}
-	if p.Title != nil {
-		sets = append(sets, `title = ?`)
-		args = append(args, *p.Title)
+	ts := nowTimestamp()
+	sets, args, payload, changed, err := issueFieldUpdatePlan(issue, p.Title, p.Body, p.Owner, ts)
+	if err != nil {
+		return Issue{}, nil, false, err
 	}
-	if p.Body != nil {
-		sets = append(sets, `body = ?`)
-		args = append(args, *p.Body)
+	if !changed {
+		return issue, nil, false, tx.Commit()
 	}
-	if p.Owner != nil {
-		sets = append(sets, `owner = ?`)
-		args = append(args, *p.Owner)
-	}
+	sets = append([]string{`updated_at = ?`}, sets...)
+	args = append([]any{ts}, args...)
 	args = append(args, p.IssueID)
 	// `sets` only contains string literals chosen above; user-provided values
 	// are parameterized via `args`. Safe to concatenate.
@@ -1272,7 +1383,7 @@ func (d *DB) EditIssue(ctx context.Context, p EditIssueParams) (Issue, *Event, b
 		IssueID:     &issue.ID,
 		Type:        "issue.updated",
 		Actor:       p.Actor,
-		Payload:     "{}",
+		Payload:     payload,
 	})
 	if err != nil {
 		return Issue{}, nil, false, err
@@ -1285,6 +1396,61 @@ func (d *DB) EditIssue(ctx context.Context, p EditIssueParams) (Issue, *Event, b
 		return Issue{}, nil, false, err
 	}
 	return updated, &evt, true, nil
+}
+
+// nowTimestamp returns the canonical UTC millisecond timestamp string used as
+// the single source for a mutation's issues.updated_at and the matching event
+// payload "updated_at", so replay reproduces the directly written value instead
+// of falling back to the event's independently clocked created_at.
+func nowTimestamp() string {
+	return time.Now().UTC().Format(sqliteTimeFormat)
+}
+
+func issueFieldUpdatePlan(issue Issue, title, body, owner *string, ts string) ([]string, []any, string, bool, error) {
+	sets := []string{}
+	args := []any{}
+	payload := map[string]any{}
+	if title != nil && *title != issue.Title {
+		sets = append(sets, `title = ?`)
+		args = append(args, *title)
+		payload["title"] = *title
+		payload["old_title"] = issue.Title
+	}
+	if body != nil && *body != issue.Body {
+		sets = append(sets, `body = ?`)
+		args = append(args, *body)
+		payload["body"] = *body
+	}
+	if owner != nil {
+		var newOwner *string
+		if *owner != "" {
+			v := *owner
+			newOwner = &v
+		}
+		if !ownerEqual(issue.Owner, newOwner) {
+			sets = append(sets, `owner = ?`)
+			args = append(args, newOwner)
+			if newOwner == nil {
+				payload["owner"] = nil
+			} else {
+				payload["owner"] = *newOwner
+			}
+			if issue.Owner == nil {
+				payload["old_owner"] = nil
+			} else {
+				payload["old_owner"] = *issue.Owner
+			}
+		}
+	}
+	if len(sets) == 0 {
+		return nil, nil, "", false, nil
+	}
+	payload["updated_at"] = ts
+	bs, err := json.Marshal(payload)
+	if err != nil {
+		return nil, nil, "", false, fmt.Errorf("marshal issue.updated payload: %w", err)
+	}
+	return sets, args, string(bs), true, nil
 }
 
 func joinComma(parts []string) string {
@@ -1321,6 +1487,9 @@ func lookupIssueForEvent(ctx context.Context, tx *sql.Tx, issueID int64) (Issue,
 	if err != nil {
 		return Issue{}, "", fmt.Errorf("lookup issue: %w", err)
 	}
+	if err := ensureProjectWritableTx(ctx, tx, i.ProjectID); err != nil {
+		return Issue{}, "", err
+	}
 	return i, projectName, nil
 }
 
@@ -1340,16 +1509,21 @@ func scanIssue(r rowScanner) (Issue, error) {
 
 // eventInsert is the tx-internal payload used by insertEventTx.
 type eventInsert struct {
-	ProjectID       int64
-	ProjectUID      string
-	ProjectName     string
-	IssueID         *int64
-	IssueUID        *string
-	RelatedIssueID  *int64
-	RelatedIssueUID *string
-	Type            string
-	Actor           string
-	Payload         string
+	ProjectID         int64
+	ProjectUID        string
+	ProjectName       string
+	IssueID           *int64
+	IssueUID          *string
+	RelatedIssueID    *int64
+	RelatedIssueUID   *string
+	Type              string
+	Actor             string
+	Payload           string
+	UID               string
+	OriginInstanceUID string
+	HLC               *eventHLCTimestamp
+	CreatedAt         string
+	ContentHash       string
 }
 
 // UpdateOwner sets issues.owner to the new value and emits the matching
@@ -1371,26 +1545,26 @@ func (d *DB) UpdateOwner(ctx context.Context, issueID int64, newOwner *string, a
 		return issue, nil, false, tx.Commit()
 	}
 
+	ts := nowTimestamp()
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET owner      = ?,
-		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ?`, newOwner, issueID); err != nil {
+		     updated_at = ?
+		 WHERE id = ?`, newOwner, ts, issueID); err != nil {
 		return Issue{}, nil, false, fmt.Errorf("update owner: %w", err)
 	}
 
 	eventType := "issue.unassigned"
-	payload := "{}"
+	ownerPayload := map[string]any{"owner": nil, "updated_at": ts}
 	if newOwner != nil {
 		eventType = "issue.assigned"
-		bs, marshalErr := json.Marshal(struct {
-			Owner string `json:"owner"`
-		}{Owner: *newOwner})
-		if marshalErr != nil {
-			return Issue{}, nil, false, fmt.Errorf("marshal assigned payload: %w", marshalErr)
-		}
-		payload = string(bs)
+		ownerPayload["owner"] = *newOwner
 	}
+	bs, marshalErr := json.Marshal(ownerPayload)
+	if marshalErr != nil {
+		return Issue{}, nil, false, fmt.Errorf("marshal owner payload: %w", marshalErr)
+	}
+	payload := string(bs)
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   issue.ProjectID,
 		ProjectName: projectName,
@@ -1482,19 +1656,20 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 	// Conditional UPDATE: only succeeds if ownership state matches expectations.
 	// The WHERE clause prevents races - if another request claimed between our
 	// read and this write, zero rows will be affected.
+	ts := nowTimestamp()
 	var res sql.Result
 	if force {
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
 			 SET owner      = ?,
-			     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE id = ? AND deleted_at IS NULL`, actor, issueID)
+			     updated_at = ?
+			 WHERE id = ? AND deleted_at IS NULL`, actor, ts, issueID)
 	} else {
 		res, err = tx.ExecContext(ctx,
 			`UPDATE issues
 			 SET owner      = ?,
-			     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE id = ? AND deleted_at IS NULL AND (owner IS NULL OR owner = ?)`, actor, issueID, actor)
+			     updated_at = ?
+			 WHERE id = ? AND deleted_at IS NULL AND (owner IS NULL OR owner = ?)`, actor, ts, issueID, actor)
 	}
 	if err != nil {
 		return ClaimResult{}, fmt.Errorf("update owner: %w", err)
@@ -1518,9 +1693,7 @@ func (d *DB) ClaimOwner(ctx context.Context, issueID int64, actor string, force 
 	}
 
 	// Emit assigned event
-	bs, marshalErr := json.Marshal(struct {
-		Owner string `json:"owner"`
-	}{Owner: actor})
+	bs, marshalErr := json.Marshal(map[string]any{"owner": actor, "updated_at": ts})
 	if marshalErr != nil {
 		return ClaimResult{}, fmt.Errorf("marshal assigned payload: %w", marshalErr)
 	}
@@ -1610,25 +1783,77 @@ func (d *DB) ReadyIssues(ctx context.Context, projectID int64, limit int, filter
 }
 
 func (d *DB) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (Event, error) {
-	eventUID, err := katauid.New()
+	eventUID := in.UID
+	var err error
+	if eventUID == "" {
+		eventUID, err = katauid.New()
+		if err != nil {
+			return Event{}, fmt.Errorf("generate event uid: %w", err)
+		}
+	}
+	originInstanceUID := in.OriginInstanceUID
+	if originInstanceUID == "" {
+		originInstanceUID = d.instanceUID
+	}
+	now := time.Now().UTC()
+	createdAt := now.Format(sqliteTimeFormat)
+	if in.CreatedAt != "" {
+		createdAt = in.CreatedAt
+	}
+	var eventHLC eventHLCTimestamp
+	if in.HLC != nil {
+		eventHLC = *in.HLC
+	} else {
+		eventHLC, err = nextEventHLC(ctx, tx, now)
+		if err != nil {
+			return Event{}, fmt.Errorf("next event hlc: %w", err)
+		}
+	}
+	projectUID, projectName, err := eventProjectIdentityTx(ctx, tx, in.ProjectID, in.ProjectUID, in.ProjectName)
 	if err != nil {
-		return Event{}, fmt.Errorf("generate event uid: %w", err)
+		return Event{}, err
+	}
+	issueUID, err := eventIssueUIDTx(ctx, tx, in.IssueID, in.IssueUID)
+	if err != nil {
+		return Event{}, err
+	}
+	relatedIssueUID, err := eventIssueUIDTx(ctx, tx, in.RelatedIssueID, in.RelatedIssueUID)
+	if err != nil {
+		return Event{}, err
+	}
+	contentHash := in.ContentHash
+	if contentHash == "" {
+		contentHash, err = EventContentHash(EventHashInput{
+			UID:               eventUID,
+			OriginInstanceUID: originInstanceUID,
+			ProjectUID:        projectUID,
+			ProjectName:       projectName,
+			IssueUID:          issueUID,
+			RelatedIssueUID:   relatedIssueUID,
+			Type:              in.Type,
+			Actor:             in.Actor,
+			HLCPhysicalMS:     eventHLC.PhysicalMS,
+			HLCCounter:        eventHLC.Counter,
+			CreatedAt:         createdAt,
+			Payload:           json.RawMessage(in.Payload),
+		})
+		if err != nil {
+			return Event{}, fmt.Errorf("content hash: %w", err)
+		}
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO events(uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid, related_issue_id, related_issue_uid, type, actor, payload)
-		 VALUES(
-		   ?, ?, ?, ?, ?,
-		   COALESCE(?, (SELECT uid FROM issues WHERE id = ?)),
-		   ?,
-		   COALESCE(?, (SELECT uid FROM issues WHERE id = ?)),
-		   ?, ?, ?
-		 )`,
-		eventUID, d.instanceUID,
-		in.ProjectID, in.ProjectName, in.IssueID,
-		stringPtrValue(in.IssueUID), in.IssueID,
-		in.RelatedIssueID,
-		stringPtrValue(in.RelatedIssueUID), in.RelatedIssueID,
-		in.Type, in.Actor, in.Payload)
+		`INSERT INTO events(
+		   uid, origin_instance_uid, project_id, project_name,
+		   issue_id, issue_uid, related_issue_id, related_issue_uid,
+		   type, actor, payload, hlc_physical_ms, hlc_counter, content_hash, created_at
+		 )
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		eventUID, originInstanceUID,
+		in.ProjectID, projectName,
+		in.IssueID, stringPtrValue(issueUID),
+		in.RelatedIssueID, stringPtrValue(relatedIssueUID),
+		in.Type, in.Actor, in.Payload,
+		eventHLC.PhysicalMS, eventHLC.Counter, contentHash, createdAt)
 	if err != nil {
 		return Event{}, fmt.Errorf("insert event: %w", err)
 	}
@@ -1636,15 +1861,73 @@ func (d *DB) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (Eve
 	if err != nil {
 		return Event{}, err
 	}
-	var e Event
-	err = tx.QueryRowContext(ctx, eventSelectByID, id).
-		Scan(&e.ID, &e.UID, &e.OriginInstanceUID, &e.ProjectID, &e.ProjectUID, &e.ProjectName, &e.IssueID,
-			&e.IssueUID, &e.IssueShortID, &e.RelatedIssueID, &e.RelatedIssueUID, &e.RelatedIssueShortID,
-			&e.Type, &e.Actor, &e.Payload, &e.CreatedAt)
+	e, err := scanEvent(tx.QueryRowContext(ctx, eventSelectByID, id))
 	if err != nil {
 		return Event{}, fmt.Errorf("read event: %w", err)
 	}
 	return e, nil
+}
+
+type eventScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanEvent(scanner eventScanner) (Event, error) {
+	var e Event
+	err := scanner.Scan(&e.ID, &e.UID, &e.OriginInstanceUID, &e.ProjectID, &e.ProjectUID, &e.ProjectName, &e.IssueID,
+		&e.IssueUID, &e.IssueShortID, &e.RelatedIssueID, &e.RelatedIssueUID, &e.RelatedIssueShortID,
+		&e.Type, &e.Actor, &e.Payload, &e.HLCPhysicalMS, &e.HLCCounter, &e.ContentHash, &e.CreatedAt)
+	return e, err
+}
+
+func nextEventHLC(ctx context.Context, tx *sql.Tx, now time.Time) (eventHLCTimestamp, error) {
+	var last eventHLCTimestamp
+	err := tx.QueryRowContext(ctx, `
+		SELECT hlc_physical_ms, hlc_counter
+		  FROM events
+		 ORDER BY hlc_physical_ms DESC, hlc_counter DESC
+		 LIMIT 1`).Scan(&last.PhysicalMS, &last.Counter)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nextEventHLCValue(eventHLCTimestamp{}, now), nil
+	}
+	if err != nil {
+		return eventHLCTimestamp{}, err
+	}
+	return nextEventHLCValue(last, now), nil
+}
+
+func eventProjectIdentityTx(ctx context.Context, tx *sql.Tx, projectID int64, projectUID, projectName string) (string, string, error) {
+	if projectUID != "" && projectName != "" {
+		return projectUID, projectName, nil
+	}
+	var storedUID, storedName string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT uid, name FROM projects WHERE id = ?`, projectID).
+		Scan(&storedUID, &storedName); err != nil {
+		return "", "", fmt.Errorf("resolve event project identity: %w", err)
+	}
+	if projectUID == "" {
+		projectUID = storedUID
+	}
+	if projectName == "" {
+		projectName = storedName
+	}
+	return projectUID, projectName, nil
+}
+
+func eventIssueUIDTx(ctx context.Context, tx *sql.Tx, issueID *int64, issueUID *string) (*string, error) {
+	if issueUID != nil && *issueUID != "" {
+		return issueUID, nil
+	}
+	if issueID == nil {
+		return nil, nil
+	}
+	var storedUID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT uid FROM issues WHERE id = ?`, *issueID).Scan(&storedUID); err != nil {
+		return nil, fmt.Errorf("resolve event issue uid: %w", err)
+	}
+	return &storedUID, nil
 }
 
 // eventSelectByID reads a single event by id with the same shape EventsAfter
@@ -1654,11 +1937,11 @@ func (d *DB) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (Eve
 // as events streamed via poll/SSE.
 const eventSelectByID = `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
        e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
-       e.type, e.actor, e.payload, e.created_at
+       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
   FROM events e
   JOIN projects p ON p.id = e.project_id
-  LEFT JOIN issues i ON i.id = e.issue_id
-  LEFT JOIN issues ri ON ri.id = e.related_issue_id
+  LEFT JOIN issues i ON i.project_id = e.project_id AND (i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid))
+  LEFT JOIN issues ri ON ri.project_id = e.project_id AND (ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid))
  WHERE e.id = ?`
 
 func stringPtrValue(s *string) any {

@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,7 +26,7 @@ func TestExportWritesOrderedRecordsWithSequenceLast(t *testing.T) {
 
 	require.NotEmpty(t, records)
 	assert.Equal(t, "meta", records[0]["kind"])
-	assert.Equal(t, map[string]any{"key": "export_version", "value": "11"}, records[0]["data"])
+	assert.Equal(t, map[string]any{"key": "export_version", "value": fmt.Sprint(db.CurrentSchemaVersion())}, records[0]["data"])
 	assert.Equal(t, "sqlite_sequence", records[len(records)-1]["kind"])
 
 	assertKindOrder(t, records)
@@ -51,9 +53,90 @@ func TestExportEmitsEventPayloadAsJSONObject(t *testing.T) {
 		payload, ok := data["payload"].(map[string]any)
 		require.True(t, ok, "payload should be a JSON object, got %T", data["payload"])
 		assert.Equal(t, "abc", payload["idempotency_key"])
+		assert.NotZero(t, data["hlc_physical_ms"])
+		assert.NotNil(t, data["hlc_counter"])
+		assert.Regexp(t, `^[a-f0-9]{64}$`, data["content_hash"])
 		found = true
 	}
 	assert.True(t, found, "expected at least one event record")
+}
+
+func TestExportFederationKindOrderPlacesEnrollmentBeforeEvent(t *testing.T) {
+	ctx, d, p := newExportEnv(t)
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleHub,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, d.RecordFederationSyncPullStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:00.000Z")))
+	require.NoError(t, d.RecordFederationSyncPullSuccess(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:01.000Z")))
+	_, err = d.ExecContext(ctx, `
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities)
+		VALUES(?, ?, ?, ?)`,
+		strings.Repeat("a", 64), "01HZZZZZZZZZZZZZZZZZZZZZ01", p.ID, "pull,push")
+	require.NoError(t, err)
+	createTesterIssue(ctx, t, d, p.ID, "event after federation records", "")
+
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{IncludeDeleted: true})
+
+	assertKindOrder(t, records)
+	kinds := make([]string, 0, len(records))
+	for _, rec := range records {
+		kinds = append(kinds, rec["kind"].(string))
+	}
+	bindingIndex := indexOfKind(kinds, "federation_binding")
+	enrollmentIndex := indexOfKind(kinds, "federation_enrollment")
+	eventIndex := indexOfKind(kinds, "event")
+	require.NotEqual(t, -1, bindingIndex, "expected federation_binding record")
+	statusIndex := indexOfKind(kinds, "federation_sync_status")
+	require.NotEqual(t, -1, statusIndex, "expected federation_sync_status record")
+	require.NotEqual(t, -1, enrollmentIndex, "expected federation_enrollment record")
+	require.NotEqual(t, -1, eventIndex, "expected event record")
+	assert.Less(t, bindingIndex, enrollmentIndex)
+	assert.Less(t, bindingIndex, statusIndex)
+	assert.Less(t, statusIndex, enrollmentIndex)
+	assert.Less(t, enrollmentIndex, eventIndex)
+}
+
+func TestExportFederationSyncStatus(t *testing.T) {
+	ctx, d, p := newExportEnv(t)
+	err := d.RecordFederationSyncPullStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:00.000Z"))
+	require.NoError(t, err)
+	err = d.RecordFederationSyncPullSuccess(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:01.000Z"))
+	require.NoError(t, err)
+	err = d.RecordFederationSyncPushStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:02.000Z"))
+	require.NoError(t, err)
+	err = d.RecordFederationSyncError(ctx, p.ID, assert.AnError, mustParseTime(t, "2026-05-23T01:00:03.000Z"))
+	require.NoError(t, err)
+
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{IncludeDeleted: true})
+
+	var found map[string]any
+	for _, rec := range records {
+		if rec["kind"] == "federation_sync_status" {
+			found = rec["data"].(map[string]any)
+			break
+		}
+	}
+	require.NotNil(t, found, "expected federation_sync_status record")
+	assert.Equal(t, float64(p.ID), found["project_id"])
+	assert.Equal(t, "2026-05-23T01:00:00.000Z", found["last_pull_started_at"])
+	assert.Equal(t, "2026-05-23T01:00:01.000Z", found["last_pull_success_at"])
+	assert.Equal(t, "2026-05-23T01:00:02.000Z", found["last_push_started_at"])
+	assert.Equal(t, "2026-05-23T01:00:03.000Z", found["last_error_at"])
+	assert.Equal(t, assert.AnError.Error(), found["last_error"])
+}
+
+func indexOfKind(kinds []string, want string) int {
+	for i, got := range kinds {
+		if got == want {
+			return i
+		}
+	}
+	return -1
 }
 
 func TestExportLegacyV1OmitsUIDFields(t *testing.T) {
@@ -314,10 +397,11 @@ func TestExportNoIncludeDeletedPreservesNonAggregatedRelatedOrphan(t *testing.T)
 	_, err = conn.ExecContext(ctx,
 		`INSERT INTO events (uid, origin_instance_uid, project_id, project_name,
 		                     issue_id, issue_uid, related_issue_id, related_issue_uid,
-		                     type, actor, payload)
+		                     type, actor, payload, hlc_physical_ms, hlc_counter, content_hash)
 		 VALUES (?, '01HZZZZZZZZZZZZZZZZZZZZZ00', ?, ?,
 		         ?, ?, 999, '01HZZZZZZZZZZZZZZZZZZZZA99',
-		         'issue.linked', 'tester', '{}')`,
+		         'issue.linked', 'tester', '{}', 1, 0,
+		         '0000000000000000000000000000000000000000000000000000000000000000')`,
 		"01HZZZZZZZZZZZZZZZZZRELOR1", p.ID, p.Name, subject.ID, subject.UID)
 	require.NoError(t, err)
 
@@ -414,7 +498,9 @@ func assertKindOrder(t *testing.T, records []map[string]any) {
 	order := map[string]int{
 		"meta": 0, "project": 1, "project_alias": 2, "recurrence": 3,
 		"issue": 4, "comment": 5, "issue_label": 6, "link": 7,
-		"import_mapping": 8, "event": 9, "purge_log": 10, "sqlite_sequence": 11,
+		"import_mapping": 8, "federation_binding": 9, "federation_sync_status": 10,
+		"federation_quarantine": 11, "federation_enrollment": 12, "issue_claim": 13,
+		"pending_claim_request": 14, "event": 15, "purge_log": 16, "sqlite_sequence": 17,
 	}
 	last := -1
 	for _, rec := range records {

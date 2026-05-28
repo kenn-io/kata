@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -64,6 +65,216 @@ type ProjectStats struct {
 	LastEventAt *time.Time
 }
 
+// FederationRole describes this daemon's relationship to a federated project.
+type FederationRole string
+
+const (
+	// FederationRoleHub marks a local project as the federation source.
+	FederationRoleHub FederationRole = "hub"
+	// FederationRoleSpoke marks a local project as a read-only hub replica.
+	FederationRoleSpoke FederationRole = "spoke"
+)
+
+// FederationBinding mirrors federation_bindings. HubURL and HubProjectID are
+// meaningful for spoke bindings; hub bindings keep the local project identity
+// and replay horizon.
+type FederationBinding struct {
+	ProjectID            int64
+	Role                 FederationRole
+	HubURL               string
+	HubProjectID         int64
+	HubProjectUID        string
+	ReplayHorizonEventID int64
+	PullCursorEventID    int64
+	PushEnabled          bool
+	PushCursorEventID    int64
+	Enabled              bool
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	LastSyncAt           *time.Time
+}
+
+// FederationQuarantineDirection identifies which federation stream is blocked.
+type FederationQuarantineDirection string
+
+const (
+	// FederationQuarantineDirectionPush blocks outgoing spoke-to-hub batches.
+	FederationQuarantineDirectionPush FederationQuarantineDirection = "push"
+	// FederationQuarantineDirectionPull blocks incoming hub-to-spoke batches.
+	FederationQuarantineDirectionPull FederationQuarantineDirection = "pull"
+)
+
+// FederationQuarantine records a poisoned federation batch that requires an
+// explicit operator decision before the stream can continue.
+type FederationQuarantine struct {
+	ID           int64
+	ProjectID    int64
+	Direction    FederationQuarantineDirection
+	FirstEventID int64
+	LastEventID  int64
+	EventUIDs    []string
+	Error        string
+	CreatedAt    time.Time
+	SkippedAt    *time.Time
+	SkippedBy    *string
+	SkipReason   *string
+}
+
+// FederationEnrollment mirrors federation_enrollments. TokenHash stores only
+// the hash of an enrollment token; plaintext tokens are never persisted.
+type FederationEnrollment struct {
+	ID               int64
+	TokenHash        string
+	SpokeInstanceUID string
+	ProjectID        *int64
+	Capabilities     string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	RevokedAt        *time.Time
+}
+
+// IssueClaim mirrors issue_claims. Active claims have ReleasedAt == nil.
+type IssueClaim struct {
+	ID                int64
+	ClaimUID          string
+	ProjectID         int64
+	IssueID           int64
+	IssueUID          string
+	Holder            string
+	HolderInstanceUID string
+	ClientKind        string
+	Purpose           string
+	ClaimKind         string
+	AcquiredAt        time.Time
+	ExpiresAt         *time.Time
+	ReleasedAt        *time.Time
+	ReleaseReason     *string
+	Revision          int64
+	UpdatedAt         time.Time
+}
+
+// PendingClaimRequest mirrors pending_claim_requests for offline claim
+// requests awaiting hub resolution.
+type PendingClaimRequest struct {
+	ID                int64
+	RequestUID        string
+	ProjectID         int64
+	IssueID           int64
+	IssueUID          string
+	Holder            string
+	HolderInstanceUID string
+	ClientKind        string
+	ClaimKind         string
+	TTLSeconds        *int64
+	Purpose           string
+	RequestedAt       time.Time
+	LastAttemptAt     *time.Time
+	LastError         *string
+	RejectedAt        *time.Time
+	ResolvedAt        *time.Time
+}
+
+// ClaimStatusRefreshError records the most recent failed spoke show-status
+// refresh for one issue.
+type ClaimStatusRefreshError struct {
+	ProjectID     int64
+	IssueUID      string
+	StatusCode    int
+	LastAttemptAt time.Time
+	LastError     string
+}
+
+// PendingClaimParams records an offline spoke claim request awaiting hub
+// resolution.
+type PendingClaimParams struct {
+	ProjectID int64
+	IssueRef  string
+	Principal ClaimPrincipal
+	ClaimKind string
+	TTL       time.Duration
+	Purpose   string
+	Now       time.Time
+}
+
+// ClaimPrincipal identifies the federation client tuple that owns a live
+// issue claim.
+type ClaimPrincipal struct {
+	HolderInstanceUID string
+	Holder            string
+	ClientKind        string
+}
+
+// AcquireClaimParams requests a hard or timed claim on a project-scoped issue
+// reference.
+type AcquireClaimParams struct {
+	ProjectID int64
+	IssueRef  string
+	Principal ClaimPrincipal
+	ClaimKind string
+	TTL       time.Duration
+	Purpose   string
+	Now       time.Time
+}
+
+// RenewClaimParams extends a live timed claim held by the same principal.
+type RenewClaimParams struct {
+	ProjectID int64
+	IssueRef  string
+	Principal ClaimPrincipal
+	TTL       time.Duration
+	Now       time.Time
+}
+
+// ReleaseClaimParams releases a live claim held by the same principal.
+type ReleaseClaimParams struct {
+	ProjectID int64
+	IssueRef  string
+	Principal ClaimPrincipal
+	Reason    string
+	Now       time.Time
+}
+
+// ForceReleaseClaimParams releases a live claim regardless of holder. The DB
+// layer records the actor/reason but does not enforce daemon auth policy.
+type ForceReleaseClaimParams struct {
+	ProjectID int64
+	IssueRef  string
+	Actor     string
+	Reason    string
+	Now       time.Time
+}
+
+// LeaseResult is returned by acquire, renew, and release arbitration helpers
+// for federation write leases. Event is nil for idempotent/no-event outcomes;
+// Events carries auxiliary events, such as opportunistic claim expirations,
+// that committed in the same transaction and should be delivered before Event.
+// (`ClaimResult` is reserved for the simple owner-claim flow in queries.go.)
+type LeaseResult struct {
+	Granted bool
+	Holder  ClaimPrincipal
+	Claim   *IssueClaim
+	Event   *Event
+	Events  []Event
+}
+
+// ClaimStatus describes the currently live claim for an issue, if any.
+type ClaimStatus struct {
+	Held   bool
+	Holder ClaimPrincipal
+	Claim  *IssueClaim
+	HubNow time.Time
+	Events []Event
+}
+
+// ClaimGateParams checks whether a local mutation can proceed using the
+// cached authoritative claim state available to this database.
+type ClaimGateParams struct {
+	ProjectID int64
+	IssueRef  string
+	Principal ClaimPrincipal
+	Now       time.Time
+}
+
 // ProjectAlias mirrors a row in project_aliases.
 type ProjectAlias struct {
 	ID            int64     `json:"id"`
@@ -103,6 +314,7 @@ type Issue struct {
 // Comment mirrors a row in comments.
 type Comment struct {
 	ID        int64     `json:"id"`
+	UID       string    `json:"uid"`
 	IssueID   int64     `json:"issue_id"`
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`
@@ -130,7 +342,28 @@ type Event struct {
 	Type                string    `json:"type"`
 	Actor               string    `json:"actor"`
 	Payload             string    `json:"payload"`
+	HLCPhysicalMS       int64     `json:"hlc_physical_ms"`
+	HLCCounter          int64     `json:"hlc_counter"`
+	ContentHash         string    `json:"content_hash"`
 	CreatedAt           time.Time `json:"created_at"`
+}
+
+// RemoteEvent is the portable event shape accepted from a federation hub.
+// Local SQLite row IDs and display-only short IDs are intentionally excluded.
+type RemoteEvent struct {
+	EventUID          string          `json:"event_uid"`
+	OriginInstanceUID string          `json:"origin_instance_uid"`
+	ProjectUID        string          `json:"project_uid"`
+	ProjectName       string          `json:"project_name"`
+	IssueUID          *string         `json:"issue_uid,omitempty"`
+	RelatedIssueUID   *string         `json:"related_issue_uid,omitempty"`
+	Type              string          `json:"type"`
+	Actor             string          `json:"actor"`
+	HLCPhysicalMS     int64           `json:"hlc_physical_ms"`
+	HLCCounter        int64           `json:"hlc_counter"`
+	ContentHash       string          `json:"content_hash"`
+	Payload           json.RawMessage `json:"payload,omitempty"`
+	CreatedAt         time.Time       `json:"created_at"`
 }
 
 // Link mirrors a row in links.

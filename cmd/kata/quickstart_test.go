@@ -35,8 +35,7 @@ func TestQuickstart_PromotesCloseStep(t *testing.T) {
 
 func TestQuickstart_JSON(t *testing.T) {
 	resetFlags(t)
-	flags.JSON = true
-	out := executeRoot(t, newQuickstartCmd())
+	out := executeRoot(t, newRootCmd(), "--json", "quickstart")
 	var got struct {
 		APIVersion int    `json:"kata_api_version"`
 		Quickstart string `json:"quickstart"`

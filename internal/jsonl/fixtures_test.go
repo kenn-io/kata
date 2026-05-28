@@ -11,12 +11,26 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/jsonl"
 )
+
+func mustParseTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	got, err := time.Parse(time.RFC3339Nano, s)
+	require.NoError(t, err)
+	return got.UTC()
+}
+
+func assertTimePtrEqual(t *testing.T, want time.Time, got *time.Time) {
+	t.Helper()
+	require.NotNil(t, got)
+	assert.True(t, want.Equal(*got), "want %s, got %s", want, *got)
+}
 
 // assertTableShape pins a fixture's table to an exact column set. Older-
 // version fixtures (seedV8DBWithOrphans, seedV9SchemaDB) build the current
@@ -213,6 +227,25 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 	softDeleted := createTesterIssue(ctx, t, d, p1.ID, "soft deleted keeps FTS", "deleted but still exportable")
 	purged := createTesterIssue(ctx, t, d, p1.ID, "purged audit trail", "purged body should leave purge_log only", "audit")
 	createTesterIssue(ctx, t, d, p2.ID, "other project orchid", "cross project export coverage")
+	binding := db.FederationBinding{
+		ProjectID:            p2.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        p2.UID,
+		ReplayHorizonEventID: 7,
+		PullCursorEventID:    6,
+		PushEnabled:          true,
+		PushCursorEventID:    5,
+		Enabled:              true,
+	}
+	_, err = d.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities)
+		VALUES(?, ?, ?, ?)`,
+		strings.Repeat("c", 64), "01HZZZZZZZZZZZZZZZZZZZZZ03", p1.ID, "pull,push")
+	require.NoError(t, err)
 
 	addTesterComment(ctx, t, d, login.ID, "watermelon comment text")
 	addTesterComment(ctx, t, d, purged.ID, "purged comment text")
@@ -425,6 +458,44 @@ func seedV3DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 func dropV10Additions(t *testing.T, raw *sql.DB) {
 	t.Helper()
 	stmts := []string{
+		`DROP TABLE IF EXISTS federation_bindings`,
+		`DROP TABLE comments`,
+		`CREATE TABLE comments (
+		  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		  issue_id   INTEGER NOT NULL REFERENCES issues(id),
+		  author     TEXT NOT NULL,
+		  body       TEXT NOT NULL,
+		  created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  CHECK (length(trim(author)) > 0),
+		  CHECK (length(trim(body))   > 0)
+		)`,
+		`CREATE INDEX idx_comments_issue ON comments(issue_id, created_at)`,
+		`DROP TABLE events`,
+		`CREATE TABLE events (
+		  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+		  uid                 TEXT NOT NULL UNIQUE,
+		  origin_instance_uid TEXT NOT NULL,
+		  project_id          INTEGER NOT NULL REFERENCES projects(id),
+		  project_name        TEXT NOT NULL,
+		  issue_id            INTEGER REFERENCES issues(id),
+		  issue_uid           TEXT,
+		  related_issue_id    INTEGER REFERENCES issues(id),
+		  related_issue_uid   TEXT,
+		  type                TEXT NOT NULL,
+		  actor               TEXT NOT NULL,
+		  payload             TEXT NOT NULL DEFAULT '{}',
+		  created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  CHECK (length(trim(actor)) > 0),
+		  CHECK (json_valid(payload)),
+		  CHECK (length(uid) = 26),
+		  CHECK (length(origin_instance_uid) = 26)
+		)`,
+		`CREATE INDEX idx_events_project ON events(project_id, id)`,
+		`CREATE INDEX idx_events_issue ON events(issue_id, id) WHERE issue_id IS NOT NULL`,
+		`CREATE INDEX idx_events_related ON events(related_issue_id, id) WHERE related_issue_id IS NOT NULL`,
+		`CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL`,
+		`CREATE INDEX idx_events_related_issue_uid ON events(related_issue_uid) WHERE related_issue_uid IS NOT NULL`,
+		`CREATE INDEX idx_events_origin_instance ON events(origin_instance_uid)`,
 		`DROP INDEX IF EXISTS issues_recurrence_occurrence_uniq`,
 		`ALTER TABLE issues DROP COLUMN recurrence_id`,
 		`ALTER TABLE issues DROP COLUMN occurrence_key`,
@@ -454,6 +525,14 @@ func assertV8V9Shape(t *testing.T, raw *sql.DB) {
 		"id", "uid", "project_id", "short_id", "title", "body", "status",
 		"closed_reason", "owner", "priority", "author",
 		"created_at", "updated_at", "closed_at", "deleted_at",
+	})
+	assertTableShape(t, raw, "comments", []string{
+		"id", "issue_id", "author", "body", "created_at",
+	})
+	assertTableShape(t, raw, "events", []string{
+		"id", "uid", "origin_instance_uid", "project_id", "project_name",
+		"issue_id", "issue_uid", "related_issue_id", "related_issue_uid",
+		"type", "actor", "payload", "created_at",
 	})
 }
 

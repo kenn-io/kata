@@ -1,4 +1,4 @@
-package daemonclient
+package client
 
 import (
 	"context"

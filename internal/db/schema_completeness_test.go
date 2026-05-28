@@ -19,7 +19,10 @@ func TestAllSchemaTablesExist(t *testing.T) {
 	d := openTestDB(t)
 	wanted := []string{
 		"projects", "project_aliases", "issues", "comments",
-		"links", "issue_labels", "events", "api_tokens", "purge_log",
+		"links", "issue_labels", "events", "purge_log",
+		"api_tokens", "federation_bindings", "federation_sync_status",
+		"federation_quarantine", "federation_enrollments",
+		"issue_claims", "pending_claim_requests",
 		"meta", "issues_fts", "import_mappings", "recurrences",
 	}
 	for _, name := range wanted {

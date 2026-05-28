@@ -1,4 +1,4 @@
-package daemonclient
+package client
 
 import (
 	"context"
@@ -32,7 +32,7 @@ const allowInsecureEnvVar = "KATA_ALLOW_INSECURE"
 var ErrRemoteUnavailable = errors.New("kata server not responding")
 
 // ResolveRemote is the exported view of resolveRemote so callers
-// outside daemonclient (e.g. cmd/kata health) can honor the same
+// outside client (e.g. cmd/kata health) can honor the same
 // KATA_SERVER / .kata.local.toml resolution rules without
 // auto-starting a local daemon.
 func ResolveRemote(ctx context.Context, workspaceStart string) (string, bool, error) {

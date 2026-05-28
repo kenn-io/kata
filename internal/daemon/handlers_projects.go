@@ -209,6 +209,10 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "project_merge_archived_target",
 				"target project is archived", "", nil)
 		}
+		if errors.Is(err, db.ErrProjectMergeFederationBinding) {
+			return nil, api.NewError(409, "project_merge_federation_binding",
+				"cannot merge federated projects", "", nil)
+		}
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}

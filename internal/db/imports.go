@@ -118,6 +118,9 @@ func (d *DB) ImportBatch(ctx context.Context, p ImportBatchParams) (ImportBatchR
 		}
 		return ImportBatchResult{}, nil, fmt.Errorf("lookup import project: %w", err)
 	}
+	if err := ensureProjectWritableTx(ctx, tx, p.ProjectID); err != nil {
+		return ImportBatchResult{}, nil, err
+	}
 
 	result := ImportBatchResult{Source: p.Source, Items: make([]ImportItemResult, 0, len(p.Items)), Errors: []string{}}
 	events := []Event{}
@@ -328,7 +331,23 @@ func (d *DB) insertImportedIssue(ctx context.Context, tx *sql.Tx, p ImportBatchP
 	if err != nil {
 		return Issue{}, Event{}, fmt.Errorf("last issue id: %w", err)
 	}
-	payload, err := importEventPayload(p.Source, item.ExternalID)
+	payload, err := buildIssueCreatedPayload(issueCreatedPayload{
+		UID:          issueUID,
+		ShortID:      shortID,
+		Title:        item.Title,
+		Body:         item.Body,
+		Author:       item.Author,
+		Owner:        normalizeOwner(item.Owner),
+		Priority:     item.Priority,
+		Status:       item.Status,
+		ClosedReason: item.ClosedReason,
+		ClosedAt:     formatOptionalSQLiteTime(item.ClosedAt),
+		Metadata:     json.RawMessage(`{}`),
+		CreatedAt:    item.CreatedAt.UTC().Format(sqliteTimeFormat),
+		UpdatedAt:    item.UpdatedAt.UTC().Format(sqliteTimeFormat),
+		Source:       p.Source,
+		ExternalID:   item.ExternalID,
+	})
 	if err != nil {
 		return Issue{}, Event{}, err
 	}
@@ -350,7 +369,7 @@ func (d *DB) updateImportedIssue(ctx context.Context, tx *sql.Tx, p ImportBatchP
 	if err != nil {
 		return Issue{}, Event{}, fmt.Errorf("update imported issue: %w", err)
 	}
-	payload, err := importEventPayload(p.Source, item.ExternalID)
+	payload, err := importedIssueUpdatedPayload(p.Source, item.ExternalID, existing, item)
 	if err != nil {
 		return Issue{}, Event{}, err
 	}
@@ -379,7 +398,11 @@ func (d *DB) importComments(ctx context.Context, tx *sql.Tx, p ImportBatchParams
 			}
 			continue
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO comments(issue_id, author, body, created_at) VALUES(?, ?, ?, ?)`, issue.ID, c.Author, c.Body, c.CreatedAt)
+		commentUID, err := katauid.New()
+		if err != nil {
+			return nil, 0, fmt.Errorf("generate imported comment uid: %w", err)
+		}
+		res, err := tx.ExecContext(ctx, `INSERT INTO comments(uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?)`, commentUID, issue.ID, c.Author, c.Body, c.CreatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("insert imported comment: %w", err)
 		}
@@ -391,7 +414,15 @@ func (d *DB) importComments(ctx context.Context, tx *sql.Tx, p ImportBatchParams
 		if err != nil {
 			return nil, 0, err
 		}
-		payload, err := json.Marshal(map[string]any{"source": p.Source, "external_id": item.ExternalID, "comment_external_id": c.ExternalID, "comment_id": commentID})
+		payload, err := json.Marshal(map[string]any{
+			"comment_uid":         commentUID,
+			"author":              c.Author,
+			"body":                c.Body,
+			"created_at":          c.CreatedAt.UTC().Format(sqliteTimeFormat),
+			"source":              p.Source,
+			"external_id":         item.ExternalID,
+			"comment_external_id": c.ExternalID,
+		})
 		if err != nil {
 			return nil, 0, fmt.Errorf("marshal import comment payload: %w", err)
 		}
@@ -433,7 +464,7 @@ func (d *DB) reconcileImportLabels(ctx context.Context, tx *sql.Tx, p ImportBatc
 				if _, err := tx.ExecContext(ctx, `DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`, issue.ID, label.String); err != nil {
 					return nil, fmt.Errorf("delete source label: %w", err)
 				}
-				evt, err := d.insertLabelEvent(ctx, tx, p, issue, projectName, item.ExternalID, "issue.unlabeled", label.String)
+				evt, err := d.insertLabelEvent(ctx, tx, p, issue, projectName, item.ExternalID, "issue.unlabeled", label.String, item.UpdatedAt)
 				if err != nil {
 					return nil, err
 				}
@@ -464,7 +495,7 @@ func (d *DB) reconcileImportLabels(ctx context.Context, tx *sql.Tx, p ImportBatc
 			}
 		}
 		if affected > 0 {
-			evt, err := d.insertLabelEvent(ctx, tx, p, issue, projectName, item.ExternalID, "issue.labeled", label)
+			evt, err := d.insertLabelEvent(ctx, tx, p, issue, projectName, item.ExternalID, "issue.labeled", label, item.UpdatedAt)
 			if err != nil {
 				return nil, err
 			}
@@ -474,8 +505,14 @@ func (d *DB) reconcileImportLabels(ctx context.Context, tx *sql.Tx, p ImportBatc
 	return events, nil
 }
 
-func (d *DB) insertLabelEvent(ctx context.Context, tx *sql.Tx, p ImportBatchParams, issue Issue, projectName, itemExternalID, eventType, label string) (Event, error) {
-	payload, err := json.Marshal(map[string]any{"source": p.Source, "external_id": importLabelExternalID(itemExternalID, label), "label": label})
+func (d *DB) insertLabelEvent(ctx context.Context, tx *sql.Tx, p ImportBatchParams, issue Issue, projectName, itemExternalID, eventType, label string, updatedAt time.Time) (Event, error) {
+	payload, err := json.Marshal(map[string]any{
+		"issue_uid":   issue.UID,
+		"source":      p.Source,
+		"external_id": importLabelExternalID(itemExternalID, label),
+		"label":       label,
+		"updated_at":  updatedAt.UTC().Format(sqliteTimeFormat),
+	})
 	if err != nil {
 		return Event{}, fmt.Errorf("marshal label payload: %w", err)
 	}
@@ -540,7 +577,7 @@ func (d *DB) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p ImportBatch
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID); err != nil {
 					return nil, 0, fmt.Errorf("delete source link: %w", err)
 				}
-				evt, err := d.insertLinkEvent(ctx, tx, p, issue, projectName, "issue.unlinked", link)
+				evt, err := d.insertLinkEvent(ctx, tx, p, issue, projectName, "issue.unlinked", link, item.UpdatedAt)
 				if err != nil {
 					return nil, 0, err
 				}
@@ -589,7 +626,7 @@ func (d *DB) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p ImportBatch
 		if err != nil {
 			return nil, 0, err
 		}
-		evt, err := d.insertLinkEvent(ctx, tx, p, issue, projectName, "issue.linked", link)
+		evt, err := d.insertLinkEvent(ctx, tx, p, issue, projectName, "issue.linked", link, item.UpdatedAt)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -599,7 +636,7 @@ func (d *DB) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p ImportBatch
 	return events, created, nil
 }
 
-func (d *DB) insertLinkEvent(ctx context.Context, tx *sql.Tx, p ImportBatchParams, issue Issue, projectName, eventType string, link Link) (Event, error) {
+func (d *DB) insertLinkEvent(ctx context.Context, tx *sql.Tx, p ImportBatchParams, issue Issue, projectName, eventType string, link Link, updatedAt time.Time) (Event, error) {
 	relatedID := link.ToIssueID
 	if relatedID == issue.ID {
 		relatedID = link.FromIssueID
@@ -620,6 +657,7 @@ func (d *DB) insertLinkEvent(ctx context.Context, tx *sql.Tx, p ImportBatchParam
 		"from_uid":      issue.UID,
 		"to_short_id":   toShortID,
 		"to_uid":        toUID,
+		"updated_at":    updatedAt.UTC().Format(sqliteTimeFormat),
 	})
 	if err != nil {
 		return Event{}, fmt.Errorf("marshal link payload: %w", err)
@@ -641,12 +679,85 @@ func issueIdentByID(ctx context.Context, tx *sql.Tx, issueID int64) (string, str
 	return shortID, uid, nil
 }
 
-func importEventPayload(source, externalID string) (string, error) {
-	payload, err := json.Marshal(map[string]string{"source": source, "external_id": externalID})
+func importedIssueUpdatedPayload(source, externalID string, existing Issue, item ImportItem) (string, error) {
+	payload := map[string]any{
+		"source":      source,
+		"external_id": externalID,
+		"updated_at":  item.UpdatedAt.UTC().Format(sqliteTimeFormat),
+	}
+	if item.Title != existing.Title {
+		payload["title"] = item.Title
+		payload["old_title"] = existing.Title
+	}
+	if item.Body != existing.Body {
+		payload["body"] = item.Body
+	}
+	newOwner := normalizeOwner(item.Owner)
+	if !ownerEqual(existing.Owner, newOwner) {
+		if newOwner == nil {
+			payload["owner"] = nil
+		} else {
+			payload["owner"] = *newOwner
+		}
+		if existing.Owner == nil {
+			payload["old_owner"] = nil
+		} else {
+			payload["old_owner"] = *existing.Owner
+		}
+	}
+	if !priorityEqual(existing.Priority, item.Priority) {
+		if item.Priority == nil {
+			payload["priority"] = nil
+		} else {
+			payload["priority"] = *item.Priority
+		}
+		if existing.Priority == nil {
+			payload["old_priority"] = nil
+		} else {
+			payload["old_priority"] = *existing.Priority
+		}
+	}
+	if item.Status != existing.Status {
+		payload["status"] = item.Status
+	}
+	if !stringPtrEqual(existing.ClosedReason, item.ClosedReason) {
+		payload["closed_reason"] = stringPtrPayload(item.ClosedReason)
+	}
+	if !timePtrEqual(existing.ClosedAt, item.ClosedAt) {
+		payload["closed_at"] = stringPtrPayload(formatOptionalSQLiteTime(item.ClosedAt))
+	}
+	bs, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal import event payload: %w", err)
 	}
-	return string(payload), nil
+	return string(bs), nil
+}
+
+func stringPtrEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func timePtrEqual(a, b *time.Time) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.UTC().Format(sqliteTimeFormat) == b.UTC().Format(sqliteTimeFormat)
+}
+
+func stringPtrPayload(s *string) any {
+	if s == nil {
+		return nil
+	}
+	return *s
 }
 
 func validImportClosedReason(reason string) bool {

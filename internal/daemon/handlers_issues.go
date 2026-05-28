@@ -91,6 +91,8 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrParentAlreadySet):
 			return nil, api.NewError(409, "parent_already_set",
 				"duplicate parent in initial links", "pass at most one parent link", nil)
+		case errors.Is(err, db.ErrFederatedReadOnly):
+			return nil, federationReadOnlyError(err)
 		case errors.Is(err, db.ErrNotFound):
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		case err != nil:
@@ -260,6 +262,9 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 
 		hasFieldChange := in.Body.Title != nil || in.Body.Body != nil || in.Body.Owner != nil
 		hasPriorityChange := in.Body.SetPriority != nil || in.Body.ClearPriority
@@ -399,6 +404,8 @@ func mapAtomicEditError(err error, issueShortID string, delta *api.LinksDelta) e
 		// Should not surface from the atomic path (set_parent replaces),
 		// but map cleanly if it ever does.
 		return api.NewError(409, "parent_already_set", err.Error(), "", nil)
+	case errors.Is(err, db.ErrFederatedReadOnly):
+		return federationReadOnlyError(err)
 	default:
 		return api.NewError(500, "internal", err.Error(), "", nil)
 	}
@@ -598,7 +605,68 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	out.Body.Labels = labels
 	out.Body.Parent = parent
 	out.Body.Children = childOuts
+	claimRelevant, err := showIssueClaimRelevant(ctx, cfg.DB, issue.ProjectID)
+	if err != nil {
+		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	if !claimRelevant {
+		return out, nil
+	}
+	if issue.DeletedAt != nil {
+		return out, nil
+	}
+	if cfg.Auth.Token == "" && cfg.InsecureReadonly {
+		return out, nil
+	}
+	refreshedHubNow, err := refreshShowClaimStatus(ctx, cfg, issue)
+	if err != nil {
+		return nil, err
+	}
+	if err := hydrateClaimViolationsForIssue(ctx, cfg.DB, issue, out); err != nil {
+		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	if err := hydrateClaimOutForIssue(ctx, cfg, issue, out); err != nil {
+		return nil, err
+	}
+	if refreshedHubNow != nil && (out.Body.Lease != nil || len(out.Body.PendingLeases) > 0) {
+		out.Body.ClaimHubNow = refreshedHubNow
+		out.Body.LeaseHubNow = refreshedHubNow
+	}
 	return out, nil
+}
+
+func hydrateClaimViolationsForIssue(ctx context.Context, store *db.DB, issue db.Issue, out *api.ShowIssueResponse) error {
+	violations, count, err := store.UnresolvedClaimViolationsForIssue(ctx, issue.ProjectID, issue.UID, 3)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	out.Body.ClaimViolations = claimViolationOuts(violations)
+	out.Body.LeaseViolations = out.Body.ClaimViolations
+	out.Body.ClaimViolationCount = &count
+	out.Body.LeaseViolationCount = &count
+	return nil
+}
+
+func claimViolationOuts(violations []db.ClaimViolationSummary) []api.ClaimViolationOut {
+	out := make([]api.ClaimViolationOut, 0, len(violations))
+	for _, v := range violations {
+		out = append(out, api.ClaimViolationOut{
+			EventID:                    v.EventID,
+			EventUID:                   v.EventUID,
+			IssueUID:                   v.IssueUID,
+			ShortID:                    v.IssueShortID,
+			OffendingEventUID:          v.OffendingEventUID,
+			OffendingEventType:         v.OffendingEventType,
+			OffendingOriginInstanceUID: v.OffendingOriginInstanceUID,
+			Actor:                      v.Actor,
+			Reason:                     v.Reason,
+			At:                         v.At,
+		})
+	}
+	return out
 }
 
 func issueRefFromDB(iss db.Issue, projectName string) api.IssueRef {
@@ -810,7 +878,7 @@ func loadLinkOuts(ctx context.Context, store *db.DB, issueID int64) ([]api.LinkO
 // order. Plan 1 ships no pagination; the show handler embeds the full slice.
 func listComments(ctx context.Context, store *db.DB, issueID int64) ([]db.Comment, error) {
 	rows, err := store.QueryContext(ctx,
-		`SELECT id, issue_id, author, body, created_at FROM comments WHERE issue_id = ? ORDER BY created_at ASC, id ASC`, issueID)
+		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ? ORDER BY created_at ASC, id ASC`, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -818,7 +886,7 @@ func listComments(ctx context.Context, store *db.DB, issueID int64) ([]db.Commen
 	var out []db.Comment
 	for rows.Next() {
 		var c db.Comment
-		if err := rows.Scan(&c.ID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

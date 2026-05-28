@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,7 +21,10 @@ func TestSoftDeleteIssue_SetsDeletedAtAndEmitsEvent(t *testing.T) {
 	assert.True(t, changed)
 	assert.Equal(t, "issue.soft_deleted", evt.Type)
 	assert.Equal(t, "agent", evt.Actor)
-	assert.JSONEq(t, "{}", string(evt.Payload), "soft_deleted event has empty payload")
+	payload := unmarshalPayload[struct {
+		DeletedAt string `json:"deleted_at"`
+	}](t, evt.Payload)
+	assert.NotEmpty(t, payload.DeletedAt)
 	require.NotNil(t, evt.IssueID)
 	assert.Equal(t, issue.ID, *evt.IssueID, "event refs the soft-deleted issue id")
 	require.NotNil(t, updated.DeletedAt)
@@ -53,6 +57,10 @@ func TestRestoreIssue_ClearsDeletedAtAndEmitsEvent(t *testing.T) {
 	require.NotNil(t, evt)
 	assert.True(t, changed)
 	assert.Equal(t, "issue.restored", evt.Type)
+	payload := unmarshalPayload[struct {
+		RestoredAt string `json:"restored_at"`
+	}](t, evt.Payload)
+	assert.NotEmpty(t, payload.RestoredAt)
 	assert.Nil(t, updated.DeletedAt)
 }
 
@@ -105,7 +113,10 @@ func TestRestoreIssue_EmitsEventWithPayloadAndRefs(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, evt)
 	assert.True(t, changed)
-	assert.JSONEq(t, "{}", string(evt.Payload), "restored event has empty payload")
+	payload := unmarshalPayload[struct {
+		RestoredAt string `json:"restored_at"`
+	}](t, evt.Payload)
+	assert.NotEmpty(t, payload.RestoredAt)
 	require.NotNil(t, evt.IssueID)
 	assert.Equal(t, issue.ID, *evt.IssueID)
 	assert.True(t, updated.UpdatedAt.After(issue.UpdatedAt) || updated.UpdatedAt.Equal(issue.UpdatedAt),
@@ -169,6 +180,31 @@ func TestPurgeIssue_RemovesAllDependentsAndAudits(t *testing.T) {
 		Actor: "tester",
 	})
 	require.NoError(t, err)
+	claimUID, err := uid.New()
+	require.NoError(t, err)
+	require.NoError(t, d.UpsertClaimCache(ctx, db.IssueClaim{
+		ClaimUID:          claimUID,
+		ProjectID:         p.ID,
+		IssueID:           target.ID,
+		IssueUID:          target.UID,
+		Holder:            "agent",
+		HolderInstanceUID: d.InstanceUID(),
+		ClaimKind:         "hard",
+		AcquiredAt:        time.Now().UTC(),
+		Revision:          1,
+		UpdatedAt:         time.Now().UTC(),
+	}))
+	_, err = d.EnqueuePendingClaim(ctx, db.PendingClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  target.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: d.InstanceUID(),
+			Holder:            "pending-agent",
+		},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
 
 	pl, err := d.PurgeIssue(ctx, target.ID, "agent", nil)
 	require.NoError(t, err)
@@ -200,6 +236,10 @@ func TestPurgeIssue_RemovesAllDependentsAndAudits(t *testing.T) {
 		target.ID, target.ID)
 	assertRowCount(ctx, t, d, 0, "labels removed",
 		`SELECT count(*) FROM issue_labels WHERE issue_id = ?`, target.ID)
+	assertRowCount(ctx, t, d, 0, "claims removed",
+		`SELECT count(*) FROM issue_claims WHERE issue_id = ?`, target.ID)
+	assertRowCount(ctx, t, d, 0, "pending claims removed",
+		`SELECT count(*) FROM pending_claim_requests WHERE issue_id = ?`, target.ID)
 	assertRowCount(ctx, t, d, 0, "events removed",
 		`SELECT count(*) FROM events WHERE issue_id = ? OR related_issue_id = ?`,
 		target.ID, target.ID)

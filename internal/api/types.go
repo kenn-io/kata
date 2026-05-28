@@ -89,6 +89,47 @@ type RevokeTokenResponse struct {
 	}
 }
 
+// ClaimPrincipalOut identifies the client tuple currently holding or
+// requesting an issue claim.
+type ClaimPrincipalOut struct {
+	HolderInstanceUID string `json:"holder_instance_uid"`
+	Holder            string `json:"holder"`
+	ClientKind        string `json:"client_kind"`
+}
+
+// IssueClaimOut is the API-owned projection of db.IssueClaim.
+type IssueClaimOut struct {
+	ClaimUID          string     `json:"claim_uid"`
+	ProjectID         int64      `json:"project_id"`
+	IssueUID          string     `json:"issue_uid"`
+	Holder            string     `json:"holder"`
+	HolderInstanceUID string     `json:"holder_instance_uid"`
+	ClientKind        string     `json:"client_kind"`
+	Purpose           string     `json:"purpose"`
+	ClaimKind         string     `json:"claim_kind"`
+	AcquiredAt        time.Time  `json:"acquired_at"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	ReleasedAt        *time.Time `json:"released_at,omitempty"`
+	ReleaseReason     *string    `json:"release_reason,omitempty"`
+	Revision          int64      `json:"revision"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// PendingClaimOut is the API-owned projection of an unresolved local pending
+// claim request.
+type PendingClaimOut struct {
+	RequestUID        string     `json:"request_uid"`
+	Holder            string     `json:"holder"`
+	HolderInstanceUID string     `json:"holder_instance_uid"`
+	ClientKind        string     `json:"client_kind"`
+	ClaimKind         string     `json:"claim_kind"`
+	TTLSeconds        *int64     `json:"ttl_seconds,omitempty"`
+	Purpose           string     `json:"purpose,omitempty"`
+	RequestedAt       time.Time  `json:"requested_at"`
+	LastAttemptAt     *time.Time `json:"last_attempt_at,omitempty"`
+	LastError         *string    `json:"last_error,omitempty"`
+}
+
 // ProjectStatsOut is the per-project aggregate returned by GET
 // /api/v1/projects?include=stats. LastEventAt is nil for a project with
 // zero events. Spec §7.2.
@@ -408,13 +449,37 @@ type ShowIssueByUIDRequest struct {
 // ShowIssueResponse is the per-issue read payload (Plan 2: + links, + labels).
 type ShowIssueResponse struct {
 	Body struct {
-		Issue    db.Issue        `json:"issue"`
-		Comments []db.Comment    `json:"comments"`
-		Links    []LinkOut       `json:"links"`
-		Labels   []db.IssueLabel `json:"labels"`
-		Parent   *IssueRef       `json:"parent,omitempty"`
-		Children []IssueOut      `json:"children,omitempty"`
+		Issue               db.Issue            `json:"issue"`
+		Comments            []db.Comment        `json:"comments"`
+		Links               []LinkOut           `json:"links"`
+		Labels              []db.IssueLabel     `json:"labels"`
+		Parent              *IssueRef           `json:"parent,omitempty"`
+		Children            []IssueOut          `json:"children,omitempty"`
+		Claim               *IssueClaimOut      `json:"claim,omitempty"`
+		Lease               *IssueClaimOut      `json:"lease,omitempty"`
+		PendingClaims       []PendingClaimOut   `json:"pending_claims,omitempty"`
+		PendingLeases       []PendingClaimOut   `json:"pending_leases,omitempty"`
+		ClaimHubNow         *time.Time          `json:"claim_hub_now,omitempty"`
+		LeaseHubNow         *time.Time          `json:"lease_hub_now,omitempty"`
+		ClaimViolations     []ClaimViolationOut `json:"claim_violations,omitempty"`
+		LeaseViolations     []ClaimViolationOut `json:"lease_violations,omitempty"`
+		ClaimViolationCount *int64              `json:"claim_violation_count,omitempty"`
+		LeaseViolationCount *int64              `json:"lease_violation_count,omitempty"`
 	}
+}
+
+// ClaimViolationOut is the canonical Phase 4 claim violation display shape.
+type ClaimViolationOut struct {
+	EventID                    int64     `json:"event_id"`
+	EventUID                   string    `json:"event_uid"`
+	IssueUID                   string    `json:"issue_uid"`
+	ShortID                    string    `json:"short_id,omitempty"`
+	OffendingEventUID          string    `json:"offending_event_uid,omitempty"`
+	OffendingEventType         string    `json:"offending_event_type,omitempty"`
+	OffendingOriginInstanceUID string    `json:"offending_origin_instance_uid,omitempty"`
+	Actor                      string    `json:"actor,omitempty"`
+	Reason                     string    `json:"reason,omitempty"`
+	At                         time.Time `json:"at"`
 }
 
 // EditIssueRequest is PATCH /api/v1/projects/{id}/issues/{ref}.

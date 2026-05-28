@@ -1,11 +1,19 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
@@ -83,6 +91,188 @@ func TestShow_AgentOutputLinkRowsUsePOVLabels(t *testing.T) {
 	assert.NotContains(t, out, "- type=blocks issue="+blocker)
 }
 
+func TestShow_NoClaimLineOnNonFederatedUnclaimedIssue(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "plain issue")
+
+	out := runCLI(t, env, dir, "show", ref)
+	assert.NotContains(t, out, "lease:")
+}
+
+func TestShow_ActiveHardClaimRendersOneClaimLine(t *testing.T) {
+	env, dir, _, ref := setupFederatedHubIssue(t, "claimed issue")
+	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
+
+	out := runCLI(t, env, dir, "show", ref)
+
+	lines := leaseLines(out)
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "lease: alice from instance ")
+	assert.Contains(t, lines[0], "(hard)")
+}
+
+func TestShow_PendingClaimsRenderPendingNewestFirst(t *testing.T) {
+	env, dir, pid, ref := setupFederatedHubIssue(t, "pending issue")
+	oldAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	newAt := oldAt.Add(2 * time.Minute)
+	enqueueCLIPendingClaim(t, env.DB, pid, ref, "oldest", oldAt)
+	enqueueCLIPendingClaim(t, env.DB, pid, ref, "newest", newAt)
+
+	out := runCLI(t, env, dir, "show", ref)
+
+	lines := leaseLines(out)
+	require.Equal(t, []string{
+		"lease: newest pending",
+		"lease: oldest pending",
+	}, lines)
+}
+
+func TestShow_UnreachableHubRendersCachedTimedClaimAndPending(t *testing.T) {
+	ctx := context.Background()
+	env, dir, pid := setupCLIWorkspace(t)
+	created := createIssueViaHTTPFull(t, env, dir, "cached claim")
+	enableSpokeClaims(t, env, pid)
+	hubNow := time.Now().UTC().Add(5 * time.Minute)
+	expiresAt := hubNow.Add(29*time.Minute + 30*time.Second)
+	require.NoError(t, env.DB.ApplyClaimStatus(ctx, pid, created.UID, db.ClaimStatus{
+		Held: true,
+		Holder: db.ClaimPrincipal{
+			HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD",
+			Holder:            "cached",
+			ClientKind:        "cli",
+		},
+		Claim: &db.IssueClaim{
+			ClaimUID:          "01HZNQ7VFPK1XGD8R5MABCD4CC",
+			ProjectID:         pid,
+			IssueID:           created.ID,
+			IssueUID:          created.UID,
+			Holder:            "cached",
+			HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD",
+			ClientKind:        "cli",
+			ClaimKind:         "timed",
+			AcquiredAt:        hubNow.Add(-time.Minute),
+			ExpiresAt:         &expiresAt,
+			Revision:          1,
+			UpdatedAt:         hubNow,
+		},
+		HubNow: hubNow,
+	}))
+	enqueueCLIPendingClaim(t, env.DB, pid, created.ShortID, "pending", hubNow.Add(time.Minute))
+
+	out := runCLI(t, env, dir, "show", created.ShortID)
+
+	lines := leaseLines(out)
+	require.Len(t, lines, 2)
+	assert.Contains(t, lines[0], "lease: cached from instance 01HZNQ7VFPK1XGD8R5MABCD4CD (timed, ")
+	assert.Contains(t, lines[0], " left)")
+	assert.Equal(t, "lease: pending pending", lines[1])
+}
+
+func TestShow_TimedClaimUsesClaimHubNowForTimeLeft(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	created := createIssueViaHTTPFull(t, env, dir, "fresh hub claim")
+	hubNow := time.Now().UTC().Add(5 * time.Minute)
+	expiresAt := hubNow.Add(29*time.Minute + 30*time.Second)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "Bearer claim-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "/api/v1/projects/42/issues/"+created.ShortID+"/lease", r.URL.Path)
+		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimStatusBody{
+			Held: true,
+			Holder: api.ClaimPrincipalOut{
+				HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EF",
+				Holder:            "hub-alice",
+				ClientKind:        "cli",
+			},
+			Claim: &api.IssueClaimOut{
+				ClaimUID:          "01HZNQ7VFPK1XGD8R5MABCD4EE",
+				ProjectID:         42,
+				IssueUID:          created.UID,
+				Holder:            "hub-alice",
+				HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EF",
+				ClientKind:        "cli",
+				ClaimKind:         "timed",
+				AcquiredAt:        hubNow.Add(-time.Minute),
+				ExpiresAt:         &expiresAt,
+				Revision:          1,
+				UpdatedAt:         hubNow,
+			},
+			HubNow: hubNow,
+		}))
+	}))
+	t.Cleanup(hub.Close)
+	enableSpokeClaimsTo(t, env, pid, hub.URL, 42)
+
+	out := runCLI(t, env, dir, "show", created.ShortID)
+
+	lines := leaseLines(out)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "lease: hub-alice from instance 01HZNQ7VFPK1XGD8R5MABCD4EF (timed, 29m left)", lines[0])
+}
+
+func TestShow_JSONIncludesClaimFields(t *testing.T) {
+	env, dir, pid, ref := setupFederatedHubIssue(t, "json claim issue")
+	runCLIAs(t, env, dir, "alice", "federation", "lease", "acquire", ref)
+	enqueueCLIPendingClaim(t, env.DB, pid, ref, "pending", time.Now().UTC())
+
+	out := runCLI(t, env, dir, "--json", "show", ref)
+
+	var body map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(out), &body))
+	assert.Contains(t, body, "lease")
+	assert.Contains(t, body, "pending_leases")
+	assert.Contains(t, body, "lease_hub_now")
+}
+
+func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
+	env, dir, pid, ref := setupFederatedHubIssue(t, "violated issue")
+	ctx := context.Background()
+	issue, err := env.DB.IssueByShortID(ctx, pid, ref, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = env.DB.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: pid,
+		IssueRef:  ref,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: cliViolationSpokeUID,
+			Holder:            "holder",
+			ClientKind:        "cli",
+		},
+		ClaimKind: "hard",
+		Now:       time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	for i := int64(0); i < 4; i++ {
+		ingestCLIClaimViolation(t, env, pid, issue, "bob", "issue.updated", 20+i)
+	}
+
+	out := runCLI(t, env, dir, "show", ref)
+
+	lines := claimViolationLines(out)
+	require.Len(t, lines, 3)
+	assert.Contains(t, lines[0], "lease violation: ")
+	assert.Contains(t, lines[0], " issue.updated by bob from instance "+cliViolationSpokeUID+" ")
+	assert.Contains(t, lines[0], "(uncovered_work)")
+	assert.NotContains(t, out, "lease violations: 4")
+
+	jsonOut := runCLI(t, env, dir, "--json", "show", ref)
+	var body struct {
+		ClaimViolationCount int `json:"lease_violation_count"`
+		ClaimViolations     []struct {
+			OffendingEventType        string `json:"offending_event_type"`
+			OffendingOriginInstanceID string `json:"offending_origin_instance_uid"`
+			Actor                     string `json:"actor"`
+			Reason                    string `json:"reason"`
+		} `json:"lease_violations"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &body))
+	assert.Equal(t, 4, body.ClaimViolationCount)
+	require.Len(t, body.ClaimViolations, 3)
+	assert.Equal(t, "issue.updated", body.ClaimViolations[0].OffendingEventType)
+	assert.Equal(t, cliViolationSpokeUID, body.ClaimViolations[0].OffendingOriginInstanceID)
+	assert.Equal(t, "bob", body.ClaimViolations[0].Actor)
+	assert.Equal(t, "uncovered_work", body.ClaimViolations[0].Reason)
+}
+
 // TestShow_LinkLabelInvertsOnToSide verifies that when show runs against
 // the link's "to" side, the rendered LABEL inverts to read from the
 // viewer's perspective: the parent slot's "to" end is the parent of
@@ -137,4 +327,50 @@ func TestShow_BareRefHonorsProjectFlagOutsideWorkspace(t *testing.T) {
 	outside := t.TempDir()
 	out := runCLI(t, env, outside, "--project", "kata", "show", created.ShortID)
 	assert.Contains(t, out, "ref outside workspace")
+}
+
+func leaseLines(out string) []string {
+	lines := []string{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "lease: ") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func claimViolationLines(out string) []string {
+	lines := []string{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "lease violation: ") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func enqueueCLIPendingClaim(
+	t *testing.T,
+	store *db.DB,
+	projectID int64,
+	ref string,
+	holder string,
+	at time.Time,
+) db.PendingClaimRequest {
+	t.Helper()
+	pending, err := store.EnqueuePendingClaim(context.Background(), db.PendingClaimParams{
+		ProjectID: projectID,
+		IssueRef:  ref,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: store.InstanceUID(),
+			Holder:            holder,
+			ClientKind:        "cli",
+		},
+		ClaimKind: "hard",
+		Now:       at,
+	})
+	require.NoError(t, err)
+	return pending
 }

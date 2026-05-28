@@ -160,18 +160,23 @@ func (d *DB) AddLabelAndEvent(ctx context.Context, issueID int64, ev LabelEventP
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	if err != nil {
+		return IssueLabel{}, Event{}, err
+	}
+
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO issue_labels(issue_id, label, author) VALUES(?, ?, ?)`,
 		issueID, ev.Label, ev.Actor); err != nil {
 		return IssueLabel{}, Event{}, classifyLabelInsertError(err)
 	}
 
-	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
-	if err != nil {
-		return IssueLabel{}, Event{}, err
-	}
-
-	payload, err := json.Marshal(map[string]string{"label": ev.Label})
+	ts := nowTimestamp()
+	payload, err := json.Marshal(map[string]string{
+		"issue_uid":  issue.UID,
+		"label":      ev.Label,
+		"updated_at": ts,
+	})
 	if err != nil {
 		return IssueLabel{}, Event{}, fmt.Errorf("marshal label payload: %w", err)
 	}
@@ -188,8 +193,8 @@ func (d *DB) AddLabelAndEvent(ctx context.Context, issueID int64, ev LabelEventP
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-		issueID); err != nil {
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		ts, issueID); err != nil {
 		return IssueLabel{}, Event{}, fmt.Errorf("touch issue: %w", err)
 	}
 
@@ -218,6 +223,11 @@ func (d *DB) RemoveLabelAndEvent(ctx context.Context, issueID int64, ev LabelEve
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
+	if err != nil {
+		return Event{}, err
+	}
+
 	res, err := tx.ExecContext(ctx,
 		`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
 		issueID, ev.Label)
@@ -232,12 +242,12 @@ func (d *DB) RemoveLabelAndEvent(ctx context.Context, issueID int64, ev LabelEve
 		return Event{}, ErrNotFound
 	}
 
-	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
-	if err != nil {
-		return Event{}, err
-	}
-
-	payload, err := json.Marshal(map[string]string{"label": ev.Label})
+	ts := nowTimestamp()
+	payload, err := json.Marshal(map[string]string{
+		"issue_uid":  issue.UID,
+		"label":      ev.Label,
+		"updated_at": ts,
+	})
 	if err != nil {
 		return Event{}, fmt.Errorf("marshal label payload: %w", err)
 	}
@@ -254,8 +264,8 @@ func (d *DB) RemoveLabelAndEvent(ctx context.Context, issueID int64, ev LabelEve
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-		issueID); err != nil {
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		ts, issueID); err != nil {
 		return Event{}, fmt.Errorf("touch issue: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

@@ -87,6 +87,9 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			return nil, api.NewError(409, "recurrence_pinned",
 				rpErr.Error(), "unpin the issue from its recurrence before moving", nil)
 		}
+		if apiErr := federationReadOnlyError(err); apiErr != nil {
+			return nil, apiErr
+		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}

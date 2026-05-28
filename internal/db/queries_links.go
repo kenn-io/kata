@@ -694,6 +694,11 @@ func (d *DB) CreateLinkAndEvent(ctx context.Context, p CreateLinkParams, ev Link
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	_, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
+	if err != nil {
+		return Link{}, Event{}, err
+	}
+
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES(?, ?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
@@ -720,10 +725,6 @@ func (d *DB) CreateLinkAndEvent(ctx context.Context, p CreateLinkParams, ev Link
 		return Link{}, Event{}, fmt.Errorf("last insert id: %w", err)
 	}
 
-	_, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
-	if err != nil {
-		return Link{}, Event{}, err
-	}
 	// related_issue_id is the OTHER endpoint of the link (not the URL issue).
 	// When the URL issue is one of the link's endpoints, pick the opposite;
 	// otherwise default to the link's to_issue_id.
@@ -731,6 +732,7 @@ func (d *DB) CreateLinkAndEvent(ctx context.Context, p CreateLinkParams, ev Link
 	if relatedID == ev.EventIssueID {
 		relatedID = p.FromIssueID
 	}
+	ts := nowTimestamp()
 	payload, err := json.Marshal(map[string]any{
 		"link_id":       linkID,
 		"type":          p.Type,
@@ -738,6 +740,7 @@ func (d *DB) CreateLinkAndEvent(ctx context.Context, p CreateLinkParams, ev Link
 		"from_uid":      ev.FromUID,
 		"to_short_id":   ev.ToShortID,
 		"to_uid":        ev.ToUID,
+		"updated_at":    ts,
 	})
 	if err != nil {
 		return Link{}, Event{}, fmt.Errorf("marshal link payload: %w", err)
@@ -756,8 +759,8 @@ func (d *DB) CreateLinkAndEvent(ctx context.Context, p CreateLinkParams, ev Link
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-		ev.EventIssueID); err != nil {
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		ts, ev.EventIssueID); err != nil {
 		return Link{}, Event{}, fmt.Errorf("touch issue: %w", err)
 	}
 
@@ -787,6 +790,11 @@ func (d *DB) DeleteLinkAndEvent(ctx context.Context, link Link, ev LinkEventPara
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	_, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
+	if err != nil {
+		return Event{}, err
+	}
+
 	res, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID)
 	if err != nil {
 		return Event{}, fmt.Errorf("delete link: %w", err)
@@ -798,15 +806,11 @@ func (d *DB) DeleteLinkAndEvent(ctx context.Context, link Link, ev LinkEventPara
 	if n == 0 {
 		return Event{}, ErrNotFound
 	}
-
-	_, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
-	if err != nil {
-		return Event{}, err
-	}
 	relatedID := link.ToIssueID
 	if relatedID == ev.EventIssueID {
 		relatedID = link.FromIssueID
 	}
+	ts := nowTimestamp()
 	payload, err := json.Marshal(map[string]any{
 		"link_id":       link.ID,
 		"type":          link.Type,
@@ -814,6 +818,7 @@ func (d *DB) DeleteLinkAndEvent(ctx context.Context, link Link, ev LinkEventPara
 		"from_uid":      ev.FromUID,
 		"to_short_id":   ev.ToShortID,
 		"to_uid":        ev.ToUID,
+		"updated_at":    ts,
 	})
 	if err != nil {
 		return Event{}, fmt.Errorf("marshal unlink payload: %w", err)
@@ -831,8 +836,8 @@ func (d *DB) DeleteLinkAndEvent(ctx context.Context, link Link, ev LinkEventPara
 		return Event{}, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE issues SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-		ev.EventIssueID); err != nil {
+		`UPDATE issues SET updated_at = ? WHERE id = ?`,
+		ts, ev.EventIssueID); err != nil {
 		return Event{}, fmt.Errorf("touch issue: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

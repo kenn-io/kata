@@ -152,10 +152,10 @@ func TestDispatcher_Shutdown_Timeout_ReportsInflight(t *testing.T) {
 	d, logBuf, _ := mustNewDispatcher(t, []ResolvedHook{stuck}, cfg)
 	enqueueEvents(d, "issue.created", 300, 1)
 	waitForInflight(t, d, 1, 5*time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
 	if err := d.Shutdown(ctx); err == nil {
-		t.Fatal("Shutdown with 50ms ctx vs term-ignore should return error")
+		t.Fatal("Shutdown with 5ms ctx vs term-ignore should return error")
 	}
 	if !strings.Contains(logBuf.String(), "timed out") {
 		t.Fatalf("daemon log missing 'timed out': %q", logBuf.String())

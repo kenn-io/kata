@@ -107,3 +107,33 @@ func TestLabelCounts_AggregatesPerProject(t *testing.T) {
 	assert.Equal(t, int64(2), got["bug"])
 	assert.Equal(t, int64(1), got["priority:high"])
 }
+
+func TestLabelEventsCarryIssueUID(t *testing.T) {
+	d, ctx, _, i := setupTestIssue(t)
+
+	_, labeled, err := d.AddLabelAndEvent(ctx, i.ID, db.LabelEventParams{
+		EventType: "issue.labeled",
+		Label:     "bug",
+		Actor:     "tester",
+	})
+	require.NoError(t, err)
+	labeledPayload := unmarshalPayload[struct {
+		IssueUID string `json:"issue_uid"`
+		Label    string `json:"label"`
+	}](t, labeled.Payload)
+	assert.Equal(t, i.UID, labeledPayload.IssueUID)
+	assert.Equal(t, "bug", labeledPayload.Label)
+
+	unlabeled, err := d.RemoveLabelAndEvent(ctx, i.ID, db.LabelEventParams{
+		EventType: "issue.unlabeled",
+		Label:     "bug",
+		Actor:     "tester",
+	})
+	require.NoError(t, err)
+	unlabeledPayload := unmarshalPayload[struct {
+		IssueUID string `json:"issue_uid"`
+		Label    string `json:"label"`
+	}](t, unlabeled.Payload)
+	assert.Equal(t, i.UID, unlabeledPayload.IssueUID)
+	assert.Equal(t, "bug", unlabeledPayload.Label)
+}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
@@ -44,31 +45,7 @@ func newShowCmd() *cobra.Command {
 				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 				return err
 			}
-			var b struct {
-				Issue struct {
-					ShortID  string  `json:"short_id"`
-					UID      string  `json:"uid"`
-					Title    string  `json:"title"`
-					Body     string  `json:"body"`
-					Status   string  `json:"status"`
-					Author   string  `json:"author"`
-					Owner    *string `json:"owner"`
-					Priority *int64  `json:"priority"`
-				} `json:"issue"`
-				Comments []struct {
-					Author    string `json:"author"`
-					Body      string `json:"body"`
-					CreatedAt string `json:"created_at"`
-				} `json:"comments"`
-				Labels []struct {
-					Label string `json:"label"`
-				} `json:"labels"`
-				Links []struct {
-					Type string         `json:"type"`
-					From linkPeerForCLI `json:"from"`
-					To   linkPeerForCLI `json:"to"`
-				} `json:"links"`
-			}
+			var b showResponseForCLI
 			if err := json.Unmarshal(bs, &b); err != nil {
 				return err
 			}
@@ -81,6 +58,12 @@ func newShowCmd() *cobra.Command {
 				textsafe.Line(b.Issue.Title),
 				b.Issue.Status,
 				textsafe.Line(b.Issue.Author)); err != nil {
+				return err
+			}
+			if err := printShowClaimLines(out, b.Lease, b.PendingLeases, b.LeaseHubNow); err != nil {
+				return err
+			}
+			if err := printShowClaimViolationLines(out, b.LeaseViolations); err != nil {
 				return err
 			}
 			if b.Issue.Body != "" {
@@ -130,7 +113,10 @@ func newShowCmd() *cobra.Command {
 	}
 }
 
-func printShowAgent(w io.Writer, b struct {
+// showResponseForCLI is the show command's decode of the daemon's show
+// response. It is shared by both the human and agent renderers; the
+// federation lease fields are zero when the issue is not federated.
+type showResponseForCLI struct {
 	Issue struct {
 		ShortID  string  `json:"short_id"`
 		UID      string  `json:"uid"`
@@ -154,7 +140,13 @@ func printShowAgent(w io.Writer, b struct {
 		From linkPeerForCLI `json:"from"`
 		To   linkPeerForCLI `json:"to"`
 	} `json:"links"`
-}) error {
+	Lease           *claimForShowCLI       `json:"lease"`
+	PendingLeases   []pendingClaimForCLI   `json:"pending_leases"`
+	LeaseHubNow     *time.Time             `json:"lease_hub_now"`
+	LeaseViolations []claimViolationForCLI `json:"lease_violations"`
+}
+
+func printShowAgent(w io.Writer, b showResponseForCLI) error {
 	if _, err := fmt.Fprintf(w, "OK show %s\n", b.Issue.ShortID); err != nil {
 		return err
 	}
@@ -184,6 +176,12 @@ func printShowAgent(w io.Writer, b struct {
 		if err := writeAgentField(w, "Priority", fmt.Sprint(*b.Issue.Priority)); err != nil {
 			return err
 		}
+	}
+	if err := printShowAgentLeaseLines(w, b.Lease, b.PendingLeases, b.LeaseHubNow); err != nil {
+		return err
+	}
+	if err := printShowAgentLeaseViolationLines(w, b.LeaseViolations); err != nil {
+		return err
 	}
 	if _, err := fmt.Fprint(w, "Body:\n", agentFencedText(b.Issue.Body)); err != nil {
 		return err
@@ -221,11 +219,147 @@ func printShowAgent(w io.Writer, b struct {
 	return nil
 }
 
+func printShowAgentLeaseLines(
+	w io.Writer,
+	claim *claimForShowCLI,
+	pending []pendingClaimForCLI,
+	hubNow *time.Time,
+) error {
+	if claim != nil {
+		if err := writeAgentKVRow(w,
+			agentRowField("lease", "active"),
+			agentRowField("holder", claim.Holder),
+			agentRowField("holder_instance", claim.HolderInstanceUID),
+			agentRowField("kind", showClaimKind(claim, hubNow)),
+		); err != nil {
+			return err
+		}
+	}
+	for _, p := range pending {
+		if err := writeAgentKVRow(w,
+			agentRowField("lease", "pending"),
+			agentRowField("holder", p.Holder),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printShowAgentLeaseViolationLines(w io.Writer, violations []claimViolationForCLI) error {
+	for _, v := range violations {
+		if err := writeAgentKVRow(w,
+			agentRowField("lease_violation", v.At.UTC().Format(time.RFC3339)),
+			agentRowField("event", v.OffendingEventType),
+			agentRowField("actor", v.Actor),
+			agentRowField("offending_instance", v.OffendingOriginInstanceUID),
+			agentRowField("reason", v.Reason),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // linkPeerForCLI mirrors api.LinkPeer for the show command's decode path. UID
 // is the stable handle; short_id is the human-readable display.
 type linkPeerForCLI struct {
 	UID     string `json:"uid"`
 	ShortID string `json:"short_id"`
+}
+
+type claimForShowCLI struct {
+	Holder            string     `json:"holder"`
+	HolderInstanceUID string     `json:"holder_instance_uid"`
+	ClaimKind         string     `json:"claim_kind"`
+	ExpiresAt         *time.Time `json:"expires_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+type pendingClaimForCLI struct {
+	Holder      string    `json:"holder"`
+	RequestedAt time.Time `json:"requested_at"`
+}
+
+type claimViolationForCLI struct {
+	OffendingEventType         string    `json:"offending_event_type"`
+	OffendingOriginInstanceUID string    `json:"offending_origin_instance_uid"`
+	Actor                      string    `json:"actor"`
+	Reason                     string    `json:"reason"`
+	At                         time.Time `json:"at"`
+}
+
+func printShowClaimLines(
+	out interface {
+		Write([]byte) (int, error)
+	},
+	claim *claimForShowCLI,
+	pending []pendingClaimForCLI,
+	hubNow *time.Time,
+) error {
+	if claim != nil {
+		if _, err := fmt.Fprintf(out, "lease: %s from instance %s (%s)\n",
+			textsafe.Line(claim.Holder),
+			textsafe.Line(claim.HolderInstanceUID),
+			showClaimKind(claim, hubNow)); err != nil {
+			return err
+		}
+	}
+	for _, p := range pending {
+		if _, err := fmt.Fprintf(out, "lease: %s pending\n", textsafe.Line(p.Holder)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printShowClaimViolationLines(
+	out interface {
+		Write([]byte) (int, error)
+	},
+	violations []claimViolationForCLI,
+) error {
+	for _, v := range violations {
+		if _, err := fmt.Fprintf(out, "lease violation: %s %s by %s from instance %s (%s)\n",
+			v.At.UTC().Format(time.RFC3339),
+			textsafe.Line(v.OffendingEventType),
+			textsafe.Line(v.Actor),
+			textsafe.Line(v.OffendingOriginInstanceUID),
+			textsafe.Line(v.Reason)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func showClaimKind(claim *claimForShowCLI, hubNow *time.Time) string {
+	if claim.ClaimKind != "timed" || claim.ExpiresAt == nil {
+		return "hard"
+	}
+	now := time.Now().UTC()
+	if hubNow != nil && !hubNow.IsZero() {
+		now = hubNow.UTC()
+	}
+	return fmt.Sprintf("timed, %s left", formatClaimTimeLeft(claim.ExpiresAt.Sub(now)))
+}
+
+func formatClaimTimeLeft(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d >= time.Hour:
+		hours := int(d / time.Hour)
+		minutes := int((d % time.Hour) / time.Minute)
+		if minutes == 0 {
+			return fmt.Sprintf("%dh", hours)
+		}
+		return fmt.Sprintf("%dh%dm", hours, minutes)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	default:
+		return fmt.Sprintf("%ds", int(d/time.Second))
+	}
 }
 
 // linkLabelFromPOV returns the label and the OTHER endpoint's short_id,

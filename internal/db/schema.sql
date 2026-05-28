@@ -74,10 +74,12 @@ CREATE UNIQUE INDEX issues_recurrence_occurrence_uniq
 
 CREATE TABLE comments (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid        TEXT NOT NULL UNIQUE,
   issue_id   INTEGER NOT NULL REFERENCES issues(id),
   author     TEXT NOT NULL,
   body       TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  CHECK (length(uid) = 26),
   CHECK (length(trim(author)) > 0),
   CHECK (length(trim(body))   > 0)
 );
@@ -210,11 +212,17 @@ CREATE TABLE events (
   type                TEXT NOT NULL,
   actor               TEXT NOT NULL,
   payload             TEXT NOT NULL DEFAULT '{}',
+  hlc_physical_ms     INTEGER NOT NULL,
+  hlc_counter         INTEGER NOT NULL,
+  content_hash        TEXT NOT NULL,
   created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   CHECK (length(trim(actor)) > 0),
   CHECK (json_valid(payload)),
   CHECK (length(uid) = 26),
-  CHECK (length(origin_instance_uid) = 26)
+  CHECK (length(origin_instance_uid) = 26),
+  CHECK (hlc_physical_ms > 0),
+  CHECK (hlc_counter >= 0),
+  CHECK (length(content_hash) = 64)
 );
 CREATE INDEX idx_events_project ON events(project_id, id);
 CREATE INDEX idx_events_issue   ON events(issue_id, id) WHERE issue_id IS NOT NULL;
@@ -222,6 +230,10 @@ CREATE INDEX idx_events_related ON events(related_issue_id, id) WHERE related_is
 CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL;
 CREATE INDEX idx_events_related_issue_uid ON events(related_issue_uid) WHERE related_issue_uid IS NOT NULL;
 CREATE INDEX idx_events_origin_instance ON events(origin_instance_uid);
+CREATE INDEX idx_events_origin_project_id
+  ON events(origin_instance_uid, project_id, id);
+CREATE INDEX idx_events_hlc ON events(hlc_physical_ms, hlc_counter, origin_instance_uid, uid);
+CREATE INDEX idx_events_content_hash ON events(content_hash);
 CREATE INDEX idx_events_idempotency
   ON events(project_id, json_extract(payload, '$.idempotency_key'), created_at)
   WHERE type = 'issue.created' AND json_extract(payload, '$.idempotency_key') IS NOT NULL;
@@ -282,6 +294,135 @@ CREATE INDEX idx_purge_log_project_uid ON purge_log(project_uid) WHERE project_u
 CREATE INDEX idx_purge_log_origin_instance ON purge_log(origin_instance_uid);
 CREATE INDEX idx_purge_log_short_id
   ON purge_log(project_id, short_id) WHERE short_id IS NOT NULL;
+
+CREATE TABLE federation_bindings (
+  project_id              INTEGER PRIMARY KEY REFERENCES projects(id),
+  role                    TEXT NOT NULL CHECK(role IN ('hub','spoke')),
+  hub_url                 TEXT NOT NULL DEFAULT '',
+  hub_project_id          INTEGER NOT NULL DEFAULT 0,
+  hub_project_uid         TEXT NOT NULL,
+  replay_horizon_event_id INTEGER NOT NULL DEFAULT 0,
+  pull_cursor_event_id    INTEGER NOT NULL DEFAULT 0,
+  push_enabled            INTEGER NOT NULL DEFAULT 0 CHECK(push_enabled IN (0,1)),
+  push_cursor_event_id    INTEGER NOT NULL DEFAULT 0 CHECK(push_cursor_event_id >= 0),
+  enabled                 INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  created_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  last_sync_at            DATETIME,
+  CHECK (length(hub_project_uid) = 26),
+  CHECK (role = 'hub' OR length(trim(hub_url)) > 0),
+  CHECK (role = 'hub' OR hub_project_id > 0),
+  CHECK (replay_horizon_event_id >= 0),
+  CHECK (pull_cursor_event_id >= 0)
+);
+CREATE INDEX idx_federation_bindings_role_enabled
+  ON federation_bindings(role, enabled);
+
+CREATE TABLE federation_sync_status (
+  project_id              INTEGER PRIMARY KEY REFERENCES projects(id),
+  last_pull_started_at    DATETIME,
+  last_pull_success_at    DATETIME,
+  last_push_started_at    DATETIME,
+  last_push_success_at    DATETIME,
+  last_error_at           DATETIME,
+  last_error              TEXT,
+  last_reset_at           DATETIME
+);
+
+CREATE TABLE federation_quarantine (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id     INTEGER NOT NULL REFERENCES projects(id),
+  direction      TEXT NOT NULL CHECK(direction IN ('push','pull')),
+  first_event_id INTEGER NOT NULL CHECK(first_event_id >= 0),
+  last_event_id  INTEGER NOT NULL CHECK(last_event_id >= first_event_id),
+  event_uids     TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(event_uids)),
+  error          TEXT NOT NULL,
+  created_at     DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  skipped_at     DATETIME,
+  skipped_by     TEXT,
+  skip_reason    TEXT,
+  CHECK (length(trim(error)) > 0),
+  CHECK (skipped_at IS NULL OR length(trim(skipped_by)) > 0)
+);
+CREATE UNIQUE INDEX uniq_federation_quarantine_active
+  ON federation_quarantine(project_id, direction)
+  WHERE skipped_at IS NULL;
+
+CREATE TABLE federation_enrollments (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash          TEXT NOT NULL UNIQUE,
+  spoke_instance_uid  TEXT NOT NULL,
+  project_id          INTEGER REFERENCES projects(id),
+  capabilities        TEXT NOT NULL,
+  created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  revoked_at          DATETIME,
+  CHECK (length(token_hash) = 64),
+  CHECK (length(spoke_instance_uid) = 26),
+  CHECK (length(trim(capabilities)) > 0)
+);
+CREATE INDEX idx_federation_enrollments_scope
+  ON federation_enrollments(project_id, revoked_at);
+CREATE INDEX idx_federation_enrollments_spoke
+  ON federation_enrollments(spoke_instance_uid);
+
+CREATE TABLE issue_claims (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  claim_uid           TEXT NOT NULL UNIQUE,
+  project_id          INTEGER NOT NULL REFERENCES projects(id),
+  issue_id            INTEGER NOT NULL REFERENCES issues(id),
+  issue_uid           TEXT NOT NULL,
+  holder              TEXT NOT NULL,
+  holder_instance_uid TEXT NOT NULL,
+  client_kind         TEXT NOT NULL DEFAULT '',
+  purpose             TEXT NOT NULL DEFAULT '',
+  claim_kind          TEXT NOT NULL CHECK(claim_kind IN ('hard','timed')),
+  acquired_at         DATETIME NOT NULL,
+  expires_at          DATETIME,
+  released_at         DATETIME,
+  release_reason      TEXT,
+  revision            INTEGER NOT NULL DEFAULT 1,
+  updated_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  CHECK (length(claim_uid) = 26),
+  CHECK (length(issue_uid) = 26),
+  CHECK (length(holder_instance_uid) = 26),
+  CHECK (length(trim(holder)) > 0),
+  CHECK (claim_kind = 'hard' OR expires_at IS NOT NULL),
+  CHECK (claim_kind = 'timed' OR expires_at IS NULL)
+);
+CREATE UNIQUE INDEX uniq_issue_claims_live_issue
+  ON issue_claims(issue_uid)
+  WHERE released_at IS NULL;
+CREATE INDEX idx_issue_claims_project_issue
+  ON issue_claims(project_id, issue_id, released_at);
+CREATE INDEX idx_issue_claims_timed_expiry
+  ON issue_claims(expires_at)
+  WHERE released_at IS NULL AND claim_kind = 'timed';
+
+CREATE TABLE pending_claim_requests (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_uid     TEXT NOT NULL UNIQUE,
+  project_id      INTEGER NOT NULL REFERENCES projects(id),
+  issue_id        INTEGER NOT NULL REFERENCES issues(id),
+  issue_uid       TEXT NOT NULL,
+  holder          TEXT NOT NULL,
+  holder_instance_uid TEXT NOT NULL DEFAULT '',
+  client_kind     TEXT NOT NULL DEFAULT '',
+  claim_kind      TEXT NOT NULL CHECK(claim_kind IN ('hard','timed')),
+  ttl_seconds     INTEGER,
+  purpose         TEXT NOT NULL DEFAULT '',
+  requested_at    DATETIME NOT NULL,
+  last_attempt_at DATETIME,
+  last_error      TEXT,
+  rejected_at     DATETIME,
+  resolved_at     DATETIME,
+  CHECK (length(request_uid) = 26),
+  CHECK (length(issue_uid) = 26),
+  CHECK (length(trim(holder)) > 0)
+);
+CREATE UNIQUE INDEX uniq_pending_claim_active
+  ON pending_claim_requests(issue_uid, holder_instance_uid, holder, client_kind)
+  WHERE rejected_at IS NULL AND resolved_at IS NULL;
 
 CREATE TABLE meta (
   key   TEXT PRIMARY KEY,

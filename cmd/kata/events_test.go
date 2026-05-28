@@ -33,6 +33,19 @@ func TestEvents_OneShotPlainOutput(t *testing.T) {
 	assert.Equal(t, 2, lines)
 }
 
+func TestEventsHumanOutputDoesNotExposeReplayInternals(t *testing.T) {
+	f := newCLIFixture(t)
+	createIssueViaHTTP(t, f.env, f.dir, "first")
+
+	require.NoError(t, f.execute("events"))
+
+	out := f.buf.String()
+	lower := strings.ToLower(out)
+	assert.NotContains(t, lower, "hlc")
+	assert.NotContains(t, lower, "content_hash")
+	assert.NotContains(t, strings.ToLower(out), "federation")
+}
+
 func TestEvents_OneShotJSON(t *testing.T) {
 	f := newCLIFixture(t)
 	createIssueViaHTTP(t, f.env, f.dir, "only")
@@ -42,13 +55,16 @@ func TestEvents_OneShotJSON(t *testing.T) {
 	var b struct {
 		KataAPIVersion int `json:"kata_api_version"`
 		Events         []struct {
-			EventID    int64   `json:"event_id"`
-			Type       string  `json:"type"`
-			ProjectUID string  `json:"project_uid"`
-			IssueUID   *string `json:"issue_uid"`
+			EventID     int64   `json:"event_id"`
+			Type        string  `json:"type"`
+			ProjectUID  string  `json:"project_uid"`
+			IssueUID    *string `json:"issue_uid"`
+			ContentHash string  `json:"content_hash"`
 		} `json:"events"`
 		NextAfterID int64 `json:"next_after_id"`
 	}
+	assert.Contains(t, f.buf.String(), `"hlc_physical_ms"`)
+	assert.Contains(t, f.buf.String(), `"content_hash"`)
 	require.NoError(t, json.Unmarshal(f.buf.Bytes(), &b))
 	assert.Equal(t, 1, b.KataAPIVersion)
 	require.Len(t, b.Events, 1)
@@ -56,6 +72,7 @@ func TestEvents_OneShotJSON(t *testing.T) {
 	assert.NotEmpty(t, b.Events[0].ProjectUID)
 	require.NotNil(t, b.Events[0].IssueUID)
 	assert.NotEmpty(t, *b.Events[0].IssueUID)
+	assert.Regexp(t, `^[a-f0-9]{64}$`, b.Events[0].ContentHash)
 	assert.Equal(t, int64(1), b.NextAfterID)
 }
 

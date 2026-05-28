@@ -28,6 +28,12 @@ var (
 	// the archive's identity, which is exactly what archival is meant to
 	// prevent.
 	ErrProjectMergeArchivedTarget = errors.New("target project is archived")
+
+	// ErrProjectMergeFederationBinding is returned when either side of a
+	// project merge has a federation binding. Federation binds project identity
+	// to remote cursors, so merging those rows would make the binding
+	// ambiguous.
+	ErrProjectMergeFederationBinding = errors.New("project merge federation binding")
 )
 
 // ProjectMergeImportMappingCollision identifies one import mapping identity
@@ -118,6 +124,9 @@ func (d *DB) MergeProjects(ctx context.Context, p MergeProjectsParams) (ProjectM
 	if target.DeletedAt != nil {
 		return ProjectMergeResult{}, ErrProjectMergeArchivedTarget
 	}
+	if err := rejectFederatedProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
+		return ProjectMergeResult{}, err
+	}
 
 	mappingCollisions, err := projectMergeImportMappingCollisions(ctx, tx, p.SourceProjectID, p.TargetProjectID)
 	if err != nil {
@@ -205,6 +214,19 @@ func (d *DB) MergeProjects(ctx context.Context, p MergeProjectsParams) (ProjectM
 		PurgeLogsMoved:    purgeLogsMoved,
 		ShortIDExtensions: extensions,
 	}, nil
+}
+
+func rejectFederatedProjectMerge(ctx context.Context, tx *sql.Tx, sourceID, targetID int64) error {
+	var n int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM federation_bindings WHERE project_id IN (?, ?)`,
+		sourceID, targetID).Scan(&n); err != nil {
+		return fmt.Errorf("check federation merge binding: %w", err)
+	}
+	if n > 0 {
+		return ErrProjectMergeFederationBinding
+	}
+	return nil
 }
 
 // extendCollidingSourceShortIDs rewrites the short_id of every source-side

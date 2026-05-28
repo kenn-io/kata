@@ -114,14 +114,48 @@ func TestCreateIssue_RejectsInvalidLabel(t *testing.T) {
 	assert.True(t, errors.Is(err, db.ErrLabelInvalid))
 }
 
-func TestCreateIssue_NoInitialStateEmitsEmptyPayload(t *testing.T) {
+func TestCreateIssue_EmitsReplayCompletePayload(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 
-	_, evt, err := d.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: p.ID, Title: "x", Author: "tester",
+	owner := "alice"
+	priority := int64(1)
+	issue, evt, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "title",
+		Body:      "body",
+		Author:    "agent",
+		Owner:     &owner,
+		Priority:  &priority,
+		Labels:    []string{"bug"},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "{}", evt.Payload)
+
+	payload := unmarshalPayload[struct {
+		UID       string         `json:"uid"`
+		ShortID   string         `json:"short_id"`
+		Title     string         `json:"title"`
+		Body      string         `json:"body"`
+		Author    string         `json:"author"`
+		Status    string         `json:"status"`
+		Owner     *string        `json:"owner"`
+		Priority  *int64         `json:"priority"`
+		Labels    []string       `json:"labels"`
+		CreatedAt string         `json:"created_at"`
+		Metadata  map[string]any `json:"metadata"`
+	}](t, evt.Payload)
+	assert.Equal(t, issue.UID, payload.UID)
+	assert.Equal(t, issue.ShortID, payload.ShortID)
+	assert.Equal(t, "title", payload.Title)
+	assert.Equal(t, "body", payload.Body)
+	assert.Equal(t, "agent", payload.Author)
+	assert.Equal(t, "open", payload.Status)
+	require.NotNil(t, payload.Owner)
+	assert.Equal(t, "alice", *payload.Owner)
+	require.NotNil(t, payload.Priority)
+	assert.Equal(t, priority, *payload.Priority)
+	assert.Equal(t, []string{"bug"}, payload.Labels)
+	assert.NotEmpty(t, payload.CreatedAt)
+	assert.Empty(t, payload.Metadata)
 }
 
 func TestCreateIssue_DuplicateInitialLinksAreDeduped(t *testing.T) {
@@ -198,7 +232,8 @@ func TestCreateIssue_EmptyStringOwnerNormalizesToNil(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Nil(t, issue.Owner, "empty-string owner must persist as NULL")
-	assert.Equal(t, "{}", evt.Payload, "payload must agree: no owner")
+	payload := unmarshalPayload[map[string]any](t, evt.Payload)
+	assert.NotContains(t, payload, "owner", "payload must agree: no owner")
 }
 
 func TestCreateIssue_WithAllInitialState(t *testing.T) {

@@ -131,6 +131,10 @@ func (d *DB) EditIssueAtomic(ctx context.Context, p EditIssueAtomicParams) (Edit
 		anyChange bool
 	)
 
+	// A single timestamp for the whole atomic edit: each sub-mutation's row
+	// bump and event payload share it so replay reproduces one updated_at.
+	ts := nowTimestamp()
+
 	// 1. Field changes (title/body/owner). Compare each requested value
 	// against the loaded row first and skip the UPDATE + issue.updated
 	// event entirely when every requested field already matches reality.
@@ -138,35 +142,13 @@ func (d *DB) EditIssueAtomic(ctx context.Context, p EditIssueAtomicParams) (Edit
 	// `kata edit 1 --title "$(current title)" --remove-blocks 2` would
 	// fire issue.updated and increment hook/digest activity even when
 	// no field actually changed.
-	sets := []string{}
-	args := []any{}
-	if p.Title != nil && *p.Title != issue.Title {
-		sets = append(sets, `title = ?`)
-		args = append(args, *p.Title)
+	sets, args, payload, fieldsChanged, err := issueFieldUpdatePlan(issue, p.Title, p.Body, p.Owner, ts)
+	if err != nil {
+		return EditIssueAtomicResult{}, err
 	}
-	if p.Body != nil && *p.Body != issue.Body {
-		sets = append(sets, `body = ?`)
-		args = append(args, *p.Body)
-	}
-	if p.Owner != nil {
-		// Owner is *string at the issue level; "" and nil both mean
-		// unassigned. Mirror create.go's normalization so a "" passed
-		// through the API is treated as nil for compare AND for the
-		// UPDATE write — otherwise the column lands as the literal "",
-		// putting the row in an inconsistent "assigned to empty string"
-		// state.
-		var newOwner *string
-		if *p.Owner != "" {
-			v := *p.Owner
-			newOwner = &v
-		}
-		if !ownerEqual(issue.Owner, newOwner) {
-			sets = append(sets, `owner = ?`)
-			args = append(args, newOwner)
-		}
-	}
-	if len(sets) > 0 {
-		sets = append([]string{`updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`}, sets...)
+	if fieldsChanged {
+		sets = append([]string{`updated_at = ?`}, sets...)
+		args = append([]any{ts}, args...)
 		args = append(args, p.IssueID)
 		// `sets` only contains fixed string literals; user values are bound
 		// via `args`. Concatenation is safe.
@@ -180,7 +162,7 @@ func (d *DB) EditIssueAtomic(ctx context.Context, p EditIssueAtomicParams) (Edit
 			IssueID:     &issue.ID,
 			Type:        "issue.updated",
 			Actor:       p.Actor,
-			Payload:     "{}",
+			Payload:     payload,
 		})
 		if err != nil {
 			return EditIssueAtomicResult{}, err
@@ -198,11 +180,11 @@ func (d *DB) EditIssueAtomic(ctx context.Context, p EditIssueAtomicParams) (Edit
 		}
 		if !priorityEqual(issue.Priority, newPrio) {
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE issues SET priority = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-				newPrio, p.IssueID); err != nil {
+				`UPDATE issues SET priority = ?, updated_at = ? WHERE id = ?`,
+				newPrio, ts, p.IssueID); err != nil {
 				return EditIssueAtomicResult{}, fmt.Errorf("update priority: %w", err)
 			}
-			eventType, payload, err := priorityEventPayload(issue.Priority, newPrio)
+			eventType, payload, err := priorityEventPayload(issue.Priority, newPrio, ts)
 			if err != nil {
 				return EditIssueAtomicResult{}, err
 			}
@@ -224,12 +206,15 @@ func (d *DB) EditIssueAtomic(ctx context.Context, p EditIssueAtomicParams) (Edit
 
 	// 3. Link delta. Any error here rolls back the entire TX, including
 	// the field/priority changes above.
-	linkChanged, err := d.applyLinksDeltaTx(ctx, tx, issue, p, &changes)
+	linkChanged, err := d.applyLinksDeltaTx(ctx, tx, issue, p, &changes, ts)
 	if err != nil {
 		return EditIssueAtomicResult{}, err
 	}
 	if linkChanged {
-		bs, err := json.Marshal(changes)
+		bs, err := json.Marshal(struct {
+			AtomicEditChanges
+			UpdatedAt string `json:"updated_at"`
+		}{changes, ts})
 		if err != nil {
 			return EditIssueAtomicResult{}, fmt.Errorf("marshal links_changed payload: %w", err)
 		}
@@ -279,7 +264,7 @@ func (d *DB) EditIssueAtomic(ctx context.Context, p EditIssueAtomicParams) (Edit
 // applyLinksDeltaTx is the per-TX worker that performs every link mutation.
 // Returns true when at least one row in `links` was inserted or deleted.
 // Touches the issue's updated_at exactly once at the end if changed link changed.
-func (d *DB) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue Issue, p EditIssueAtomicParams, changes *AtomicEditChanges) (bool, error) {
+func (d *DB) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue Issue, p EditIssueAtomicParams, changes *AtomicEditChanges, ts string) (bool, error) {
 	changed := false
 
 	// set_parent: replaces an existing parent if present. No-op when the
@@ -479,8 +464,8 @@ func (d *DB) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue Issue, p E
 
 	if changed {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE issues SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
-			issue.ID); err != nil {
+			`UPDATE issues SET updated_at = ? WHERE id = ?`,
+			ts, issue.ID); err != nil {
 			return changed, fmt.Errorf("touch issue: %w", err)
 		}
 	}

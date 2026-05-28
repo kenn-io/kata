@@ -52,12 +52,94 @@ func TestImportBatch_CreatesIssueCommentsLabelsLinks(t *testing.T) {
 	require.NotNil(t, commentMap.CommentID)
 	assert.Equal(t, comments[0].ID, *commentMap.CommentID)
 
+	var createdEvent *db.Event
+	for i := range events {
+		if events[i].Type != "issue.created" {
+			continue
+		}
+		payload := unmarshalPayload[struct {
+			ExternalID string `json:"external_id"`
+		}](t, events[i].Payload)
+		if payload.ExternalID == "blocked" {
+			createdEvent = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, createdEvent)
+	createdPayload := unmarshalPayload[struct {
+		UID          string   `json:"uid"`
+		ShortID      string   `json:"short_id"`
+		Title        string   `json:"title"`
+		Body         string   `json:"body"`
+		Author       string   `json:"author"`
+		Status       string   `json:"status"`
+		ClosedReason *string  `json:"closed_reason"`
+		ClosedAt     *string  `json:"closed_at"`
+		Labels       []string `json:"labels"`
+		Source       string   `json:"source"`
+		ExternalID   string   `json:"external_id"`
+		UpdatedAt    string   `json:"updated_at"`
+	}](t, createdEvent.Payload)
+	assert.Equal(t, blocked.UID, createdPayload.UID)
+	assert.Equal(t, blocked.ShortID, createdPayload.ShortID)
+	assert.Equal(t, "Blocked", createdPayload.Title)
+	assert.Equal(t, "body", createdPayload.Body)
+	assert.Equal(t, "bob", createdPayload.Author)
+	assert.Equal(t, "closed", createdPayload.Status)
+	require.NotNil(t, createdPayload.ClosedReason)
+	assert.Equal(t, "done", *createdPayload.ClosedReason)
+	require.NotNil(t, createdPayload.ClosedAt)
+	assert.Equal(t, "2026-05-01T11:00:00.000Z", *createdPayload.ClosedAt)
+	assert.Equal(t, "beads", createdPayload.Source)
+	assert.Equal(t, "blocked", createdPayload.ExternalID)
+	assert.Equal(t, "2026-05-01T11:00:00.000Z", createdPayload.UpdatedAt)
+	assert.Empty(t, createdPayload.Labels, "import-created issue payload should not duplicate label events")
+
+	var commentEvent *db.Event
+	for i := range events {
+		if events[i].Type == "issue.commented" {
+			commentEvent = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, commentEvent)
+	commentPayload := unmarshalPayload[struct {
+		CommentUID        string `json:"comment_uid"`
+		Author            string `json:"author"`
+		Body              string `json:"body"`
+		CreatedAt         string `json:"created_at"`
+		Source            string `json:"source"`
+		ExternalID        string `json:"external_id"`
+		CommentExternalID string `json:"comment_external_id"`
+	}](t, commentEvent.Payload)
+	assert.Equal(t, comments[0].UID, commentPayload.CommentUID)
+	assert.Equal(t, "bob", commentPayload.Author)
+	assert.Equal(t, "note", commentPayload.Body)
+	assert.Equal(t, "2026-05-01T11:00:00.000Z", commentPayload.CreatedAt)
+	assert.Equal(t, "beads", commentPayload.Source)
+	assert.Equal(t, "blocked", commentPayload.ExternalID)
+	assert.Equal(t, "c1", commentPayload.CommentExternalID)
+
 	labels := labelsForIssue(ctx, t, d, blocked.ID)
 	require.Len(t, labels, 2)
 	assert.Equal(t, "beads-id:blocked", labels[0].Label)
 	assert.True(t, labels[0].CreatedAt.Equal(t1))
 	assert.Equal(t, "source:beads", labels[1].Label)
 	assert.True(t, labels[1].CreatedAt.Equal(t1))
+	var labelEvent *db.Event
+	for i := range events {
+		if events[i].Type == "issue.labeled" && events[i].IssueID != nil && *events[i].IssueID == blocked.ID {
+			labelEvent = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, labelEvent)
+	labelPayload := unmarshalPayload[struct {
+		IssueUID string `json:"issue_uid"`
+		Label    string `json:"label"`
+	}](t, labelEvent.Payload)
+	assert.Equal(t, blocked.UID, labelPayload.IssueUID)
+	assert.NotEmpty(t, labelPayload.Label)
 
 	blockerMap, err := d.ImportMappingBySource(ctx, p.ID, "beads", "issue", "blocker")
 	require.NoError(t, err)
@@ -167,7 +249,7 @@ func TestImportBatch_ReimportSourceNewerUpdatesFieldsAndTimestamp(t *testing.T) 
 
 	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "old", Body: "old body", Author: "alice", Status: "open", CreatedAt: older, UpdatedAt: older}}})
 	require.NoError(t, err)
-	res, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "new", Body: "new body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: older, UpdatedAt: newer, ClosedAt: &newer}}})
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{{ExternalID: "a", Title: "new", Body: "new body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: older, UpdatedAt: newer, ClosedAt: &newer}}})
 	require.NoError(t, err)
 	assert.Equal(t, 1, res.Updated)
 
@@ -181,6 +263,13 @@ func TestImportBatch_ReimportSourceNewerUpdatesFieldsAndTimestamp(t *testing.T) 
 	require.NotNil(t, issue.ClosedAt)
 	assert.True(t, issue.ClosedAt.Equal(newer))
 	assert.True(t, issue.UpdatedAt.Equal(newer))
+	require.Len(t, events, 1)
+	payload := unmarshalPayload[struct {
+		UpdatedAt string `json:"updated_at"`
+		Status    string `json:"status"`
+	}](t, events[0].Payload)
+	assert.Equal(t, "2026-05-02T10:00:00.000Z", payload.UpdatedAt)
+	assert.Equal(t, "closed", payload.Status)
 }
 
 func TestImportBatch_LocalNewerIssueUnchangedButMissingCommentsMerge(t *testing.T) {
@@ -438,13 +527,13 @@ func TestImportBatch_TimestampValidationErrors(t *testing.T) {
 
 func commentsForIssue(ctx context.Context, t *testing.T, d *db.DB, issueID int64) []db.Comment {
 	t.Helper()
-	rows, err := d.QueryContext(ctx, `SELECT id, issue_id, author, body, created_at FROM comments WHERE issue_id = ? ORDER BY id ASC`, issueID)
+	rows, err := d.QueryContext(ctx, `SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ? ORDER BY id ASC`, issueID)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var out []db.Comment
 	for rows.Next() {
 		var c db.Comment
-		require.NoError(t, rows.Scan(&c.ID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt))
+		require.NoError(t, rows.Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt))
 		out = append(out, c)
 	}
 	require.NoError(t, rows.Err())

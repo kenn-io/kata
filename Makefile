@@ -1,7 +1,8 @@
-.PHONY: build install test test-short lint vet clean fmt nilaway tui tui-demo
+.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway tui tui-demo
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
+NILAWAY_VERSION := v0.0.0-20260515015210-fd187751154f
 export GOBIN
 
 build:
@@ -16,6 +17,12 @@ test:
 test-short:
 	go test -short $(GOFLAGS_TEST) ./...
 
+test-stress:
+	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout 2m
+
+test-federation-docker:
+	./scripts/test-federation-docker.sh
+
 lint:
 	golangci-lint run --config .golangci.yml
 
@@ -25,7 +32,7 @@ vet:
 nilaway:
 	@if ! command -v nilaway >/dev/null 2>&1; then \
 		echo "nilaway not found. Install with:" >&2; \
-		echo "  go install go.uber.org/nilaway/cmd/nilaway@latest" >&2; \
+		echo "  go install go.uber.org/nilaway/cmd/nilaway@$(NILAWAY_VERSION)" >&2; \
 		exit 1; \
 	fi
 	@module_path="$$(go list -m)" || { \

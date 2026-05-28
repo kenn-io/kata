@@ -121,6 +121,19 @@ func TestBuildStdin_HappyPath(t *testing.T) {
 	}
 }
 
+func TestBuildStdin_CommentBodyFromPortablePayload(t *testing.T) {
+	evt := sampleEvent("issue.commented")
+	evt.Payload = `{"comment_uid":"01HZNQ7VFPK1XGD8R5MABCD4EY","body":"direct body"}`
+	_, got, _ := runBuild(t, evt, withComment(func(context.Context, int64) (CommentSnapshot, error) {
+		return CommentSnapshot{}, errors.New("comment resolver should not be called")
+	}))
+
+	pld := got["payload"].(map[string]any)
+	if pld["comment_body"] != "direct body" {
+		t.Fatalf("comment_body: %v", pld["comment_body"])
+	}
+}
+
 func TestBuildStdin_AliasMissing_OmitsBlock(t *testing.T) {
 	noAlias := func(_ context.Context, _ db.Event) (AliasSnapshot, bool, error) { return AliasSnapshot{}, false, nil }
 	_, got, _ := runBuild(t, sampleEvent("issue.created"), withAlias(noAlias))

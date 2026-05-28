@@ -420,9 +420,12 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := decodeData(env, &rec); err != nil {
 			return err
 		}
+		if err := fillCommentUID(&rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO comments(id, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?)`,
-			rec.ID, rec.IssueID, rec.Author, rec.Body, rec.CreatedAt)
+			`INSERT INTO comments(id, uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?, ?)`,
+			rec.ID, rec.UID, rec.IssueID, rec.Author, rec.Body, rec.CreatedAt)
 		return wrapImportErr(env.Kind, err)
 	case KindIssueLabel:
 		var rec issueLabelRecord
@@ -461,6 +464,127 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 			rec.ID, rec.Source, rec.ExternalID, rec.ObjectType, rec.ProjectID, rec.IssueID, rec.CommentID,
 			rec.LinkID, rec.Label, rec.SourceUpdatedAt, rec.ImportedAt)
 		return wrapImportErr(env.Kind, err)
+	case KindFederationBinding:
+		var rec federationBindingRecord
+		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		enabled := 0
+		if rec.Enabled {
+			enabled = 1
+		}
+		pushEnabled := 0
+		if rec.PushEnabled {
+			pushEnabled = 1
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO federation_bindings(
+			   project_id, role, hub_url, hub_project_id, hub_project_uid,
+			   replay_horizon_event_id, pull_cursor_event_id, push_enabled,
+			   push_cursor_event_id, enabled,
+			   created_at, updated_at, last_sync_at
+			 )
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			rec.ProjectID, rec.Role, rec.HubURL, rec.HubProjectID, rec.HubProjectUID,
+			rec.ReplayHorizonEventID, rec.PullCursorEventID, pushEnabled,
+			rec.PushCursorEventID, enabled,
+			rec.CreatedAt, rec.UpdatedAt, rec.LastSyncAt)
+		return wrapImportErr(env.Kind, err)
+	case KindFederationSyncStatus:
+		var rec federationSyncStatusRecord
+		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO federation_sync_status(
+			   project_id, last_pull_started_at, last_pull_success_at,
+			   last_push_started_at, last_push_success_at,
+			   last_error_at, last_error, last_reset_at
+			 )
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+			rec.ProjectID, rec.LastPullStartedAt, rec.LastPullSuccessAt,
+			rec.LastPushStartedAt, rec.LastPushSuccessAt,
+			rec.LastErrorAt, rec.LastError, rec.LastResetAt)
+		return wrapImportErr(env.Kind, err)
+	case KindFederationQuarantine:
+		var rec federationQuarantineRecord
+		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO federation_quarantine(
+			   id, project_id, direction, first_event_id, last_event_id,
+			   event_uids, error, created_at, skipped_at, skipped_by, skip_reason
+			 )
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			rec.ID, rec.ProjectID, rec.Direction, rec.FirstEventID, rec.LastEventID,
+			string(rec.EventUIDs), rec.Error, rec.CreatedAt, rec.SkippedAt, rec.SkippedBy, rec.SkipReason)
+		return wrapImportErr(env.Kind, err)
+	case KindFederationEnrollment:
+		var rec federationEnrollmentRecord
+		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO federation_enrollments(
+			   id, token_hash, spoke_instance_uid, project_id, capabilities,
+			   created_at, updated_at, revoked_at
+			 )
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+			rec.ID, rec.TokenHash, rec.SpokeInstanceUID, rec.ProjectID, rec.Capabilities,
+			rec.CreatedAt, rec.UpdatedAt, rec.RevokedAt)
+		return wrapImportErr(env.Kind, err)
+	case KindIssueClaim:
+		var rec issueClaimRecord
+		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO issue_claims(
+			   id, claim_uid, project_id, issue_id, issue_uid, holder,
+			   holder_instance_uid, client_kind, purpose, claim_kind,
+			   acquired_at, expires_at, released_at, release_reason, revision, updated_at
+			 )
+			 VALUES(
+			   ?, ?, ?, ?,
+			   COALESCE(NULLIF(?, ''), (SELECT uid FROM issues WHERE id = ?)),
+			   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			 )`,
+			rec.ID, rec.ClaimUID, rec.ProjectID, rec.IssueID,
+			rec.IssueUID, rec.IssueID,
+			rec.Holder, rec.HolderInstanceUID, rec.ClientKind, rec.Purpose,
+			rec.ClaimKind, rec.AcquiredAt, rec.ExpiresAt, rec.ReleasedAt,
+			rec.ReleaseReason, rec.Revision, rec.UpdatedAt)
+		return wrapImportErr(env.Kind, err)
+	case KindPendingClaimRequest:
+		var rec pendingClaimRequestRecord
+		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		skip, err := skipLegacyDuplicateActivePendingClaim(ctx, tx, rec, exportVersion)
+		if err != nil {
+			return wrapImportErr(env.Kind, err)
+		}
+		if skip {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO pending_claim_requests(
+			   id, request_uid, project_id, issue_id, issue_uid, holder,
+			   holder_instance_uid, client_kind, claim_kind, ttl_seconds, purpose, requested_at, last_attempt_at,
+			   last_error, rejected_at, resolved_at
+			 )
+			 VALUES(
+			   ?, ?, ?, ?,
+			   COALESCE(NULLIF(?, ''), (SELECT uid FROM issues WHERE id = ?)),
+			   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			 )`,
+			rec.ID, rec.RequestUID, rec.ProjectID, rec.IssueID,
+			rec.IssueUID, rec.IssueID,
+			rec.Holder, rec.HolderInstanceUID, rec.ClientKind, rec.ClaimKind, rec.TTLSeconds,
+			rec.Purpose, rec.RequestedAt, rec.LastAttemptAt, rec.LastError, rec.RejectedAt,
+			rec.ResolvedAt)
+		return wrapImportErr(env.Kind, err)
 	case KindEvent:
 		var rec eventRecord
 		if err := decodeData(env, &rec); err != nil {
@@ -476,22 +600,27 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err != nil {
 			return err
 		}
+		rec.ProjectName = projectName
+		if err := fillEventV11ReplayFields(ctx, tx, &rec, exportVersion); err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO events(id, uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid, related_issue_id, related_issue_uid,
-			                    type, actor, payload, created_at)
+			                    type, actor, payload, hlc_physical_ms, hlc_counter, content_hash, created_at)
 			 VALUES(
 			   ?, ?, ?, ?, ?, ?,
 			   COALESCE(?, (SELECT uid FROM issues WHERE id = ?)),
 			   ?,
 			   COALESCE(?, (SELECT uid FROM issues WHERE id = ?)),
-			   ?, ?, ?, ?
+			   ?, ?, ?, ?, ?, ?, ?
 			)`,
 			rec.ID, rec.UID, rec.OriginInstanceUID,
 			rec.ProjectID, projectName, rec.IssueID,
 			stringPtrValue(rec.IssueUID), rec.IssueID,
 			rec.RelatedIssueID,
 			stringPtrValue(rec.RelatedIssueUID), rec.RelatedIssueID,
-			rec.Type, rec.Actor, string(rec.Payload), rec.CreatedAt)
+			rec.Type, rec.Actor, string(rec.Payload),
+			rec.HLCPhysicalMS, rec.HLCCounter, rec.ContentHash, rec.CreatedAt)
 		return wrapImportErr(env.Kind, err)
 	case KindPurgeLog:
 		var rec purgeLogRecord
@@ -618,6 +747,28 @@ func fillIssueUID(rec *issueRecord, exportVersion int) error {
 	return nil
 }
 
+func fillCommentUID(rec *commentRecord) error {
+	if rec.UID != "" {
+		if !katauid.Valid(rec.UID) {
+			return fmt.Errorf("invalid comment uid %q", rec.UID)
+		}
+		return nil
+	}
+	t, err := parseExportTime(rec.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("fill comment uid: %w", err)
+	}
+	uid, err := katauid.FromStableSeed(
+		[]byte(fmt.Sprintf("comment:%d:%d:%s:%s:%s", rec.IssueID, rec.ID, rec.Author, rec.Body, rec.CreatedAt)),
+		t,
+	)
+	if err != nil {
+		return fmt.Errorf("fill comment uid: %w", err)
+	}
+	rec.UID = uid
+	return nil
+}
+
 func fillEventUIDs(ctx context.Context, tx *sql.Tx, rec *eventRecord) error {
 	if rec.IssueID != nil && rec.IssueUID == nil {
 		issueUID, err := lookupIssueUID(ctx, tx, *rec.IssueID)
@@ -662,6 +813,83 @@ func fillEventV3Identity(rec *eventRecord, exportVersion int, localInstanceUID s
 		rec.OriginInstanceUID = localInstanceUID
 	}
 	return nil
+}
+
+func fillEventV11ReplayFields(ctx context.Context, tx *sql.Tx, rec *eventRecord, exportVersion int) error {
+	if exportVersion >= db.CurrentSchemaVersion() {
+		if rec.HLCPhysicalMS <= 0 {
+			return fmt.Errorf("event %d missing hlc_physical_ms", rec.ID)
+		}
+		if rec.HLCCounter < 0 {
+			return fmt.Errorf("event %d has negative hlc_counter", rec.ID)
+		}
+		if !validContentHash(rec.ContentHash) {
+			return fmt.Errorf("event %d invalid content_hash %q", rec.ID, rec.ContentHash)
+		}
+		return nil
+	}
+	t, err := parseExportTime(rec.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("fill event replay fields: %w", err)
+	}
+	if exportVersion >= 12 {
+		if rec.HLCPhysicalMS <= 0 {
+			return fmt.Errorf("event %d missing hlc_physical_ms", rec.ID)
+		}
+		if rec.HLCCounter < 0 {
+			return fmt.Errorf("event %d has negative hlc_counter", rec.ID)
+		}
+	} else {
+		if rec.HLCPhysicalMS <= 0 {
+			rec.HLCPhysicalMS = t.UTC().UnixMilli()
+			rec.HLCCounter = rec.ID
+		} else if rec.HLCCounter < 0 {
+			return fmt.Errorf("event %d has negative hlc_counter", rec.ID)
+		}
+	}
+	projectUID, err := lookupProjectUID(ctx, tx, rec.ProjectID)
+	if err != nil {
+		return fmt.Errorf("fill event replay fields: %w", err)
+	}
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID:               rec.UID,
+		OriginInstanceUID: rec.OriginInstanceUID,
+		ProjectUID:        projectUID,
+		ProjectName:       rec.ProjectName,
+		IssueUID:          rec.IssueUID,
+		RelatedIssueUID:   rec.RelatedIssueUID,
+		Type:              rec.Type,
+		Actor:             rec.Actor,
+		HLCPhysicalMS:     rec.HLCPhysicalMS,
+		HLCCounter:        rec.HLCCounter,
+		CreatedAt:         rec.CreatedAt,
+		Payload:           rec.Payload,
+	})
+	if err != nil {
+		return fmt.Errorf("fill event content hash: %w", err)
+	}
+	rec.ContentHash = hash
+	return nil
+}
+
+func validContentHash(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func lookupProjectUID(ctx context.Context, tx *sql.Tx, projectID int64) (string, error) {
+	var uid string
+	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id = ?`, projectID).Scan(&uid); err != nil {
+		return "", fmt.Errorf("lookup project uid %d: %w", projectID, err)
+	}
+	return uid, nil
 }
 
 // fillPurgeLogV3Identity backfills purge_log.uid + purge_log.origin_instance_uid
@@ -764,6 +992,37 @@ type recurrenceRecord struct {
 	DeletedAt           *string         `json:"deleted_at,omitempty"`
 }
 
+func skipLegacyDuplicateActivePendingClaim(
+	ctx context.Context,
+	tx *sql.Tx,
+	rec pendingClaimRequestRecord,
+	exportVersion int,
+) (bool, error) {
+	if exportVersion >= 12 || rec.RejectedAt != nil || rec.ResolvedAt != nil {
+		return false, nil
+	}
+	var existingID int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT id
+		  FROM pending_claim_requests
+		 WHERE issue_uid = COALESCE(NULLIF(?, ''), (SELECT uid FROM issues WHERE id = ?))
+		   AND holder_instance_uid = ?
+		   AND holder = ?
+		   AND client_kind = ?
+		   AND rejected_at IS NULL
+		   AND resolved_at IS NULL
+		 ORDER BY requested_at ASC, id ASC
+		 LIMIT 1`,
+		rec.IssueUID, rec.IssueID, rec.HolderInstanceUID, rec.Holder, rec.ClientKind).Scan(&existingID)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
+}
+
 type issueRecord struct {
 	ID        int64  `json:"id"`
 	UID       string `json:"uid"`
@@ -803,6 +1062,7 @@ type issueRecord struct {
 
 type commentRecord struct {
 	ID        int64  `json:"id"`
+	UID       string `json:"uid"`
 	IssueID   int64  `json:"issue_id"`
 	Author    string `json:"author"`
 	Body      string `json:"body"`
@@ -842,6 +1102,96 @@ type importMappingRecord struct {
 	ImportedAt      string  `json:"imported_at"`
 }
 
+type federationBindingRecord struct {
+	ProjectID            int64   `json:"project_id"`
+	Role                 string  `json:"role"`
+	HubURL               string  `json:"hub_url"`
+	HubProjectID         int64   `json:"hub_project_id"`
+	HubProjectUID        string  `json:"hub_project_uid"`
+	ReplayHorizonEventID int64   `json:"replay_horizon_event_id"`
+	PullCursorEventID    int64   `json:"pull_cursor_event_id"`
+	PushEnabled          bool    `json:"push_enabled,omitempty"`
+	PushCursorEventID    int64   `json:"push_cursor_event_id,omitempty"`
+	Enabled              bool    `json:"enabled"`
+	CreatedAt            string  `json:"created_at"`
+	UpdatedAt            string  `json:"updated_at"`
+	LastSyncAt           *string `json:"last_sync_at,omitempty"`
+}
+
+type federationSyncStatusRecord struct {
+	ProjectID         int64   `json:"project_id"`
+	LastPullStartedAt *string `json:"last_pull_started_at,omitempty"`
+	LastPullSuccessAt *string `json:"last_pull_success_at,omitempty"`
+	LastPushStartedAt *string `json:"last_push_started_at,omitempty"`
+	LastPushSuccessAt *string `json:"last_push_success_at,omitempty"`
+	LastErrorAt       *string `json:"last_error_at,omitempty"`
+	LastError         *string `json:"last_error,omitempty"`
+	LastResetAt       *string `json:"last_reset_at,omitempty"`
+}
+
+type federationQuarantineRecord struct {
+	ID           int64           `json:"id"`
+	ProjectID    int64           `json:"project_id"`
+	Direction    string          `json:"direction"`
+	FirstEventID int64           `json:"first_event_id"`
+	LastEventID  int64           `json:"last_event_id"`
+	EventUIDs    json.RawMessage `json:"event_uids"`
+	Error        string          `json:"error"`
+	CreatedAt    string          `json:"created_at"`
+	SkippedAt    *string         `json:"skipped_at,omitempty"`
+	SkippedBy    *string         `json:"skipped_by,omitempty"`
+	SkipReason   *string         `json:"skip_reason,omitempty"`
+}
+
+type federationEnrollmentRecord struct {
+	ID               int64   `json:"id"`
+	TokenHash        string  `json:"token_hash"`
+	SpokeInstanceUID string  `json:"spoke_instance_uid"`
+	ProjectID        *int64  `json:"project_id,omitempty"`
+	Capabilities     string  `json:"capabilities"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+	RevokedAt        *string `json:"revoked_at,omitempty"`
+}
+
+type issueClaimRecord struct {
+	ID                int64   `json:"id"`
+	ClaimUID          string  `json:"claim_uid"`
+	ProjectID         int64   `json:"project_id"`
+	IssueID           int64   `json:"issue_id"`
+	IssueUID          string  `json:"issue_uid"`
+	Holder            string  `json:"holder"`
+	HolderInstanceUID string  `json:"holder_instance_uid"`
+	ClientKind        string  `json:"client_kind"`
+	Purpose           string  `json:"purpose"`
+	ClaimKind         string  `json:"claim_kind"`
+	AcquiredAt        string  `json:"acquired_at"`
+	ExpiresAt         *string `json:"expires_at,omitempty"`
+	ReleasedAt        *string `json:"released_at,omitempty"`
+	ReleaseReason     *string `json:"release_reason,omitempty"`
+	Revision          int64   `json:"revision"`
+	UpdatedAt         string  `json:"updated_at"`
+}
+
+type pendingClaimRequestRecord struct {
+	ID                int64   `json:"id"`
+	RequestUID        string  `json:"request_uid"`
+	ProjectID         int64   `json:"project_id"`
+	IssueID           int64   `json:"issue_id"`
+	IssueUID          string  `json:"issue_uid"`
+	Holder            string  `json:"holder"`
+	HolderInstanceUID string  `json:"holder_instance_uid"`
+	ClientKind        string  `json:"client_kind"`
+	ClaimKind         string  `json:"claim_kind"`
+	TTLSeconds        *int64  `json:"ttl_seconds,omitempty"`
+	Purpose           string  `json:"purpose"`
+	RequestedAt       string  `json:"requested_at"`
+	LastAttemptAt     *string `json:"last_attempt_at,omitempty"`
+	LastError         *string `json:"last_error,omitempty"`
+	RejectedAt        *string `json:"rejected_at,omitempty"`
+	ResolvedAt        *string `json:"resolved_at,omitempty"`
+}
+
 type eventRecord struct {
 	ID                int64   `json:"id"`
 	UID               string  `json:"uid"`
@@ -860,6 +1210,9 @@ type eventRecord struct {
 	Type            string          `json:"type"`
 	Actor           string          `json:"actor"`
 	Payload         json.RawMessage `json:"payload"`
+	HLCPhysicalMS   int64           `json:"hlc_physical_ms,omitempty"`
+	HLCCounter      int64           `json:"hlc_counter,omitempty"`
+	ContentHash     string          `json:"content_hash,omitempty"`
 	CreatedAt       string          `json:"created_at"`
 }
 
@@ -934,7 +1287,7 @@ func upsertSequence(ctx context.Context, tx *sql.Tx, name string, seq int64) err
 }
 
 func reconcileSequences(ctx context.Context, tx *sql.Tx) error {
-	for _, table := range []string{"projects", "project_aliases", "issues", "comments", "links", "import_mappings", "events", "purge_log", "api_tokens"} {
+	for _, table := range []string{"projects", "project_aliases", "issues", "comments", "links", "import_mappings", "events", "purge_log", "api_tokens", "federation_enrollments"} {
 		var maxID int64
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(MAX(id), 0) FROM `+table).Scan(&maxID); err != nil {

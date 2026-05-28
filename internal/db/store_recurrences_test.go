@@ -11,13 +11,19 @@ import (
 )
 
 func TestCreateRecurrence_HappyPath(t *testing.T) {
+	owner := "alice"
+	priority := int64(2)
 	d, _, _, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule:     "FREQ=WEEKLY;BYDAY=MO",
 		DTStart:  "2026-05-11",
 		Timezone: "America/New_York",
 		Template: db.RecurrenceTemplate{
-			Title: "Weekly review",
-			Body:  "What got done?",
+			Title:    "Weekly review",
+			Body:     "What got done?",
+			Owner:    &owner,
+			Priority: &priority,
+			Labels:   []string{"recurring"},
+			Metadata: json.RawMessage(`{"kind":"weekly"}`),
 		},
 	})
 	assert.Len(t, rec.UID, 26)
@@ -26,6 +32,35 @@ func TestCreateRecurrence_HappyPath(t *testing.T) {
 	assert.Equal(t, int64(1), rec.Revision)
 
 	assertEventCount(t, d, "recurrence.created", 1)
+	var payload string
+	require.NoError(t, d.QueryRow(`SELECT payload FROM events
+        WHERE type='recurrence.created' ORDER BY id DESC LIMIT 1`).Scan(&payload))
+	createdPayload := unmarshalPayload[struct {
+		RecurrenceUID     string          `json:"recurrence_uid"`
+		RRule             string          `json:"rrule"`
+		DTStart           string          `json:"dtstart"`
+		Timezone          string          `json:"timezone"`
+		TemplateTitle     string          `json:"template_title"`
+		TemplateBody      string          `json:"template_body"`
+		TemplateOwner     *string         `json:"template_owner"`
+		TemplatePriority  *int64          `json:"template_priority"`
+		TemplateLabels    []string        `json:"template_labels"`
+		TemplateMetadata  json.RawMessage `json:"template_metadata"`
+		NextOccurrenceKey string          `json:"next_occurrence_key"`
+	}](t, payload)
+	assert.Equal(t, rec.UID, createdPayload.RecurrenceUID)
+	assert.Equal(t, "FREQ=WEEKLY;BYDAY=MO", createdPayload.RRule)
+	assert.Equal(t, "2026-05-11", createdPayload.DTStart)
+	assert.Equal(t, "America/New_York", createdPayload.Timezone)
+	assert.Equal(t, "Weekly review", createdPayload.TemplateTitle)
+	assert.Equal(t, "What got done?", createdPayload.TemplateBody)
+	require.NotNil(t, createdPayload.TemplateOwner)
+	assert.Equal(t, "alice", *createdPayload.TemplateOwner)
+	require.NotNil(t, createdPayload.TemplatePriority)
+	assert.Equal(t, priority, *createdPayload.TemplatePriority)
+	assert.Equal(t, []string{"recurring"}, createdPayload.TemplateLabels)
+	assert.JSONEq(t, `{"kind":"weekly"}`, string(createdPayload.TemplateMetadata))
+	assert.Equal(t, "2026-05-11", createdPayload.NextOccurrenceKey)
 }
 
 func TestPatchRecurrence_BumpsRevisionAndEmitsDiff(t *testing.T) {
@@ -259,6 +294,8 @@ func TestMaterializeNext_NormalizesLegacyDuplicateLabels(t *testing.T) {
 		`SELECT id FROM issues WHERE recurrence_id = ? AND occurrence_key = ?`,
 		rec.ID, "2026-05-22",
 	).Scan(&newIssueID))
+	newIssue, err := d.IssueByID(ctx, newIssueID)
+	require.NoError(t, err)
 
 	rows, err := d.QueryContext(ctx,
 		`SELECT label FROM issue_labels WHERE issue_id = ? ORDER BY label ASC`, newIssueID)
@@ -272,4 +309,26 @@ func TestMaterializeNext_NormalizesLegacyDuplicateLabels(t *testing.T) {
 	}
 	require.NoError(t, rows.Err())
 	assert.Equal(t, []string{"bar", "foo"}, got, "labels must be sorted and deduplicated")
+
+	var eventPayload string
+	require.NoError(t, d.QueryRowContext(ctx,
+		`SELECT payload FROM events WHERE issue_id = ? AND type = 'issue.created'`,
+		newIssueID,
+	).Scan(&eventPayload))
+	payload := unmarshalPayload[struct {
+		UID           string   `json:"uid"`
+		ShortID       string   `json:"short_id"`
+		Title         string   `json:"title"`
+		Status        string   `json:"status"`
+		Labels        []string `json:"labels"`
+		RecurrenceUID string   `json:"recurrence_uid"`
+		OccurrenceKey string   `json:"occurrence_key"`
+	}](t, eventPayload)
+	assert.Equal(t, newIssue.UID, payload.UID)
+	assert.Equal(t, newIssue.ShortID, payload.ShortID)
+	assert.Equal(t, "t", payload.Title)
+	assert.Equal(t, "open", payload.Status)
+	assert.Equal(t, []string{"bar", "foo"}, payload.Labels)
+	assert.Equal(t, rec.UID, payload.RecurrenceUID)
+	assert.Equal(t, "2026-05-22", payload.OccurrenceKey)
 }

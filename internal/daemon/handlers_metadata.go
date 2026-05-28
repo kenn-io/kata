@@ -41,6 +41,9 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, iss, actor); err != nil {
+			return nil, err
+		}
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID:    iss.ID,
 			IfMatchRev: rev,
@@ -54,6 +57,9 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		}
 		if errors.Is(err, metadata.ErrInvalidValue) {
 			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
+		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
@@ -97,6 +103,9 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 		}
 		if errors.Is(err, metadata.ErrInvalidValue) {
 			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
+		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)

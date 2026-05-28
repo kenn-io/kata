@@ -230,6 +230,73 @@ func TestAuthMiddleware_UnauthenticatedPathsAlwaysPass(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_FederationTransportPathsBypassAdminBearer(t *testing.T) {
+	mw := requireBearer(authPolicy{Token: "expected-token"})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/v1/projects/1/federation/events"},
+		{method: http.MethodGet, path: "/api/v1/projects/1/federation/metadata"},
+		{method: http.MethodPost, path: "/api/v1/projects/1/federation/events:ingest"},
+	} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, nil))
+		assert.Equal(t, http.StatusAccepted, rr.Code, "%s %s should bypass daemon bearer middleware", tc.method, tc.path)
+	}
+}
+
+func TestAuthMiddleware_FederationTransportBypassRequiresExactRouteAndMethod(t *testing.T) {
+	mw := requireBearer(authPolicy{Token: "expected-token"})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "wrong method for poll", method: http.MethodPost, path: "/api/v1/projects/1/federation/events"},
+		{name: "wrong method for metadata", method: http.MethodPost, path: "/api/v1/projects/1/federation/metadata"},
+		{name: "wrong method for ingest", method: http.MethodGet, path: "/api/v1/projects/1/federation/events:ingest"},
+		{name: "extra suffix segment", method: http.MethodGet, path: "/api/v1/projects/1/federation/events/extra"},
+		{name: "extra middle segment", method: http.MethodGet, path: "/api/v1/projects/1/setup/federation/events"},
+		{name: "nonnumeric project id", method: http.MethodGet, path: "/api/v1/projects/not-a-number/federation/events"},
+		{name: "admin enrollment setup", method: http.MethodPost, path: "/api/v1/federation/enrollments"},
+		{name: "admin replica setup", method: http.MethodPost, path: "/api/v1/federation/replicas"},
+		{name: "project federation enable", method: http.MethodPost, path: "/api/v1/projects/1/federation/enable"},
+		{name: "project federation metadata", method: http.MethodGet, path: "/api/v1/projects/1/federation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, nil))
+			assert.Equal(t, http.StatusUnauthorized, rr.Code, "%s %s should require daemon bearer", tc.method, tc.path)
+		})
+	}
+}
+
+func TestAuthMiddleware_FederationSetupRouteUsesAdminBearer(t *testing.T) {
+	mw := requireBearer(authPolicy{Token: "expected-token"})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/federation/enrollments", nil))
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/federation/enrollments", nil)
+	req.Header.Set("Authorization", "Bearer expected-token")
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusAccepted, rr.Code)
+}
+
 func openAuthTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))

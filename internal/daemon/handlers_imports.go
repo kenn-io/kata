@@ -73,6 +73,8 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		switch {
 		case errors.Is(err, db.ErrImportValidation):
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		case errors.Is(err, db.ErrFederatedReadOnly):
+			return nil, federationReadOnlyError(err)
 		case errors.Is(err, db.ErrNotFound):
 			return nil, api.NewError(404, "issue_not_found", err.Error(), "", nil)
 		case err != nil:

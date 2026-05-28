@@ -65,6 +65,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			out.Body.Issue = issue
 			return out, nil
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 		if !tuiBypass {
 			if err := ValidateCloseInput(in.Body.Reason, in.Body.Message, in.Body.Evidence); err != nil {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
@@ -128,12 +131,18 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		var updated db.Issue
 		var evt *db.Event
+		var events []db.Event
 		var changed bool
 		err = db.RetryLockContention(ctx, func() error {
 			var err error
-			updated, evt, changed, err = cfg.DB.CloseIssue(ctx, issue.ID,
+			evt = nil
+			events = nil
+			updated, events, changed, err = cfg.DB.CloseIssueWithEvents(ctx, issue.ID,
 				in.Body.Reason, actor, in.Body.Message,
 				evidenceToDB(in.Body.Evidence))
+			if len(events) > 0 {
+				evt = &events[0]
+			}
 			return err
 		})
 		if err != nil {
@@ -150,11 +159,17 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 				return nil, api.NewError(409, "parent_has_open_children", detail, "", nil)
 			}
+			if errors.Is(err, db.ErrFederatedReadOnly) {
+				return nil, federationReadOnlyError(err)
+			}
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
-		if changed && evt != nil {
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
-			cfg.Hooks.Enqueue(*evt)
+		if changed {
+			for i := range events {
+				event := events[i]
+				cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
+				cfg.Hooks.Enqueue(event)
+			}
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updated
@@ -176,6 +191,14 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if issue.Status == "open" {
+			out := &api.MutationResponse{}
+			out.Body.Issue = issue
+			return out, nil
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 		var updated db.Issue
 		var evt *db.Event
 		var changed bool
@@ -185,6 +208,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return err
 		})
 		if err != nil {
+			if apiErr := federationReadOnlyError(err); apiErr != nil {
+				return nil, apiErr
+			}
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
 		if changed && evt != nil {

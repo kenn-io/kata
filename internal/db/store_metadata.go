@@ -66,6 +66,9 @@ func (d *DB) PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (P
 	if err != nil {
 		return out, err
 	}
+	if err := ensureProjectWritableTx(ctx, tx, projectID); err != nil {
+		return out, err
+	}
 
 	if in.IfMatchRev != curRevision {
 		return out, &RevisionConflictError{CurrentRevision: curRevision}
@@ -99,13 +102,14 @@ func (d *DB) PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (P
 	}
 
 	newRev := curRevision + 1
+	ts := nowTimestamp()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE issues
 		   SET metadata   = ?,
 		       revision   = ?,
-		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		       updated_at = ?
 		 WHERE id = ?`,
-		string(newBlob), newRev, in.IssueID,
+		string(newBlob), newRev, ts, in.IssueID,
 	); err != nil {
 		return out, fmt.Errorf("update issue metadata: %w", err)
 	}
@@ -122,7 +126,8 @@ func (d *DB) PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (P
 	payload, err := json.Marshal(struct {
 		Diff        map[string]keyDiffPayload `json:"diff"`
 		RevisionNew int64                     `json:"revision_new"`
-	}{diffPayload, newRev})
+		UpdatedAt   string                    `json:"updated_at"`
+	}{diffPayload, newRev, ts})
 	if err != nil {
 		return out, fmt.Errorf("marshal event payload: %w", err)
 	}
@@ -207,6 +212,9 @@ func (d *DB) PatchProjectMetadata(ctx context.Context, in PatchProjectMetadataIn
 		return out, fmt.Errorf("project %d not found", in.ProjectID)
 	}
 	if err != nil {
+		return out, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, in.ProjectID); err != nil {
 		return out, err
 	}
 

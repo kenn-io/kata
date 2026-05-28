@@ -1,9 +1,9 @@
-// Package daemonclient resolves a running kata daemon and builds matching
+// Package client resolves a running kata daemon and builds matching
 // *http.Clients for both unix-socket and tcp endpoints. Both the kata CLI
 // (cmd/kata) and the kata TUI (internal/tui) consume this so the discovery
 // rules — runtime-file scan, alive-pid filter, /ping handshake, magic
 // http://kata.invalid base URL for unix transport — stay in one place.
-package daemonclient
+package client
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 )
 
@@ -144,11 +145,26 @@ type Opts struct {
 // from the first-party CLI/TUI without callers having to plumb the header
 // through every request site.
 func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client, error) {
+	auth := resolveAuthConfig()
+	return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
+}
+
+// NewHTTPClientWithBearer returns an HTTP client bound to baseURL with an
+// explicit bearer token. Empty token preserves the plain no-auth client path.
+// TrustPrivateNetwork is still resolved from config so private-network
+// federation callers honour the operator opt-in even when supplying their
+// own token.
+func NewHTTPClientWithBearer(ctx context.Context, baseURL, token string, opts Opts) (*http.Client, error) {
+	auth := resolveAuthConfig()
+	auth.Token = token
+	return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
+}
+
+func newHTTPClientWithAuth(ctx context.Context, baseURL string, auth config.AuthConfig, opts Opts) (*http.Client, error) {
 	c, err := newHTTPClientWithoutAuth(ctx, baseURL, opts)
 	if err != nil {
 		return nil, err
 	}
-	auth := resolveAuthConfig()
 	var origin string
 	if auth.Token != "" {
 		if origin, err = checkBearerTargetSafe(baseURL, auth.TrustPrivateNetwork); err != nil {

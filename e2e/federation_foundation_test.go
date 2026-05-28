@@ -73,10 +73,16 @@ func TestSmoke_FederationFoundationV3(t *testing.T) {
 		var data struct {
 			EventUID          string `json:"event_uid"`
 			OriginInstanceUID string `json:"origin_instance_uid"`
+			HLCPhysicalMS     int64  `json:"hlc_physical_ms"`
+			HLCCounter        int64  `json:"hlc_counter"`
+			ContentHash       string `json:"content_hash"`
 		}
 		require.NoErrorf(t, json.Unmarshal([]byte(f.data), &data), "frame data: %s", f.data)
 		assert.True(t, uid.Valid(data.EventUID), "event_uid %q invalid", data.EventUID)
 		assert.Equal(t, inst.InstanceUID, data.OriginInstanceUID, f.event)
+		assert.Greater(t, data.HLCPhysicalMS, int64(0), f.event)
+		assert.GreaterOrEqual(t, data.HLCCounter, int64(0), f.event)
+		assert.Regexp(t, `^[a-f0-9]{64}$`, data.ContentHash, f.event)
 	}
 
 	// 7. Purge the issue and capture the purge_log row from the response.
@@ -129,10 +135,16 @@ func TestSmoke_FederationFoundationV3(t *testing.T) {
 			var rec struct {
 				UID               string `json:"uid"`
 				OriginInstanceUID string `json:"origin_instance_uid"`
+				HLCPhysicalMS     int64  `json:"hlc_physical_ms"`
+				HLCCounter        int64  `json:"hlc_counter"`
+				ContentHash       string `json:"content_hash"`
 			}
 			require.NoError(t, json.Unmarshal(env.Data, &rec))
 			assert.True(t, uid.Valid(rec.UID), "event uid %q invalid", rec.UID)
 			assert.Equal(t, inst.InstanceUID, rec.OriginInstanceUID)
+			assert.Greater(t, rec.HLCPhysicalMS, int64(0))
+			assert.GreaterOrEqual(t, rec.HLCCounter, int64(0))
+			assert.Regexp(t, `^[a-f0-9]{64}$`, rec.ContentHash)
 			sawEvent = true
 		case "purge_log":
 			var rec struct {

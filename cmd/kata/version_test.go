@@ -43,10 +43,9 @@ func TestVersion_HumanFormatMatchesMsgvault(t *testing.T) {
 
 func TestVersion_JSONEnvelope(t *testing.T) {
 	resetFlags(t)
-	flags.JSON = true
 	stubVersionInfo(t, "v0.0.1-test", "abc1234", "2026-05-12T11:17:12Z")
 
-	out := executeRoot(t, newVersionCmd())
+	out := executeRoot(t, newRootCmd(), "--json", "version")
 
 	var got struct {
 		Version string `json:"version"`

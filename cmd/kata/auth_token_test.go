@@ -11,13 +11,13 @@ import (
 )
 
 // TestCLIInjectsAuthTokenAgainstProtectedDaemon covers roborev finding 19207:
-// when the daemon enforces bearer auth, the CLI's daemonclient must attach
+// when the daemon enforces bearer auth, the CLI's client must attach
 // Authorization: Bearer <token> to every API call. Without the fix the
 // `kata projects list` call below would get a 401 from the daemon's middleware
 // and surface as a CLI error.
 //
 // testenv.WithAuthToken also exports KATA_AUTH_TOKEN into the test process,
-// so daemonclient.NewHTTPClient — wired into httpClientFor via Opts — sees
+// so client.NewHTTPClient — wired into httpClientFor via Opts — sees
 // the same token the daemon enforces.
 func TestCLIInjectsAuthTokenAgainstProtectedDaemon(t *testing.T) {
 	resetFlags(t)

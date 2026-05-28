@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -57,11 +58,11 @@ func (d *DB) EventsAfter(ctx context.Context, p EventsAfterParams) ([]Event, err
 	}
 	q := `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 	             e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
-	             e.type, e.actor, e.payload, e.created_at
+	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
 	      FROM events e
 	      JOIN projects p ON p.id = e.project_id
-	      LEFT JOIN issues i ON i.id = e.issue_id
-	      LEFT JOIN issues ri ON ri.id = e.related_issue_id
+	      LEFT JOIN issues i ON i.project_id = e.project_id AND (i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid))
+	      LEFT JOIN issues ri ON ri.project_id = e.project_id AND (ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid))
 	      WHERE ` + strings.Join(conds, " AND ") + ` ORDER BY e.id ASC LIMIT ?`
 	args = append(args, p.Limit)
 	rows, err := d.QueryContext(ctx, q, args...)
@@ -71,16 +72,41 @@ func (d *DB) EventsAfter(ctx context.Context, p EventsAfterParams) ([]Event, err
 	defer func() { _ = rows.Close() }()
 	var out []Event
 	for rows.Next() {
-		var e Event
-		if err := rows.Scan(&e.ID, &e.UID, &e.OriginInstanceUID, &e.ProjectID, &e.ProjectUID, &e.ProjectName,
-			&e.IssueID, &e.IssueUID, &e.IssueShortID,
-			&e.RelatedIssueID, &e.RelatedIssueUID, &e.RelatedIssueShortID,
-			&e.Type, &e.Actor, &e.Payload, &e.CreatedAt); err != nil {
+		e, err := scanEvent(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// EventsByUIDs returns project events matching uids in insertion order. It is
+// used by federation ingest to broadcast only fresh rows after an all-or-
+// nothing insert commits.
+func (d *DB) EventsByUIDs(ctx context.Context, projectID int64, uids []string) ([]Event, error) {
+	if len(uids) == 0 {
+		return nil, nil
+	}
+	out := make([]Event, 0, len(uids))
+	for _, uid := range uids {
+		var id int64
+		err := d.QueryRowContext(ctx,
+			`SELECT id FROM events WHERE project_id = ? AND uid = ?`,
+			projectID, uid).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, fmt.Errorf("lookup event uid %s: %w", uid, err)
+		}
+		e, err := scanEvent(d.QueryRowContext(ctx, eventSelectByID, id))
+		if err != nil {
+			return nil, fmt.Errorf("read event uid %s: %w", uid, err)
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 // EventsInWindowParams selects events whose created_at lies in the closed
@@ -127,13 +153,13 @@ func (d *DB) EventsInWindow(ctx context.Context, p EventsInWindowParams) ([]Even
 		}
 		conds = append(conds, "e.actor IN ("+strings.Join(placeholders, ",")+")")
 	}
-	q := `SELECT e.id, e.project_id, e.project_name, e.issue_id, e.issue_uid, i.short_id,
+	q := `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name, e.issue_id, e.issue_uid, i.short_id,
 	             e.related_issue_id, e.related_issue_uid, ri.short_id,
-	             e.type, e.actor, e.payload, e.created_at
+	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
 	      FROM events e
 	      JOIN projects p ON p.id = e.project_id
-	      LEFT JOIN issues i ON i.id = e.issue_id
-	      LEFT JOIN issues ri ON ri.id = e.related_issue_id
+	      LEFT JOIN issues i ON i.project_id = e.project_id AND (i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid))
+	      LEFT JOIN issues ri ON ri.project_id = e.project_id AND (ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid))
 	      WHERE ` + strings.Join(conds, " AND ") + ` ORDER BY e.id ASC`
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -143,9 +169,9 @@ func (d *DB) EventsInWindow(ctx context.Context, p EventsInWindowParams) ([]Even
 	var out []Event
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.ID, &e.ProjectID, &e.ProjectName, &e.IssueID, &e.IssueUID, &e.IssueShortID,
+		if err := rows.Scan(&e.ID, &e.UID, &e.OriginInstanceUID, &e.ProjectID, &e.ProjectUID, &e.ProjectName, &e.IssueID, &e.IssueUID, &e.IssueShortID,
 			&e.RelatedIssueID, &e.RelatedIssueUID, &e.RelatedIssueShortID,
-			&e.Type, &e.Actor, &e.Payload, &e.CreatedAt); err != nil {
+			&e.Type, &e.Actor, &e.Payload, &e.HLCPhysicalMS, &e.HLCCounter, &e.ContentHash, &e.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
 		out = append(out, e)

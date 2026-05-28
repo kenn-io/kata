@@ -81,6 +81,17 @@ func DaemonConfigPath() (string, error) {
 	return filepath.Join(home, "config.toml"), nil
 }
 
+// FederationCredentialsPath returns <KataHome>/credentials.toml. It stores
+// local secrets such as federation bearer tokens and must not be committed to a
+// workspace.
+func FederationCredentialsPath() (string, error) {
+	home, err := KataHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "credentials.toml"), nil
+}
+
 // HookRootDir returns <KataHome>/hooks/<dbhash>. Per-DB so multiple kata
 // databases on the same host don't share output streams. Rejects any
 // dbhash that is not a 12-char lower-hex string so a malformed value

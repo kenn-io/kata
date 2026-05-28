@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestIssuesMetadataAndRevisionColumns(t *testing.T) {
@@ -152,7 +153,7 @@ func TestRecurrencesTableAndIssueLinkage(t *testing.T) {
 	assert.Equal(t, 1, idxn)
 }
 
-func TestSchemaVersionAt11(t *testing.T) {
+func TestSchemaVersionCurrent(t *testing.T) {
 	d := openTestDB(t)
-	assertSchemaVersion(t, d, 11)
+	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 }

@@ -39,8 +39,8 @@ func TestCreateIssue_NoPriorityIsNullAndOmittedFromPayload(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Nil(t, issue.Priority)
-	// No priority key means buildCreatedPayload still emits the empty payload.
-	assert.Equal(t, "{}", evt.Payload)
+	payload := unmarshalPayload[map[string]any](t, evt.Payload)
+	assert.NotContains(t, payload, "priority")
 }
 
 func TestCreateIssue_RejectsPriorityOutOfRange(t *testing.T) {

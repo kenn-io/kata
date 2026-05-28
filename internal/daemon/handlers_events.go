@@ -156,6 +156,9 @@ func eventToEnvelope(e db.Event) api.EventEnvelope {
 		RelatedIssueUID:     e.RelatedIssueUID,
 		RelatedIssueShortID: e.RelatedIssueShortID,
 		Actor:               e.Actor,
+		HLCPhysicalMS:       e.HLCPhysicalMS,
+		HLCCounter:          e.HLCCounter,
+		ContentHash:         e.ContentHash,
 		Payload:             payload,
 		CreatedAt:           e.CreatedAt,
 	}

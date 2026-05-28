@@ -75,6 +75,48 @@ func TestAutoCutoverUpgradesLegacyV1DB(t *testing.T) {
 	assertNoCutoverTemps(t, path)
 }
 
+func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+
+	d, err := db.Open(ctx, path)
+	require.NoError(t, err)
+	project, err := d.CreateProject(ctx, "legacy-v11")
+	require.NoError(t, err)
+	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "v11 issue",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = d.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID,
+		Author:  "tester",
+		Body:    "v11 comment",
+	})
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	trimCurrentDBToV11Shape(t, path)
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	upgraded, err := db.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	assertCurrentSchemaVersion(t, path)
+	got, err := upgraded.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.Equal(t, "v11 issue", got.Title)
+	var commentUID, contentHash string
+	require.NoError(t, upgraded.QueryRowContext(ctx,
+		`SELECT uid FROM comments WHERE body = 'v11 comment'`).Scan(&commentUID))
+	assert.True(t, uid.Valid(commentUID))
+	require.NoError(t, upgraded.QueryRowContext(ctx,
+		`SELECT content_hash FROM events WHERE type = 'issue.created' AND issue_uid = ?`, issue.UID).Scan(&contentHash))
+	assert.Len(t, contentHash, 64)
+}
+
 func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -129,6 +171,24 @@ func TestPeekSchemaVersion(t *testing.T) {
 	ver, err := db.PeekSchemaVersion(ctx, noMeta)
 	require.NoError(t, err)
 	assert.Equal(t, 0, ver)
+}
+
+func TestClaimCutover_PreFederationImportLeavesClaimTablesEmpty(t *testing.T) {
+	ctx := context.Background()
+	dst := openImportTargetDB(t)
+	body := buildJSONL(
+		`{"kind":"meta","data":{"key":"export_version","value":"11"}}`,
+		`{"kind":"meta","data":{"key":"instance_uid","value":"01HZZZZZZZZZZZZZZZZZZZZZ20"}}`,
+		`{"kind":"project","data":{"id":1,"uid":"01HZZZZZZZZZZZZZZZZZZZZZ21","name":"legacy","metadata":{},"revision":1,"created_at":"2026-05-23T00:00:00.000Z"}}`,
+	)
+
+	require.NoError(t, jsonl.Import(ctx, strings.NewReader(body), dst))
+
+	var claims, pending int
+	require.NoError(t, dst.QueryRowContext(ctx, `SELECT COUNT(*) FROM issue_claims`).Scan(&claims))
+	require.NoError(t, dst.QueryRowContext(ctx, `SELECT COUNT(*) FROM pending_claim_requests`).Scan(&pending))
+	assert.Equal(t, 0, claims)
+	assert.Equal(t, 0, pending)
 }
 
 // TestRoundtripV4PreservesDeletedAt covers #24's projects.deleted_at column:
@@ -760,4 +820,97 @@ func TestExport_PreV10_RoundtripsThroughImport(t *testing.T) {
 		`SELECT COUNT(*) FROM events`).Scan(&eventCount))
 	assert.Equal(t, 1, issueCount, "v9 issue must survive cutover")
 	assert.Equal(t, 1, eventCount, "v9 event must survive cutover")
+}
+
+func trimCurrentDBToV11Shape(t *testing.T, path string) {
+	t.Helper()
+	ctx := context.Background()
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+
+	_, err = raw.ExecContext(ctx, `
+		PRAGMA foreign_keys = OFF;
+
+		DROP TRIGGER IF EXISTS comments_ai_fts;
+		DROP TRIGGER IF EXISTS comments_ad_fts;
+		DROP TRIGGER IF EXISTS issues_ai_fts;
+		DROP TRIGGER IF EXISTS issues_au_fts;
+		DROP TRIGGER IF EXISTS issues_ad_fts;
+		DROP INDEX IF EXISTS idx_comments_issue;
+		ALTER TABLE comments RENAME TO comments_current;
+		CREATE TABLE comments (
+		  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		  issue_id   INTEGER NOT NULL REFERENCES issues(id),
+		  author     TEXT NOT NULL,
+		  body       TEXT NOT NULL,
+		  created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  CHECK (length(trim(author)) > 0),
+		  CHECK (length(trim(body))   > 0)
+		);
+		INSERT INTO comments(id, issue_id, author, body, created_at)
+		  SELECT id, issue_id, author, body, created_at FROM comments_current;
+		DROP TABLE comments_current;
+		CREATE INDEX idx_comments_issue ON comments(issue_id, created_at);
+
+		DROP INDEX IF EXISTS idx_events_project;
+		DROP INDEX IF EXISTS idx_events_issue;
+		DROP INDEX IF EXISTS idx_events_related;
+		DROP INDEX IF EXISTS idx_events_issue_uid;
+		DROP INDEX IF EXISTS idx_events_related_issue_uid;
+		DROP INDEX IF EXISTS idx_events_origin_instance;
+		DROP INDEX IF EXISTS idx_events_origin_project_id;
+		DROP INDEX IF EXISTS idx_events_hlc;
+		DROP INDEX IF EXISTS idx_events_content_hash;
+		DROP INDEX IF EXISTS idx_events_idempotency;
+		ALTER TABLE events RENAME TO events_current;
+		CREATE TABLE events (
+		  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+		  uid                 TEXT NOT NULL UNIQUE,
+		  origin_instance_uid TEXT NOT NULL,
+		  project_id          INTEGER NOT NULL REFERENCES projects(id),
+		  project_name        TEXT NOT NULL,
+		  issue_id            INTEGER REFERENCES issues(id),
+		  issue_uid           TEXT,
+		  related_issue_id    INTEGER REFERENCES issues(id),
+		  related_issue_uid   TEXT,
+		  type                TEXT NOT NULL,
+		  actor               TEXT NOT NULL,
+		  payload             TEXT NOT NULL DEFAULT '{}',
+		  created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  CHECK (length(trim(actor)) > 0),
+		  CHECK (json_valid(payload)),
+		  CHECK (length(uid) = 26),
+		  CHECK (length(origin_instance_uid) = 26)
+		);
+		INSERT INTO events(
+		  id, uid, origin_instance_uid, project_id, project_name, issue_id,
+		  issue_uid, related_issue_id, related_issue_uid, type, actor, payload, created_at
+		)
+		  SELECT id, uid, origin_instance_uid, project_id, project_name, issue_id,
+		         issue_uid, related_issue_id, related_issue_uid, type, actor, payload, created_at
+		    FROM events_current;
+		DROP TABLE events_current;
+		CREATE INDEX idx_events_project ON events(project_id, id);
+		CREATE INDEX idx_events_issue ON events(issue_id, id) WHERE issue_id IS NOT NULL;
+		CREATE INDEX idx_events_related ON events(related_issue_id, id) WHERE related_issue_id IS NOT NULL;
+		CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL;
+		CREATE INDEX idx_events_related_issue_uid ON events(related_issue_uid) WHERE related_issue_uid IS NOT NULL;
+		CREATE INDEX idx_events_origin_instance ON events(origin_instance_uid);
+		CREATE INDEX idx_events_idempotency
+		  ON events(project_id, json_extract(payload, '$.idempotency_key'), created_at)
+		  WHERE type = 'issue.created' AND json_extract(payload, '$.idempotency_key') IS NOT NULL;
+
+		UPDATE meta SET value='11' WHERE key='schema_version';
+		PRAGMA foreign_keys = ON;
+	`)
+	require.NoError(t, err)
+	assertTableShape(t, raw, "comments", []string{
+		"id", "issue_id", "author", "body", "created_at",
+	})
+	assertTableShape(t, raw, "events", []string{
+		"id", "uid", "origin_instance_uid", "project_id", "project_name",
+		"issue_id", "issue_uid", "related_issue_id", "related_issue_uid",
+		"type", "actor", "payload", "created_at",
+	})
 }

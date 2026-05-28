@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/daemonclient"
 )
 
 // defaultHTTPTimeout is the per-request budget for non-streaming CLI calls.
@@ -39,9 +39,9 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 }
 
 // ensureDaemon discovers a live daemon's HTTP base URL, auto-starting one
-// if none is found. Thin wrapper over daemonclient.EnsureRunning so the CLI
+// if none is found. Thin wrapper over client.EnsureRunning so the CLI
 // and TUI share one resolution path; tests still inject a base URL via
-// daemonclient.BaseURLKey{} on the context.
+// client.BaseURLKey{} on the context.
 //
 // When --workspace points at a specific directory, that path anchors
 // the .kata.local.toml walk so a workspace-local [server] override is
@@ -52,11 +52,11 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 // daemon-unavailable error so callers see a stable exit code and shape.
 func ensureDaemon(ctx context.Context) (string, error) {
 	workspaceStart := workspaceStartForRemote()
-	baseURL, err := daemonclient.EnsureRunningInWorkspace(ctx, workspaceStart)
+	baseURL, err := client.EnsureRunningInWorkspace(ctx, workspaceStart)
 	if err == nil {
 		return baseURL, nil
 	}
-	if errors.Is(err, daemonclient.ErrRemoteUnavailable) {
+	if errors.Is(err, client.ErrRemoteUnavailable) {
 		return "", &cliError{
 			Message:  err.Error(),
 			Kind:     kindDaemonUnavail,
@@ -101,11 +101,11 @@ func workspaceStartForRemote() string {
 // matching hammer-test finding #1's expectation that `kata health`
 // doesn't lie about the daemon's actual state.
 func discoverDaemon(ctx context.Context) (string, error) {
-	if v, ok := ctx.Value(daemonclient.BaseURLKey{}).(string); ok && v != "" {
+	if v, ok := ctx.Value(client.BaseURLKey{}).(string); ok && v != "" {
 		return v, nil
 	}
-	if url, ok, err := daemonclient.ResolveRemote(ctx, workspaceStartForRemote()); err != nil {
-		if errors.Is(err, daemonclient.ErrRemoteUnavailable) {
+	if url, ok, err := client.ResolveRemote(ctx, workspaceStartForRemote()); err != nil {
+		if errors.Is(err, client.ErrRemoteUnavailable) {
 			return "", &cliError{
 				Message:  err.Error(),
 				Kind:     kindDaemonUnavail,
@@ -120,7 +120,7 @@ func discoverDaemon(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if url, ok := daemonclient.Discover(ctx, ns.DataDir); ok {
+	if url, ok := client.Discover(ctx, ns.DataDir); ok {
 		return url, nil
 	}
 	return "", &cliError{
@@ -132,11 +132,11 @@ func discoverDaemon(ctx context.Context) (string, error) {
 
 // httpClientFor returns an *http.Client whose transport understands the
 // unix-socket base URL emitted by ensureDaemon. The TUI calls into
-// daemonclient directly; this wrapper exists only because every existing
+// client directly; this wrapper exists only because every existing
 // CLI command site is already named for it.
 func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
-	return daemonclient.NewHTTPClient(ctx, baseURL,
-		daemonclient.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
+	return client.NewHTTPClient(ctx, baseURL,
+		client.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
 }
 
 // streamingClientFor builds the SSE-friendly variant: no overall
@@ -144,8 +144,8 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 // ResponseHeaderTimeout so a stalled handshake can't hang forever. Body
 // cancellation comes from the request context.
 func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
-	return daemonclient.NewHTTPClient(ctx, baseURL, daemonclient.Opts{
-		ResponseHeaderTimeout: daemonclient.SSEHandshakeTimeout,
+	return client.NewHTTPClient(ctx, baseURL, client.Opts{
+		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
 	})
 }
 

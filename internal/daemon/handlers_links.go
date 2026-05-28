@@ -47,6 +47,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, from, actor); err != nil {
+			return nil, err
+		}
 
 		// Reject self-link before mutating state. The DB will catch this anyway,
 		// but in the --replace path we delete the existing parent before we'd
@@ -97,6 +100,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 				}
 				unlinkEvt, err := cfg.DB.DeleteLinkAndEvent(ctx, existing, unlinkEv)
 				if err != nil {
+					if apiErr := federationReadOnlyError(err); apiErr != nil {
+						return nil, apiErr
+					}
 					return nil, api.NewError(500, "internal", err.Error(), "", nil)
 				}
 				cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &unlinkEvt, ProjectID: in.ProjectID})
@@ -139,6 +145,8 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			return nil, api.NewError(400, "validation", "cannot link an issue to itself", "", nil)
 		case errors.Is(err, db.ErrCrossProjectLink):
 			return nil, api.NewError(400, "validation", "cross-project links are not allowed", "", nil)
+		case errors.Is(err, db.ErrFederatedReadOnly):
+			return nil, federationReadOnlyError(err)
 		case err != nil:
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
@@ -186,6 +194,9 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if link.FromIssueID != from.ID && link.ToIssueID != from.ID {
 			return nil, api.NewError(404, "link_not_found", "link not attached to this issue", "", nil)
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, from, actor); err != nil {
+			return nil, err
+		}
 
 		// Resolve the link's storage endpoints so the payload carries each
 		// peer's short_id + UID. For parent/blocks links the URL issue is
@@ -223,6 +234,9 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 			out.Body.Event = nil
 			out.Body.Changed = false
 			return out, nil
+		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)

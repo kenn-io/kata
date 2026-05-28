@@ -100,6 +100,12 @@ func (d *DB) MoveIssueProject(ctx context.Context, in MoveIssueProjectIn) (MoveI
 		}
 		return out, err
 	}
+	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
+		return out, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, in.FromProjectID); err != nil {
+		return out, err
+	}
 	if in.IfMatchRev != curRev {
 		return out, &RevisionConflictError{CurrentRevision: curRev}
 	}
@@ -128,6 +134,9 @@ func (d *DB) MoveIssueProject(ctx context.Context, in MoveIssueProjectIn) (MoveI
 		}
 		return out, err
 	}
+	if err := ensureProjectWritableTx(ctx, tx, in.ToProjectID); err != nil {
+		return out, err
+	}
 
 	newShortID, err := assignShortIDIn(ctx, tx,
 		[]int64{in.ToProjectID}, issueUID, shortid.MinLength,
@@ -137,14 +146,15 @@ func (d *DB) MoveIssueProject(ctx context.Context, in MoveIssueProjectIn) (MoveI
 	}
 
 	newRev := curRev + 1
+	ts := nowTimestamp()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE issues
 		   SET project_id = ?,
 		       short_id   = ?,
 		       revision   = ?,
-		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		       updated_at = ?
 		 WHERE id = ?`,
-		in.ToProjectID, newShortID, newRev, in.IssueID,
+		in.ToProjectID, newShortID, newRev, ts, in.IssueID,
 	); err != nil {
 		return out, err
 	}
@@ -209,6 +219,7 @@ func (d *DB) MoveIssueProject(ctx context.Context, in MoveIssueProjectIn) (MoveI
 		"from_short_id":    curShortID,
 		"to_project_uid":   toProjectUID,
 		"to_short_id":      newShortID,
+		"updated_at":       ts,
 	})
 	ev, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   in.ToProjectID,

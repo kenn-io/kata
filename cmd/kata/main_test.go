@@ -21,6 +21,69 @@ func TestRoot_HelpListsUniversalFlags(t *testing.T) {
 	assert.Contains(t, out, "--quiet")
 	assert.Contains(t, out, "--as")
 	assert.Contains(t, out, "--workspace")
+	assertNoFederationStorageInternals(t, out)
+}
+
+func TestRootHelpMentionsFederationWithoutStorageInternals(t *testing.T) {
+	out := string(executeRoot(t, newRootCmd(), "--help"))
+	assert.Contains(t, strings.ToLower(out), "federation")
+	assertNoFederationStorageInternals(t, out)
+}
+
+func TestDaemonHelpDoesNotMentionFederation(t *testing.T) {
+	out := string(executeRoot(t, newRootCmd(), "daemon", "--help"))
+	assertNoFederationInternals(t, out)
+}
+
+func TestImportHelpDoesNotMentionFederationInternals(t *testing.T) {
+	out := string(executeRoot(t, newRootCmd(), "import", "--help"))
+	assertNoFederationInternals(t, out)
+}
+
+func TestNormalCommandsDoNotMentionFederation(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	short := createIssue(t, env, pid, "ordinary work")
+
+	for name, out := range map[string]string{
+		"create":        runCLI(t, env, dir, "create", "plain issue"),
+		"list":          runCLI(t, env, dir, "list"),
+		"show":          runCLI(t, env, dir, "show", short),
+		"projects list": requireCmdOutput(t, env, "projects", "list"),
+		"projects show": requireCmdOutput(t, env, "projects", "show", itoa(pid)),
+	} {
+		assertNoFederationInternals(t, out, name)
+	}
+}
+
+func assertNoFederationInternals(t *testing.T, out string, msgAndArgs ...any) {
+	t.Helper()
+	lower := strings.ToLower(out)
+	for _, forbidden := range []string{
+		"federation",
+		"enrollment",
+		"enrollments",
+		"hlc",
+		"origin_instance_uid",
+		"push",
+		"pull",
+		"hidden setup",
+	} {
+		assert.NotContains(t, lower, forbidden, msgAndArgs...)
+	}
+}
+
+func assertNoFederationStorageInternals(t *testing.T, out string, msgAndArgs ...any) {
+	t.Helper()
+	lower := strings.ToLower(out)
+	for _, forbidden := range []string{
+		"enrollment",
+		"enrollments",
+		"hlc",
+		"origin_instance_uid",
+		"hidden setup",
+	} {
+		assert.NotContains(t, lower, forbidden, msgAndArgs...)
+	}
 }
 
 func TestNewRootCmdResetsGlobalFlagState(t *testing.T) {
@@ -124,6 +187,19 @@ func TestRoot_Plan3VerbsAdvertised(t *testing.T) {
 		_, ok := registered[verb]
 		assert.Truef(t, ok, "root must register subcommand %q", verb)
 	}
+}
+
+func TestRoot_LeaseVerbsAreFederationScoped(t *testing.T) {
+	registered := rootSubcommands()
+	// `claim` lives at root for the simple ownership claim (PR #49); the
+	// federation write-lease verbs stay under `federation lease`.
+	_, ok := registered["release"]
+	assert.False(t, ok, "root must not register federation lease command \"release\"")
+	federation, ok := registered["federation"]
+	require.True(t, ok, "root must register federation")
+	lease, _, err := federation.Find([]string{"lease"})
+	require.NoError(t, err)
+	assert.Equal(t, "lease", lease.Name())
 }
 
 func TestRoot_QuickstartAdvertised(t *testing.T) {

@@ -1,0 +1,87 @@
+services:
+  netns:
+    image: debian:bookworm-slim
+    command: ["sleep", "infinity"]
+
+  hub:
+    build:
+      context: ../..
+      dockerfile: docker/federation/Dockerfile
+    network_mode: service:netns
+    depends_on:
+      - netns
+    volumes:
+      - hub-data:/data/kata
+    environment:
+      KATA_HOME: /data/kata
+      KATA_FEDERATION_PULL_INTERVAL_MS: "250"
+    command: ["daemon", "start", "--listen", "127.0.0.1:7373"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7373/api/v1/health"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  spoke-a:
+    build:
+      context: ../..
+      dockerfile: docker/federation/Dockerfile
+    network_mode: service:netns
+    depends_on:
+      - netns
+    volumes:
+      - spoke-a-data:/data/kata
+    environment:
+      KATA_HOME: /data/kata
+      KATA_FEDERATION_PULL_INTERVAL_MS: "250"
+    command: ["daemon", "start", "--listen", "127.0.0.1:7374"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7374/api/v1/health"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  spoke-b:
+    build:
+      context: ../..
+      dockerfile: docker/federation/Dockerfile
+    network_mode: service:netns
+    depends_on:
+      - netns
+    volumes:
+      - spoke-b-data:/data/kata
+    environment:
+      KATA_HOME: /data/kata
+      KATA_FEDERATION_PULL_INTERVAL_MS: "250"
+    command: ["daemon", "start", "--listen", "127.0.0.1:7375"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7375/api/v1/health"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  runner:
+    build:
+      context: ../..
+      dockerfile: docker/federation/Dockerfile
+    entrypoint: ["/usr/local/bin/federation-smoke"]
+    network_mode: service:netns
+    depends_on:
+      hub:
+        condition: service_healthy
+      spoke-a:
+        condition: service_healthy
+      spoke-b:
+        condition: service_healthy
+    volumes:
+      - runner-data:/data/kata
+    environment:
+      KATA_HOME: /data/kata
+      KATA_HTTP_TIMEOUT: 15s
+      KATA_FEDERATION_DOCKER_CURL_TIMEOUT: ${KATA_FEDERATION_DOCKER_CURL_TIMEOUT:-15}
+
+volumes:
+  hub-data:
+  spoke-a-data:
+  spoke-b-data:
+  runner-data:

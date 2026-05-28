@@ -126,7 +126,9 @@ func buildPayloadBlock(ctx context.Context, evt db.Event, rc commentResolver, lo
 		}
 	}
 	if evt.Type == "issue.commented" {
-		if cidF, ok := payload["comment_id"].(float64); ok {
+		if body, ok := payload["body"].(string); ok {
+			truncStringField(payload, "comment_body", body, maxCommentBodyBytes)
+		} else if cidF, ok := payload["comment_id"].(float64); ok {
 			cid := int64(cidF)
 			if csnap, err := rc(ctx, cid); err != nil {
 				log("hooks: comment resolver: %v", err)

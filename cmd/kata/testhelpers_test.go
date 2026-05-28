@@ -18,8 +18,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/daemonclient"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
@@ -40,6 +40,7 @@ func setupKataEnv(t *testing.T) string {
 // (daemon, etc.); workspace-bound tests should use runCLI instead.
 func executeRoot(t *testing.T, cmd *cobra.Command, args ...string) []byte {
 	t.Helper()
+	resetFlags(t)
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetArgs(args)
@@ -55,6 +56,7 @@ func executeRoot(t *testing.T, cmd *cobra.Command, args ...string) []byte {
 //nolint:revive // test helper: t *testing.T conventionally precedes ctx.
 func executeRootCapture(t *testing.T, ctx context.Context, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	resetFlags(t)
 	cmd := newRootCmd()
 	var so, se bytes.Buffer
 	cmd.SetOut(&so)
@@ -114,7 +116,7 @@ func writeRuntimeFor(home, addr string) error {
 // contextWithBaseURL injects a daemon base URL into the context so CLI
 // commands bypass real daemon discovery during tests.
 func contextWithBaseURL(ctx context.Context, url string) context.Context {
-	return context.WithValue(ctx, daemonclient.BaseURLKey{}, url)
+	return context.WithValue(ctx, client.BaseURLKey{}, url)
 }
 
 // runGit executes `git <args>` in dir and fails the test on error. Use for
@@ -266,6 +268,24 @@ func runCmdOutput(t *testing.T, env *testenv.Env, args ...string) (string, error
 	return buf.String(), err
 }
 
+// runCmdCapture is runCmdOutput with stdout and stderr kept separate.
+func runCmdCapture(t *testing.T, env *testenv.Env, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	resetFlags(t)
+	cmd := newRootCmd()
+	var so, se bytes.Buffer
+	cmd.SetOut(&so)
+	cmd.SetErr(&se)
+	cmd.SetArgs(args)
+	ctx := context.Background()
+	if env != nil {
+		ctx = contextWithBaseURL(ctx, env.URL)
+	}
+	cmd.SetContext(ctx)
+	err = cmd.Execute()
+	return so.String(), se.String(), err
+}
+
 // requireCmdOutput is runCmdOutput with require.NoError on the result.
 func requireCmdOutput(t *testing.T, env *testenv.Env, args ...string) string {
 	t.Helper()
@@ -294,6 +314,7 @@ func setupMergeProjects(t *testing.T, env *testenv.Env) (alpha, beta db.Project)
 // runCLI executes a root command and returns the output.
 func runCLI(t *testing.T, env *testenv.Env, dir string, args ...string) string {
 	t.Helper()
+	resetFlags(t)
 	cmd := newRootCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
@@ -320,6 +341,7 @@ func runCLIAs(t *testing.T, env *testenv.Env, dir, actor string, args ...string)
 // specific failure (cliError code, exit status) instead of just succeeding.
 func runCLICapture(t *testing.T, env *testenv.Env, dir string, args ...string) (string, error) {
 	t.Helper()
+	resetFlags(t)
 	cmd := newRootCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
@@ -336,6 +358,7 @@ func runCLICapture(t *testing.T, env *testenv.Env, dir string, args ...string) (
 // stderr as the user would see it.
 func runCLIWithErr(t *testing.T, env *testenv.Env, dir string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	resetFlags(t)
 	cmd := newRootCmd()
 	var so, se bytes.Buffer
 	cmd.SetOut(&so)

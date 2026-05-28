@@ -544,6 +544,30 @@ func TestMergeProjects_ImportMappingCollisionReturnsError(t *testing.T) {
 		`SELECT count(*) FROM import_mappings WHERE project_id = ?`, target.ID)
 }
 
+func TestMergeProjects_RejectsFederationBinding(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	source := createProject(ctx, t, d, "src")
+	target := createProject(ctx, t, d, "target")
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            source.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        source.UID,
+		ReplayHorizonEventID: 7,
+		PullCursorEventID:    6,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+
+	_, err = d.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.ID, TargetProjectID: target.ID})
+	require.ErrorIs(t, err, db.ErrProjectMergeFederationBinding)
+
+	_, lookupErr := d.ProjectByID(ctx, source.ID)
+	require.NoError(t, lookupErr)
+}
+
 func TestBatchProjectStats_EmptyProjectReturnsZeroes(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()

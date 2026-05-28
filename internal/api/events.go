@@ -56,6 +56,9 @@ type EventEnvelope struct {
 	RelatedIssueUID     *string `json:"related_issue_uid,omitempty"`
 	RelatedIssueShortID *string `json:"related_issue_short_id,omitempty"`
 	Actor               string  `json:"actor"`
+	HLCPhysicalMS       int64   `json:"hlc_physical_ms"`
+	HLCCounter          int64   `json:"hlc_counter"`
+	ContentHash         string  `json:"content_hash"`
 	// Payload is the event-type-specific JSON object. Always valid JSON
 	// because the schema enforces json_valid(payload) at write time.
 	Payload   json.RawMessage `json:"payload,omitempty"`
@@ -88,14 +91,17 @@ type PollEventsGlobalRequest struct {
 	Limit   OptionalInt `query:"limit,omitempty"`
 }
 
+// PollEventsBody is the response body for both polling endpoints.
+type PollEventsBody struct {
+	ResetRequired bool            `json:"reset_required"`
+	ResetAfterID  int64           `json:"reset_after_id,omitempty"`
+	Events        []EventEnvelope `json:"events"`        // always non-nil; empty array on no rows
+	NextAfterID   int64           `json:"next_after_id"` // = max events.id in response, or after_id if empty
+}
+
 // PollEventsResponse is the response for both polling endpoints. ResetRequired
 // signals a purge-invalidated cursor; when true, Events is empty and the
 // client should refetch state and resume from ResetAfterID.
 type PollEventsResponse struct {
-	Body struct {
-		ResetRequired bool            `json:"reset_required"`
-		ResetAfterID  int64           `json:"reset_after_id,omitempty"`
-		Events        []EventEnvelope `json:"events"`        // always non-nil; empty array on no rows
-		NextAfterID   int64           `json:"next_after_id"` // = max events.id in response, or after_id if empty
-	}
+	Body PollEventsBody
 }

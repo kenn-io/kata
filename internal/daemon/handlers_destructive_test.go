@@ -1,11 +1,16 @@
 package daemon_test
 
 import (
+	"context"
+	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 // confirmHeader builds the X-Kata-Confirm value for an issue. After Task 11
@@ -116,6 +121,91 @@ func TestPurge_RequiresConfirmHeaderAndRemovesAllRows(t *testing.T) {
 	// Subsequent show 404s — issue is gone.
 	respShow, _ := getStatusBody(t, ts, issueURL(pid, num, "")+"?include_deleted=true")
 	assert.Equal(t, 404, respShow.StatusCode)
+}
+
+func TestPurge_FederatedSpokeRequiresHubAdmin(t *testing.T) {
+	h, ts, pid, num := bootstrapProjectWithIssue(t)
+	project, err := h.DB().ProjectByID(t.Context(), pid)
+	require.NoError(t, err)
+	_, err = h.DB().UpsertFederationBinding(t.Context(), db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 1,
+		PushEnabled:          true,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+
+	resp := postWithHeader(t, ts, issueURL(pid, num, "actions/purge"),
+		map[string]string{"X-Kata-Confirm": confirmHeader(t, h, pid, num, "PURGE")},
+		map[string]any{"actor": "agent"})
+
+	assertAPIError(t, resp.status, resp.body, 409, "federated_admin_required")
+}
+
+func TestPurge_FederatedHubRequiresIssueClaim(t *testing.T) {
+	h, ts, pid, num := bootstrapProjectWithIssue(t)
+	issue, err := h.DB().IssueByID(t.Context(), num)
+	require.NoError(t, err)
+	_, err = h.DB().EnableProjectFederation(t.Context(), pid, "tester")
+	require.NoError(t, err)
+	_, err = h.DB().AcquireClaim(t.Context(), db.AcquireClaimParams{
+		ProjectID: pid,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: h.DB().InstanceUID(),
+			Holder:            "alice",
+		},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	resp := postWithHeader(t, ts, issueURL(pid, num, "actions/purge"),
+		map[string]string{"X-Kata-Confirm": confirmHeader(t, h, pid, num, "PURGE")},
+		map[string]any{"actor": "bob"})
+	assertAPIError(t, resp.status, resp.body, 409, "claim_denied")
+
+	resp = postWithHeader(t, ts, issueURL(pid, num, "actions/purge"),
+		map[string]string{"X-Kata-Confirm": confirmHeader(t, h, pid, num, "PURGE")},
+		map[string]any{"actor": "alice"})
+	require.Equal(t, 200, resp.status, string(resp.body))
+	assert.Contains(t, string(resp.body), `"purge_log"`)
+}
+
+func TestPurge_FederatedHubUsesResolvedIdentityActorForClaimGate(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	ctx := context.Background()
+	project, issue := createClaimHubIssue(t, env)
+	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "alice-token",
+		Actor:          "alice",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	_, err = env.DB.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: env.DB.InstanceUID(),
+			Holder:            "alice",
+		},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "actions/purge"),
+		map[string]any{"actor": ""}, map[string]string{
+			"Authorization":  "Bearer alice-token",
+			"X-Kata-Confirm": "PURGE " + project.Name + "#" + issue.ShortID,
+		})
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), `"purge_log"`)
 }
 
 // TestDelete_UnknownIssueIs404 covers the handler-level translation of

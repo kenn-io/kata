@@ -3,6 +3,7 @@ package jsonl_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -66,6 +67,45 @@ func TestImportSQLiteSequenceUsesUpdateOrInsert(t *testing.T) {
 	assert.Equal(t, int64(150), seq)
 }
 
+func TestImportFederationSyncStatus(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+	require.NoError(t, importJSONL(ctx, target,
+		`{"kind":"meta","data":{"key":"export_version","value":"12"}}`,
+		`{"kind":"meta","data":{"key":"instance_uid","value":"01HZZZZZZZZZZZZZZZZZZZZZ10"}}`,
+		`{"kind":"project","data":{"id":1,"uid":"01HZZZZZZZZZZZZZZZZZZZZZ11","name":"hub","metadata":{},"revision":1,"created_at":"2026-05-23T00:00:00.000Z"}}`,
+		`{"kind":"federation_sync_status","data":{"project_id":1,"last_pull_started_at":"2026-05-23T01:00:00.000Z","last_pull_success_at":"2026-05-23T01:00:01.000Z","last_push_started_at":"2026-05-23T01:00:02.000Z","last_push_success_at":"2026-05-23T01:00:03.000Z","last_error_at":"2026-05-23T01:00:04.000Z","last_error":"hub offline","last_reset_at":"2026-05-23T01:00:05.000Z"}}`,
+	))
+
+	got, err := target.FederationSyncStatusByProject(ctx, 1)
+	require.NoError(t, err)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:00.000Z"), got.LastPullStartedAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:01.000Z"), got.LastPullSuccessAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:02.000Z"), got.LastPushStartedAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:03.000Z"), got.LastPushSuccessAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:04.000Z"), got.LastErrorAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-05-23T01:00:05.000Z"), got.LastResetAt)
+	require.NotNil(t, got.LastError)
+	assert.Equal(t, "hub offline", *got.LastError)
+}
+
+func TestImportV11JSONLDefaultsWithoutFederationSyncStatus(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+	require.NoError(t, importJSONL(ctx, target,
+		`{"kind":"meta","data":{"key":"export_version","value":"11"}}`,
+		`{"kind":"meta","data":{"key":"schema_version","value":"11"}}`,
+		`{"kind":"meta","data":{"key":"instance_uid","value":"01HZZZZZZZZZZZZZZZZZZZZZ10"}}`,
+		`{"kind":"project","data":{"id":1,"uid":"01HZZZZZZZZZZZZZZZZZZZZZ11","name":"hub","metadata":{},"revision":1,"created_at":"2026-05-23T00:00:00.000Z"}}`,
+	))
+
+	_, err := target.FederationSyncStatusByProject(ctx, 1)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	var schemaVersion string
+	require.NoError(t, target.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&schemaVersion))
+	assert.Equal(t, fmt.Sprint(db.CurrentSchemaVersion()), schemaVersion)
+}
+
 func TestImportV1FillsUIDsDeterministically(t *testing.T) {
 	ctx := context.Background()
 	rows := []string{
@@ -88,7 +128,7 @@ func TestImportV1FillsUIDsDeterministically(t *testing.T) {
 	}
 	var schemaVersion string
 	require.NoError(t, first.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&schemaVersion))
-	assert.Equal(t, "11", schemaVersion)
+	assert.Equal(t, fmt.Sprint(db.CurrentSchemaVersion()), schemaVersion)
 }
 
 func TestImportLegacyEventSnapshotsUseFinalProjectName(t *testing.T) {

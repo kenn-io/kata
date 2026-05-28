@@ -46,7 +46,7 @@ func newImportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&target, "target", "", "database path to create")
 	cmd.Flags().BoolVar(&force, "force", false, "replace existing target database")
 	cmd.Flags().BoolVar(&newInstance, "new-instance", false,
-		"keep the target's fresh meta.instance_uid instead of overwriting it with the source's; preserves imported events' origin_instance_uid for federation loop-detection")
+		"keep the target database's new identity instead of reusing the source identity; useful when restoring into a separate copy")
 	return cmd
 }
 

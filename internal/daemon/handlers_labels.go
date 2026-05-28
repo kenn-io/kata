@@ -44,6 +44,9 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 
 		ev := db.LabelEventParams{
 			EventType: "issue.labeled",
@@ -67,6 +70,8 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		case errors.Is(err, db.ErrLabelInvalid):
 			return nil, api.NewError(400, "validation",
 				"label must match charset [a-z0-9._:-] and length 1..64", "", nil)
+		case errors.Is(err, db.ErrFederatedReadOnly):
+			return nil, federationReadOnlyError(err)
 		case err != nil:
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
@@ -96,6 +101,9 @@ func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabel
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 
 		ev := db.LabelEventParams{
 			EventType: "issue.unlabeled",
@@ -110,6 +118,9 @@ func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabel
 			out.Body.Event = nil
 			out.Body.Changed = false
 			return out, nil
+		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)

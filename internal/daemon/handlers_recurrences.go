@@ -121,6 +121,9 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		if errors.Is(err, db.ErrLabelInvalid) || errors.Is(err, db.ErrInvalidRecurrence) {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return nil, federationReadOnlyError(err)
+		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
@@ -201,6 +204,9 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 		if errors.Is(err, db.ErrLabelInvalid) || errors.Is(err, db.ErrInvalidRecurrence) {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
+		if errors.Is(err, db.ErrFederatedReadOnly) {
+			return nil, federationReadOnlyError(err)
+		}
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
@@ -223,6 +229,9 @@ func deleteRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Delete
 			return nil, err
 		}
 		if err := cfg.DB.SoftDeleteRecurrence(ctx, rec.ID, actor); err != nil {
+			if apiErr := federationReadOnlyError(err); apiErr != nil {
+				return nil, apiErr
+			}
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
 		return &api.DeleteRecurrenceResponse{}, nil

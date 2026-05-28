@@ -30,8 +30,14 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 		updated, evt, changed, err := cfg.DB.UpdateOwner(ctx, issue.ID, &owner, actor)
 		if err != nil {
+			if apiErr := federationReadOnlyError(err); apiErr != nil {
+				return nil, apiErr
+			}
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
 		if changed && evt != nil {
@@ -58,8 +64,14 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 		updated, evt, changed, err := cfg.DB.UpdateOwner(ctx, issue.ID, nil, actor)
 		if err != nil {
+			if apiErr := federationReadOnlyError(err); apiErr != nil {
+				return nil, apiErr
+			}
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
 		if changed && evt != nil {

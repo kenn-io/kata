@@ -1,6 +1,6 @@
 //go:build !windows
 
-package daemonclient
+package client
 
 import (
 	"os/exec"

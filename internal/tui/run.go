@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 
-	"go.kenn.io/kata/internal/daemonclient"
+	"go.kenn.io/kata/internal/client"
 )
 
 // Options controls TUI behavior. Stable across versions; new fields
@@ -132,17 +132,17 @@ func sseProjectScope(_ scope) *int64 {
 // We re-use NewHTTPClient with ResponseHeaderTimeout instead of building
 // a bespoke transport so unix-socket dialing stays in one place.
 func bootClient(ctx context.Context, _ Options) (*Client, *http.Client, bootInit, string, error) {
-	endpoint, err := daemonclient.EnsureRunning(ctx)
+	endpoint, err := client.EnsureRunning(ctx)
 	if err != nil {
 		return nil, nil, bootInit{}, "", err
 	}
-	hc, err := daemonclient.NewHTTPClient(ctx, endpoint,
-		daemonclient.Opts{Timeout: 5 * time.Second})
+	hc, err := client.NewHTTPClient(ctx, endpoint,
+		client.Opts{Timeout: 5 * time.Second})
 	if err != nil {
 		return nil, nil, bootInit{}, "", err
 	}
-	sseHC, err := daemonclient.NewHTTPClient(ctx, endpoint,
-		daemonclient.Opts{ResponseHeaderTimeout: daemonclient.SSEHandshakeTimeout})
+	sseHC, err := client.NewHTTPClient(ctx, endpoint,
+		client.Opts{ResponseHeaderTimeout: client.SSEHandshakeTimeout})
 	if err != nil {
 		return nil, nil, bootInit{}, "", err
 	}

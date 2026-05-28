@@ -50,7 +50,7 @@ func Export(ctx context.Context, d *db.DB, w io.Writer, opts ExportOptions) erro
 	if err := exportIssues(ctx, d, enc, opts, sourceSchemaVersion); err != nil {
 		return err
 	}
-	if err := exportComments(ctx, d, enc, opts); err != nil {
+	if err := exportComments(ctx, d, enc, opts, sourceSchemaVersion); err != nil {
 		return err
 	}
 	if err := exportIssueLabels(ctx, d, enc, opts); err != nil {
@@ -61,6 +61,34 @@ func Export(ctx context.Context, d *db.DB, w io.Writer, opts ExportOptions) erro
 	}
 	if sourceSchemaVersion >= 5 {
 		if err := exportImportMappings(ctx, d, enc, opts); err != nil {
+			return err
+		}
+	}
+	if sourceSchemaVersion >= 12 {
+		if err := exportFederationBindings(ctx, d, enc, opts); err != nil {
+			return err
+		}
+	}
+	if sourceSchemaVersion >= 12 {
+		if err := exportFederationSyncStatus(ctx, d, enc, opts); err != nil {
+			return err
+		}
+	}
+	if sourceSchemaVersion >= 12 {
+		if err := exportFederationQuarantine(ctx, d, enc, opts); err != nil {
+			return err
+		}
+	}
+	if sourceSchemaVersion >= 12 {
+		if err := exportFederationEnrollments(ctx, d, enc, opts); err != nil {
+			return err
+		}
+	}
+	if sourceSchemaVersion >= 12 {
+		if err := exportIssueClaims(ctx, d, enc, opts); err != nil {
+			return err
+		}
+		if err := exportPendingClaimRequests(ctx, d, enc, opts); err != nil {
 			return err
 		}
 	}
@@ -648,7 +676,35 @@ func exportIssuesV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 	})
 }
 
-func exportComments(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportComments(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
+	if sourceSchemaVersion < 12 {
+		return exportCommentsV10(ctx, d, enc, opts)
+	}
+	type record struct {
+		ID        int64  `json:"id"`
+		UID       string `json:"uid"`
+		IssueID   int64  `json:"issue_id"`
+		Author    string `json:"author"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"created_at"`
+	}
+	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT)
+	          FROM comments
+	          JOIN issues ON issues.id = comments.issue_id`
+	where, args := issueExportWhere("issues", opts)
+	query += where + ` ORDER BY comments.id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export comments: %w", err)
+	}
+	return scanRecords(rows, KindComment, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt)
+		return rec, err
+	})
+}
+
+func exportCommentsV10(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID        int64  `json:"id"`
 		IssueID   int64  `json:"issue_id"`
@@ -809,6 +865,262 @@ func exportImportMappings(ctx context.Context, d *db.DB, enc *Encoder, opts Expo
 	})
 }
 
+func exportFederationBindings(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+	type record struct {
+		ProjectID            int64   `json:"project_id"`
+		Role                 string  `json:"role"`
+		HubURL               string  `json:"hub_url"`
+		HubProjectID         int64   `json:"hub_project_id"`
+		HubProjectUID        string  `json:"hub_project_uid"`
+		ReplayHorizonEventID int64   `json:"replay_horizon_event_id"`
+		PullCursorEventID    int64   `json:"pull_cursor_event_id"`
+		PushEnabled          bool    `json:"push_enabled"`
+		PushCursorEventID    int64   `json:"push_cursor_event_id"`
+		Enabled              bool    `json:"enabled"`
+		CreatedAt            string  `json:"created_at"`
+		UpdatedAt            string  `json:"updated_at"`
+		LastSyncAt           *string `json:"last_sync_at,omitempty"`
+	}
+	query := `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
+	                 replay_horizon_event_id, pull_cursor_event_id, push_enabled,
+	                 push_cursor_event_id, enabled,
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT),
+	                 CAST(last_sync_at AS TEXT)
+	          FROM federation_bindings`
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY project_id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export federation_bindings: %w", err)
+	}
+	return scanRecords(rows, KindFederationBinding, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		var enabled, pushEnabled int
+		err := rows.Scan(&rec.ProjectID, &rec.Role, &rec.HubURL, &rec.HubProjectID,
+			&rec.HubProjectUID, &rec.ReplayHorizonEventID, &rec.PullCursorEventID,
+			&pushEnabled, &rec.PushCursorEventID, &enabled, &rec.CreatedAt,
+			&rec.UpdatedAt, &rec.LastSyncAt)
+		rec.PushEnabled = pushEnabled == 1
+		rec.Enabled = enabled == 1
+		return rec, err
+	})
+}
+
+func exportFederationSyncStatus(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+	type record struct {
+		ProjectID         int64   `json:"project_id"`
+		LastPullStartedAt *string `json:"last_pull_started_at,omitempty"`
+		LastPullSuccessAt *string `json:"last_pull_success_at,omitempty"`
+		LastPushStartedAt *string `json:"last_push_started_at,omitempty"`
+		LastPushSuccessAt *string `json:"last_push_success_at,omitempty"`
+		LastErrorAt       *string `json:"last_error_at,omitempty"`
+		LastError         *string `json:"last_error,omitempty"`
+		LastResetAt       *string `json:"last_reset_at,omitempty"`
+	}
+	query := `SELECT project_id,
+	                 CAST(last_pull_started_at AS TEXT), CAST(last_pull_success_at AS TEXT),
+	                 CAST(last_push_started_at AS TEXT), CAST(last_push_success_at AS TEXT),
+	                 CAST(last_error_at AS TEXT), last_error, CAST(last_reset_at AS TEXT)
+	            FROM federation_sync_status`
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY project_id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export federation_sync_status: %w", err)
+	}
+	return scanRecords(rows, KindFederationSyncStatus, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		err := rows.Scan(&rec.ProjectID, &rec.LastPullStartedAt, &rec.LastPullSuccessAt,
+			&rec.LastPushStartedAt, &rec.LastPushSuccessAt, &rec.LastErrorAt,
+			&rec.LastError, &rec.LastResetAt)
+		return rec, err
+	})
+}
+
+func exportFederationQuarantine(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+	type record struct {
+		ID           int64           `json:"id"`
+		ProjectID    int64           `json:"project_id"`
+		Direction    string          `json:"direction"`
+		FirstEventID int64           `json:"first_event_id"`
+		LastEventID  int64           `json:"last_event_id"`
+		EventUIDs    json.RawMessage `json:"event_uids"`
+		Error        string          `json:"error"`
+		CreatedAt    string          `json:"created_at"`
+		SkippedAt    *string         `json:"skipped_at,omitempty"`
+		SkippedBy    *string         `json:"skipped_by,omitempty"`
+		SkipReason   *string         `json:"skip_reason,omitempty"`
+	}
+	query := `SELECT id, project_id, direction, first_event_id, last_event_id,
+	                 event_uids, error, CAST(created_at AS TEXT),
+	                 CAST(skipped_at AS TEXT), skipped_by, skip_reason
+	            FROM federation_quarantine`
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export federation_quarantine: %w", err)
+	}
+	return scanRecords(rows, KindFederationQuarantine, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		var eventUIDs string
+		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.Direction, &rec.FirstEventID,
+			&rec.LastEventID, &eventUIDs, &rec.Error, &rec.CreatedAt,
+			&rec.SkippedAt, &rec.SkippedBy, &rec.SkipReason)
+		if err != nil {
+			return rec, err
+		}
+		if !json.Valid([]byte(eventUIDs)) {
+			return rec, fmt.Errorf("federation quarantine %d event_uids is invalid JSON", rec.ID)
+		}
+		rec.EventUIDs = json.RawMessage(eventUIDs)
+		return rec, nil
+	})
+}
+
+func exportFederationEnrollments(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+	type record struct {
+		ID               int64   `json:"id"`
+		TokenHash        string  `json:"token_hash"`
+		SpokeInstanceUID string  `json:"spoke_instance_uid"`
+		ProjectID        *int64  `json:"project_id,omitempty"`
+		Capabilities     string  `json:"capabilities"`
+		CreatedAt        string  `json:"created_at"`
+		UpdatedAt        string  `json:"updated_at"`
+		RevokedAt        *string `json:"revoked_at,omitempty"`
+	}
+	query := `SELECT id, token_hash, spoke_instance_uid, project_id, capabilities,
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT)
+	          FROM federation_enrollments`
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export federation_enrollments: %w", err)
+	}
+	return scanRecords(rows, KindFederationEnrollment, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		err := rows.Scan(&rec.ID, &rec.TokenHash, &rec.SpokeInstanceUID, &rec.ProjectID,
+			&rec.Capabilities, &rec.CreatedAt, &rec.UpdatedAt, &rec.RevokedAt)
+		return rec, err
+	})
+}
+
+func exportIssueClaims(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+	type record struct {
+		ID                int64   `json:"id"`
+		ClaimUID          string  `json:"claim_uid"`
+		ProjectID         int64   `json:"project_id"`
+		IssueID           int64   `json:"issue_id"`
+		IssueUID          string  `json:"issue_uid"`
+		Holder            string  `json:"holder"`
+		HolderInstanceUID string  `json:"holder_instance_uid"`
+		ClientKind        string  `json:"client_kind"`
+		Purpose           string  `json:"purpose"`
+		ClaimKind         string  `json:"claim_kind"`
+		AcquiredAt        string  `json:"acquired_at"`
+		ExpiresAt         *string `json:"expires_at,omitempty"`
+		ReleasedAt        *string `json:"released_at,omitempty"`
+		ReleaseReason     *string `json:"release_reason,omitempty"`
+		Revision          int64   `json:"revision"`
+		UpdatedAt         string  `json:"updated_at"`
+	}
+	query := `SELECT issue_claims.id, issue_claims.claim_uid, issue_claims.project_id,
+	                 issue_claims.issue_id, issue_claims.issue_uid, issue_claims.holder,
+	                 issue_claims.holder_instance_uid, issue_claims.client_kind,
+	                 issue_claims.purpose, issue_claims.claim_kind,
+	                 CAST(issue_claims.acquired_at AS TEXT),
+	                 CAST(issue_claims.expires_at AS TEXT),
+	                 CAST(issue_claims.released_at AS TEXT),
+	                 issue_claims.release_reason, issue_claims.revision,
+	                 CAST(issue_claims.updated_at AS TEXT)
+	          FROM issue_claims
+	          JOIN issues ON issues.id = issue_claims.issue_id`
+	where, args := issueExportWhere("issues", opts)
+	query += where + ` ORDER BY issue_claims.id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export issue_claims: %w", err)
+	}
+	return scanRecords(rows, KindIssueClaim, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		err := rows.Scan(&rec.ID, &rec.ClaimUID, &rec.ProjectID, &rec.IssueID,
+			&rec.IssueUID, &rec.Holder, &rec.HolderInstanceUID, &rec.ClientKind,
+			&rec.Purpose, &rec.ClaimKind, &rec.AcquiredAt, &rec.ExpiresAt,
+			&rec.ReleasedAt, &rec.ReleaseReason, &rec.Revision, &rec.UpdatedAt)
+		return rec, err
+	})
+}
+
+func exportPendingClaimRequests(
+	ctx context.Context,
+	d *db.DB,
+	enc *Encoder,
+	opts ExportOptions,
+) error {
+	type record struct {
+		ID                int64   `json:"id"`
+		RequestUID        string  `json:"request_uid"`
+		ProjectID         int64   `json:"project_id"`
+		IssueID           int64   `json:"issue_id"`
+		IssueUID          string  `json:"issue_uid"`
+		Holder            string  `json:"holder"`
+		HolderInstanceUID string  `json:"holder_instance_uid"`
+		ClientKind        string  `json:"client_kind"`
+		ClaimKind         string  `json:"claim_kind"`
+		TTLSeconds        *int64  `json:"ttl_seconds,omitempty"`
+		Purpose           string  `json:"purpose"`
+		RequestedAt       string  `json:"requested_at"`
+		LastAttemptAt     *string `json:"last_attempt_at,omitempty"`
+		LastError         *string `json:"last_error,omitempty"`
+		RejectedAt        *string `json:"rejected_at,omitempty"`
+		ResolvedAt        *string `json:"resolved_at,omitempty"`
+	}
+	query := `SELECT pending_claim_requests.id, pending_claim_requests.request_uid,
+	                 pending_claim_requests.project_id, pending_claim_requests.issue_id,
+	                 pending_claim_requests.issue_uid, pending_claim_requests.holder,
+	                 pending_claim_requests.holder_instance_uid, pending_claim_requests.client_kind,
+	                 pending_claim_requests.claim_kind, pending_claim_requests.ttl_seconds,
+	                 pending_claim_requests.purpose,
+	                 CAST(pending_claim_requests.requested_at AS TEXT),
+	                 CAST(pending_claim_requests.last_attempt_at AS TEXT),
+	                 pending_claim_requests.last_error,
+	                 CAST(pending_claim_requests.rejected_at AS TEXT),
+	                 CAST(pending_claim_requests.resolved_at AS TEXT)
+	          FROM pending_claim_requests
+	          JOIN issues ON issues.id = pending_claim_requests.issue_id`
+	where, args := issueExportWhere("issues", opts)
+	query += where + ` ORDER BY pending_claim_requests.id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export pending_claim_requests: %w", err)
+	}
+	return scanRecords(rows, KindPendingClaimRequest, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		err := rows.Scan(&rec.ID, &rec.RequestUID, &rec.ProjectID, &rec.IssueID,
+			&rec.IssueUID, &rec.Holder, &rec.HolderInstanceUID, &rec.ClientKind,
+			&rec.ClaimKind, &rec.TTLSeconds, &rec.Purpose, &rec.RequestedAt, &rec.LastAttemptAt, &rec.LastError,
+			&rec.RejectedAt, &rec.ResolvedAt)
+		return rec, err
+	})
+}
+
 func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
 	projectNameExpr, joinProjects := eventProjectNameExpr(sourceSchemaVersion)
 	if sourceSchemaVersion < 2 {
@@ -820,6 +1132,77 @@ func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOption
 	if sourceSchemaVersion < 8 {
 		return exportEventsV3(ctx, d, enc, opts, projectNameExpr, joinProjects)
 	}
+	if sourceSchemaVersion < 12 {
+		return exportEventsV8(ctx, d, enc, opts, projectNameExpr, joinProjects)
+	}
+	type record struct {
+		ID                int64           `json:"id"`
+		UID               string          `json:"uid"`
+		OriginInstanceUID string          `json:"origin_instance_uid"`
+		ProjectID         int64           `json:"project_id"`
+		ProjectName       string          `json:"project_name"`
+		IssueID           *int64          `json:"issue_id"`
+		IssueUID          *string         `json:"issue_uid"`
+		RelatedIssueID    *int64          `json:"related_issue_id"`
+		RelatedIssueUID   *string         `json:"related_issue_uid"`
+		Type              string          `json:"type"`
+		Actor             string          `json:"actor"`
+		Payload           json.RawMessage `json:"payload"`
+		HLCPhysicalMS     int64           `json:"hlc_physical_ms"`
+		HLCCounter        int64           `json:"hlc_counter"`
+		ContentHash       string          `json:"content_hash"`
+		CreatedAt         string          `json:"created_at"`
+	}
+	// See exportEventsV2 for the kata#1 design call: live-only export
+	// keeps aggregated issue.links_changed events whose related_issue_id
+	// points at a now-soft-deleted peer, but the peer's row is omitted
+	// from the export — so the FK must be scrubbed at emit time so the
+	// JSONL round-trips. The payload's *_uids slices retain the orphan
+	// reference for historical context.
+	//
+	// Scrub related_issue_id when the peer is missing entirely
+	// (any event type) OR, on live-only export, when an
+	// issue.links_changed peer is soft-deleted (kata#1 history-
+	// preservation rule). Peer-missing must be checked first so
+	// `peer.deleted_at` doesn't dereference a NULL row.
+	scrubCondition := `(peer.id IS NULL AND events.related_issue_id IS NOT NULL)`
+	if !opts.IncludeDeleted {
+		scrubCondition += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
+	}
+	relatedIDExpr := `CASE WHEN ` + scrubCondition + ` THEN NULL ELSE events.related_issue_id END`
+	relatedUIDExpr := `CASE WHEN ` + scrubCondition + ` THEN NULL ELSE events.related_issue_uid END`
+	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, %s, events.issue_id, events.issue_uid,
+	                 `+relatedIDExpr+`, `+relatedUIDExpr+`,
+	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
+	                 CAST(events.created_at AS TEXT)
+	          FROM events%s
+	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
+	          LEFT JOIN issues peer ON peer.id = events.related_issue_id`, projectNameExpr, joinProjects)
+	clauses, args := eventExportWhereClauses(opts)
+	clauses = append([]string{`(events.issue_id IS NULL OR subject_issue.id IS NOT NULL)`}, clauses...)
+	query += whereClause(clauses) + ` ORDER BY events.id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export events: %w", err)
+	}
+	return scanRecords(rows, KindEvent, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		var payload string
+		err := rows.Scan(&rec.ID, &rec.UID, &rec.OriginInstanceUID, &rec.ProjectID, &rec.ProjectName, &rec.IssueID,
+			&rec.IssueUID, &rec.RelatedIssueID, &rec.RelatedIssueUID,
+			&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt)
+		if err != nil {
+			return rec, err
+		}
+		if !json.Valid([]byte(payload)) {
+			return rec, fmt.Errorf("event %d payload is invalid JSON", rec.ID)
+		}
+		rec.Payload = json.RawMessage(payload)
+		return rec, nil
+	})
+}
+
+func exportEventsV8(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
 		ID                int64           `json:"id"`
 		UID               string          `json:"uid"`
@@ -835,18 +1218,6 @@ func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOption
 		Payload           json.RawMessage `json:"payload"`
 		CreatedAt         string          `json:"created_at"`
 	}
-	// See exportEventsV2 for the kata#1 design call: live-only export
-	// keeps aggregated issue.links_changed events whose related_issue_id
-	// points at a now-soft-deleted peer, but the peer's row is omitted
-	// from the export — so the FK must be scrubbed at emit time so the
-	// JSONL round-trips. The payload's *_uids slices retain the orphan
-	// reference for historical context.
-	//
-	// Scrub related_issue_id when the peer is missing entirely
-	// (any event type) OR, on live-only export, when an
-	// issue.links_changed peer is soft-deleted (kata#1 history-
-	// preservation rule). Peer-missing must be checked first so
-	// `peer.deleted_at` doesn't dereference a NULL row.
 	scrubCondition := `(peer.id IS NULL AND events.related_issue_id IS NOT NULL)`
 	if !opts.IncludeDeleted {
 		scrubCondition += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`

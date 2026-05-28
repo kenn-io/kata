@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/recurrence"
 	"go.kenn.io/kata/internal/shortid"
@@ -146,6 +147,12 @@ func (d *DB) CreateRecurrence(ctx context.Context, in CreateRecurrenceIn) (Recur
 		}
 		return rec, err
 	}
+	if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, in.ProjectID); err != nil {
+		return rec, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, in.ProjectID); err != nil {
+		return rec, err
+	}
 
 	recUID, err := katauid.New()
 	if err != nil {
@@ -203,13 +210,22 @@ func (d *DB) CreateRecurrence(ctx context.Context, in CreateRecurrenceIn) (Recur
 		return rec, err
 	}
 
+	templateLabels := normalizedLabels
+	if templateLabels == nil {
+		templateLabels = []string{}
+	}
 	payload, err := json.Marshal(map[string]any{
-		"recurrence_uid": recUID,
-		"rrule":          in.Rule,
-		"dtstart":        in.DTStart,
-		"timezone":       in.Timezone,
-		"template_title": in.Template.Title,
-		"template_body":  in.Template.Body,
+		"recurrence_uid":      recUID,
+		"rrule":               in.Rule,
+		"dtstart":             in.DTStart,
+		"timezone":            in.Timezone,
+		"template_title":      in.Template.Title,
+		"template_body":       in.Template.Body,
+		"template_owner":      in.Template.Owner,
+		"template_priority":   in.Template.Priority,
+		"template_labels":     templateLabels,
+		"template_metadata":   json.RawMessage(metaJSON),
+		"next_occurrence_key": firstNext,
 	})
 	if err != nil {
 		return rec, fmt.Errorf("marshal event payload: %w", err)
@@ -281,6 +297,12 @@ func (d *DB) PatchRecurrence(ctx context.Context, in PatchRecurrenceIn) (PatchRe
 	}
 	if cur.DeletedAt != nil {
 		return out, fmt.Errorf("recurrence %d soft-deleted", in.RecurrenceID)
+	}
+	if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, cur.ProjectID); err != nil {
+		return out, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, cur.ProjectID); err != nil {
+		return out, err
 	}
 	if in.IfMatchRev != cur.Revision {
 		return out, &RevisionConflictError{CurrentRevision: cur.Revision}
@@ -492,6 +514,12 @@ func (d *DB) SoftDeleteRecurrence(ctx context.Context, id int64, actor string) e
 		}
 		return err
 	}
+	if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, pid); err != nil {
+		return err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, pid); err != nil {
+		return err
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE recurrences
@@ -644,6 +672,12 @@ func (d *DB) MaterializeNext(
 	if r.DeletedAt != nil {
 		return out, nil
 	}
+	if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, r.ProjectID); err != nil {
+		return out, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, r.ProjectID); err != nil {
+		return out, err
+	}
 
 	next, err := recurrence.Walk(r.RRule, r.DTStart, r.Timezone, afterKey)
 	if err != nil {
@@ -692,18 +726,17 @@ func (d *DB) MaterializeNext(
 	if err != nil {
 		return out, fmt.Errorf("assign short_id: %w", err)
 	}
+	createdAt := time.Now().UTC().Format(sqliteTimeFormat)
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO issues
 		  (uid, project_id, short_id, title, body, status,
 		   owner, priority, author, metadata, revision,
 		   recurrence_id, occurrence_key, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, 1, ?, ?,
-		        strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-		        strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+		VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
 		newUID, r.ProjectID, newShortID, r.TemplateTitle, r.TemplateBody,
 		r.TemplateOwner, r.TemplatePriority, actor, string(issueMetadata),
-		r.ID, nextKey,
+		r.ID, nextKey, createdAt, createdAt,
 	)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -761,15 +794,23 @@ func (d *DB) MaterializeNext(
 	}
 
 	// Emit issue.created (with recurrence linkage) and recurrence.materialized.
-	issueCreatedPayload, err := json.Marshal(map[string]any{
-		"title":          r.TemplateTitle,
-		"body":           r.TemplateBody,
-		"recurrence_uid": r.UID,
-		"occurrence_key": nextKey,
-		"labels":         labels,
+	issueCreatedPayload, err := buildIssueCreatedPayload(issueCreatedPayload{
+		UID:           newUID,
+		ShortID:       newShortID,
+		Title:         r.TemplateTitle,
+		Body:          r.TemplateBody,
+		Author:        actor,
+		Owner:         r.TemplateOwner,
+		Priority:      r.TemplatePriority,
+		Status:        "open",
+		Metadata:      json.RawMessage(issueMetadata),
+		Labels:        labels,
+		CreatedAt:     createdAt,
+		RecurrenceUID: r.UID,
+		OccurrenceKey: nextKey,
 	})
 	if err != nil {
-		return out, fmt.Errorf("marshal issue.created payload: %w", err)
+		return out, err
 	}
 	if _, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   r.ProjectID,

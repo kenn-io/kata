@@ -32,15 +32,16 @@ func (d *DB) UpdatePriority(ctx context.Context, issueID int64, newPriority *int
 		return issue, nil, false, tx.Commit()
 	}
 
+	ts := nowTimestamp()
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
 		 SET priority   = ?,
-		     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ?`, newPriority, issueID); err != nil {
+		     updated_at = ?
+		 WHERE id = ?`, newPriority, ts, issueID); err != nil {
 		return Issue{}, nil, false, fmt.Errorf("update priority: %w", err)
 	}
 
-	eventType, payload, err := priorityEventPayload(issue.Priority, newPriority)
+	eventType, payload, err := priorityEventPayload(issue.Priority, newPriority, ts)
 	if err != nil {
 		return Issue{}, nil, false, err
 	}
@@ -78,16 +79,18 @@ func priorityEqual(a, b *int64) bool {
 // priorityEventPayload returns the event type and JSON payload for a
 // priority transition from old to new. old==new is rejected as a programming
 // error because UpdatePriority short-circuits no-ops before reaching here.
-func priorityEventPayload(old, newPrio *int64) (string, string, error) {
+func priorityEventPayload(old, newPrio *int64, ts string) (string, string, error) {
 	type setPayload struct {
 		Priority    int64  `json:"priority"`
 		OldPriority *int64 `json:"old_priority,omitempty"`
+		UpdatedAt   string `json:"updated_at"`
 	}
 	type clearedPayload struct {
-		OldPriority int64 `json:"old_priority"`
+		OldPriority int64  `json:"old_priority"`
+		UpdatedAt   string `json:"updated_at"`
 	}
 	if newPrio != nil {
-		bs, err := json.Marshal(setPayload{Priority: *newPrio, OldPriority: old})
+		bs, err := json.Marshal(setPayload{Priority: *newPrio, OldPriority: old, UpdatedAt: ts})
 		if err != nil {
 			return "", "", fmt.Errorf("marshal priority_set payload: %w", err)
 		}
@@ -97,7 +100,7 @@ func priorityEventPayload(old, newPrio *int64) (string, string, error) {
 	if old == nil {
 		return "", "", fmt.Errorf("priorityEventPayload: cannot clear a nil priority")
 	}
-	bs, err := json.Marshal(clearedPayload{OldPriority: *old})
+	bs, err := json.Marshal(clearedPayload{OldPriority: *old, UpdatedAt: ts})
 	if err != nil {
 		return "", "", fmt.Errorf("marshal priority_cleared payload: %w", err)
 	}

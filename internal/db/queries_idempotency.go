@@ -125,7 +125,8 @@ func (d *DB) LookupIdempotency(ctx context.Context, projectID int64, key string,
 	const q = `
 		SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 		       e.issue_id, e.issue_uid,
-		       e.related_issue_id, e.related_issue_uid, e.type, e.actor, e.payload, e.created_at,
+		       e.related_issue_id, e.related_issue_uid, e.type, e.actor, e.payload,
+		       e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at,
 		       json_extract(e.payload, '$.idempotency_fingerprint')
 		FROM events e
 		JOIN projects p ON p.id = e.project_id
@@ -143,7 +144,7 @@ func (d *DB) LookupIdempotency(ctx context.Context, projectID int64, key string,
 	)
 	err := row.Scan(&evt.ID, &evt.UID, &evt.OriginInstanceUID, &evt.ProjectID, &evt.ProjectUID, &evt.ProjectName,
 		&evt.IssueID, &evt.IssueUID, &evt.RelatedIssueID, &evt.RelatedIssueUID, &evt.Type, &evt.Actor,
-		&evt.Payload, &evt.CreatedAt, &fp)
+		&evt.Payload, &evt.HLCPhysicalMS, &evt.HLCCounter, &evt.ContentHash, &evt.CreatedAt, &fp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

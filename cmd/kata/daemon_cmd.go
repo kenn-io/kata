@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/version"
@@ -313,12 +315,16 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	signal.Notify(sigs, syscall.SIGHUP)
 	defer signal.Stop(sigs)
 	go runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
+	broadcaster := daemon.NewEventBroadcaster()
+	federationWake := startFederationRunner(ctx, store, broadcaster, disp, daemonLog)
 
 	srv := daemon.NewServer(daemon.ServerConfig{
-		DB:        store,
-		StartedAt: time.Now().UTC(),
-		Endpoint:  endpoint,
-		Hooks:     disp,
+		DB:             store,
+		StartedAt:      time.Now().UTC(),
+		Endpoint:       endpoint,
+		Hooks:          disp,
+		Broadcaster:    broadcaster,
+		FederationWake: federationWake,
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			ThrottleDisabled: !dcfg.Close.Throttle.ThrottleEnabled(),
 		},
@@ -345,6 +351,82 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	}
 
 	return srv.Run(ctx)
+}
+
+func startFederationRunner(
+	ctx context.Context,
+	store *db.DB,
+	bcast *daemon.EventBroadcaster,
+	hookSink hooks.Sink,
+	daemonLog *log.Logger,
+) func() {
+	wake := make(chan struct{}, 1)
+	wakeRunner := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	sub := bcast.Subscribe(daemon.SubFilter{})
+	go func() {
+		defer sub.Unsub()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-sub.Ch:
+				if !ok {
+					return
+				}
+				if msg.Kind != "event" {
+					continue
+				}
+				wakeRunner()
+			}
+		}
+	}()
+	runner := &federation.Runner{
+		DB:       store,
+		Interval: federationRunnerInterval(),
+		Wake:     wake,
+		OnError: func(err error) {
+			daemonLog.Printf("federation: %v", err)
+		},
+		OnPulledEvents: func(projectID int64, events []db.Event) {
+			for i := range events {
+				event := events[i]
+				bcast.Broadcast(daemon.StreamMsg{Kind: "event", Event: &event, ProjectID: projectID})
+				hookSink.Enqueue(event)
+			}
+		},
+	}
+	go func() {
+		if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			daemonLog.Printf("federation: %v", err)
+		}
+	}()
+	sweeper := daemon.NewTimedClaimSweeper(store, bcast, hookSink)
+	sweeper.OnError = func(err error) {
+		daemonLog.Printf("claim sweeper: %v", err)
+	}
+	go func() {
+		if err := sweeper.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			daemonLog.Printf("claim sweeper: %v", err)
+		}
+	}()
+	return wakeRunner
+}
+
+func federationRunnerInterval() time.Duration {
+	raw := os.Getenv("KATA_FEDERATION_PULL_INTERVAL_MS")
+	if raw == "" {
+		return 30 * time.Second
+	}
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 // chooseEndpoint picks the daemon's listener: Unix socket when listen is

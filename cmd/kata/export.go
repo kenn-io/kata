@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/daemonclient"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/jsonl"
 )
@@ -131,7 +131,7 @@ func refuseRunningDaemonWithMessage(ctx context.Context, message string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := daemonclient.Discover(ctx, ns.DataDir); ok {
+	if _, ok := client.Discover(ctx, ns.DataDir); ok {
 		return &cliError{
 			Message:  message,
 			Kind:     kindValidation,
