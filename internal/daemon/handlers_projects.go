@@ -84,6 +84,9 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects",
 	}, func(ctx context.Context, in *api.InitProjectRequest) (*api.InitProjectResponse, error) {
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return nil, err
+		}
 		out, created, err := initProject(ctx, cfg.DB, in)
 		if err != nil {
 			return nil, err
@@ -166,6 +169,9 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/merge",
 	}, func(ctx context.Context, in *api.MergeProjectRequest) (*api.MergeProjectResponse, error) {
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return nil, err
+		}
 		if in.Body.SourceProjectID == 0 {
 			return nil, api.NewError(400, "validation", "source_project_id required", "", nil)
 		}
@@ -327,6 +333,9 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "PATCH",
 		Path:        "/api/v1/projects/{project_id}",
 	}, func(ctx context.Context, in *api.RenameProjectRequest) (*api.ShowProjectResponse, error) {
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return nil, err
+		}
 		name := strings.TrimSpace(in.Body.Name)
 		if err := config.ValidateProjectName(name); err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
