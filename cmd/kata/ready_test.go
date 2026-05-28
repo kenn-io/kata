@@ -112,3 +112,29 @@ func TestReady_AllFromBoundDirSkipsLocalProject(t *testing.T) {
 	assert.Contains(t, out, "#",
 		"--all from bound dir still emits qualified refs, got: %q", out)
 }
+
+// TestReady_AllRejectsFilterFlags pins that --all errors out when combined
+// with per-project filter flags rather than silently dropping them: the
+// global ready endpoint does not apply --unowned / --owner / --label /
+// --no-label, so accepting those alongside --all would return misleading
+// (unfiltered) results.
+func TestReady_AllRejectsFilterFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"unowned", []string{"ready", "--all", "--unowned"}},
+		{"owner", []string{"ready", "--all", "--owner", "alice"}},
+		{"label", []string{"ready", "--all", "--label", "bug"}},
+		{"no-label", []string{"ready", "--all", "--no-label", "wip"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, dir, _ := setupCLIWorkspace(t)
+			args := append([]string{"--workspace", dir}, tc.args...)
+			_, err := runCmdOutput(t, env, args...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "--all does not support")
+		})
+	}
+}

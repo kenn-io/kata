@@ -39,6 +39,16 @@ func newReadyCmd() *cobra.Command {
 					ExitCode: ExitUsage,
 				}
 			}
+			// The global ready endpoint does not apply per-project filter
+			// flags. Reject combinations that would silently ignore them
+			// rather than returning misleading results.
+			if all && (unowned || owner != "" || len(labels) > 0 || len(noLabels) > 0) {
+				return &cliError{
+					Message:  "--all does not support --unowned, --owner, --label, or --no-label",
+					Kind:     kindUsage,
+					ExitCode: ExitUsage,
+				}
+			}
 			ctx := cmd.Context()
 			baseURL, err := ensureDaemon(ctx)
 			if err != nil {
