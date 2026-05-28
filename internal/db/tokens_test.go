@@ -148,6 +148,33 @@ func TestResolveAPITokenReturnsActiveToken(t *testing.T) {
 	assert.Equal(t, "wesm", got.Actor)
 }
 
+func TestResolveAPITokenLazilyUpdatesLastUsedAt(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "secret-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	got, err := d.ResolveAPIToken(ctx, "secret-token")
+	require.NoError(t, err)
+	require.NotNil(t, got.LastUsedAt)
+
+	tokens, err := d.ListAPITokens(ctx)
+	require.NoError(t, err)
+	require.Len(t, tokens, 1)
+	require.NotNil(t, tokens[0].LastUsedAt)
+	assert.Equal(t, tok.ID, tokens[0].ID)
+
+	firstUsed := *tokens[0].LastUsedAt
+	got, err = d.ResolveAPIToken(ctx, "secret-token")
+	require.NoError(t, err)
+	require.NotNil(t, got.LastUsedAt)
+	assert.Equal(t, firstUsed, *got.LastUsedAt)
+}
+
 func TestResolveAPITokenRejectsRevokedToken(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()

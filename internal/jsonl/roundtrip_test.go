@@ -66,22 +66,22 @@ func TestRoundtrip_ReplaysAPITokensFromTokenEvents(t *testing.T) {
 	dst := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, &buf, dst))
 
+	tokens, err := dst.ListAPITokens(ctx)
+	require.NoError(t, err)
+	require.Len(t, tokens, 2)
+	assert.Empty(t, tokens[0].TokenHash)
+	assert.Nil(t, tokens[0].LastUsedAt, "last_used_at is projection-only and resets on import")
+	assert.NotNil(t, tokens[1].RevokedAt)
+
 	got, err := dst.ResolveAPIToken(ctx, "active-token")
 	require.NoError(t, err)
 	assert.Equal(t, active.ID, got.ID)
 	assert.Equal(t, "wesm", got.Actor)
 	require.NotNil(t, got.Name)
 	assert.Equal(t, "laptop", *got.Name)
-	assert.Nil(t, got.LastUsedAt, "last_used_at is projection-only and resets on import")
 
 	_, err = dst.ResolveAPIToken(ctx, "revoked-token")
 	assert.ErrorIs(t, err, db.ErrNotFound)
-
-	tokens, err := dst.ListAPITokens(ctx)
-	require.NoError(t, err)
-	require.Len(t, tokens, 2)
-	assert.Empty(t, tokens[0].TokenHash)
-	assert.NotNil(t, tokens[1].RevokedAt)
 }
 
 func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {

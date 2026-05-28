@@ -233,11 +233,34 @@ func (d *DB) RevokeAPIToken(ctx context.Context, id int64, adminActor string) (A
 
 // ResolveAPIToken resolves a plaintext bearer token to its active token row.
 func (d *DB) ResolveAPIToken(ctx context.Context, plaintext string) (APIToken, error) {
+	hash := tokenHash(plaintext)
 	tok, err := scanAPIToken(d.QueryRowContext(ctx,
 		apiTokenSelect+` WHERE token_hash = ? AND revoked_at IS NULL`,
-		tokenHash(plaintext)))
+		hash))
 	if err != nil {
 		return APIToken{}, err
+	}
+	res, err := d.ExecContext(ctx, `
+		UPDATE api_tokens
+		   SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE token_hash = ?
+		   AND revoked_at IS NULL
+		   AND (
+		     last_used_at IS NULL OR
+		     last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
+		   )`, hash)
+	if err != nil {
+		return APIToken{}, fmt.Errorf("update api token last used: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return APIToken{}, fmt.Errorf("api token last used rows affected: %w", err)
+	}
+	if n > 0 {
+		tok, err = scanAPIToken(d.QueryRowContext(ctx, apiTokenSelect+` WHERE id = ?`, tok.ID))
+		if err != nil {
+			return APIToken{}, err
+		}
 	}
 	return tok, nil
 }
