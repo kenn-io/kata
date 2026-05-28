@@ -18,7 +18,8 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/comments",
 	}, func(ctx context.Context, in *api.CommentRequest) (*api.CommentResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -27,7 +28,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		c, evt, err := cfg.DB.CreateComment(ctx, db.CreateCommentParams{
 			IssueID: issue.ID,
-			Author:  in.Body.Actor,
+			Author:  actor,
 			Body:    in.Body.Body,
 		})
 		if err != nil {

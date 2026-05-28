@@ -17,6 +17,45 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+func TestCreateIssue_IdentityModeOverridesBodyActor(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	projectID := mkProject(t, env, "github.com/test/a", "a")
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "alice-token",
+		Actor:          "alice",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	resp, bs := envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues",
+		map[string]string{"actor": "someone_else", "title": "identity actor"},
+		map[string]string{"Authorization": "Bearer alice-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+	var out struct {
+		Issue struct {
+			ID int64 `json:"id"`
+		} `json:"issue"`
+		Event struct {
+			Actor string `json:"actor"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	assert.Equal(t, "alice", out.Event.Actor)
+	issue, err := env.DB.IssueByID(context.Background(), out.Issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "alice", issue.Author)
+}
+
+func TestCreateIssue_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	projectID := mkProject(t, env, "github.com/test/a", "a")
+
+	resp, bs := envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues",
+		map[string]string{"actor": "someone_else", "title": "bootstrap write"},
+		map[string]string{"Authorization": "Bearer bootstrap-token"})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusForbidden, "bootstrap_token_write_forbidden")
+}
+
 // TestGetIssue_ResolvesByShortID pins that /api/v1/projects/{pid}/issues/{ref}
 // accepts a short_id as the {ref} path component and renders QualifiedID in
 // the response.

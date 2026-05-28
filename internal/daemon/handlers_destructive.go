@@ -20,7 +20,8 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/delete",
 	}, func(ctx context.Context, in *api.DestructiveActionRequest) (*api.MutationResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		// Idempotent re-delete must resolve a soft-deleted row.
@@ -35,7 +36,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateConfirm(in.Confirm, "DELETE", project.Name, issue.ShortID); err != nil {
 			return nil, err
 		}
-		updated, evt, changed, err := cfg.DB.SoftDeleteIssue(ctx, issue.ID, in.Body.Actor)
+		updated, evt, changed, err := cfg.DB.SoftDeleteIssue(ctx, issue.ID, actor)
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}
@@ -58,7 +59,8 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/restore",
 	}, func(ctx context.Context, in *api.RestoreRequest) (*api.MutationResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		// Restore must resolve a soft-deleted row by short_id (§6).
@@ -66,7 +68,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		updated, evt, changed, err := cfg.DB.RestoreIssue(ctx, issue.ID, in.Body.Actor)
+		updated, evt, changed, err := cfg.DB.RestoreIssue(ctx, issue.ID, actor)
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}
@@ -89,7 +91,8 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/purge",
 	}, func(ctx context.Context, in *api.DestructiveActionRequest) (*api.PurgeResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		// Purge resolves soft-deleted rows so an operator can still confirm
@@ -110,7 +113,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			r := in.Body.Reason
 			reasonPtr = &r
 		}
-		pl, err := cfg.DB.PurgeIssue(ctx, issue.ID, in.Body.Actor, reasonPtr)
+		pl, err := cfg.DB.PurgeIssue(ctx, issue.ID, actor, reasonPtr)
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}

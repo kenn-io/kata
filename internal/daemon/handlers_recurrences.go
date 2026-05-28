@@ -96,7 +96,8 @@ func activeRecurrenceByUID(
 
 func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.CreateRecurrenceRequest) (*api.CreateRecurrenceResponse, error) {
 	return func(ctx context.Context, in *api.CreateRecurrenceRequest) (*api.CreateRecurrenceResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
@@ -104,7 +105,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		}
 		rec, err := cfg.DB.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 			ProjectID: in.ProjectID,
-			Actor:     in.Body.Actor,
+			Actor:     actor,
 			Rule:      in.Body.RRule,
 			DTStart:   in.Body.DTStart,
 			Timezone:  in.Body.Timezone,
@@ -161,7 +162,8 @@ func showRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.ShowRecu
 
 func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRecurrenceRequest) (*api.PatchRecurrenceResponse, error) {
 	return func(ctx context.Context, in *api.PatchRecurrenceRequest) (*api.PatchRecurrenceResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		rev, err := parseIfMatchRevision(in.IfMatch)
@@ -188,7 +190,7 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 		res, err := cfg.DB.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 			RecurrenceID: rec.ID,
 			IfMatchRev:   rev,
-			Actor:        in.Body.Actor,
+			Actor:        actor,
 			Update:       update,
 		})
 		var rce *db.RevisionConflictError
@@ -212,14 +214,15 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 
 func deleteRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.DeleteRecurrenceRequest) (*api.DeleteRecurrenceResponse, error) {
 	return func(ctx context.Context, in *api.DeleteRecurrenceRequest) (*api.DeleteRecurrenceResponse, error) {
-		if err := validateActor(in.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Actor)
+		if err != nil {
 			return nil, err
 		}
 		rec, err := activeRecurrenceByUID(ctx, cfg.DB, in.ProjectID, in.RecurrenceUID)
 		if err != nil {
 			return nil, err
 		}
-		if err := cfg.DB.SoftDeleteRecurrence(ctx, rec.ID, in.Actor); err != nil {
+		if err := cfg.DB.SoftDeleteRecurrence(ctx, rec.ID, actor); err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
 		return &api.DeleteRecurrenceResponse{}, nil

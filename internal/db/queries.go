@@ -25,6 +25,9 @@ var ErrOpenChildren = errors.New("issue has open children")
 
 // CreateProject inserts a new projects row.
 func (d *DB) CreateProject(ctx context.Context, name string) (Project, error) {
+	if name == SystemProjectName {
+		return Project{}, fmt.Errorf("create project: reserved project name %q", name)
+	}
 	projectUID, err := katauid.New()
 	if err != nil {
 		return Project{}, fmt.Errorf("generate project uid: %w", err)
@@ -47,7 +50,7 @@ func (d *DB) CreateProject(ctx context.Context, name string) (Project, error) {
 // themselves.
 func (d *DB) ProjectByID(ctx context.Context, id int64) (Project, error) {
 	row := d.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, id)
-	return scanProject(row)
+	return hideSystemProject(scanProject(row))
 }
 
 // ProjectByName fetches one project by its UNIQUE name. Archived projects are
@@ -57,7 +60,7 @@ func (d *DB) ProjectByID(ctx context.Context, id int64) (Project, error) {
 func (d *DB) ProjectByName(ctx context.Context, name string) (Project, error) {
 	row := d.QueryRowContext(ctx,
 		projectSelect+` WHERE name = ? AND deleted_at IS NULL`, name)
-	return scanProject(row)
+	return hideSystemProject(scanProject(row))
 }
 
 // ProjectByNameIncludingArchived returns the project even when archived.
@@ -65,7 +68,7 @@ func (d *DB) ProjectByName(ctx context.Context, name string) (Project, error) {
 // from "project was archived".
 func (d *DB) ProjectByNameIncludingArchived(ctx context.Context, name string) (Project, error) {
 	row := d.QueryRowContext(ctx, projectSelect+` WHERE name = ?`, name)
-	return scanProject(row)
+	return hideSystemProject(scanProject(row))
 }
 
 // ProjectByUID fetches one project by its stable UID. Archived
@@ -74,7 +77,7 @@ func (d *DB) ProjectByNameIncludingArchived(ctx context.Context, name string) (P
 // inspect DeletedAt themselves. Returns ErrNotFound when no row matches.
 func (d *DB) ProjectByUID(ctx context.Context, uid string) (Project, error) {
 	row := d.QueryRowContext(ctx, projectSelect+` WHERE uid = ?`, uid)
-	return scanProject(row)
+	return hideSystemProject(scanProject(row))
 }
 
 // RenameProject updates a project's canonical name without changing aliases or
@@ -111,10 +114,12 @@ func (d *DB) ListProjectsIncludingArchived(ctx context.Context) ([]Project, erro
 func (d *DB) listProjects(ctx context.Context, includeArchived bool) ([]Project, error) {
 	q := projectSelect
 	if !includeArchived {
-		q += ` WHERE deleted_at IS NULL`
+		q += ` WHERE deleted_at IS NULL AND name <> ?`
+	} else {
+		q += ` WHERE name <> ?`
 	}
 	q += ` ORDER BY id ASC`
-	rows, err := d.QueryContext(ctx, q)
+	rows, err := d.QueryContext(ctx, q, SystemProjectName)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
@@ -167,9 +172,9 @@ SELECT
 FROM projects p
 LEFT JOIN issue_counts ic ON ic.project_id = p.id
 LEFT JOIN event_max    em ON em.project_id = p.id
-WHERE p.deleted_at IS NULL
+WHERE p.deleted_at IS NULL AND p.name <> ?
 ORDER BY p.id`
-	rows, err := d.QueryContext(ctx, q)
+	rows, err := d.QueryContext(ctx, q, SystemProjectName)
 	if err != nil {
 		return nil, fmt.Errorf("batch project stats: %w", err)
 	}

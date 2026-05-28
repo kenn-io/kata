@@ -45,6 +45,8 @@ func (d *DB) EventsAfter(ctx context.Context, p EventsAfterParams) ([]Event, err
 	)
 	conds = append(conds, "e.id > ?")
 	args = append(args, p.AfterID)
+	conds = append(conds, "p.name <> ?")
+	args = append(args, SystemProjectName)
 	if p.ProjectID != 0 {
 		conds = append(conds, "e.project_id = ?")
 		args = append(args, p.ProjectID)
@@ -111,6 +113,8 @@ func (d *DB) EventsInWindow(ctx context.Context, p EventsInWindowParams) ([]Even
 	args = append(args, p.Since)
 	conds = append(conds, "e.created_at <= ?")
 	args = append(args, p.Until)
+	conds = append(conds, "p.name <> ?")
+	args = append(args, SystemProjectName)
 	if p.ProjectID != 0 {
 		conds = append(conds, "e.project_id = ?")
 		args = append(args, p.ProjectID)
@@ -127,6 +131,7 @@ func (d *DB) EventsInWindow(ctx context.Context, p EventsInWindowParams) ([]Even
 	             e.related_issue_id, e.related_issue_uid, ri.short_id,
 	             e.type, e.actor, e.payload, e.created_at
 	      FROM events e
+	      JOIN projects p ON p.id = e.project_id
 	      LEFT JOIN issues i ON i.id = e.issue_id
 	      LEFT JOIN issues ri ON ri.id = e.related_issue_id
 	      WHERE ` + strings.Join(conds, " AND ") + ` ORDER BY e.id ASC`

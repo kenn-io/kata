@@ -39,7 +39,8 @@ func activeProjectByUID(ctx context.Context, store *db.DB, uid string) (db.Proje
 
 func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequest) (*api.MoveIssueResponse, error) {
 	return func(ctx context.Context, in *api.MoveIssueRequest) (*api.MoveIssueResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		if in.Body.ToProjectUID == "" {
@@ -68,7 +69,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			FromProjectID: in.ProjectID,
 			ToProjectID:   tgt.ID,
 			IfMatchRev:    rev,
-			Actor:         in.Body.Actor,
+			Actor:         actor,
 		})
 		var conflict *db.RevisionConflictError
 		if errors.As(err, &conflict) {

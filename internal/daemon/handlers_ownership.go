@@ -18,7 +18,10 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/assign",
 	}, func(ctx context.Context, in *api.AssignRequest) (*api.MutationResponse, error) {
-		actor := strings.TrimSpace(in.Body.Actor)
+		actor := strings.TrimSpace(actorFor(ctx, in.Body.Actor))
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return nil, err
+		}
 		if err := validateActor(actor); err != nil {
 			return nil, err
 		}
@@ -50,7 +53,10 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/unassign",
 	}, func(ctx context.Context, in *api.UnassignRequest) (*api.MutationResponse, error) {
-		actor := strings.TrimSpace(in.Body.Actor)
+		actor := strings.TrimSpace(actorFor(ctx, in.Body.Actor))
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return nil, err
+		}
 		if err := validateActor(actor); err != nil {
 			return nil, err
 		}
@@ -78,7 +84,10 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/claim",
 	}, func(ctx context.Context, in *api.ClaimRequest) (*api.ClaimResponse, error) {
-		actor := strings.TrimSpace(in.Body.Actor)
+		actor := strings.TrimSpace(actorFor(ctx, in.Body.Actor))
+		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+			return nil, err
+		}
 		if err := validateActor(actor); err != nil {
 			return nil, err
 		}

@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -20,6 +22,54 @@ type throttledEventRecord struct {
 	Actor        string          `json:"actor"`
 	IssueShortID *string         `json:"issue_short_id"`
 	Payload      json.RawMessage `json:"payload"`
+}
+
+func TestCloseIssue_IdentityModeDoesNotTrustBodySourceTUI(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	pid := mkProject(t, env, "github.com/test/a", "a")
+	issue := mkIssue(t, env, pid, "close me")
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "alice-token",
+		Actor:          "alice",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	resp, bs := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(pid, issue.ShortID, "actions/close"),
+		map[string]any{"actor": "someone_else", "source": "tui"},
+		map[string]string{"Authorization": "Bearer alice-token"})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
+
+	got, err := env.DB.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "open", got.Status)
+}
+
+func TestCloseIssue_IdentityModeAllowsTUIBypassForMatchingTokenActor(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	pid := mkProject(t, env, "github.com/test/a", "a")
+	issue := mkIssue(t, env, pid, "close me")
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "alice-token",
+		Actor:          "alice",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	resp, bs := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(pid, issue.ShortID, "actions/close"),
+		map[string]any{"actor": "alice", "source": "tui"},
+		map[string]string{"Authorization": "Bearer alice-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+
+	got, err := env.DB.IssueByID(context.Background(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "closed", got.Status)
+	var actor string
+	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+		`SELECT actor FROM events WHERE type = 'issue.closed' AND issue_id = ?`, issue.ID).Scan(&actor))
+	assert.Equal(t, "alice", actor)
 }
 
 // fetchEvents polls /api/v1/events for the project and returns every event in

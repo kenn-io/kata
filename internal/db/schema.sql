@@ -226,6 +226,20 @@ CREATE INDEX idx_events_idempotency
   ON events(project_id, json_extract(payload, '$.idempotency_key'), created_at)
   WHERE type = 'issue.created' AND json_extract(payload, '$.idempotency_key') IS NOT NULL;
 
+CREATE TABLE api_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash   TEXT NOT NULL UNIQUE,
+  actor        TEXT NOT NULL,
+  name         TEXT,
+  created_at   DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  last_used_at DATETIME,
+  revoked_at   DATETIME,
+  CHECK (length(token_hash) = 64),
+  CHECK (length(trim(actor)) > 0),
+  CHECK (actor <> 'bootstrap'),
+  CHECK (name IS NULL OR length(trim(name)) > 0)
+);
+
 CREATE TABLE purge_log (
   id                          INTEGER PRIMARY KEY AUTOINCREMENT,
   uid                         TEXT NOT NULL UNIQUE,

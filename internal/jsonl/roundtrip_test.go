@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/jsonl"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func TestRoundtripRichDatabaseIsByteEquivalent(t *testing.T) {
@@ -33,6 +34,91 @@ func TestRoundtripRichDatabaseIsByteEquivalent(t *testing.T) {
 	assertSearchResultsMatch(t, src, dst, fixture.Project.ID, "orchid")
 	assertSearchResultsMatch(t, src, dst, fixture.Project.ID, "watermelon")
 	assertSearchResultsMatch(t, src, dst, fixture.Project.ID, "soft")
+}
+
+func TestRoundtrip_ReplaysAPITokensFromTokenEvents(t *testing.T) {
+	ctx := context.Background()
+	src := openExportTestDB(t)
+	name := "laptop"
+	active, _, err := src.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "active-token",
+		Actor:          "wesm",
+		Name:           &name,
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	revoked, _, err := src.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "revoked-token",
+		Actor:          "ci",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	_, _, err = src.RevokeAPIToken(ctx, revoked.ID, db.BootstrapActor)
+	require.NoError(t, err)
+	_, err = src.ExecContext(ctx,
+		`UPDATE api_tokens SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
+		active.ID)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{}))
+
+	dst := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, &buf, dst))
+
+	got, err := dst.ResolveAPIToken(ctx, "active-token")
+	require.NoError(t, err)
+	assert.Equal(t, active.ID, got.ID)
+	assert.Equal(t, "wesm", got.Actor)
+	require.NotNil(t, got.Name)
+	assert.Equal(t, "laptop", *got.Name)
+	assert.Nil(t, got.LastUsedAt, "last_used_at is projection-only and resets on import")
+
+	_, err = dst.ResolveAPIToken(ctx, "revoked-token")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+
+	tokens, err := dst.ListAPITokens(ctx)
+	require.NoError(t, err)
+	require.Len(t, tokens, 2)
+	assert.Empty(t, tokens[0].TokenHash)
+	assert.NotNil(t, tokens[1].RevokedAt)
+}
+
+func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {
+	ctx := context.Background()
+	src := openExportTestDB(t)
+	tok, _, err := src.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "revoked-token",
+		Actor:          "ci",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	_, _, err = src.RevokeAPIToken(ctx, tok.ID, db.BootstrapActor)
+	require.NoError(t, err)
+	var firstRevokedAt string
+	require.NoError(t, src.QueryRowContext(ctx,
+		`SELECT CAST(revoked_at AS TEXT) FROM api_tokens WHERE id = ?`, tok.ID).Scan(&firstRevokedAt))
+
+	system, err := src.SystemProject(ctx)
+	require.NoError(t, err)
+	eventUID, err := uid.New()
+	require.NoError(t, err)
+	_, err = src.ExecContext(ctx, `
+		INSERT INTO events(uid, origin_instance_uid, project_id, project_name, type, actor, payload, created_at)
+		VALUES(?, ?, ?, ?, 'token.revoked', ?, ?, '2026-05-28T23:59:59.000Z')`,
+		eventUID, src.InstanceUID(), system.ID, system.Name, db.BootstrapActor,
+		fmt.Sprintf(`{"token_id":%d}`, tok.ID))
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{}))
+	dst := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, &buf, dst))
+
+	var got string
+	require.NoError(t, dst.QueryRowContext(ctx,
+		`SELECT CAST(revoked_at AS TEXT) FROM api_tokens WHERE id = ?`, tok.ID).Scan(&got))
+	assert.Equal(t, firstRevokedAt, got)
 }
 
 func assertRoundtripTableCounts(t *testing.T, src, dst *db.DB) {

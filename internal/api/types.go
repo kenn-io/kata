@@ -43,6 +43,52 @@ type InstanceResponse struct {
 	}
 }
 
+// CreateTokenRequest is POST /api/v1/tokens.
+type CreateTokenRequest struct {
+	Body struct {
+		Actor string `json:"actor" required:"true"`
+		Name  string `json:"name,omitempty"`
+	}
+}
+
+// TokenOut is the redacted token metadata returned by token-admin endpoints.
+type TokenOut struct {
+	ID         int64      `json:"id"`
+	Actor      string     `json:"actor"`
+	Name       *string    `json:"name"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+}
+
+// CreateTokenResponse returns the plaintext token exactly once.
+type CreateTokenResponse struct {
+	Body struct {
+		Token     TokenOut `json:"token"`
+		Plaintext string   `json:"plaintext"`
+	}
+}
+
+// ListTokensResponse returns redacted token metadata.
+type ListTokensResponse struct {
+	Body struct {
+		Tokens []TokenOut `json:"tokens"`
+	}
+}
+
+// RevokeTokenRequest is POST /api/v1/tokens/{id}/actions/revoke.
+type RevokeTokenRequest struct {
+	ID int64 `path:"id" required:"true"`
+}
+
+// RevokeTokenResponse returns the revoked token and revocation event.
+type RevokeTokenResponse struct {
+	Body struct {
+		Token TokenOut  `json:"token"`
+		Event *db.Event `json:"event"`
+	}
+}
+
 // ProjectStatsOut is the per-project aggregate returned by GET
 // /api/v1/projects?include=stats. LastEventAt is nil for a project with
 // zero events. Spec §7.2.
@@ -479,10 +525,9 @@ type ActionRequest struct {
 		// substance / evidence validation so an interactive human close
 		// is one keystroke. Structural guards (parent-close, sibling
 		// throttle) still apply. Empty string means "agent / CLI" and
-		// gets the full validation. Lying about Source is possible and
-		// considered acceptable: agents who'd forge this could also
-		// forge the evidence payload, so adding a hard signal here would
-		// only inconvenience honest callers.
+		// gets the full validation. In token identity mode the daemon
+		// only honors this bypass when the request actor matches the
+		// authenticated token actor; otherwise full validation applies.
 		Source   string     `json:"source,omitempty" enum:"tui,"`
 		Evidence []Evidence `json:"evidence,omitempty"`
 		DryRun   bool       `json:"dry_run,omitempty"`

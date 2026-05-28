@@ -482,6 +482,7 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 
 	dropV10Additions(t, raw)
 	assertV8V9Shape(t, raw)
+	deleteAutoSystemProject(t, raw)
 
 	// Phase 2: seed the valid baseline via raw SQL. Fixed UIDs keep the
 	// fixture deterministic; short_ids satisfy the issues CHECK that
@@ -594,6 +595,13 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	_, err = raw.Exec(`UPDATE meta SET value='8' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	_, err = raw.Exec(`PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+}
+
+func deleteAutoSystemProject(t *testing.T, raw *sql.DB) {
+	t.Helper()
+	_, err := raw.Exec(`DELETE FROM projects WHERE uid = ? AND name = ?`,
+		db.SystemProjectUID, db.SystemProjectName)
 	require.NoError(t, err)
 }
 

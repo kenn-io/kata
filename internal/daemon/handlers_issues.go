@@ -28,7 +28,8 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues",
 	}, func(ctx context.Context, in *api.CreateIssueRequest) (*api.MutationResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
@@ -66,7 +67,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			ProjectID:              in.ProjectID,
 			Title:                  in.Body.Title,
 			Body:                   in.Body.Body,
-			Author:                 in.Body.Actor,
+			Author:                 actor,
 			Owner:                  in.Body.Owner,
 			Priority:               in.Body.Priority,
 			Labels:                 in.Body.Labels,
@@ -251,7 +252,8 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 // is valid as long as the delta contains at least one mutation.
 func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequest) (*api.EditIssueResponse, error) {
 	return func(ctx context.Context, in *api.EditIssueRequest) (*api.EditIssueResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -282,7 +284,7 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 
 		params := db.EditIssueAtomicParams{
 			IssueID:       issue.ID,
-			Actor:         in.Body.Actor,
+			Actor:         actor,
 			Title:         in.Body.Title,
 			Body:          in.Body.Body,
 			Owner:         in.Body.Owner,

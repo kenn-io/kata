@@ -35,7 +35,8 @@ func registerLinksHandlers(humaAPI huma.API, cfg ServerConfig) {
 
 func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRequest) (*api.CreateLinkResponse, error) {
 	return func(ctx context.Context, in *api.CreateLinkRequest) (*api.CreateLinkResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		from, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -92,7 +93,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 					FromUID:      from.UID,
 					ToShortID:    oldParentIssue.ShortID,
 					ToUID:        oldParentIssue.UID,
-					Actor:        in.Body.Actor,
+					Actor:        actor,
 				}
 				unlinkEvt, err := cfg.DB.DeleteLinkAndEvent(ctx, existing, unlinkEv)
 				if err != nil {
@@ -114,14 +115,14 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			FromUID:      from.UID,
 			ToShortID:    to.ShortID,
 			ToUID:        to.UID,
-			Actor:        in.Body.Actor,
+			Actor:        actor,
 		}
 		link, evt, err := cfg.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{
 			ProjectID:   in.ProjectID,
 			FromIssueID: storageFromID,
 			ToIssueID:   storageToID,
 			Type:        in.Body.Type,
-			Author:      in.Body.Actor,
+			Author:      actor,
 		}, linkEv)
 		switch {
 		case errors.Is(err, db.ErrLinkExists):
@@ -154,7 +155,8 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 
 func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRequest) (*api.MutationResponse, error) {
 	return func(ctx context.Context, in *api.DeleteLinkRequest) (*api.MutationResponse, error) {
-		if err := validateActor(in.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Actor)
+		if err != nil {
 			return nil, err
 		}
 		from, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -211,7 +213,7 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 			FromUID:      linkFrom.UID,
 			ToShortID:    linkTo.ShortID,
 			ToUID:        linkTo.UID,
-			Actor:        in.Actor,
+			Actor:        actor,
 		}
 		evt, err := cfg.DB.DeleteLinkAndEvent(ctx, link, ev)
 		if errors.Is(err, db.ErrNotFound) {

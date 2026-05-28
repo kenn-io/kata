@@ -16,7 +16,8 @@ func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/priority",
 	}, func(ctx context.Context, in *api.PriorityRequest) (*api.MutationResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		if err := validatePriorityRange(in.Body.Priority); err != nil {
@@ -26,7 +27,7 @@ func registerPriorityHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		updated, evt, changed, err := cfg.DB.UpdatePriority(ctx, issue.ID, in.Body.Priority, in.Body.Actor)
+		updated, evt, changed, err := cfg.DB.UpdatePriority(ctx, issue.ID, in.Body.Priority, actor)
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}

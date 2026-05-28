@@ -570,6 +570,37 @@ literal non-public addresses: loopback, RFC1918, CGNAT, link-local, and ULA.
 Public IPs and DNS hostnames are rejected; use HTTPS through a reverse proxy
 or an SSH tunnel for those shapes.
 
+For a shared daemon where each user should have a stable actor identity, mint
+per-user API tokens before enabling identity mode:
+
+```sh
+KATA_AUTH_TOKEN=change-me kata tokens create --actor wesm --name laptop
+kata tokens list
+kata tokens revoke 1
+```
+
+Then enable identity mode on the daemon:
+
+```toml
+[auth]
+token = "change-me"
+trust_private_network = true
+require_token_identity = true
+```
+
+In identity mode, `token` is a bootstrap/admin credential. It can create,
+list, and revoke user tokens, and it can perform reads, but it cannot perform
+attributed writes. Mutations must use a DB-backed token created with
+`kata tokens create`; the daemon derives the actor from that token and ignores
+any actor string sent in the request body. This preserves existing local CLI
+behavior while making shared-daemon attribution server-derived.
+
+Token lifecycle changes are stored in the event log so backup/restore and
+JSONL cutover preserve them, but the hidden system-project token events are
+excluded from ordinary project lists, stats, poll responses, and event streams.
+`require_token_identity = true` cannot be combined with
+`--insecure-readonly`.
+
 For unauthenticated private-network experiments, `kata daemon start --listen
 100.64.0.5:7777 --insecure-readonly` permits GET requests only; mutations and
 the event stream still require authentication. Network ACLs (firewall, VPN,

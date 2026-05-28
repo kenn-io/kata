@@ -20,7 +20,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const currentSchemaVersion = 10
+const currentSchemaVersion = 11
 
 // CurrentSchemaVersion returns the schema version expected by this binary.
 func CurrentSchemaVersion() int { return currentSchemaVersion }
@@ -64,6 +64,10 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return nil, err
 	}
 	if err := d.ensureInstanceUID(ctx); err != nil {
+		_ = sdb.Close()
+		return nil, err
+	}
+	if err := d.EnsureSystemProject(ctx); err != nil {
 		_ = sdb.Close()
 		return nil, err
 	}

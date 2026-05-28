@@ -75,6 +75,48 @@ func TestAutoCutoverUpgradesLegacyV1DB(t *testing.T) {
 	assertNoCutoverTemps(t, path)
 }
 
+func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	d, err := db.Open(ctx, path)
+	require.NoError(t, err)
+	active, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "active-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	revoked, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "revoked-token",
+		Actor:          "ci",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	_, _, err = d.RevokeAPIToken(ctx, revoked.ID, db.BootstrapActor)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx,
+		`UPDATE meta SET value = ? WHERE key = 'schema_version'`,
+		db.CurrentSchemaVersion()-1)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	upgraded, err := db.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	got, err := upgraded.ResolveAPIToken(ctx, "active-token")
+	require.NoError(t, err)
+	assert.Equal(t, active.ID, got.ID)
+	assert.Equal(t, "wesm", got.Actor)
+	_, err = upgraded.ResolveAPIToken(ctx, "revoked-token")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	tokens, err := upgraded.ListAPITokens(ctx)
+	require.NoError(t, err)
+	require.Len(t, tokens, 2)
+	assert.NotNil(t, tokens[1].RevokedAt)
+}
+
 func TestPeekSchemaVersion(t *testing.T) {
 	ctx, path := setupClosedTestDB(t)
 	assertCurrentSchemaVersion(t, path)
@@ -491,7 +533,8 @@ func TestCutoverV7_RejectsProjectNameWithHash(t *testing.T) {
 
 	// Cutover must fail BEFORE any inserts.
 	var n int
-	require.NoError(t, target.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&n))
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM projects WHERE name <> ?`, db.SystemProjectName).Scan(&n))
 	assert.Equal(t, 0, n, "cutover must fail before mutating target")
 }
 
@@ -616,6 +659,7 @@ func seedV9SchemaDB(t *testing.T, path string) {
 
 	dropV10Additions(t, raw)
 	assertV8V9Shape(t, raw)
+	deleteAutoSystemProject(t, raw)
 
 	const projectUID = "01HZZZZZZZZZZZZZZZZZZZZZZZ"
 	const issueUID = "01HZZZZZZZZZZZZZZZZZZZZA01"

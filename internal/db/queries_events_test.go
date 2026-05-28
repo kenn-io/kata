@@ -41,6 +41,33 @@ func TestEventsAfter_CrossProject(t *testing.T) {
 	assert.Equal(t, int64(2), all[1].ID)
 }
 
+func TestEventsAfter_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p := createProject(ctx, t, d, "a")
+	_, normal := createTesterIssue(ctx, t, d, p.ID, "a1")
+	_, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "secret-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	sys, err := d.SystemProject(ctx)
+	require.NoError(t, err)
+
+	all, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 0, Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+	assert.Equal(t, normal.ID, all[0].ID)
+	assert.Equal(t, "issue.created", all[0].Type)
+
+	systemRows, err := d.EventsAfter(ctx, db.EventsAfterParams{
+		AfterID: 0, ProjectID: sys.ID, Limit: 100,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, systemRows)
+}
+
 func TestEventsAfter_PerProjectFilter(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
@@ -92,6 +119,28 @@ func TestEventsAfter_StrictlyAfterNonZeroID(t *testing.T) {
 	none, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 5, Limit: 100})
 	require.NoError(t, err)
 	assert.Len(t, none, 0, "AfterID at the highest event id must return no rows (strict >)")
+}
+
+func TestEventsInWindow_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p := createProject(ctx, t, d, "a")
+	_, normal := createTesterIssue(ctx, t, d, p.ID, "a1")
+	_, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "secret-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	all, err := d.EventsInWindow(ctx, db.EventsInWindowParams{
+		Since: "1970-01-01T00:00:00.000Z",
+		Until: "2999-01-01T00:00:00.000Z",
+	})
+	require.NoError(t, err)
+	require.Len(t, all, 1)
+	assert.Equal(t, normal.ID, all[0].ID)
+	assert.Equal(t, "issue.created", all[0].Type)
 }
 
 func TestPurgeResetCheck_NoPurges(t *testing.T) {

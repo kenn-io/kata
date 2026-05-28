@@ -59,6 +59,9 @@ func ImportWithOptions(ctx context.Context, r io.Reader, target *db.DB, opts Imp
 	if _, err := tx.ExecContext(ctx, `PRAGMA defer_foreign_keys=ON`); err != nil {
 		return fmt.Errorf("defer foreign keys: %w", err)
 	}
+	if err := removeAutoSystemProject(ctx, tx); err != nil {
+		return err
+	}
 
 	// Capture the target's meta.instance_uid (set by db.Open) before the
 	// envelope loop has a chance to overwrite it. This value is the LOCAL
@@ -74,6 +77,12 @@ func ImportWithOptions(ctx context.Context, r io.Reader, target *db.DB, opts Imp
 		if err := importEnvelope(ctx, tx, env, exportVersion, localInstanceUID, opts); err != nil {
 			return err
 		}
+	}
+	if err := ensureSystemProject(ctx, tx); err != nil {
+		return err
+	}
+	if err := replayAPITokenProjection(ctx, tx); err != nil {
+		return err
 	}
 	if err := recordImportSchemaVersion(ctx, tx); err != nil {
 		return err
@@ -105,6 +114,109 @@ func readMetaInstanceUID(ctx context.Context, tx *sql.Tx) (string, error) {
 		return "", fmt.Errorf("read target instance_uid: %w", err)
 	}
 	return v, nil
+}
+
+func removeAutoSystemProject(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx,
+		`DELETE FROM projects WHERE uid = ? AND name = ?`,
+		db.SystemProjectUID, db.SystemProjectName)
+	if err != nil {
+		return fmt.Errorf("remove auto system project before import: %w", err)
+	}
+	return nil
+}
+
+func ensureSystemProject(ctx context.Context, tx *sql.Tx) error {
+	var exists int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM projects WHERE uid = ? AND name = ?`,
+		db.SystemProjectUID, db.SystemProjectName).Scan(&exists); err != nil {
+		return fmt.Errorf("check system project after import: %w", err)
+	}
+	if exists > 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO projects(uid, name)
+		VALUES(?, ?)
+	`, db.SystemProjectUID, db.SystemProjectName)
+	if err != nil {
+		return fmt.Errorf("ensure system project after import: %w", err)
+	}
+	return nil
+}
+
+func replayAPITokenProjection(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM api_tokens`); err != nil {
+		return fmt.Errorf("clear api_tokens projection: %w", err)
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT type, payload, CAST(created_at AS TEXT)
+		  FROM events
+		 WHERE type IN ('token.created', 'token.revoked')
+		 ORDER BY id ASC`)
+	if err != nil {
+		return fmt.Errorf("read token events: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var typ, payload, createdAt string
+		if err := rows.Scan(&typ, &payload, &createdAt); err != nil {
+			return fmt.Errorf("scan token event: %w", err)
+		}
+		switch typ {
+		case "token.created":
+			var rec tokenCreatedEventPayload
+			if err := json.Unmarshal([]byte(payload), &rec); err != nil {
+				return fmt.Errorf("decode token.created payload: %w", err)
+			}
+			if rec.TokenID == 0 || rec.TokenHash == "" || rec.TargetActor == "" {
+				return fmt.Errorf("decode token.created payload: missing required field")
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO api_tokens(id, token_hash, actor, name, created_at)
+				 VALUES(?, ?, ?, ?, ?)`,
+				rec.TokenID, rec.TokenHash, rec.TargetActor, rec.Name, createdAt); err != nil {
+				return fmt.Errorf("replay token.created %d: %w", rec.TokenID, err)
+			}
+		case "token.revoked":
+			var rec tokenRevokedEventPayload
+			if err := json.Unmarshal([]byte(payload), &rec); err != nil {
+				return fmt.Errorf("decode token.revoked payload: %w", err)
+			}
+			if rec.TokenID == 0 {
+				return fmt.Errorf("decode token.revoked payload: missing token_id")
+			}
+			res, err := tx.ExecContext(ctx,
+				`UPDATE api_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?`,
+				createdAt, rec.TokenID)
+			if err != nil {
+				return fmt.Errorf("replay token.revoked %d: %w", rec.TokenID, err)
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("replay token.revoked rows affected: %w", err)
+			}
+			if n == 0 {
+				return fmt.Errorf("replay token.revoked %d: token not found", rec.TokenID)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read token event rows: %w", err)
+	}
+	return nil
+}
+
+type tokenCreatedEventPayload struct {
+	TokenID     int64   `json:"token_id"`
+	TokenHash   string  `json:"token_hash"`
+	TargetActor string  `json:"target_actor"`
+	Name        *string `json:"name,omitempty"`
+}
+
+type tokenRevokedEventPayload struct {
+	TokenID int64 `json:"token_id"`
 }
 
 func validateExportVersion(envs []Envelope) (int, error) {
@@ -158,6 +270,20 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		}
 		if err := fillProjectUID(&rec, exportVersion); err != nil {
 			return err
+		}
+		if isSystemProjectRecord(rec) {
+			if len(rec.Metadata) == 0 {
+				rec.Metadata = json.RawMessage(`{}`)
+			}
+			if rec.Revision == 0 {
+				rec.Revision = 1
+			}
+			_, err := tx.ExecContext(ctx,
+				`INSERT INTO projects(id, uid, name, created_at, deleted_at, metadata, revision)
+				 VALUES(?, ?, ?, ?, ?, ?, ?)`,
+				rec.ID, rec.UID, rec.Name, rec.CreatedAt, rec.DeletedAt,
+				string(rec.Metadata), rec.Revision)
+			return wrapImportErr(env.Kind, err)
 		}
 		rec.OriginalName = rec.Name
 		name, renamed, err := uniqueProjectName(ctx, tx, rec.ID, rec.Name)
@@ -416,6 +542,9 @@ func uniqueProjectName(ctx context.Context, tx *sql.Tx, projectID int64, name st
 		name = fmt.Sprintf("project-%d", projectID)
 		original = name
 	}
+	if name == db.SystemProjectName {
+		name = db.SystemProjectName + "-2"
+	}
 	for suffix := 1; ; suffix++ {
 		var exists int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects WHERE name = ?`, name).Scan(&exists); err != nil {
@@ -426,6 +555,10 @@ func uniqueProjectName(ctx context.Context, tx *sql.Tx, projectID int64, name st
 		}
 		name = fmt.Sprintf("%s-%d", original, suffix+1)
 	}
+}
+
+func isSystemProjectRecord(rec projectRecord) bool {
+	return rec.UID == db.SystemProjectUID && rec.Name == db.SystemProjectName
 }
 
 func fillProjectUID(rec *projectRecord, exportVersion int) error {
@@ -776,7 +909,7 @@ func upsertSequence(ctx context.Context, tx *sql.Tx, name string, seq int64) err
 }
 
 func reconcileSequences(ctx context.Context, tx *sql.Tx) error {
-	for _, table := range []string{"projects", "project_aliases", "issues", "comments", "links", "import_mappings", "events", "purge_log"} {
+	for _, table := range []string{"projects", "project_aliases", "issues", "comments", "links", "import_mappings", "events", "purge_log", "api_tokens"} {
 		var maxID int64
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(MAX(id), 0) FROM `+table).Scan(&maxID); err != nil {

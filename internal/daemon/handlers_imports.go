@@ -23,7 +23,8 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// typical enrichment ratios while still bounding a runaway client.
 		MaxBodyBytes: 64 << 20,
 	}, func(ctx context.Context, in *api.ImportRequest) (*api.ImportResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
@@ -66,7 +67,7 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		result, events, err := cfg.DB.ImportBatch(ctx, db.ImportBatchParams{
 			ProjectID: in.ProjectID,
 			Source:    in.Body.Source,
-			Actor:     in.Body.Actor,
+			Actor:     actor,
 			Items:     items,
 		})
 		switch {

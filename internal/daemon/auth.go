@@ -9,6 +9,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 )
 
 const (
@@ -26,9 +27,10 @@ const (
 // fields are also surfaced through ServerConfig; this struct exists so the
 // middleware itself does not depend on ServerConfig.
 type authPolicy struct {
-	Token               string
-	TrustPrivateNetwork bool
-	InsecureReadonly    bool
+	Token                string
+	TrustPrivateNetwork  bool
+	InsecureReadonly     bool
+	RequireTokenIdentity bool
 }
 
 // requireBearer returns an HTTP middleware that enforces bearer-token auth
@@ -40,11 +42,19 @@ type authPolicy struct {
 //
 // /api/v1/ping and /api/v1/health bypass unconditionally so health-check probes
 // do not need credentials.
-func requireBearer(p authPolicy) func(http.Handler) http.Handler {
+func requireBearer(p authPolicy, tokenStores ...*db.DB) func(http.Handler) http.Handler {
+	var tokenStore *db.DB
+	if len(tokenStores) > 0 {
+		tokenStore = tokenStores[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == pathPing || r.URL.Path == pathHealth {
 				next.ServeHTTP(w, r)
+				return
+			}
+			if p.RequireTokenIdentity {
+				requireIdentityBearer(w, r, next, p, tokenStore)
 				return
 			}
 			if p.Token == "" {
@@ -52,7 +62,9 @@ func requireBearer(p authPolicy) func(http.Handler) http.Handler {
 					next.ServeHTTP(w, r)
 					return
 				}
-				if r.Method != http.MethodGet || strings.HasPrefix(r.URL.Path, pathEventsStreamPath) {
+				if r.Method != http.MethodGet ||
+					strings.HasPrefix(r.URL.Path, pathEventsStreamPath) ||
+					isTokenAdminPath(r.URL.Path) {
 					api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required",
 						"mutations and event stream require authentication; daemon is in --insecure-readonly mode")
 					return
@@ -71,9 +83,47 @@ func requireBearer(p authPolicy) func(http.Handler) http.Handler {
 				api.WriteEnvelope(w, http.StatusForbidden, "auth_invalid", "token mismatch")
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), Principal{
+				Kind: PrincipalStaticToken,
+			})))
 		})
 	}
+}
+
+func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Handler, p authPolicy, tokenStore *db.DB) {
+	got := r.Header.Get(authHeader)
+	if !strings.HasPrefix(got, authBearerPrefix) {
+		api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required",
+			"Authorization: Bearer <token> required")
+		return
+	}
+	presented := strings.TrimPrefix(got, authBearerPrefix)
+	if p.Token != "" && subtle.ConstantTimeCompare([]byte(presented), []byte(p.Token)) == 1 {
+		if isMutation(r.Method) && !isTokenAdminPath(r.URL.Path) {
+			api.WriteEnvelope(w, http.StatusForbidden, "bootstrap_token_write_forbidden",
+				"bootstrap token cannot perform attributed writes; use a user token")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), Principal{
+			Kind: PrincipalBootstrap,
+		})))
+		return
+	}
+	if tokenStore == nil {
+		api.WriteEnvelope(w, http.StatusInternalServerError, "internal",
+			"token identity requires a database")
+		return
+	}
+	tok, err := tokenStore.ResolveAPIToken(r.Context(), presented)
+	if err != nil {
+		api.WriteEnvelope(w, http.StatusForbidden, "token_invalid", "token invalid")
+		return
+	}
+	next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principalFromAPIToken(tok))))
+}
+
+func isTokenAdminPath(path string) bool {
+	return path == "/api/v1/tokens" || strings.HasPrefix(path, "/api/v1/tokens/")
 }
 
 // checkAuthStartup refuses startup when the listen address would expose
@@ -92,6 +142,9 @@ func requireBearer(p authPolicy) func(http.Handler) http.Handler {
 // daemon with a TLS-terminating reverse proxy and bind the daemon to a
 // Unix socket or 127.0.0.1.
 func checkAuthStartup(listen string, p authPolicy) error {
+	if p.RequireTokenIdentity && p.InsecureReadonly {
+		return fmt.Errorf("require_token_identity cannot be combined with --insecure-readonly")
+	}
 	if !isNonLoopbackTCP(listen) {
 		return nil
 	}
@@ -115,9 +168,10 @@ func checkAuthStartup(listen string, p authPolicy) error {
 // CheckAuthStartup is the exported form used by the CLI entry point.
 func CheckAuthStartup(listen string, auth config.AuthConfig, insecureReadonly bool) error {
 	return checkAuthStartup(listen, authPolicy{
-		Token:               auth.Token,
-		TrustPrivateNetwork: auth.TrustPrivateNetwork,
-		InsecureReadonly:    insecureReadonly,
+		Token:                auth.Token,
+		TrustPrivateNetwork:  auth.TrustPrivateNetwork,
+		InsecureReadonly:     insecureReadonly,
+		RequireTokenIdentity: auth.RequireTokenIdentity,
 	})
 }
 

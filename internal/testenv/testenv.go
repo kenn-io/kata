@@ -53,6 +53,13 @@ func WithAuthToken(token string) Option {
 	}
 }
 
+// WithRequireTokenIdentity enables DB-backed bearer identity for tests.
+func WithRequireTokenIdentity() Option {
+	return func(cfg *daemon.ServerConfig) {
+		cfg.Auth.RequireTokenIdentity = true
+	}
+}
+
 // applyClientAuthEnv mirrors the WithAuthToken value into the
 // KATA_AUTH_TOKEN env var inside the test process so any in-process
 // daemonclient construction picks the token up automatically. Called by

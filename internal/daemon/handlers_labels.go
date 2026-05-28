@@ -36,7 +36,8 @@ func registerLabelsHandlers(humaAPI huma.API, cfg ServerConfig) {
 
 func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelRequest) (*api.AddLabelResponse, error) {
 	return func(ctx context.Context, in *api.AddLabelRequest) (*api.AddLabelResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -47,7 +48,7 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		ev := db.LabelEventParams{
 			EventType: "issue.labeled",
 			Label:     in.Body.Label,
-			Actor:     in.Body.Actor,
+			Actor:     actor,
 		}
 		row, evt, err := cfg.DB.AddLabelAndEvent(ctx, issue.ID, ev)
 		switch {
@@ -87,7 +88,8 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 
 func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabelRequest) (*api.MutationResponse, error) {
 	return func(ctx context.Context, in *api.RemoveLabelRequest) (*api.MutationResponse, error) {
-		if err := validateActor(in.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Actor)
+		if err != nil {
 			return nil, err
 		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -98,7 +100,7 @@ func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabel
 		ev := db.LabelEventParams{
 			EventType: "issue.unlabeled",
 			Label:     in.Label,
-			Actor:     in.Actor,
+			Actor:     actor,
 		}
 		evt, err := cfg.DB.RemoveLabelAndEvent(ctx, issue.ID, ev)
 		if errors.Is(err, db.ErrNotFound) {

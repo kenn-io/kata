@@ -22,7 +22,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/close",
 	}, func(ctx context.Context, in *api.ActionRequest) (*api.MutationResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		// TUI closes bypass substance / evidence validation: the
@@ -36,8 +37,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// so the db layer never silently coerces an empty reason. The
 		// TUI client always sends "done"; the explicit fallback below
 		// covers older clients and keeps the policy visible.
-		tuiClose := in.Body.Source == "tui"
-		if tuiClose && in.Body.Reason == "" {
+		if in.Body.Source == "tui" && in.Body.Reason == "" {
 			in.Body.Reason = "done"
 		}
 		// The TUI bypass is scoped to reason="done" — the only shape
@@ -48,7 +48,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// claiming a TUI origin; require full validation in that case
 		// so duplicate/superseded closes still must carry their typed
 		// targets and won't corrupt the audit trail.
-		tuiBypass := tuiClose && in.Body.Reason == "done"
+		tuiBypass := tuiBypassAllowed(ctx, in.Body.Source, in.Body.Reason, in.Body.Actor)
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
@@ -84,12 +84,12 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// completeness guard above) still apply.
 		if !cfg.CloseThrottle.ThrottleDisabled {
 			if parentRef, cohort, refusal := CheckSiblingCloseThrottle(
-				ctx, cfg.DB, in.ProjectID, issue.ID, in.Body.Actor, now); refusal != nil {
+				ctx, cfg.DB, in.ProjectID, issue.ID, actor, now); refusal != nil {
 				// Dry-run is side-effect-free: surface the 429 but skip persisting
 				// an audit event so kata events --tail doesn't fill with would-be
 				// refusals from validation probes.
 				if !in.Body.DryRun {
-					if err := emitThrottledEvent(ctx, cfg, issue, in.Body.Actor,
+					if err := emitThrottledEvent(ctx, cfg, issue, actor,
 						db.CloseThrottledPayload{
 							Reason: db.CloseThrottleReasonSiblingBurst,
 							Parent: parentRef,
@@ -102,9 +102,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			if priorRef, parentRef, refusal := CheckRepeatedMessageGuard(
 				ctx, cfg.DB, in.ProjectID, issue.ID,
-				in.Body.Actor, in.Body.Reason, in.Body.Message, now); refusal != nil {
+				actor, in.Body.Reason, in.Body.Message, now); refusal != nil {
 				if !in.Body.DryRun {
-					if err := emitThrottledEvent(ctx, cfg, issue, in.Body.Actor,
+					if err := emitThrottledEvent(ctx, cfg, issue, actor,
 						db.CloseThrottledPayload{
 							Reason: db.CloseThrottleReasonDuplicateMessage,
 							Parent: parentRef,
@@ -132,7 +132,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		err = db.RetryLockContention(ctx, func() error {
 			var err error
 			updated, evt, changed, err = cfg.DB.CloseIssue(ctx, issue.ID,
-				in.Body.Reason, in.Body.Actor, in.Body.Message,
+				in.Body.Reason, actor, in.Body.Message,
 				evidenceToDB(in.Body.Evidence))
 			return err
 		})
@@ -168,7 +168,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/actions/reopen",
 	}, func(ctx context.Context, in *api.ActionRequest) (*api.MutationResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
@@ -180,7 +181,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var changed bool
 		err = db.RetryLockContention(ctx, func() error {
 			var err error
-			updated, evt, changed, err = cfg.DB.ReopenIssue(ctx, issue.ID, in.Body.Actor)
+			updated, evt, changed, err = cfg.DB.ReopenIssue(ctx, issue.ID, actor)
 			return err
 		})
 		if err != nil {

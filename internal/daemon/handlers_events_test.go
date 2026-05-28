@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -110,6 +111,28 @@ func TestPollEvents_ReturnsEventsAndAdvancesCursor(t *testing.T) {
 	assert.Equal(t, first.ShortID, *b.Events[0].IssueShortID)
 	assert.Equal(t, int64(2), b.NextAfterID, "advances to max event id")
 	assert.False(t, b.ResetRequired)
+}
+
+func TestPollEvents_OmitsTokenEvents(t *testing.T) {
+	env := testenv.New(t)
+	pid := mkProject(t, env, "github.com/test/a", "a")
+	mkIssue(t, env, pid, "first")
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "secret-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	var b struct {
+		Events []struct {
+			EventID int64  `json:"event_id"`
+			Type    string `json:"type"`
+		} `json:"events"`
+	}
+	envGetJSON(t, env, "/api/v1/events?after_id=0&limit=10", &b)
+	require.Len(t, b.Events, 1)
+	assert.Equal(t, "issue.created", b.Events[0].Type)
 }
 
 // TestEvents_PayloadIncludesShortIDNotNumber pins the wire-level rename:
@@ -295,6 +318,15 @@ func TestPollEvents_PerProject_NonPositiveProjectIDIs400(t *testing.T) {
 func TestPollEvents_PerProject_UnknownProjectIs404(t *testing.T) {
 	env := testenv.New(t)
 	resp, bs := envGetRaw(t, env, "/api/v1/projects/9999/events?after_id=0&limit=10")
+	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+}
+
+func TestPollEvents_PerProject_SystemProjectIs404(t *testing.T) {
+	env := testenv.New(t)
+	sys, err := env.DB.SystemProject(context.Background())
+	require.NoError(t, err)
+	resp, bs := envGetRaw(t, env,
+		"/api/v1/projects/"+strconv.FormatInt(sys.ID, 10)+"/events?after_id=0&limit=10")
 	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
 }
 
@@ -489,6 +521,29 @@ func TestSSE_DrainEmitsExistingEventsInOrder(t *testing.T) {
 	assert.Equal(t, "3", frames[2].id)
 }
 
+func TestSSE_DrainOmitsTokenEvents(t *testing.T) {
+	env := testenv.New(t)
+	pid := mkProject(t, env, "github.com/test/a", "a")
+	mkIssue(t, env, pid, "first")
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "secret-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	resp := openSSE(t, env, "after_id=0", nil)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, 200, resp.StatusCode)
+	framer := newSSEFramer(resp.Body)
+
+	first, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "issue frame should arrive")
+	assert.Equal(t, "issue.created", first.event)
+	_, ok = framer.Next(t, 150*time.Millisecond)
+	assert.False(t, ok, "token.created must not be emitted as a drain frame")
+}
+
 func TestSSE_PerProjectFilterExcludesOtherProjects(t *testing.T) {
 	env := testenv.New(t)
 	pa := mkProject(t, env, "github.com/test/a", "a")
@@ -546,6 +601,33 @@ func TestSSE_DrainFollowedByLiveBroadcast(t *testing.T) {
 	require.True(t, ok, "live frame should arrive after the broadcast")
 	assert.Equal(t, "2", second.id)
 	assert.Equal(t, "issue.created", second.event)
+}
+
+func TestSSE_LivePhaseOmitsTokenEvents(t *testing.T) {
+	env := testenv.New(t)
+	pid := mkProject(t, env, "github.com/test/a", "a")
+
+	resp := openSSE(t, env, "after_id=0", nil)
+	defer func() { _ = resp.Body.Close() }()
+	framer := newSSEFramer(resp.Body)
+
+	sys, err := env.DB.SystemProject(context.Background())
+	require.NoError(t, err)
+	_, tokenEvt, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "secret-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	env.Broadcaster.Broadcast(daemon.StreamMsg{Kind: "event", Event: &tokenEvt, ProjectID: sys.ID})
+	_, ok := framer.Next(t, 150*time.Millisecond)
+	assert.False(t, ok, "token.created must not be emitted as a live frame")
+
+	envPostJSON(t, env, projectPath(pid)+"/issues",
+		map[string]string{"title": "visible", "actor": "tester"}, nil)
+	visible, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "normal live event should still arrive")
+	assert.Equal(t, "issue.created", visible.event)
 }
 
 func TestSSE_LiveResetClosesStream(t *testing.T) {
@@ -618,6 +700,16 @@ func TestSSE_ParentReplaceEmitsTwoFrames(t *testing.T) {
 func TestSSE_UnknownProjectIDReturns404(t *testing.T) {
 	env := testenv.New(t)
 	resp, bs := envDoRaw(t, env, http.MethodGet, "/api/v1/events/stream?project_id=99999", nil,
+		map[string]string{"Accept": "text/event-stream"})
+	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
+}
+
+func TestSSE_SystemProjectIDReturns404(t *testing.T) {
+	env := testenv.New(t)
+	sys, err := env.DB.SystemProject(context.Background())
+	require.NoError(t, err)
+	resp, bs := envDoRaw(t, env, http.MethodGet,
+		"/api/v1/events/stream?project_id="+strconv.FormatInt(sys.ID, 10), nil,
 		map[string]string{"Accept": "text/event-stream"})
 	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
 }

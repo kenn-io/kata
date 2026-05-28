@@ -51,9 +51,10 @@ type ServerConfig struct {
 // stays unaware of ServerConfig and config.AuthConfig.
 func (c ServerConfig) authPolicy() authPolicy {
 	return authPolicy{
-		Token:               c.Auth.Token,
-		TrustPrivateNetwork: c.Auth.TrustPrivateNetwork,
-		InsecureReadonly:    c.InsecureReadonly,
+		Token:                c.Auth.Token,
+		TrustPrivateNetwork:  c.Auth.TrustPrivateNetwork,
+		InsecureReadonly:     c.InsecureReadonly,
+		RequireTokenIdentity: c.Auth.RequireTokenIdentity,
 	}
 }
 
@@ -95,7 +96,7 @@ func NewServer(cfg ServerConfig) *Server {
 	s := &Server{cfg: cfg, api: humaAPI}
 	registerRoutes(humaAPI, mux, cfg)
 
-	s.handler = withCSRFGuards(requireBearer(cfg.authPolicy())(mux))
+	s.handler = withCSRFGuards(requireBearer(cfg.authPolicy(), cfg.DB)(mux))
 	return s
 }
 
@@ -187,6 +188,7 @@ func isMutation(method string) bool {
 func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerHealth(humaAPI, cfg)
 	registerInstanceHandlers(humaAPI, cfg)
+	registerTokenHandlers(humaAPI, cfg)
 	registerProjects(humaAPI, cfg)
 	registerIssues(humaAPI, cfg)
 	registerImportsHandlers(humaAPI, cfg)

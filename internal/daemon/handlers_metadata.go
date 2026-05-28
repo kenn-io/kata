@@ -29,7 +29,8 @@ func registerMetadataHandlers(humaAPI huma.API, cfg ServerConfig) {
 
 func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.PatchIssueMetadataRequest) (*api.PatchIssueMetadataResponse, error) {
 	return func(ctx context.Context, in *api.PatchIssueMetadataRequest) (*api.PatchIssueMetadataResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		rev, err := parseIfMatchRevision(in.IfMatch)
@@ -43,7 +44,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID:    iss.ID,
 			IfMatchRev: rev,
-			Actor:      in.Body.Actor,
+			Actor:      actor,
 			Patch:      in.Body.Patch,
 		})
 		var conflict *db.RevisionConflictError
@@ -72,7 +73,8 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 
 func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.PatchProjectMetadataRequest) (*api.PatchProjectMetadataResponse, error) {
 	return func(ctx context.Context, in *api.PatchProjectMetadataRequest) (*api.PatchProjectMetadataResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		rev, err := parseIfMatchRevision(in.IfMatch)
@@ -85,7 +87,7 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 		res, err := cfg.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 			ProjectID:  in.ProjectID,
 			IfMatchRev: rev,
-			Actor:      in.Body.Actor,
+			Actor:      actor,
 			Patch:      in.Body.Patch,
 		})
 		var conflict *db.RevisionConflictError
