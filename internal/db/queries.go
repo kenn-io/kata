@@ -1634,11 +1634,11 @@ func (d *DB) ReadyIssuesGlobal(ctx context.Context, limit int) ([]ReadyGlobalIss
 	for rows.Next() {
 		var r ReadyGlobalIssue
 		if err := rows.Scan(
-			&r.Issue.ID, &r.Issue.UID, &r.Issue.ProjectID, &r.Issue.ProjectUID,
-			&r.Issue.ShortID, &r.Issue.Title, &r.Issue.Body, &r.Issue.Status,
-			&r.Issue.ClosedReason, &r.Issue.Owner, &r.Issue.Priority, &r.Issue.Author,
-			&r.Issue.Metadata, &r.Issue.Revision, &r.Issue.RecurrenceID, &r.Issue.OccurrenceKey,
-			&r.Issue.CreatedAt, &r.Issue.UpdatedAt, &r.Issue.ClosedAt, &r.Issue.DeletedAt,
+			&r.ID, &r.UID, &r.ProjectID, &r.ProjectUID,
+			&r.ShortID, &r.Title, &r.Body, &r.Status,
+			&r.ClosedReason, &r.Owner, &r.Priority, &r.Author,
+			&r.Metadata, &r.Revision, &r.RecurrenceID, &r.OccurrenceKey,
+			&r.CreatedAt, &r.UpdatedAt, &r.ClosedAt, &r.DeletedAt,
 			&r.ProjectName,
 		); err != nil {
 			return nil, fmt.Errorf("scan ready global issue: %w", err)

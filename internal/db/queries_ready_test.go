@@ -239,7 +239,7 @@ func TestReadyIssuesGlobal_ReturnsIssuesAcrossProjects(t *testing.T) {
 
 	got := map[string]string{}
 	for _, r := range rows {
-		got[r.Issue.ShortID] = r.ProjectName
+		got[r.ShortID] = r.ProjectName
 	}
 	assert.Equal(t, p1.Name, got[a.ShortID])
 	assert.Equal(t, "second-project", got[b.ShortID])
@@ -265,7 +265,7 @@ func TestReadyIssuesGlobal_ExcludesArchivedProjects(t *testing.T) {
 
 	got := map[string]bool{}
 	for _, r := range rows {
-		got[r.Issue.ShortID] = true
+		got[r.ShortID] = true
 	}
 	assert.True(t, got[keep.ShortID], "issue in active project is returned")
 	assert.False(t, got[hidden.ShortID], "issue in archived project is excluded")
@@ -281,7 +281,7 @@ func TestReadyIssuesGlobal_ExcludesBlockedIssues(t *testing.T) {
 	require.NoError(t, err)
 	got := map[string]bool{}
 	for _, r := range rows {
-		got[r.Issue.ShortID] = true
+		got[r.ShortID] = true
 	}
 	assert.True(t, got[blocker.ShortID])
 	assert.False(t, got[blocked.ShortID])
