@@ -115,6 +115,33 @@ func TestProjectMutations_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 	}
 }
 
+func TestResolveProject_IdentityModeBootstrapCannotMutateAliases(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(context.Background(), "target")
+	require.NoError(t, err)
+
+	resp, bs := envDoRaw(t, env, http.MethodPost, "/api/v1/projects/resolve",
+		map[string]any{
+			"name": "target",
+			"alias": map[string]any{
+				"identity":  "github.com/wesm/target",
+				"kind":      "git",
+				"root_path": "/client/target",
+			},
+		},
+		map[string]string{"Authorization": "Bearer bootstrap-token"})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusForbidden, "bootstrap_token_write_forbidden")
+
+	aliases, err := env.DB.ProjectAliases(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.Empty(t, aliases)
+
+	resp, bs = envDoRaw(t, env, http.MethodPost, "/api/v1/projects/resolve",
+		map[string]any{"name": "target"},
+		map[string]string{"Authorization": "Bearer bootstrap-token"})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+}
+
 func TestInit_FreshCloneFromExistingKataToml(t *testing.T) {
 	// Simulate "git clone, kata init" on a repo that already had .kata.toml.
 	h := newServerWithGitWorkspace(t, "")

@@ -72,6 +72,11 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/resolve",
 	}, func(ctx context.Context, in *api.ResolveProjectRequest) (*api.ResolveProjectResponse, error) {
+		if resolveProjectRequestCanMutate(in) {
+			if err := ensureAttributedWriteAllowed(ctx); err != nil {
+				return nil, err
+			}
+		}
 		out, err := resolveProject(ctx, cfg.DB, in.Body.Alias, in.Body.Name, in.Body.StartPath)
 		if err != nil {
 			return nil, err
@@ -359,6 +364,10 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Aliases = aliases
 		return out, nil
 	})
+}
+
+func resolveProjectRequestCanMutate(in *api.ResolveProjectRequest) bool {
+	return in.Body.Alias != nil || strings.TrimSpace(in.Body.StartPath) != ""
 }
 
 // resolveProject implements project resolution. Inputs are tried in

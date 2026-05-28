@@ -227,6 +227,54 @@ func TestImportRejectsTokenRevokedForUnknownToken(t *testing.T) {
 	assert.Contains(t, err.Error(), "token not found")
 }
 
+func TestImportRejectsTokenEventsOutsideSystemProject(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+
+	err := importJSONL(ctx, target,
+		`{"kind":"meta","data":{"key":"export_version","value":"11"}}`,
+		`{"kind":"project","data":{"id":1,"uid":"01HZNQ7VFPK1XGD8R5MABCD4EZ","name":"normal","created_at":"2026-05-03T00:00:00.000Z","metadata":{},"revision":1}}`,
+		`{"kind":"event","data":{"id":1,"uid":"01HZNQ7VFPK1XGD8R5MABCD4EX","origin_instance_uid":"01HZNQ7VFPK1XGD8R5MABCD4EY","project_id":1,"project_name":"normal","issue_id":null,"issue_uid":null,"related_issue_id":null,"related_issue_uid":null,"type":"token.created","actor":"bootstrap","payload":{"token_id":1,"token_hash":"`+db.HashTokenForTest("evil-token")+`","target_actor":"mallory"},"created_at":"2026-05-03T00:00:01.000Z"}}`,
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token.created")
+	assert.Contains(t, err.Error(), "system project")
+}
+
+func TestImportRejectsMalformedTokenReplayFields(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		payload     string
+		wantMessage string
+	}{
+		{
+			name:        "invalid hash",
+			payload:     `{"token_id":1,"token_hash":"not-hex","target_actor":"alice"}`,
+			wantMessage: "token_hash",
+		},
+		{
+			name:        "reserved actor",
+			payload:     `{"token_id":1,"token_hash":"` + db.HashTokenForTest("secret-token") + `","target_actor":"bootstrap"}`,
+			wantMessage: "reserved",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			target := openImportTargetDB(t)
+
+			err := importJSONL(ctx, target,
+				`{"kind":"meta","data":{"key":"export_version","value":"11"}}`,
+				`{"kind":"project","data":{"id":1,"uid":"00000000000000000000000000","name":".kata-system","created_at":"2026-05-03T00:00:00.000Z","metadata":{},"revision":1}}`,
+				`{"kind":"event","data":{"id":1,"uid":"01HZNQ7VFPK1XGD8R5MABCD4EX","origin_instance_uid":"01HZNQ7VFPK1XGD8R5MABCD4EY","project_id":1,"project_name":".kata-system","issue_id":null,"issue_uid":null,"related_issue_id":null,"related_issue_uid":null,"type":"token.created","actor":"bootstrap","payload":`+tc.payload+`,"created_at":"2026-05-03T00:00:01.000Z"}}`,
+			)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantMessage)
+		})
+	}
+}
+
 func openImportTargetDB(t *testing.T) *db.DB {
 	t.Helper()
 	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "target.db"))

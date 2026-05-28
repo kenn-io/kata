@@ -109,6 +109,24 @@ func TestTokenIdentity_BootstrapCanResolveButCannotWrite(t *testing.T) {
 	bootstrapEnv := identityCLIEnv(clientHome, addr, identityBootstrapToken)
 	runRemoteCmd(t, bin, clientWS, bootstrapEnv, "projects", "show", "bootstrap-boundary")
 
+	resolveWithAlias := doJSONWithBearer(t, http.DefaultClient, http.MethodPost,
+		"http://"+addr+"/api/v1/projects/resolve", identityBootstrapToken,
+		map[string]any{
+			"name": "bootstrap-boundary",
+			"alias": map[string]any{
+				"identity":  "github.com/wesm/bootstrap-boundary",
+				"kind":      "git",
+				"root_path": clientWS,
+			},
+		})
+	require.Equal(t, http.StatusForbidden, resolveWithAlias.status, resolveWithAlias.body)
+	assert.Contains(t, resolveWithAlias.body, "bootstrap_token_write_forbidden")
+
+	resolveByName := doJSONWithBearer(t, http.DefaultClient, http.MethodPost,
+		"http://"+addr+"/api/v1/projects/resolve", identityBootstrapToken,
+		map[string]any{"name": "bootstrap-boundary"})
+	require.Equal(t, http.StatusOK, resolveByName.status, resolveByName.body)
+
 	out, err := runRemoteCmdOutputErr(t, bin, clientWS, bootstrapEnv,
 		"create", "bootstrap should not write")
 	require.Error(t, err, "bootstrap token must not perform attributed writes")
@@ -150,20 +168,30 @@ func startIdentityDaemon(t *testing.T, bin string) (addr, serverHome string, sto
 	cmd.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),
+		"KATA_AUTH_TOKEN=",
 		"KATA_AUTOSTART=",
 	)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	require.NoError(t, cmd.Start())
+	stopped := false
+	stop = func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		stopDaemon(cmd)
+	}
 	t.Cleanup(func() {
 		if t.Failed() {
 			t.Logf("daemon stderr:\n%s", stderr.String())
 		}
+		stop()
 	})
 
 	waitForPing(t, "http://"+addr, 5*time.Second)
-	return addr, serverHome, func() { stopDaemon(cmd) }
+	return addr, serverHome, stop
 }
 
 func identityCLIEnv(home, addr, token string) []string {

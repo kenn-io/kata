@@ -148,4 +148,16 @@ func TestCreateTokenEndpoint_LocalNoAuthCanAdmin(t *testing.T) {
 	resp, bs := envDoRaw(t, env, http.MethodPost, "/api/v1/tokens",
 		map[string]string{"actor": "wesm"}, nil)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+
+	var out struct {
+		Token struct {
+			ID int64 `json:"id"`
+		} `json:"token"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	var actor string
+	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+		`SELECT actor FROM events WHERE type = 'token.created' AND json_extract(payload, '$.token_id') = ?`,
+		out.Token.ID).Scan(&actor))
+	assert.Equal(t, db.BootstrapActor, actor)
 }

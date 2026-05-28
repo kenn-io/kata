@@ -3,6 +3,7 @@ package jsonl
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -151,18 +152,26 @@ func replayAPITokenProjection(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("clear api_tokens projection: %w", err)
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT type, payload, CAST(created_at AS TEXT)
-		  FROM events
-		 WHERE type IN ('token.created', 'token.revoked')
-		 ORDER BY id ASC`)
+		SELECT e.id, e.type, e.payload, CAST(e.created_at AS TEXT),
+		       e.project_name, p.name, p.uid
+		  FROM events e
+		  JOIN projects p ON p.id = e.project_id
+		 WHERE e.type IN ('token.created', 'token.revoked')
+		 ORDER BY e.id ASC`)
 	if err != nil {
 		return fmt.Errorf("read token events: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var typ, payload, createdAt string
-		if err := rows.Scan(&typ, &payload, &createdAt); err != nil {
+		var id int64
+		var typ, payload, createdAt, eventProjectName, projectName, projectUID string
+		if err := rows.Scan(&id, &typ, &payload, &createdAt, &eventProjectName, &projectName, &projectUID); err != nil {
 			return fmt.Errorf("scan token event: %w", err)
+		}
+		if projectUID != db.SystemProjectUID || projectName != db.SystemProjectName ||
+			eventProjectName != db.SystemProjectName {
+			return fmt.Errorf("%s event %d must belong to system project %s",
+				typ, id, db.SystemProjectName)
 		}
 		switch typ {
 		case "token.created":
@@ -172,6 +181,12 @@ func replayAPITokenProjection(ctx context.Context, tx *sql.Tx) error {
 			}
 			if rec.TokenID == 0 || rec.TokenHash == "" || rec.TargetActor == "" {
 				return fmt.Errorf("decode token.created payload: missing required field")
+			}
+			if err := validateReplayTokenHash(rec.TokenHash); err != nil {
+				return fmt.Errorf("decode token.created payload: %w", err)
+			}
+			if err := db.ValidateTokenActor(rec.TargetActor); err != nil {
+				return fmt.Errorf("decode token.created payload: %w", err)
 			}
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO api_tokens(id, token_hash, actor, name, created_at)
@@ -204,6 +219,16 @@ func replayAPITokenProjection(ctx context.Context, tx *sql.Tx) error {
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("read token event rows: %w", err)
+	}
+	return nil
+}
+
+func validateReplayTokenHash(hash string) error {
+	if len(hash) != 64 {
+		return fmt.Errorf("token_hash must be 64 hex characters")
+	}
+	if _, err := hex.DecodeString(hash); err != nil {
+		return fmt.Errorf("token_hash must be 64 hex characters: %w", err)
 	}
 	return nil
 }

@@ -38,7 +38,7 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 			PlaintextToken: plaintext,
 			Actor:          in.Body.Actor,
 			Name:           name,
-			AdminActor:     tokenAdminAuditActor(ctx, in.Body.Actor),
+			AdminActor:     tokenAdminAuditActor(ctx, db.BootstrapActor),
 		})
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
