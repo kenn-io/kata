@@ -267,6 +267,9 @@ func shouldDeliverDuplicatePulledEvent(
 	if status.LastResetAt == nil {
 		return false, nil
 	}
+	if !event.CreatedAt.Before(*status.LastResetAt) {
+		return false, nil
+	}
 	if status.LastPullSuccessAt != nil && !status.LastPullSuccessAt.Before(*status.LastResetAt) {
 		return false, nil
 	}

@@ -1086,6 +1086,71 @@ func TestSyncFederationOnceRecoveredResetDoesNotDeliverLocalProjectPushEcho(t *t
 	assert.Empty(t, delivered, "local project metadata push echo should not redeliver pulled side effects after reset recovery")
 }
 
+func TestSyncFederationOncePendingResetDoesNotDeliverPostResetLocalProjectPushEcho(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 100,
+		PullCursorEventID:    99,
+		PushEnabled:          true,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	resetAt := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, spoke.DB.RecordFederationSyncReset(ctx, project.ID, resetAt))
+
+	metaOut, err := spoke.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+		ProjectID:  project.ID,
+		IfMatchRev: project.Revision,
+		Actor:      "tester",
+		Patch: map[string]json.RawMessage{
+			"area": json.RawMessage(`"ops"`),
+		},
+	})
+	require.NoError(t, err)
+	localEvent := metaOut.Event
+	require.True(t, localEvent.CreatedAt.After(resetAt), "test event must be created after reset marker")
+	envelope := eventEnvelopeForSyncTest(localEvent, 100)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events:ingest":
+			var body api.FederationIngestEventsRequestBody
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.NotEmpty(t, body.Events)
+			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
+				Accepted:          len(body.Events),
+				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
+			}))
+		case "/api/v1/projects/42/federation/events":
+			require.Equal(t, "99", r.URL.Query().Get("after_id"))
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+				Events:      []api.EventEnvelope{envelope},
+				NextAfterID: 100,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+	var delivered []db.Event
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	}, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		delivered = append(delivered, events...)
+	}))
+
+	assert.Empty(t, delivered, "post-reset local project metadata push echo should not be treated as reset replay")
+}
+
 func TestSyncFederationOncePushRetryDuplicateAdvancesCursor(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)
