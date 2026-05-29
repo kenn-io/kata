@@ -367,6 +367,13 @@ func TestPendingFederationPushEvents(t *testing.T) {
 		Body:    "local comment",
 	})
 	require.NoError(t, err)
+	_, ownerEvent, changed, err := d.UpdateOwner(ctx, localIssue.ID, strPtr("alice"), "tester")
+	require.NoError(t, err)
+	require.True(t, changed)
+	priority := int64(2)
+	_, priorityEvent, changed, err := d.UpdatePriority(ctx, localIssue.ID, &priority, "tester")
+	require.NoError(t, err)
+	require.True(t, changed)
 	_, err = d.ExecContext(ctx, `
 		INSERT INTO events(
 			uid, origin_instance_uid, project_id, project_name,
@@ -383,15 +390,17 @@ func TestPendingFederationPushEvents(t *testing.T) {
 	got, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), binding.PushCursorEventID, 10)
 	require.NoError(t, err)
 
-	require.Len(t, got, 2)
-	assert.Equal(t, []int64{localEvent.ID, localComment.ID}, []int64{got[0].ID, got[1].ID})
+	require.Len(t, got, 4)
+	assert.Equal(t,
+		[]int64{localEvent.ID, localComment.ID, ownerEvent.ID, priorityEvent.ID},
+		[]int64{got[0].ID, got[1].ID, got[2].ID, got[3].ID})
 	for _, ev := range got {
 		assert.Equal(t, d.InstanceUID(), ev.OriginInstanceUID)
 	}
 
 	got, err = d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), localEvent.ID, 10)
 	require.NoError(t, err)
-	require.Len(t, got, 1)
+	require.Len(t, got, 3)
 	assert.Equal(t, localComment.ID, got[0].ID)
 
 	got, err = d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), 0, 1)
@@ -478,6 +487,42 @@ func TestResetFederatedProjectIfNoPendingPushRejectsPendingLocalEvents(t *testin
 	require.NoError(t, listErr)
 	require.Len(t, events, 1)
 	assert.Equal(t, evt.ID, events[0].ID)
+}
+
+func TestResetFederatedProjectIfNoPendingPushIgnoresUnsupportedLocalEvents(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 9,
+		PullCursorEventID:    8,
+		PushEnabled:          true,
+		PushCursorEventID:    0,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		INSERT INTO events(
+			uid, origin_instance_uid, project_id, project_name,
+			type, actor, payload, hlc_physical_ms, hlc_counter, content_hash
+		)
+		VALUES(
+			'01HZNQ7VFPK1XGD8R5MABCD4PZ', ?, ?, ?,
+			'project.restored', 'tester', '{}', 1, 0,
+			'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+		)`,
+		d.InstanceUID(), p.ID, p.Name)
+	require.NoError(t, err)
+
+	err = d.ResetFederatedProjectIfNoPendingPush(ctx, p.ID, 20, 19, d.InstanceUID(), 0)
+
+	require.NoError(t, err)
+	events, listErr := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
+	require.NoError(t, listErr)
+	assert.Empty(t, events)
 }
 
 func TestResetFederatedProjectIfNoPendingPushRejectsActiveQuarantine(t *testing.T) {

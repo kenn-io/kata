@@ -90,6 +90,7 @@ func federationPushEventTypeCondition(column string) string {
 		'project.metadata_updated',
 		'issue.created', 'issue.snapshot', 'issue.updated', 'issue.closed', 'issue.reopened',
 		'issue.soft_deleted', 'issue.restored', 'issue.commented',
+		'issue.assigned', 'issue.unassigned', 'issue.priority_set', 'issue.priority_cleared',
 		'issue.labeled', 'issue.unlabeled',
 		'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated'
 	)`
@@ -192,6 +193,7 @@ func (d *DB) ResetFederatedProjectIfNoPendingPush(
 		        WHERE project_id = ?
 		          AND origin_instance_uid = ?
 		          AND id > ?
+		          AND `+federationPushEventTypeCondition("type")+`
 		   )
 		   AND NOT EXISTS (
 		       SELECT 1
