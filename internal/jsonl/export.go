@@ -1140,6 +1140,7 @@ func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOption
 		UID               string          `json:"uid"`
 		OriginInstanceUID string          `json:"origin_instance_uid"`
 		ProjectID         int64           `json:"project_id"`
+		ProjectUID        string          `json:"-"`
 		ProjectName       string          `json:"project_name"`
 		IssueID           *int64          `json:"issue_id"`
 		IssueUID          *string         `json:"issue_uid"`
@@ -1171,11 +1172,12 @@ func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOption
 	}
 	relatedIDExpr := `CASE WHEN ` + scrubCondition + ` THEN NULL ELSE events.related_issue_id END`
 	relatedUIDExpr := `CASE WHEN ` + scrubCondition + ` THEN NULL ELSE events.related_issue_uid END`
-	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, %s, events.issue_id, events.issue_uid,
+	query := fmt.Sprintf(`SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, %s, events.issue_id, events.issue_uid,
 	                 `+relatedIDExpr+`, `+relatedUIDExpr+`,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
 	                 CAST(events.created_at AS TEXT)
 	          FROM events%s
+	          JOIN projects export_project ON export_project.id = events.project_id
 	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
 	          LEFT JOIN issues peer ON peer.id = events.related_issue_id`, projectNameExpr, joinProjects)
 	clauses, args := eventExportWhereClauses(opts)
@@ -1188,7 +1190,7 @@ func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOption
 	return scanRecords(rows, KindEvent, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
 		var payload string
-		err := rows.Scan(&rec.ID, &rec.UID, &rec.OriginInstanceUID, &rec.ProjectID, &rec.ProjectName, &rec.IssueID,
+		err := rows.Scan(&rec.ID, &rec.UID, &rec.OriginInstanceUID, &rec.ProjectID, &rec.ProjectUID, &rec.ProjectName, &rec.IssueID,
 			&rec.IssueUID, &rec.RelatedIssueID, &rec.RelatedIssueUID,
 			&rec.Type, &rec.Actor, &payload, &rec.HLCPhysicalMS, &rec.HLCCounter, &rec.ContentHash, &rec.CreatedAt)
 		if err != nil {
@@ -1198,6 +1200,24 @@ func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOption
 			return rec, fmt.Errorf("event %d payload is invalid JSON", rec.ID)
 		}
 		rec.Payload = json.RawMessage(payload)
+		contentHash, err := db.EventContentHash(db.EventHashInput{
+			UID:               rec.UID,
+			OriginInstanceUID: rec.OriginInstanceUID,
+			ProjectUID:        rec.ProjectUID,
+			ProjectName:       rec.ProjectName,
+			IssueUID:          rec.IssueUID,
+			RelatedIssueUID:   rec.RelatedIssueUID,
+			Type:              rec.Type,
+			Actor:             rec.Actor,
+			HLCPhysicalMS:     rec.HLCPhysicalMS,
+			HLCCounter:        rec.HLCCounter,
+			CreatedAt:         rec.CreatedAt,
+			Payload:           rec.Payload,
+		})
+		if err != nil {
+			return rec, fmt.Errorf("event %d content hash: %w", rec.ID, err)
+		}
+		rec.ContentHash = contentHash
 		return rec, nil
 	})
 }

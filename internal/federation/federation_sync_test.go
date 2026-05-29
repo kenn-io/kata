@@ -930,6 +930,97 @@ func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing
 	assert.Greater(t, delivered[0].ID, localEvent.ID)
 }
 
+func TestSyncFederationOnceResetRetryDeliversReplayedLocalProjectEvent(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	metaOut, err := spoke.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+		ProjectID:  project.ID,
+		IfMatchRev: project.Revision,
+		Actor:      "tester",
+		Patch: map[string]json.RawMessage{
+			"area": json.RawMessage(`"ops"`),
+		},
+	})
+	require.NoError(t, err)
+	localEvent := metaOut.Event
+	require.Nil(t, localEvent.IssueID)
+	require.Nil(t, localEvent.IssueUID)
+	envelope := eventEnvelopeForSyncTest(localEvent, 100)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 51,
+		PullCursorEventID:    50,
+		PushEnabled:          true,
+		PushCursorEventID:    localEvent.ID,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events:ingest":
+			var body api.FederationIngestEventsRequestBody
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.NotEmpty(t, body.Events)
+			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
+				Accepted:          len(body.Events),
+				Duplicates:        len(body.Events),
+				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
+			}))
+		case "/api/v1/projects/42/federation/events":
+			switch r.URL.Query().Get("after_id") {
+			case "50":
+				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+					ResetRequired: true,
+					ResetAfterID:  99,
+					NextAfterID:   99,
+				}))
+			case "99":
+				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+					Events:      []api.EventEnvelope{envelope},
+					NextAfterID: 100,
+				}))
+			default:
+				require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{NextAfterID: 100}))
+			}
+		case "/api/v1/projects/42/federation/metadata":
+			require.NoError(t, json.NewEncoder(w).Encode(api.ProjectFederationBody{
+				ProjectID:              42,
+				ProjectUID:             project.UID,
+				ProjectName:            project.Name,
+				ReplayHorizonEventID:   100,
+				BaselineThroughEventID: 100,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+	creds := config.FederationCredential{HubURL: hub.URL, HubProjectID: 42, Token: "token"}
+	var delivered []db.Event
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
+	require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		delivered = append(delivered, events...)
+	}))
+	assert.Empty(t, delivered)
+
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		delivered = append(delivered, events...)
+	}))
+
+	require.NotEmpty(t, delivered)
+	assert.Equal(t, localEvent.UID, delivered[0].UID)
+	assert.Greater(t, delivered[0].ID, localEvent.ID)
+}
+
 func TestSyncFederationOncePushRetryDuplicateAdvancesCursor(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)

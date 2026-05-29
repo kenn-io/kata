@@ -274,6 +274,24 @@ func TestExportNoIncludeDeletedNullsAggregatedEnvelopePeerOnSoftDelete(t *testin
 	bs, _ := json.Marshal(aggregated["payload"])
 	assert.Contains(t, string(bs), target.UID,
 		"payload must keep the orphan UID for historical context")
+	payload := json.RawMessage(bs)
+	expectedHash, err := db.EventContentHash(db.EventHashInput{
+		UID:               aggregated["uid"].(string),
+		OriginInstanceUID: aggregated["origin_instance_uid"].(string),
+		ProjectUID:        p.UID,
+		ProjectName:       aggregated["project_name"].(string),
+		IssueUID:          ptrToStringValue(t, aggregated["issue_uid"]),
+		RelatedIssueUID:   ptrToStringValue(t, aggregated["related_issue_uid"]),
+		Type:              aggregated["type"].(string),
+		Actor:             aggregated["actor"].(string),
+		HLCPhysicalMS:     int64(aggregated["hlc_physical_ms"].(float64)),
+		HLCCounter:        int64(aggregated["hlc_counter"].(float64)),
+		CreatedAt:         aggregated["created_at"].(string),
+		Payload:           payload,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, expectedHash, aggregated["content_hash"],
+		"live-only export must rehash scrubbed portable event fields")
 }
 
 // TestExportNoIncludeDeletedPreservesSinglePeerAggregatedEvent pins
@@ -491,6 +509,16 @@ func decodeJSONLLines(t *testing.T, bs []byte) []map[string]any {
 	}
 	require.NoError(t, scanner.Err())
 	return out
+}
+
+func ptrToStringValue(t *testing.T, v any) *string {
+	t.Helper()
+	if v == nil {
+		return nil
+	}
+	s, ok := v.(string)
+	require.True(t, ok, "expected string value, got %T", v)
+	return &s
 }
 
 func assertKindOrder(t *testing.T, records []map[string]any) {

@@ -76,6 +76,7 @@ func SyncFederationOnceWithPulledEvents(
 	if err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
+	runStartBinding := binding
 	if binding.PushEnabled {
 		for {
 			if _, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
@@ -191,7 +192,7 @@ func SyncFederationOnceWithPulledEvents(
 			}
 			deliverDuplicate := false
 			if !inserted && shouldDeliverPage {
-				deliverDuplicate, err = shouldDeliverDuplicatePulledEvent(ctx, store, currentBinding, ev, localInstanceUID)
+				deliverDuplicate, err = shouldDeliverDuplicatePulledEvent(ctx, store, currentBinding, runStartBinding, ev, localInstanceUID)
 				if err != nil {
 					return err
 				}
@@ -229,6 +230,7 @@ func shouldDeliverDuplicatePulledEvent(
 	ctx context.Context,
 	store *db.DB,
 	binding db.FederationBinding,
+	runStartBinding db.FederationBinding,
 	ev api.EventEnvelope,
 	localInstanceUID string,
 ) (bool, error) {
@@ -246,7 +248,23 @@ func shouldDeliverDuplicatePulledEvent(
 	if event.ID > binding.PushCursorEventID {
 		return true, nil
 	}
-	return event.IssueID == nil && event.IssueUID != nil, nil
+	if event.IssueID == nil && event.IssueUID != nil {
+		return true, nil
+	}
+	if event.ID <= runStartBinding.PushCursorEventID {
+		return false, nil
+	}
+	if runStartBinding.PullCursorEventID != runStartBinding.ReplayHorizonEventID-1 {
+		return false, nil
+	}
+	status, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return status.LastResetAt != nil, nil
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {
