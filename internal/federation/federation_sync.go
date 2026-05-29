@@ -264,7 +264,13 @@ func shouldDeliverDuplicatePulledEvent(
 	if err != nil {
 		return false, err
 	}
-	return status.LastResetAt != nil, nil
+	if status.LastResetAt == nil {
+		return false, nil
+	}
+	if status.LastPullSuccessAt != nil && !status.LastPullSuccessAt.Before(*status.LastResetAt) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {
