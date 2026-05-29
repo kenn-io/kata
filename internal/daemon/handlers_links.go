@@ -39,6 +39,9 @@ func requireFederatedLinkClaims(ctx context.Context, cfg ServerConfig, projectID
 		if _, ok := seen[issue.ID]; ok {
 			continue
 		}
+		if issue.DeletedAt != nil {
+			continue
+		}
 		seen[issue.ID] = struct{}{}
 		if err := requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor); err != nil {
 			return err
@@ -111,7 +114,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 				if err != nil {
 					return nil, api.NewError(500, "internal", err.Error(), "", nil)
 				}
-				if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, oldParentIssue, actor); err != nil {
+				if err := requireFederatedLinkClaims(ctx, cfg, in.ProjectID, actor, oldParentIssue); err != nil {
 					return nil, err
 				}
 				unlinkEv := db.LinkEventParams{

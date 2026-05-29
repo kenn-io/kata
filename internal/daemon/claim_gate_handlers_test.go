@@ -188,6 +188,27 @@ func TestClaimGateLinkDeleteRequiresClaimsForBothEndpoints(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
+func TestClaimGateLinkDeleteSkipsSoftDeletedPeerClaim(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, peer := setupClaimGateProject(t, env, true)
+	link, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: issue.ID,
+		ToIssueID:   peer.ID,
+		Type:        "related",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.SoftDeleteIssue(context.Background(), peer.ID, "tester")
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodDelete,
+		issuePathRef(project.ID, issue.ShortID, "links/"+strconv.FormatInt(link.ID, 10))+"?actor=agent", nil, nil)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
 func TestClaimGateParentReplaceRequiresClaimForOldAndNewParent(t *testing.T) {
 	env := testenv.New(t)
 	project, child, oldParent := setupClaimGateProject(t, env, true)
@@ -227,6 +248,38 @@ func TestClaimGateParentReplaceRequiresClaimForOldAndNewParent(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
+func TestClaimGateParentReplaceSkipsSoftDeletedOldParentClaim(t *testing.T) {
+	env := testenv.New(t)
+	project, child, oldParent := setupClaimGateProject(t, env, true)
+	newParent, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "new parent",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: child.ID,
+		ToIssueID:   oldParent.ID,
+		Type:        "parent",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.SoftDeleteIssue(context.Background(), oldParent.ID, "tester")
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, child, "agent")
+	acquireClaimGateIssue(t, env, project, newParent, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, child.ShortID, "links"), map[string]any{
+		"actor":   "agent",
+		"type":    "parent",
+		"to_ref":  newParent.ShortID,
+		"replace": true,
+	}, nil)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
 func TestClaimGateEditLinksDeltaRequiresClaimsForAffectedEndpoints(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)
@@ -244,6 +297,29 @@ func TestClaimGateEditLinksDeltaRequiresClaimsForAffectedEndpoints(t *testing.T)
 		"actor":       "agent",
 		"links_delta": map[string]any{"add_related": []string{peer.ShortID}},
 	}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
+func TestClaimGateEditLinksDeltaRemoveSkipsSoftDeletedPeerClaim(t *testing.T) {
+	env := testenv.New(t)
+	project, child, parent := setupClaimGateProject(t, env, true)
+	_, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: child.ID,
+		ToIssueID:   parent.ID,
+		Type:        "parent",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.SoftDeleteIssue(context.Background(), parent.ID, "tester")
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, child, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, child.ShortID, ""), map[string]any{
+		"actor":       "agent",
+		"links_delta": map[string]any{"remove_parent": parent.ShortID},
+	}, nil)
+
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
