@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 func TestSyncFederationOncePullsAndAdvancesCursor(t *testing.T) {
@@ -170,6 +172,90 @@ func TestSyncFederationOnceReportsFreshPulledEvents(t *testing.T) {
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered, "duplicate/no-op pulls should not be delivered again")
+}
+
+func TestSyncFederationOnceAdvancesAcrossIncompleteBaselineLinkPage(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	hubProjectUID := mustTestUID(t)
+	sourceUID := mustTestUID(t)
+	targetUID := mustTestUID(t)
+	project, err := spoke.DB.CreateProjectWithUID(ctx, "hub", hubProjectUID)
+	require.NoError(t, err)
+
+	sourcePayload := `{
+		"uid":"` + sourceUID + `",
+		"short_id":"` + shortIDForSyncTest(sourceUID) + `",
+		"title":"source",
+		"body":"",
+		"author":"hub",
+		"status":"open",
+		"metadata":{},
+		"links":[{"type":"related","to_issue_uid":"` + targetUID + `"}],
+		"created_at":"2026-05-23T12:00:00.000Z"
+	}`
+	targetPayload := `{
+		"uid":"` + targetUID + `",
+		"short_id":"` + shortIDForSyncTest(targetUID) + `",
+		"title":"target",
+		"body":"",
+		"author":"hub",
+		"status":"open",
+		"metadata":{},
+		"created_at":"2026-05-23T12:00:01.000Z"
+	}`
+	page1 := []api.EventEnvelope{
+		syncTestEnvelope(t, 1, hubProjectUID, "hub", nil, nil, "project.federation_enabled",
+			`{"project_uid":"`+hubProjectUID+`","project_name":"hub","metadata":{}}`),
+		syncTestEnvelope(t, 2, hubProjectUID, "hub", &sourceUID, nil, "issue.snapshot", sourcePayload),
+	}
+	page2 := []api.EventEnvelope{
+		syncTestEnvelope(t, 3, hubProjectUID, "hub", &targetUID, nil, "issue.snapshot", targetPayload),
+	}
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/projects/42/federation/events", r.URL.Path)
+		switch r.URL.Query().Get("after_id") {
+		case "0":
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: page1, NextAfterID: 2}))
+		case "2":
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: page2, NextAfterID: 3}))
+		default:
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{Events: []api.EventEnvelope{}, NextAfterID: 3}))
+		}
+	}))
+	t.Cleanup(hub.Close)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               hub.URL,
+		HubProjectID:         42,
+		HubProjectUID:        hubProjectUID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	}))
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), binding.PullCursorEventID)
+
+	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	}))
+	var linkCount int
+	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM links
+		 WHERE project_id = ? AND type = 'related'`,
+		project.ID).Scan(&linkCount))
+	assert.Equal(t, 1, linkCount)
 }
 
 func TestSyncFederationOnceHandlesResetRequired(t *testing.T) {
@@ -1551,6 +1637,69 @@ func eventsToFold(events []db.Event) []db.FoldEvent {
 		})
 	}
 	return out
+}
+
+func syncTestEnvelope(
+	t *testing.T,
+	eventID int64,
+	projectUID string,
+	projectName string,
+	issueUID *string,
+	relatedIssueUID *string,
+	eventType string,
+	payload string,
+) api.EventEnvelope {
+	t.Helper()
+	createdAt := time.Date(2026, 5, 23, 12, 0, int(eventID), 0, time.UTC)
+	eventUID := mustTestUID(t)
+	raw := json.RawMessage(payload)
+	const originInstanceUID = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID:               eventUID,
+		OriginInstanceUID: originInstanceUID,
+		ProjectUID:        projectUID,
+		ProjectName:       projectName,
+		IssueUID:          issueUID,
+		RelatedIssueUID:   relatedIssueUID,
+		Type:              eventType,
+		Actor:             "hub",
+		HLCPhysicalMS:     eventID,
+		HLCCounter:        0,
+		CreatedAt:         createdAt.Format("2006-01-02T15:04:05.000Z"),
+		Payload:           raw,
+	})
+	require.NoError(t, err)
+	return api.EventEnvelope{
+		EventID:           eventID,
+		EventUID:          eventUID,
+		OriginInstanceUID: originInstanceUID,
+		Type:              eventType,
+		ProjectID:         42,
+		ProjectUID:        projectUID,
+		ProjectName:       projectName,
+		IssueUID:          issueUID,
+		RelatedIssueUID:   relatedIssueUID,
+		Actor:             "hub",
+		HLCPhysicalMS:     eventID,
+		HLCCounter:        0,
+		ContentHash:       hash,
+		Payload:           raw,
+		CreatedAt:         createdAt,
+	}
+}
+
+func mustTestUID(t *testing.T) string {
+	t.Helper()
+	uid, err := katauid.New()
+	require.NoError(t, err)
+	return uid
+}
+
+func shortIDForSyncTest(uid string) string {
+	if len(uid) <= 4 {
+		return strings.ToLower(uid)
+	}
+	return strings.ToLower(uid[len(uid)-4:])
 }
 
 func openDaemonclientTestDB(t *testing.T) (*db.DB, string) {

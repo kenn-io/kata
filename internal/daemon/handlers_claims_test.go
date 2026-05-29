@@ -820,7 +820,7 @@ func TestClaimForwardCrossOriginRedirectDoesNotReachRedirectTarget(t *testing.T)
 	}))
 	t.Cleanup(redirectTarget.Close)
 	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, redirectTarget.URL+r.URL.Path, http.StatusTemporaryRedirect)
+		http.Redirect(w, r, redirectTarget.URL+r.URL.Path, http.StatusTemporaryRedirect) //nolint:gosec // test server intentionally redirects to another test server.
 	}))
 	t.Cleanup(redirector.Close)
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{

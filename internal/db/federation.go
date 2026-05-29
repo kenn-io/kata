@@ -1441,7 +1441,10 @@ func reconcileFederatedLinks(ctx context.Context, tx *sql.Tx, projectID int64, i
 		fromID, fromOK := issueIDs[key.FromUID]
 		toID, toOK := issueIDs[key.ToUID]
 		if !fromOK || !toOK {
-			return fmt.Errorf("federated link %s %s->%s references unknown issue", key.Type, key.FromUID, key.ToUID)
+			// A baseline can arrive over multiple poll pages. Skip incomplete
+			// links for this materialization pass; a later pass sees both
+			// snapshots and recreates the edge.
+			continue
 		}
 		fromUID, toUID := key.FromUID, key.ToUID
 		if key.Type == "related" && fromID > toID {
