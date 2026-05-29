@@ -248,7 +248,7 @@ func (fx *federationStressFixture) applyRandomOperation(t *rapid.T) {
 	case 4:
 		fx.editClaimedIssue(t)
 	case 5:
-		fx.commentWithoutClaim(t)
+		fx.commentClaimedIssue(t)
 	}
 }
 
@@ -327,21 +327,28 @@ func (fx *federationStressFixture) editClaimedIssue(t *rapid.T) {
 	}
 }
 
-func (fx *federationStressFixture) commentWithoutClaim(t *rapid.T) {
+func (fx *federationStressFixture) commentClaimedIssue(t *rapid.T) {
 	t.Helper()
+	actor := fx.drawActor(t, "comment-actor")
 	if rapid.Bool().Draw(t, "comment-on-hub") {
 		issue, ok := fx.drawIssue(t, fx.hub, fx.hubProject.ID, false, "hub-comment")
 		if !ok {
 			return
 		}
-		fx.commentOnNode(t, fx.hub, fx.hubProject.ID, issue.ShortID)
+		if !fx.acquireHubClaim(t, issue.ShortID, actor) {
+			return
+		}
+		fx.commentOnNode(t, fx.hub, fx.hubProject.ID, issue.ShortID, actor)
 		return
 	}
 	spokeIdx, issue, ok := fx.drawSpokeLiveIssue(t, "spoke-comment")
 	if !ok {
 		return
 	}
-	fx.commentOnNode(t, fx.spokes[spokeIdx], fx.spokes[spokeIdx].replica.Project.ID, issue.ShortID)
+	if !fx.acquireClaim(t, spokeIdx, issue.ShortID, actor) {
+		return
+	}
+	fx.commentOnNode(t, fx.spokes[spokeIdx], fx.spokes[spokeIdx].replica.Project.ID, issue.ShortID, actor)
 }
 
 func (fx *federationStressFixture) createIssueOnNode(t federationStressTB, node *federationStressNode, projectID int64, prefix string) createdIssue {
@@ -453,13 +460,14 @@ func (fx *federationStressFixture) commentOnNode(
 	node federationStressNode,
 	projectID int64,
 	ref string,
+	actor string,
 ) {
 	t.Helper()
 	status, raw := stressDoJSON(t, node.http, http.MethodPost,
 		node.url+"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+url.PathEscape(ref)+"/comments",
 		nil, map[string]any{
-			"actor": "commenter",
-			"body":  fmt.Sprintf("claim-free stress comment %03d", fx.opSeq),
+			"actor": actor,
+			"body":  fmt.Sprintf("claimed stress comment %03d", fx.opSeq),
 		}, nil)
 	require.Equalf(t, http.StatusOK, status, "comment body: %s", raw)
 }

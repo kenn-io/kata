@@ -296,6 +296,11 @@ type Runner struct {
 	OnPulledEvents func(projectID int64, events []db.Event)
 }
 
+type activeSpokeBinding struct {
+	binding db.FederationBinding
+	project db.Project
+}
+
 // RunOnce executes one pull pass. With no spoke bindings it returns without
 // reading credentials or making network requests.
 func (r *Runner) RunOnce(ctx context.Context) error {
@@ -303,11 +308,22 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	spokes := make([]db.FederationBinding, 0, len(bindings))
+	spokes := make([]activeSpokeBinding, 0, len(bindings))
 	for _, binding := range bindings {
-		if binding.Enabled && binding.Role == db.FederationRoleSpoke {
-			spokes = append(spokes, binding)
+		if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
+			continue
 		}
+		project, err := r.DB.ProjectByID(ctx, binding.ProjectID)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return err
+			}
+			return err
+		}
+		if project.DeletedAt != nil {
+			continue
+		}
+		spokes = append(spokes, activeSpokeBinding{binding: binding, project: project})
 	}
 	if len(spokes) == 0 {
 		return nil
@@ -316,7 +332,8 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	if err != nil {
 		var errs []error
 		errs = append(errs, err)
-		for _, binding := range spokes {
+		for _, spoke := range spokes {
+			binding := spoke.binding
 			if recordErr := r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()); recordErr != nil {
 				errs = append(errs, recordErr)
 			}
@@ -324,16 +341,10 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 		return errors.Join(errs...)
 	}
 	var errs []error
-	for _, binding := range spokes {
+	for _, spoke := range spokes {
+		binding := spoke.binding
 		bindingErrs := len(errs)
-		project, err := r.DB.ProjectByID(ctx, binding.ProjectID)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return err
-			}
-			errs = append(errs, err)
-			continue
-		}
+		project := spoke.project
 		cred := creds.Projects[project.UID]
 		if cred.HubURL == "" {
 			cred.HubURL = binding.HubURL

@@ -13,7 +13,8 @@ import (
 
 type claimPrincipal struct {
 	db.ClaimPrincipal
-	Local bool
+	Local         bool
+	IdentityToken bool
 }
 
 func resolveClaimPrincipal(
@@ -117,23 +118,30 @@ func resolveLocalClaimPrincipal(
 				"token identity requires a database", "", nil)
 		}
 		presented := strings.TrimPrefix(authz, authBearerPrefix)
-		if _, err := cfg.DB.ResolveAPIToken(ctx, presented); err != nil {
+		token, err := cfg.DB.ResolveAPIToken(ctx, presented)
+		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				return claimPrincipal{}, false, nil
 			}
 			return claimPrincipal{}, false, api.NewError(http.StatusInternalServerError, "internal",
 				"token identity lookup failed", "", nil)
 		}
-		return localClaimPrincipal(cfg, body), true, nil
+		principal := localClaimPrincipalWithHolder(cfg, body, token.Actor)
+		principal.IdentityToken = true
+		return principal, true, nil
 	default:
 		return claimPrincipal{}, false, nil
 	}
 }
 
 func localClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody) claimPrincipal {
+	return localClaimPrincipalWithHolder(cfg, body, body.Holder)
+}
+
+func localClaimPrincipalWithHolder(cfg ServerConfig, body api.ClaimActionBody, holder string) claimPrincipal {
 	return claimPrincipal{Local: true, ClaimPrincipal: db.ClaimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
-		Holder:            strings.TrimSpace(body.Holder),
+		Holder:            strings.TrimSpace(holder),
 		ClientKind:        strings.TrimSpace(body.ClientKind),
 	}}
 }

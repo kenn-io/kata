@@ -916,6 +916,44 @@ func TestFederationRunnerNoBindingsNoNetwork(t *testing.T) {
 	require.False(t, requested)
 }
 
+func TestFederationRunnerSkipsArchivedSpokeBindings(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+	project, err := spoke.DB.CreateProject(ctx, "archived-spoke")
+	require.NoError(t, err)
+	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	_, _, err = spoke.DB.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: project.ID,
+		Actor:     "tester",
+		Force:     true,
+	})
+	require.NoError(t, err)
+	requested := false
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requested = true
+		http.Error(w, "archived binding should not sync", http.StatusTeapot)
+	}))
+	t.Cleanup(hub.Close)
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "archived-token",
+	}))
+
+	require.NoError(t, (&Runner{DB: spoke.DB}).RunOnce(ctx))
+	assert.False(t, requested)
+}
+
 func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)

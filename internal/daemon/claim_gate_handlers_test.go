@@ -145,14 +145,31 @@ func TestClaimGateUsesResolvedTokenActorForFederatedMutation(t *testing.T) {
 	require.Equal(t, "alice", out.Events[0].Actor)
 }
 
-func TestClaimGateBypassesCommentsCreateAndNonFederatedProjects(t *testing.T) {
-	t.Run("comments bypass on federated project", func(t *testing.T) {
+func TestClaimGateCommentsCreateAndNonFederatedProjects(t *testing.T) {
+	t.Run("comments require claim on federated project", func(t *testing.T) {
 		env, project, issue := setupClaimGateIssue(t, true)
 
-		resp := envDoJSON(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "comments"),
+		resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "comments"),
 			map[string]string{"actor": "agent", "body": "comment without claim"}, nil)
 
-		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+	})
+
+	t.Run("comments deny conflicting holder on federated project", func(t *testing.T) {
+		env, project, issue := setupClaimGateIssue(t, true)
+		_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+			ProjectID: project.ID,
+			IssueRef:  issue.ShortID,
+			Principal: claimGatePrincipal(env, "other"),
+			ClaimKind: "hard",
+			Now:       time.Now().UTC(),
+		})
+		require.NoError(t, err)
+
+		resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "comments"),
+			map[string]string{"actor": "agent", "body": "comment without claim"}, nil)
+
+		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 	})
 
 	t.Run("issue create bypass on federated project", func(t *testing.T) {

@@ -51,13 +51,21 @@ func (s *TimedClaimSweeper) RunOnce(ctx context.Context, now time.Time) error {
 		if !binding.Enabled || binding.Role != db.FederationRoleHub {
 			continue
 		}
+		project, err := s.DB.ProjectByID(ctx, binding.ProjectID)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if project.DeletedAt != nil {
+			continue
+		}
 		events, err := s.DB.ExpireTimedClaimsForProject(ctx, binding.ProjectID, now, limit)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		for _, event := range events {
-			s.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: binding.ProjectID})
+			s.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: event.ProjectID})
 			s.Hooks.Enqueue(event)
 		}
 	}

@@ -59,6 +59,7 @@ func TestClaimAuthIdentityTokenCanUseLocalLeaseRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.True(t, acquired.Granted)
 	assert.Equal(t, env.DB.InstanceUID(), acquired.Holder.HolderInstanceUID)
+	assert.Equal(t, "alice", acquired.Holder.Holder)
 
 	resp, raw := envDoRaw(t, env, http.MethodGet, claimStatusPath(project.ID, issue.ShortID), nil, headers)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
@@ -490,6 +491,85 @@ func TestClaimActionAcquireBroadcastsOpportunisticExpiryBeforeAcquire(t *testing
 	assert.Less(t, first.Event.ID, second.Event.ID)
 }
 
+func TestClaimActionBroadcastsOpportunisticExpiryOnExpiredClaimProject(t *testing.T) {
+	env := testenv.New(t)
+	projectA, issueA := createClaimHubIssue(t, env)
+	projectB, issueB := createClaimHubIssueNamed(t, env, "hub-b")
+	subA := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: projectA.ID})
+	defer subA.Unsub()
+	subB := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: projectB.ID})
+	defer subB.Unsub()
+	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+		ProjectID: projectB.ID,
+		IssueRef:  issueB.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: env.DB.InstanceUID(),
+			Holder:            "agent-b",
+			ClientKind:        "cli",
+		},
+		ClaimKind: "timed",
+		TTL:       time.Minute,
+		Now:       time.Now().Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	var out claimResponseBody
+	resp := claimPost(t, env, projectA.ID, issueA.ShortID, "claim",
+		map[string]any{"holder": "agent-a", "client_kind": "cli", "claim_kind": "hard"}, nil, &out)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	expired := receiveMsg(t, subB.Ch, time.Second, "other project claim expired broadcast")
+	require.NotNil(t, expired.Event)
+	assert.Equal(t, "claim.expired", expired.Event.Type)
+	assert.Equal(t, projectB.ID, expired.ProjectID)
+	acquired := receiveMsg(t, subA.Ch, time.Second, "current project claim acquired broadcast")
+	require.NotNil(t, acquired.Event)
+	assert.Equal(t, "claim.acquired", acquired.Event.Type)
+	assert.Equal(t, projectA.ID, acquired.ProjectID)
+}
+
+func TestClaimActionDoesNotBroadcastRolledBackOpportunisticExpiry(t *testing.T) {
+	env := testenv.New(t)
+	projectA, issueA := createClaimHubIssue(t, env)
+	projectB, issueB := createClaimHubIssueNamed(t, env, "hub-b")
+	subA := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: projectA.ID})
+	defer subA.Unsub()
+	subB := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: projectB.ID})
+	defer subB.Unsub()
+	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+		ProjectID: projectA.ID,
+		IssueRef:  issueA.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: env.DB.InstanceUID(),
+			Holder:            "agent-owner",
+			ClientKind:        "cli",
+		},
+		ClaimKind: "hard",
+		Now:       time.Now(),
+	})
+	require.NoError(t, err)
+	_, err = env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+		ProjectID: projectB.ID,
+		IssueRef:  issueB.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: env.DB.InstanceUID(),
+			Holder:            "agent-b",
+			ClientKind:        "cli",
+		},
+		ClaimKind: "timed",
+		TTL:       time.Minute,
+		Now:       time.Now().Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+
+	resp := claimPost(t, env, projectA.ID, issueA.ShortID, "claim",
+		map[string]any{"holder": "agent-denied", "client_kind": "cli", "claim_kind": "hard"}, nil, nil)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assertNoReceive(t, subA.Ch, 100*time.Millisecond, "denied claim should not broadcast rolled-back expiration")
+	assertNoReceive(t, subB.Ch, 100*time.Millisecond, "denied claim should not broadcast rolled-back expiration")
+}
+
 func TestClaimStatusBroadcastsOpportunisticExpiry(t *testing.T) {
 	env := testenv.New(t)
 	project, issue := createClaimHubIssue(t, env)
@@ -894,8 +974,13 @@ type claimOut struct {
 
 func createClaimHubIssue(t *testing.T, env *testenv.Env) (db.Project, db.Issue) {
 	t.Helper()
+	return createClaimHubIssueNamed(t, env, "hub")
+}
+
+func createClaimHubIssueNamed(t *testing.T, env *testenv.Env, name string) (db.Project, db.Issue) {
+	t.Helper()
 	ctx := context.Background()
-	project := createFederatedHubProject(t, env, "hub")
+	project := createFederatedHubProject(t, env, name)
 	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "claim target",

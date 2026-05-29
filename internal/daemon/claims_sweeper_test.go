@@ -89,6 +89,47 @@ func TestTimedClaimSweeperExpiresOnlyHubClaimsAndFansOutEvents(t *testing.T) {
 	assert.Equal(t, 0, spokeReleased, "sweeper must not expire spoke cache claims")
 }
 
+func TestTimedClaimSweeperSkipsArchivedHubBindings(t *testing.T) {
+	ctx := context.Background()
+	env := testenv.New(t)
+	now := time.Date(2026, 5, 23, 18, 0, 0, 0, time.UTC)
+	project, issue := createClaimHubIssue(t, env)
+	_, err := env.DB.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: env.DB.InstanceUID(),
+			Holder:            "hub-cli",
+			ClientKind:        "cli",
+		},
+		ClaimKind: "timed",
+		TTL:       time.Minute,
+		Now:       now.Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: project.ID,
+		Actor:     "tester",
+		Force:     true,
+	})
+	require.NoError(t, err)
+
+	broadcaster := daemon.NewEventBroadcaster()
+	sub := broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer sub.Unsub()
+	hookSink := &captureHookSink{}
+	sweeper := daemon.NewTimedClaimSweeper(env.DB, broadcaster, hookSink)
+
+	require.NoError(t, sweeper.RunOnce(ctx, now))
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "archived project should not broadcast claim expiry")
+	require.Empty(t, hookSink.events)
+
+	var released int
+	require.NoError(t, env.DB.QueryRowContext(ctx,
+		`SELECT released_at IS NOT NULL FROM issue_claims WHERE issue_uid = ?`, issue.UID).Scan(&released))
+	assert.Equal(t, 0, released, "archived project claim should remain untouched")
+}
+
 func TestTimedClaimSweeperRunReportsPassErrorsToOnError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

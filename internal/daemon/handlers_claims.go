@@ -73,13 +73,17 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      http.MethodPost,
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/force_release",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
-		if _, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body, false, true); err != nil {
+		principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body, false, true)
+		if err != nil {
 			return nil, err
 		}
 		if err := requireHubClaimBinding(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
 		actor := strings.TrimSpace(in.Body.Actor)
+		if principal.IdentityToken {
+			actor = principal.Holder
+		}
 		if actor == "" {
 			actor = "admin"
 		}
@@ -94,10 +98,13 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Reason:    reason,
 			Now:       time.Now().UTC(),
 		})
-		emitClaimEvents(cfg, in.ProjectID, result.Events)
 		if err != nil {
+			if errors.Is(err, db.ErrClaimExpired) {
+				emitClaimEvents(cfg, result.Events)
+			}
 			return nil, claimAPIError(err)
 		}
+		emitClaimEvents(cfg, result.Events)
 		emitClaimEvent(cfg, in.ProjectID, result.Event)
 		return &api.ClaimActionResponse{Body: claimResultBody(result)}, nil
 	})
@@ -140,13 +147,13 @@ func handleClaimAcquire(
 			Purpose:   strings.TrimSpace(body.Purpose),
 			Now:       time.Now().UTC(),
 		})
-		emitClaimEvents(cfg, projectID, result.Events)
 		if err != nil {
 			if errors.Is(err, db.ErrClaimDenied) {
 				return claimResultBody(result), nil
 			}
 			return api.ClaimActionResponseBody{}, claimAPIError(err)
 		}
+		emitClaimEvents(cfg, result.Events)
 		emitClaimEvent(cfg, projectID, result.Event)
 		if err := federationFailpoint("after_claim_grant_commit_before_response"); err != nil {
 			return api.ClaimActionResponseBody{}, api.NewError(http.StatusInternalServerError, "federation_failpoint", err.Error(), "", nil)
@@ -206,10 +213,13 @@ func handleClaimRenew(
 			TTL:       ttlDuration(body.TTLSeconds),
 			Now:       time.Now().UTC(),
 		})
-		emitClaimEvents(cfg, projectID, result.Events)
 		if err != nil {
+			if errors.Is(err, db.ErrClaimExpired) {
+				emitClaimEvents(cfg, result.Events)
+			}
 			return api.ClaimActionResponseBody{}, claimAPIError(err)
 		}
+		emitClaimEvents(cfg, result.Events)
 		return claimResultBody(result), nil
 	}
 	remote, cred, err := claimForwardClient(ctx, cfg.DB, binding)
@@ -246,10 +256,13 @@ func handleClaimRelease(
 			Reason:    strings.TrimSpace(body.Reason),
 			Now:       time.Now().UTC(),
 		})
-		emitClaimEvents(cfg, projectID, result.Events)
 		if err != nil {
+			if errors.Is(err, db.ErrClaimExpired) {
+				emitClaimEvents(cfg, result.Events)
+			}
 			return api.ClaimActionResponseBody{}, claimAPIError(err)
 		}
+		emitClaimEvents(cfg, result.Events)
 		emitClaimEvent(cfg, projectID, result.Event)
 		return claimResultBody(result), nil
 	}
@@ -277,7 +290,7 @@ func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, r
 		if err != nil {
 			return api.ClaimStatusBody{}, claimAPIError(err)
 		}
-		emitClaimEvents(cfg, projectID, status.Events)
+		emitClaimEvents(cfg, status.Events)
 		return claimStatusBody(status), nil
 	}
 	remote, cred, err := claimForwardClient(ctx, cfg.DB, binding)
@@ -842,8 +855,8 @@ func emitClaimEvent(cfg ServerConfig, projectID int64, event *db.Event) {
 	cfg.Hooks.Enqueue(*event)
 }
 
-func emitClaimEvents(cfg ServerConfig, projectID int64, events []db.Event) {
+func emitClaimEvents(cfg ServerConfig, events []db.Event) {
 	for i := range events {
-		emitClaimEvent(cfg, projectID, &events[i])
+		emitClaimEvent(cfg, events[i].ProjectID, &events[i])
 	}
 }

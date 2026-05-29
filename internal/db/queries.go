@@ -1013,6 +1013,9 @@ func (d *DB) CreateComment(ctx context.Context, p CreateCommentParams) (Comment,
 	if err != nil {
 		return Comment{}, Event{}, err
 	}
+	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
+		return Comment{}, Event{}, err
+	}
 
 	commentUID, err := katauid.New()
 	if err != nil {
