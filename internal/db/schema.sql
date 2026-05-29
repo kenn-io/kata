@@ -366,6 +366,23 @@ CREATE INDEX idx_federation_enrollments_scope
 CREATE INDEX idx_federation_enrollments_spoke
   ON federation_enrollments(spoke_instance_uid);
 
+CREATE TABLE federation_ingest_deliveries (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id          INTEGER NOT NULL REFERENCES projects(id),
+  enrollment_id       INTEGER NOT NULL DEFAULT 0,
+  spoke_instance_uid  TEXT NOT NULL,
+  source_event_id     INTEGER NOT NULL CHECK(source_event_id > 0),
+  event_uid           TEXT NOT NULL,
+  created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  delivered_at        DATETIME,
+  CHECK (length(spoke_instance_uid) = 26),
+  CHECK (length(event_uid) = 26),
+  UNIQUE(project_id, enrollment_id, source_event_id, event_uid)
+);
+CREATE INDEX idx_federation_ingest_deliveries_undelivered
+  ON federation_ingest_deliveries(project_id, enrollment_id, spoke_instance_uid, source_event_id)
+  WHERE delivered_at IS NULL;
+
 CREATE TABLE issue_claims (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   claim_uid           TEXT NOT NULL UNIQUE,

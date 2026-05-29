@@ -259,6 +259,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID:        in.ProjectID,
+			EnrollmentID:     principal.EnrollmentID,
 			SpokeInstanceUID: principal.SpokeInstanceUID,
 			Events:           federationIngestEventsToDB(in.Body.Events),
 		})
@@ -275,6 +276,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		for _, evt := range inserted {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
 			cfg.Hooks.Enqueue(evt)
+		}
+		if err := cfg.DB.MarkFederationIngestDelivered(ctx, in.ProjectID, principal.EnrollmentID,
+			principal.SpokeInstanceUID, result.InsertedEventUIDs); err != nil {
+			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 		}
 		return &api.FederationIngestEventsResponse{Body: api.FederationIngestEventsBody{
 			Accepted:          result.Accepted,
@@ -360,10 +365,21 @@ func ensureReplicaBinding(
 	store *db.DB,
 	in *api.CreateFederationReplicaRequest,
 ) (db.Project, db.FederationBinding, error) {
+	projectName := strings.TrimSpace(in.Body.ProjectName)
+	if err := config.ValidateProjectName(projectName); err != nil {
+		return db.Project{}, db.FederationBinding{}, api.NewError(400, "validation", err.Error(), "", nil)
+	}
 	project, err := store.ProjectByUID(ctx, in.Body.HubProjectUID)
 	createdProject := false
 	if errors.Is(err, db.ErrNotFound) {
-		project, err = store.CreateProjectWithUID(ctx, in.Body.ProjectName, in.Body.HubProjectUID)
+		if existing, lookupErr := store.ProjectByNameIncludingArchived(ctx, projectName); lookupErr == nil {
+			if existing.UID != in.Body.HubProjectUID {
+				return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision", "a project with this name already has a different UID", "", nil)
+			}
+		} else if !errors.Is(lookupErr, db.ErrNotFound) {
+			return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", lookupErr.Error(), "", nil)
+		}
+		project, err = store.CreateProjectWithUID(ctx, projectName, in.Body.HubProjectUID)
 		if err != nil {
 			return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
 		}

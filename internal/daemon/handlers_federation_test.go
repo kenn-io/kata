@@ -361,6 +361,39 @@ func TestFederationReplicaSetupRejectsUnboundProjectCollision(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
 }
 
+func TestFederationReplicaSetupValidatesProjectName(t *testing.T) {
+	env := testenv.New(t)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "bad\nname",
+		"replay_horizon_event_id": 9,
+	}, nil)
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(raw), "validation")
+}
+
+func TestFederationReplicaSetupRejectsNameCollisionWithDifferentUID(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	_, err := env.DB.CreateProject(ctx, "spoke")
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "spoke",
+		"replay_horizon_event_id": 9,
+	}, nil)
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "federation_project_collision")
+}
+
 func TestFederatedSpokeMutationReturnsReadOnlyError(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -1092,6 +1125,54 @@ func TestFederationIngestPersistsBroadcastsAndReturnsAck(t *testing.T) {
 	assert.Equal(t, int64(1), out.Duplicates)
 	assert.Equal(t, int64(17), out.PushCursorEventID)
 	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "duplicate ingest should not rebroadcast")
+}
+
+func TestFederationIngestRetryAfterPostCommitFailureBroadcastsAcceptedEvent(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project := createFederatedHubProject(t, env, "hub")
+	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:            "ingest-retry-token",
+		SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID:        &project.ID,
+		Capabilities:     "push",
+	})
+	require.NoError(t, err)
+	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
+	body := federationIngestBody(federationIngestEnvelope(t, int64(17), ev))
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer sub.Unsub()
+
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "after_federation_ingest_commit_before_broadcast=fail")
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/events:ingest", body, bearer(created.Token))
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode, string(raw))
+	_, err = env.DB.IssueByUID(ctx, *ev.IssueUID, db.IncludeDeletedNo)
+	require.NoError(t, err, "failpoint is after commit")
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "post-commit failpoint fires before broadcast")
+
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+	resp, raw = envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/events:ingest", body, bearer(created.Token))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var out struct {
+		Accepted          int64 `json:"accepted"`
+		Duplicates        int64 `json:"duplicates"`
+		PushCursorEventID int64 `json:"push_cursor_event_id"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, int64(0), out.Accepted)
+	assert.Equal(t, int64(1), out.Duplicates)
+	assert.Equal(t, int64(17), out.PushCursorEventID)
+	msg := receiveMsg(t, sub.Ch, time.Second, "duplicate retry must broadcast undelivered accepted event")
+	require.Equal(t, "event", msg.Kind)
+	require.NotNil(t, msg.Event)
+	assert.Equal(t, ev.EventUID, msg.Event.UID)
+
+	resp, raw = envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/events:ingest", body, bearer(created.Token))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "delivered duplicate ingest should not rebroadcast")
 }
 
 func TestFederationIngestRejectsFutureSchemaVersion(t *testing.T) {
