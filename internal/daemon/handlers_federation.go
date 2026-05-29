@@ -733,6 +733,18 @@ func projectFederationBody(ctx context.Context, store *db.DB, projectID int64) (
 	if err != nil {
 		return api.ProjectFederationBody{}, federationError(err)
 	}
+	if binding.Role == db.FederationRoleHub && binding.Enabled {
+		resetTo, err := store.PurgeResetCheck(ctx, binding.ReplayHorizonEventID, projectID)
+		if err != nil {
+			return api.ProjectFederationBody{}, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		if resetTo > 0 {
+			binding, _, err = store.RefreshProjectFederationBaseline(ctx, projectID, "federation")
+			if err != nil {
+				return api.ProjectFederationBody{}, api.NewError(500, "internal", err.Error(), "", nil)
+			}
+		}
+	}
 	var baselineThrough sql.NullInt64
 	if err := store.QueryRowContext(ctx, `
 		SELECT MAX(id)

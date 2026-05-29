@@ -60,6 +60,32 @@ func TestFederationEnableAndMetadata(t *testing.T) {
 	assert.Equal(t, enabled, got)
 }
 
+func TestFederationMetadataRecoversBaselineAfterPurgeReset(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "purged issue",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(ctx, project.ID, "tester")
+	require.NoError(t, err)
+	purgeLog, err := env.DB.PurgeIssue(ctx, issue.ID, "tester", nil)
+	require.NoError(t, err)
+	require.NotNil(t, purgeLog.PurgeResetAfterEventID)
+
+	var got api.ProjectFederationBody
+	envGetJSON(t, env, projectPath(project.ID)+"/federation", &got)
+
+	assert.Greater(t, got.ReplayHorizonEventID, *purgeLog.PurgeResetAfterEventID)
+	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, got.ReplayHorizonEventID, binding.ReplayHorizonEventID)
+}
+
 func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	env := testenv.New(t)
 
