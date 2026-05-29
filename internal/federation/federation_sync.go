@@ -15,6 +15,7 @@ import (
 )
 
 const federationPollLimit = 1000
+const defaultClientTimeout = 5 * time.Second
 
 // ErrFederationResetRequired reports a hub that still requires reset after the
 // spoke refreshed federation metadata and replayed from the new horizon.
@@ -39,7 +40,7 @@ func SyncFederationOnce(
 	binding db.FederationBinding,
 	creds config.FederationCredential,
 ) error {
-	return SyncFederationOnceWithPulledEvents(ctx, store, binding, creds, nil)
+	return SyncFederationOnceWithPulledEvents(ctx, store, binding, creds, clientOptsWithDefault(clientpkg.Opts{}), nil)
 }
 
 // SyncFederationOnceWithPulledEvents is SyncFederationOnce with a post-commit
@@ -51,6 +52,7 @@ func SyncFederationOnceWithPulledEvents(
 	store *db.DB,
 	binding db.FederationBinding,
 	creds config.FederationCredential,
+	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 ) error {
 	hubURL := creds.HubURL
@@ -70,7 +72,7 @@ func SyncFederationOnceWithPulledEvents(
 			return err
 		}
 	}
-	client, err := NewClient(ctx, hubURL, creds.Token, clientpkg.Opts{})
+	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsWithDefault(opts))
 	if err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
@@ -296,6 +298,17 @@ type Runner struct {
 	OnPulledEvents func(projectID int64, events []db.Event)
 }
 
+func (r *Runner) clientOpts() clientpkg.Opts {
+	return clientOptsWithDefault(r.Opts)
+}
+
+func clientOptsWithDefault(opts clientpkg.Opts) clientpkg.Opts {
+	if opts.Timeout == 0 {
+		opts.Timeout = defaultClientTimeout
+	}
+	return opts
+}
+
 type activeSpokeBinding struct {
 	binding db.FederationBinding
 	project db.Project
@@ -352,13 +365,14 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 		if cred.HubProjectID == 0 {
 			cred.HubProjectID = binding.HubProjectID
 		}
-		if err := RetryPendingClaimsOnce(ctx, r.DB, binding, cred); err != nil {
+		opts := r.clientOpts()
+		if err := RetryPendingClaimsOnce(ctx, r.DB, binding, cred, opts); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
 			errs = append(errs, err)
 		}
-		if err := SyncFederationOnceWithPulledEvents(ctx, r.DB, binding, cred, r.OnPulledEvents); err != nil {
+		if err := SyncFederationOnceWithPulledEvents(ctx, r.DB, binding, cred, opts, r.OnPulledEvents); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
@@ -380,6 +394,7 @@ func RetryPendingClaimsOnce(
 	store *db.DB,
 	binding db.FederationBinding,
 	creds config.FederationCredential,
+	opts clientpkg.Opts,
 ) error {
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke || strings.TrimSpace(creds.Token) == "" {
 		return nil
@@ -412,7 +427,7 @@ func RetryPendingClaimsOnce(
 	if hubProjectID == 0 {
 		hubProjectID = binding.HubProjectID
 	}
-	client, err := NewClient(ctx, hubURL, creds.Token, clientpkg.Opts{})
+	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsWithDefault(opts))
 	if err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}

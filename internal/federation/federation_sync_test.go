@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
@@ -195,7 +196,7 @@ func TestSyncFederationOnceReportsFreshPulledEvents(t *testing.T) {
 		HubURL:       hub.URL,
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
-	}, func(projectID int64, events []db.Event) {
+	}, clientpkg.Opts{}, func(projectID int64, events []db.Event) {
 		require.Equal(t, spokeProject.ID, projectID)
 		delivered = append(delivered, events...)
 	})
@@ -219,7 +220,7 @@ func TestSyncFederationOnceReportsFreshPulledEvents(t *testing.T) {
 		HubURL:       hub.URL,
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
-	}, func(_ int64, events []db.Event) {
+	}, clientpkg.Opts{}, func(_ int64, events []db.Event) {
 		delivered = append(delivered, events...)
 	}))
 	assert.Empty(t, delivered, "duplicate/no-op pulls should not be delivered again")
@@ -1051,6 +1052,49 @@ func TestFederationRunnerNoBindingsNoNetwork(t *testing.T) {
 
 	require.NoError(t, runner.RunOnce(context.Background()))
 	require.False(t, requested)
+}
+
+func TestFederationRunnerUsesClientTimeout(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", spoke.Home)
+	project, err := spoke.DB.CreateProject(ctx, "spoke")
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events":
+			time.Sleep(500 * time.Millisecond)
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+				Events:      []api.EventEnvelope{},
+				NextAfterID: 1,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               hub.URL,
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "runner-timeout-token",
+	}))
+	runner := &Runner{DB: spoke.DB, Opts: clientpkg.Opts{Timeout: 50 * time.Millisecond}}
+
+	start := time.Now()
+	err = runner.RunOnce(ctx)
+
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 300*time.Millisecond)
 }
 
 func TestFederationRunnerSkipsArchivedSpokeBindings(t *testing.T) {

@@ -63,6 +63,9 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			items = append(items, item)
 		}
+		if err := requireFederatedImportClaims(ctx, cfg, in.ProjectID, in.Body.Source, actor, items); err != nil {
+			return nil, err
+		}
 
 		result, events, err := cfg.DB.ImportBatch(ctx, db.ImportBatchParams{
 			ProjectID: in.ProjectID,
@@ -91,4 +94,73 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body = result
 		return out, nil
 	})
+}
+
+func requireFederatedImportClaims(
+	ctx context.Context,
+	cfg ServerConfig,
+	projectID int64,
+	source string,
+	actor string,
+	items []db.ImportItem,
+) error {
+	binding, err := cfg.DB.FederationBindingByProject(ctx, projectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	if !binding.Enabled {
+		return nil
+	}
+	issueIDs := map[int64]struct{}{}
+	for _, item := range items {
+		if err := addMappedImportIssueID(ctx, cfg.DB, issueIDs, projectID, source, item.ExternalID); err != nil {
+			return err
+		}
+		for _, link := range item.Links {
+			if err := addMappedImportIssueID(ctx, cfg.DB, issueIDs, projectID, source, link.TargetExternalID); err != nil {
+				return err
+			}
+		}
+	}
+	for issueID := range issueIDs {
+		issue, err := cfg.DB.IssueByID(ctx, issueID)
+		if errors.Is(err, db.ErrNotFound) {
+			return api.NewError(404, "issue_not_found", err.Error(), "", nil)
+		}
+		if err != nil {
+			return api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		if issue.DeletedAt != nil {
+			return api.NewError(404, "issue_not_found", "mapped import issue is deleted", "", nil)
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addMappedImportIssueID(
+	ctx context.Context,
+	store *db.DB,
+	issueIDs map[int64]struct{},
+	projectID int64,
+	source string,
+	externalID string,
+) error {
+	mapping, err := store.ImportMappingBySource(ctx, projectID, source, "issue", externalID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	if mapping.IssueID == nil {
+		return api.NewError(404, "issue_not_found", "import issue mapping is missing issue id", "", nil)
+	}
+	issueIDs[*mapping.IssueID] = struct{}{}
+	return nil
 }
