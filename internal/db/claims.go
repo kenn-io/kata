@@ -1706,7 +1706,6 @@ func resolveClaimIssueTx(ctx context.Context, tx claimStore, projectID int64, is
 		  FROM issues i
 		  JOIN projects p ON p.id = i.project_id
 		 WHERE i.project_id = ?
-		   AND i.deleted_at IS NULL
 		   AND (i.short_id = ? OR i.uid = ?)`
 	var issue Issue
 	var projectName string

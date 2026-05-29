@@ -358,6 +358,19 @@ func TestClaimGateEditLinksDeltaParentReplaceRequiresClaimForOldAndNewParent(t *
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
+func TestClaimGateRestoreCanAcquireLeaseAfterSoftDelete(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, _ := setupClaimGateProject(t, env, true)
+	_, _, _, err := env.DB.SoftDeleteIssue(context.Background(), issue.ID, "tester")
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "actions/restore"),
+		map[string]string{"actor": "agent"}, nil)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
 func TestClaimGateUsesResolvedTokenActorForFederatedMutation(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, issue, _ := setupClaimGateProject(t, env, true)

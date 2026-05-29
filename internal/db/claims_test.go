@@ -827,6 +827,72 @@ func TestClaimStatusReturnsLiveHolderAndHubNow(t *testing.T) {
 	assert.Equal(t, issue.UID, status.Claim.IssueUID)
 }
 
+func TestClaimsCanBeReacquiredForSoftDeletedIssue(t *testing.T) {
+	d, ctx, p, issue := setupTestIssue(t)
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	alice := claimPrincipal(t, "alice")
+	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: alice,
+		ClaimKind: "hard",
+		Now:       now,
+	})
+	require.NoError(t, err)
+	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "alice")
+	require.NoError(t, err)
+
+	released, err := d.ReleaseClaim(ctx, db.ReleaseClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: alice,
+		Reason:    "restore handoff",
+		Now:       now.Add(time.Minute),
+	})
+	require.NoError(t, err)
+	assert.True(t, released.Granted)
+
+	reacquired, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: alice,
+		ClaimKind: "hard",
+		Now:       now.Add(2 * time.Minute),
+	})
+	require.NoError(t, err)
+	assert.True(t, reacquired.Granted)
+	require.NotNil(t, reacquired.Claim)
+	assert.Equal(t, issue.UID, reacquired.Claim.IssueUID)
+
+	status, err := d.ClaimStatus(ctx, p.ID, issue.ShortID, now.Add(3*time.Minute))
+	require.NoError(t, err)
+	assert.True(t, status.Held)
+	assert.Equal(t, issue.UID, status.Claim.IssueUID)
+}
+
+func TestClaimStatusExpiresTimedClaimForSoftDeletedIssue(t *testing.T) {
+	d, ctx, p, issue := setupTestIssue(t)
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: claimPrincipal(t, "alice"),
+		ClaimKind: "timed",
+		TTL:       time.Minute,
+		Now:       now.Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+	_, _, _, err = d.SoftDeleteIssue(ctx, issue.ID, "alice")
+	require.NoError(t, err)
+
+	status, err := d.ClaimStatus(ctx, p.ID, issue.ShortID, now)
+
+	require.NoError(t, err)
+	assert.False(t, status.Held)
+	require.Len(t, status.Events, 1)
+	assert.Equal(t, "claim.expired", status.Events[0].Type)
+}
+
 func TestPendingClaimRequestInsertIsDurable(t *testing.T) {
 	d, path := openTestDBWithPath(t)
 	ctx := t.Context()
