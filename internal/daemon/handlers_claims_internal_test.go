@@ -42,23 +42,26 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 
 	var gotPath string
 	var gotAuth string
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/ping":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ok":      true,
-				"service": "kata",
-				"version": "test",
-				"pid":     os.Getpid(),
-			})
-		case "/api/v1/projects/42/issues/ABC/lease/actions/acquire":
-			gotPath = r.URL.Path
-			gotAuth = r.Header.Get("Authorization")
-			_ = json.NewEncoder(w).Encode(api.ClaimActionResponseBody{Granted: true})
-		default:
-			http.NotFound(w, r)
-		}
-	})}
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/api/v1/ping":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"ok":      true,
+					"service": "kata",
+					"version": "test",
+					"pid":     os.Getpid(),
+				})
+			case "/api/v1/projects/42/issues/ABC/lease/actions/acquire":
+				gotPath = r.URL.Path
+				gotAuth = r.Header.Get("Authorization")
+				_ = json.NewEncoder(w).Encode(api.ClaimActionResponseBody{Granted: true})
+			default:
+				http.NotFound(w, r)
+			}
+		}),
+		ReadHeaderTimeout: time.Second,
+	}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 	_, err = WriteRuntimeFile(ns.DataDir, RuntimeRecord{
