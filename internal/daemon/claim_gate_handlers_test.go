@@ -113,6 +113,146 @@ func TestClaimGateStableDenialCodes(t *testing.T) {
 	})
 }
 
+func TestClaimGateLinkCreateRequiresClaimsForBothEndpoints(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, peer := setupClaimGateProject(t, env, true)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "links"), map[string]string{
+		"actor":  "agent",
+		"type":   "related",
+		"to_ref": peer.ShortID,
+	}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+
+	acquireClaimGateIssue(t, env, project, peer, "agent")
+	resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "links"), map[string]string{
+		"actor":  "agent",
+		"type":   "related",
+		"to_ref": peer.ShortID,
+	}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
+func TestClaimGateLinkDeleteRequiresClaimsForBothEndpoints(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, peer := setupClaimGateProject(t, env, true)
+	link, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: issue.ID,
+		ToIssueID:   peer.ID,
+		Type:        "related",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodDelete,
+		issuePathRef(project.ID, issue.ShortID, "links/"+strconv.FormatInt(link.ID, 10))+"?actor=agent", nil, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+
+	acquireClaimGateIssue(t, env, project, peer, "agent")
+	resp, raw = envDoRaw(t, env, http.MethodDelete,
+		issuePathRef(project.ID, issue.ShortID, "links/"+strconv.FormatInt(link.ID, 10))+"?actor=agent", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
+func TestClaimGateParentReplaceRequiresClaimForOldAndNewParent(t *testing.T) {
+	env := testenv.New(t)
+	project, child, oldParent := setupClaimGateProject(t, env, true)
+	newParent, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "new parent",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: child.ID,
+		ToIssueID:   oldParent.ID,
+		Type:        "parent",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, child, "agent")
+	acquireClaimGateIssue(t, env, project, newParent, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, child.ShortID, "links"), map[string]any{
+		"actor":   "agent",
+		"type":    "parent",
+		"to_ref":  newParent.ShortID,
+		"replace": true,
+	}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+
+	acquireClaimGateIssue(t, env, project, oldParent, "agent")
+	resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, child.ShortID, "links"), map[string]any{
+		"actor":   "agent",
+		"type":    "parent",
+		"to_ref":  newParent.ShortID,
+		"replace": true,
+	}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
+func TestClaimGateEditLinksDeltaRequiresClaimsForAffectedEndpoints(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, peer := setupClaimGateProject(t, env, true)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.ShortID, ""), map[string]any{
+		"actor":       "agent",
+		"links_delta": map[string]any{"add_related": []string{peer.ShortID}},
+	}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+
+	acquireClaimGateIssue(t, env, project, peer, "agent")
+	resp, raw = envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.ShortID, ""), map[string]any{
+		"actor":       "agent",
+		"links_delta": map[string]any{"add_related": []string{peer.ShortID}},
+	}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
+func TestClaimGateEditLinksDeltaParentReplaceRequiresClaimForOldAndNewParent(t *testing.T) {
+	env := testenv.New(t)
+	project, child, oldParent := setupClaimGateProject(t, env, true)
+	newParent, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "new parent",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: child.ID,
+		ToIssueID:   oldParent.ID,
+		Type:        "parent",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, child, "agent")
+	acquireClaimGateIssue(t, env, project, newParent, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, child.ShortID, ""), map[string]any{
+		"actor":       "agent",
+		"links_delta": map[string]any{"set_parent": newParent.ShortID},
+	}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+
+	acquireClaimGateIssue(t, env, project, oldParent, "agent")
+	resp, raw = envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, child.ShortID, ""), map[string]any{
+		"actor":       "agent",
+		"links_delta": map[string]any{"set_parent": newParent.ShortID},
+	}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
 func TestClaimGateUsesResolvedTokenActorForFederatedMutation(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, issue, _ := setupClaimGateProject(t, env, true)
@@ -262,6 +402,18 @@ func claimGatePrincipal(env *testenv.Env, actor string) db.ClaimPrincipal {
 		Holder:            actor,
 		ClientKind:        "",
 	}
+}
+
+func acquireClaimGateIssue(t *testing.T, env *testenv.Env, project db.Project, issue db.Issue, actor string) {
+	t.Helper()
+	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+		ProjectID: project.ID,
+		IssueRef:  issue.ShortID,
+		Principal: claimGatePrincipal(env, actor),
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
 }
 
 func claimGateEditTitleRequest(t *testing.T, federated bool) (*testenv.Env, claimGateHTTPRequest) {

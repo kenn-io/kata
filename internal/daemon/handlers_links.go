@@ -33,6 +33,20 @@ func registerLinksHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, deleteLinkHandler(cfg))
 }
 
+func requireFederatedLinkClaims(ctx context.Context, cfg ServerConfig, projectID int64, actor string, issues ...db.Issue) error {
+	seen := make(map[int64]struct{}, len(issues))
+	for _, issue := range issues {
+		if _, ok := seen[issue.ID]; ok {
+			continue
+		}
+		seen[issue.ID] = struct{}{}
+		if err := requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRequest) (*api.CreateLinkResponse, error) {
 	return func(ctx context.Context, in *api.CreateLinkRequest) (*api.CreateLinkResponse, error) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
@@ -59,6 +73,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		// target are looked up via the same in.ProjectID).
 		if from.ID == to.ID {
 			return nil, api.NewError(400, "validation", "cannot link an issue to itself", "", nil)
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, to, actor); err != nil {
+			return nil, err
 		}
 
 		// Storage endpoints: canonical (from < to) for related; otherwise as-is.
@@ -88,6 +105,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 				oldParentIssue, err := cfg.DB.IssueByID(ctx, existing.ToIssueID)
 				if err != nil {
 					return nil, api.NewError(500, "internal", err.Error(), "", nil)
+				}
+				if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, oldParentIssue, actor); err != nil {
+					return nil, err
 				}
 				unlinkEv := db.LinkEventParams{
 					EventType:    "issue.unlinked",
@@ -194,9 +214,6 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if link.FromIssueID != from.ID && link.ToIssueID != from.ID {
 			return nil, api.NewError(404, "link_not_found", "link not attached to this issue", "", nil)
 		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, from, actor); err != nil {
-			return nil, err
-		}
 
 		// Resolve the link's storage endpoints so the payload carries each
 		// peer's short_id + UID. For parent/blocks links the URL issue is
@@ -216,6 +233,9 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		}
 		if link.FromIssueID != from.ID {
 			linkFrom, linkTo = linkTo, linkFrom
+		}
+		if err := requireFederatedLinkClaims(ctx, cfg, in.ProjectID, actor, linkFrom, linkTo); err != nil {
+			return nil, err
 		}
 		ev := db.LinkEventParams{
 			EventType:    "issue.unlinked",

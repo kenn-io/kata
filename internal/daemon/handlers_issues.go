@@ -308,6 +308,9 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			if err := validateResolvedLinksDelta(&params); err != nil {
 				return nil, err
 			}
+			if err := requireFederatedLinksDeltaClaims(ctx, cfg, in.ProjectID, actor, issue, &params); err != nil {
+				return nil, err
+			}
 		}
 
 		result, err := cfg.DB.EditIssueAtomic(ctx, params)
@@ -468,6 +471,62 @@ func validateResolvedLinksDelta(p *db.EditIssueAtomicParams) error {
 			"choose one", nil)
 	}
 	return nil
+}
+
+func requireFederatedLinksDeltaClaims(
+	ctx context.Context,
+	cfg ServerConfig,
+	projectID int64,
+	actor string,
+	source db.Issue,
+	p *db.EditIssueAtomicParams,
+) error {
+	ids := make(map[int64]struct{})
+	addID := func(id int64) {
+		if id != source.ID {
+			ids[id] = struct{}{}
+		}
+	}
+	addIDs := func(in []int64) {
+		for _, id := range in {
+			addID(id)
+		}
+	}
+	if p.SetParent != nil {
+		addID(*p.SetParent)
+		existing, err := cfg.DB.ParentOf(ctx, source.ID)
+		switch {
+		case err == nil:
+			if existing.ToIssueID != *p.SetParent {
+				addID(existing.ToIssueID)
+			}
+		case errors.Is(err, db.ErrNotFound):
+		default:
+			return api.NewError(500, "internal", err.Error(), "", nil)
+		}
+	}
+	if p.RemoveParent != nil {
+		addID(*p.RemoveParent)
+	}
+	addIDs(p.AddBlocks)
+	addIDs(p.AddBlockedBy)
+	addIDs(p.AddRelated)
+	addIDs(p.RemoveBlocks)
+	addIDs(p.RemoveBlockedBy)
+	addIDs(p.RemoveRelated)
+	if len(ids) == 0 {
+		return nil
+	}
+
+	issues := make([]db.Issue, 0, len(ids))
+	for id := range ids {
+		issue, err := cfg.DB.IssueByID(ctx, id)
+		if err != nil {
+			return api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		issues = append(issues, issue)
+	}
+	return requireFederatedLinkClaims(ctx, cfg, projectID, actor, issues...)
 }
 
 // firstIDConflict reports the first int64 present in both slices.
