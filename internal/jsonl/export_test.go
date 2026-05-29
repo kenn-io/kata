@@ -444,6 +444,34 @@ func TestExportNoIncludeDeletedPreservesNonAggregatedRelatedOrphan(t *testing.T)
 		"orphan related_issue_uid must be NULL-scrubbed in the exported event")
 }
 
+func TestExportNoIncludeDeletedDropsFederatedEventForSoftDeletedIssueUID(t *testing.T) {
+	ctx, d, p := newExportEnv(t)
+	issue := createTesterIssue(ctx, t, d, p.ID, "federated subject", "")
+	_, err := d.ExecContext(ctx, `UPDATE issues SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, issue.ID)
+	require.NoError(t, err)
+	const eventUID = "01HZZZZZZZZZZZZZZZZZRELOR1"
+	_, err = d.ExecContext(ctx,
+		`INSERT INTO events (uid, origin_instance_uid, project_id, project_name,
+		                     issue_id, issue_uid, related_issue_id, related_issue_uid,
+		                     type, actor, payload, hlc_physical_ms, hlc_counter, content_hash)
+		 VALUES (?, '01HZZZZZZZZZZZZZZZZZZZZZ00', ?, ?,
+		         NULL, ?, NULL, NULL,
+		         'issue.updated', 'remote', '{}', 1, 0,
+		         '1111111111111111111111111111111111111111111111111111111111111111')`,
+		eventUID, p.ID, p.Name, issue.UID)
+	require.NoError(t, err)
+
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{IncludeDeleted: false})
+
+	for _, rec := range records {
+		if rec["kind"] != "event" {
+			continue
+		}
+		data, _ := rec["data"].(map[string]any)
+		assert.NotEqual(t, eventUID, data["uid"], "live-only export must drop events attached only by deleted issue_uid")
+	}
+}
+
 func openExportTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))

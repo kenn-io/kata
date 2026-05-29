@@ -367,6 +367,18 @@ func TestPendingFederationPushEvents(t *testing.T) {
 		Body:    "local comment",
 	})
 	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		INSERT INTO events(
+			uid, origin_instance_uid, project_id, project_name,
+			type, actor, payload, hlc_physical_ms, hlc_counter, content_hash
+		)
+		VALUES(
+			'01HZNQ7VFPK1XGD8R5MABCD4PX', ?, ?, ?,
+			'project.removed', 'tester', '{}', 1, 0,
+			'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+		)`,
+		d.InstanceUID(), p.ID, p.Name)
+	require.NoError(t, err)
 
 	got, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), binding.PushCursorEventID, 10)
 	require.NoError(t, err)

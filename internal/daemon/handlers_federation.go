@@ -650,21 +650,7 @@ func federationPendingPushStats(ctx context.Context, store *db.DB, binding db.Fe
 	if binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
 		return 0, 0, nil
 	}
-	var count int64
-	var maxID sql.NullInt64
-	if err := store.QueryRowContext(ctx, `
-		SELECT COUNT(*), MAX(id)
-		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?
-		   AND id > ?`,
-		binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID).Scan(&count, &maxID); err != nil {
-		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
-	}
-	if maxID.Valid {
-		return count, maxID.Int64, nil
-	}
-	return count, 0, nil
+	return store.PendingFederationPushStats(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
 }
 
 func federationEnrollmentCount(ctx context.Context, store *db.DB, binding db.FederationBinding) (int64, error) {

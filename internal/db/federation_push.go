@@ -41,6 +41,7 @@ func (d *DB) PendingFederationPushEvents(
 	      WHERE e.project_id = ?
 	        AND e.origin_instance_uid = ?
 	        AND e.id > ?
+	        AND `+federationPushEventTypeCondition("e.type")+`
 	      ORDER BY e.id ASC
 	      LIMIT ?`, projectID, originInstanceUID, afterID, limit)
 	if err != nil {
@@ -56,6 +57,42 @@ func (d *DB) PendingFederationPushEvents(
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// PendingFederationPushStats returns the pending count and high-water local
+// events.id using the same supported-event filter as PendingFederationPushEvents.
+func (d *DB) PendingFederationPushStats(
+	ctx context.Context,
+	projectID int64,
+	originInstanceUID string,
+	afterID int64,
+) (int64, int64, error) {
+	var count int64
+	var maxID sql.NullInt64
+	if err := d.QueryRowContext(ctx, `
+		SELECT COUNT(*), MAX(id)
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND id > ?
+		   AND `+federationPushEventTypeCondition("type"),
+		projectID, originInstanceUID, afterID).Scan(&count, &maxID); err != nil {
+		return 0, 0, fmt.Errorf("count pending federation push: %w", err)
+	}
+	if maxID.Valid {
+		return count, maxID.Int64, nil
+	}
+	return count, 0, nil
+}
+
+func federationPushEventTypeCondition(column string) string {
+	return column + ` IN (
+		'project.metadata_updated',
+		'issue.created', 'issue.snapshot', 'issue.updated', 'issue.closed', 'issue.reopened',
+		'issue.soft_deleted', 'issue.restored', 'issue.commented',
+		'issue.labeled', 'issue.unlabeled',
+		'issue.linked', 'issue.unlinked', 'issue.links_changed', 'issue.metadata_updated'
+	)`
 }
 
 // AdvanceFederationPushCursor records the highest local events.id accepted by

@@ -450,6 +450,18 @@ func TestFederationStatusSpokeIncludesCursorsQueuesAndLastSync(t *testing.T) {
 		Author:    "tester",
 	})
 	require.NoError(t, err)
+	_, err = env.DB.ExecContext(ctx, `
+		INSERT INTO events(
+			uid, origin_instance_uid, project_id, project_name,
+			type, actor, payload, hlc_physical_ms, hlc_counter, content_hash
+		)
+		VALUES(
+			'01HZNQ7VFPK1XGD8R5MABCD4PY', ?, ?, ?,
+			'project.removed', 'tester', '{}', 1, 0,
+			'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+		)`,
+		env.DB.InstanceUID(), project.ID, project.Name)
+	require.NoError(t, err)
 	lastPull := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	lastPush := time.Date(2026, 5, 23, 12, 5, 0, 0, time.UTC)
 	lastErrorAt := time.Date(2026, 5, 23, 12, 7, 0, 0, time.UTC)
@@ -484,6 +496,7 @@ func TestFederationStatusSpokeIncludesCursorsQueuesAndLastSync(t *testing.T) {
 	assert.Equal(t, int64(12), status.PullCursorEventID)
 	assert.Equal(t, int64(0), status.PushCursorEventID)
 	assert.Equal(t, int64(1), status.PendingPushCount)
+	assert.Equal(t, localEvent.ID, status.PendingPushHighWaterEventID)
 	assert.Equal(t, int64(1), status.PendingClaimCount)
 	assert.Equal(t, int64(0), status.EnrollmentCount)
 	assert.Equal(t, int64(0), status.LiveClaimCount)
