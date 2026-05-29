@@ -1,5 +1,37 @@
 .git
+.gitignore
+.dockerignore
+
+# Build and test artifacts.
 dist
 kata
 kata.exe
 coverage.out
+*.test
+*.out
+/result
+
+# Local daemon state and secrets. Docker federation smoke builds should never
+# capture a developer's live data, credentials, or SQLite files in context.
+/.kata/
+/.kata-*/
+**/credentials.toml
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Repo-local work/agent/editor state.
+/.worktrees/
+/.superpowers/
+/.codex/
+/.superset/
+/.claude/settings.local.json
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+.kata.local.toml

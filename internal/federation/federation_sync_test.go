@@ -104,6 +104,57 @@ func TestSyncFederationOncePullsAndAdvancesCursor(t *testing.T) {
 	assert.Equal(t, beforeSecondSync+1, afterSecondSync, "second sync should pull only the new hub event")
 }
 
+func TestSyncFederationOnceDuplicateOnlyPullSkipsMaterialize(t *testing.T) {
+	ctx := context.Background()
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+
+	hubProject, err := hub.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	hubIssue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: hubProject.ID,
+		Title:     "from hub",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	var meta api.ProjectFederationBody
+	postJSON(t, hub.URL, "/api/v1/projects/"+strconv.FormatInt(hubProject.ID, 10)+"/federation/enable",
+		map[string]any{"actor": "tester"}, &meta)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:            "duplicate-pull-token",
+		SpokeInstanceUID: spoke.DB.InstanceUID(),
+		ProjectID:        &hubProject.ID,
+		Capabilities:     "pull",
+	})
+	require.NoError(t, err)
+	var replica api.CreateFederationReplicaBody
+	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 hub.URL,
+		"hub_project_id":          hubProject.ID,
+		"hub_project_uid":         meta.ProjectUID,
+		"project_name":            meta.ProjectName,
+		"replay_horizon_event_id": meta.ReplayHorizonEventID,
+	}, &replica)
+
+	staleBinding, err := spoke.DB.FederationBindingByProject(ctx, replica.Project.ID)
+	require.NoError(t, err)
+	creds := config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: hubProject.ID,
+		Token:        created.Token,
+	}
+	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, staleBinding, creds))
+	mirrored, err := spoke.DB.IssueByUID(ctx, hubIssue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	revision := mirrored.Revision
+
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
+	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, staleBinding, creds))
+	unchanged, err := spoke.DB.IssueByUID(ctx, hubIssue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, revision, unchanged.Revision)
+}
+
 func TestSyncFederationOnceReportsFreshPulledEvents(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)

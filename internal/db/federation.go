@@ -658,8 +658,10 @@ func (d *DB) materializeFederatedProjectTx(ctx context.Context, tx *sql.Tx, proj
 	}
 	if raw := projection.ProjectMetadata[binding.HubProjectUID]; len(raw) > 0 {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE projects SET metadata = ?, revision = revision + 1 WHERE id = ?`,
-			string(raw), projectID); err != nil {
+			`UPDATE projects
+			    SET metadata = ?, revision = revision + 1
+			  WHERE id = ? AND metadata IS NOT ?`,
+			string(raw), projectID, string(raw)); err != nil {
 			return fmt.Errorf("update federated project metadata: %w", err)
 		}
 	}
@@ -1149,10 +1151,20 @@ func reconcileFederatedIssues(
 			updatedAt = issue.CreatedAt
 		}
 		if row, ok := existing[uid]; ok {
+			issueValues := []any{
+				shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status),
+				issue.ClosedReason, issue.Owner, issue.Priority, nonEmptyAuthor(issue.Author),
+				nonEmptyTime(issue.CreatedAt), nonEmptyTime(updatedAt),
+				optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt),
+				string(metadata),
+			}
+			args := append([]any{}, issueValues...)
+			args = append(args, row.id)
+			args = append(args, issueValues...)
 			_, err := tx.ExecContext(ctx, `
-				UPDATE issues
-				   SET short_id = ?,
-				       title = ?,
+					UPDATE issues
+					   SET short_id = ?,
+					       title = ?,
 				       body = ?,
 				       status = ?,
 				       closed_reason = ?,
@@ -1162,15 +1174,26 @@ func reconcileFederatedIssues(
 				       created_at = ?,
 				       updated_at = ?,
 				       closed_at = ?,
-				       deleted_at = ?,
-				       metadata = ?,
-				       revision = revision + 1
-				 WHERE id = ?`,
-				shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status),
-				issue.ClosedReason, issue.Owner, issue.Priority, nonEmptyAuthor(issue.Author),
-				nonEmptyTime(issue.CreatedAt), nonEmptyTime(updatedAt),
-				optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt),
-				string(metadata), row.id)
+					       deleted_at = ?,
+					       metadata = ?,
+					       revision = revision + 1
+					 WHERE id = ?
+					   AND (
+					       short_id IS NOT ? OR
+					       title IS NOT ? OR
+					       body IS NOT ? OR
+					       status IS NOT ? OR
+					       closed_reason IS NOT ? OR
+					       owner IS NOT ? OR
+					       priority IS NOT ? OR
+					       author IS NOT ? OR
+					       created_at IS NOT ? OR
+					       updated_at IS NOT ? OR
+					       closed_at IS NOT ? OR
+					       deleted_at IS NOT ? OR
+					       metadata IS NOT ?
+					   )`,
+				args...)
 			if err != nil {
 				return nil, fmt.Errorf("update federated issue %s: %w", uid, err)
 			}

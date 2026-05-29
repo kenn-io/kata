@@ -1821,6 +1821,12 @@ func TestMaterializeFederatedProject(t *testing.T) {
 	project, err := d.ProjectByID(ctx, p.ID)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"area":"federation"}`, string(project.Metadata))
+	projectRevision := project.Revision
+	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	unchangedProject, err := d.ProjectByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, projectRevision, unchangedProject.Revision, "duplicate materialization must not bump project revision")
+
 	events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
 	require.NoError(t, err)
 	require.NotEmpty(t, events)
@@ -1895,8 +1901,6 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 	require.True(t, inserted)
 
 	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
-	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
-
 	reconciled, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Equal(t, issue.ID, reconciled.ID)
@@ -1904,6 +1908,12 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 	assert.Equal(t, "remote title", reconciled.Title)
 	assert.Equal(t, "remote body", reconciled.Body)
 	assert.Greater(t, reconciled.Revision, issue.Revision)
+	reconciledRevision := reconciled.Revision
+
+	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+	unchanged, err := d.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, reconciledRevision, unchanged.Revision, "duplicate materialization must not bump issue revision")
 
 	var eventIssueID int64
 	require.NoError(t, d.QueryRowContext(ctx,

@@ -185,7 +185,7 @@ func SyncFederationOnceWithPulledEvents(
 				insertedUIDs = append(insertedUIDs, ev.EventUID)
 			}
 		}
-		if len(body.Events) > 0 {
+		if len(insertedUIDs) > 0 {
 			if err := federationFailpoint("during_spoke_pull_apply_before_materialize"); err != nil {
 				return err
 			}
