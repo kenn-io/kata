@@ -196,6 +196,7 @@ func (fx *federationStressFixture) enrollSpoke(t federationStressTB, i int) api.
 		"replay_horizon_event_id":   fx.meta.ReplayHorizonEventID,
 		"baseline_through_event_id": fx.meta.BaselineThroughEventID,
 		"token":                     created.Token,
+		"capabilities":              "pull,push,claim",
 		"push_enabled":              true,
 	}, &replica)
 	require.True(t, replica.Binding.PushEnabled)
