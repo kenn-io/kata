@@ -461,8 +461,9 @@ func isTransportClaimError(err error) bool {
 }
 
 type claimHubClient struct {
-	baseURL string
-	client  *http.Client
+	baseURL      string
+	client       *http.Client
+	transportErr error
 }
 
 type claimHubStatusError struct {
@@ -475,9 +476,18 @@ func (e *claimHubStatusError) Error() string {
 	return fmt.Sprintf("hub %s returned %d: %s", e.Path, e.StatusCode, e.Body)
 }
 
+var errClaimHubTransportUnavailable = errors.New("claim hub transport unavailable")
+
 func newClaimHubClient(ctx context.Context, baseURL, token string) (*claimHubClient, error) {
 	httpClient, err := newClaimHubHTTPClient(ctx, baseURL)
 	if err != nil {
+		if errors.Is(err, errClaimHubTransportUnavailable) {
+			return &claimHubClient{
+				baseURL:      strings.TrimRight(baseURL, "/"),
+				client:       &http.Client{Timeout: 10 * time.Second},
+				transportErr: err,
+			}, nil
+		}
 		return nil, err
 	}
 	if err := config.ConfigureBearerClient(httpClient, baseURL, token); err != nil {
@@ -512,7 +522,7 @@ func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, e
 		}
 		return &http.Client{Transport: claimUnixTransport(path), Timeout: 10 * time.Second}, nil
 	}
-	return nil, errors.New("no unix-socket daemon found")
+	return nil, fmt.Errorf("%w: no unix-socket daemon found", errClaimHubTransportUnavailable)
 }
 
 func claimHubPing(ctx context.Context, client *http.Client) bool {
@@ -581,6 +591,9 @@ func (c *claimHubClient) claimAction(
 }
 
 func (c *claimHubClient) getJSON(ctx context.Context, path string, out any) error {
+	if c.transportErr != nil {
+		return c.transportErr
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil) //nolint:gosec // hub URL comes from local federation config.
 	if err != nil {
 		return err
@@ -598,6 +611,9 @@ func (c *claimHubClient) getJSON(ctx context.Context, path string, out any) erro
 }
 
 func (c *claimHubClient) postJSON(ctx context.Context, path string, in, out any) error {
+	if c.transportErr != nil {
+		return c.transportErr
+	}
 	body, err := json.Marshal(in)
 	if err != nil {
 		return err

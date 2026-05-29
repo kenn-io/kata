@@ -931,6 +931,35 @@ func TestPendingClaimOfflineAcquireDuplicateReturnsExistingRequest(t *testing.T)
 	assert.Equal(t, 1, n)
 }
 
+func TestPendingClaimUnixHubOfflineAcquireEnqueues(t *testing.T) {
+	ctx := context.Background()
+	_, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
+	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
+		HubURL:       "http://kata.invalid",
+		HubProjectID: hubProject.ID,
+		Token:        token,
+		Capabilities: "claim",
+	}))
+
+	var pending claimResponseBody
+	resp := claimPost(t, spoke, spokeProject.ID, issue.ShortID, "claim", map[string]any{
+		"holder":      "offline-cli",
+		"client_kind": "cli",
+		"claim_kind":  "hard",
+	}, nil, &pending)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, pending.Pending)
+	assert.False(t, pending.Granted)
+	assert.NotEmpty(t, pending.RequestUID)
+	var n int
+	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM pending_claim_requests
+		 WHERE issue_uid = ? AND holder = ? AND rejected_at IS NULL AND resolved_at IS NULL`,
+		issue.UID, "offline-cli").Scan(&n))
+	assert.Equal(t, 1, n)
+}
+
 type claimResponseBody struct {
 	Granted    bool           `json:"granted"`
 	Pending    bool           `json:"pending"`
