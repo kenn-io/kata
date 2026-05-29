@@ -105,7 +105,7 @@ func TestSyncFederationOncePullsAndAdvancesCursor(t *testing.T) {
 	assert.Equal(t, beforeSecondSync+1, afterSecondSync, "second sync should pull only the new hub event")
 }
 
-func TestSyncFederationOnceDuplicateOnlyPullSkipsMaterialize(t *testing.T) {
+func TestSyncFederationOnceDuplicateOnlyPullMaterializesStaleProjection(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
@@ -144,16 +144,16 @@ func TestSyncFederationOnceDuplicateOnlyPullSkipsMaterialize(t *testing.T) {
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
 	}
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
+	require.Error(t, SyncFederationOnce(ctx, spoke.DB, staleBinding, creds))
+	_, err = spoke.DB.IssueByUID(ctx, hubIssue.UID, db.IncludeDeletedYes)
+	require.ErrorIs(t, err, db.ErrNotFound)
+
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
 	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, staleBinding, creds))
 	mirrored, err := spoke.DB.IssueByUID(ctx, hubIssue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
-	revision := mirrored.Revision
-
-	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
-	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, staleBinding, creds))
-	unchanged, err := spoke.DB.IssueByUID(ctx, hubIssue.UID, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	assert.Equal(t, revision, unchanged.Revision)
+	assert.Equal(t, "from hub", mirrored.Title)
 }
 
 func TestSyncFederationOnceReportsFreshPulledEvents(t *testing.T) {

@@ -38,6 +38,7 @@ func TestClaimGateEditCloseReopenPriorityRequiresLiveClaimForFederatedHubIssueMu
 
 func TestClaimGateLinkLabelAssignUnassignMetadataDeleteRestoreRequiresLiveClaimForFederatedHubIssueMutations(t *testing.T) {
 	for _, tc := range []claimGateHTTPCase{
+		{name: "ClaimOwner", build: claimGateClaimOwnerRequest},
 		{name: "Assign", build: claimGateAssignRequest},
 		{name: "Unassign", build: claimGateUnassignRequest},
 		{name: "LabelAdd", build: claimGateLabelAddRequest},
@@ -188,6 +189,7 @@ func TestClaimGateCommentsCreateAndNonFederatedProjects(t *testing.T) {
 		{name: "EditOwner", build: claimGateEditOwnerRequest},
 		{name: "EditPriority", build: claimGateEditPriorityRequest},
 		{name: "EditLinkDelta", build: claimGateEditLinkDeltaRequest},
+		{name: "ClaimOwner", build: claimGateClaimOwnerRequest},
 		{name: "Assign", build: claimGateAssignRequest},
 		{name: "Unassign", build: claimGateUnassignRequest},
 		{name: "PriorityAction", build: claimGatePriorityRequest},
@@ -321,6 +323,15 @@ func claimGateAssignRequest(t *testing.T, federated bool) (*testenv.Env, claimGa
 		method: http.MethodPost,
 		path:   issuePathRef(project.ID, issue.ShortID, "actions/assign"),
 		body:   map[string]string{"actor": "agent", "owner": "owner-a"},
+	}
+}
+
+func claimGateClaimOwnerRequest(t *testing.T, federated bool) (*testenv.Env, claimGateHTTPRequest) {
+	env, project, issue := setupClaimGateIssue(t, federated)
+	return env, claimGateHTTPRequest{
+		method: http.MethodPost,
+		path:   issuePathRef(project.ID, issue.ShortID, "actions/claim"),
+		body:   map[string]string{"actor": "agent"},
 	}
 }
 

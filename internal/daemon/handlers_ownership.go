@@ -98,6 +98,9 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); err != nil {
+			return nil, err
+		}
 
 		var result db.ClaimResult
 		err = db.RetryLockContention(ctx, func() error {

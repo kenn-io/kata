@@ -131,3 +131,21 @@ func TestClaimOwner_ForceReassign(t *testing.T) {
 	require.NotNil(t, result.PreviousOwner)
 	assert.Equal(t, "agent1", *result.PreviousOwner)
 }
+
+func TestClaimOwner_ReadOnlyFederatedSpokeRejected(t *testing.T) {
+	d, ctx, p, i := setupTestIssue(t)
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7787",
+		HubProjectID:         p.ID,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+		PushEnabled:          false,
+	})
+	require.NoError(t, err)
+
+	_, err = d.ClaimOwner(ctx, i.ID, "agent1", false)
+	require.ErrorIs(t, err, db.ErrFederatedReadOnly)
+}
