@@ -1178,6 +1178,10 @@ func (d *DB) annotateClaimWorkMutationTx(
 	if !hub {
 		return nil, nil
 	}
+	events, err := d.expireTimedClaimsForProjectTx(ctx, tx, in.ProjectID, time.Now().UTC(), 0)
+	if err != nil {
+		return nil, err
+	}
 	if in.OffendingEventUID == "" {
 		uid, err := latestClaimOffendingEventUIDTx(ctx, tx, in.ProjectID, in.IssueUID, in.EventType, in.Actor)
 		if err != nil && !errors.Is(err, ErrNotFound) {
@@ -1192,14 +1196,13 @@ func (d *DB) annotateClaimWorkMutationTx(
 			if err != nil {
 				return nil, err
 			}
-			return []Event{evt}, nil
+			return append(events, evt), nil
 		}
-		return nil, nil
+		return events, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	events := make([]Event, 0, 2)
 	if !claimWorkCoveredByLiveClaim(live, in.HolderInstanceUID, in.Actor) {
 		evt, err := d.insertClaimEventTx(ctx, tx, claimEventInput{
 			ProjectID: in.ProjectID, ProjectName: in.ProjectName, IssueID: in.IssueID,
@@ -1229,7 +1232,7 @@ func claimWorkMutationRequiresClaim(eventType string) bool {
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
 		"issue.labeled", "issue.unlabeled", "issue.linked", "issue.unlinked",
-		"issue.links_changed", "issue.metadata_updated":
+		"issue.links_changed", "issue.metadata_updated", "issue.commented":
 		return true
 	default:
 		return false

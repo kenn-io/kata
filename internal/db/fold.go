@@ -70,6 +70,10 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		if e.ProjectUID != "" {
 			p.ProjectMetadata[e.ProjectUID] = applyMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"])
 		}
+	case "project.federation_enabled":
+		if e.ProjectUID != "" && len(payload["metadata"]) > 0 && string(payload["metadata"]) != "null" {
+			p.ProjectMetadata[e.ProjectUID] = canonicalJSON(payload["metadata"])
+		}
 	case "claim.acquired", "claim.released", "claim.expired", "claim.force_released", "claim.violated":
 		// Claim events are federation audit records, not issue projection state.
 		return

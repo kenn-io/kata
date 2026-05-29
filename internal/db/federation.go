@@ -554,11 +554,13 @@ func (d *DB) insertFederationBaselineEventsTx(
 	actor string,
 ) (Event, error) {
 	enablePayload, err := json.Marshal(struct {
-		ProjectUID  string `json:"project_uid"`
-		ProjectName string `json:"project_name"`
+		ProjectUID  string   `json:"project_uid"`
+		ProjectName string   `json:"project_name"`
+		Metadata    JSONBlob `json:"metadata"`
 	}{
 		ProjectUID:  project.UID,
 		ProjectName: project.Name,
+		Metadata:    project.Metadata,
 	})
 	if err != nil {
 		return Event{}, fmt.Errorf("marshal federation enable payload: %w", err)

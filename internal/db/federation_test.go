@@ -1013,6 +1013,16 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 	})
 	require.NoError(t, err)
 	active = metaOut.Issue
+	projectMetaOut, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+		ProjectID:  p.ID,
+		IfMatchRev: p.Revision,
+		Actor:      "alice",
+		Patch: map[string]json.RawMessage{
+			"area": json.RawMessage(`"federation"`),
+		},
+	})
+	require.NoError(t, err)
+	p = projectMetaOut.Project
 	deleted, _, _, err = d.SoftDeleteIssue(ctx, deleted.ID, "bob")
 	require.NoError(t, err)
 
@@ -1040,6 +1050,10 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 		}
 	}
 	require.NotNil(t, enableEvent)
+	enablePayload := unmarshalPayload[struct {
+		Metadata json.RawMessage `json:"metadata"`
+	}](t, enableEvent.Payload)
+	assert.JSONEq(t, `{"area":"federation"}`, string(enablePayload.Metadata))
 	assert.Equal(t, binding.ReplayHorizonEventID, enableEvent.ID)
 	require.Len(t, snapshots, 2)
 
@@ -1675,7 +1689,7 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
 		"issue.labeled", "issue.unlabeled", "issue.linked", "issue.unlinked",
-		"issue.links_changed", "issue.metadata_updated",
+		"issue.links_changed", "issue.metadata_updated", "issue.commented",
 	} {
 		t.Run(eventType, func(t *testing.T) {
 			d, ctx, p, spokeUID, issue, peer := setupIngestClaimIssue(t)
@@ -1696,9 +1710,7 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 		})
 	}
 
-	for _, eventType := range []string{
-		"issue.commented", "project.metadata_updated",
-	} {
+	for _, eventType := range []string{"project.metadata_updated"} {
 		t.Run(eventType, func(t *testing.T) {
 			d, ctx, p, spokeUID, issue, peer := setupIngestClaimIssue(t)
 			_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -1717,6 +1729,27 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 			assertEventCount(t, d, "claim.violated", 0)
 		})
 	}
+}
+
+func TestIngestClaimViolationExpiresTimedClaimBeforeAudit(t *testing.T) {
+	d, ctx, p, spokeUID, issue, _ := setupIngestClaimIssue(t)
+	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: spokeUID, Holder: "remote-agent"},
+		ClaimKind: "timed",
+		TTL:       time.Minute,
+		Now:       time.Now().Add(-2 * time.Minute).UTC(),
+	})
+	require.NoError(t, err)
+
+	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID,
+		remoteClaimWorkEvent(t, p, spokeUID, issue.UID, nil, "issue.updated", "remote-agent")))
+
+	require.NoError(t, err)
+	assertLiveClaimCount(t, d, issue.UID, 0)
+	assertEventCount(t, d, "claim.expired", 1)
+	assertEventCount(t, d, "claim.violated", 1)
 }
 
 func TestMaterializeFederatedProject(t *testing.T) {
@@ -1763,6 +1796,8 @@ func TestMaterializeFederatedProject(t *testing.T) {
 		"created_at":"2026-05-23T12:00:00.000Z"
 	}`
 	for _, ev := range []db.RemoteEvent{
+		remoteEvent(t, remoteProjectUID, "hub", nil, nil, "project.federation_enabled", "remote-agent", 99,
+			`{"project_uid":"`+remoteProjectUID+`","project_name":"hub","metadata":{"area":"federation"}}`),
 		remoteEvent(t, remoteProjectUID, "hub", &issueUID, nil, "issue.snapshot", "remote-agent", 100, issueSnapshot),
 		remoteEvent(t, remoteProjectUID, "hub", &relatedUID, nil, "issue.snapshot", "remote-agent", 101, relatedSnapshot),
 	} {
@@ -1783,10 +1818,19 @@ func TestMaterializeFederatedProject(t *testing.T) {
 	assert.Equal(t, int64(1), *issue.Priority)
 	assert.Equal(t, "2026-05-23T12:00:09.000Z", issue.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"))
 	assert.JSONEq(t, `{"area":"db"}`, string(issue.Metadata))
+	project, err := d.ProjectByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"area":"federation"}`, string(project.Metadata))
 	events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
 	require.NoError(t, err)
 	require.NotEmpty(t, events)
-	assert.NotNil(t, events[0].IssueShortID, "stored remote events should resolve to materialized issue display ids")
+	var resolvedIssueEvent bool
+	for _, event := range events {
+		if event.Type == "issue.snapshot" && event.IssueUID != nil && *event.IssueUID == issueUID {
+			resolvedIssueEvent = event.IssueShortID != nil
+		}
+	}
+	assert.True(t, resolvedIssueEvent, "stored remote issue events should resolve to materialized issue display ids")
 
 	var commentBody string
 	require.NoError(t, d.QueryRowContext(ctx,
@@ -2375,7 +2419,7 @@ func remoteClaimWorkPayload(issueUID string, relatedIssueUID *string, eventType 
 	case "issue.restored":
 		return `{"issue_uid":"` + issueUID + `","restored_at":"2026-05-23T12:00:00.000Z"}`
 	case "issue.commented":
-		return `{"issue_uid":"` + issueUID + `","body":"comment"}`
+		return `{"issue_uid":"` + issueUID + `","comment_uid":"01HZNQ7VFPK1XGD8R5MABCD4EZ","author":"remote-agent","body":"comment","created_at":"2026-05-23T12:00:00.000Z"}`
 	case "issue.labeled", "issue.unlabeled":
 		return `{"issue_uid":"` + issueUID + `","label":"area:db"}`
 	case "issue.linked", "issue.unlinked":
