@@ -1,12 +1,15 @@
 package daemon_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -60,22 +63,47 @@ type bearerProxyOpts struct {
 	RequireTokenIdentity bool
 }
 
+// syncBuffer is a goroutine-safe bytes.Buffer wrapper for capturing slog
+// output. The slog handler writes from the request goroutine while the test
+// reads from the test goroutine, so the raw bytes.Buffer's unsynchronized
+// access would race under -race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // startBearerProxyTestServer is the sibling of startTrustedProxyTestServer
 // that also wires bearer auth. The two layers stack in production: requireBearer
 // runs first and admits/refuses; withTrustedProxyActor runs second and
 // overwrites the principal on trusted listeners. None of the original
 // trusted-proxy e2e tests exercise that stacking, so this helper exists to add
-// targeted coverage. Returns the server and the DB so identity-mode tests can
-// mint DB tokens against the same store the daemon resolves through.
-func startBearerProxyTestServer(t *testing.T, headerName string, auth bearerProxyOpts) (*httptest.Server, *db.DB) {
+// targeted coverage. Returns the server, the DB (so identity-mode tests can
+// mint DB tokens against the same store the daemon resolves through), and a
+// log capture so tests can assert on the slog warning emitted when a
+// trusted-proxy header overwrites an upstream bearer-derived principal.
+func startBearerProxyTestServer(t *testing.T, headerName string, auth bearerProxyOpts) (*httptest.Server, *db.DB, *syncBuffer) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
 	d := openTestDB(t)
+	logs := &syncBuffer{}
 	cfg := daemon.ServerConfig{
 		DB:        d.db,
 		StartedAt: d.now,
+		Logger:    slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		Auth: config.AuthConfig{
 			Token:                auth.Token,
 			RequireTokenIdentity: auth.RequireTokenIdentity,
@@ -92,7 +120,7 @@ func startBearerProxyTestServer(t *testing.T, headerName string, auth bearerProx
 	ts.Listener = l
 	ts.Start()
 	t.Cleanup(ts.Close)
-	return ts, d.db
+	return ts, d.db, logs
 }
 
 // trustedProxyCreateProject posts to /api/v1/projects with a path-free init
@@ -357,7 +385,7 @@ func TestTrustedProxyHeader_TUIBypassRequiresCloseValidation(t *testing.T) {
 // value credited as the actor (not the body actor, and not anything derived
 // from the bearer — static tokens have no associated actor).
 func TestTrustedProxyHeader_StaticBearerHeaderWins(t *testing.T) {
-	ts, _ := startBearerProxyTestServer(t, "X-Kata-Actor",
+	ts, _, logs := startBearerProxyTestServer(t, "X-Kata-Actor",
 		bearerProxyOpts{Token: "static-bearer"})
 	authed := map[string]string{
 		"Authorization": "Bearer static-bearer",
@@ -387,6 +415,13 @@ func TestTrustedProxyHeader_StaticBearerHeaderWins(t *testing.T) {
 	require.NotNil(t, payload.Event, "close returned no event: %s", raw)
 	assert.Equal(t, "proxy-user", payload.Event.Actor,
 		"bearer auth admits the request; trusted-proxy must still overwrite the actor")
+
+	// The operator wired both modes on the same listener — daemon should
+	// have warned at least once that the proxy header is silently winning
+	// over the static-token principal.
+	out := logs.String()
+	assert.Contains(t, out, "trusted-proxy header overwriting upstream principal")
+	assert.Contains(t, out, "upstream_kind=static_token")
 }
 
 // TestTrustedProxyHeader_StaticBearerMissingHeaderRejects pins the layered
@@ -394,7 +429,7 @@ func TestTrustedProxyHeader_StaticBearerHeaderWins(t *testing.T) {
 // fail with 400 actor_header_required (not 401 — bearer was fine — and not a
 // silent body-actor fallback).
 func TestTrustedProxyHeader_StaticBearerMissingHeaderRejects(t *testing.T) {
-	ts, _ := startBearerProxyTestServer(t, "X-Kata-Actor",
+	ts, _, _ := startBearerProxyTestServer(t, "X-Kata-Actor",
 		bearerProxyOpts{Token: "static-bearer"})
 	authed := map[string]string{
 		"Authorization": "Bearer static-bearer",
@@ -424,7 +459,7 @@ func TestTrustedProxyHeader_StaticBearerMissingHeaderRejects(t *testing.T) {
 // middleware order in composition could quietly let the header through on
 // unauthenticated requests.
 func TestTrustedProxyHeader_BadBearerStops401BeforeProxy(t *testing.T) {
-	ts, _ := startBearerProxyTestServer(t, "X-Kata-Actor",
+	ts, _, _ := startBearerProxyTestServer(t, "X-Kata-Actor",
 		bearerProxyOpts{Token: "static-bearer"})
 
 	// Setup uses the right bearer so we have something to close.
@@ -461,7 +496,7 @@ func TestTrustedProxyHeader_BadBearerStops401BeforeProxy(t *testing.T) {
 // "bob" (token), not "client-claim" (body). Pin this so a future change that
 // reverses the precedence (or silently merges the two principals) fails here.
 func TestTrustedProxyHeader_DBTokenIdentityHeaderOverwrites(t *testing.T) {
-	ts, store := startBearerProxyTestServer(t, "X-Kata-Actor",
+	ts, store, logs := startBearerProxyTestServer(t, "X-Kata-Actor",
 		bearerProxyOpts{Token: "bootstrap-token", RequireTokenIdentity: true})
 
 	// Mint a DB-registered token for "bob" so requireIdentityBearer sets
@@ -508,4 +543,14 @@ func TestTrustedProxyHeader_DBTokenIdentityHeaderOverwrites(t *testing.T) {
 	require.NotNil(t, payload.Event, "close returned no event: %s", raw)
 	assert.Equal(t, "alice", payload.Event.Actor,
 		"trusted-proxy header must overwrite a DB-token identity on a trusted listener")
+
+	// Bearer identity + proxy attribution stacked → daemon should have
+	// warned about the overwrite so an operator running both modes notices.
+	// The setup calls (project init, issue create) used the bootstrap
+	// token, so the kind in the warning may be either db_token (for the
+	// close) or bootstrap (for setup) — assert on the message and key.
+	out := logs.String()
+	assert.Contains(t, out, "trusted-proxy header overwriting upstream principal")
+	assert.Contains(t, out, "upstream_kind=db_token",
+		"the close request used a DB token; that kind must appear in at least one warning")
 }
