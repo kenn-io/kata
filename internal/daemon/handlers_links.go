@@ -74,9 +74,6 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if from.ID == to.ID {
 			return nil, api.NewError(400, "validation", "cannot link an issue to itself", "", nil)
 		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, to, actor); err != nil {
-			return nil, err
-		}
 
 		// Storage endpoints: canonical (from < to) for related; otherwise as-is.
 		// canonicalFrom/canonicalTo match the Link row's actual columns
@@ -89,6 +86,14 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if in.Body.Type == "related" && storageFromID > storageToID {
 			storageFromID, storageToID = storageToID, storageFromID
 			canonicalFromPeer, canonicalToPeer = canonicalToPeer, canonicalFromPeer
+		}
+		if existing, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type); lookupErr == nil {
+			return mutationLinkResponse(from, existing, canonicalFromPeer, canonicalToPeer, nil, false), nil
+		} else if !errors.Is(lookupErr, db.ErrNotFound) {
+			return nil, api.NewError(500, "internal", lookupErr.Error(), "", nil)
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, to, actor); err != nil {
+			return nil, err
 		}
 
 		// Parent --replace path: delete the existing parent link in its own TX

@@ -135,6 +135,35 @@ func TestClaimGateLinkCreateRequiresClaimsForBothEndpoints(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
+func TestClaimGateDuplicateLinkCreateDoesNotRequirePeerClaim(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, peer := setupClaimGateProject(t, env, true)
+	_, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: issue.ID,
+		ToIssueID:   peer.ID,
+		Type:        "related",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "links"), map[string]string{
+		"actor":  "agent",
+		"type":   "related",
+		"to_ref": peer.ShortID,
+	}, nil)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var out struct {
+		Changed bool      `json:"changed"`
+		Event   *db.Event `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	require.False(t, out.Changed)
+	require.Nil(t, out.Event)
+}
+
 func TestClaimGateLinkDeleteRequiresClaimsForBothEndpoints(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)

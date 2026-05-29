@@ -412,7 +412,22 @@ func (p *FoldProjection) setLink(from, to, typ string, present bool, clock FoldC
 	if typ == "related" && from > to {
 		from, to = to, from
 	}
+	if typ == "parent" && present {
+		p.clearOlderParents(from, to, clock)
+	}
 	p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}] = FoldElementState{Present: present, Clock: clock}
+}
+
+func (p *FoldProjection) clearOlderParents(childUID, keepParentUID string, clock FoldClock) {
+	for key, state := range p.Links {
+		if key.Type != "parent" || key.FromUID != childUID || key.ToUID == keepParentUID || !state.Present {
+			continue
+		}
+		if compareClock(state.Clock, clock) > 0 {
+			continue
+		}
+		p.Links[key] = FoldElementState{Present: false, Clock: clock}
+	}
 }
 
 func (p *FoldProjection) ensureIssue(uid string) FoldIssue {

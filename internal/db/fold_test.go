@@ -164,6 +164,32 @@ func TestFoldLinksChangedUsesPayloadIssueUID(t *testing.T) {
 	assert.Equal(t, "2026-05-23T12:00:02.000Z", got.Issues["issue-1"].UpdatedAt)
 }
 
+func TestFoldParentLinksAreSingleChildLWWRegister(t *testing.T) {
+	t.Run("issue.linked parent events", func(t *testing.T) {
+		events := []FoldEvent{
+			testEvent("issue.linked", 3, `{"type":"parent","from_uid":"issue-1","to_uid":"parent-b"}`),
+			testEvent("issue.linked", 2, `{"type":"parent","from_uid":"issue-1","to_uid":"parent-a"}`),
+		}
+
+		got := FoldEvents(events)
+
+		assert.False(t, got.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "parent-a", Type: "parent"}].Present)
+		assert.True(t, got.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "parent-b", Type: "parent"}].Present)
+	})
+
+	t.Run("issue.links_changed parent_set events", func(t *testing.T) {
+		events := []FoldEvent{
+			testEvent("issue.links_changed", 2, `{"issue_uid":"issue-1","parent_set_uid":"parent-a"}`),
+			testEvent("issue.links_changed", 3, `{"issue_uid":"issue-1","parent_set_uid":"parent-b"}`),
+		}
+
+		got := FoldEvents(events)
+
+		assert.False(t, got.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "parent-a", Type: "parent"}].Present)
+		assert.True(t, got.Links[FoldLinkKey{FromUID: "issue-1", ToUID: "parent-b", Type: "parent"}].Present)
+	})
+}
+
 func TestFoldIssueSnapshotEstablishesIssueStateAndBaselineComments(t *testing.T) {
 	priority := int64(2)
 	owner := "alice"
