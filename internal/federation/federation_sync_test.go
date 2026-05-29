@@ -789,6 +789,57 @@ func TestSyncFederationOncePushesAndAdvancesCursor(t *testing.T) {
 	assert.Nil(t, status.LastError)
 }
 
+func TestSyncFederationOncePushEchoDoesNotDeliverPulledLocalEvent(t *testing.T) {
+	ctx := context.Background()
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+	hubProject := createFederatedHubForPush(t, hub)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:            "push-echo-token",
+		SpokeInstanceUID: spoke.DB.InstanceUID(),
+		ProjectID:        &hubProject.ID,
+		Capabilities:     "pull,push",
+	})
+	require.NoError(t, err)
+	hubMaxEventID, err := hub.DB.MaxEventID(ctx)
+	require.NoError(t, err)
+	spokeProject, err := spoke.DB.CreateProjectWithUID(ctx, "hub", hubProject.UID)
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            spokeProject.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               hub.URL,
+		HubProjectID:         hubProject.ID,
+		HubProjectUID:        hubProject.UID,
+		ReplayHorizonEventID: 1,
+		PullCursorEventID:    hubMaxEventID,
+		PushEnabled:          true,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: spokeProject.ID,
+		Title:     "from spoke",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	var delivered []db.Event
+
+	err = SyncFederationOnceWithPulledEvents(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: hubProject.ID,
+		Token:        created.Token,
+	}, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		delivered = append(delivered, events...)
+	})
+
+	require.NoError(t, err)
+	for _, event := range delivered {
+		assert.NotEqual(t, localEvent.UID, event.UID, "push echo should not redeliver local-origin event")
+	}
+	assert.Empty(t, delivered, "push echo was the only unadvanced pull event")
+}
+
 func TestSyncFederationOncePushRetryDuplicateAdvancesCursor(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)

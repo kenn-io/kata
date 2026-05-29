@@ -182,12 +182,15 @@ func SyncFederationOnceWithPulledEvents(
 			return err
 		}
 		shouldDeliverPage := len(body.Events) > 0 && body.NextAfterID > currentBinding.PullCursorEventID
-		pageUIDs := make([]string, 0, len(body.Events))
+		deliverUIDs := make([]string, 0, len(body.Events))
+		localInstanceUID := store.InstanceUID()
 		for _, ev := range body.Events {
-			pageUIDs = append(pageUIDs, ev.EventUID)
-			_, err := store.InsertRemoteEvent(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
+			inserted, err := store.InsertRemoteEvent(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
 			if err != nil {
 				return err
+			}
+			if inserted || (shouldDeliverPage && ev.OriginInstanceUID != localInstanceUID) {
+				deliverUIDs = append(deliverUIDs, ev.EventUID)
 			}
 		}
 		if len(body.Events) > 0 {
@@ -198,8 +201,8 @@ func SyncFederationOnceWithPulledEvents(
 				return err
 			}
 		}
-		if shouldDeliverPage {
-			events, err := store.EventsByUIDs(ctx, binding.ProjectID, pageUIDs)
+		if shouldDeliverPage && len(deliverUIDs) > 0 {
+			events, err := store.EventsByUIDs(ctx, binding.ProjectID, deliverUIDs)
 			if err != nil {
 				return err
 			}
