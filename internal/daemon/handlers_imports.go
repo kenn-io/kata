@@ -114,53 +114,58 @@ func requireFederatedImportClaims(
 	if !binding.Enabled {
 		return nil
 	}
-	issueIDs := map[int64]struct{}{}
 	for _, item := range items {
-		if err := addMappedImportIssueID(ctx, cfg.DB, issueIDs, projectID, source, item.ExternalID); err != nil {
+		issue, needsClaim, err := importItemNeedsFederatedClaim(ctx, cfg.DB, projectID, source, item)
+		if err != nil {
 			return err
 		}
-		for _, link := range item.Links {
-			if err := addMappedImportIssueID(ctx, cfg.DB, issueIDs, projectID, source, link.TargetExternalID); err != nil {
+		if needsClaim {
+			if err := requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor); err != nil {
 				return err
 			}
-		}
-	}
-	for issueID := range issueIDs {
-		issue, err := cfg.DB.IssueByID(ctx, issueID)
-		if errors.Is(err, db.ErrNotFound) {
-			return api.NewError(404, "issue_not_found", err.Error(), "", nil)
-		}
-		if err != nil {
-			return api.NewError(500, "internal", err.Error(), "", nil)
-		}
-		if issue.DeletedAt != nil {
-			return api.NewError(404, "issue_not_found", "mapped import issue is deleted", "", nil)
-		}
-		if err := requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor); err != nil {
-			return err
 		}
 	}
 	return nil
 }
 
-func addMappedImportIssueID(
+func importItemNeedsFederatedClaim(
 	ctx context.Context,
 	store *db.DB,
-	issueIDs map[int64]struct{},
 	projectID int64,
 	source string,
-	externalID string,
-) error {
-	mapping, err := store.ImportMappingBySource(ctx, projectID, source, "issue", externalID)
+	item db.ImportItem,
+) (db.Issue, bool, error) {
+	mapping, err := store.ImportMappingBySource(ctx, projectID, source, "issue", item.ExternalID)
 	if errors.Is(err, db.ErrNotFound) {
-		return nil
+		return db.Issue{}, false, nil
 	}
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Issue{}, false, api.NewError(500, "internal", err.Error(), "", nil)
 	}
 	if mapping.IssueID == nil {
-		return api.NewError(404, "issue_not_found", "import issue mapping is missing issue id", "", nil)
+		return db.Issue{}, false, api.NewError(404, "issue_not_found", "import issue mapping is missing issue id", "", nil)
 	}
-	issueIDs[*mapping.IssueID] = struct{}{}
-	return nil
+	issue, err := store.IssueByID(ctx, *mapping.IssueID)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, false, api.NewError(404, "issue_not_found", err.Error(), "", nil)
+	}
+	if err != nil {
+		return db.Issue{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	if issue.DeletedAt != nil {
+		return db.Issue{}, false, api.NewError(404, "issue_not_found", "mapped import issue is deleted", "", nil)
+	}
+	if item.UpdatedAt.After(issue.UpdatedAt) {
+		return issue, true, nil
+	}
+	for _, comment := range item.Comments {
+		_, err := store.ImportMappingBySource(ctx, projectID, source, "comment", comment.ExternalID)
+		if errors.Is(err, db.ErrNotFound) {
+			return issue, true, nil
+		}
+		if err != nil {
+			return db.Issue{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+	}
+	return issue, false, nil
 }

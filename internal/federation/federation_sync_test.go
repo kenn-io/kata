@@ -144,16 +144,30 @@ func TestSyncFederationOnceDuplicateOnlyPullMaterializesStaleProjection(t *testi
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
 	}
+	var delivered []db.Event
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=unexpected")
-	require.Error(t, SyncFederationOnce(ctx, spoke.DB, staleBinding, creds))
+	require.Error(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, staleBinding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		delivered = append(delivered, events...)
+	}))
+	assert.Empty(t, delivered)
 	_, err = spoke.DB.IssueByUID(ctx, hubIssue.UID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
 
 	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
-	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, staleBinding, creds))
+	require.NoError(t, SyncFederationOnceWithPulledEvents(ctx, spoke.DB, staleBinding, creds, clientpkg.Opts{}, func(_ int64, events []db.Event) {
+		delivered = append(delivered, events...)
+	}))
 	mirrored, err := spoke.DB.IssueByUID(ctx, hubIssue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	assert.Equal(t, "from hub", mirrored.Title)
+	var foundIssueEvent bool
+	for _, event := range delivered {
+		if event.IssueUID != nil && *event.IssueUID == hubIssue.UID {
+			foundIssueEvent = true
+		}
+	}
+	assert.NotEmpty(t, delivered, "retry of unadvanced duplicate page must deliver pulled events")
+	assert.True(t, foundIssueEvent, "delivered events should include the recovered issue event")
 }
 
 func TestSyncFederationOnceReportsFreshPulledEvents(t *testing.T) {

@@ -177,14 +177,17 @@ func SyncFederationOnceWithPulledEvents(
 	}
 	var pulledEvents []db.Event
 	if err := db.RetryLockContention(ctx, func() error {
-		insertedUIDs := make([]string, 0, len(body.Events))
+		currentBinding, err := store.FederationBindingByProject(ctx, binding.ProjectID)
+		if err != nil {
+			return err
+		}
+		shouldDeliverPage := len(body.Events) > 0 && body.NextAfterID > currentBinding.PullCursorEventID
+		pageUIDs := make([]string, 0, len(body.Events))
 		for _, ev := range body.Events {
-			inserted, err := store.InsertRemoteEvent(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
+			pageUIDs = append(pageUIDs, ev.EventUID)
+			_, err := store.InsertRemoteEvent(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
 			if err != nil {
 				return err
-			}
-			if inserted {
-				insertedUIDs = append(insertedUIDs, ev.EventUID)
 			}
 		}
 		if len(body.Events) > 0 {
@@ -195,8 +198,8 @@ func SyncFederationOnceWithPulledEvents(
 				return err
 			}
 		}
-		if len(insertedUIDs) > 0 {
-			events, err := store.EventsByUIDs(ctx, binding.ProjectID, insertedUIDs)
+		if shouldDeliverPage {
+			events, err := store.EventsByUIDs(ctx, binding.ProjectID, pageUIDs)
 			if err != nil {
 				return err
 			}
