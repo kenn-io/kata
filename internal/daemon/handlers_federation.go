@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -182,16 +183,26 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			in.Body.ProjectName == "" || in.Body.ReplayHorizonEventID <= 0 {
 			return nil, api.NewError(400, "validation", "hub_url, hub_project_id, hub_project_uid, project_name, and replay_horizon_event_id are required", "", nil)
 		}
+		capabilities, err := normalizedReplicaCapabilities(in.Body.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		if in.Body.PushEnabled && !federationCapabilitiesContain(capabilities, "push") {
+			return nil, api.NewError(400, "federation_capability_mismatch", "push-enabled federation replica requires push capability", "", nil)
+		}
 		project, binding, err := ensureReplicaBinding(ctx, cfg.DB, in)
 		if err != nil {
 			return nil, err
+		}
+		if binding.PushEnabled && in.Body.Token != "" && !federationCapabilitiesContain(capabilities, "push") {
+			return nil, api.NewError(400, "federation_capability_mismatch", "push-enabled federation replica credentials require push capability", "", nil)
 		}
 		if in.Body.Token != "" {
 			if err := config.WriteFederationCredential(project.UID, config.FederationCredential{
 				HubURL:       in.Body.HubURL,
 				HubProjectID: in.Body.HubProjectID,
 				Token:        in.Body.Token,
-				Capabilities: in.Body.Capabilities,
+				Capabilities: capabilities,
 			}); err != nil {
 				return nil, api.NewError(500, "internal", err.Error(), "", nil)
 			}
@@ -322,6 +333,26 @@ func federationIngestError(err error) error {
 	default:
 		return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 	}
+}
+
+func normalizedReplicaCapabilities(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	capabilities, err := db.CanonicalFederationCapabilities(raw)
+	if err != nil {
+		return "", api.NewError(400, "validation", err.Error(), "", nil)
+	}
+	return capabilities, nil
+}
+
+func federationCapabilitiesContain(capabilities, want string) bool {
+	for _, part := range strings.Split(capabilities, ",") {
+		if strings.TrimSpace(part) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func ensureReplicaBinding(

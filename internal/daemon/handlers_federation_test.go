@@ -152,6 +152,7 @@ func TestFederationReplicaSetupPushEnabledWritesCredentialAndEnablesPush(t *test
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
 		"token":                   "push-token",
+		"capabilities":            "pull,push",
 		"push_enabled":            true,
 	}, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -167,6 +168,51 @@ func TestFederationReplicaSetupPushEnabledWritesCredentialAndEnablesPush(t *test
 	assert.Equal(t, "push-token", creds.Projects[out.Project.UID].Token)
 }
 
+func TestFederationReplicaSetupRejectsPushEnabledWithoutPushCapability(t *testing.T) {
+	env := testenv.New(t)
+
+	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "hub",
+		"replay_horizon_event_id": 9,
+		"token":                   "pull-token",
+		"capabilities":            "pull",
+		"push_enabled":            true,
+	}, nil)
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestFederationReplicaSetupRejectsCredentialDowngradeOnPushBinding(t *testing.T) {
+	env := testenv.New(t)
+	body := map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "hub",
+		"replay_horizon_event_id": 9,
+		"token":                   "push-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+	}
+	var out api.CreateFederationReplicaBody
+	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &out)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body["token"] = "pull-token"
+	body["capabilities"] = "pull"
+	body["push_enabled"] = false
+	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	creds, err := config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, "push-token", creds.Projects[out.Project.UID].Token)
+	assert.Equal(t, "pull,push", creds.Projects[out.Project.UID].Capabilities)
+}
+
 func TestFederationReplicaSetupPushRetryPreservesHigherCursors(t *testing.T) {
 	env := testenv.New(t)
 	body := map[string]any{
@@ -176,6 +222,7 @@ func TestFederationReplicaSetupPushRetryPreservesHigherCursors(t *testing.T) {
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
 		"token":                   "push-token",
+		"capabilities":            "pull,push",
 		"push_enabled":            true,
 	}
 	var first api.CreateFederationReplicaBody
@@ -261,6 +308,7 @@ func TestFederationReplicaSetupCanUpgradePhase1BindingToPush(t *testing.T) {
 	localEventID, err := res.LastInsertId()
 	require.NoError(t, err)
 	body["push_enabled"] = true
+	body["capabilities"] = "pull,push"
 
 	var upgraded api.CreateFederationReplicaBody
 	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &upgraded)

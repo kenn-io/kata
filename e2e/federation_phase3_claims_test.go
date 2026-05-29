@@ -249,6 +249,7 @@ func enrollFederationClaimSpoke(
 		"project_name":            meta.ProjectName,
 		"replay_horizon_event_id": meta.ReplayHorizonEventID,
 		"token":                   created.Token,
+		"capabilities":            "pull,push,claim",
 		"push_enabled":            true,
 	}, &replica)
 	require.True(t, replica.Binding.PushEnabled)
