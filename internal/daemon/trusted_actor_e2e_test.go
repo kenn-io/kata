@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 )
 
 // startTrustedProxyTestServer pre-binds a loopback TCP listener, then builds a
@@ -45,6 +47,52 @@ func startTrustedProxyTestServer(t *testing.T, headerName string) *httptest.Serv
 	ts.Start()
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+// bearerProxyOpts carries the per-test bearer policy for
+// startBearerProxyTestServer. Token is the static or bootstrap value
+// requireBearer compares the Authorization header against; identity-mode is
+// opt-in (RequireTokenIdentity must be true AND Token must be non-empty since
+// checkAuthStartup enforces that pairing, but Serve uses raw NewServer so the
+// constraint is also relied on by the tests below).
+type bearerProxyOpts struct {
+	Token                string
+	RequireTokenIdentity bool
+}
+
+// startBearerProxyTestServer is the sibling of startTrustedProxyTestServer
+// that also wires bearer auth. The two layers stack in production: requireBearer
+// runs first and admits/refuses; withTrustedProxyActor runs second and
+// overwrites the principal on trusted listeners. None of the original
+// trusted-proxy e2e tests exercise that stacking, so this helper exists to add
+// targeted coverage. Returns the server and the DB so identity-mode tests can
+// mint DB tokens against the same store the daemon resolves through.
+func startBearerProxyTestServer(t *testing.T, headerName string, auth bearerProxyOpts) (*httptest.Server, *db.DB) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	d := openTestDB(t)
+	cfg := daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		Auth: config.AuthConfig{
+			Token:                auth.Token,
+			RequireTokenIdentity: auth.RequireTokenIdentity,
+			Proxy: config.ProxyConfig{
+				TrustedActorHeader:    headerName,
+				TrustedProxyListeners: []string{l.Addr().String()},
+			},
+		},
+	}
+	srv := daemon.NewServer(cfg)
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewUnstartedServer(srv.Handler())
+	require.NoError(t, ts.Listener.Close())
+	ts.Listener = l
+	ts.Start()
+	t.Cleanup(ts.Close)
+	return ts, d.db
 }
 
 // trustedProxyCreateProject posts to /api/v1/projects with a path-free init
@@ -300,4 +348,165 @@ func TestTrustedProxyHeader_TUIBypassRequiresCloseValidation(t *testing.T) {
 		"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+issueRef+"/actions/close",
 		body, map[string]string{"X-Kata-Actor": "proxy-user"})
 	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+}
+
+// TestTrustedProxyHeader_StaticBearerHeaderWins exercises the simplest
+// stacked case: a daemon with both bearer auth (static token) and trusted-
+// proxy mode configured. A request that supplies a valid bearer AND the
+// trusted-proxy header on the trusted listener must succeed, with the header
+// value credited as the actor (not the body actor, and not anything derived
+// from the bearer — static tokens have no associated actor).
+func TestTrustedProxyHeader_StaticBearerHeaderWins(t *testing.T) {
+	ts, _ := startBearerProxyTestServer(t, "X-Kata-Actor",
+		bearerProxyOpts{Token: "static-bearer"})
+	authed := map[string]string{
+		"Authorization": "Bearer static-bearer",
+		"X-Kata-Actor":  "proxy-user",
+	}
+
+	projectID := trustedProxyCreateProject(t, ts, authed)
+	issueRef := trustedProxyCreateIssue(t, ts, projectID, authed)
+
+	body := map[string]any{
+		"actor":    "client-claim",
+		"reason":   "done",
+		"message":  "stacked bearer + proxy must credit the proxy-asserted header value.",
+		"evidence": []map[string]any{{"type": "commit", "sha": "abc1234"}},
+	}
+	resp, raw := doReq(t, ts, "POST",
+		"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+issueRef+"/actions/close",
+		body, authed)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "close: %s", raw)
+
+	var payload struct {
+		Event *struct {
+			Actor string `json:"actor"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &payload))
+	require.NotNil(t, payload.Event, "close returned no event: %s", raw)
+	assert.Equal(t, "proxy-user", payload.Event.Actor,
+		"bearer auth admits the request; trusted-proxy must still overwrite the actor")
+}
+
+// TestTrustedProxyHeader_StaticBearerMissingHeaderRejects pins the layered
+// error surface: a valid bearer on a trusted listener without the header must
+// fail with 400 actor_header_required (not 401 — bearer was fine — and not a
+// silent body-actor fallback).
+func TestTrustedProxyHeader_StaticBearerMissingHeaderRejects(t *testing.T) {
+	ts, _ := startBearerProxyTestServer(t, "X-Kata-Actor",
+		bearerProxyOpts{Token: "static-bearer"})
+	authed := map[string]string{
+		"Authorization": "Bearer static-bearer",
+		"X-Kata-Actor":  "setup",
+	}
+
+	projectID := trustedProxyCreateProject(t, ts, authed)
+	issueRef := trustedProxyCreateIssue(t, ts, projectID, authed)
+
+	body := map[string]any{
+		"actor":   "client-claim",
+		"reason":  "done",
+		"message": "valid bearer, but no X-Kata-Actor on a trusted listener.",
+		"source":  "tui",
+	}
+	// Same Authorization header, but no X-Kata-Actor.
+	resp, raw := doReq(t, ts, "POST",
+		"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+issueRef+"/actions/close",
+		body, map[string]string{"Authorization": "Bearer static-bearer"})
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "actor_header_required")
+}
+
+// TestTrustedProxyHeader_BadBearerStops401BeforeProxy verifies the middleware
+// ordering at the failure boundary: a request with the trusted-proxy header
+// but a wrong bearer must short-circuit at requireBearer with a token error,
+// never reaching withTrustedProxyActor. Without this test, swapping the
+// middleware order in composition could quietly let the header through on
+// unauthenticated requests.
+func TestTrustedProxyHeader_BadBearerStops401BeforeProxy(t *testing.T) {
+	ts, _ := startBearerProxyTestServer(t, "X-Kata-Actor",
+		bearerProxyOpts{Token: "static-bearer"})
+
+	// Setup uses the right bearer so we have something to close.
+	authed := map[string]string{
+		"Authorization": "Bearer static-bearer",
+		"X-Kata-Actor":  "setup",
+	}
+	projectID := trustedProxyCreateProject(t, ts, authed)
+	issueRef := trustedProxyCreateIssue(t, ts, projectID, authed)
+
+	// The close request supplies a bogus bearer plus the proxy header. The
+	// header should be ignored because requireBearer rejects first.
+	body := map[string]any{
+		"actor":   "client-claim",
+		"reason":  "done",
+		"message": "wrong bearer must reject before the proxy header is considered.",
+		"source":  "tui",
+	}
+	resp, raw := doReq(t, ts, "POST",
+		"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+issueRef+"/actions/close",
+		body, map[string]string{
+			"Authorization": "Bearer wrong-bearer",
+			"X-Kata-Actor":  "proxy-user",
+		})
+	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "auth_invalid")
+}
+
+// TestTrustedProxyHeader_DBTokenIdentityHeaderOverwrites exercises the case
+// the spec §3.4 precedence table explicitly calls out: identity-mode bearer
+// admits the request and PR #65's requireIdentityBearer sets
+// PrincipalDBToken{Actor: "bob"}; the trusted-proxy middleware then
+// overwrites that principal with PrincipalTrustedProxy{Actor: "alice"} on the
+// trusted listener. The resulting event must credit "alice" (header), not
+// "bob" (token), not "client-claim" (body). This is the "documented but not
+// encouraged" silent override — pinning it here makes any future drift in
+// either layer fail loudly.
+func TestTrustedProxyHeader_DBTokenIdentityHeaderOverwrites(t *testing.T) {
+	ts, store := startBearerProxyTestServer(t, "X-Kata-Actor",
+		bearerProxyOpts{Token: "bootstrap-token", RequireTokenIdentity: true})
+
+	// Mint a DB-registered token for "bob" so requireIdentityBearer sets
+	// PrincipalDBToken on his requests.
+	bobPlain := "bob-db-token"
+	_, _, err := store.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: bobPlain,
+		Actor:          "bob",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	// Setup uses the bootstrap token (allowed in identity mode for admin-
+	// shaped writes) plus the proxy header for actor attribution.
+	setup := map[string]string{
+		"Authorization": "Bearer bootstrap-token",
+		"X-Kata-Actor":  "setup",
+	}
+	projectID := trustedProxyCreateProject(t, ts, setup)
+	issueRef := trustedProxyCreateIssue(t, ts, projectID, setup)
+
+	// The close uses bob's DB token AND a conflicting header value. Header
+	// must win; the DB-token actor "bob" must be silently discarded.
+	body := map[string]any{
+		"actor":    "client-claim",
+		"reason":   "done",
+		"message":  "DB-token identity + proxy header: the header must overwrite the DB identity.",
+		"evidence": []map[string]any{{"type": "commit", "sha": "abc1234"}},
+	}
+	resp, raw := doReq(t, ts, "POST",
+		"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+issueRef+"/actions/close",
+		body, map[string]string{
+			"Authorization": "Bearer " + bobPlain,
+			"X-Kata-Actor":  "alice",
+		})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "close: %s", raw)
+
+	var payload struct {
+		Event *struct {
+			Actor string `json:"actor"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &payload))
+	require.NotNil(t, payload.Event, "close returned no event: %s", raw)
+	assert.Equal(t, "alice", payload.Event.Actor,
+		"trusted-proxy header must overwrite a DB-token identity on a trusted listener")
 }
