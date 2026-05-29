@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -44,6 +45,12 @@ type ServerConfig struct {
 	// InsecureReadonly permits unauthenticated GETs on non-loopback TCP
 	// even when Auth.Token == "". DEV ONLY — not for production.
 	InsecureReadonly bool
+
+	// Logger is the structured logger middleware uses for operator-visible
+	// warnings (currently: trusted-proxy header overwriting an upstream
+	// bearer-derived principal). Nil uses slog.Default(); tests inject a
+	// per-test logger so output is observable and isolated.
+	Logger *slog.Logger
 }
 
 // authPolicy returns the resolved bearer-auth policy in the form the

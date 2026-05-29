@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -45,6 +46,10 @@ func normalizeListenerEntry(s string) string {
 func withTrustedProxyActor(cfg ServerConfig) func(http.Handler) http.Handler {
 	headerName := strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
 	allowlist := cfg.Auth.Proxy.TrustedProxyListeners
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if headerName == "" {
@@ -56,6 +61,7 @@ func withTrustedProxyActor(cfg ServerConfig) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			warnIfOverwritingUpstreamPrincipal(r.Context(), logger, localAddr, headerName)
 			raw := strings.TrimSpace(r.Header.Get(headerName))
 			var ctx context.Context
 			if raw != "" {
@@ -71,4 +77,30 @@ func withTrustedProxyActor(cfg ServerConfig) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// warnIfOverwritingUpstreamPrincipal logs a warning when bearer auth has
+// already attached a principal and trusted-proxy mode is about to overwrite
+// it. An operator who configured both modes on the same listener gets
+// per-request visibility that the proxy header is silently winning, so they
+// can either accept the topology or split the modes onto separate listeners.
+func warnIfOverwritingUpstreamPrincipal(ctx context.Context, logger *slog.Logger, localAddr net.Addr, headerName string) {
+	existing, ok := PrincipalFromContext(ctx)
+	if !ok {
+		return
+	}
+	switch existing.Kind {
+	case PrincipalDBToken, PrincipalStaticToken, PrincipalBootstrap:
+	default:
+		return
+	}
+	listener := ""
+	if localAddr != nil {
+		listener = localAddr.String()
+	}
+	logger.Warn("trusted-proxy header overwriting upstream principal",
+		"listener", listener,
+		"upstream_kind", string(existing.Kind),
+		"upstream_actor", existing.Actor,
+		"header", headerName)
 }
