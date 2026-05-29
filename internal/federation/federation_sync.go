@@ -189,7 +189,14 @@ func SyncFederationOnceWithPulledEvents(
 			if err != nil {
 				return err
 			}
-			if inserted || (shouldDeliverPage && ev.OriginInstanceUID != localInstanceUID) {
+			deliverDuplicate := false
+			if !inserted && shouldDeliverPage {
+				deliverDuplicate, err = shouldDeliverDuplicatePulledEvent(ctx, store, currentBinding, ev, localInstanceUID)
+				if err != nil {
+					return err
+				}
+			}
+			if inserted || deliverDuplicate {
 				deliverUIDs = append(deliverUIDs, ev.EventUID)
 			}
 		}
@@ -216,6 +223,30 @@ func SyncFederationOnceWithPulledEvents(
 		onPulledEvents(binding.ProjectID, pulledEvents)
 	}
 	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC())
+}
+
+func shouldDeliverDuplicatePulledEvent(
+	ctx context.Context,
+	store *db.DB,
+	binding db.FederationBinding,
+	ev api.EventEnvelope,
+	localInstanceUID string,
+) (bool, error) {
+	if ev.OriginInstanceUID != localInstanceUID {
+		return true, nil
+	}
+	events, err := store.EventsByUIDs(ctx, binding.ProjectID, []string{ev.EventUID})
+	if err != nil {
+		return false, err
+	}
+	if len(events) != 1 {
+		return false, nil
+	}
+	event := events[0]
+	if event.ID > binding.PushCursorEventID {
+		return true, nil
+	}
+	return event.IssueID == nil && event.IssueUID != nil, nil
 }
 
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {
