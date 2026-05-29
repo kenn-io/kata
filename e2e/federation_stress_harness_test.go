@@ -593,11 +593,6 @@ func (fx *federationStressFixture) issueLiveOnHub(t federationStressTB, issueUID
 	return err == nil
 }
 
-func isSQLiteBusyMessage(msg string) bool {
-	msg = strings.ToLower(msg)
-	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
-}
-
 func (fx *federationStressFixture) waitForFoldedProjectionMatch(t federationStressTB, spokeIdx int) {
 	t.Helper()
 	spoke := fx.spokes[spokeIdx]

@@ -31,10 +31,10 @@ work, with documented consistency limits.
   before that point is represented by baseline snapshot events rather than by a
   replay-complete event stream.
 - **Lease**: a hub-authoritative write lease for one existing issue. Mutating
-  existing issue work on federated projects requires a live lease except for
-  intentionally lease-free operations such as comments. Creating new issues is
-  also lease-free because there is no existing issue to lease. The internal
-  storage and audit events still use the `claim` name.
+  existing issue work on federated projects, including comments, requires a live
+  lease. Creating new issues remains lease-free because there is no existing
+  issue to lease. The internal storage and audit events still use the `claim`
+  name.
 - **Quarantine**: a local operator stop marker for a poisoned federation batch.
   It prevents hot-looping and requires an explicit operator decision.
 
@@ -231,9 +231,9 @@ requests to the hub using an enrollment token with `claim` capability. The hub
 derives `holder_instance_uid` from that enrollment token; clients provide the
 human-readable holder string.
 
-For federated projects, non-comment mutations of existing issues require a live
-lease. Creating new issues and adding comments do not require a lease. Spokes
-use their cached lease state to gate local writes. When online, stale status is
+For federated projects, mutations of existing issues, including comments,
+require a live lease. Creating new issues does not require a lease. Spokes use
+their cached lease state to gate local writes. When online, stale status is
 refreshed from the hub. When offline, cached hard leases can still be used so
 work is not lost. Timed leases expire by hub time.
 
@@ -307,7 +307,7 @@ that the local batch will not be federated.
 Hard purge is hub-admin-only for federated projects. A spoke rejects hard purge
 with `federated_admin_required`. A hub purge uses the normal local/admin daemon
 auth surface, the existing exact confirmation string, and the same live-lease
-gate as other non-comment issue mutations.
+gate as other issue mutations.
 
 When a hub purge removes replay history, it records a reset boundary in
 `purge_log` and writes a fresh federation baseline for the remaining project

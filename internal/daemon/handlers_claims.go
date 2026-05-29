@@ -670,6 +670,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 			if err != nil {
 				return nil, claimAPIError(err)
 			}
+			emitClaimEvents(cfg, status.Events)
 			hubNow := status.HubNow
 			if hubNow.IsZero() {
 				return nil, nil
@@ -773,7 +774,7 @@ func markShowClaimStatusRefreshFailure(
 
 func hydrateClaimOutForIssue(ctx context.Context, cfg ServerConfig, issue db.Issue, out *api.ShowIssueResponse) error {
 	now := time.Now().UTC()
-	status, err := cfg.DB.ClaimStatus(ctx, issue.ProjectID, issue.UID, now)
+	status, err := cfg.DB.ClaimStatusReadOnly(ctx, issue.ProjectID, issue.UID, now)
 	if err != nil {
 		return api.NewError(500, "internal", err.Error(), "", nil)
 	}

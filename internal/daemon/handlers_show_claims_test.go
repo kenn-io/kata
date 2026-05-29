@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -166,6 +167,74 @@ func TestShowIssueClaimExpiresTimedClaimBeforeViolationHydration(t *testing.T) {
 	assert.Nil(t, body.ClaimViolationCount)
 	assert.Empty(t, body.ClaimViolations)
 	assertShowEventCount(t, hub.DB, "claim.expired", 1)
+}
+
+func TestShowIssueClaimHubExpiryBroadcastsCommittedEvent(t *testing.T) {
+	ctx := context.Background()
+	hub := testenv.New(t)
+	project, issue := createClaimHubIssue(t, hub)
+	now := time.Now().UTC()
+	_, err := hub.DB.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: hub.DB.InstanceUID(),
+			Holder:            "hub-cli",
+			ClientKind:        "cli",
+		},
+		ClaimKind: "timed",
+		TTL:       time.Minute,
+		Now:       now.Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+	sub := hub.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer sub.Unsub()
+
+	body := getShowIssueClaimBody(t, hub, project.ID, issue.ShortID)
+
+	assert.Nil(t, body.Claim)
+	msg := receiveMsg(t, sub.Ch, time.Second, "show should broadcast claim expiry")
+	require.NotNil(t, msg.Event)
+	assert.Equal(t, "claim.expired", msg.Event.Type)
+}
+
+func TestShowIssueClaimSpokeFallbackDoesNotExpireCachedTimedClaim(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, issue := createShowClaimSpokeProject(t, spoke)
+	cachedAt := time.Now().UTC().Add(-2 * time.Minute)
+	expiresAt := cachedAt.Add(time.Minute)
+	require.NoError(t, spoke.DB.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
+		Held: true,
+		Holder: db.ClaimPrincipal{
+			HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD",
+			Holder:            "cached-holder",
+			ClientKind:        "cli",
+		},
+		Claim: &db.IssueClaim{
+			ClaimUID:          "01HZNQ7VFPK1XGD8R5MABCD4AA",
+			ProjectID:         project.ID,
+			IssueID:           issue.ID,
+			IssueUID:          issue.UID,
+			Holder:            "cached-holder",
+			HolderInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4CD",
+			ClientKind:        "cli",
+			ClaimKind:         "timed",
+			AcquiredAt:        cachedAt,
+			ExpiresAt:         &expiresAt,
+			Revision:          1,
+			UpdatedAt:         cachedAt,
+		},
+		HubNow: cachedAt,
+	}))
+	writeShowClaimSpokeBinding(t, spoke, project, "http://127.0.0.1:1", "claim-token", "claim")
+
+	body := getShowIssueClaimBody(t, spoke, project.ID, issue.ShortID)
+
+	require.NotNil(t, body.Claim)
+	assert.Equal(t, "cached-holder", body.Claim.Holder)
+	assertShowLiveClaimCount(t, spoke.DB, issue.UID, 1)
+	assertShowEventCount(t, spoke.DB, "claim.expired", 0)
 }
 
 func TestShowIssueClaimIncludesPendingClaimsNewestFirst(t *testing.T) {

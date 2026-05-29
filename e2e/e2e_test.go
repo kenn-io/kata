@@ -186,12 +186,30 @@ func postJSON(t *testing.T, client *http.Client, url string, body any) *http.Res
 	t.Helper()
 	bs, err := json.Marshal(body)
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(bs))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req) //nolint:gosec // G704: test-only loopback, caller-controlled URL
-	require.NoError(t, err)
-	return resp
+	deadline := time.Now().Add(5 * time.Second)
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(bs))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req) //nolint:gosec // G704: test-only loopback, caller-controlled URL
+		require.NoError(t, err)
+		if resp.StatusCode != http.StatusInternalServerError {
+			return resp
+		}
+		raw, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		require.NoError(t, err)
+		resp.Body = io.NopCloser(bytes.NewReader(raw))
+		if !isSQLiteBusyMessage(string(raw)) || time.Now().After(deadline) {
+			return resp
+		}
+		time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
+	}
+}
+
+func isSQLiteBusyMessage(msg string) bool {
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
 }
 
 // getBody runs a GET via the bounded testenv client and returns the response

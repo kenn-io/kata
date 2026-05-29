@@ -316,7 +316,7 @@ func runKataJSONWantExit[T any](t *testing.T, bin string, dirs e2eDirs, wantExit
 
 func runKataOK(t *testing.T, bin string, dirs e2eDirs, args ...string) e2eClaimRun {
 	t.Helper()
-	res, exitCode := runKata(t, bin, dirs, args...)
+	res, exitCode := runKataWithSQLiteBusyRetry(t, bin, dirs, args...)
 	require.Equalf(t, 0, exitCode, "kata %s\nstdout: %s\nstderr: %s", strings.Join(args, " "), res.stdout, res.stderr)
 	return res
 }
@@ -326,6 +326,27 @@ func runKataWantExit(t *testing.T, bin string, dirs e2eDirs, wantExit int, args 
 	res, exitCode := runKata(t, bin, dirs, args...)
 	require.Equalf(t, wantExit, exitCode, "kata %s\nstdout: %s\nstderr: %s", strings.Join(args, " "), res.stdout, res.stderr)
 	return res
+}
+
+func runKataWithSQLiteBusyRetry(t *testing.T, bin string, dirs e2eDirs, args ...string) (e2eClaimRun, int) {
+	t.Helper()
+	var res e2eClaimRun
+	var exitCode int
+	deadline := time.Now().Add(5 * time.Second)
+	for attempt := 0; ; attempt++ {
+		res, exitCode = runKata(t, bin, dirs, args...)
+		if exitCode == 0 || !claimE2ESQLiteBusy(res) || time.Now().After(deadline) {
+			return res, exitCode
+		}
+		// These e2e tests run foreground CLI commands against the same daemon DB
+		// that background federation runners are polling. CI can occasionally hit
+		// SQLite's short busy window; retry only success-expected commands.
+		time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
+	}
+}
+
+func claimE2ESQLiteBusy(res e2eClaimRun) bool {
+	return isSQLiteBusyMessage(res.stdout + "\n" + res.stderr)
 }
 
 func runKata(t *testing.T, bin string, dirs e2eDirs, args ...string) (e2eClaimRun, int) {

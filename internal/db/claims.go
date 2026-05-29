@@ -339,6 +339,30 @@ func (d *DB) ClaimStatus(ctx context.Context, projectID int64, issueRef string, 
 	return out, err
 }
 
+// ClaimStatusReadOnly returns the currently cached live claim without expiring
+// timed claims or writing audit events. It is for display-only surfaces that
+// must not mutate local spoke state.
+func (d *DB) ClaimStatusReadOnly(ctx context.Context, projectID int64, issueRef string, now time.Time) (ClaimStatus, error) {
+	now = claimNow(now)
+	issue, _, err := resolveClaimIssueTx(ctx, d, projectID, issueRef)
+	if err != nil {
+		return ClaimStatus{}, err
+	}
+	live, err := liveClaimForIssueTx(ctx, d, issue.UID)
+	if errors.Is(err, ErrNotFound) {
+		return ClaimStatus{HubNow: now}, nil
+	}
+	if err != nil {
+		return ClaimStatus{}, err
+	}
+	return ClaimStatus{
+		Held:   true,
+		Holder: principalForClaim(live),
+		Claim:  &live,
+		HubNow: now,
+	}, nil
+}
+
 // EnqueuePendingClaim stores or returns an unresolved offline claim request.
 func (d *DB) EnqueuePendingClaim(ctx context.Context, p PendingClaimParams) (PendingClaimRequest, error) {
 	now := claimNow(p.Now)
