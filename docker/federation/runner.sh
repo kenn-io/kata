@@ -139,7 +139,7 @@ spoke_a_replica=$(post "$spoke_a/api/v1/federation/replicas" 200 \
     --argjson hub_project_id "$hub_project_id" \
     --argjson replay "$replay_horizon" \
     --argjson baseline "$baseline_through" \
-    '{hub_url: $hub_url, hub_project_id: $hub_project_id, hub_project_uid: $hub_uid, project_name: $name, replay_horizon_event_id: $replay, baseline_through_event_id: $baseline, token: $token, push_enabled: true}')")
+    '{hub_url: $hub_url, hub_project_id: $hub_project_id, hub_project_uid: $hub_uid, project_name: $name, replay_horizon_event_id: $replay, baseline_through_event_id: $baseline, token: $token, capabilities: "pull,push,claim", push_enabled: true}')")
 spoke_a_project_id=$(jq -r '.project.id' <<<"$spoke_a_replica")
 
 log "enrolling and binding spoke-b"
@@ -156,7 +156,7 @@ spoke_b_replica=$(post "$spoke_b/api/v1/federation/replicas" 200 \
     --argjson hub_project_id "$hub_project_id" \
     --argjson replay "$replay_horizon" \
     --argjson baseline "$baseline_through" \
-    '{hub_url: $hub_url, hub_project_id: $hub_project_id, hub_project_uid: $hub_uid, project_name: $name, replay_horizon_event_id: $replay, baseline_through_event_id: $baseline, token: $token, push_enabled: true}')")
+    '{hub_url: $hub_url, hub_project_id: $hub_project_id, hub_project_uid: $hub_uid, project_name: $name, replay_horizon_event_id: $replay, baseline_through_event_id: $baseline, token: $token, capabilities: "pull,push,claim", push_enabled: true}')")
 spoke_b_project_id=$(jq -r '.project.id' <<<"$spoke_b_replica")
 
 log "verifying baseline pull"
