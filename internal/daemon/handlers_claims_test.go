@@ -38,6 +38,28 @@ func TestClaimAuthLocalDaemonBearerCanClaimHubProject(t *testing.T) {
 	assert.Equal(t, "local-cli", out.Holder.Holder)
 }
 
+func TestClaimRoutesRejectArchivedFederatedProject(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
+	project, issue := createClaimHubIssue(t, env)
+	_, _, err := env.DB.RemoveProject(context.Background(), db.RemoveProjectParams{
+		ProjectID: project.ID,
+		Actor:     "tester",
+		Force:     true,
+	})
+	require.NoError(t, err)
+
+	headers := bearer("admin-token")
+	resp := claimPost(t, env, project.ID, issue.ShortID, "claim", map[string]any{
+		"holder":      "local-cli",
+		"client_kind": "cli",
+		"claim_kind":  "hard",
+	}, headers, nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	resp, raw := envDoRaw(t, env, http.MethodGet, claimStatusPath(project.ID, issue.ShortID), nil, headers)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(raw))
+}
+
 func TestClaimAuthIdentityTokenCanUseLocalLeaseRoutes(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, issue := createClaimHubIssue(t, env)

@@ -317,6 +317,9 @@ func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, r
 }
 
 func claimBinding(ctx context.Context, store *db.DB, projectID int64) (db.FederationBinding, error) {
+	if _, err := activeProjectByID(ctx, store, projectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	binding, err := store.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return db.FederationBinding{}, api.NewError(http.StatusNotFound, "federation_not_found", "project is not federated", "", nil)
@@ -640,6 +643,9 @@ func claimHubPath(hubProjectID int64, ref, suffix string) string {
 }
 
 func requireHubClaimBinding(ctx context.Context, store *db.DB, projectID int64) error {
+	if _, err := activeProjectByID(ctx, store, projectID); err != nil {
+		return err
+	}
 	binding, err := store.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return api.NewError(http.StatusNotFound, "federation_not_found", "project is not a federation hub", "", nil)
