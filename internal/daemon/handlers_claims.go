@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -355,7 +356,7 @@ func claimForwardClient(
 	if cred.HubProjectID == 0 {
 		cred.HubProjectID = binding.HubProjectID
 	}
-	client, err := newClaimHubClient(cred.HubURL, cred.Token)
+	client, err := newClaimHubClient(ctx, cred.HubURL, cred.Token)
 	if err != nil {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", err.Error(), "", nil)
 	}
@@ -474,8 +475,11 @@ func (e *claimHubStatusError) Error() string {
 	return fmt.Sprintf("hub %s returned %d: %s", e.Path, e.StatusCode, e.Body)
 }
 
-func newClaimHubClient(baseURL, token string) (*claimHubClient, error) {
-	httpClient := &http.Client{Timeout: 10 * time.Second}
+func newClaimHubClient(ctx context.Context, baseURL, token string) (*claimHubClient, error) {
+	httpClient, err := newClaimHubHTTPClient(ctx, baseURL)
+	if err != nil {
+		return nil, err
+	}
 	if err := config.ConfigureBearerClient(httpClient, baseURL, token); err != nil {
 		return nil, err
 	}
@@ -483,6 +487,52 @@ func newClaimHubClient(baseURL, token string) (*claimHubClient, error) {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  httpClient,
 	}, nil
+}
+
+func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, error) {
+	if !strings.HasPrefix(baseURL, "http://kata.invalid") {
+		return &http.Client{Timeout: 10 * time.Second}, nil
+	}
+	ns, err := NewNamespace()
+	if err != nil {
+		return nil, err
+	}
+	recs, err := ListRuntimeFiles(ns.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, rec := range recs {
+		if !ProcessAlive(rec.PID) || !strings.HasPrefix(rec.Address, "unix://") {
+			continue
+		}
+		path := strings.TrimPrefix(rec.Address, "unix://")
+		probe := &http.Client{Transport: claimUnixTransport(path), Timeout: time.Second}
+		if !claimHubPing(ctx, probe) {
+			continue
+		}
+		return &http.Client{Transport: claimUnixTransport(path), Timeout: 10 * time.Second}, nil
+	}
+	return nil, errors.New("no unix-socket daemon found")
+}
+
+func claimHubPing(ctx context.Context, client *http.Client) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://kata.invalid/api/v1/ping", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req) //nolint:gosec // Unix runtime file target is locally discovered and probed.
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode == http.StatusOK
+}
+
+func claimUnixTransport(path string) *http.Transport {
+	return &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "unix", path)
+	}}
 }
 
 func (c *claimHubClient) AcquireClaim(
