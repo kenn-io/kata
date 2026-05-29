@@ -452,15 +452,14 @@ func TestTrustedProxyHeader_BadBearerStops401BeforeProxy(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "auth_invalid")
 }
 
-// TestTrustedProxyHeader_DBTokenIdentityHeaderOverwrites exercises the case
-// the spec §3.4 precedence table explicitly calls out: identity-mode bearer
-// admits the request and PR #65's requireIdentityBearer sets
+// TestTrustedProxyHeader_DBTokenIdentityHeaderOverwrites exercises the
+// stacked case where bearer identity AND trusted-proxy attribution are both
+// configured. requireIdentityBearer admits the DB token and sets
 // PrincipalDBToken{Actor: "bob"}; the trusted-proxy middleware then
 // overwrites that principal with PrincipalTrustedProxy{Actor: "alice"} on the
 // trusted listener. The resulting event must credit "alice" (header), not
-// "bob" (token), not "client-claim" (body). This is the "documented but not
-// encouraged" silent override — pinning it here makes any future drift in
-// either layer fail loudly.
+// "bob" (token), not "client-claim" (body). Pin this so a future change that
+// reverses the precedence (or silently merges the two principals) fails here.
 func TestTrustedProxyHeader_DBTokenIdentityHeaderOverwrites(t *testing.T) {
 	ts, store := startBearerProxyTestServer(t, "X-Kata-Actor",
 		bearerProxyOpts{Token: "bootstrap-token", RequireTokenIdentity: true})
