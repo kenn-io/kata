@@ -22,7 +22,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 		"links", "issue_labels", "events", "purge_log",
 		"api_tokens", "federation_bindings", "federation_sync_status",
 		"federation_quarantine", "federation_enrollments",
-		"federation_ingest_deliveries", "issue_claims", "pending_claim_requests",
+		"issue_claims", "pending_claim_requests",
 		"meta", "issues_fts", "import_mappings", "recurrences",
 	}
 	for _, name := range wanted {

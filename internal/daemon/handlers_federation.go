@@ -259,7 +259,6 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID:        in.ProjectID,
-			EnrollmentID:     principal.EnrollmentID,
 			SpokeInstanceUID: principal.SpokeInstanceUID,
 			Events:           federationIngestEventsToDB(in.Body.Events),
 		})
@@ -276,10 +275,6 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		for _, evt := range inserted {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
 			cfg.Hooks.Enqueue(evt)
-		}
-		if err := cfg.DB.MarkFederationIngestDelivered(ctx, in.ProjectID, principal.EnrollmentID,
-			principal.SpokeInstanceUID, result.InsertedEventUIDs); err != nil {
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 		}
 		return &api.FederationIngestEventsResponse{Body: api.FederationIngestEventsBody{
 			Accepted:          result.Accepted,

@@ -24,14 +24,13 @@ type FederationIngestEvent struct {
 // hub transport handler.
 type FederationIngestParams struct {
 	ProjectID        int64
-	EnrollmentID     int64
 	SpokeInstanceUID string
 	Events           []FederationIngestEvent
 }
 
 // FederationIngestResult summarizes an accepted batch. InsertedEventUIDs lists
-// events that need post-commit delivery: fresh events and any previously
-// accepted-but-undelivered duplicates from a response-lost retry.
+// only fresh events, including generated claim audit events in insertion order,
+// so callers can avoid rebroadcasting response-lost retries.
 type FederationIngestResult struct {
 	Accepted          int
 	Duplicates        int
@@ -120,12 +119,6 @@ func (d *DB) ingestFederationEventsOnce(
 				return FederationIngestResult{}, fmt.Errorf("%w: event %s", ErrRemoteEventConflict, ev.EventUID)
 			}
 			result.Duplicates++
-			deliveryUIDs, err := undeliveredFederationIngestDeliveryUIDsTx(
-				ctx, tx, p.ProjectID, p.EnrollmentID, p.SpokeInstanceUID, in.SourceEventID)
-			if err != nil {
-				return FederationIngestResult{}, err
-			}
-			result.InsertedEventUIDs = appendUniqueStrings(result.InsertedEventUIDs, deliveryUIDs...)
 			rememberIngestIssueUIDs(ev, knownIssueUIDs)
 			prepared = append(prepared, preparedFederationIngestEvent{
 				SourceEventID: in.SourceEventID,
@@ -169,15 +162,9 @@ func (d *DB) ingestFederationEventsOnce(
 			return FederationIngestResult{}, err
 		}
 		result.Accepted++
-		deliveryUIDs := []string{ev.EventUID}
-		result.InsertedEventUIDs = appendUniqueStrings(result.InsertedEventUIDs, ev.EventUID)
+		result.InsertedEventUIDs = append(result.InsertedEventUIDs, ev.EventUID)
 		for _, auditEvent := range auditEvents {
-			deliveryUIDs = append(deliveryUIDs, auditEvent.UID)
-			result.InsertedEventUIDs = appendUniqueStrings(result.InsertedEventUIDs, auditEvent.UID)
-		}
-		if err := insertFederationIngestDeliveriesTx(ctx, tx, p.ProjectID, p.EnrollmentID,
-			p.SpokeInstanceUID, in.SourceEventID, deliveryUIDs); err != nil {
-			return FederationIngestResult{}, err
+			result.InsertedEventUIDs = append(result.InsertedEventUIDs, auditEvent.UID)
 		}
 	}
 	if result.Accepted > 0 {
@@ -192,104 +179,6 @@ func (d *DB) ingestFederationEventsOnce(
 		return FederationIngestResult{}, fmt.Errorf("commit federation ingest: %w", err)
 	}
 	return result, nil
-}
-
-func appendUniqueStrings(dst []string, values ...string) []string {
-	if len(values) == 0 {
-		return dst
-	}
-	seen := make(map[string]struct{}, len(dst)+len(values))
-	for _, value := range dst {
-		seen[value] = struct{}{}
-	}
-	for _, value := range values {
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		dst = append(dst, value)
-	}
-	return dst
-}
-
-func insertFederationIngestDeliveriesTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID, enrollmentID int64,
-	spokeInstanceUID string,
-	sourceEventID int64,
-	eventUIDs []string,
-) error {
-	for _, eventUID := range eventUIDs {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO federation_ingest_deliveries(
-			  project_id, enrollment_id, spoke_instance_uid, source_event_id, event_uid
-			)
-			VALUES(?, ?, ?, ?, ?)
-			ON CONFLICT(project_id, enrollment_id, source_event_id, event_uid) DO NOTHING`,
-			projectID, enrollmentID, spokeInstanceUID, sourceEventID, eventUID); err != nil {
-			return fmt.Errorf("insert federation ingest delivery: %w", err)
-		}
-	}
-	return nil
-}
-
-func undeliveredFederationIngestDeliveryUIDsTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID, enrollmentID int64,
-	spokeInstanceUID string,
-	sourceEventID int64,
-) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT event_uid
-		  FROM federation_ingest_deliveries
-		 WHERE project_id = ?
-		   AND enrollment_id = ?
-		   AND spoke_instance_uid = ?
-		   AND source_event_id = ?
-		   AND delivered_at IS NULL
-		 ORDER BY id ASC`,
-		projectID, enrollmentID, spokeInstanceUID, sourceEventID)
-	if err != nil {
-		return nil, fmt.Errorf("list federation ingest deliveries: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var uid string
-		if err := rows.Scan(&uid); err != nil {
-			return nil, fmt.Errorf("scan federation ingest delivery: %w", err)
-		}
-		out = append(out, uid)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate federation ingest deliveries: %w", err)
-	}
-	return out, nil
-}
-
-// MarkFederationIngestDelivered records that the daemon completed local
-// post-commit side effects for the supplied ingested event UIDs.
-func (d *DB) MarkFederationIngestDelivered(
-	ctx context.Context,
-	projectID, enrollmentID int64,
-	spokeInstanceUID string,
-	eventUIDs []string,
-) error {
-	for _, eventUID := range eventUIDs {
-		if _, err := d.ExecContext(ctx, `
-			UPDATE federation_ingest_deliveries
-			   SET delivered_at = COALESCE(delivered_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-			 WHERE project_id = ?
-			   AND enrollment_id = ?
-			   AND spoke_instance_uid = ?
-			   AND event_uid = ?`,
-			projectID, enrollmentID, spokeInstanceUID, eventUID); err != nil {
-			return fmt.Errorf("mark federation ingest delivered: %w", err)
-		}
-	}
-	return nil
 }
 
 func insertFederationEventTx(
