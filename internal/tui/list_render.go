@@ -39,6 +39,7 @@ type viewChrome struct {
 	input        inputState       // active input shell (M3a bar; M3b prompt; M4 form)
 	narrow       bool             // M6 split mode list pane: drop owner column
 	projectsByID map[int64]string // for all-projects mode: pid → display name (empty otherwise)
+	daemon       string           // active daemon display label
 }
 
 // View renders the list under the M3.5 chrome layer:
@@ -65,7 +66,7 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 		// layout math (avoids divide-by-negative or empty renders).
 		return lm.renderTinyFallback(width)
 	}
-	title := renderTitleBar(width, chrome.scope, chrome.version)
+	title := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
 	stats := renderStatsLine(width, chrome.scope, lm.issueCounts(), lm.filter)
 	helpRows := listHelpRows(lm, chrome)
 	footerLines := helpLines(helpRows, width)
@@ -153,9 +154,9 @@ func (lm listModel) renderBodyArea(width, bodyRows int, chrome viewChrome) strin
 // disambiguator for the brand vs. a project that happens to also be
 // named "kata". All-projects scope and the empty-scope hint render
 // in the project slot so the left side is never blank.
-func renderTitleBar(width int, sc scope, version string) string {
+func renderTitleBar(width int, sc scope, version string, daemon ...string) string {
 	left := titleBarLeft(sc)
-	right := titleBarRight(version)
+	right := titleBarRight(version, firstDaemonLabel(daemon))
 	body := padLeftRightInside(left, right, titleBarInnerWidth(width))
 	return titleBarStyle.Render(body)
 }
@@ -183,11 +184,25 @@ func titleBarLeft(sc scope) string {
 // titleBarRight is the brand + version cluster pinned to the right
 // of the title bar. Version is omitted (gracefully) on builds that
 // didn't stamp it so the right side is just the brand.
-func titleBarRight(version string) string {
-	if version == "" {
-		return "kata カタ"
+func titleBarRight(version, daemon string) string {
+	parts := []string{}
+	if daemon != "" {
+		parts = append(parts, "Daemon: "+daemon)
 	}
-	return "kata カタ · " + version
+	brand := "kata カタ"
+	if version == "" {
+		parts = append(parts, brand)
+		return strings.Join(parts, " · ")
+	}
+	parts = append(parts, brand, version)
+	return strings.Join(parts, " · ")
+}
+
+func firstDaemonLabel(labels []string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	return labels[0]
 }
 
 // titleBarInnerWidth subtracts the titleBarStyle horizontal padding

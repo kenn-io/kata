@@ -159,6 +159,32 @@ func TestTitleBarLeft_SanitizeEmptyFallsBackToPlaceholder(t *testing.T) {
 	}
 }
 
+func TestTitleBarShowsDaemonName(t *testing.T) {
+	useNoColor(t)
+	got := renderTitleBar(100, scope{projectName: "kata"}, "dev", "shared")
+
+	assertContains(t, stripANSI(got), "Daemon: shared", "title bar missing configured daemon name")
+}
+
+func TestTitleBarShowsDaemonHostFallback(t *testing.T) {
+	useNoColor(t)
+	got := renderTitleBar(120, scope{projectName: "kata"}, "dev", "daemon.internal:7777")
+
+	assertContains(t, stripANSI(got), "Daemon: daemon.internal:7777", "title bar missing daemon host fallback")
+}
+
+func TestTitleBarShowsLocalDaemonFallback(t *testing.T) {
+	useNoColor(t)
+	m := initialModel(Options{})
+	m.scope = scope{projectName: "kata"}
+	m.activeDaemon = daemonTarget{Local: true}
+	m.list.loading = false
+
+	got := m.list.View(120, 12, m.chrome())
+
+	assertContains(t, stripANSI(got), "Daemon: local", "title bar missing local daemon fallback")
+}
+
 // TestRenderLabelChips_LargeOverflowReservesActualWidth pins the
 // fix for roborev job 235: with >=100 labels dropped, the `+N` token
 // is `+100` (5 cells) — wider than the legacy hard-coded 4-cell

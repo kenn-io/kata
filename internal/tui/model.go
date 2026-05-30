@@ -2577,5 +2577,6 @@ func (m Model) chrome() viewChrome {
 		version:      kataVersion,
 		input:        m.input,
 		projectsByID: m.projectsByID,
+		daemon:       daemonTargetDisplay(m.activeDaemon),
 	}
 }
