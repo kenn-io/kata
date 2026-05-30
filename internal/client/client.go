@@ -132,6 +132,15 @@ type Opts struct {
 	ResponseHeaderTimeout time.Duration
 }
 
+// TargetAuth is explicit per-target bearer configuration. It is used by
+// interactive clients that switch between multiple daemon endpoints in one
+// process and therefore cannot rely on the package-global auth resolution
+// path.
+type TargetAuth struct {
+	Token          string
+	AllowInsecure bool
+}
+
 // NewHTTPClient returns an *http.Client whose transport matches baseURL —
 // unix-socket dialing when baseURL == UnixBase, plain TCP otherwise. Pair
 // with the URL returned by Discover/EnsureRunning. We re-scan and re-probe
@@ -158,6 +167,23 @@ func NewHTTPClientWithBearer(ctx context.Context, baseURL, token string, opts Op
 	auth := resolveAuthConfig()
 	auth.Token = token
 	return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
+}
+
+// NewHTTPClientForTarget returns an HTTP client for a fully-resolved daemon
+// target. Unlike NewHTTPClient and NewHTTPClientWithBearer, it does not read
+// global auth config; the supplied TargetAuth is the complete bearer policy
+// for this client.
+func NewHTTPClientForTarget(ctx context.Context, baseURL string, auth TargetAuth, opts Opts) (*http.Client, error) {
+	c, err := newHTTPClientWithoutAuth(ctx, baseURL, opts)
+	if err != nil {
+		return nil, err
+	}
+	rt, err := explicitBearerTransport(c.Transport, auth.Token, baseURL, auth.AllowInsecure)
+	if err != nil {
+		return nil, err
+	}
+	c.Transport = rt
+	return c, nil
 }
 
 func newHTTPClientWithAuth(ctx context.Context, baseURL string, auth config.AuthConfig, opts Opts) (*http.Client, error) {

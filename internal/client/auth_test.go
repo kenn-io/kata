@@ -171,6 +171,69 @@ func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
 	assert.Equal(t, "Bearer explicit-token", got)
 }
 
+func TestNewHTTPClientForTargetAttachesExplicitTokenOverGlobal(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	tmp := t.TempDir()
+	t.Setenv("KATA_HOME", tmp)
+	t.Setenv("KATA_AUTH_TOKEN", "global-token")
+
+	c, err := NewHTTPClientForTarget(context.Background(), srv.URL,
+		TargetAuth{Token: "target-token"}, Opts{})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		srv.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer target-token", got)
+}
+
+func TestNewHTTPClientForTargetAllowsBearerWhenAllowInsecureSet(t *testing.T) {
+	c, err := NewHTTPClientForTarget(context.Background(), "http://daemon.internal:7373",
+		TargetAuth{Token: "target-token", AllowInsecure: true}, Opts{})
+
+	require.NoError(t, err)
+	assert.NotNil(t, c)
+}
+
+func TestNewHTTPClientForTargetRefusesPlaintextHostnameWithoutAllowInsecure(t *testing.T) {
+	_, err := NewHTTPClientForTarget(context.Background(), "http://daemon.internal:7373",
+		TargetAuth{Token: "target-token"}, Opts{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plaintext")
+}
+
+func TestNewHTTPClientForTargetAllowInsecureStillRefusesCrossOrigin(t *testing.T) {
+	called := false
+	base := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
+	})
+	rt, err := explicitBearerTransport(base, "target-token", "http://daemon.internal:7373", true)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"http://other.internal:7373/api/v1/ping", nil)
+	require.NoError(t, err)
+
+	resp, err := rt.RoundTrip(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cross-origin")
+	assert.False(t, called, "cross-origin request must not reach the base transport")
+}
+
 func TestNewHTTPClientWithBearerEmptyTokenSkipsSafetyCheck(t *testing.T) {
 	c, err := NewHTTPClientWithBearer(context.Background(), "http://example.invalid:7373", "", Opts{})
 

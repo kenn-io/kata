@@ -1,7 +1,9 @@
 package client
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -52,4 +54,61 @@ func withBearer(base http.RoundTripper, token, origin string, trustPrivateNetwor
 // client construction time to fail fast before any request is built.
 func checkBearerTargetSafe(baseURL string, trustPrivateNetwork bool) (string, error) {
 	return config.BearerOriginForBaseURLWithTrust(baseURL, trustPrivateNetwork)
+}
+
+func explicitBearerTransport(
+	base http.RoundTripper,
+	token, baseURL string,
+	allowInsecure bool,
+) (http.RoundTripper, error) {
+	if token == "" {
+		return base, nil
+	}
+	if !allowInsecure {
+		origin, err := checkBearerTargetSafe(baseURL, false)
+		if err != nil {
+			return nil, err
+		}
+		return withBearer(base, token, origin, false), nil
+	}
+	origin, err := bearerOriginWithoutSafetyCheck(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &allowInsecureBearerTransport{base: base, token: token, origin: origin}, nil
+}
+
+func bearerOriginWithoutSafetyCheck(baseURL string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse base URL %q for bearer-token origin: %w", baseURL, err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("base URL %q must include scheme and host for bearer-token origin", baseURL)
+	}
+	return u.Scheme + "://" + u.Host, nil
+}
+
+type allowInsecureBearerTransport struct {
+	base   http.RoundTripper
+	token  string
+	origin string
+}
+
+func (t *allowInsecureBearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.token == "" || req.Header.Get("Authorization") != "" {
+		return t.base.RoundTrip(req)
+	}
+	reqOrigin := req.URL.Scheme + "://" + req.URL.Host
+	if reqOrigin != t.origin {
+		return nil, fmt.Errorf("refusing to attach bearer token to %q - "+
+			"client is bound to daemon origin %q; cross-origin redirects "+
+			"are blocked to prevent token leakage", reqOrigin, t.origin)
+	}
+	clone := req.Clone(req.Context())
+	clone.Header.Set("Authorization", "Bearer "+t.token)
+	return t.base.RoundTrip(clone)
 }
