@@ -83,6 +83,30 @@ func TestExportReplaceOutputDoesNotDeleteExistingOutput(t *testing.T) {
 		"export replacement must not delete the existing backup before replacement succeeds")
 }
 
+func TestExportReplaceOutputUsesWindowsReplacePrimitive(t *testing.T) {
+	bs, err := os.ReadFile("export_replace_windows.go")
+	require.NoError(t, err)
+
+	assert.Contains(t, string(bs), "windows.MoveFileEx")
+	assert.Contains(t, string(bs), "windows.MOVEFILE_REPLACE_EXISTING")
+}
+
+func TestReplaceExportOutputReplacesExistingOutput(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "export.jsonl")
+	tmp := filepath.Join(dir, ".export.jsonl.tmp")
+	require.NoError(t, os.WriteFile(output, []byte("old\n"), 0o600))
+	require.NoError(t, os.WriteFile(tmp, []byte("new\n"), 0o600))
+
+	require.NoError(t, replaceExportOutput(tmp, output))
+
+	bs, err := os.ReadFile(output) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "new\n", string(bs))
+	_, err = os.Stat(tmp)
+	assert.True(t, os.IsNotExist(err), "successful replacement must consume the temp file")
+}
+
 func TestExportAgentOutput(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")

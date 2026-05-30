@@ -110,13 +110,6 @@ func writeExportOutput(ctx context.Context, d *db.DB, output string, opts jsonl.
 	return nil
 }
 
-func replaceExportOutput(tmpName, output string) error {
-	if err := os.Rename(tmpName, output); err != nil { //nolint:gosec // output is the user-requested export destination; tmpName comes from os.CreateTemp in the same dir.
-		return fmt.Errorf("replace export output: %w", err)
-	}
-	return nil
-}
-
 // resolveExportProject reconciles the global --project NAME flag with the
 // local --project-id N flag. NAME is looked up against the projects table
 // since export reads the database directly (the daemon must be stopped).

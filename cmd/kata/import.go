@@ -275,7 +275,7 @@ func moveSQLiteFileSet(from, to string) (bool, error) {
 
 func sqliteFileSetExists(path string) (bool, error) {
 	for _, name := range sqliteFileSetPaths(path) {
-		if _, err := os.Stat(name); err == nil {
+		if _, err := os.Stat(name); err == nil { //nolint:gosec // path is an explicit import target or temp/backup path, plus SQLite sidecars.
 			return true, nil
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return false, err
