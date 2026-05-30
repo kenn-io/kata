@@ -111,6 +111,40 @@ func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	assert.Contains(t, ce.Message, "target already exists")
 }
 
+func TestImportRejectsExistingTargetSidecarWithoutForce(t *testing.T) {
+	_, input, target := setupImportTest(t)
+	require.NoError(t, os.WriteFile(target+"-wal", []byte("stale-wal"), 0o600))
+
+	_, err := runCmdOutput(t, nil, "import", "--input", input, "--target", target)
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, ce.Message, "target already exists")
+
+	_, statErr := os.Stat(target)
+	assert.True(t, os.IsNotExist(statErr), "non-force import must not install beside stale sidecars")
+	gotWAL, readErr := os.ReadFile(target + "-wal") //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, "stale-wal", string(gotWAL))
+}
+
+func TestInstallImportedTargetForceRemovesSidecarsWhenMainTargetIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.db")
+	tmpTarget := filepath.Join(dir, "imported.db")
+	require.NoError(t, os.WriteFile(tmpTarget, []byte("new-db"), 0o600))
+	require.NoError(t, os.WriteFile(target+"-wal", []byte("stale-wal"), 0o600))
+	require.NoError(t, os.WriteFile(target+"-shm", []byte("stale-shm"), 0o600))
+
+	require.NoError(t, installImportedTarget(tmpTarget, target, true))
+
+	gotTarget, readErr := os.ReadFile(target) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, "new-db", string(gotTarget))
+	_, statErr := os.Stat(target + "-wal")
+	assert.True(t, os.IsNotExist(statErr), "force import must remove stale wal sidecar")
+	_, statErr = os.Stat(target + "-shm")
+	assert.True(t, os.IsNotExist(statErr), "force import must remove stale shm sidecar")
+}
+
 func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) {
 	home := setupKataEnv(t)
 	input := filepath.Join(home, "bad.jsonl")
@@ -172,7 +206,7 @@ func TestInstallImportedTargetForceFailsBeforeReplaceOnStaleSidecarCleanupError(
 	assert.Equal(t, "new-db", string(gotTmp))
 }
 
-func TestMoveSQLiteSidecarsRollsBackAlreadyMovedSidecarOnError(t *testing.T) {
+func TestMoveSQLiteFileSetRollsBackAlreadyMovedSidecarOnError(t *testing.T) {
 	dir := t.TempDir()
 	from := filepath.Join(dir, "from.db")
 	to := filepath.Join(dir, "to.db")
@@ -181,8 +215,9 @@ func TestMoveSQLiteSidecarsRollsBackAlreadyMovedSidecarOnError(t *testing.T) {
 	require.NoError(t, os.Mkdir(to+"-shm", 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(to+"-shm", "block"), []byte("x"), 0o600))
 
-	err := moveSQLiteSidecars(from, to)
+	moved, err := moveSQLiteFileSet(from, to)
 	require.Error(t, err)
+	assert.True(t, moved)
 
 	gotWAL, readErr := os.ReadFile(from + "-wal") //nolint:gosec // test fixture under TempDir
 	require.NoError(t, readErr)
