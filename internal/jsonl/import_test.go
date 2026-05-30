@@ -157,6 +157,23 @@ func TestImportV1FillsUIDsDeterministically(t *testing.T) {
 	assert.Equal(t, fmt.Sprint(db.CurrentSchemaVersion()), schemaVersion)
 }
 
+func TestImportV1FillsCommentUIDFromGoStringTimestamp(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+
+	require.NoError(t, importJSONL(ctx, target,
+		validExportVersion,
+		validV1ProjectRow,
+		`{"kind":"issue","data":{"id":1,"project_id":1,"number":1,"title":"v1 issue","body":"","status":"open","closed_reason":null,"owner":null,"author":"tester","created_at":"2026-05-04 00:21:07 +0000 UTC","updated_at":"2026-05-04 00:21:07 +0000 UTC","closed_at":null,"deleted_at":null}}`,
+		`{"kind":"comment","data":{"id":1,"issue_id":1,"author":"tester","body":"legacy note","created_at":"2026-05-04 00:21:07 +0000 UTC"}}`,
+	))
+
+	var commentUID string
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT uid FROM comments WHERE id = 1`).Scan(&commentUID))
+	assert.True(t, uid.Valid(commentUID), "invalid filled comment uid %q", commentUID)
+}
+
 func TestImportLegacyEventSnapshotsUseFinalProjectName(t *testing.T) {
 	ctx := context.Background()
 	target := openImportTargetDB(t)

@@ -927,7 +927,12 @@ func lookupIssueUID(ctx context.Context, tx *sql.Tx, issueID int64) (string, err
 }
 
 func parseExportTime(s string) (time.Time, error) {
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05"} {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05",
+	} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC(), nil
 		}
