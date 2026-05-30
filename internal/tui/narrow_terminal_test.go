@@ -186,3 +186,24 @@ func TestNarrowTerminal_QuitConfirmModalOverlaysHint(t *testing.T) {
 		t.Fatalf("modal rounded border missing; got:\n%s", view)
 	}
 }
+
+func TestNarrowTerminal_DaemonViewShowsHintAndToast(t *testing.T) {
+	m, cleanup := narrowTestSetup(t)
+	defer cleanup()
+	m = resizeModel(m, 60, 24)
+	m.view = viewDaemons
+	m.daemonTargets = []daemonTarget{{Name: "shared", URL: "https://daemon.example"}}
+	m.toast = &toast{text: "daemon failed", level: toastError}
+
+	view := m.View()
+
+	if !strings.Contains(view, narrowHintMarker) {
+		t.Fatalf("daemon view at narrow width must show stable too-narrow hint; got:\n%s", view)
+	}
+	if strings.Contains(view, "kata / daemons") {
+		t.Fatalf("daemon view rendered full picker below minimum width; got:\n%s", view)
+	}
+	if !strings.Contains(view, "daemon failed") {
+		t.Fatalf("daemon switch failure toast hidden at narrow width; got:\n%s", view)
+	}
+}

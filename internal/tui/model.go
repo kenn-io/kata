@@ -2486,11 +2486,10 @@ func (m Model) View() string {
 		switch m.view {
 		case viewProjects:
 			body = renderProjects(m)
-		case viewDaemons:
-			body = renderDaemons(m)
 		default:
 			body = renderTooNarrow(m.width, m.height)
 		}
+		body = m.appendNonListDetailExtras(body)
 		if m.modal == modalQuitConfirm {
 			return overlayModal(body, renderQuitConfirmModal(), m.width, m.height)
 		}
@@ -2501,18 +2500,7 @@ func (m Model) View() string {
 		return body
 	}
 	body := m.viewBody()
-	if m.view != viewList && m.view != viewDetail {
-		extras := []string{}
-		if s := renderSSEStatus(m.sseStatus); s != "" {
-			extras = append(extras, s)
-		}
-		if s := renderToast(m.toast); s != "" {
-			extras = append(extras, s)
-		}
-		if len(extras) > 0 {
-			body = joinNonEmpty(append([]string{body}, extras...))
-		}
-	}
+	body = m.appendNonListDetailExtras(body)
 	// M3.5b: a centered modal overlays the rendered view when active.
 	if m.modal == modalQuitConfirm {
 		return overlayModal(body, renderQuitConfirmModal(), m.width, m.height)
@@ -2530,6 +2518,22 @@ func (m Model) View() string {
 	// user is on focusDetail regardless of m.view.
 	if m.detailIsActive() && isLabelPromptKind(m.input.kind) {
 		body = m.overlaySuggestMenu(body)
+	}
+	return body
+}
+
+func (m Model) appendNonListDetailExtras(body string) string {
+	if m.view != viewList && m.view != viewDetail {
+		extras := []string{}
+		if s := renderSSEStatus(m.sseStatus); s != "" {
+			extras = append(extras, s)
+		}
+		if s := renderToast(m.toast); s != "" {
+			extras = append(extras, s)
+		}
+		if len(extras) > 0 {
+			body = joinNonEmpty(append([]string{body}, extras...))
+		}
 	}
 	return body
 }

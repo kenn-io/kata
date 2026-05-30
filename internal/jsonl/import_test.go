@@ -174,6 +174,24 @@ func TestImportV1FillsCommentUIDFromGoStringTimestamp(t *testing.T) {
 	assert.True(t, uid.Valid(commentUID), "invalid filled comment uid %q", commentUID)
 }
 
+func TestImportV1NormalizesGoStringEventTimestampForStats(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+
+	require.NoError(t, importJSONL(ctx, target,
+		validExportVersion,
+		validV1ProjectRow,
+		`{"kind":"issue","data":{"id":1,"project_id":1,"number":1,"title":"v1 issue","body":"","status":"open","closed_reason":null,"owner":null,"author":"tester","created_at":"2026-05-04T00:21:07.000Z","updated_at":"2026-05-04T00:21:07.000Z","closed_at":null,"deleted_at":null}}`,
+		`{"kind":"event","data":{"id":1,"project_id":1,"project_identity":"github.com/wesm/kata","issue_id":1,"issue_number":1,"related_issue_id":null,"type":"issue.created","actor":"tester","payload":{},"created_at":"2026-05-04 00:21:07 +0000 UTC"}}`,
+	))
+
+	stats, err := target.BatchProjectStats(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, stats[1].LastEventAt, "imported Go-string event timestamp must participate in stats")
+	assert.Equal(t, "2026-05-04T00:21:07.000Z",
+		stats[1].LastEventAt.UTC().Format("2006-01-02T15:04:05.000Z"))
+}
+
 func TestImportLegacyEventSnapshotsUseFinalProjectName(t *testing.T) {
 	ctx := context.Background()
 	target := openImportTargetDB(t)

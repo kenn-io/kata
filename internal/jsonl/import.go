@@ -832,6 +832,9 @@ func fillEventV11ReplayFields(ctx context.Context, tx *sql.Tx, rec *eventRecord,
 	if err != nil {
 		return fmt.Errorf("fill event replay fields: %w", err)
 	}
+	if exportVersion < 12 {
+		rec.CreatedAt = formatImportTime(t)
+	}
 	if exportVersion >= 12 {
 		if rec.HLCPhysicalMS <= 0 {
 			return fmt.Errorf("event %d missing hlc_physical_ms", rec.ID)
@@ -938,6 +941,10 @@ func parseExportTime(s string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("parse timestamp %q", s)
+}
+
+func formatImportTime(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 func stringPtrValue(s *string) any {
