@@ -57,6 +57,19 @@ type TUIConfig struct {
 	// Mouse enables Bubble Tea mouse cell-motion capture and additive
 	// click/wheel navigation. Default false preserves native selection.
 	Mouse bool `toml:"mouse"`
+	// ActiveDaemon names the TUI daemon catalog entry selected by default.
+	ActiveDaemon string `toml:"active_daemon"`
+	// Daemons is the optional named daemon catalog used only by the TUI.
+	Daemons []TUIDaemonConfig `toml:"daemon"`
+}
+
+// TUIDaemonConfig is a single named target in the TUI daemon catalog.
+type TUIDaemonConfig struct {
+	Name          string `toml:"name"`
+	Local         bool   `toml:"local"`
+	URL           string `toml:"url"`
+	Token         string `toml:"token"`
+	AllowInsecure bool   `toml:"allow_insecure"`
 }
 
 // CloseConfig is the [close] block of <KATA_HOME>/config.toml.
@@ -112,6 +125,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Listen = strings.TrimSpace(cfg.Listen)
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
+		trimTUIConfig(&cfg.TUI)
 	case errors.Is(err, os.ErrNotExist):
 		// Absent file: fall through with zero-value cfg. Env merge and
 		// validation below still apply so an env-only misconfig is
@@ -123,7 +137,41 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
 		return nil, err
 	}
+	if err := validateTUIConfig(cfg.TUI); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+func trimTUIConfig(tui *TUIConfig) {
+	tui.ActiveDaemon = strings.TrimSpace(tui.ActiveDaemon)
+	for i := range tui.Daemons {
+		tui.Daemons[i].Name = strings.TrimSpace(tui.Daemons[i].Name)
+		tui.Daemons[i].URL = strings.TrimSpace(tui.Daemons[i].URL)
+		tui.Daemons[i].Token = strings.TrimSpace(tui.Daemons[i].Token)
+	}
+}
+
+func validateTUIConfig(tui TUIConfig) error {
+	names := make(map[string]struct{}, len(tui.Daemons))
+	for _, daemon := range tui.Daemons {
+		if daemon.Name == "" {
+			return errors.New("tui.daemon: name is required")
+		}
+		if _, ok := names[daemon.Name]; ok {
+			return fmt.Errorf("tui.daemon: duplicate tui daemon name %q", daemon.Name)
+		}
+		names[daemon.Name] = struct{}{}
+		if daemon.Local == (daemon.URL != "") {
+			return fmt.Errorf("tui.daemon %q: exactly one of local or url is required", daemon.Name)
+		}
+	}
+	if tui.ActiveDaemon != "" {
+		if _, ok := names[tui.ActiveDaemon]; !ok {
+			return fmt.Errorf("tui.active_daemon %q is not in tui.daemon catalog", tui.ActiveDaemon)
+		}
+	}
+	return nil
 }
 
 // validateAuthProxy rejects the dangerous partial-config case where the

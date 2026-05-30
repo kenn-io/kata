@@ -51,6 +51,112 @@ func TestReadDaemonConfig_ReadsTUIMouse(t *testing.T) {
 	assert.True(t, cfg.TUI.Mouse)
 }
 
+func TestReadDaemonConfig_ReadsTUIDaemons(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[tui]
+active_daemon = "remote"
+
+[[tui.daemon]]
+name = "local"
+local = true
+
+[[tui.daemon]]
+name = "remote"
+url = "https://kata.example.test"
+token = "target-token"
+allow_insecure = true
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.TUI.Daemons, 2)
+	assert.Equal(t, "remote", cfg.TUI.ActiveDaemon)
+	assert.Equal(t, config.TUIDaemonConfig{Name: "local", Local: true}, cfg.TUI.Daemons[0])
+	assert.Equal(t, config.TUIDaemonConfig{
+		Name:          "remote",
+		URL:           "https://kata.example.test",
+		Token:         "target-token",
+		AllowInsecure: true,
+	}, cfg.TUI.Daemons[1])
+}
+
+func TestReadDaemonConfig_RejectsDuplicateTUIDaemonNames(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[tui.daemon]]
+name = "prod"
+local = true
+
+[[tui.daemon]]
+name = "prod"
+url = "https://kata.example.test"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "duplicate tui daemon name")
+	assert.Contains(t, err.Error(), "prod")
+}
+
+func TestReadDaemonConfig_RejectsTUIDaemonWithLocalAndURL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[tui.daemon]]
+name = "ambiguous"
+local = true
+url = "https://kata.example.test"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "local")
+	assert.Contains(t, err.Error(), "url")
+}
+
+func TestReadDaemonConfig_RejectsActiveTUIDaemonMissingFromCatalog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[tui]
+active_daemon = "missing"
+
+[[tui.daemon]]
+name = "local"
+local = true
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "active_daemon")
+	assert.Contains(t, err.Error(), "missing")
+}
+
+func TestReadDaemonConfig_TrimsTUIDaemonFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[tui]
+active_daemon = "  remote  "
+
+[[tui.daemon]]
+name = "  remote  "
+url = "  https://kata.example.test  "
+token = "  target-token  "
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.TUI.Daemons, 1)
+	assert.Equal(t, "remote", cfg.TUI.ActiveDaemon)
+	assert.Equal(t, "remote", cfg.TUI.Daemons[0].Name)
+	assert.Equal(t, "https://kata.example.test", cfg.TUI.Daemons[0].URL)
+	assert.Equal(t, "target-token", cfg.TUI.Daemons[0].Token)
+}
+
 func TestReadDaemonConfig_ThrottleDefaultsEnabled(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	cfg, err := config.ReadDaemonConfig()
