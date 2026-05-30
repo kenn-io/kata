@@ -21,7 +21,8 @@ import (
 // path, so width/height are guaranteed >= split breakpoints.
 func renderSplit(m Model) string {
 	width, height := m.width, m.height
-	title := renderTitleBar(width, m.scope, kataVersion)
+	chrome := m.chrome()
+	title := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
 	helpRows := m.splitHelpRows()
 	footerLines := helpLines(helpRows, width)
 	footer := renderSplitFooter(width, m)

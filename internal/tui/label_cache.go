@@ -75,7 +75,7 @@ func (m Model) dispatchLabelFetch(pid int64) (Model, tea.Cmd) {
 	if m.api != nil {
 		api = m.api
 	}
-	return m, fetchLabelsCmd(api, pid, gen)
+	return m, withConnGen(fetchLabelsCmd(api, pid, gen), m.connGen)
 }
 
 // fetchLabelsCmd returns a tea.Cmd that calls api.ListLabels and

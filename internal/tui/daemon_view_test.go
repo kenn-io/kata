@@ -21,6 +21,23 @@ func TestDaemonView_DKeyTransitionsFromList(t *testing.T) {
 	assert.Equal(t, 1, out.daemonCursor, "cursor should land on the active daemon")
 }
 
+func TestDaemonView_DKeyTransitionsFromEmpty(t *testing.T) {
+	m := setupDaemonViewSource()
+	m.view = viewEmpty
+
+	out, cmd := updateModel(m, keyRune('D'))
+
+	require.Nil(t, cmd)
+	assert.Equal(t, viewDaemons, out.view)
+	assert.Equal(t, viewEmpty, out.prevView)
+}
+
+func TestDaemonTargetsMatchImplicitLocalToNamedLocal(t *testing.T) {
+	assert.True(t,
+		daemonTargetsMatch(daemonTarget{Name: "local", Local: true}, daemonTarget{Local: true}),
+		"implicit active local daemon should match a named local catalog row")
+}
+
 func TestDaemonView_EscReturnsToPreviousView(t *testing.T) {
 	m := setupDaemonViewSource()
 	m.view = viewDetail
@@ -92,6 +109,26 @@ func TestDaemonView_EnterDispatchesSwitchCommand(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, sw.err)
 	assert.Equal(t, "prod", sw.conn.target.Name)
+	assert.Equal(t, uint64(1), sw.attempt)
+	assert.Equal(t, uint64(1), out.daemonSwitchAttempt)
+}
+
+func TestDaemonSwitchDropsOutOfOrderAttempt(t *testing.T) {
+	m := setupDaemonViewSource()
+	m.connGen = 2
+	m.daemonSwitchAttempt = 2
+	m.activeDaemon = daemonTarget{Name: "current", URL: "https://current.example"}
+	conn := daemonConnection{
+		api:    &Client{},
+		target: daemonTarget{Name: "older", URL: "https://older.example"},
+		init:   bootInit{view: viewList, scope: homedScope(9, "older")},
+	}
+
+	out, cmd := updateModel(m, daemonSwitchResultMsg{attempt: 1, conn: conn})
+
+	assert.Equal(t, uint64(2), out.connGen)
+	assert.Equal(t, "current", out.activeDaemon.Name)
+	assert.Nil(t, cmd)
 }
 
 func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
@@ -185,7 +222,57 @@ func TestDaemonSwitchDropsOldSSEMessages(t *testing.T) {
 
 	assert.False(t, out.cache.isStale())
 	assert.False(t, out.pendingRefetch)
+	assert.NotNil(t, cmd, "dropping stale SSE must still re-arm the SSE bridge")
+}
+
+func TestDaemonSwitchDropsOldListFetch(t *testing.T) {
+	m := newTestModel()
+	m.connGen = 2
+	keep := []Issue{testIssue("keep")}
+	m.list.issues = keep
+	m.cache.put(cacheKey{projectID: 7, limit: queueFetchLimit}, keep)
+
+	out, cmd := updateModel(m, refetchedMsg{
+		connGen:     1,
+		dispatchKey: cacheKey{projectID: 7, limit: queueFetchLimit},
+		issues:      []Issue{testIssue("stale")},
+	})
+
 	assert.Nil(t, cmd)
+	assert.Equal(t, keep, out.list.issues)
+}
+
+func TestDaemonSwitchDropsOldListMutation(t *testing.T) {
+	m := newTestModel()
+	m.connGen = 2
+	m.view = viewList
+	m.list.status = "keep"
+
+	out, cmd := updateModel(m, mutationDoneMsg{
+		connGen: 1,
+		origin:  "list",
+		kind:    "close",
+		err:     assert.AnError,
+	})
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, "keep", out.list.status)
+}
+
+func TestDaemonSwitchDropsOldProjectsFetch(t *testing.T) {
+	m := newTestModel()
+	m.connGen = 2
+	m.projectsGen = 3
+	m.projectsByID = map[int64]string{7: "keep"}
+
+	out, cmd := updateModel(m, projectsLoadedMsg{
+		connGen:  1,
+		gen:      3,
+		projects: map[int64]string{7: "stale"},
+	})
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, map[int64]string{7: "keep"}, out.projectsByID)
 }
 
 func setupDaemonViewSource() Model {

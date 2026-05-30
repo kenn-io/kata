@@ -55,6 +55,19 @@ func TestEnsureRunningRestartsWhenDaemonVersionUnknown(t *testing.T) {
 	assert.Equal(t, 1, restore.startCalls)
 }
 
+func TestEnsureLocalRunningIgnoresRemoteOverride(t *testing.T) {
+	t.Setenv("KATA_SERVER", "http://100.64.0.5:7777")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
+	setupKataEnv(t)
+	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://local-daemon")
+
+	url, err := EnsureLocalRunning(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://local-daemon", url)
+	assert.Equal(t, 1, restore.startCalls)
+}
+
 func TestShouldRefuseAutoStartDaemonFromGoTestBinary(t *testing.T) {
 	assert.True(t, shouldRefuseAutoStartDaemon("/tmp/go-build123/b001/kata.test"))
 	assert.True(t, shouldRefuseAutoStartDaemon("/var/folders/x/go-build123/b001/kata"))

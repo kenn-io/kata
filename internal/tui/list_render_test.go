@@ -185,6 +185,41 @@ func TestTitleBarShowsLocalDaemonFallback(t *testing.T) {
 	assertContains(t, stripANSI(got), "Daemon: local", "title bar missing local daemon fallback")
 }
 
+func TestTitleBarSanitizesDaemonLabel(t *testing.T) {
+	useNoColor(t)
+	got := renderTitleBar(100, scope{projectName: "kata"}, "dev", "shared\nbad")
+
+	assertContains(t, stripANSI(got), `Daemon: shared\nbad`, "title bar did not sanitize daemon label")
+}
+
+func TestDetailTitleBarShowsDaemon(t *testing.T) {
+	useNoColor(t)
+	iss := testIssue("abc1")
+	dm := detailModel{issue: &iss}
+
+	got := dm.View(100, 18, viewChrome{
+		scope:   scope{projectName: "kata"},
+		version: "dev",
+		daemon:  "shared",
+	})
+
+	assertContains(t, stripANSI(got), "Daemon: shared", "detail title bar missing daemon label")
+}
+
+func TestSplitTitleBarShowsDaemon(t *testing.T) {
+	useNoColor(t)
+	m := resizeModel(newTestModel(), 130, 30)
+	m.layout = layoutSplit
+	m.activeDaemon = daemonTarget{Name: "shared"}
+	m.list.issues = []Issue{testIssue("abc1")}
+	iss := testIssue("abc1")
+	m.detail.issue = &iss
+
+	got := renderSplit(m)
+
+	assertContains(t, stripANSI(got), "Daemon: shared", "split title bar missing daemon label")
+}
+
 // TestRenderLabelChips_LargeOverflowReservesActualWidth pins the
 // fix for roborev job 235: with >=100 labels dropped, the `+N` token
 // is `+100` (5 cells) — wider than the legacy hard-coded 4-cell

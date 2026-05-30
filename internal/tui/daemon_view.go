@@ -23,7 +23,7 @@ func daemonRows(targets []daemonTarget, active daemonTarget) []daemonRow {
 }
 
 func daemonTargetsMatch(a, b daemonTarget) bool {
-	if a.Name != "" || b.Name != "" {
+	if a.Name != "" && b.Name != "" {
 		return a.Name == b.Name
 	}
 	if a.Local || b.Local {
@@ -54,15 +54,16 @@ func (m Model) routeDaemonsViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.daemonCursor < 0 || m.daemonCursor >= len(rows) {
 			return m, nil
 		}
-		return m, switchDaemonCmd(rows[m.daemonCursor].target)
+		m.daemonSwitchAttempt++
+		return m, switchDaemonCmd(rows[m.daemonCursor].target, m.daemonSwitchAttempt)
 	}
 	return m, nil
 }
 
-func switchDaemonCmd(target daemonTarget) tea.Cmd {
+func switchDaemonCmd(target daemonTarget, attempt uint64) tea.Cmd {
 	return func() tea.Msg {
 		conn, err := connectDaemonTargetForTUI(context.Background(), target)
-		return daemonSwitchResultMsg{conn: conn, target: target, err: err}
+		return daemonSwitchResultMsg{attempt: attempt, conn: conn, target: target, err: err}
 	}
 }
 
@@ -107,6 +108,9 @@ func cursorForDaemon(rows []daemonRow) int {
 }
 
 func (m Model) handleDaemonSwitchResult(msg daemonSwitchResultMsg) (Model, tea.Cmd) {
+	if msg.attempt != 0 && msg.attempt != m.daemonSwitchAttempt {
+		return m, nil
+	}
 	if msg.err != nil {
 		name := daemonTargetDisplay(msg.target)
 		m.toast = &toast{

@@ -38,6 +38,7 @@ const (
 var (
 	readDaemonConfigForTUI   = config.ReadDaemonConfig
 	ensureRunningForTUI      = client.EnsureRunning
+	ensureLocalRunningForTUI = client.EnsureLocalRunning
 	normalizeRemoteURLForTUI = func(v string, allowInsecure bool) (string, error) {
 		return client.NormalizeRemoteURL(v, allowInsecure)
 	}
@@ -50,6 +51,9 @@ var (
 		target daemonTarget,
 		kind clientOptsKind,
 	) (*http.Client, error) {
+		if target.Local && target.Token == "" {
+			return client.NewHTTPClient(ctx, endpoint, optsForKind(kind))
+		}
 		return client.NewHTTPClientForTarget(ctx, endpoint,
 			client.TargetAuth{Token: target.Token, AllowInsecure: target.AllowInsecure},
 			optsForKind(kind))
@@ -92,7 +96,12 @@ func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, 
 	catalog := daemonTargetsFromConfig(cfg.TUI)
 	target, ok := activeDaemonTarget(catalog, cfg.TUI.ActiveDaemon)
 	if !ok {
-		target = daemonTarget{Local: true}
+		conn, err := connectImplicitDaemonTarget(ctx)
+		if err != nil {
+			return daemonConnection{}, err
+		}
+		conn.catalog = catalog
+		return conn, nil
 	}
 	conn, err := connectDaemonTarget(ctx, target)
 	if err != nil {
@@ -102,11 +111,24 @@ func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, 
 	return conn, nil
 }
 
+func connectImplicitDaemonTarget(ctx context.Context) (daemonConnection, error) {
+	target := daemonTarget{Local: true}
+	endpoint, err := ensureRunningForTUI(ctx)
+	if err != nil {
+		return daemonConnection{}, err
+	}
+	return connectResolvedDaemonTarget(ctx, target, endpoint)
+}
+
 func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnection, error) {
 	endpoint, err := resolveDaemonEndpoint(ctx, target)
 	if err != nil {
 		return daemonConnection{}, err
 	}
+	return connectResolvedDaemonTarget(ctx, target, endpoint)
+}
+
+func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpoint string) (daemonConnection, error) {
 	hc, err := newHTTPClientForTUI(ctx, endpoint, target, clientOptsNormal)
 	if err != nil {
 		return daemonConnection{}, err
@@ -132,7 +154,7 @@ func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnec
 
 func resolveDaemonEndpoint(ctx context.Context, target daemonTarget) (string, error) {
 	if target.Local {
-		return ensureRunningForTUI(ctx)
+		return ensureLocalRunningForTUI(ctx)
 	}
 	endpoint, err := normalizeRemoteURLForTUI(target.URL, target.AllowInsecure)
 	if err != nil {

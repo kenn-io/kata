@@ -7,6 +7,7 @@ import "time"
 // Model.populateCache can drop stale responses that arrive after a
 // scope toggle or filter change.
 type initialFetchMsg struct {
+	connGen     uint64
 	dispatchKey cacheKey
 	issues      []Issue
 	err         error
@@ -16,6 +17,7 @@ type initialFetchMsg struct {
 // refetch. dispatchKey captures the scope/filter at dispatch time so
 // Model.populateCache can drop stale responses — see initialFetchMsg.
 type refetchedMsg struct {
+	connGen     uint64
 	dispatchKey cacheKey
 	issues      []Issue
 	err         error
@@ -125,6 +127,7 @@ type jumpDetailMsg struct {
 // close form B, misroute as origin=detail, or fire an unrelated
 // batchLabelRefresh against form A's project. Jobs 242/244.
 type mutationDoneMsg struct {
+	connGen uint64
 	origin  string
 	gen     int64
 	formGen int64
@@ -222,10 +225,11 @@ type linksChangedParents struct {
 // later dispatch under the same pid bumps the cache's gen, and any
 // older response arriving after must NOT overwrite the newer state).
 type labelsFetchedMsg struct {
-	pid    int64
-	gen    int64
-	labels []LabelCount
-	err    error
+	connGen uint64
+	pid     int64
+	gen     int64
+	labels  []LabelCount
+	err     error
 }
 
 // projectsLoadedMsg is delivered after a /api/v1/projects fetch returns.
@@ -242,6 +246,7 @@ type labelsFetchedMsg struct {
 // variant) leaves gen=0 since it does not participate in the stale-flip
 // race. Spec §6.3.
 type projectsLoadedMsg struct {
+	connGen  uint64
 	projects map[int64]string
 	idents   map[int64]string
 	stats    map[int64]ProjectStatsSummary
@@ -270,9 +275,10 @@ type sseStatusMsg struct {
 }
 
 type daemonSwitchResultMsg struct {
-	conn   daemonConnection
-	target daemonTarget
-	err    error
+	attempt uint64
+	conn    daemonConnection
+	target  daemonTarget
+	err     error
 }
 
 // sseConnState is the SSE consumer's connection state.

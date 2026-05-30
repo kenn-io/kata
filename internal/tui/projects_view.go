@@ -26,12 +26,13 @@ import (
 func (m Model) fetchProjectsWithStats() tea.Cmd {
 	api := m.api
 	gen := m.projectsGen
+	connGen := m.connGen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		rows, err := api.ListProjectsWithStats(ctx)
 		if err != nil {
-			return projectsLoadedMsg{err: err, gen: gen}
+			return projectsLoadedMsg{connGen: connGen, err: err, gen: gen}
 		}
 		names := make(map[int64]string, len(rows))
 		idents := make(map[int64]string, len(rows))
@@ -43,7 +44,13 @@ func (m Model) fetchProjectsWithStats() tea.Cmd {
 				stats[r.ID] = *r.Stats
 			}
 		}
-		return projectsLoadedMsg{projects: names, idents: idents, stats: stats, gen: gen}
+		return projectsLoadedMsg{
+			connGen:  connGen,
+			projects: names,
+			idents:   idents,
+			stats:    stats,
+			gen:      gen,
+		}
 	}
 }
 

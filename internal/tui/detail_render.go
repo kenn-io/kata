@@ -42,7 +42,7 @@ func (dm detailModel) View(width, height int, chrome viewChrome) string {
 	helpRows := detailHelpRows(dm, chrome)
 	footerLines := helpLines(helpRows, width)
 	footer := renderFooterHelpTable(helpRows, width)
-	titleBar := renderTitleBar(width, chrome.scope, chrome.version)
+	titleBar := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
 	// Top chrome (title + blank) + bottom chrome (info + footer) frame
 	// the viewport. Whatever rows are left belong to the document.
 	visible := height - 2 - 1 - footerLines

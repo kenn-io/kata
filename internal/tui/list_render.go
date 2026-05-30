@@ -186,8 +186,9 @@ func titleBarLeft(sc scope) string {
 // didn't stamp it so the right side is just the brand.
 func titleBarRight(version, daemon string) string {
 	parts := []string{}
-	if daemon != "" {
-		parts = append(parts, "Daemon: "+daemon)
+	cleanDaemon := sanitizeForLine(daemon)
+	if cleanDaemon != "" {
+		parts = append(parts, "Daemon: "+cleanDaemon)
 	}
 	brand := "kata カタ"
 	if version == "" {

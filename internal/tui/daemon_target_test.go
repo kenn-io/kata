@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -62,18 +63,24 @@ func TestDaemonTargetDisplayLocalFallback(t *testing.T) {
 	assert.Equal(t, "local", got)
 }
 
-func TestConnectDaemonTargetLocalUsesEnsureRunningPath(t *testing.T) {
+func TestConnectDaemonTargetLocalUsesLocalOnlyEnsurePath(t *testing.T) {
 	oldEnsure := ensureRunningForTUI
+	oldEnsureLocal := ensureLocalRunningForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
 	t.Cleanup(func() {
 		ensureRunningForTUI = oldEnsure
+		ensureLocalRunningForTUI = oldEnsureLocal
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
 	})
 
 	var ensured bool
 	ensureRunningForTUI = func(context.Context) (string, error) {
+		t.Fatal("explicit local target must not honor remote-aware EnsureRunning")
+		return "", nil
+	}
+	ensureLocalRunningForTUI = func(context.Context) (string, error) {
 		ensured = true
 		return "http://kata.invalid", nil
 	}
@@ -87,10 +94,72 @@ func TestConnectDaemonTargetLocalUsesEnsureRunningPath(t *testing.T) {
 	conn, err := connectDaemonTarget(context.Background(), daemonTarget{Name: "local", Local: true})
 
 	require.NoError(t, err)
-	assert.True(t, ensured, "local daemon must use existing EnsureRunning path")
+	assert.True(t, ensured, "explicit local daemon must use local-only ensure path")
 	assert.Equal(t, "http://kata.invalid", conn.endpoint)
 	assert.Equal(t, "local", daemonTargetDisplay(conn.target))
 	assert.Equal(t, viewEmpty, conn.init.view)
+}
+
+func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) {
+	oldRead := readDaemonConfigForTUI
+	oldEnsure := ensureRunningForTUI
+	oldEnsureLocal := ensureLocalRunningForTUI
+	oldNewClient := newHTTPClientForTUI
+	oldBootScope := bootResolveScopeForTUI
+	t.Cleanup(func() {
+		readDaemonConfigForTUI = oldRead
+		ensureRunningForTUI = oldEnsure
+		ensureLocalRunningForTUI = oldEnsureLocal
+		newHTTPClientForTUI = oldNewClient
+		bootResolveScopeForTUI = oldBootScope
+	})
+
+	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
+		return &config.DaemonConfig{}, nil
+	}
+	var ensured bool
+	ensureRunningForTUI = func(context.Context) (string, error) {
+		ensured = true
+		return "http://kata.invalid", nil
+	}
+	ensureLocalRunningForTUI = func(context.Context) (string, error) {
+		t.Fatal("implicit default boot must keep existing remote-aware EnsureRunning behavior")
+		return "", nil
+	}
+	newHTTPClientForTUI = func(_ context.Context, _ string, _ daemonTarget, _ clientOptsKind) (*http.Client, error) {
+		return &http.Client{}, nil
+	}
+	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
+	}
+
+	conn, err := bootDaemonConnection(context.Background(), Options{})
+
+	require.NoError(t, err)
+	assert.True(t, ensured, "implicit daemon must use existing EnsureRunning path")
+	assert.Equal(t, "http://kata.invalid", conn.endpoint)
+	assert.Equal(t, "local", daemonTargetDisplay(conn.target))
+	assert.Equal(t, viewEmpty, conn.init.view)
+}
+
+func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
+	t.Setenv("KATA_AUTH_TOKEN", "global-token")
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	hc, err := newHTTPClientForTUI(t.Context(), srv.URL, daemonTarget{Local: true}, clientOptsNormal)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := hc.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, "Bearer global-token", gotAuth)
 }
 
 func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {

@@ -41,21 +41,22 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
-	opts           Options
-	api            KataAPI
-	scope          scope
-	view           viewID
-	prevView       viewID
-	width          int
-	height         int
-	keymap         keymap
-	list           listModel
-	detail         detailModel
-	sseCh          chan tea.Msg
-	sseStatus      sseConnState
-	pendingRefetch bool
-	connGen        uint64
-	sseRestart     func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
+	opts                Options
+	api                 KataAPI
+	scope               scope
+	view                viewID
+	prevView            viewID
+	width               int
+	height              int
+	keymap              keymap
+	list                listModel
+	detail              detailModel
+	sseCh               chan tea.Msg
+	sseStatus           sseConnState
+	pendingRefetch      bool
+	connGen             uint64
+	daemonSwitchAttempt uint64
+	sseRestart          func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
 	// projectsStale flags that the projects table needs a refetch. Set by
 	// the SSE event router when an event's project_id matches a row in
 	// m.projectsByID and viewProjects is the active view. Cleared when the
@@ -270,18 +271,19 @@ func (m Model) waitForSSE() tea.Cmd {
 // when the map is missing the entry.
 func (m Model) fetchProjects() tea.Cmd {
 	api := m.api
+	connGen := m.connGen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		summaries, err := api.ListProjects(ctx)
 		if err != nil {
-			return projectsLoadedMsg{err: err}
+			return projectsLoadedMsg{connGen: connGen, err: err}
 		}
 		out := make(map[int64]string, len(summaries))
 		for _, p := range summaries {
 			out[p.ID] = p.Name
 		}
-		return projectsLoadedMsg{projects: out}
+		return projectsLoadedMsg{connGen: connGen, projects: out}
 	}
 }
 
@@ -295,6 +297,7 @@ func (m Model) fetchProjects() tea.Cmd {
 // post-toggle list.
 func (m Model) fetchInitial() tea.Cmd {
 	api, sc, filter := m.api, m.scope, queueFetchFilter()
+	connGen := m.connGen
 	dispatchKey := cacheKey{
 		allProjects: sc.allProjects, projectID: sc.projectID, limit: filter.Limit,
 	}
@@ -310,7 +313,7 @@ func (m Model) fetchInitial() tea.Cmd {
 		} else {
 			issues, err = api.ListIssues(ctx, sc.projectID, filter)
 		}
-		return initialFetchMsg{dispatchKey: dispatchKey, issues: issues, err: err}
+		return initialFetchMsg{connGen: connGen, dispatchKey: dispatchKey, issues: issues, err: err}
 	}
 }
 
@@ -344,6 +347,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var bootstrapCmd tea.Cmd
 	switch msg.(type) {
 	case initialFetchMsg, refetchedMsg:
+		if m.staleConnResult(msg) {
+			return m, nil
+		}
 		if m.isStaleListFetch(msg) {
 			return m, nil
 		}
@@ -353,6 +359,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if mut, ok := msg.(mutationDoneMsg); ok {
+		if m.staleConnMsg(mut.connGen) {
+			return m, nil
+		}
 		next, cmd := m.routeMutation(mut)
 		return next, cmd
 	}
@@ -368,10 +377,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// so we fall through to dispatchToView for any unhandled message
 	// shape after.
 	if lf, ok := msg.(labelsFetchedMsg); ok {
+		if m.staleConnMsg(lf.connGen) {
+			return m, nil
+		}
 		m = m.handleLabelsFetched(lf)
 		return m, nil
 	}
 	if pl, ok := msg.(projectsLoadedMsg); ok {
+		if m.staleConnMsg(pl.connGen) {
+			return m, nil
+		}
 		// Drop stale responses entirely (success OR error). A pre-
 		// invalidation fetch (older gen) must not overwrite maps already
 		// updated by a newer in-flight or completed fetch, AND its error
@@ -500,13 +515,13 @@ func (m Model) routeMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.origin == "list" && !m.listIsActive() {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.applyMutation(mut, m.api, m.scope)
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	}
 	if mut.origin == "detail" {
 		if !m.detailIsActive() {
 			var cmd tea.Cmd
 			m.detail, cmd = m.detail.applyMutation(mut, m.api)
-			return m, cmd
+			return m, withConnGen(cmd, m.connGen)
 		}
 		if mut.gen != m.detail.gen {
 			// Stale-to-current-detail: the original UI is gone but
@@ -532,7 +547,7 @@ func (m Model) routeMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mutAffectsLabelCounts(mut) {
 		next, cmd = batchLabelRefresh(next, cmd, mut)
 	}
-	return next, cmd
+	return next, withConnGen(cmd, m.connGen)
 }
 
 // mutAffectsLabelCounts reports whether a successful mutation could
@@ -1310,9 +1325,9 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 	formGen := m.input.formGen
 	switch kind {
 	case inputCommentForm:
-		return m, dispatchFormAddComment(m.api, target, rawBuf, m.list.actor, formGen)
+		return m, withConnGen(dispatchFormAddComment(m.api, target, rawBuf, m.list.actor, formGen), m.connGen)
 	case inputBodyEditForm:
-		return m, dispatchFormEditBody(m.api, target, rawBuf, m.list.actor, formGen)
+		return m, withConnGen(dispatchFormEditBody(m.api, target, rawBuf, m.list.actor, formGen), m.connGen)
 	}
 	return m, nil
 }
@@ -1359,7 +1374,7 @@ func (m Model) commitNewIssueForm() (Model, tea.Cmd) {
 	if m.detailIsActive() && m.detail.scopePID != 0 {
 		pid = m.detail.scopePID
 	}
-	return m, dispatchFormCreateIssue(m.api, pid, body, m.input.formGen)
+	return m, withConnGen(dispatchFormCreateIssue(m.api, pid, body, m.input.formGen), m.connGen)
 }
 
 func newIssueBodyFromForm(fields []inputField, actor string) (CreateIssueBody, error) {
@@ -1504,8 +1519,8 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 
 // routeGlobalKey handles the global key family (quit, help, scope
 // toggle), gated by canQuit so an open input/modal absorbs the key.
-// viewEmpty honors only quit/ctrl+c; ?, R, and any other binding
-// fall through silently because the only meaningful action is exit.
+// viewEmpty honors quit/ctrl+c and the daemon picker so a user can
+// recover from an empty daemon by switching to another configured one.
 //
 // `q` opens the quit-confirm modal (msgvault pattern); `ctrl+c`
 // remains the immediate-quit escape hatch for power users.
@@ -1526,6 +1541,10 @@ func (m Model) routeGlobalKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		m.modal = modalQuitConfirm
 		return m, nil, true
 	}
+	if m.keymap.Daemons.matches(msg) {
+		next, cmd := m.transitionToDaemons()
+		return next, cmd, true
+	}
 	if m.view == viewEmpty {
 		return m, nil, true
 	}
@@ -1534,10 +1553,6 @@ func (m Model) routeGlobalKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 	if m.keymap.Projects.matches(msg) {
 		next, cmd := m.transitionToProjects()
-		return next, cmd, true
-	}
-	if m.keymap.Daemons.matches(msg) {
-		next, cmd := m.transitionToDaemons()
 		return next, cmd, true
 	}
 	if m.keymap.ToggleLayout.matches(msg) {
@@ -1609,19 +1624,19 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case eventReceivedMsg:
 		if m.staleConnMsg(msg.gen) {
-			return m, nil, true
+			return m, m.waitForSSE(), true
 		}
 		next, cmd := m.handleEventReceived(msg)
 		return next, cmd, true
 	case resetRequiredMsg:
 		if m.staleConnMsg(msg.gen) {
-			return m, nil, true
+			return m, m.waitForSSE(), true
 		}
 		next, cmd := m.handleResetRequired(msg)
 		return next, cmd, true
 	case sseStatusMsg:
 		if m.staleConnMsg(msg.gen) {
-			return m, nil, true
+			return m, m.waitForSSE(), true
 		}
 		m.sseStatus = msg.state
 		return m, m.waitForSSE(), true
@@ -1640,6 +1655,53 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 func (m Model) staleConnMsg(gen uint64) bool {
 	return gen != 0 && gen != m.connGen
+}
+
+func withConnGen(cmd tea.Cmd, gen uint64) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		return stampConnGen(cmd(), gen)
+	}
+}
+
+func stampConnGen(msg tea.Msg, gen uint64) tea.Msg {
+	switch msg := msg.(type) {
+	case tea.BatchMsg:
+		out := make(tea.BatchMsg, len(msg))
+		for i, cmd := range msg {
+			out[i] = withConnGen(cmd, gen)
+		}
+		return out
+	case initialFetchMsg:
+		msg.connGen = gen
+		return msg
+	case refetchedMsg:
+		msg.connGen = gen
+		return msg
+	case mutationDoneMsg:
+		msg.connGen = gen
+		return msg
+	case labelsFetchedMsg:
+		msg.connGen = gen
+		return msg
+	case projectsLoadedMsg:
+		msg.connGen = gen
+		return msg
+	default:
+		return msg
+	}
+}
+
+func (m Model) staleConnResult(msg tea.Msg) bool {
+	switch msg := msg.(type) {
+	case initialFetchMsg:
+		return m.staleConnMsg(msg.connGen)
+	case refetchedMsg:
+		return m.staleConnMsg(msg.connGen)
+	}
+	return false
 }
 
 // populateCache updates the single-slot cache after a successful list
@@ -1923,7 +1985,7 @@ func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 		return m, m.waitForSSE()
 	}
 	cmd := m.list.refetchCmd(m.api, m.scope)
-	return m, tea.Batch(cmd, m.waitForSSE())
+	return m, tea.Batch(withConnGen(cmd, m.connGen), m.waitForSSE())
 }
 
 // handleResetRequired is the terminal-cache branch: drop everything,
@@ -1947,7 +2009,7 @@ func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
 	}
 	cmds := []tea.Cmd{m.waitForSSE(), toastExpireCmd(toastResyncedTTL)}
 	if m.api != nil {
-		cmds = append(cmds, m.list.refetchCmd(m.api, m.scope))
+		cmds = append(cmds, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))
 		// If the user is in detail view, the open issue + tabs are also
 		// stale — the cursor invalidation behind reset_required means
 		// any cached detail data is suspect, not just the list. Batch
@@ -2216,11 +2278,11 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewList:
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg, m.keymap, m.api, m.scope)
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	case viewDetail:
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	}
 	return m, nil
 }
@@ -2234,7 +2296,7 @@ func (m Model) dispatchToSplitPane(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if isDetailFetchMsg(msg) {
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	}
 	if _, ok := msg.(tea.KeyMsg); ok && m.focus == focusList {
 		next, cmd := m.dispatchListKey(msg)
@@ -2243,18 +2305,18 @@ func (m Model) dispatchToSplitPane(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyMsg); ok && m.focus == focusDetail {
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	}
 	// Non-key, non-detail-fetch messages route to the focused pane so
 	// list mutations / list refetches land where the user is looking.
 	if m.focus == focusList {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg, m.keymap, m.api, m.scope)
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	}
 	var cmd tea.Cmd
 	m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
-	return m, cmd
+	return m, withConnGen(cmd, m.connGen)
 }
 
 // dispatchListKey routes a key into the list pane and, when the
@@ -2277,18 +2339,18 @@ func (m Model) dispatchListKey(msg tea.Msg) (Model, tea.Cmd) {
 	m.list, cmd = m.list.Update(msg, m.keymap, m.api, m.scope)
 	newPID, newUID, newHas := highlightedIdentity(m.list)
 	if prevHas == newHas && prevPID == newPID && prevUID == newUID {
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	}
 	// Highlighted row changed. Retarget detail immediately so the
 	// pane never lags the list.
 	m, followCmd := m.scheduleDetailFollow()
 	if followCmd == nil {
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	}
 	if cmd == nil {
 		return m, followCmd
 	}
-	return m, tea.Batch(cmd, followCmd)
+	return m, tea.Batch(withConnGen(cmd, m.connGen), followCmd)
 }
 
 // highlightedIdentity returns the composite (project_id, uid) of the
@@ -2577,6 +2639,13 @@ func (m Model) chrome() viewChrome {
 		version:      kataVersion,
 		input:        m.input,
 		projectsByID: m.projectsByID,
-		daemon:       daemonTargetDisplay(m.activeDaemon),
+		daemon:       activeDaemonDisplay(m.activeDaemon),
 	}
+}
+
+func activeDaemonDisplay(target daemonTarget) string {
+	if target == (daemonTarget{}) {
+		return ""
+	}
+	return daemonTargetDisplay(target)
 }

@@ -63,6 +63,21 @@ func EnsureRunningInWorkspace(ctx context.Context, workspaceStart string) (strin
 	} else if ok {
 		return url, nil
 	}
+	return ensureLocalRunning(ctx)
+}
+
+// EnsureLocalRunning returns a live local daemon's base URL, ignoring
+// KATA_SERVER and .kata.local.toml remote overrides. Named "local" TUI
+// daemon entries use this so selecting local never silently resolves to
+// a configured shared daemon.
+func EnsureLocalRunning(ctx context.Context) (string, error) {
+	if v, ok := ctx.Value(BaseURLKey{}).(string); ok && v != "" {
+		return v, nil
+	}
+	return ensureLocalRunning(ctx)
+}
+
+func ensureLocalRunning(ctx context.Context) (string, error) {
 	ns, err := daemon.NewNamespace()
 	if err != nil {
 		return "", err
