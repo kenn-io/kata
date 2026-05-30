@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -586,6 +588,45 @@ func TestNewIssueForm_MutationSuccessRefreshesLabelCache(t *testing.T) {
 	if entry.gen <= 1 {
 		t.Fatalf("label cache gen for pid=7 = %d, want > 1 "+
 			"(dispatchLabelFetch must stamp a fresh gen)", entry.gen)
+	}
+}
+
+func TestNewIssueFormCreateRefetchCarriesConnGen(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issues":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	m := openNewIssueForm(t, newIssueFormFixture())
+	m.api = NewClient(srv.URL, srv.Client())
+	m.connGen = 4
+	m.input.saving = true
+	mut := mutationDoneMsg{
+		connGen: 4, origin: "form", kind: "create", formGen: m.input.formGen,
+		resp: &MutationResp{Issue: &Issue{UID: "01TEST-99zz", ShortID: "99zz", ProjectID: 7}},
+	}
+
+	_, cmd := stepModel(m, mut)
+
+	if cmd == nil {
+		t.Fatal("form create success returned no refetch command")
+	}
+	msg := cmd()
+	fetched, ok := msg.(refetchedMsg)
+	if !ok {
+		t.Fatalf("form create refetch returned %T, want refetchedMsg", msg)
+	}
+	if fetched.err != nil {
+		t.Fatalf("form create refetch err = %v", fetched.err)
+	}
+	if !called {
+		t.Fatal("form create refetch did not call ListIssues")
+	}
+	if fetched.connGen != 4 {
+		t.Fatalf("form create refetch connGen = %d, want 4", fetched.connGen)
 	}
 }
 

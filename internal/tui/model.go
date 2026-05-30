@@ -1151,9 +1151,10 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		// keeps it a no-op for projects the user never opened the
 		// menu for.
 		if mutAffectsLabelCounts(mut) {
-			return batchLabelRefresh(m, cmd, mut)
+			next, cmd := batchLabelRefresh(m, cmd, mut)
+			return next, withConnGen(cmd, m.connGen)
 		}
-		return m, cmd
+		return m, withConnGen(cmd, m.connGen)
 	}
 	m.input = inputState{}
 	// Hand off to the existing per-view mutation routing so the
