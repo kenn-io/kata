@@ -18,7 +18,7 @@ type helpSection struct {
 func helpSections(km keymap) []helpSection {
 	r := func(k key) helpItem { return helpItem{keyDisplay(k), k.Help} }
 	return []helpSection{
-		{"Global", []helpItem{r(km.Help), r(km.Quit), r(km.Projects), r(km.ToggleLayout)}},
+		{"Global", []helpItem{r(km.Help), r(km.Quit), r(km.Projects), r(km.Daemons), r(km.ToggleLayout)}},
 		{"Graph", []helpItem{
 			r(km.Up), r(km.Down), r(km.ScrollUp), r(km.ScrollDown),
 			r(km.PageUp), r(km.PageDown), r(km.Home),

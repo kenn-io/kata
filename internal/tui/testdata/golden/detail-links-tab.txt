@@ -25,6 +25,6 @@
                                                                                                                         
                                                                                                                         
                                                                                                                         
- ↑↓ scroll ▕ j/k row▕ ↹ section▕ ↵ open  ▕ pgup/pgdn page▕ e edit   ▕ c comment ▕ + label▕ - unlabel▕ a owner           
- A unassign▕ x close▕ r reopen ▕ p parent▕ b block       ▕ l related▕ ! priority▕ N child▕ L layout ▕ esc back          
- ? help    ▕ q quit                                                                                                     
+ ↑↓ scroll ▕ j/k row▕ ↹ section▕ ↵ open  ▕ pgup/pgdn page▕ e edit   ▕ c comment ▕ + label  ▕ - unlabel▕ a owner         
+ A unassign▕ x close▕ r reopen ▕ p parent▕ b block       ▕ l related▕ ! priority▕ D daemons▕ N child  ▕ L layout        
+ esc back  ▕ ? help ▕ q quit                                                                                            

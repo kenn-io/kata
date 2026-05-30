@@ -7,7 +7,7 @@ import tea "github.com/charmbracelet/bubbletea"
 // what Update actually handles.
 type keymap struct {
 	Help, Quit                                     key
-	Projects                                       key
+	Projects, Daemons                              key
 	ToggleLayout                                   key
 	Up, Down, PageUp, PageDown, Home, End          key
 	ScrollUp, ScrollDown                           key
@@ -36,6 +36,7 @@ func newKeymap() keymap {
 		Help:         key{Keys: []string{"?"}, Help: "help"},
 		Quit:         key{Keys: []string{"q", "ctrl+c"}, Help: "quit"},
 		Projects:     key{Keys: []string{"P"}, Help: "projects"},
+		Daemons:      key{Keys: []string{"D"}, Help: "daemons"},
 		ToggleLayout: key{Keys: []string{"L"}, Help: "toggle layout"},
 		// Up/Down are the section-cursor bindings: in the detail view
 		// they move the activity tab cursor or the children cursor.

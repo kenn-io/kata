@@ -4,23 +4,24 @@ Global                        Detail                                     Forms
 ?         help                tab            next tab                    ctrl+s         save or apply
 q/ctrl+c  quit                shift+tab      prev tab                    esc            cancel       
 P         projects            enter          jump to referenced issue    tab/shift+tab  change field 
-L         toggle layout       esc/backspace  back                        ctrl+e         open editor  
-                              e              edit body                   ctrl+u         clear prompt 
-Graph                         c              new comment                                             
-k       up                    p              set parent                  Filters                     
-j       down                  b              add blocker                 /       search              
-up      scroll up             l              add related                 s       cycle status filter 
-down    scroll down           +              add label                   f       filter (form)       
-pgup    page up               -              remove label                c       clear filters       
-pgdown  page down             a              assign owner                ctrl+r  reset filter form   
-g       first                 A              clear owner                                             
-G       last                  !              set priority                                            
-enter   open detail                                                                                  
-space   expand/collapse       Children                                                               
-right   expand                N      new child                                                       
-left    collapse              j/k    move child cursor                                               
-n       new issue (form)      ↑↓     scroll detail viewport                                          
-o       toggle graph order    enter  open child                                                      
+D         daemons             esc/backspace  back                        ctrl+e         open editor  
+L         toggle layout       e              edit body                   ctrl+u         clear prompt 
+                              c              new comment                                             
+Graph                         p              set parent                  Filters                     
+k       up                    b              add blocker                 /       search              
+j       down                  l              add related                 s       cycle status filter 
+up      scroll up             +              add label                   f       filter (form)       
+down    scroll down           -              remove label                c       clear filters       
+pgup    page up               a              assign owner                ctrl+r  reset filter form   
+pgdown  page down             A              clear owner                                             
+g       first                 !              set priority                                            
+G       last                                                                                         
+enter   open detail           Children                                                               
+space   expand/collapse       N      new child                                                       
+right   expand                j/k    move child cursor                                               
+left    collapse              ↑↓     scroll detail viewport                                          
+n       new issue (form)      enter  open child                                                      
+o       toggle graph order                                                                           
 x       close                                                                                        
 r       reopen                                                                                       
 

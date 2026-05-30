@@ -4,6 +4,7 @@ Global
 ?         help
 q/ctrl+c  quit
 P         projects
+D         daemons
 L         toggle layout
 
 Graph

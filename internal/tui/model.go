@@ -21,6 +21,7 @@ const (
 	viewHelp
 	viewEmpty
 	viewProjects
+	viewDaemons
 )
 
 // Model is the top-level Bubble Tea model. Sub-views are embedded by
@@ -131,6 +132,7 @@ type Model struct {
 	projectsCursor int
 	activeDaemon   daemonTarget
 	daemonTargets  []daemonTarget
+	daemonCursor   int
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
@@ -637,6 +639,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		if m.view == viewProjects {
 			next, cmd := m.routeProjectsViewKey(msg)
+			return next, cmd, true
+		}
+		if m.view == viewDaemons {
+			next, cmd := m.routeDaemonsViewKey(msg)
 			return next, cmd, true
 		}
 		// Detail-view `e` and `c` open M4 centered forms instead of
@@ -1524,6 +1530,10 @@ func (m Model) routeGlobalKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		next, cmd := m.transitionToProjects()
 		return next, cmd, true
 	}
+	if m.keymap.Daemons.matches(msg) {
+		next, cmd := m.transitionToDaemons()
+		return next, cmd, true
+	}
 	if m.keymap.ToggleLayout.matches(msg) {
 		next, cmd := m.toggleLayout()
 		return next, cmd, true
@@ -2393,6 +2403,8 @@ func (m Model) View() string {
 		var body string
 		if m.view == viewProjects {
 			body = renderProjects(m)
+		} else if m.view == viewDaemons {
+			body = renderDaemons(m)
 		} else {
 			body = renderTooNarrow(m.width, m.height)
 		}
@@ -2517,6 +2529,8 @@ func (m Model) viewBody() string {
 		return renderEmpty(m.width, m.height)
 	case viewProjects:
 		return renderProjects(m)
+	case viewDaemons:
+		return renderDaemons(m)
 	}
 	if m.layout == layoutSplit {
 		return renderSplit(m)
