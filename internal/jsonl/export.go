@@ -18,8 +18,28 @@ type ExportOptions struct {
 	IncludeDeleted bool
 }
 
+type exportQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // Export writes a deterministic JSONL export of d to w.
 func Export(ctx context.Context, d *db.DB, w io.Writer, opts ExportOptions) error {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return fmt.Errorf("begin export snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := exportSnapshot(ctx, tx, w, opts); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit export snapshot: %w", err)
+	}
+	return nil
+}
+
+func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts ExportOptions) error {
 	enc := NewEncoder(w)
 
 	version, err := schemaVersion(ctx, d)
@@ -109,7 +129,7 @@ type metaRecord struct {
 	Value string `json:"value"`
 }
 
-func schemaVersion(ctx context.Context, d *db.DB) (string, error) {
+func schemaVersion(ctx context.Context, d exportQuerier) (string, error) {
 	var version string
 	if err := d.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='schema_version'`).Scan(&version); err != nil {
 		return "", fmt.Errorf("read schema_version: %w", err)
@@ -117,7 +137,7 @@ func schemaVersion(ctx context.Context, d *db.DB) (string, error) {
 	return version, nil
 }
 
-func exportMeta(ctx context.Context, d *db.DB, enc *Encoder) error {
+func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder) error {
 	rows, err := d.QueryContext(ctx, `SELECT key, value FROM meta ORDER BY key ASC`)
 	if err != nil {
 		return fmt.Errorf("export meta: %w", err)
@@ -135,7 +155,7 @@ func exportMeta(ctx context.Context, d *db.DB, enc *Encoder) error {
 	return rows.Err()
 }
 
-func exportProjects(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
+func exportProjects(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
 	hasIdentity, err := tableHasColumn(ctx, d, "projects", "identity")
 	if err != nil {
 		return err
@@ -202,7 +222,7 @@ func exportProjects(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 // physical schema) does not surface this. The import path defaults
 // metadata to {} and revision to 1 when those fields are absent from a
 // record, so omitting them here produces correct v10 rows downstream.
-func exportProjectsV8(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportProjectsV8(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID        int64   `json:"id"`
 		UID       string  `json:"uid"`
@@ -230,7 +250,7 @@ func exportProjectsV8(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOp
 
 // exportProjectsV7 emits the v7 projects projection (with next_issue_number
 // and without the identity column). Used when cutting over from a v7 source.
-func exportProjectsV7(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportProjectsV7(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID              int64   `json:"id"`
 		UID             string  `json:"uid"`
@@ -259,7 +279,7 @@ func exportProjectsV7(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOp
 	})
 }
 
-func exportProjectsV4(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportProjectsV4(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID              int64   `json:"id"`
 		UID             string  `json:"uid"`
@@ -292,7 +312,7 @@ func exportProjectsV4(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOp
 // exportProjectsV2 covers schema versions 2 and 3 (UID present, deleted_at
 // absent). Kept distinct so cutover from v3→v4 reads the source via the
 // pre-v4 column list and lets the import path default deleted_at to NULL.
-func exportProjectsV2(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportProjectsV2(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID              int64  `json:"id"`
 		UID             string `json:"uid"`
@@ -319,7 +339,7 @@ func exportProjectsV2(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOp
 	})
 }
 
-func exportProjectsV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportProjectsV1(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID              int64  `json:"id"`
 		Identity        string `json:"identity"`
@@ -345,7 +365,7 @@ func exportProjectsV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOp
 	})
 }
 
-func exportProjectAliases(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportProjectAliases(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID            int64  `json:"id"`
 		ProjectID     int64  `json:"project_id"`
@@ -376,7 +396,7 @@ func exportProjectAliases(ctx context.Context, d *db.DB, enc *Encoder, opts Expo
 	})
 }
 
-func exportRecurrences(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportRecurrences(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID                  int64           `json:"id"`
 		UID                 string          `json:"uid"`
@@ -452,7 +472,7 @@ func exportRecurrences(ctx context.Context, d *db.DB, enc *Encoder, opts ExportO
 	})
 }
 
-func exportIssues(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
+func exportIssues(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
 	if sourceSchemaVersion < 2 {
 		return exportIssuesV1(ctx, d, enc, opts)
 	}
@@ -525,7 +545,7 @@ func exportIssues(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOption
 // exist on a real v8/v9 source DB. The import path defaults Metadata to
 // {} and Revision to 1 when those fields are absent from a record, so
 // omitting them here lets v9 rows replay cleanly into the v10 schema.
-func exportIssuesV8(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportIssuesV8(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID           int64   `json:"id"`
 		UID          string  `json:"uid"`
@@ -565,7 +585,7 @@ func exportIssuesV8(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 // exportIssuesV6 emits the schema_version 6..7 issue projection (with priority
 // and the now-dropped number column). Cutover from a pre-short_id source DB
 // lands here; targets at v8+ derive short_ids during replay (Task 9).
-func exportIssuesV6(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportIssuesV6(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID           int64   `json:"id"`
 		UID          string  `json:"uid"`
@@ -605,7 +625,7 @@ func exportIssuesV6(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 // exportIssuesV2 emits the schema_version 2..5 issue projection (no priority
 // column). Cutover from a pre-priority source DB lands here; targets at v6+
 // silently default priority to NULL on import.
-func exportIssuesV2(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportIssuesV2(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID           int64   `json:"id"`
 		UID          string  `json:"uid"`
@@ -641,7 +661,7 @@ func exportIssuesV2(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 	})
 }
 
-func exportIssuesV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportIssuesV1(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID           int64   `json:"id"`
 		ProjectID    int64   `json:"project_id"`
@@ -676,7 +696,7 @@ func exportIssuesV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 	})
 }
 
-func exportComments(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
+func exportComments(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
 	if sourceSchemaVersion < 12 {
 		return exportCommentsV10(ctx, d, enc, opts)
 	}
@@ -704,7 +724,7 @@ func exportComments(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 	})
 }
 
-func exportCommentsV10(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportCommentsV10(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID        int64  `json:"id"`
 		IssueID   int64  `json:"issue_id"`
@@ -728,7 +748,7 @@ func exportCommentsV10(ctx context.Context, d *db.DB, enc *Encoder, opts ExportO
 	})
 }
 
-func exportIssueLabels(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportIssueLabels(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		IssueID   int64  `json:"issue_id"`
 		Label     string `json:"label"`
@@ -751,7 +771,7 @@ func exportIssueLabels(ctx context.Context, d *db.DB, enc *Encoder, opts ExportO
 	})
 }
 
-func exportLinks(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
+func exportLinks(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
 	if sourceSchemaVersion < 2 {
 		return exportLinksV1(ctx, d, enc, opts)
 	}
@@ -786,7 +806,7 @@ func exportLinks(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions
 	})
 }
 
-func exportLinksV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportLinksV1(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID          int64  `json:"id"`
 		ProjectID   int64  `json:"project_id"`
@@ -815,7 +835,7 @@ func exportLinksV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptio
 	})
 }
 
-func exportImportMappings(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportImportMappings(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID              int64   `json:"id"`
 		Source          string  `json:"source"`
@@ -865,7 +885,7 @@ func exportImportMappings(ctx context.Context, d *db.DB, enc *Encoder, opts Expo
 	})
 }
 
-func exportFederationBindings(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportFederationBindings(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ProjectID            int64   `json:"project_id"`
 		Role                 string  `json:"role"`
@@ -910,7 +930,7 @@ func exportFederationBindings(ctx context.Context, d *db.DB, enc *Encoder, opts 
 	})
 }
 
-func exportFederationSyncStatus(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportFederationSyncStatus(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ProjectID         int64   `json:"project_id"`
 		LastPullStartedAt *string `json:"last_pull_started_at,omitempty"`
@@ -945,7 +965,7 @@ func exportFederationSyncStatus(ctx context.Context, d *db.DB, enc *Encoder, opt
 	})
 }
 
-func exportFederationQuarantine(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportFederationQuarantine(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID           int64           `json:"id"`
 		ProjectID    int64           `json:"project_id"`
@@ -990,7 +1010,7 @@ func exportFederationQuarantine(ctx context.Context, d *db.DB, enc *Encoder, opt
 	})
 }
 
-func exportFederationEnrollments(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportFederationEnrollments(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID               int64   `json:"id"`
 		TokenHash        string  `json:"token_hash"`
@@ -1022,7 +1042,7 @@ func exportFederationEnrollments(ctx context.Context, d *db.DB, enc *Encoder, op
 	})
 }
 
-func exportIssueClaims(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions) error {
+func exportIssueClaims(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID                int64   `json:"id"`
 		ClaimUID          string  `json:"claim_uid"`
@@ -1070,7 +1090,7 @@ func exportIssueClaims(ctx context.Context, d *db.DB, enc *Encoder, opts ExportO
 
 func exportPendingClaimRequests(
 	ctx context.Context,
-	d *db.DB,
+	d exportQuerier,
 	enc *Encoder,
 	opts ExportOptions,
 ) error {
@@ -1121,7 +1141,7 @@ func exportPendingClaimRequests(
 	})
 }
 
-func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
+func exportEvents(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
 	projectNameExpr, joinProjects := eventProjectNameExpr(sourceSchemaVersion)
 	if sourceSchemaVersion < 2 {
 		return exportEventsV1(ctx, d, enc, opts, projectNameExpr, joinProjects)
@@ -1227,7 +1247,7 @@ func exportEvents(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOption
 	})
 }
 
-func exportEventsV8(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
+func exportEventsV8(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
 		ID                int64           `json:"id"`
 		UID               string          `json:"uid"`
@@ -1281,7 +1301,7 @@ func exportEventsV8(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 
 // exportEventsV3 emits the v3..v7 events projection (with the now-dropped
 // issue_number column). Cutover from a pre-short_id source DB lands here.
-func exportEventsV3(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
+func exportEventsV3(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
 		ID                int64           `json:"id"`
 		UID               string          `json:"uid"`
@@ -1334,7 +1354,7 @@ func exportEventsV3(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 	})
 }
 
-func exportEventsV2(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
+func exportEventsV2(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
 		ID              int64           `json:"id"`
 		ProjectID       int64           `json:"project_id"`
@@ -1393,7 +1413,7 @@ func exportEventsV2(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 	})
 }
 
-func exportEventsV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
+func exportEventsV1(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
 		ID             int64           `json:"id"`
 		ProjectID      int64           `json:"project_id"`
@@ -1443,7 +1463,7 @@ func exportEventsV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 	})
 }
 
-func exportPurgeLog(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
+func exportPurgeLog(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, sourceSchemaVersion int) error {
 	projectNameExpr, joinProjects, err := purgeProjectNameExpr(ctx, d, sourceSchemaVersion)
 	if err != nil {
 		return err
@@ -1509,7 +1529,7 @@ func exportPurgeLog(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOpti
 
 // exportPurgeLogV3 emits the v3..v7 purge_log projection (with the now-dropped
 // issue_number column). Cutover from a pre-short_id source DB lands here.
-func exportPurgeLogV3(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
+func exportPurgeLogV3(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
 		ID                     int64   `json:"id"`
 		UID                    string  `json:"uid"`
@@ -1560,7 +1580,7 @@ func exportPurgeLogV3(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOp
 	})
 }
 
-func exportPurgeLogV2(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
+func exportPurgeLogV2(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
 		ID                     int64   `json:"id"`
 		ProjectID              int64   `json:"project_id"`
@@ -1609,7 +1629,7 @@ func exportPurgeLogV2(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOp
 	})
 }
 
-func exportPurgeLogV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
+func exportPurgeLogV1(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, projectNameExpr, joinProjects string) error {
 	type record struct {
 		ID                     int64   `json:"id"`
 		ProjectID              int64   `json:"project_id"`
@@ -1655,7 +1675,7 @@ func exportPurgeLogV1(ctx context.Context, d *db.DB, enc *Encoder, opts ExportOp
 	})
 }
 
-func tableHasColumn(ctx context.Context, d *db.DB, table, column string) (bool, error) {
+func tableHasColumn(ctx context.Context, d exportQuerier, table, column string) (bool, error) {
 	rows, err := d.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
 		return false, fmt.Errorf("inspect %s columns: %w", table, err)
@@ -1687,7 +1707,7 @@ func eventProjectNameExpr(sourceSchemaVersion int) (expr, joinProjects string) {
 	return "events.project_name", ""
 }
 
-func purgeProjectNameExpr(ctx context.Context, d *db.DB, sourceSchemaVersion int) (expr, joinProjects string, err error) {
+func purgeProjectNameExpr(ctx context.Context, d exportQuerier, sourceSchemaVersion int) (expr, joinProjects string, err error) {
 	if sourceSchemaVersion < 7 {
 		hasLegacy, err := tableHasColumn(ctx, d, "purge_log", "project_identity")
 		if err != nil {
@@ -1771,7 +1791,7 @@ func joinClauses(clauses []string) string {
 	return out
 }
 
-func exportSQLiteSequence(ctx context.Context, d *db.DB, enc *Encoder) error {
+func exportSQLiteSequence(ctx context.Context, d exportQuerier, enc *Encoder) error {
 	type record struct {
 		Name string `json:"name"`
 		Seq  int64  `json:"seq"`

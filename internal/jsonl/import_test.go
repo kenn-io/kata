@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,6 +46,31 @@ func TestImportRoundTripsExportedRows(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, issue.ShortID, got.ShortID)
 	assert.Equal(t, issue.Title, got.Title)
+}
+
+func TestImportRoundTripsExportedLargeIssueBody(t *testing.T) {
+	ctx := context.Background()
+	src := openExportTestDB(t)
+	p, err := src.CreateProject(ctx, "kata")
+	require.NoError(t, err)
+	body := strings.Repeat("large-body-", 2*1024*1024)
+	issue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "large round trip",
+		Body:      body,
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+
+	var exported bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, src, &exported, jsonl.ExportOptions{IncludeDeleted: true}))
+
+	dst := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(exported.Bytes()), dst))
+
+	got, err := dst.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, body, got.Body)
 }
 
 func TestImportSQLiteSequenceUsesUpdateOrInsert(t *testing.T) {

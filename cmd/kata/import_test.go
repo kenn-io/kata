@@ -111,6 +111,41 @@ func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	assert.Contains(t, ce.Message, "target already exists")
 }
 
+func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) {
+	home := setupKataEnv(t)
+	input := filepath.Join(home, "bad.jsonl")
+	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
+	target := filepath.Join(home, "target.db")
+	ctx := context.Background()
+	d, err := db.Open(ctx, target)
+	require.NoError(t, err)
+	_, err = d.CreateProject(ctx, "existing")
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	_, err = runCmdOutput(t, nil, "import", "--force", "--input", input, "--target", target)
+	require.Error(t, err)
+
+	d, err = db.Open(ctx, target)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+	_, err = d.ProjectByName(ctx, "existing")
+	require.NoError(t, err)
+}
+
+func TestImportFailureRemovesNewPartialTarget(t *testing.T) {
+	home := setupKataEnv(t)
+	input := filepath.Join(home, "bad.jsonl")
+	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
+	target := filepath.Join(home, "target.db")
+
+	_, err := runCmdOutput(t, nil, "import", "--input", input, "--target", target)
+	require.Error(t, err)
+
+	_, statErr := os.Stat(target)
+	assert.True(t, os.IsNotExist(statErr), "failed import must not leave a partial target DB")
+}
+
 func TestImportRefusesDaemon(t *testing.T) {
 	home, input, target := setupImportTest(t)
 	dbPath := filepath.Join(home, "kata.db")

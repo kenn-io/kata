@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -112,26 +113,38 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 	} else if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("stat import target: %w", err)
 	}
-	if force {
-		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove import target: %w", err)
-		}
-	}
 	in, err := os.Open(input) //nolint:gosec // import path is user-provided CLI input
 	if err != nil {
 		return fmt.Errorf("open import input: %w", err)
 	}
 	defer func() { _ = in.Close() }()
-	d, err := db.Open(cmd.Context(), target)
+	tmpTarget, cleanupTmp, err := prepareImportTempTarget(target)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = d.Close() }()
+	installed := false
+	defer func() {
+		if !installed {
+			cleanupTmp()
+		}
+	}()
+	d, err := db.Open(cmd.Context(), tmpTarget)
+	if err != nil {
+		return err
+	}
 	if err := jsonl.ImportWithOptions(cmd.Context(), in, d, jsonl.ImportOptions{
 		NewInstance: newInstance,
 	}); err != nil {
+		_ = d.Close()
 		return err
 	}
+	if err := d.Close(); err != nil {
+		return fmt.Errorf("close import target: %w", err)
+	}
+	if err := installImportedTarget(tmpTarget, target, force); err != nil {
+		return err
+	}
+	installed = true
 	if flags.Quiet || flags.JSON {
 		return nil
 	}
@@ -142,4 +155,65 @@ func runKataJSONLImport(cmd *cobra.Command, input, target string, force, newInst
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "imported %s\n", target)
 	}
 	return err
+}
+
+func prepareImportTempTarget(target string) (string, func(), error) {
+	dir := filepath.Dir(target)
+	base := filepath.Base(target)
+	f, err := os.CreateTemp(dir, "."+base+".import-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create import target: %w", err)
+	}
+	tmpTarget := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpTarget)
+		return "", nil, fmt.Errorf("close import target placeholder: %w", err)
+	}
+	removeSQLiteFileSetMain(tmpTarget)
+	return tmpTarget, func() { removeSQLiteFileSetMain(tmpTarget) }, nil
+}
+
+func installImportedTarget(tmpTarget, target string, force bool) error {
+	if !force {
+		if err := os.Rename(tmpTarget, target); err != nil {
+			return fmt.Errorf("install import target: %w", err)
+		}
+		return nil
+	}
+
+	backupTarget := target + ".replace.tmp"
+	removeSQLiteFileSetMain(backupTarget)
+	backupMade := false
+	if _, err := os.Stat(target); err == nil {
+		if err := os.Rename(target, backupTarget); err != nil {
+			return fmt.Errorf("backup import target before replace: %w", err)
+		}
+		backupMade = true
+		renameIfExists(target+"-wal", backupTarget+"-wal")
+		renameIfExists(target+"-shm", backupTarget+"-shm")
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("stat import target before replace: %w", err)
+	}
+	if err := os.Rename(tmpTarget, target); err != nil {
+		if backupMade {
+			_ = os.Rename(backupTarget, target)
+			renameIfExists(backupTarget+"-wal", target+"-wal")
+			renameIfExists(backupTarget+"-shm", target+"-shm")
+		}
+		return fmt.Errorf("install import target: %w", err)
+	}
+	removeSQLiteFileSetMain(backupTarget)
+	return nil
+}
+
+func renameIfExists(from, to string) {
+	if _, err := os.Stat(from); err == nil {
+		_ = os.Rename(from, to)
+	}
+}
+
+func removeSQLiteFileSetMain(path string) {
+	_ = os.Remove(path)
+	_ = os.Remove(path + "-wal")
+	_ = os.Remove(path + "-shm")
 }

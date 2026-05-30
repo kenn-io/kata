@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -48,28 +50,11 @@ func newExportCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			f, err := os.OpenFile(output, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) //nolint:gosec // output path is user-supplied via --output CLI flag
-			if err != nil {
-				return fmt.Errorf("open export output: %w", err)
-			}
-			bw := bufio.NewWriter(f)
-			if err := jsonl.Export(ctx, d, bw, jsonl.ExportOptions{
+			if err := writeExportOutput(ctx, d, output, jsonl.ExportOptions{
 				ProjectID:      projectID,
 				IncludeDeleted: includeDeleted,
 			}); err != nil {
-				_ = f.Close()
 				return err
-			}
-			if err := bw.Flush(); err != nil {
-				_ = f.Close()
-				return fmt.Errorf("flush export output: %w", err)
-			}
-			if err := f.Sync(); err != nil {
-				_ = f.Close()
-				return fmt.Errorf("sync export output: %w", err)
-			}
-			if err := f.Close(); err != nil {
-				return fmt.Errorf("close export output: %w", err)
 			}
 			if flags.Quiet || flags.JSON {
 				return nil
@@ -88,6 +73,57 @@ func newExportCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&includeDeleted, "include-deleted", true, "include soft-deleted rows")
 	cmd.Flags().BoolVar(&allowRunningDaemon, "allow-running-daemon", false, "export even if a daemon is running")
 	return cmd
+}
+
+func writeExportOutput(ctx context.Context, d *db.DB, output string, opts jsonl.ExportOptions) error {
+	dir := filepath.Dir(output)
+	base := filepath.Base(output)
+	f, err := os.CreateTemp(dir, "."+base+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create export output: %w", err)
+	}
+	tmpName := f.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = f.Close()
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	bw := bufio.NewWriter(f)
+	if err := jsonl.Export(ctx, d, bw, opts); err != nil {
+		return err
+	}
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush export output: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync export output: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close export output: %w", err)
+	}
+	if err := replaceExportOutput(tmpName, output); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func replaceExportOutput(tmpName, output string) error {
+	if err := os.Rename(tmpName, output); err != nil {
+		if runtime.GOOS == "windows" {
+			if rmErr := os.Remove(output); rmErr != nil && !os.IsNotExist(rmErr) {
+				return fmt.Errorf("replace export output: %w", err)
+			}
+			if retryErr := os.Rename(tmpName, output); retryErr == nil {
+				return nil
+			}
+		}
+		return fmt.Errorf("replace export output: %w", err)
+	}
+	return nil
 }
 
 // resolveExportProject reconciles the global --project NAME flag with the

@@ -29,7 +29,10 @@ func (d *DB) UpdatePriority(ctx context.Context, issueID int64, newPriority *int
 		return Issue{}, nil, false, err
 	}
 	if priorityEqual(issue.Priority, newPriority) {
-		return issue, nil, false, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return Issue{}, nil, false, err
+		}
+		return issue, nil, false, nil
 	}
 
 	ts := nowTimestamp()

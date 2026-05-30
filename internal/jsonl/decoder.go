@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -22,21 +23,30 @@ func NewDecoder(r io.Reader) *Decoder {
 // ReadAll reads every envelope, enforcing the fixed kind order and requiring
 // meta.export_version as the first record.
 func (d *Decoder) ReadAll(ctx context.Context) ([]Envelope, error) {
-	scanner := bufio.NewScanner(d.r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	reader := bufio.NewReader(d.r)
 
 	var (
 		out      []Envelope
 		lineNo   int
 		lastRank = -1
 	)
-	for scanner.Scan() {
+	for {
+		lineBytes, err := reader.ReadBytes('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("read jsonl: %w", err)
+		}
+		if len(lineBytes) == 0 {
+			break
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		lineNo++
-		line := bytes.TrimSpace(scanner.Bytes())
+		line := bytes.TrimSpace(lineBytes)
 		if len(line) == 0 {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			continue
 		}
 
@@ -58,9 +68,9 @@ func (d *Decoder) ReadAll(ctx context.Context) ([]Envelope, error) {
 		}
 		lastRank = rank
 		out = append(out, env)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan jsonl: %w", err)
+		if errors.Is(err, io.EOF) {
+			break
+		}
 	}
 	if len(out) == 0 {
 		return nil, ErrMissingExportVersion

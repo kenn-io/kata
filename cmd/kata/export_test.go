@@ -38,6 +38,41 @@ func TestExportWritesJSONLToOutput(t *testing.T) {
 	assert.Contains(t, out, outPath)
 }
 
+func TestExportDoesNotReplaceExistingOutputOnFailure(t *testing.T) {
+	home := setupKataEnv(t)
+	dbPath := filepath.Join(home, "kata.db")
+	ctx := context.Background()
+	d, err := db.Open(ctx, dbPath)
+	require.NoError(t, err)
+	p, err := d.CreateProject(ctx, "kata")
+	require.NoError(t, err)
+	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "invalid metadata",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	conn, err := d.Conn(ctx)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `PRAGMA ignore_check_constraints = ON`)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `UPDATE issues SET metadata = '{' WHERE id = ?`, issue.ID)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `PRAGMA ignore_check_constraints = OFF`)
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+	require.NoError(t, d.Close())
+
+	outPath := filepath.Join(home, "export.jsonl")
+	require.NoError(t, os.WriteFile(outPath, []byte("previous backup\n"), 0o600))
+	_, err = runCmdOutput(t, nil, "export", "--output", outPath)
+	require.Error(t, err)
+
+	bs, readErr := os.ReadFile(outPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, "previous backup\n", string(bs))
+}
+
 func TestExportAgentOutput(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")

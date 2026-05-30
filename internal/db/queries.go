@@ -1124,7 +1124,10 @@ func (d *DB) CloseIssueWithEvents(
 		return Issue{}, nil, false, err
 	}
 	if issue.Status == "closed" {
-		return issue, nil, false, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return Issue{}, nil, false, err
+		}
+		return issue, nil, false, nil
 	}
 	if hasOpen, err := txHasOpenChildren(ctx, tx, issue.ProjectID, issueID); err != nil {
 		return Issue{}, nil, false, err
@@ -1298,7 +1301,10 @@ func (d *DB) ReopenIssue(
 		return Issue{}, nil, false, err
 	}
 	if issue.Status == "open" {
-		return issue, nil, false, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return Issue{}, nil, false, err
+		}
+		return issue, nil, false, nil
 	}
 	reopenedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	if _, err := tx.ExecContext(ctx,
@@ -1369,7 +1375,10 @@ func (d *DB) EditIssue(ctx context.Context, p EditIssueParams) (Issue, *Event, b
 		return Issue{}, nil, false, err
 	}
 	if !changed {
-		return issue, nil, false, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return Issue{}, nil, false, err
+		}
+		return issue, nil, false, nil
 	}
 	sets = append([]string{`updated_at = ?`}, sets...)
 	args = append([]any{ts}, args...)
@@ -1545,7 +1554,10 @@ func (d *DB) UpdateOwner(ctx context.Context, issueID int64, newOwner *string, a
 	}
 	// No-op: same owner.
 	if ownerEqual(issue.Owner, newOwner) {
-		return issue, nil, false, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return Issue{}, nil, false, err
+		}
+		return issue, nil, false, nil
 	}
 
 	ts := nowTimestamp()

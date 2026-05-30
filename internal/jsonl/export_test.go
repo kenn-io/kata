@@ -189,6 +189,37 @@ func TestExportProjectIDFiltersProjectScopedRows(t *testing.T) {
 	assertProjectIDs(t, records, map[int64]bool{p1.ID: true})
 }
 
+func TestExportUsesSingleSnapshot(t *testing.T) {
+	ctx, d, p := newExportEnv(t)
+	w := &mutatingExportWriter{
+		triggerNeedle: []byte(`"kind":"project"`),
+		trigger: func() {
+			createTesterIssue(ctx, t, d, p.ID, "created during export", "")
+		},
+	}
+
+	require.NoError(t, jsonl.Export(ctx, d, w, jsonl.ExportOptions{IncludeDeleted: true}))
+
+	records := decodeJSONLLines(t, w.Bytes())
+	assertRecordsDoNotContain(t, records, "created during export")
+}
+
+type mutatingExportWriter struct {
+	bytes.Buffer
+	triggerNeedle []byte
+	triggered     bool
+	trigger       func()
+}
+
+func (w *mutatingExportWriter) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	if !w.triggered && bytes.Contains(p, w.triggerNeedle) {
+		w.triggered = true
+		w.trigger()
+	}
+	return n, err
+}
+
 func TestExportNoIncludeDeletedOmitsSoftDeletedIssueDependents(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
 	kept := createTesterIssue(ctx, t, d, p.ID, "kept issue", "")
