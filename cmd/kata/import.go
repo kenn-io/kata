@@ -166,7 +166,7 @@ func prepareImportTempTarget(target string) (string, func(), error) {
 	}
 	tmpTarget := f.Name()
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmpTarget)
+		_ = os.Remove(tmpTarget) //nolint:gosec // tmpTarget comes from os.CreateTemp above.
 		return "", nil, fmt.Errorf("close import target placeholder: %w", err)
 	}
 	removeSQLiteFileSetMain(tmpTarget)
@@ -213,7 +213,7 @@ func renameIfExists(from, to string) {
 }
 
 func removeSQLiteFileSetMain(path string) {
-	_ = os.Remove(path)
+	_ = os.Remove(path) //nolint:gosec // path is either os.CreateTemp output or a suffix of explicit --target for import replacement.
 	_ = os.Remove(path + "-wal")
 	_ = os.Remove(path + "-shm")
 }

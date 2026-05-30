@@ -4,6 +4,6 @@ default_stages = ["pre-commit"]
 [[repos]]
 repo = "local"
 hooks = [
-  { id = "make-lint", name = "make lint", entry = "make lint", language = "system", pass_filenames = false, always_run = true },
+  { id = "make-lint", name = "make lint", entry = "make lint", language = "system", stages = ["pre-push"], pass_filenames = false, always_run = true },
   { id = "nilaway", name = "nilaway", entry = "make nilaway", language = "system", stages = ["pre-push"], types_or = ["go", "go-mod", "go-sum"], pass_filenames = false },
 ]
