@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -169,8 +170,8 @@ func prepareImportTempTarget(target string) (string, func(), error) {
 		_ = os.Remove(tmpTarget) //nolint:gosec // tmpTarget comes from os.CreateTemp above.
 		return "", nil, fmt.Errorf("close import target placeholder: %w", err)
 	}
-	removeSQLiteFileSetMain(tmpTarget)
-	return tmpTarget, func() { removeSQLiteFileSetMain(tmpTarget) }, nil
+	_ = removeSQLiteFileSetMain(tmpTarget)
+	return tmpTarget, func() { _ = removeSQLiteFileSetMain(tmpTarget) }, nil
 }
 
 func installImportedTarget(tmpTarget, target string, force bool) error {
@@ -182,38 +183,81 @@ func installImportedTarget(tmpTarget, target string, force bool) error {
 	}
 
 	backupTarget := target + ".replace.tmp"
-	removeSQLiteFileSetMain(backupTarget)
+	if err := removeSQLiteFileSetMain(backupTarget); err != nil {
+		return fmt.Errorf("clear stale import target backup: %w", err)
+	}
 	backupMade := false
 	if _, err := os.Stat(target); err == nil {
 		if err := os.Rename(target, backupTarget); err != nil {
 			return fmt.Errorf("backup import target before replace: %w", err)
 		}
 		backupMade = true
-		renameIfExists(target+"-wal", backupTarget+"-wal")
-		renameIfExists(target+"-shm", backupTarget+"-shm")
+		if err := moveSQLiteSidecars(target, backupTarget); err != nil {
+			return errors.Join(
+				fmt.Errorf("backup import target sidecars: %w", err),
+				restoreImportedTargetBackup(backupTarget, target, backupMade),
+			)
+		}
 	} else if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("stat import target before replace: %w", err)
 	}
 	if err := os.Rename(tmpTarget, target); err != nil {
-		if backupMade {
-			_ = os.Rename(backupTarget, target)
-			renameIfExists(backupTarget+"-wal", target+"-wal")
-			renameIfExists(backupTarget+"-shm", target+"-shm")
-		}
-		return fmt.Errorf("install import target: %w", err)
+		return errors.Join(
+			fmt.Errorf("install import target: %w", err),
+			restoreImportedTargetBackup(backupTarget, target, backupMade),
+		)
 	}
-	removeSQLiteFileSetMain(backupTarget)
+	if err := removeSQLiteFileSetMain(backupTarget); err != nil {
+		return fmt.Errorf("remove import target backup: %w", err)
+	}
 	return nil
 }
 
-func renameIfExists(from, to string) {
-	if _, err := os.Stat(from); err == nil {
-		_ = os.Rename(from, to)
+func restoreImportedTargetBackup(backupTarget, target string, backupMade bool) error {
+	if !backupMade {
+		return nil
 	}
+	if err := os.Rename(backupTarget, target); err != nil {
+		return fmt.Errorf("restore import target backup: %w", err)
+	}
+	if err := moveSQLiteSidecars(backupTarget, target); err != nil {
+		return fmt.Errorf("restore import target sidecars: %w", err)
+	}
+	return nil
 }
 
-func removeSQLiteFileSetMain(path string) {
-	_ = os.Remove(path) //nolint:gosec // path is either os.CreateTemp output or a suffix of explicit --target for import replacement.
-	_ = os.Remove(path + "-wal")
-	_ = os.Remove(path + "-shm")
+func moveSQLiteSidecars(from, to string) error {
+	moved := make([]string, 0, 2)
+	for _, suffix := range []string{"-wal", "-shm"} {
+		src := from + suffix
+		dst := to + suffix
+		if _, err := os.Stat(src); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("stat %s: %w", src, err)
+		}
+		if err := os.Rename(src, dst); err != nil { //nolint:gosec // src/dst are SQLite sidecars beside an explicit import target or temp DB.
+			var rollbackErr error
+			for i := len(moved) - 1; i >= 0; i-- {
+				oldSrc := to + moved[i]
+				oldDst := from + moved[i]
+				if err := os.Rename(oldSrc, oldDst); err != nil { //nolint:gosec // rollback of sidecars just moved by this helper.
+					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("rollback %s: %w", moved[i], err))
+				}
+			}
+			return errors.Join(fmt.Errorf("rename %s: %w", suffix, err), rollbackErr)
+		}
+		moved = append(moved, suffix)
+	}
+	return nil
+}
+
+func removeSQLiteFileSetMain(path string) error {
+	var out error
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Remove(name); err != nil && !os.IsNotExist(err) { //nolint:gosec // path is os.CreateTemp output or a suffix of explicit --target for import replacement.
+			out = errors.Join(out, err)
+		}
+	}
+	return out
 }
