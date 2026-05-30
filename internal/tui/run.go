@@ -51,9 +51,20 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	m := buildRunModel(opts, c, bi, conn)
 	sseCtx, cancelSSE := context.WithCancel(ctx)
-	defer cancelSSE()
+	defer func() { cancelSSE() }()
+	m.connGen = 1
+	m.sseRestart = func(conn daemonConnection, gen uint64, ch chan tea.Msg) tea.Cmd {
+		return func() tea.Msg {
+			cancelSSE()
+			sseCtx, cancelSSE = context.WithCancel(ctx)
+			if !conn.init.scope.empty && conn.sseHC != nil {
+				go startSSEForConnection(sseCtx, conn.sseHC, conn.endpoint, sseProjectScope(conn.init.scope), ch, gen)
+			}
+			return nil
+		}
+	}
 	if !bi.scope.empty && sseHC != nil {
-		go startSSE(sseCtx, sseHC, endpoint, sseProjectScope(bi.scope), m.sseCh)
+		go startSSEForConnection(sseCtx, sseHC, endpoint, sseProjectScope(bi.scope), m.sseCh, m.connGen)
 	}
 	if _, err := tea.NewProgram(m, programOpts(ctx, opts)...).Run(); err != nil {
 		return err

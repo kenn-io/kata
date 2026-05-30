@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"net/http"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -67,6 +69,125 @@ func TestDaemonView_HelpIncludesDaemonBinding(t *testing.T) {
 	assertContains(t, out, "daemons", "help overlay missing daemon description")
 }
 
+func TestDaemonView_EnterDispatchesSwitchCommand(t *testing.T) {
+	oldConnect := connectDaemonTargetForTUI
+	t.Cleanup(func() { connectDaemonTargetForTUI = oldConnect })
+	connectDaemonTargetForTUI = func(_ context.Context, target daemonTarget) (daemonConnection, error) {
+		return daemonConnection{
+			api:      &Client{},
+			endpoint: target.URL,
+			target:   target,
+			init:     bootInit{view: viewEmpty, scope: scope{empty: true}},
+		}, nil
+	}
+	m := setupDaemonView()
+	m.daemonCursor = 2
+
+	out, cmd := m.routeDaemonsViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.NotNil(t, cmd)
+	assert.Equal(t, viewDaemons, out.view, "view should remain until connection succeeds")
+	msg := cmd()
+	sw, ok := msg.(daemonSwitchResultMsg)
+	require.True(t, ok)
+	require.NoError(t, sw.err)
+	assert.Equal(t, "prod", sw.conn.target.Name)
+}
+
+func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
+	restarted := false
+	m := setupDaemonViewSource()
+	m.connGen = 4
+	m.api = &Client{}
+	m.scope = homedScope(7, "old")
+	m.view = viewDetail
+	m.list = newListModel()
+	m.list.actor = "tester"
+	m.list.issues = []Issue{testIssue("old1")}
+	m.detail = detailModel{issue: &Issue{ProjectID: 7, ShortID: "old1"}}
+	m.cache.put(cacheKey{projectID: 7, limit: queueFetchLimit}, []Issue{testIssue("old1")})
+	m.projectLabels = newLabelCache()
+	m.projectLabels.byProject[7] = labelCacheEntry{labels: []LabelCount{{Label: "old", Count: 1}}}
+	m.projectsByID[7] = "old"
+	m.projectStats[7] = ProjectStatsSummary{Open: 1}
+	m.pendingRefetch = true
+	m.projectsStale = true
+	m.projectsRefetchPending = true
+	m.input = newSearchBar(ListFilter{})
+	m.modal = modalQuitConfirm
+	m.sseRestart = func(daemonConnection, uint64, chan tea.Msg) tea.Cmd {
+		return func() tea.Msg {
+			restarted = true
+			return nil
+		}
+	}
+	conn := daemonConnection{
+		api:      &Client{},
+		sseHC:    &http.Client{},
+		endpoint: "https://new.example",
+		target:   daemonTarget{Name: "new", URL: "https://new.example"},
+		catalog:  m.daemonTargets,
+		init: bootInit{
+			view:  viewList,
+			scope: homedScope(9, "new-project"),
+		},
+	}
+
+	out, cmd := updateModel(m, daemonSwitchResultMsg{conn: conn})
+
+	assert.Equal(t, uint64(5), out.connGen)
+	assert.Equal(t, "new", out.activeDaemon.Name)
+	assert.Equal(t, int64(9), out.scope.projectID)
+	assert.Equal(t, viewList, out.view)
+	assert.Equal(t, "tester", out.list.actor)
+	assert.Empty(t, out.list.issues)
+	assert.Nil(t, out.detail.issue)
+	assert.False(t, out.cache.isStale())
+	assert.Empty(t, out.projectLabels.byProject)
+	assert.Empty(t, out.projectsByID)
+	assert.False(t, out.pendingRefetch)
+	assert.False(t, out.projectsStale)
+	assert.False(t, out.projectsRefetchPending)
+	assert.Equal(t, inputNone, out.input.kind)
+	assert.Equal(t, modalNone, out.modal)
+	require.NotNil(t, cmd)
+	runBatchCmd(cmd)
+	assert.True(t, restarted)
+}
+
+func TestDaemonSwitchFailureKeepsCurrentSession(t *testing.T) {
+	m := setupDaemonViewSource()
+	m.connGen = 2
+	m.scope = homedScope(7, "old")
+	m.cache.put(cacheKey{projectID: 7, limit: queueFetchLimit}, []Issue{testIssue("old1")})
+	active := m.activeDaemon
+
+	out, cmd := updateModel(m, daemonSwitchResultMsg{
+		target: daemonTarget{Name: "broken", URL: "https://broken.example"},
+		err:    assert.AnError,
+	})
+
+	assert.Equal(t, uint64(2), out.connGen)
+	assert.Equal(t, active, out.activeDaemon)
+	assert.Equal(t, int64(7), out.scope.projectID)
+	assert.False(t, out.cache.isStale())
+	require.NotNil(t, out.toast)
+	assert.Contains(t, out.toast.text, "broken")
+	require.NotNil(t, cmd)
+}
+
+func TestDaemonSwitchDropsOldSSEMessages(t *testing.T) {
+	m := newTestModel()
+	m.connGen = 2
+	m.cache.put(cacheKey{projectID: 7, limit: queueFetchLimit}, []Issue{testIssue("old1")})
+
+	out, cmd := updateModel(m, eventReceivedMsg{gen: 1, eventType: "issue.created", projectID: 7})
+
+	assert.False(t, out.cache.isStale())
+	assert.False(t, out.pendingRefetch)
+	assert.Nil(t, cmd)
+}
+
 func setupDaemonViewSource() Model {
 	m := initialModel(Options{})
 	m.view = viewList
@@ -84,4 +205,13 @@ func setupDaemonView() Model {
 	m := setupDaemonViewSource()
 	m.view = viewDaemons
 	return m
+}
+
+func runBatchCmd(cmd tea.Cmd) {
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		if len(batch) > 0 && batch[0] != nil {
+			_ = batch[0]()
+		}
+	}
 }

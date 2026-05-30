@@ -1,6 +1,10 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"context"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 type daemonRow struct {
 	target  daemonTarget
@@ -47,9 +51,19 @@ func (m Model) routeDaemonsViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "esc":
 		return m.escFromDaemonsView()
 	case "enter":
-		return m, nil
+		if m.daemonCursor < 0 || m.daemonCursor >= len(rows) {
+			return m, nil
+		}
+		return m, switchDaemonCmd(rows[m.daemonCursor].target)
 	}
 	return m, nil
+}
+
+func switchDaemonCmd(target daemonTarget) tea.Cmd {
+	return func() tea.Msg {
+		conn, err := connectDaemonTargetForTUI(context.Background(), target)
+		return daemonSwitchResultMsg{conn: conn, target: target, err: err}
+	}
 }
 
 func (m Model) cursorMoveDaemons(msg tea.KeyMsg, rows []daemonRow) (Model, bool) {
@@ -90,4 +104,76 @@ func cursorForDaemon(rows []daemonRow) int {
 		}
 	}
 	return 0
+}
+
+func (m Model) handleDaemonSwitchResult(msg daemonSwitchResultMsg) (Model, tea.Cmd) {
+	if msg.err != nil {
+		name := daemonTargetDisplay(msg.target)
+		m.toast = &toast{
+			text:      "daemon " + quoteForToast(name) + ": " + msg.err.Error(),
+			level:     toastError,
+			expiresAt: m.toastNow().Add(toastNoBindingTTL),
+		}
+		return m, toastExpireCmd(toastNoBindingTTL)
+	}
+	return m.installDaemonConnection(msg.conn)
+}
+
+func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
+	actor := m.list.actor
+	m.connGen++
+	m.api = conn.api
+	m.activeDaemon = conn.target
+	if len(conn.catalog) > 0 {
+		m.daemonTargets = conn.catalog
+	}
+	m.scope = conn.init.scope
+	m.view = conn.init.view
+	m.prevView = viewList
+	m.list = newListModel()
+	m.list.actor = actor
+	m.detail = newDetailModel()
+	m.cache = newIssueCache()
+	m.projectLabels = newLabelCache()
+	m.projectsByID = map[int64]string{}
+	m.projectIdentByID = map[int64]string{}
+	m.projectStats = map[int64]ProjectStatsSummary{}
+	m.projectsCursor = 0
+	m.pendingRefetch = false
+	m.projectsStale = false
+	m.projectsRefetchPending = false
+	m.input = inputState{}
+	m.modal = modalNone
+	m.sseStatus = sseConnected
+	m.nextGen++
+	m.nextDetailFollowGen++
+	if len(conn.init.projects) > 0 {
+		m.projectsByID = make(map[int64]string, len(conn.init.projects))
+		m.projectIdentByID = make(map[int64]string, len(conn.init.projects))
+		m.projectStats = make(map[int64]ProjectStatsSummary, len(conn.init.projects))
+		for _, r := range conn.init.projects {
+			m.projectsByID[r.ID] = r.Name
+			m.projectIdentByID[r.ID] = r.Name
+			if r.Stats != nil {
+				m.projectStats[r.ID] = *r.Stats
+			}
+		}
+	}
+	var cmds []tea.Cmd
+	if m.sseRestart != nil {
+		if cmd := m.sseRestart(conn, m.connGen, m.sseCh); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if m.view == viewList && !m.scope.empty {
+		cmds = append(cmds, m.fetchInitial(), m.fetchProjects())
+	}
+	if m.view == viewProjects {
+		cmds = append(cmds, m.fetchProjects())
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func quoteForToast(s string) string {
+	return `"` + s + `"`
 }

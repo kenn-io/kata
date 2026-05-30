@@ -165,6 +165,7 @@ type editorReturnedMsg struct {
 // the old or new parent's pane would stay stale until a manual
 // refresh after a parent replace.
 type eventReceivedMsg struct {
+	gen             uint64
 	eventType       string
 	projectID       int64
 	projectUID      string
@@ -258,12 +259,21 @@ type projectsLoadedMsg struct {
 // consumer already uses to update its Last-Event-ID resume cursor — is
 // the authoritative checkpoint. A second copy of the same value on the
 // envelope would invite drift if either path lagged.
-type resetRequiredMsg struct{}
+type resetRequiredMsg struct{ gen uint64 }
 
 // sseStatusMsg carries connection-state transitions from the SSE
 // goroutine to the TEA loop so the status bar can render the
 // reconnect indicator.
-type sseStatusMsg struct{ state sseConnState }
+type sseStatusMsg struct {
+	gen   uint64
+	state sseConnState
+}
+
+type daemonSwitchResultMsg struct {
+	conn   daemonConnection
+	target daemonTarget
+	err    error
+}
 
 // sseConnState is the SSE consumer's connection state.
 type sseConnState int

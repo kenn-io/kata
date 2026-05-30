@@ -54,7 +54,8 @@ var (
 			client.TargetAuth{Token: target.Token, AllowInsecure: target.AllowInsecure},
 			optsForKind(kind))
 	}
-	bootResolveScopeForTUI = bootResolveScope
+	bootResolveScopeForTUI    = bootResolveScope
+	connectDaemonTargetForTUI = connectDaemonTarget
 )
 
 func daemonTargetsFromConfig(cfg config.TUIConfig) []daemonTarget {

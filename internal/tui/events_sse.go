@@ -57,6 +57,12 @@ var reconnectStatusGrace = 1500 * time.Millisecond
 func startSSE(
 	ctx context.Context, hc sseClient, base string, projectID *int64, sseCh chan<- tea.Msg,
 ) {
+	startSSEForConnection(ctx, hc, base, projectID, sseCh, 0)
+}
+
+func startSSEForConnection(
+	ctx context.Context, hc sseClient, base string, projectID *int64, sseCh chan<- tea.Msg, gen uint64,
+) {
 	const maxBackoff = 30 * time.Second
 	backoff := time.Second
 	var lastID int64
@@ -77,7 +83,7 @@ func startSSE(
 		}
 		inOutage = false
 		hasConnected = true
-		notifyStatus(ctx, sseCh, sseConnected)
+		notifyStatus(ctx, sseCh, sseConnected, gen)
 	}
 	armGrace := func() {
 		stateMu.Lock()
@@ -93,7 +99,7 @@ func startSSE(
 			if hasConnected {
 				return
 			}
-			notifyStatus(ctx, sseCh, sseReconnecting)
+			notifyStatus(ctx, sseCh, sseReconnecting, gen)
 		})
 	}
 	defer func() {
@@ -110,7 +116,7 @@ func startSSE(
 			return
 		}
 		connected, err := readSSEStream(
-			ctx, hc, base, projectID, lastID, sseCh, &lastID, publishConnected,
+			ctx, hc, base, projectID, lastID, sseCh, &lastID, publishConnected, gen,
 		)
 		if err == nil || ctx.Err() != nil {
 			return
@@ -142,9 +148,13 @@ func nextBackoff(d, ceiling time.Duration) time.Duration {
 }
 
 // notifyStatus pushes an sseStatusMsg without blocking past ctx cancel.
-func notifyStatus(ctx context.Context, sseCh chan<- tea.Msg, st sseConnState) {
+func notifyStatus(ctx context.Context, sseCh chan<- tea.Msg, st sseConnState, gen ...uint64) {
+	var g uint64
+	if len(gen) > 0 {
+		g = gen[0]
+	}
 	select {
-	case sseCh <- sseStatusMsg{state: st}:
+	case sseCh <- sseStatusMsg{gen: g, state: st}:
 	case <-ctx.Done():
 	}
 }
@@ -166,7 +176,7 @@ func notifyStatus(ctx context.Context, sseCh chan<- tea.Msg, st sseConnState) {
 // take when driving readSSEStream without the startSSE wrapper.
 func readSSEStream(
 	ctx context.Context, hc sseClient, base string, projectID *int64,
-	lastID int64, sseCh chan<- tea.Msg, updateLastID *int64, onConnect func(),
+	lastID int64, sseCh chan<- tea.Msg, updateLastID *int64, onConnect func(), gen ...uint64,
 ) (bool, error) {
 	req, err := buildSSERequest(ctx, base, projectID, lastID)
 	if err != nil {
@@ -194,15 +204,22 @@ func readSSEStream(
 			if onConnect != nil {
 				onConnect()
 			} else {
-				notifyStatus(ctx, sseCh, sseConnected)
+				notifyStatus(ctx, sseCh, sseConnected, firstGen(gen))
 			}
 			connected = true
 		}
 		*updateLastID = f.id
-		if !forwardFrame(ctx, sseCh, f) {
+		if !forwardFrame(ctx, sseCh, f, firstGen(gen)) {
 			return connected, ctx.Err()
 		}
 	}
+}
+
+func firstGen(gen []uint64) uint64 {
+	if len(gen) == 0 {
+		return 0
+	}
+	return gen[0]
 }
 
 // buildSSERequest composes the streaming request. project_id is omitted
@@ -232,12 +249,14 @@ func buildSSERequest(
 // the daemon's contract (internal/api/events.go EventReset.EventID ==
 // ResetAfterID) makes the SSE id: line — which already feeds Last-Event-ID
 // — the authoritative resume checkpoint.
-func forwardFrame(ctx context.Context, sseCh chan<- tea.Msg, f frame) bool {
+func forwardFrame(ctx context.Context, sseCh chan<- tea.Msg, f frame, gen ...uint64) bool {
 	var msg tea.Msg
 	if f.kind == frameReset {
-		msg = resetRequiredMsg{}
+		msg = resetRequiredMsg{gen: firstGen(gen)}
 	} else {
-		msg = decodeEventReceived(f)
+		ev := decodeEventReceived(f)
+		ev.gen = firstGen(gen)
+		msg = ev
 	}
 	select {
 	case sseCh <- msg:

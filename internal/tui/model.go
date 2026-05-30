@@ -54,6 +54,8 @@ type Model struct {
 	sseCh          chan tea.Msg
 	sseStatus      sseConnState
 	pendingRefetch bool
+	connGen        uint64
+	sseRestart     func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
 	// projectsStale flags that the projects table needs a refetch. Set by
 	// the SSE event router when an event's project_id matches a row in
 	// m.projectsByID and viewProjects is the active view. Cleared when the
@@ -423,6 +425,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.fetchProjectsWithStats()
 		}
 		return m, nil
+	}
+	if sw, ok := msg.(daemonSwitchResultMsg); ok {
+		next, cmd := m.handleDaemonSwitchResult(sw)
+		return next, cmd
 	}
 	next, cmd := m.dispatchToView(msg)
 	if bootstrapCmd == nil {
@@ -1602,12 +1608,21 @@ func (m Model) toggleHelp() Model {
 func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case eventReceivedMsg:
+		if m.staleConnMsg(msg.gen) {
+			return m, nil, true
+		}
 		next, cmd := m.handleEventReceived(msg)
 		return next, cmd, true
 	case resetRequiredMsg:
+		if m.staleConnMsg(msg.gen) {
+			return m, nil, true
+		}
 		next, cmd := m.handleResetRequired(msg)
 		return next, cmd, true
 	case sseStatusMsg:
+		if m.staleConnMsg(msg.gen) {
+			return m, nil, true
+		}
 		m.sseStatus = msg.state
 		return m, m.waitForSSE(), true
 	case refetchTickMsg:
@@ -1621,6 +1636,10 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return next, cmd, true
 	}
 	return m, nil, false
+}
+
+func (m Model) staleConnMsg(gen uint64) bool {
+	return gen != 0 && gen != m.connGen
 }
 
 // populateCache updates the single-slot cache after a successful list
