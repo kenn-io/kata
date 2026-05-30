@@ -185,15 +185,15 @@ func installImportedTarget(tmpTarget, target string, force bool) error {
 		if targetExists {
 			return fmt.Errorf("target already exists; pass --force to replace it")
 		}
-		if err := os.Rename(tmpTarget, target); err != nil {
+		if _, err := moveSQLiteFileSet(tmpTarget, target); err != nil {
 			return fmt.Errorf("install import target: %w", err)
 		}
 		return nil
 	}
 
-	backupTarget := target + ".replace.tmp"
-	if err := removeSQLiteFileSetMain(backupTarget); err != nil {
-		return fmt.Errorf("clear stale import target backup: %w", err)
+	backupTarget, err := prepareImportBackupTarget(target)
+	if err != nil {
+		return err
 	}
 	backupMade, err := moveSQLiteFileSet(target, backupTarget)
 	if err != nil {
@@ -202,7 +202,7 @@ func installImportedTarget(tmpTarget, target string, force bool) error {
 			restoreImportedTargetBackup(backupTarget, target, backupMade),
 		)
 	}
-	if err := os.Rename(tmpTarget, target); err != nil {
+	if _, err := moveSQLiteFileSet(tmpTarget, target); err != nil {
 		return errors.Join(
 			fmt.Errorf("install import target: %w", err),
 			restoreImportedTargetBackup(backupTarget, target, backupMade),
@@ -212,6 +212,29 @@ func installImportedTarget(tmpTarget, target string, force bool) error {
 		return fmt.Errorf("remove import target backup: %w", err)
 	}
 	return nil
+}
+
+func prepareImportBackupTarget(target string) (string, error) {
+	dir := filepath.Dir(target)
+	base := filepath.Base(target)
+	f, err := os.CreateTemp(dir, "."+base+".replace-*")
+	if err != nil {
+		return "", fmt.Errorf("create import target backup: %w", err)
+	}
+	backupTarget := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(backupTarget) //nolint:gosec // backupTarget comes from os.CreateTemp above.
+		return "", fmt.Errorf("close import target backup placeholder: %w", err)
+	}
+	if err := os.Remove(backupTarget); err != nil { //nolint:gosec // backupTarget comes from os.CreateTemp above.
+		return "", fmt.Errorf("remove import target backup placeholder: %w", err)
+	}
+	if exists, err := sqliteFileSetExists(backupTarget); err != nil {
+		return "", fmt.Errorf("stat import target backup: %w", err)
+	} else if exists {
+		return "", fmt.Errorf("import target backup already exists: %s", backupTarget)
+	}
+	return backupTarget, nil
 }
 
 func restoreImportedTargetBackup(backupTarget, target string, backupMade bool) error {
@@ -234,7 +257,7 @@ func moveSQLiteFileSet(from, to string) (bool, error) {
 		} else if err != nil {
 			return len(moved) > 0, fmt.Errorf("stat %s: %w", src, err)
 		}
-		if err := os.Rename(src, dst); err != nil { //nolint:gosec // src/dst are SQLite sidecars beside an explicit import target or temp DB.
+		if err := os.Rename(src, dst); err != nil { //nolint:gosec // src/dst are SQLite files beside an explicit import target or temp DB.
 			var rollbackErr error
 			for i := len(moved) - 1; i >= 0; i-- {
 				oldSrc := to + moved[i]
