@@ -156,7 +156,7 @@ func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 
-	resp, err := hc.Do(req)
+	resp, err := hc.Do(req) //nolint:gosec // test request targets httptest.Server's loopback URL
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	assert.Equal(t, "Bearer global-token", gotAuth)

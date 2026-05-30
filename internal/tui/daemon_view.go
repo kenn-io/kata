@@ -134,6 +134,7 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.scope = conn.init.scope
 	m.view = conn.init.view
 	m.prevView = viewList
+	m.focus = focusList
 	m.list = newListModel()
 	m.list.actor = actor
 	m.detail = newDetailModel()

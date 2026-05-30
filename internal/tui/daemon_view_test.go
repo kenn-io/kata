@@ -137,6 +137,8 @@ func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
 	m.connGen = 4
 	m.api = &Client{}
 	m.scope = homedScope(7, "old")
+	m.layout = layoutSplit
+	m.focus = focusDetail
 	m.view = viewDetail
 	m.list = newListModel()
 	m.list.actor = "tester"
@@ -176,6 +178,7 @@ func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
 	assert.Equal(t, "new", out.activeDaemon.Name)
 	assert.Equal(t, int64(9), out.scope.projectID)
 	assert.Equal(t, viewList, out.view)
+	assert.Equal(t, focusList, out.focus)
 	assert.Equal(t, "tester", out.list.actor)
 	assert.Empty(t, out.list.issues)
 	assert.Nil(t, out.detail.issue)

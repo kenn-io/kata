@@ -137,7 +137,7 @@ type Opts struct {
 // process and therefore cannot rely on the package-global auth resolution
 // path.
 type TargetAuth struct {
-	Token          string
+	Token         string
 	AllowInsecure bool
 }
 

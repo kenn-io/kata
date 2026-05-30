@@ -88,7 +88,7 @@ func activeDaemonTarget(targets []daemonTarget, active string) (daemonTarget, bo
 	return daemonTarget{}, false
 }
 
-func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, error) {
+func bootDaemonConnection(ctx context.Context, _ Options) (daemonConnection, error) {
 	cfg, err := readDaemonConfigForTUI()
 	if err != nil {
 		return daemonConnection{}, err

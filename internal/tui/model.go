@@ -2483,11 +2483,12 @@ func (m Model) View() string {
 		// projects view after a resize below threshold (mirror of the
 		// roborev #250 incident on the regular narrow path).
 		var body string
-		if m.view == viewProjects {
+		switch m.view {
+		case viewProjects:
 			body = renderProjects(m)
-		} else if m.view == viewDaemons {
+		case viewDaemons:
 			body = renderDaemons(m)
-		} else {
+		default:
 			body = renderTooNarrow(m.width, m.height)
 		}
 		if m.modal == modalQuitConfirm {
