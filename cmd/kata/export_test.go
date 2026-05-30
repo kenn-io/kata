@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,6 +72,15 @@ func TestExportDoesNotReplaceExistingOutputOnFailure(t *testing.T) {
 	bs, readErr := os.ReadFile(outPath) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, readErr)
 	assert.Equal(t, "previous backup\n", string(bs))
+}
+
+func TestExportReplaceOutputDoesNotDeleteExistingOutput(t *testing.T) {
+	bs, err := os.ReadFile("export.go")
+	require.NoError(t, err)
+
+	re := regexp.MustCompile(`os\.Remove\(\s*output\s*\)`)
+	assert.NotRegexp(t, re, string(bs),
+		"export replacement must not delete the existing backup before replacement succeeds")
 }
 
 func TestExportAgentOutput(t *testing.T) {

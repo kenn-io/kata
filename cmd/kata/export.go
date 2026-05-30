@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -113,14 +112,6 @@ func writeExportOutput(ctx context.Context, d *db.DB, output string, opts jsonl.
 
 func replaceExportOutput(tmpName, output string) error {
 	if err := os.Rename(tmpName, output); err != nil {
-		if runtime.GOOS == "windows" {
-			if rmErr := os.Remove(output); rmErr != nil && !os.IsNotExist(rmErr) {
-				return fmt.Errorf("replace export output: %w", err)
-			}
-			if retryErr := os.Rename(tmpName, output); retryErr == nil {
-				return nil
-			}
-		}
 		return fmt.Errorf("replace export output: %w", err)
 	}
 	return nil
