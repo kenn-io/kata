@@ -39,6 +39,14 @@ func ResolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 	return resolveRemote(ctx, workspaceStart)
 }
 
+// NormalizeRemoteURL exposes kata's remote URL validation/canonicalization
+// for TUI daemon-catalog entries. It returns scheme://host[:port] with path
+// and query stripped, and applies the same allow_insecure semantics used by
+// KATA_SERVER and .kata.local.toml.
+func NormalizeRemoteURL(v string, allowInsecure bool) (string, error) {
+	return normalizeRemoteURL(v, allowInsecure)
+}
+
 // resolveRemote checks the two opt-in remote sources, in order:
 //
 //  1. KATA_SERVER env (highest precedence)

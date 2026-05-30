@@ -129,6 +129,8 @@ type Model struct {
 	// projectsCursor is the highlighted row in viewProjects. Reset when
 	// transitioning into the view; preserved across re-renders.
 	projectsCursor int
+	activeDaemon   daemonTarget
+	daemonTargets  []daemonTarget
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
