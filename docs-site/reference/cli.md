@@ -186,11 +186,13 @@ kata export [--project NAME] [--project-id N] [--output PATH]
 kata export --allow-running-daemon --output PATH
 
 kata import --input PATH --target PATH [--force]
-kata import --source-format beads --input PATH --target PATH
+kata import --source-format beads
 ```
 
-`kata import` creates a fresh database at the target path. It is not a merge
-operation.
+The kata-format `import` creates a fresh database at the target path; it is not a
+merge operation. The `--source-format beads` form is different: it drives the
+`bd` CLI and merges into the current project. See
+[Migrating from Beads](../guide/migrating-from-beads.md).
 
 ## Remote and identity tokens
 

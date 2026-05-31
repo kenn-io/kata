@@ -108,7 +108,7 @@ kata close abc4 --done \
 If work is incomplete:
 
 ```sh
-kata edit abc4 --label needs-review --agent
+kata label add abc4 needs-review --agent
 kata comment abc4 --body "Drafted remote-daemon docs; still need token identity verification." --agent
 ```
 

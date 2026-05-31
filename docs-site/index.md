@@ -34,8 +34,8 @@ the daemon.
 
 You can:
 
-- create, list, edit, close, reopen, comment, label, assign, claim, and link
-  issues;
+- create, list, edit, close, reopen, comment, label, assign, and claim issues,
+  and relate them with `--parent`, `--blocks`, `--blocked-by`, and `--related`;
 - use short issue refs derived from ULIDs, such as `abc4` or `kata#abc4`;
 - search before creating and use idempotency keys for safe retries;
 - stream durable events for polling, live tailing, hooks, and TUI updates;
@@ -45,7 +45,7 @@ You can:
 - opt projects into hub-and-spoke federation when local-first replication is
   more important than single-copy reads.
 
-## Architecture in one pass
+## Architecture
 
 The CLI resolves a project from the current workspace, `.kata.toml`, or an
 explicit `--project` value. It talks to a daemon, starting one automatically for
@@ -76,4 +76,5 @@ still deliberately narrow.
 Read the [Quickstart](get-started/quickstart.md), then skim
 [Concepts](guide/concepts.md) and the [CLI reference](reference/cli.md). Agents
 should use the [Agent workflows](workflows/agents.md) page as their operating
-contract.
+contract. Coming from Beads? See
+[Migrating from Beads](guide/migrating-from-beads.md).

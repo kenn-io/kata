@@ -2,8 +2,8 @@
 site_name = "kata"
 site_url = "https://katatracker.com/"
 site_description = "Local-first issue tracking for humans and coding agents."
-site_author = "kenn.io"
-copyright = "Copyright &copy; 2026 kenn.io"
+site_author = "Kenn Software LLC"
+copyright = 'Copyright &copy; 2026 <a href="https://kenn.io">Kenn Software LLC</a>'
 docs_dir = "docs-site"
 site_dir = "site"
 repo_url = "https://github.com/kenn-io/kata"
@@ -19,6 +19,7 @@ nav = [
   {"Guide" = [
     {"Concepts" = "guide/concepts.md"},
     {"Workspaces and projects" = "guide/workspaces-projects.md"},
+    {"Migrating from Beads" = "guide/migrating-from-beads.md"},
   ]},
   {"Reference" = [
     {"CLI" = "reference/cli.md"},

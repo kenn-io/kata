@@ -93,10 +93,8 @@ For multi-project backups, take a full-database export.
 
 ## Beads import
 
-`kata import` can also read Beads exports:
-
-```sh
-kata import --source-format beads --input beads.jsonl --target /tmp/kata-from-beads.db
-```
-
-This creates a fresh kata database from the source file.
+`kata import --source-format beads` migrates issues from Beads. It does not read
+a file or build a separate database: it drives the `bd` CLI and merges issues
+into the current kata project. See
+[Migrating from Beads](../guide/migrating-from-beads.md) for prerequisites and
+the field mapping.

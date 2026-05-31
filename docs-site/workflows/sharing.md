@@ -19,7 +19,8 @@ This is the default shape for agent coordination on one workstation.
 
 ## Private-network remote daemon
 
-Use this when several trusted hosts should point at one daemon and one database.
+Reach for this when several trusted hosts should share one daemon and one
+database.
 
 The daemon runs on the host that owns the SQLite database and listens on a
 private IP address. Clients set `KATA_SERVER` or `.kata.local.toml`.
@@ -32,7 +33,7 @@ listener.
 
 ## Federation
 
-Use this when each participant should keep a local daemon and local database but
+Choose federation when each participant keeps a local daemon and database, but
 selected projects should converge through a hub.
 
 Federation is opt-in per project. It favors local availability and offline

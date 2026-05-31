@@ -140,7 +140,7 @@ kata list --json | jq .
 Closing asserts completion. If work is incomplete, add context instead:
 
 ```sh
-kata edit abc4 --label needs-review
+kata label add abc4 needs-review
 kata comment abc4 --body "Attempted the schema change; migration test still fails."
 ```
 
