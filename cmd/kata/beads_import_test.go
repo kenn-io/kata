@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -213,6 +214,9 @@ func runBeadsImportTTY(t *testing.T, env *testenv.Env, dir, input string, args .
 
 func installFakeBD(t *testing.T) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake bd is a POSIX shell script; beads-from-live-bd import isn't exercised on Windows")
+	}
 	bin := t.TempDir()
 	path := filepath.Join(bin, "bd")
 	script := `#!/bin/sh

@@ -7,11 +7,9 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -132,7 +130,7 @@ func daemonRuntimeVersion(r daemon.RuntimeRecord) string {
 func daemonStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "send SIGTERM to a running daemon",
+		Short: "request a graceful shutdown of the running daemon",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ns, err := daemon.NewNamespace()
 			if err != nil {
@@ -145,13 +143,21 @@ func daemonStopCmd() *cobra.Command {
 			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
-				if daemon.ProcessAlive(r.PID) {
-					p, _ := os.FindProcess(r.PID)
-					_ = p.Signal(syscall.SIGTERM)
-					pids = append(pids, r.PID)
-					if mode == outputHuman {
-						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", r.PID)
+				if !daemon.ProcessAlive(r.PID) {
+					continue
+				}
+				// signalDaemonStop is platform-specific: SIGTERM on Unix,
+				// a named stop event on Windows (which has no cross-process
+				// SIGTERM). See daemon_signaling_{unix,windows}.go.
+				if err := signalDaemonStop(r, ns.DBHash); err != nil {
+					return &cliError{
+						Kind: kindInternal, ExitCode: ExitInternal,
+						Message: fmt.Sprintf("stop pid %d: %v", r.PID, err),
 					}
+				}
+				pids = append(pids, r.PID)
+				if mode == outputHuman {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", r.PID)
 				}
 			}
 			switch mode {
@@ -194,7 +200,7 @@ func joinInts(values []int, sep string) string {
 func daemonReloadCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reload",
-		Short: "send SIGHUP to a running daemon to reload hook config",
+		Short: "ask a running daemon to reload hook config",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ns, err := daemon.NewNamespace()
 			if err != nil {
@@ -208,17 +214,13 @@ func daemonReloadCmd() *cobra.Command {
 				if !daemon.ProcessAlive(r.PID) {
 					continue
 				}
-				p, err := os.FindProcess(r.PID)
-				if err != nil {
+				// signalDaemonReload is platform-specific: SIGHUP on Unix,
+				// a named reload event on Windows. See
+				// daemon_signaling_{unix,windows}.go.
+				if err := signalDaemonReload(r, ns.DBHash); err != nil {
 					return &cliError{
 						Kind: kindInternal, ExitCode: ExitInternal,
-						Message: fmt.Sprintf("find pid %d: %v", r.PID, err),
-					}
-				}
-				if err := p.Signal(syscall.SIGHUP); err != nil {
-					return &cliError{
-						Kind: kindInternal, ExitCode: ExitInternal,
-						Message: fmt.Sprintf("signal pid %d: %v", r.PID, err),
+						Message: fmt.Sprintf("reload pid %d: %v", r.PID, err),
 					}
 				}
 				switch currentOutputMode() {
@@ -290,6 +292,16 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	if err := ns.EnsureDirs(); err != nil {
 		return err
 	}
+
+	// Wrap ctx with a local cancel so platform-specific shutdown watchers
+	// (e.g. the Windows named-event fired by `kata daemon stop`) can drive
+	// a graceful exit. On Unix this is a no-op; SIGTERM delivered to the
+	// process by main.go's signal.NotifyContext already cancels ctx.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stopCleanup := installStopWatcher(ns.DBHash, cancel)
+	defer stopCleanup()
+
 	dbPath, err := config.KataDB()
 	if err != nil {
 		return err
@@ -311,9 +323,11 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	}
 	defer shutdownHooks(disp)
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGHUP)
-	defer signal.Stop(sigs)
+	// installReloadSource is platform-specific: SIGHUP delivery on Unix,
+	// a named reload event pumped onto the channel on Windows. See
+	// daemon_signaling_{unix,windows}.go.
+	sigs, reloadCleanup := installReloadSource(ctx, ns.DBHash)
+	defer reloadCleanup()
 	go runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
 	broadcaster := daemon.NewEventBroadcaster()
 	federationWake := startFederationRunner(ctx, store, broadcaster, disp, daemonLog)

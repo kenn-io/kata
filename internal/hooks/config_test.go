@@ -4,10 +4,31 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+// absTestCommand returns an absolute command path valid on the host OS.
+// filepath.IsAbs rejects Unix-style "/x" paths on Windows, so tests that need
+// a valid absolute command must use a platform-appropriate one. Forward
+// slashes are accepted by filepath.IsAbs on Windows (after a drive letter) and
+// sidestep TOML backslash escaping.
+func absTestCommand() string {
+	if runtime.GOOS == "windows" {
+		return "C:/Windows/System32/cmd.exe"
+	}
+	return "/usr/local/bin/notify"
+}
+
+// absTestCommandWithSpaces is absTestCommand for the internal-whitespace case.
+func absTestCommandWithSpaces() string {
+	if runtime.GOOS == "windows" {
+		return "C:/Program Files/Some App/bin/notify"
+	}
+	return "/Applications/Some App/bin/notify"
+}
 
 func TestResolvedHook_MatchExact(t *testing.T) {
 	h := ResolvedHook{Event: "issue.created", Match: func(s string) bool { return s == "issue.created" }}
@@ -134,7 +155,7 @@ pool_size = 8
 queue_cap = 1000
 [[hook]]
 event   = "issue.created"
-command = "/bin/true"
+command = "true"
 `)
 	cur := Config{PoolSize: 4, QueueCap: 1000, OutputDiskCap: 100 << 20, RunsLogMaxBytes: 50 << 20, RunsLogKeep: 5, QueueFullLogInterval: 60 * time.Second}
 	lc, err := LoadReload(p, cur)
@@ -167,7 +188,7 @@ func TestLoad_EventStarCreated_Error(t *testing.T) {
 	assertLoadError(t, `
 [[hook]]
 event   = "*.created"
-command = "/bin/true"
+command = "true"
 `, "event = *.created must be rejected")
 }
 
@@ -175,7 +196,7 @@ func TestLoad_EventSyncResetRequired_Error(t *testing.T) {
 	assertLoadError(t, `
 [[hook]]
 event   = "sync.reset_required"
-command = "/bin/true"
+command = "true"
 `, "event = sync.reset_required must be rejected")
 }
 
@@ -185,7 +206,7 @@ func TestLoad_CommandPaths(t *testing.T) {
 		ok   bool
 		desc string
 	}{
-		{"/usr/local/bin/notify", true, "absolute"},
+		{absTestCommand(), true, "absolute"},
 		{"notify", true, "bare name"},
 		{"./foo", false, "dot-relative"},
 		{"bin/foo", false, "embedded slash"},
@@ -212,7 +233,7 @@ func TestLoad_RelativeWorkingDir_Error(t *testing.T) {
 	assertLoadError(t, `
 [[hook]]
 event       = "issue.created"
-command     = "/bin/true"
+command     = "true"
 working_dir = "relative/path"
 `, "relative working_dir must be rejected")
 }
@@ -221,7 +242,7 @@ func TestLoad_KataPrefixedEnv_Error(t *testing.T) {
 	assertLoadError(t, `
 [[hook]]
 event   = "issue.created"
-command = "/bin/true"
+command = "true"
 [hook.env]
 KATA_FOO = "x"
 `, "[hook.env] keys matching ^KATA_ must be rejected")
@@ -230,7 +251,7 @@ KATA_FOO = "x"
 func TestLoad_HookCountCap(t *testing.T) {
 	var b strings.Builder
 	for i := 0; i < 257; i++ {
-		b.WriteString("[[hook]]\nevent = \"issue.created\"\ncommand = \"/bin/true\"\n")
+		b.WriteString("[[hook]]\nevent = \"issue.created\"\ncommand = \"true\"\n")
 	}
 	assertLoadError(t, b.String(), "257 [[hook]] entries must be rejected (cap 256)")
 }
@@ -242,7 +263,7 @@ output_disk_cap = "100k"
 runs_log_max    = "1MB"
 [[hook]]
 event   = "issue.created"
-command = "/bin/true"
+command = "true"
 `)
 	if lc.Config.OutputDiskCap != 100*1024 {
 		t.Fatalf("100k = %d, want %d", lc.Config.OutputDiskCap, 100*1024)
@@ -256,7 +277,7 @@ func TestLoad_UserEnvSorted(t *testing.T) {
 	lc := assertLoadOK(t, `
 [[hook]]
 event   = "issue.created"
-command = "/bin/true"
+command = "true"
 [hook.env]
 ZED   = "z"
 ALPHA = "a"
@@ -272,7 +293,7 @@ MID   = "m"
 func TestLoad_DefaultWorkingDir_IsKataHome(t *testing.T) {
 	dir := setupKataHome(t)
 	path := filepath.Join(dir, "hooks.toml")
-	if err := os.WriteFile(path, []byte("[[hook]]\nevent = \"issue.created\"\ncommand = \"/bin/true\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[[hook]]\nevent = \"issue.created\"\ncommand = \"true\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	lc, err := LoadStartup(path)
@@ -298,7 +319,7 @@ func TestLoad_TimeoutBounds(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.desc, func(t *testing.T) {
-			body := "[[hook]]\nevent=\"issue.created\"\ncommand=\"/bin/true\"\ntimeout=\"" + c.v + "\"\n"
+			body := "[[hook]]\nevent=\"issue.created\"\ncommand=\"true\"\ntimeout=\"" + c.v + "\"\n"
 			if c.ok {
 				assertLoadOK(t, body)
 			} else {
@@ -346,11 +367,7 @@ output_disk_cap = "9999999999999mb"
 // internal whitespace inside an absolute path (Windows "Program Files"
 // or Unix custom dirs), while still rejecting bare names with spaces.
 func TestLoad_AbsolutePathWithSpaces(t *testing.T) {
-	assertLoadOK(t, `
-[[hook]]
-event   = "issue.created"
-command = "/Applications/Some App/bin/notify"
-`)
+	assertLoadOK(t, "[[hook]]\nevent = \"issue.created\"\ncommand = \""+absTestCommandWithSpaces()+"\"\n")
 }
 
 // TestMatch_IssueStarOnlyKnown pins that the issue.* matcher rejects

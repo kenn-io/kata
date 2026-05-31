@@ -153,7 +153,9 @@ func TestExportAgentOutput(t *testing.T) {
 	out, err := runCmdOutput(t, nil, "export", "--agent", "--output", outPath)
 	require.NoError(t, err)
 
-	assert.Equal(t, "OK export output="+outPath+"\n", out)
+	// agentValue is identity for separator-free Unix paths but quotes Windows
+	// paths (backslashes), so assert against the formatted value, not raw.
+	assert.Equal(t, "OK export output="+agentValue(outPath)+"\n", out)
 }
 
 func TestExportScopesByProjectName(t *testing.T) {

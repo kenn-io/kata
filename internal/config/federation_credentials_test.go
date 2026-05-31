@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -36,7 +37,11 @@ func TestWriteFederationCredentialRoundTrips(t *testing.T) {
 	path := filepath.Join(home, "credentials.toml")
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	// Unix permission bits are not meaningful on Windows (files report 0666/
+	// 0444 by the read-only bit); the 0600 intent is enforced via ACLs there.
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 
 	creds, err := config.ReadFederationCredentials()
 	require.NoError(t, err)
@@ -68,6 +73,9 @@ token = "secret-token"
 }
 
 func TestWriteFederationCredentialTightensExistingFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file-mode tightening is not meaningful on Windows (ACL-based)")
+	}
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	path := filepath.Join(home, "credentials.toml")

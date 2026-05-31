@@ -419,4 +419,9 @@ func writeRuntimePID(t *testing.T, home string, pid int) {
 		StartedAt: time.Now().UTC(),
 	})
 	require.NoError(t, err)
+	// On Windows, daemon stop/reload signal via per-daemon named events that
+	// a real daemon creates at startup (installStopWatcher/installReloadSource).
+	// A faked daemon PID has none, so create them here; no-op on Unix, where
+	// stop/reload deliver SIGTERM/SIGHUP straight to the PID.
+	registerDaemonSignalEndpoints(t, ns.DBHash, pid)
 }

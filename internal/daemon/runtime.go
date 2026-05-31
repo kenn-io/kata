@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -105,21 +104,12 @@ func ListRuntimeFiles(dir string) ([]RuntimeRecord, error) {
 	return out, nil
 }
 
-// ProcessAlive returns true if a kill(0, pid) succeeds. Best-effort signal
-// probe; doesn't distinguish "not ours" vs "alive".
-func ProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	if err := p.Signal(syscall.Signal(0)); err != nil {
-		return false
-	}
-	return true
-}
+// ProcessAlive reports whether pid currently refers to a live process.
+// Implementation is platform-specific: Unix uses kill(pid, 0); Windows uses
+// OpenProcess + GetExitCodeProcess. Both are best-effort and don't try to
+// distinguish "not ours" vs "alive".
+//
+// See runtime_unix.go and runtime_windows.go.
 
 // CleanupStaleFiles removes any daemon.<pid>.json whose pid is dead. It
 // cross-checks the filename's pid against the record's pid so a malformed file

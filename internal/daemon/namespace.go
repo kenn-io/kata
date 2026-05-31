@@ -45,7 +45,8 @@ func NewNamespace() (*Namespace, error) {
 
 // socketParent returns the per-dbhash socket directory, preferring
 // $XDG_RUNTIME_DIR and falling back to $TMPDIR (or os.TempDir) under
-// kata-<uid>/<dbhash>.
+// kata-<userTag>/<dbhash>. userTag is the numeric uid on Unix and a
+// sanitized username on Windows (where Getuid is meaningless).
 func socketParent(dbhash string) string {
 	if v := os.Getenv("XDG_RUNTIME_DIR"); v != "" {
 		return filepath.Join(v, "kata", dbhash)
@@ -54,7 +55,7 @@ func socketParent(dbhash string) string {
 	if tmp == "" {
 		tmp = os.TempDir()
 	}
-	return filepath.Join(tmp, fmt.Sprintf("kata-%d", os.Getuid()), dbhash)
+	return filepath.Join(tmp, "kata-"+userTag(), dbhash)
 }
 
 // EnsureDirs materializes DataDir (0700) and SocketDir (0700).

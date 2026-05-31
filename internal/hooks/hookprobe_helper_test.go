@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,9 @@ func hookprobePath(t testing.TB) string {
 			return
 		}
 		out := filepath.Join(dir, "hookprobe")
+		if runtime.GOOS == "windows" {
+			out += ".exe" // Windows won't exec a binary without a recognized extension
+		}
 		// Test-only build of an in-tree helper; args are constants.
 		cmd := exec.Command("go", "build", "-o", out, "./hookprobe") //nolint:gosec // test build
 		var stderr bytes.Buffer

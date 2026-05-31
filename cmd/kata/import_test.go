@@ -49,7 +49,8 @@ func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
 	got, err := d.ProjectByName(context.Background(), "kata")
 	require.NoError(t, err)
 	assert.Equal(t, "kata", got.Name)
-	assert.Equal(t, "OK import source_format=kata target="+target+"\n", out)
+	// agentValue quotes Windows paths (backslashes); assert the formatted value.
+	assert.Equal(t, "OK import source_format=kata target="+agentValue(target)+"\n", out)
 }
 
 func TestImportLegacyFormatConflictsWithSourceFormat(t *testing.T) {

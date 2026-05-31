@@ -47,7 +47,7 @@ func TestRunReloadLoop_DispatchesOnSignal(t *testing.T) {
 	path := filepath.Join(dir, "hooks.toml")
 	require.NoError(t, os.WriteFile(path, []byte(`[[hook]]
 event = "issue.created"
-command = "/bin/true"
+command = "true"
 `), 0o600))
 	rec := &recordingDispatcher{}
 	sigs := make(chan os.Signal, 1)
