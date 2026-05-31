@@ -139,6 +139,39 @@ func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *t
 	assert.Equal(t, viewEmpty, conn.init.view)
 }
 
+func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testing.T) {
+	oldRead := readDaemonConfigForTUI
+	oldEnsure := ensureRunningForTUI
+	oldNewClient := newHTTPClientForTUI
+	oldBootScope := bootResolveScopeForTUI
+	t.Cleanup(func() {
+		readDaemonConfigForTUI = oldRead
+		ensureRunningForTUI = oldEnsure
+		newHTTPClientForTUI = oldNewClient
+		bootResolveScopeForTUI = oldBootScope
+	})
+
+	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
+		return &config.DaemonConfig{}, nil
+	}
+	ensureRunningForTUI = func(context.Context) (string, error) {
+		return "http://100.64.0.5:7777", nil
+	}
+	newHTTPClientForTUI = func(_ context.Context, _ string, _ daemonTarget, _ clientOptsKind) (*http.Client, error) {
+		return &http.Client{}, nil
+	}
+	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
+	}
+
+	conn, err := bootDaemonConnection(context.Background(), Options{})
+
+	require.NoError(t, err)
+	assert.False(t, conn.target.Local)
+	assert.Equal(t, "http://100.64.0.5:7777", conn.target.URL)
+	assert.Equal(t, "100.64.0.5:7777", daemonTargetDisplay(conn.target))
+}
+
 func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	var gotAuth string

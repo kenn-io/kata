@@ -112,11 +112,11 @@ func bootDaemonConnection(ctx context.Context, _ Options) (daemonConnection, err
 }
 
 func connectImplicitDaemonTarget(ctx context.Context) (daemonConnection, error) {
-	target := daemonTarget{Local: true}
 	endpoint, err := ensureRunningForTUI(ctx)
 	if err != nil {
 		return daemonConnection{}, err
 	}
+	target := implicitDaemonTarget(endpoint)
 	return connectResolvedDaemonTarget(ctx, target, endpoint)
 }
 
@@ -172,6 +172,13 @@ func resolvedDaemonTarget(target daemonTarget, endpoint string) daemonTarget {
 		target.URL = ""
 	}
 	return target
+}
+
+func implicitDaemonTarget(endpoint string) daemonTarget {
+	if endpoint == client.UnixBase {
+		return daemonTarget{Local: true}
+	}
+	return daemonTarget{URL: endpoint}
 }
 
 func daemonTargetDisplay(target daemonTarget) string {

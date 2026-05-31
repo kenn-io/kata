@@ -2,7 +2,9 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -214,6 +216,21 @@ func TestDaemonSwitchFailureKeepsCurrentSession(t *testing.T) {
 	require.NotNil(t, out.toast)
 	assert.Contains(t, out.toast.text, "broken")
 	require.NotNil(t, cmd)
+}
+
+func TestDaemonSwitchFailureSanitizesToast(t *testing.T) {
+	m := setupDaemonViewSource()
+
+	out, _ := updateModel(m, daemonSwitchResultMsg{
+		target: daemonTarget{Name: "bad\x1b]0;owned\a"},
+		err:    errors.New("boom\x1b[31mred\x1b[0m\nnext"),
+	})
+
+	require.NotNil(t, out.toast)
+	assert.NotContains(t, out.toast.text, "\x1b")
+	assert.NotContains(t, out.toast.text, "\a")
+	assert.False(t, strings.Contains(out.toast.text, "\n"), "toast must stay single-line")
+	assert.Contains(t, out.toast.text, `\n`)
 }
 
 func TestDaemonSwitchDropsOldSSEMessages(t *testing.T) {

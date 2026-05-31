@@ -112,9 +112,10 @@ func (m Model) handleDaemonSwitchResult(msg daemonSwitchResultMsg) (Model, tea.C
 		return m, nil
 	}
 	if msg.err != nil {
-		name := daemonTargetDisplay(msg.target)
+		name := sanitizeForLine(daemonTargetDisplay(msg.target))
+		errText := sanitizeForLine(msg.err.Error())
 		m.toast = &toast{
-			text:      "daemon " + quoteForToast(name) + ": " + msg.err.Error(),
+			text:      "daemon " + quoteForToast(name) + ": " + errText,
 			level:     toastError,
 			expiresAt: m.toastNow().Add(toastNoBindingTTL),
 		}
