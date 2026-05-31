@@ -21,6 +21,16 @@ required_files=(
   "docs/operations/backup-restore.md"
   "docs/reference/configuration.md"
   "docs/development/contributing.md"
+  "docs/design/index.md"
+  "docs/design/federation.md"
+  "docs/design/hosted-mode.md"
+  "docs/superpowers/plans/2026-05-26-agent-output-format-implementation.md"
+  "docs/superpowers/plans/2026-05-28-trusted-proxy-actor-header.md"
+  "docs/superpowers/specs/2026-04-29-kata-design.md"
+  "docs/superpowers/specs/2026-04-29-kata-shared-server-mode.md"
+  "docs/superpowers/specs/2026-05-20-kata-federation-design.md"
+  "docs/superpowers/specs/2026-05-26-agent-output-format-design.md"
+  "docs/superpowers/specs/2026-05-27-trusted-proxy-actor-header-design.md"
   "docs/stylesheets/extra.css"
 )
 
@@ -31,8 +41,7 @@ fi
 
 for private_docs in \
   docs/federation.md \
-  docs/hosted-mode.md \
-  docs/superpowers; do
+  docs/hosted-mode.md; do
   if [[ -e "$private_docs" ]]; then
     printf 'maintainer-only docs must live outside docs/: %s\n' "$private_docs" >&2
     missing=1
@@ -65,19 +74,13 @@ require_line zensical.toml 'site_url = "https://katatracker.com/"'
 require_line zensical.toml 'docs_dir = "docs"'
 require_line zensical.toml 'site_dir = "site"'
 require_line zensical.toml 'scheme = "slate"'
+require_line zensical.toml '{"Design" = ['
 require_line docs/index.md '# kata カタ'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
 
 rm -rf site
 
-if [[ -x ".venv/bin/zensical" ]]; then
-  .venv/bin/zensical build --strict
-elif command -v zensical >/dev/null 2>&1; then
-  zensical build --strict
-else
-  printf 'zensical not found; install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-docs.txt\n' >&2
-  exit 127
-fi
+scripts/zensical-docs.sh build
 
 for generated in \
   site/federation/index.html \
@@ -85,6 +88,16 @@ for generated in \
   site/superpowers; do
   if [[ -e "$generated" ]]; then
     printf 'generated site contains maintainer-only docs: %s\n' "$generated" >&2
+    exit 1
+  fi
+done
+
+for generated in \
+  site/design/index.html \
+  site/design/federation/index.html \
+  site/design/hosted-mode/index.html; do
+  if [[ ! -e "$generated" ]]; then
+    printf 'generated site is missing design docs page: %s\n' "$generated" >&2
     exit 1
   fi
 done

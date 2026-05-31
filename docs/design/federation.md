@@ -451,6 +451,6 @@ KATA_FEDERATION_DOCKER_PROJECT=kata-federation-smoke-$USER make test-federation-
 ## Historical Design Context
 
 The original design discussion remains in
-`maintainer-docs/superpowers/specs/2026-05-20-kata-federation-design.md`. That document is
+`docs/superpowers/specs/2026-05-20-kata-federation-design.md`. That document is
 historical context. This file is the canonical description of the implemented
 federation behavior and limitations.

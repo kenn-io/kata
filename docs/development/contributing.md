@@ -15,8 +15,7 @@ documented.
 | `internal/tui` | Bubble Tea TUI. |
 | `internal/jsonl` | Export/import, cutover, fixture compatibility. |
 | `internal/federation` | Spoke-side federation client and runner. |
-| `docs` | Public Zensical documentation source. |
-| `maintainer-docs` | Implementation notes and historical design specs that should not be published. |
+| `docs` | Public Zensical documentation source, design notes, and unpublished historical specs. |
 
 ## Local checks
 
@@ -71,9 +70,10 @@ static files from `site/` with a real static host, CDN, or web server.
 
 ## Documentation standards
 
-Public docs should describe implemented behavior first. Historical design specs
-under `maintainer-docs/superpowers/specs` are useful for context, but they
-should not be published wholesale because some decisions have changed during
+Public docs should describe implemented behavior first. Technical notes under
+`docs/design/` can cover deeper implementation context. Historical design specs
+under `docs/superpowers/specs` are useful for maintainers, but they should not
+be published wholesale because some decisions have changed during
 implementation.
 
 When changing behavior:
@@ -81,8 +81,8 @@ When changing behavior:
 - update CLI help when flags or contracts change;
 - update `README.md` if the project overview or quickstart changes;
 - update `docs/` for public user/operator behavior;
-- keep deep design context under `maintainer-docs/superpowers/` only when it
-  helps maintainers.
+- keep historical planning context under `docs/superpowers/` only when it helps
+  maintainers.
 
 ## Commit discipline
 

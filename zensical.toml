@@ -35,6 +35,11 @@ nav = [
     {"Hosted mode" = "operations/hosted-mode.md"},
     {"Backup and restore" = "operations/backup-restore.md"},
   ]},
+  {"Design" = [
+    {"Design notes" = "design/index.md"},
+    {"Federation technical notes" = "design/federation.md"},
+    {"Hosted mode technical notes" = "design/hosted-mode.md"},
+  ]},
   {"Development" = [
     {"Contributing" = "development/contributing.md"},
   ]},

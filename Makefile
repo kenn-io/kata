@@ -28,10 +28,10 @@ docs-install:
 	.venv/bin/pip install -r requirements-docs.txt
 
 docs-build:
-	.venv/bin/zensical build --strict
+	scripts/zensical-docs.sh build
 
 docs-serve:
-	.venv/bin/zensical serve
+	scripts/zensical-docs.sh serve
 
 docs-check:
 	bash scripts/check-docs.sh
