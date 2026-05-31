@@ -223,6 +223,7 @@ func daemonLogWriter(dataDir string) *os.File {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil
 	}
+	//nolint:gosec // G304: dataDir is the daemon's own data dir; filename is the fixed constant "daemon.log".
 	f, err := os.OpenFile(filepath.Join(dataDir, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil
