@@ -6,22 +6,28 @@ missing=0
 required_files=(
   "zensical.toml"
   "requirements-docs.txt"
-  "docs-site/index.md"
-  "docs-site/get-started/quickstart.md"
-  "docs-site/get-started/install.md"
-  "docs-site/guide/concepts.md"
-  "docs-site/guide/workspaces-projects.md"
-  "docs-site/reference/cli.md"
-  "docs-site/workflows/agents.md"
-  "docs-site/workflows/sharing.md"
-  "docs-site/operations/remote-daemon.md"
-  "docs-site/operations/federation.md"
-  "docs-site/operations/hosted-mode.md"
-  "docs-site/operations/backup-restore.md"
-  "docs-site/reference/configuration.md"
-  "docs-site/development/contributing.md"
-  "docs-site/stylesheets/extra.css"
+  "docs/index.md"
+  "docs/get-started/quickstart.md"
+  "docs/get-started/install.md"
+  "docs/guide/concepts.md"
+  "docs/guide/workspaces-projects.md"
+  "docs/guide/migrating-from-beads.md"
+  "docs/reference/cli.md"
+  "docs/workflows/agents.md"
+  "docs/workflows/sharing.md"
+  "docs/operations/remote-daemon.md"
+  "docs/operations/federation.md"
+  "docs/operations/hosted-mode.md"
+  "docs/operations/backup-restore.md"
+  "docs/reference/configuration.md"
+  "docs/development/contributing.md"
+  "docs/stylesheets/extra.css"
 )
+
+if [[ -d "docs-site" ]]; then
+  printf 'docs-site directory should not exist; keep Zensical source under docs/\n' >&2
+  missing=1
+fi
 
 for file in "${required_files[@]}"; do
   if [[ ! -f "$file" ]]; then
@@ -36,7 +42,7 @@ fi
 
 grep -F 'site_name = "kata"' zensical.toml >/dev/null
 grep -F 'site_url = "https://katatracker.com/"' zensical.toml >/dev/null
-grep -F 'docs_dir = "docs-site"' zensical.toml >/dev/null
+grep -F 'docs_dir = "docs"' zensical.toml >/dev/null
 grep -F 'site_dir = "site"' zensical.toml >/dev/null
 grep -F 'scheme = "slate"' zensical.toml >/dev/null
 

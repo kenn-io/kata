@@ -34,7 +34,7 @@ docs-serve:
 	.venv/bin/zensical serve
 
 docs-check:
-	bash scripts/check-docs-site.sh
+	bash scripts/check-docs.sh
 
 lint:
 	golangci-lint run --config .golangci.yml

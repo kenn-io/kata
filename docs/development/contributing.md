@@ -15,8 +15,7 @@ documented.
 | `internal/tui` | Bubble Tea TUI. |
 | `internal/jsonl` | Export/import, cutover, fixture compatibility. |
 | `internal/federation` | Spoke-side federation client and runner. |
-| `docs` | Existing implementation notes and historical design specs. |
-| `docs-site` | Public Zensical documentation source. |
+| `docs` | Public Zensical documentation source, implementation notes, and historical design specs. |
 
 ## Local checks
 
@@ -79,8 +78,8 @@ When changing behavior:
 
 - update CLI help when flags or contracts change;
 - update `README.md` if the project overview or quickstart changes;
-- update `docs-site` for public user/operator behavior;
-- keep deep design context in `docs/` only when it helps maintainers.
+- update `docs/` for public user/operator behavior;
+- keep deep design context under `docs/superpowers/` only when it helps maintainers.
 
 ## Commit discipline
 

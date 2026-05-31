@@ -4,11 +4,11 @@ site_url = "https://katatracker.com/"
 site_description = "Local-first issue tracking for humans and coding agents."
 site_author = "Kenn Software LLC"
 copyright = 'Copyright &copy; 2026 <a href="https://kenn.io">Kenn Software LLC</a>'
-docs_dir = "docs-site"
+docs_dir = "docs"
 site_dir = "site"
 repo_url = "https://github.com/kenn-io/kata"
 repo_name = "kenn-io/kata"
-edit_uri = "edit/main/docs-site/"
+edit_uri = "edit/main/docs/"
 extra_css = ["stylesheets/extra.css"]
 nav = [
   {"Start" = [

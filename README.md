@@ -9,7 +9,7 @@ automation: stable commands, JSON output, predictable failure modes. The TUI is
 built for people: browse, triage, edit, and supervise agent-written work without
 reading raw JSON. Both talk to the same local daemon and SQLite database.
 
-The documentation in [`docs-site/`](docs-site/) is the definitive guide,
+The documentation in [`docs/`](docs/) is the definitive guide,
 published with Zensical at <https://katatracker.com/>.
 
 Status: early public preview. The CLI, daemon, and TUI are usable, but command
@@ -71,7 +71,7 @@ trade-off is that kata does not ride git remotes for sharing; the remote daemon
 and federation cover that instead.
 
 Moving from Beads? See
-[Migrating from Beads](docs-site/guide/migrating-from-beads.md).
+[Migrating from Beads](docs/guide/migrating-from-beads.md).
 `kata import --source-format beads` drives the `bd` CLI and merges your issues
 into a kata project.
 
@@ -88,37 +88,37 @@ go install go.kenn.io/kata/cmd/kata@latest
 Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin` (often
 `~/go/bin`); put that directory on your `PATH`. To build from a clone, run
 `make install` (it defaults to `~/.local/bin`). See
-[Install](docs-site/get-started/install.md) for build-from-source and Windows
+[Install](docs/get-started/install.md) for build-from-source and Windows
 steps.
 
 ## Documentation
 
-The [docs site](docs-site/) is the definitive reference:
+The [docs site](docs/) is the definitive reference:
 
-- Get started: [Quickstart](docs-site/get-started/quickstart.md) ·
-  [Install](docs-site/get-started/install.md)
-- Guide: [Concepts](docs-site/guide/concepts.md) ·
-  [Workspaces and projects](docs-site/guide/workspaces-projects.md) ·
-  [Migrating from Beads](docs-site/guide/migrating-from-beads.md)
-- Reference: [CLI](docs-site/reference/cli.md) ·
-  [Configuration](docs-site/reference/configuration.md)
-- Workflows: [Agent workflows](docs-site/workflows/agents.md) ·
-  [Sharing models](docs-site/workflows/sharing.md)
-- Operations: [Remote daemon](docs-site/operations/remote-daemon.md) ·
-  [Federation](docs-site/operations/federation.md) ·
-  [Hosted mode](docs-site/operations/hosted-mode.md) ·
-  [Backup and restore](docs-site/operations/backup-restore.md)
+- Get started: [Quickstart](docs/get-started/quickstart.md) ·
+  [Install](docs/get-started/install.md)
+- Guide: [Concepts](docs/guide/concepts.md) ·
+  [Workspaces and projects](docs/guide/workspaces-projects.md) ·
+  [Migrating from Beads](docs/guide/migrating-from-beads.md)
+- Reference: [CLI](docs/reference/cli.md) ·
+  [Configuration](docs/reference/configuration.md)
+- Workflows: [Agent workflows](docs/workflows/agents.md) ·
+  [Sharing models](docs/workflows/sharing.md)
+- Operations: [Remote daemon](docs/operations/remote-daemon.md) ·
+  [Federation](docs/operations/federation.md) ·
+  [Hosted mode](docs/operations/hosted-mode.md) ·
+  [Backup and restore](docs/operations/backup-restore.md)
 
 ## For coding agents
 
 Run `kata quickstart` (alias `kata agent-instructions`) for the operating
 contract: search before creating, pass an idempotency key on create, prefer
 `--agent` output, claim work with `kata claim`, and close only when the work is
-verified. [Agent workflows](docs-site/workflows/agents.md) is the same contract
+verified. [Agent workflows](docs/workflows/agents.md) is the same contract
 in long form.
 
 ## Contributing
 
-See [Contributing](docs-site/development/contributing.md) for the repository
+See [Contributing](docs/development/contributing.md) for the repository
 layout and local checks (`make test`, `make lint`, `make vet`, `make nilaway`).
 Licensed under the terms in [LICENSE](LICENSE).
