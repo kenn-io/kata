@@ -374,23 +374,14 @@ func TestIngestClaimViolationPayloadIncludesCanonicalOffenderFields(t *testing.T
 	assert.Equal(t, spokeUID, payloadString(t, payload, "holder_instance_uid"))
 }
 
-func TestIngestClaimRequiredViolationPayloadOmitsLiveClaimFields(t *testing.T) {
+func TestIngestWithoutLiveClaimDoesNotEmitViolation(t *testing.T) {
 	d, ctx, p, spokeUID, issue, _ := setupIngestClaimIssue(t)
 	offending := remoteClaimWorkEvent(t, p, spokeUID, issue.UID, nil, "issue.updated", "remote-agent")
 
 	_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, offending))
 	require.NoError(t, err)
 
-	payload := latestClaimViolationPayload(t, d)
-	assert.Equal(t, issue.UID, payloadString(t, payload, "issue_uid"))
-	assert.Equal(t, offending.EventUID, payloadString(t, payload, "offending_event_uid"))
-	assert.Equal(t, "issue.updated", payloadString(t, payload, "offending_event_type"))
-	assert.Equal(t, spokeUID, payloadString(t, payload, "offending_origin_instance_uid"))
-	assert.Equal(t, "remote-agent", payloadString(t, payload, "actor"))
-	assert.Equal(t, "claim_required", payloadString(t, payload, "reason"))
-	assertPayloadFieldOmittedOrNull(t, payload, "claim_uid")
-	assertPayloadFieldOmittedOrNull(t, payload, "holder")
-	assertPayloadFieldOmittedOrNull(t, payload, "holder_instance_uid")
+	assertEventCount(t, d, "claim.violated", 0)
 }
 
 func TestClaimViolationQueriesUseLegacyPayloadOriginFallback(t *testing.T) {
@@ -1043,7 +1034,18 @@ func TestPendingClaimRequestLegacyEmptyHolderInstanceStillDedupesByHolder(t *tes
 	assert.Empty(t, got.HolderInstanceUID)
 }
 
-func TestPendingClaimDoesNotSatisfyClaimGate(t *testing.T) {
+func TestClaimGateAllowsUnclaimedIssue(t *testing.T) {
+	d, ctx, p, issue := setupTestIssue(t)
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+
+	err := d.CheckClaimGate(ctx, db.ClaimGateParams{
+		ProjectID: p.ID, IssueRef: issue.ShortID, Principal: claimPrincipal(t, "alice"), Now: now,
+	})
+
+	require.NoError(t, err)
+}
+
+func TestPendingClaimDoesNotBlockUnclaimedClaimGate(t *testing.T) {
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	alice := claimPrincipal(t, "alice")
@@ -1056,8 +1058,7 @@ func TestPendingClaimDoesNotSatisfyClaimGate(t *testing.T) {
 		ProjectID: p.ID, IssueRef: issue.ShortID, Principal: alice, Now: now,
 	})
 
-	require.Error(t, err)
-	assert.ErrorIs(t, err, db.ErrPendingClaimNotAuthoritative)
+	require.NoError(t, err)
 }
 
 func TestPendingClaimResolveStoresCachedClaim(t *testing.T) {
@@ -1203,7 +1204,7 @@ func TestClaimGateIgnoresClientKindForLiveHolderMatch(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("same holder instance expired timed claim with non-empty client kind returns expired", func(t *testing.T) {
+	t.Run("same holder instance expired timed claim with non-empty client kind is treated as absent", func(t *testing.T) {
 		d, ctx, p, issue := setupTestIssue(t)
 		now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 		acquired := db.ClaimPrincipal{
@@ -1231,8 +1232,7 @@ func TestClaimGateIgnoresClientKindForLiveHolderMatch(t *testing.T) {
 			Now: now.Add(time.Minute),
 		})
 
-		require.Error(t, err)
-		assert.ErrorIs(t, err, db.ErrClaimExpired)
+		require.NoError(t, err)
 	})
 
 	t.Run("different holder instance still returns denied", func(t *testing.T) {
@@ -1266,7 +1266,7 @@ func TestClaimGateIgnoresClientKindForLiveHolderMatch(t *testing.T) {
 	})
 }
 
-func TestCachedClaimTimedGateDeniesAfterExpiry(t *testing.T) {
+func TestCachedClaimTimedGateAllowsAfterExpiry(t *testing.T) {
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	expires := now.Add(time.Minute)
@@ -1280,11 +1280,10 @@ func TestCachedClaimTimedGateDeniesAfterExpiry(t *testing.T) {
 	err := d.CheckClaimGate(ctx, db.ClaimGateParams{
 		ProjectID: p.ID, IssueRef: issue.ShortID, Principal: alice, Now: expires,
 	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, db.ErrClaimExpired)
+	require.NoError(t, err)
 }
 
-func TestCachedClaimTimedGateDeniesDifferentTupleBeforeExpiryClassification(t *testing.T) {
+func TestCachedClaimTimedGateDeniesDifferentTupleBeforeExpiry(t *testing.T) {
 	d, ctx, p, issue := setupTestIssue(t)
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
 	expires := now.Add(time.Minute)
@@ -1293,18 +1292,17 @@ func TestCachedClaimTimedGateDeniesDifferentTupleBeforeExpiryClassification(t *t
 	require.NoError(t, d.UpsertClaimCache(ctx, cachedClaim(t, issue, alice, "timed", now, &expires)))
 
 	err := d.CheckClaimGate(ctx, db.ClaimGateParams{
-		ProjectID: p.ID, IssueRef: issue.ShortID, Principal: bob, Now: expires,
+		ProjectID: p.ID, IssueRef: issue.ShortID, Principal: bob, Now: now.Add(30 * time.Second),
 	})
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, db.ErrClaimDenied)
 
 	err = d.CheckClaimGate(ctx, db.ClaimGateParams{
-		ProjectID: p.ID, IssueRef: issue.ShortID, Principal: alice, Now: expires,
+		ProjectID: p.ID, IssueRef: issue.ShortID, Principal: bob, Now: expires,
 	})
 
-	require.Error(t, err)
-	assert.ErrorIs(t, err, db.ErrClaimExpired)
+	require.NoError(t, err)
 }
 
 func TestCachedClaimDeniedForDifferentHolder(t *testing.T) {

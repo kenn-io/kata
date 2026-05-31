@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	// ErrClaimRequired reports that an issue mutation needs a live claim.
+	// ErrClaimRequired is retained for legacy claim-action error mapping.
 	ErrClaimRequired = errors.New("claim required")
 	// ErrClaimDenied reports that another holder owns the relevant claim.
 	ErrClaimDenied = errors.New("claim denied")
@@ -23,7 +23,7 @@ var (
 	ErrClaimExpired = errors.New("claim expired")
 	// ErrClaimValidation reports an invalid claim request or state transition.
 	ErrClaimValidation = errors.New("claim validation")
-	// ErrPendingClaimNotAuthoritative reports that a pending claim cannot authorize work.
+	// ErrPendingClaimNotAuthoritative reports that a pending claim cannot prove exclusivity.
 	ErrPendingClaimNotAuthoritative = errors.New("pending claim not authoritative")
 )
 
@@ -710,23 +710,16 @@ func (d *DB) CheckClaimGate(ctx context.Context, p ClaimGateParams) error {
 		}
 		live, err := liveClaimForIssueTx(ctx, conn, issue.UID)
 		if errors.Is(err, ErrNotFound) {
-			pending, err := activePendingClaimRequestForPrincipalTx(ctx, conn, issue.UID, p.Principal)
-			if err == nil && pending.ID != 0 {
-				return ErrPendingClaimNotAuthoritative
-			}
-			if err != nil && !errors.Is(err, ErrNotFound) {
-				return err
-			}
-			return ErrClaimRequired
+			return nil
 		}
 		if err != nil {
 			return err
 		}
+		if live.ClaimKind == "timed" && live.ExpiresAt != nil && !live.ExpiresAt.After(now) {
+			return nil
+		}
 		if !sameClaimGateHolder(live, p.Principal) {
 			return ErrClaimDenied
-		}
-		if live.ClaimKind == "timed" && live.ExpiresAt != nil && !live.ExpiresAt.After(now) {
-			return ErrClaimExpired
 		}
 		return nil
 	})
@@ -1290,19 +1283,16 @@ func (d *DB) annotateClaimWorkMutationTx(
 		}
 		in.OffendingEventUID = uid
 	}
+	shouldAuditClaim := in.RequireClaim || claimWorkMutationRequiresClaim(in.EventType)
 	live, err := liveClaimForIssueTx(ctx, tx, in.IssueUID)
 	if errors.Is(err, ErrNotFound) {
-		if in.RequireClaim || claimWorkMutationRequiresClaim(in.EventType) {
-			evt, err := d.insertClaimViolationWithoutLiveClaimTx(ctx, tx, in, "claim_required")
-			if err != nil {
-				return nil, err
-			}
-			return append(events, evt), nil
-		}
 		return events, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if !shouldAuditClaim {
+		return events, nil
 	}
 	if !claimWorkCoveredByLiveClaim(live, in.HolderInstanceUID, in.Actor) {
 		evt, err := d.insertClaimEventTx(ctx, tx, claimEventInput{
@@ -1333,7 +1323,7 @@ func claimWorkMutationRequiresClaim(eventType string) bool {
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
 		"issue.labeled", "issue.unlabeled", "issue.linked", "issue.unlinked",
-		"issue.links_changed", "issue.metadata_updated", "issue.commented":
+		"issue.links_changed", "issue.metadata_updated":
 		return true
 	default:
 		return false
@@ -1406,76 +1396,6 @@ func latestClaimOffendingEventUIDTx(
 		return "", fmt.Errorf("lookup claim violation offender event: %w", err)
 	}
 	return uid, nil
-}
-
-func (d *DB) insertClaimViolationWithoutLiveClaimTx(
-	ctx context.Context,
-	tx claimStore,
-	in claimWorkMutationInput,
-	reason string,
-) (Event, error) {
-	payload := map[string]any{
-		"issue_uid":                     in.IssueUID,
-		"offending_event_uid":           in.OffendingEventUID,
-		"offending_event_type":          in.EventType,
-		"offending_origin_instance_uid": in.HolderInstanceUID,
-		"actor":                         in.Actor,
-		"reason":                        reason,
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return Event{}, fmt.Errorf("marshal claim violation payload: %w", err)
-	}
-	eventUID, err := katauid.New()
-	if err != nil {
-		return Event{}, fmt.Errorf("generate event uid: %w", err)
-	}
-	now := time.Now().UTC()
-	createdAt := now.Format(sqliteTimeFormat)
-	clock, err := nextClaimEventHLC(ctx, tx, now)
-	if err != nil {
-		return Event{}, fmt.Errorf("next event hlc: %w", err)
-	}
-	projectUID, projectName, err := claimEventProjectIdentityTx(ctx, tx, in.ProjectID, in.ProjectName)
-	if err != nil {
-		return Event{}, err
-	}
-	contentHash, err := EventContentHash(EventHashInput{
-		UID:               eventUID,
-		OriginInstanceUID: d.instanceUID,
-		ProjectUID:        projectUID,
-		ProjectName:       projectName,
-		IssueUID:          &in.IssueUID,
-		Type:              "claim.violated",
-		Actor:             in.Actor,
-		HLCPhysicalMS:     clock.PhysicalMS,
-		HLCCounter:        clock.Counter,
-		CreatedAt:         createdAt,
-		Payload:           json.RawMessage(b),
-	})
-	if err != nil {
-		return Event{}, fmt.Errorf("content hash: %w", err)
-	}
-	res, err := tx.ExecContext(ctx, `
-		INSERT INTO events(
-		  uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid,
-		  type, actor, payload, hlc_physical_ms, hlc_counter, content_hash, created_at
-		)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		eventUID, d.instanceUID, in.ProjectID, projectName, in.IssueID, in.IssueUID,
-		"claim.violated", in.Actor, string(b), clock.PhysicalMS, clock.Counter, contentHash, createdAt)
-	if err != nil {
-		return Event{}, fmt.Errorf("insert claim violation event: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Event{}, err
-	}
-	e, err := scanEvent(tx.QueryRowContext(ctx, eventSelectByID, id))
-	if err != nil {
-		return Event{}, fmt.Errorf("read claim violation event: %w", err)
-	}
-	return e, nil
 }
 
 type claimEventInput struct {

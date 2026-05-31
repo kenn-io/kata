@@ -499,6 +499,10 @@ A claim answers "who is *actively working* this issue right now," distinct from
 `owner` ("who is responsible"). It is hub-authoritative and exclusive per issue.
 A claim is a coordination primitive, not a cryptographic or consensus proof of
 global state.
+Holding a claim gives temporary exclusivity against other non-comment work while
+the claim is live. It does not replace durable ownership, does not serialize
+comments, and is not required for ordinary unclaimed edits, which still converge
+through the LWW fold.
 
 The default is a **hard claim**: it has no expiry and stays active until the
 holder releases it, the issue closes, or an admin/human force-releases it. For
@@ -548,22 +552,18 @@ happened offline. Enforcement therefore does not live in a synchronous write
 path; it is layered:
 
 1. **Claim exclusivity is mechanical** — the hub guarantees ≤1 live holder.
-2. **Spoke write-time gate** — a spoke daemon refuses *agent-initiated* work
-   mutations (edit/close/priority/links) on a shared issue unless the acting
-   agent holds a valid claim. While disconnected, a cached hub-confirmed claim is
-   a local continuity policy, not an exclusivity proof: timed claims may be used
-   only until cached `expires_at`, and hard claims may either be online-only or
-   accepted as an optimistic stale-cache path that the hub may later flag if the
-   claim was closed, force-released, or superseded. This is where double-work is
-   normally prevented — at the point of action, before an event exists. Comments
-   bypass. Human/admin work actions may bypass only through trusted spoke policy
-   or a server-authenticated role/capability/client kind; the free-form `--as`
-   actor string is never a bypass authority. If the deployment has no
-   authenticated client-kind signal, require claims for all non-comment work
-   mutations on federated projects.
-3. **Hub-side audit annotation** — if a work event still arrives uncovered by a
-   valid claim (stale client, genuine race), the hub emits `claim.violated` and
-   the origin spoke surfaces it on next sync. Nothing is dropped.
+2. **Spoke live-claim gate** — before non-comment work mutations
+   (edit/close/priority/links) on a shared issue, a spoke refreshes cached claim
+   state when it can. If no live claim exists, the mutation proceeds locally and
+   converges by LWW. If the acting agent holds the live claim, the mutation
+   proceeds. If another holder has a live, unexpired claim, the spoke refuses the
+   mutation. Timed claims stop blocking once expired. Pending offline claim
+   requests are never authoritative and do not block ordinary edits. Comments
+   bypass this gate because they are append-only.
+3. **Hub-side audit annotation** — if a work event arrives while another holder
+   has a live claim on the affected issue, the hub emits `claim.violated` and
+   the origin spoke surfaces it on next sync. Ordinary unclaimed work is not a
+   violation. Nothing is dropped.
 
 A strictly synchronous hub-reject model is possible only by making agent work
 mutations synchronous, which trades away offline editing; this design declines
@@ -572,9 +572,9 @@ that trade.
 ### 9.5 Offline pending-claim UX
 
 Offline, a spoke records and displays a **pending** claim request. It must not
-block others, must not appear authoritative, and is retried on reconnect. If the
-hub later denies it, the local daemon surfaces a *rejected pending claim* and the
-agent should stop or rebase its plan.
+block edits or other actors, must not appear authoritative, and is retried on
+reconnect. If the hub later denies it, the local daemon surfaces a *rejected
+pending claim* and the agent should stop relying on exclusivity.
 
 ### 9.6 Claim state authority
 
@@ -582,9 +582,10 @@ Current claim state — especially `expires_at` after timed-claim renewals — i
 authoritative from the **hub claim table/API**, not derived from the event log
 (renewals are not events). Spokes may cache claim state for display and local
 continuity, but must treat it as possibly stale and confirm against the hub before
-relying on exclusivity. Offline mutations made under a cached hard claim are
-therefore explicitly outside the strict ≤1-holder guarantee; on ingest the hub
-annotates uncovered/stale work with `claim.violated` instead of dropping data.
+relying on exclusivity. Offline mutations made while relying on a cached hard
+claim are therefore explicitly outside the strict ≤1-holder guarantee; on ingest
+the hub annotates work that conflicts with another currently live claim with
+`claim.violated` instead of dropping data.
 
 ---
 
@@ -715,8 +716,8 @@ section remains as historical context for how the implementation was staged.
 ### Phase 3 — Claims / optional timed claims
 - Claim table + atomic hub endpoints (§9.2); timed-claim sweeper +
   opportunistic expiry; enrollment-grant authorization for claim actions
-  (§7.4, §13); spoke write-time gate; pending-claim UX; `claim.*` events; lease
-  CLI/status surface.
+  (§7.4, §13); spoke live-claim conflict gate; pending-claim UX; `claim.*`
+  events; lease CLI/status surface.
 - **Exit:** two agents on different spokes cannot both hold a live claim; a
   crashed timed-claim holder's claim auto-expires and frees the issue.
 

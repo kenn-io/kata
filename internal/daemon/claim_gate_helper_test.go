@@ -28,21 +28,28 @@ func TestClaimGateHelperBypassesProjectsWithoutEnabledFederation(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestClaimGateHelperHubRequiresLocalLiveClaim(t *testing.T) {
+func TestClaimGateHelperHubAllowsUnclaimedIssue(t *testing.T) {
 	ctx := context.Background()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	enableClaimGateHelperHub(t, store, project.ID)
 
 	err := requireFederatedIssueClaim(ctx, ServerConfig{DB: store}, project.ID, issue, "agent")
-	assertClaimGateHelperAPIError(t, err, http.StatusConflict, "claim_required")
+	require.NoError(t, err)
+}
 
-	_, err = store.AcquireClaim(ctx, db.AcquireClaimParams{
+func TestClaimGateHelperHubDeniesOtherLiveClaimHolder(t *testing.T) {
+	ctx := context.Background()
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	enableClaimGateHelperHub(t, store, project.ID)
+
+	_, err := store.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: project.ID,
 		IssueRef:  issue.ShortID,
 		Principal: db.ClaimPrincipal{
 			HolderInstanceUID: store.InstanceUID(),
-			Holder:            "agent",
+			Holder:            "other",
 			ClientKind:        "",
 		},
 		ClaimKind: "hard",
@@ -51,10 +58,10 @@ func TestClaimGateHelperHubRequiresLocalLiveClaim(t *testing.T) {
 	require.NoError(t, err)
 
 	err = requireFederatedIssueClaim(ctx, ServerConfig{DB: store}, project.ID, issue, "agent")
-	require.NoError(t, err)
+	assertClaimGateHelperAPIError(t, err, http.StatusConflict, "claim_denied")
 }
 
-func TestClaimGateHelperPendingClaimMapsToClaimRequired(t *testing.T) {
+func TestClaimGateHelperPendingClaimDoesNotBlockUnclaimedIssue(t *testing.T) {
 	ctx := context.Background()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
@@ -74,7 +81,7 @@ func TestClaimGateHelperPendingClaimMapsToClaimRequired(t *testing.T) {
 
 	err = requireFederatedIssueClaim(ctx, ServerConfig{DB: store}, project.ID, issue, "agent")
 
-	assertClaimGateHelperAPIError(t, err, http.StatusConflict, "claim_required")
+	require.NoError(t, err)
 }
 
 func TestClaimGateHelperSpokeRefreshesHubStatusBeforeCheckingCache(t *testing.T) {

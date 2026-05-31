@@ -121,7 +121,7 @@ func claimGateAPIError(err error) error {
 			"lease expired for federated issue mutation", "run kata federation lease acquire <ref>", nil)
 	case errors.Is(err, db.ErrClaimRequired), errors.Is(err, db.ErrPendingClaimNotAuthoritative):
 		return api.NewError(http.StatusConflict, "claim_required",
-			"lease required for federated issue mutation", "run kata federation lease acquire <ref>", nil)
+			"lease is not authoritative for this federated issue mutation", "run kata show <ref>", nil)
 	case errors.Is(err, db.ErrClaimValidation):
 		return api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
 	case errors.Is(err, db.ErrNotFound):

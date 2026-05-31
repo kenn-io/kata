@@ -851,8 +851,7 @@ func TestAdoptProjectIntoFederationClearsLocalClaimState(t *testing.T) {
 		Principal: principal,
 		Now:       now,
 	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, db.ErrClaimRequired)
+	require.NoError(t, err)
 }
 
 func TestAdoptionSnapshotLinksIngestDoesNotEmitClaimViolation(t *testing.T) {
@@ -2178,7 +2177,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		assertEventCount(t, d, "claim.violated", 1)
+		assertEventCount(t, d, "claim.violated", 0)
 	})
 
 	for _, eventType := range []string{"issue.created", "issue.snapshot"} {
@@ -2369,7 +2368,7 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
 		"issue.labeled", "issue.unlabeled", "issue.linked", "issue.unlinked",
-		"issue.links_changed", "issue.metadata_updated", "issue.commented",
+		"issue.links_changed", "issue.metadata_updated",
 	} {
 		t.Run(eventType, func(t *testing.T) {
 			d, ctx, p, spokeUID, issue, peer := setupIngestClaimIssue(t)
@@ -2387,9 +2386,6 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 
 			require.NoError(t, err)
 			wantViolations := 1
-			if eventType == "issue.linked" || eventType == "issue.unlinked" || eventType == "issue.links_changed" {
-				wantViolations = 2
-			}
 			assertEventCount(t, d, "claim.violated", wantViolations)
 		})
 	}
@@ -2413,6 +2409,24 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 			assertEventCount(t, d, "claim.violated", 0)
 		})
 	}
+
+	t.Run("issue.commented bypasses live claims", func(t *testing.T) {
+		d, ctx, p, spokeUID, issue, peer := setupIngestClaimIssue(t)
+		_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
+			ProjectID: p.ID,
+			IssueRef:  issue.ShortID,
+			Principal: db.ClaimPrincipal{HolderInstanceUID: spokeUID, Holder: "holder"},
+			ClaimKind: "hard",
+			Now:       time.Now().UTC(),
+		})
+		require.NoError(t, err)
+
+		_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID,
+			remoteClaimWorkEvent(t, p, spokeUID, issue.UID, &peer.UID, "issue.commented", "remote-agent")))
+
+		require.NoError(t, err)
+		assertEventCount(t, d, "claim.violated", 0)
+	})
 }
 
 func TestIngestClaimAuditRejectsForgedAdoptionLinkBaseline(t *testing.T) {
@@ -2432,7 +2446,7 @@ func TestIngestClaimAuditRejectsForgedAdoptionLinkBaseline(t *testing.T) {
 	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, ev))
 
 	require.NoError(t, err)
-	assertEventCount(t, d, "claim.violated", 2)
+	assertEventCount(t, d, "claim.violated", 1)
 }
 
 func TestIngestClaimAuditRejectsForgedAdoptionLinkBaselineAfterSnapshots(t *testing.T) {
@@ -2465,10 +2479,10 @@ func TestIngestClaimAuditRejectsForgedAdoptionLinkBaselineAfterSnapshots(t *test
 	})
 
 	require.NoError(t, err)
-	assertEventCount(t, d, "claim.violated", 2)
+	assertEventCount(t, d, "claim.violated", 0)
 }
 
-func TestIngestClaimAuditSnapshotLinkToExistingIssueRequiresPeerClaim(t *testing.T) {
+func TestIngestClaimAuditSnapshotLinkToUnclaimedExistingIssueDoesNotViolate(t *testing.T) {
 	d, ctx, p, spokeUID := setupFederationIngestHub(t)
 	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -2484,13 +2498,13 @@ func TestIngestClaimAuditSnapshotLinkToExistingIssueRequiresPeerClaim(t *testing
 	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, snapshot))
 
 	require.NoError(t, err)
-	assertEventCount(t, d, "claim.violated", 1)
+	assertEventCount(t, d, "claim.violated", 0)
 	assertRowCount(ctx, t, d, 1, "snapshot link to existing peer materialized",
 		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'related'`,
 		p.ID)
 }
 
-func TestIngestClaimAuditSnapshotLinkToUnclaimedSameOriginPeerRequiresClaim(t *testing.T) {
+func TestIngestClaimAuditSnapshotLinkToUnclaimedSameOriginPeerDoesNotViolate(t *testing.T) {
 	d, ctx, p, spokeUID := setupFederationIngestHub(t)
 	parentUID := newTestUID(t)
 	childUID := newTestUID(t)
@@ -2506,7 +2520,7 @@ func TestIngestClaimAuditSnapshotLinkToUnclaimedSameOriginPeerRequiresClaim(t *t
 	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, childSnapshot))
 
 	require.NoError(t, err)
-	assertEventCount(t, d, "claim.violated", 1)
+	assertEventCount(t, d, "claim.violated", 0)
 	assertRowCount(ctx, t, d, 1, "snapshot baseline parent link materialized",
 		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'parent'`,
 		p.ID)
@@ -2544,7 +2558,7 @@ func TestIngestClaimAuditSnapshotLinkToClaimedSameOriginPeerRequiresClaim(t *tes
 		p.ID)
 }
 
-func TestIngestClaimAuditLaterSnapshotLinkToPriorSameOriginPeerRequiresClaim(t *testing.T) {
+func TestIngestClaimAuditLaterSnapshotLinkToPriorUnclaimedSameOriginPeerDoesNotViolate(t *testing.T) {
 	d, ctx, p, spokeUID := setupFederationIngestHub(t)
 	peerUID := newTestUID(t)
 	childUID := newTestUID(t)
@@ -2560,7 +2574,7 @@ func TestIngestClaimAuditLaterSnapshotLinkToPriorSameOriginPeerRequiresClaim(t *
 	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, laterSnapshot))
 
 	require.NoError(t, err)
-	assertEventCount(t, d, "claim.violated", 1)
+	assertEventCount(t, d, "claim.violated", 0)
 	assertRowCount(ctx, t, d, 1, "later snapshot parent link materialized",
 		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'parent'`,
 		p.ID)
@@ -2596,12 +2610,20 @@ func TestIngestClaimAuditCreatedLinkToExistingIssueRequiresPeerClaim(t *testing.
 		p.ID)
 }
 
-func TestIngestClaimAuditLinksChangedRequiresPeerClaim(t *testing.T) {
+func TestIngestClaimAuditLinksChangedViolatesOtherPeerClaimHolder(t *testing.T) {
 	d, ctx, p, spokeUID, issue, peer := setupIngestClaimIssue(t)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
 		ProjectID: p.ID,
 		IssueRef:  issue.ShortID,
 		Principal: db.ClaimPrincipal{HolderInstanceUID: spokeUID, Holder: "remote-agent"},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	_, err = d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  peer.ShortID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: d.InstanceUID(), Holder: "hub-agent"},
 		ClaimKind: "hard",
 		Now:       time.Now().UTC(),
 	})
@@ -2632,7 +2654,7 @@ func TestIngestClaimViolationExpiresTimedClaimBeforeAudit(t *testing.T) {
 	require.NoError(t, err)
 	assertLiveClaimCount(t, d, issue.UID, 0)
 	assertEventCount(t, d, "claim.expired", 1)
-	assertEventCount(t, d, "claim.violated", 1)
+	assertEventCount(t, d, "claim.violated", 0)
 }
 
 func TestMaterializeFederatedProject(t *testing.T) {

@@ -224,6 +224,10 @@ kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --re
 ```
 
 Federation is an operator workflow. Most users never need these commands.
+Issue edits on push-enabled federated spokes remain local-first; use
+`kata federation lease acquire` only when you want exclusive coordination on an
+issue. A live lease held by another actor blocks non-comment mutations until it
+is released or expires.
 
 ## Ref forms
 

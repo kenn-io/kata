@@ -75,9 +75,8 @@ func TestFederationClaimsTwoSpokeLifecycle(t *testing.T) {
 		"--project", fx.hubProject.Name, "federation", "lease", "release", issueB.ShortID, "--as", "bob")
 	require.True(t, bobReleased.Granted)
 
-	charlieEdit := runKataWantExit(t, fx.bin, fx.spokeB.dirs, 5,
-		"--json", "--project", fx.hubProject.Name, "edit", issueB.ShortID, "--title", "charlie rejected", "--as", "charlie")
-	assert.Contains(t, charlieEdit.stderr, `"code":"claim_required"`)
+	runKataOK(t, fx.bin, fx.spokeB.dirs,
+		"--project", fx.hubProject.Name, "edit", issueB.ShortID, "--title", "charlie edit", "--as", "charlie")
 
 	waitForFoldedProjectionMatch(t, fx.hub.DB, fx.spokeA.db,
 		fx.hubProject.ID, fx.spokeA.replica.Project.ID, fx.replayAfterID, fx.spokeA.stderr)
@@ -86,7 +85,7 @@ func TestFederationClaimsTwoSpokeLifecycle(t *testing.T) {
 
 	finalHubIssue, err := fx.hub.DB.IssueByUID(ctx, fx.hubIssue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	assert.Equal(t, "bob edit", finalHubIssue.Title)
+	assert.Equal(t, "charlie edit", finalHubIssue.Title)
 }
 
 func TestFederationTimedClaimExpires(t *testing.T) {

@@ -15,7 +15,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestClaimGateEditCloseReopenPriorityRequiresLiveClaimForFederatedHubIssueMutations(t *testing.T) {
+func TestClaimGateEditCloseReopenPriorityAllowsUnclaimedFederatedHubIssueMutations(t *testing.T) {
 	for _, tc := range []claimGateHTTPCase{
 		{name: "EditTitle", build: claimGateEditTitleRequest},
 		{name: "EditBody", build: claimGateEditBodyRequest},
@@ -31,12 +31,12 @@ func TestClaimGateEditCloseReopenPriorityRequiresLiveClaimForFederatedHubIssueMu
 
 			resp, raw := envDoRaw(t, env, req.method, req.path, req.body, req.headers)
 
-			assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		})
 	}
 }
 
-func TestClaimGateLinkLabelAssignUnassignMetadataDeleteRestoreRequiresLiveClaimForFederatedHubIssueMutations(t *testing.T) {
+func TestClaimGateLinkLabelAssignUnassignMetadataDeleteRestoreAllowsUnclaimedFederatedHubIssueMutations(t *testing.T) {
 	for _, tc := range []claimGateHTTPCase{
 		{name: "ClaimOwner", build: claimGateClaimOwnerRequest},
 		{name: "Assign", build: claimGateAssignRequest},
@@ -54,13 +54,13 @@ func TestClaimGateLinkLabelAssignUnassignMetadataDeleteRestoreRequiresLiveClaimF
 
 			resp, raw := envDoRaw(t, env, req.method, req.path, req.body, req.headers)
 
-			assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		})
 	}
 }
 
 func TestClaimGateStableDenialCodes(t *testing.T) {
-	t.Run("pending claim still requires authoritative live claim", func(t *testing.T) {
+	t.Run("pending claim does not block unclaimed issue", func(t *testing.T) {
 		env, project, issue := setupClaimGateIssue(t, true)
 		_, err := env.DB.EnqueuePendingClaim(context.Background(), db.PendingClaimParams{
 			ProjectID: project.ID,
@@ -74,7 +74,7 @@ func TestClaimGateStableDenialCodes(t *testing.T) {
 		req := claimGateEditTitleRequestFor(project, issue)
 		resp, raw := envDoRaw(t, env, req.method, req.path, req.body, req.headers)
 
-		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	})
 
 	t.Run("other live holder denies", func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestClaimGateStableDenialCodes(t *testing.T) {
 		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 	})
 
-	t.Run("matching timed claim expired", func(t *testing.T) {
+	t.Run("matching timed claim expired is treated as absent", func(t *testing.T) {
 		env, project, issue := setupClaimGateIssue(t, true)
 		_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
 			ProjectID: project.ID,
@@ -109,11 +109,11 @@ func TestClaimGateStableDenialCodes(t *testing.T) {
 		req := claimGateEditTitleRequestFor(project, issue)
 		resp, raw := envDoRaw(t, env, req.method, req.path, req.body, req.headers)
 
-		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_expired")
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	})
 }
 
-func TestClaimGateLinkCreateRequiresClaimsForBothEndpoints(t *testing.T) {
+func TestClaimGateLinkCreateAllowsUnclaimedPeer(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)
 	acquireClaimGateIssue(t, env, project, issue, "agent")
@@ -124,15 +124,22 @@ func TestClaimGateLinkCreateRequiresClaimsForBothEndpoints(t *testing.T) {
 		"to_ref": peer.ShortID,
 	}, nil)
 
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
 
-	acquireClaimGateIssue(t, env, project, peer, "agent")
-	resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "links"), map[string]string{
+func TestClaimGateLinkCreateDeniesOtherPeerClaimHolder(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, peer := setupClaimGateProject(t, env, true)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+	acquireClaimGateIssue(t, env, project, peer, "other")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "links"), map[string]string{
 		"actor":  "agent",
 		"type":   "related",
 		"to_ref": peer.ShortID,
 	}, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 }
 
 func TestClaimGateDuplicateLinkCreateDoesNotRequirePeerClaim(t *testing.T) {
@@ -164,7 +171,7 @@ func TestClaimGateDuplicateLinkCreateDoesNotRequirePeerClaim(t *testing.T) {
 	require.Nil(t, out.Event)
 }
 
-func TestClaimGateLinkDeleteRequiresClaimsForBothEndpoints(t *testing.T) {
+func TestClaimGateLinkDeleteAllowsUnclaimedPeer(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)
 	link, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
@@ -180,12 +187,27 @@ func TestClaimGateLinkDeleteRequiresClaimsForBothEndpoints(t *testing.T) {
 	resp, raw := envDoRaw(t, env, http.MethodDelete,
 		issuePathRef(project.ID, issue.ShortID, "links/"+strconv.FormatInt(link.ID, 10))+"?actor=agent", nil, nil)
 
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
-
-	acquireClaimGateIssue(t, env, project, peer, "agent")
-	resp, raw = envDoRaw(t, env, http.MethodDelete,
-		issuePathRef(project.ID, issue.ShortID, "links/"+strconv.FormatInt(link.ID, 10))+"?actor=agent", nil, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
+
+func TestClaimGateLinkDeleteDeniesOtherPeerClaimHolder(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, peer := setupClaimGateProject(t, env, true)
+	link, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: issue.ID,
+		ToIssueID:   peer.ID,
+		Type:        "related",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+	acquireClaimGateIssue(t, env, project, peer, "other")
+
+	resp, raw := envDoRaw(t, env, http.MethodDelete,
+		issuePathRef(project.ID, issue.ShortID, "links/"+strconv.FormatInt(link.ID, 10))+"?actor=agent", nil, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 }
 
 func TestClaimGateLinkDeleteSkipsSoftDeletedPeerClaim(t *testing.T) {
@@ -209,7 +231,7 @@ func TestClaimGateLinkDeleteSkipsSoftDeletedPeerClaim(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
-func TestClaimGateParentReplaceRequiresClaimForOldAndNewParent(t *testing.T) {
+func TestClaimGateParentReplaceAllowsUnclaimedOldParent(t *testing.T) {
 	env := testenv.New(t)
 	project, child, oldParent := setupClaimGateProject(t, env, true)
 	newParent, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
@@ -236,16 +258,38 @@ func TestClaimGateParentReplaceRequiresClaimForOldAndNewParent(t *testing.T) {
 		"replace": true,
 	}, nil)
 
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
 
-	acquireClaimGateIssue(t, env, project, oldParent, "agent")
-	resp, raw = envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, child.ShortID, "links"), map[string]any{
+func TestClaimGateParentReplaceDeniesOtherOldParentClaimHolder(t *testing.T) {
+	env := testenv.New(t)
+	project, child, oldParent := setupClaimGateProject(t, env, true)
+	newParent, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "new parent",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: child.ID,
+		ToIssueID:   oldParent.ID,
+		Type:        "parent",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, child, "agent")
+	acquireClaimGateIssue(t, env, project, newParent, "agent")
+	acquireClaimGateIssue(t, env, project, oldParent, "other")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, child.ShortID, "links"), map[string]any{
 		"actor":   "agent",
 		"type":    "parent",
 		"to_ref":  newParent.ShortID,
 		"replace": true,
 	}, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 }
 
 func TestClaimGateParentReplaceSkipsSoftDeletedOldParentClaim(t *testing.T) {
@@ -280,7 +324,7 @@ func TestClaimGateParentReplaceSkipsSoftDeletedOldParentClaim(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
-func TestClaimGateEditLinksDeltaRequiresClaimsForAffectedEndpoints(t *testing.T) {
+func TestClaimGateEditLinksDeltaAllowsUnclaimedPeer(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)
 	acquireClaimGateIssue(t, env, project, issue, "agent")
@@ -290,14 +334,21 @@ func TestClaimGateEditLinksDeltaRequiresClaimsForAffectedEndpoints(t *testing.T)
 		"links_delta": map[string]any{"add_related": []string{peer.ShortID}},
 	}, nil)
 
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
 
-	acquireClaimGateIssue(t, env, project, peer, "agent")
-	resp, raw = envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.ShortID, ""), map[string]any{
+func TestClaimGateEditLinksDeltaDeniesOtherPeerClaimHolder(t *testing.T) {
+	env := testenv.New(t)
+	project, issue, peer := setupClaimGateProject(t, env, true)
+	acquireClaimGateIssue(t, env, project, issue, "agent")
+	acquireClaimGateIssue(t, env, project, peer, "other")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, issue.ShortID, ""), map[string]any{
 		"actor":       "agent",
 		"links_delta": map[string]any{"add_related": []string{peer.ShortID}},
 	}, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 }
 
 func TestClaimGateEditLinksDeltaRemoveSkipsSoftDeletedPeerClaim(t *testing.T) {
@@ -323,7 +374,7 @@ func TestClaimGateEditLinksDeltaRemoveSkipsSoftDeletedPeerClaim(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 }
 
-func TestClaimGateEditLinksDeltaParentReplaceRequiresClaimForOldAndNewParent(t *testing.T) {
+func TestClaimGateEditLinksDeltaParentReplaceAllowsUnclaimedOldParent(t *testing.T) {
 	env := testenv.New(t)
 	project, child, oldParent := setupClaimGateProject(t, env, true)
 	newParent, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
@@ -348,14 +399,36 @@ func TestClaimGateEditLinksDeltaParentReplaceRequiresClaimForOldAndNewParent(t *
 		"links_delta": map[string]any{"set_parent": newParent.ShortID},
 	}, nil)
 
-	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+}
 
-	acquireClaimGateIssue(t, env, project, oldParent, "agent")
-	resp, raw = envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, child.ShortID, ""), map[string]any{
+func TestClaimGateEditLinksDeltaParentReplaceDeniesOtherOldParentClaimHolder(t *testing.T) {
+	env := testenv.New(t)
+	project, child, oldParent := setupClaimGateProject(t, env, true)
+	newParent, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "new parent",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
+		ProjectID:   project.ID,
+		FromIssueID: child.ID,
+		ToIssueID:   oldParent.ID,
+		Type:        "parent",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+	acquireClaimGateIssue(t, env, project, child, "agent")
+	acquireClaimGateIssue(t, env, project, newParent, "agent")
+	acquireClaimGateIssue(t, env, project, oldParent, "other")
+
+	resp, raw := envDoRaw(t, env, http.MethodPatch, issuePathRef(project.ID, child.ShortID, ""), map[string]any{
 		"actor":       "agent",
 		"links_delta": map[string]any{"set_parent": newParent.ShortID},
 	}, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 }
 
 func TestClaimGateRestoreCanAcquireLeaseAfterSoftDelete(t *testing.T) {
@@ -405,16 +478,16 @@ func TestClaimGateUsesResolvedTokenActorForFederatedMutation(t *testing.T) {
 }
 
 func TestClaimGateCommentsCreateAndNonFederatedProjects(t *testing.T) {
-	t.Run("comments require claim on federated project", func(t *testing.T) {
+	t.Run("comments bypass claim gate on federated project", func(t *testing.T) {
 		env, project, issue := setupClaimGateIssue(t, true)
 
 		resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "comments"),
 			map[string]string{"actor": "agent", "body": "comment without claim"}, nil)
 
-		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_required")
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	})
 
-	t.Run("comments deny conflicting holder on federated project", func(t *testing.T) {
+	t.Run("comments bypass other live holder on federated project", func(t *testing.T) {
 		env, project, issue := setupClaimGateIssue(t, true)
 		_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
 			ProjectID: project.ID,
@@ -428,7 +501,7 @@ func TestClaimGateCommentsCreateAndNonFederatedProjects(t *testing.T) {
 		resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "comments"),
 			map[string]string{"actor": "agent", "body": "comment without claim"}, nil)
 
-		assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	})
 
 	t.Run("issue create bypass on federated project", func(t *testing.T) {
