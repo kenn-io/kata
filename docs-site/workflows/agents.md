@@ -105,6 +105,12 @@ kata close abc4 --done \
   --agent
 ```
 
+Close each issue as soon as its work is verified, not in a batch at the end of a
+run. The daemon refuses more than three sibling closes under one parent within
+five minutes, so end-of-run close bursts get throttled; closing as you finish
+each issue keeps you under the limit. See
+[Close throttle](../reference/configuration.md#close-throttle).
+
 If work is incomplete:
 
 ```sh
@@ -145,5 +151,5 @@ not.
 4. Record the intended approach in a comment for large work.
 5. Implement and verify.
 6. Commit repository changes.
-7. Close the issue with evidence.
+7. Close the issue with evidence as soon as it is verified.
 8. Move to the next ready issue.

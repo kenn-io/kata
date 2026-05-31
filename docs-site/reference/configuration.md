@@ -97,6 +97,9 @@ guards throttle close bursts by one actor under a shared parent:
 - repeated-message: closing a second sibling with an identical `done` or
   `audit-no-change` message within thirty minutes is refused.
 
+Closing each issue as soon as its work is verified, rather than batching closes
+at the end of a run, keeps an actor under both limits.
+
 Operators can disable both throttles daemon-wide:
 
 ```toml
