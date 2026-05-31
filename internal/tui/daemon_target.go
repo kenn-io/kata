@@ -62,9 +62,9 @@ var (
 	connectDaemonTargetForTUI = connectDaemonTarget
 )
 
-func daemonTargetsFromConfig(cfg config.TUIConfig) []daemonTarget {
-	out := make([]daemonTarget, 0, len(cfg.Daemons))
-	for _, d := range cfg.Daemons {
+func daemonTargetsFromConfig(daemons []config.CatalogDaemonConfig) []daemonTarget {
+	out := make([]daemonTarget, 0, len(daemons))
+	for _, d := range daemons {
 		out = append(out, daemonTarget{
 			Name:          d.Name,
 			Local:         d.Local,
@@ -93,8 +93,8 @@ func bootDaemonConnection(ctx context.Context, _ Options) (daemonConnection, err
 	if err != nil {
 		return daemonConnection{}, err
 	}
-	catalog := daemonTargetsFromConfig(cfg.TUI)
-	target, ok := activeDaemonTarget(catalog, cfg.TUI.ActiveDaemon)
+	catalog := daemonTargetsFromConfig(cfg.Daemons)
+	target, ok := activeDaemonTarget(catalog, cfg.ActiveDaemon)
 	if !ok {
 		conn, err := connectImplicitDaemonTarget(ctx)
 		if err != nil {

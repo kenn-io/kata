@@ -13,15 +13,12 @@ import (
 )
 
 func TestDaemonTargetsFromConfigIncludesConfiguredEntries(t *testing.T) {
-	cfg := config.TUIConfig{
-		ActiveDaemon: "shared",
-		Daemons: []config.TUIDaemonConfig{
-			{Name: "local", Local: true},
-			{Name: "shared", URL: "http://100.64.0.5:7777", Token: "tok", AllowInsecure: true},
-		},
+	daemons := []config.CatalogDaemonConfig{
+		{Name: "local", Local: true},
+		{Name: "shared", URL: "http://100.64.0.5:7777", Token: "tok", AllowInsecure: true},
 	}
 
-	targets := daemonTargetsFromConfig(cfg)
+	targets := daemonTargetsFromConfig(daemons)
 
 	require.Len(t, targets, 2)
 	assert.Equal(t, daemonTarget{Name: "local", Local: true}, targets[0])

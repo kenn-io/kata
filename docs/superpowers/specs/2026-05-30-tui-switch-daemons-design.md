@@ -6,26 +6,26 @@ Enable `kata tui` to switch between multiple configured daemon targets during a 
 
 ## Configuration
 
-`<KATA_HOME>/config.toml` gains TUI-owned daemon entries:
+`<KATA_HOME>/config.toml` carries a top-level daemon catalog. It is not nested
+under `[tui]` because external clients (e.g. kataflow) read the same catalog:
 
 ```toml
-[tui]
 active_daemon = "shared"
 
-[[tui.daemon]]
+[[daemon]]
 name = "local"
 local = true
 
-[[tui.daemon]]
+[[daemon]]
 name = "shared"
 url = "http://100.64.0.5:7777"
 token = "shared-token"
 allow_insecure = true
 
-[[tui.daemon]]
+[[daemon]]
 name = "prod"
 url = "https://kata.example.com"
-token = "prod-token"
+token_env = "KATA_PROD_TOKEN"
 ```
 
 Rules:
@@ -34,8 +34,9 @@ Rules:
 - `local = true` means the current local path: `client.EnsureRunning` with Unix socket discovery and auto-start. A local entry must not also set `url`.
 - Remote entries require `url`.
 - `token` is optional. When present, it is used only for that daemon target.
+- `token_env` names an environment variable holding the token; it resolves into the token at config load (failing fast if the variable is unset or empty) so the secret stays out of the file. `token` and `token_env` are mutually exclusive.
 - `allow_insecure` has the same meaning as `.kata.local.toml [server].allow_insecure`: it permits plain HTTP to targets the existing URL guard would otherwise reject.
-- `[tui].active_daemon` is optional. If absent, TUI boot keeps today's endpoint resolution behavior.
+- `active_daemon` is optional. If absent, TUI boot keeps today's endpoint resolution behavior.
 - The TUI does not write back to config. Runtime selection is session-local.
 
 ## Client Resolution
@@ -45,7 +46,7 @@ Add a TUI-specific daemon resolver that returns a connection target containing d
 Boot behavior:
 
 1. Load `<KATA_HOME>/config.toml`.
-2. If `[tui].active_daemon` names an entry, connect to that entry.
+2. If `active_daemon` names an entry, connect to that entry.
 3. If no active daemon is configured, preserve today's `client.EnsureRunning(ctx)` behavior.
 4. If the active daemon is missing or invalid, return a startup error.
 

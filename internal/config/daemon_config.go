@@ -20,6 +20,13 @@ type DaemonConfig struct {
 	// --listen flag is supplied. Same syntax as the flag (host:port).
 	// An empty value (or a missing file) means "default Unix socket".
 	Listen string `toml:"listen"`
+	// ActiveDaemon names the daemon catalog entry selected by default.
+	// Empty preserves the legacy implicit endpoint resolution.
+	ActiveDaemon string `toml:"active_daemon"`
+	// Daemons is the named daemon catalog. The TUI resolves its default
+	// target here; external clients (e.g. kataflow) read the same catalog,
+	// so it is top-level rather than nested under [tui].
+	Daemons []CatalogDaemonConfig `toml:"daemon"`
 	// TUI carries client-side interactive UI defaults. Unlike remote
 	// daemon overrides, these are user preferences and belong in
 	// <KATA_HOME>/config.toml.
@@ -57,18 +64,19 @@ type TUIConfig struct {
 	// Mouse enables Bubble Tea mouse cell-motion capture and additive
 	// click/wheel navigation. Default false preserves native selection.
 	Mouse bool `toml:"mouse"`
-	// ActiveDaemon names the TUI daemon catalog entry selected by default.
-	ActiveDaemon string `toml:"active_daemon"`
-	// Daemons is the optional named daemon catalog used only by the TUI.
-	Daemons []TUIDaemonConfig `toml:"daemon"`
 }
 
-// TUIDaemonConfig is a single named target in the TUI daemon catalog.
-type TUIDaemonConfig struct {
-	Name          string `toml:"name"`
-	Local         bool   `toml:"local"`
-	URL           string `toml:"url"`
-	Token         string `toml:"token"`
+// CatalogDaemonConfig is a single named entry in the daemon catalog
+// (top-level [[daemon]] in <KATA_HOME>/config.toml).
+type CatalogDaemonConfig struct {
+	Name  string `toml:"name"`
+	Local bool   `toml:"local"`
+	URL   string `toml:"url"`
+	// Token is the inline bearer token, mutually exclusive with TokenEnv.
+	Token string `toml:"token"`
+	// TokenEnv names an environment variable holding the bearer token, so
+	// the secret stays out of the config file. Resolved into Token at load.
+	TokenEnv      string `toml:"token_env"`
 	AllowInsecure bool   `toml:"allow_insecure"`
 }
 
@@ -125,7 +133,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Listen = strings.TrimSpace(cfg.Listen)
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
-		trimTUIConfig(&cfg.TUI)
+		trimDaemonCatalog(&cfg)
 	case errors.Is(err, os.ErrNotExist):
 		// Absent file: fall through with zero-value cfg. Env merge and
 		// validation below still apply so an env-only misconfig is
@@ -137,38 +145,50 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
 		return nil, err
 	}
-	if err := validateTUIConfig(cfg.TUI); err != nil {
+	if err := normalizeDaemonCatalog(&cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
-func trimTUIConfig(tui *TUIConfig) {
-	tui.ActiveDaemon = strings.TrimSpace(tui.ActiveDaemon)
-	for i := range tui.Daemons {
-		tui.Daemons[i].Name = strings.TrimSpace(tui.Daemons[i].Name)
-		tui.Daemons[i].URL = strings.TrimSpace(tui.Daemons[i].URL)
-		tui.Daemons[i].Token = strings.TrimSpace(tui.Daemons[i].Token)
+func trimDaemonCatalog(cfg *DaemonConfig) {
+	cfg.ActiveDaemon = strings.TrimSpace(cfg.ActiveDaemon)
+	for i := range cfg.Daemons {
+		cfg.Daemons[i].Name = strings.TrimSpace(cfg.Daemons[i].Name)
+		cfg.Daemons[i].URL = strings.TrimSpace(cfg.Daemons[i].URL)
+		cfg.Daemons[i].Token = strings.TrimSpace(cfg.Daemons[i].Token)
+		cfg.Daemons[i].TokenEnv = strings.TrimSpace(cfg.Daemons[i].TokenEnv)
 	}
 }
 
-func validateTUIConfig(tui TUIConfig) error {
-	names := make(map[string]struct{}, len(tui.Daemons))
-	for _, daemon := range tui.Daemons {
-		if daemon.Name == "" {
-			return errors.New("tui.daemon: name is required")
+func normalizeDaemonCatalog(cfg *DaemonConfig) error {
+	names := make(map[string]struct{}, len(cfg.Daemons))
+	for i := range cfg.Daemons {
+		d := &cfg.Daemons[i]
+		if d.Name == "" {
+			return errors.New("daemon: name is required")
 		}
-		if _, ok := names[daemon.Name]; ok {
-			return fmt.Errorf("tui.daemon: duplicate tui daemon name %q", daemon.Name)
+		if _, ok := names[d.Name]; ok {
+			return fmt.Errorf("daemon: duplicate daemon name %q", d.Name)
 		}
-		names[daemon.Name] = struct{}{}
-		if daemon.Local == (daemon.URL != "") {
-			return fmt.Errorf("tui.daemon %q: exactly one of local or url is required", daemon.Name)
+		names[d.Name] = struct{}{}
+		if d.Local == (d.URL != "") {
+			return fmt.Errorf("daemon %q: exactly one of local or url is required", d.Name)
+		}
+		if d.Token != "" && d.TokenEnv != "" {
+			return fmt.Errorf("daemon %q: token and token_env are mutually exclusive", d.Name)
+		}
+		if d.TokenEnv != "" {
+			v := strings.TrimSpace(os.Getenv(d.TokenEnv))
+			if v == "" {
+				return fmt.Errorf("daemon %q: token_env %q is unset or empty", d.Name, d.TokenEnv)
+			}
+			d.Token = v
 		}
 	}
-	if tui.ActiveDaemon != "" {
-		if _, ok := names[tui.ActiveDaemon]; !ok {
-			return fmt.Errorf("tui.active_daemon %q is not in tui.daemon catalog", tui.ActiveDaemon)
+	if cfg.ActiveDaemon != "" {
+		if _, ok := names[cfg.ActiveDaemon]; !ok {
+			return fmt.Errorf("active_daemon %q is not in daemon catalog", cfg.ActiveDaemon)
 		}
 	}
 	return nil

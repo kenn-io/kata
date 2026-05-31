@@ -51,18 +51,17 @@ func TestReadDaemonConfig_ReadsTUIMouse(t *testing.T) {
 	assert.True(t, cfg.TUI.Mouse)
 }
 
-func TestReadDaemonConfig_ReadsTUIDaemons(t *testing.T) {
+func TestReadDaemonConfig_ReadsDaemonCatalog(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-[tui]
 active_daemon = "remote"
 
-[[tui.daemon]]
+[[daemon]]
 name = "local"
 local = true
 
-[[tui.daemon]]
+[[daemon]]
 name = "remote"
 url = "https://kata.example.test"
 token = "target-token"
@@ -71,41 +70,41 @@ allow_insecure = true
 
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
-	require.Len(t, cfg.TUI.Daemons, 2)
-	assert.Equal(t, "remote", cfg.TUI.ActiveDaemon)
-	assert.Equal(t, config.TUIDaemonConfig{Name: "local", Local: true}, cfg.TUI.Daemons[0])
-	assert.Equal(t, config.TUIDaemonConfig{
+	require.Len(t, cfg.Daemons, 2)
+	assert.Equal(t, "remote", cfg.ActiveDaemon)
+	assert.Equal(t, config.CatalogDaemonConfig{Name: "local", Local: true}, cfg.Daemons[0])
+	assert.Equal(t, config.CatalogDaemonConfig{
 		Name:          "remote",
 		URL:           "https://kata.example.test",
 		Token:         "target-token",
 		AllowInsecure: true,
-	}, cfg.TUI.Daemons[1])
+	}, cfg.Daemons[1])
 }
 
-func TestReadDaemonConfig_RejectsDuplicateTUIDaemonNames(t *testing.T) {
+func TestReadDaemonConfig_RejectsDuplicateDaemonNames(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-[[tui.daemon]]
+[[daemon]]
 name = "prod"
 local = true
 
-[[tui.daemon]]
+[[daemon]]
 name = "prod"
 url = "https://kata.example.test"
 `), 0o600))
 
 	_, err := config.ReadDaemonConfig()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate tui daemon name")
+	assert.Contains(t, err.Error(), "duplicate daemon name")
 	assert.Contains(t, err.Error(), "prod")
 }
 
-func TestReadDaemonConfig_RejectsTUIDaemonWithLocalAndURL(t *testing.T) {
+func TestReadDaemonConfig_RejectsDaemonWithLocalAndURL(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-[[tui.daemon]]
+[[daemon]]
 name = "ambiguous"
 local = true
 url = "https://kata.example.test"
@@ -117,14 +116,13 @@ url = "https://kata.example.test"
 	assert.Contains(t, err.Error(), "url")
 }
 
-func TestReadDaemonConfig_RejectsActiveTUIDaemonMissingFromCatalog(t *testing.T) {
+func TestReadDaemonConfig_RejectsActiveDaemonMissingFromCatalog(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-[tui]
 active_daemon = "missing"
 
-[[tui.daemon]]
+[[daemon]]
 name = "local"
 local = true
 `), 0o600))
@@ -135,14 +133,13 @@ local = true
 	assert.Contains(t, err.Error(), "missing")
 }
 
-func TestReadDaemonConfig_TrimsTUIDaemonFields(t *testing.T) {
+func TestReadDaemonConfig_TrimsDaemonFields(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
-[tui]
 active_daemon = "  remote  "
 
-[[tui.daemon]]
+[[daemon]]
 name = "  remote  "
 url = "  https://kata.example.test  "
 token = "  target-token  "
@@ -150,11 +147,81 @@ token = "  target-token  "
 
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
-	require.Len(t, cfg.TUI.Daemons, 1)
-	assert.Equal(t, "remote", cfg.TUI.ActiveDaemon)
-	assert.Equal(t, "remote", cfg.TUI.Daemons[0].Name)
-	assert.Equal(t, "https://kata.example.test", cfg.TUI.Daemons[0].URL)
-	assert.Equal(t, "target-token", cfg.TUI.Daemons[0].Token)
+	require.Len(t, cfg.Daemons, 1)
+	assert.Equal(t, "remote", cfg.ActiveDaemon)
+	assert.Equal(t, "remote", cfg.Daemons[0].Name)
+	assert.Equal(t, "https://kata.example.test", cfg.Daemons[0].URL)
+	assert.Equal(t, "target-token", cfg.Daemons[0].Token)
+}
+
+func TestReadDaemonConfig_ResolvesDaemonTokenEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_WORK_TOKEN", "secret-from-env")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "work"
+url = "https://kata.example.test"
+token_env = "KATA_WORK_TOKEN"
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.Daemons, 1)
+	assert.Equal(t, "secret-from-env", cfg.Daemons[0].Token,
+		"token_env must resolve into Token during config load")
+}
+
+func TestReadDaemonConfig_RejectsDaemonTokenEnvUnset(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_WORK_TOKEN", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "work"
+url = "https://kata.example.test"
+token_env = "KATA_WORK_TOKEN"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err, "an unset token_env var must fail fast at config load")
+	assert.Contains(t, err.Error(), "token_env")
+	assert.Contains(t, err.Error(), "KATA_WORK_TOKEN")
+}
+
+func TestReadDaemonConfig_RejectsDaemonTokenAndTokenEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_WORK_TOKEN", "secret-from-env")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "work"
+url = "https://kata.example.test"
+token = "inline-token"
+token_env = "KATA_WORK_TOKEN"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err, "token and token_env are mutually exclusive")
+	assert.Contains(t, err.Error(), "token")
+	assert.Contains(t, err.Error(), "token_env")
+}
+
+func TestReadDaemonConfig_TrimsDaemonTokenEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_WORK_TOKEN", "secret-from-env")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "work"
+url = "https://kata.example.test"
+token_env = "  KATA_WORK_TOKEN  "
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.Daemons, 1)
+	assert.Equal(t, "secret-from-env", cfg.Daemons[0].Token)
 }
 
 func TestReadDaemonConfig_ThrottleDefaultsEnabled(t *testing.T) {

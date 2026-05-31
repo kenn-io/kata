@@ -45,7 +45,7 @@ func TestReadDaemonConfig_TrimsTUIDaemonFields(t *testing.T)
 
 - [ ] **Step 2: Run red tests**
 
-Run: `go test ./internal/config -run 'TestReadDaemonConfig_.*TUIDaemon|TestReadDaemonConfig_ReadsTUIDaemons'`
+Run: `go test ./internal/config -run 'TestReadDaemonConfig_(Reads|Rejects|Trims).*Daemon'`
 
 Expected: fail because fields/validation do not exist.
 
@@ -54,22 +54,30 @@ Expected: fail because fields/validation do not exist.
 Add:
 
 ```go
-type TUIConfig struct {
-    Mouse        bool              `toml:"mouse"`
-    ActiveDaemon string            `toml:"active_daemon"`
-    Daemons      []TUIDaemonConfig `toml:"daemon"`
+// Catalog + active selection live at the top level of DaemonConfig so
+// external clients (kataflow) read the same catalog; [tui] keeps only Mouse.
+type DaemonConfig struct {
+    // ... Listen, Close, Auth ...
+    ActiveDaemon string                `toml:"active_daemon"`
+    Daemons      []CatalogDaemonConfig `toml:"daemon"`
+    TUI          TUIConfig             `toml:"tui"`
 }
 
-type TUIDaemonConfig struct {
+type TUIConfig struct {
+    Mouse bool `toml:"mouse"`
+}
+
+type CatalogDaemonConfig struct {
     Name          string `toml:"name"`
     Local         bool   `toml:"local"`
     URL           string `toml:"url"`
     Token         string `toml:"token"`
+    TokenEnv      string `toml:"token_env"`
     AllowInsecure bool   `toml:"allow_insecure"`
 }
 ```
 
-Trim names/URLs/tokens. Validate unique non-empty names, local xor URL, and active name exists when set.
+Trim names/URLs/tokens/token_env. Validate unique non-empty names, local xor URL, and token xor token_env (resolving token_env from the environment, failing fast if unset/empty); confirm the active name exists when set.
 
 - [ ] **Step 4: Run green tests**
 
