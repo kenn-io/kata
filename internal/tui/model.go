@@ -676,6 +676,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		next, cmd := m.openInputFromMsg(msg)
 		return next, cmd, true
 	case openDetailMsg:
+		if m.staleConnMsg(msg.connGen) {
+			return m, nil, true
+		}
 		next, cmd := m.handleOpenDetail(msg)
 		return next, cmd, true
 	case jumpDetailMsg:
@@ -1688,6 +1691,9 @@ func stampConnGen(msg tea.Msg, gen uint64) tea.Msg {
 		msg.connGen = gen
 		return msg
 	case projectsLoadedMsg:
+		msg.connGen = gen
+		return msg
+	case openDetailMsg:
 		msg.connGen = gen
 		return msg
 	default:

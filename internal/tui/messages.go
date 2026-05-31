@@ -63,7 +63,8 @@ type linksFetchedMsg struct {
 // The top-level Model handles it: switches m.view to viewDetail, seeds
 // m.detail.issue, and dispatches the three concurrent tab fetches.
 type openDetailMsg struct {
-	issue Issue
+	connGen uint64
+	issue   Issue
 }
 
 // popDetailMsg reverts the top-level Model from viewDetail back to

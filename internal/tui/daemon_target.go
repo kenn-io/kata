@@ -17,6 +17,7 @@ type daemonTarget struct {
 	URL           string
 	Token         string
 	AllowInsecure bool
+	Implicit      bool
 }
 
 type daemonConnection struct {
@@ -51,7 +52,7 @@ var (
 		target daemonTarget,
 		kind clientOptsKind,
 	) (*http.Client, error) {
-		if target.Local && target.Token == "" {
+		if (target.Local || target.Implicit) && target.Token == "" {
 			return client.NewHTTPClient(ctx, endpoint, optsForKind(kind))
 		}
 		return client.NewHTTPClientForTarget(ctx, endpoint,
@@ -176,9 +177,9 @@ func resolvedDaemonTarget(target daemonTarget, endpoint string) daemonTarget {
 
 func implicitDaemonTarget(endpoint string) daemonTarget {
 	if endpoint == client.UnixBase {
-		return daemonTarget{Local: true}
+		return daemonTarget{Local: true, Implicit: true}
 	}
-	return daemonTarget{URL: endpoint}
+	return daemonTarget{URL: endpoint, Implicit: true}
 }
 
 func daemonTargetDisplay(target daemonTarget) string {

@@ -279,6 +279,20 @@ func TestDaemonSwitchDropsOldListMutation(t *testing.T) {
 	assert.Equal(t, "keep", out.list.status)
 }
 
+func TestDaemonSwitchDropsOldOpenDetail(t *testing.T) {
+	m := newTestModel()
+	m.connGen = 2
+
+	out, cmd := updateModel(m, openDetailMsg{
+		connGen: 1,
+		issue:   Issue{ProjectID: 7, UID: "old-uid", ShortID: "old1", Title: "old"},
+	})
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, viewList, out.view)
+	assert.Nil(t, out.detail.issue)
+}
+
 func TestDaemonSwitchDropsOldProjectsFetch(t *testing.T) {
 	m := newTestModel()
 	m.connGen = 2

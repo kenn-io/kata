@@ -192,6 +192,26 @@ func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	assert.Equal(t, "Bearer global-token", gotAuth)
 }
 
+func TestNewHTTPClientForTUIImplicitRemoteFallsBackToGlobalAuth(t *testing.T) {
+	t.Setenv("KATA_AUTH_TOKEN", "global-token")
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	hc, err := newHTTPClientForTUI(t.Context(), srv.URL, implicitDaemonTarget(srv.URL), clientOptsNormal)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := hc.Do(req) //nolint:gosec // test request targets httptest.Server's loopback URL
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, "Bearer global-token", gotAuth)
+}
+
 func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
 	oldNormalize := normalizeRemoteURLForTUI
 	oldProbe := probeRemoteForTUI

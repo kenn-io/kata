@@ -525,6 +525,7 @@ func TestDetail_Back_EmitsPopMsg(t *testing.T) {
 // it, but we can verify the model state mutated correctly.)
 func TestDetail_OpenFromList_DispatchesBatch(t *testing.T) {
 	m := newDetailHostModel(Options{}, 7)
+	m.connGen = 9
 	m.list.loading = false
 	m.list.issues = []Issue{
 		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "first"},
@@ -544,6 +545,9 @@ func TestDetail_OpenFromList_DispatchesBatch(t *testing.T) {
 	}
 	if open.issue.ShortID != "bbb2" {
 		t.Fatalf("issue.ShortID = %q, want bbb2", open.issue.ShortID)
+	}
+	if open.connGen != 9 {
+		t.Fatalf("openDetailMsg.connGen = %d, want 9", open.connGen)
 	}
 	out, _ = m.Update(open)
 	m = out.(Model)
