@@ -40,7 +40,7 @@ func newExportCmd() *cobra.Command {
 			if output == "" {
 				output = "kata-export-" + time.Now().UTC().Format("20060102T150405Z") + ".jsonl"
 			}
-			d, err := db.Open(ctx, dbPath)
+			d, err := db.OpenReadOnly(ctx, dbPath)
 			if err != nil {
 				return err
 			}
@@ -112,9 +112,9 @@ func writeExportOutput(ctx context.Context, d *db.DB, output string, opts jsonl.
 
 // resolveExportProject reconciles the global --project NAME flag with the
 // local --project-id N flag. NAME is looked up against the projects table
-// since export reads the database directly (the daemon must be stopped).
-// Conflicts and unknown names surface as validation errors so scripts get
-// a clean failure rather than a silent full-DB export.
+// using the read-only export handle. Conflicts and unknown names surface as
+// validation errors so scripts get a clean failure rather than a silent
+// full-DB export.
 func resolveExportProject(ctx context.Context, d *db.DB, projectID int64) (int64, error) {
 	name := strings.TrimSpace(flags.Project)
 	if name == "" {

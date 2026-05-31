@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -138,4 +139,40 @@ func TestOpen_TimestampColumnsScanIntoTime(t *testing.T) {
 	// modernc.org/sqlite returns time.Time for DATETIME columns
 	_, ok := ts.(interface{ Year() int })
 	assert.True(t, ok, "expected time.Time, got %T", ts)
+}
+
+func TestCheckpointTruncatesWAL(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	d, err := db.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+	d.SetMaxOpenConns(1)
+
+	_, err = d.ExecContext(ctx, `PRAGMA wal_autocheckpoint=0`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `CREATE TABLE checkpoint_noise(id INTEGER PRIMARY KEY, body BLOB)`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		WITH RECURSIVE seq(x) AS (
+			SELECT 1
+			UNION ALL
+			SELECT x + 1 FROM seq WHERE x < 128
+		)
+		INSERT INTO checkpoint_noise(body)
+		SELECT randomblob(4096) FROM seq`)
+	require.NoError(t, err)
+
+	before, err := os.Stat(path + "-wal")
+	require.NoError(t, err)
+	require.Positive(t, before.Size(), "test setup must create WAL frames")
+
+	require.NoError(t, d.Checkpoint(ctx))
+
+	after, err := os.Stat(path + "-wal")
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	require.NoError(t, err)
+	assert.Zero(t, after.Size(), "TRUNCATE checkpoint should leave no WAL bytes")
 }

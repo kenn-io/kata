@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver registered as "sqlite"
 
@@ -34,6 +35,7 @@ type DB struct {
 	*sql.DB
 	path        string
 	instanceUID string
+	readOnly    bool
 }
 
 // Open opens (and if needed initializes) the kata SQLite database at path.
@@ -150,7 +152,42 @@ func OpenReadOnly(ctx context.Context, path string) (*DB, error) {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping read-only %s: %w", path, err)
 	}
-	return &DB{DB: sdb, path: path}, nil
+	return &DB{DB: sdb, path: path, readOnly: true}, nil
+}
+
+// Checkpoint runs a truncating WAL checkpoint for writable databases. It is
+// used by graceful shutdown paths so the durable main database file is brought
+// up to date before the process exits.
+func (d *DB) Checkpoint(ctx context.Context) error {
+	if d.readOnly {
+		return nil
+	}
+	var busy, logFrames, checkpointedFrames int
+	if err := d.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).
+		Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
+		return fmt.Errorf("checkpoint WAL: %w", err)
+	}
+	if busy != 0 {
+		return fmt.Errorf("checkpoint WAL: busy=%d log=%d checkpointed=%d",
+			busy, logFrames, checkpointedFrames)
+	}
+	return nil
+}
+
+// Close checkpoints writable WAL databases before closing the connection pool.
+// Read-only handles skip the checkpoint because SQLite rejects WAL checkpoints
+// on read-only connections.
+func (d *DB) Close() error {
+	if d == nil || d.DB == nil {
+		return nil
+	}
+	var checkpointErr error
+	if !d.readOnly {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		checkpointErr = d.Checkpoint(ctx)
+		cancel()
+	}
+	return errors.Join(checkpointErr, d.DB.Close())
 }
 
 // Path returns the resolved database path.

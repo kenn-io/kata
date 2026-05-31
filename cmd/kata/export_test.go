@@ -39,6 +39,33 @@ func TestExportWritesJSONLToOutput(t *testing.T) {
 	assert.Contains(t, out, outPath)
 }
 
+func TestExportReadsDatabaseWithoutWritePermission(t *testing.T) {
+	home := setupKataEnv(t)
+	dbPath := filepath.Join(home, "kata.db")
+	d, err := db.Open(context.Background(), dbPath)
+	require.NoError(t, err)
+	p, err := d.CreateProject(context.Background(), "kata")
+	require.NoError(t, err)
+	_, _, err = d.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "read-only export",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	require.NoError(t, os.Chmod(dbPath, 0o400))
+	t.Cleanup(func() { _ = os.Chmod(dbPath, 0o600) })
+
+	outPath := filepath.Join(home, "readonly.jsonl")
+	_, err = runCmdOutput(t, nil, "export", "--output", outPath)
+	require.NoError(t, err)
+
+	bs, err := os.ReadFile(outPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(bs), "read-only export")
+}
+
 func TestExportDoesNotReplaceExistingOutputOnFailure(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")

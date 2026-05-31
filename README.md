@@ -644,6 +644,12 @@ auto-started on demand.
 a database from that file. Together they cover backups, machine moves,
 and migrations between schema versions.
 
+Use JSONL exports for backups. Do **not** copy `~/.kata/kata.db` while the
+daemon is running: kata uses SQLite WAL mode, so recent writes can live in
+`kata.db-wal` and a plain `cp kata.db ...` can create a stale snapshot that
+looks successful. The `kata.db.bak.*` files created by schema cutover are
+temporary rollback files, not scheduled backups.
+
 Back up the local database:
 
 ```sh
@@ -654,9 +660,12 @@ kata daemon start
 
 Without `--output`, `kata export` writes a timestamped file
 (`kata-export-YYYYMMDDTHHMMSSZ.jsonl`) in the current directory. Export
-refuses to run while a daemon holds the database open; pass
-`--allow-running-daemon` to take a best-effort snapshot on a host where
-you cannot stop the daemon.
+refuses to run while a local daemon holds the database open; pass
+`--allow-running-daemon` when you need an online backup on the same host:
+
+```sh
+kata export --allow-running-daemon --output backups/kata-$(date -u +%Y%m%d).jsonl
+```
 
 Restore into a fresh database file:
 
