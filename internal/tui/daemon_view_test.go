@@ -81,6 +81,26 @@ func TestDaemonView_RenderIncludesDaemonRows(t *testing.T) {
 	assertContains(t, out, "current", "missing current marker")
 }
 
+func TestDaemonView_RenderKeepsConfiguredTextSingleLine(t *testing.T) {
+	row := daemonRow{
+		target: daemonTarget{
+			Name: "shared\nname",
+			URL:  "https://daemon.example:7777\textra",
+		},
+		current: true,
+	}
+
+	rendered := stripANSI(renderDaemonRow(row, false, 100))
+	footer := stripANSI(daemonFooter(row, 100))
+
+	assert.NotContains(t, rendered, "\n")
+	assert.NotContains(t, footer, "\n")
+	assertContains(t, rendered, `shared\nname`, "row name must be line-sanitized")
+	assertContains(t, rendered, "https://daemon.example:7777 extra", "row endpoint must be line-sanitized")
+	assertContains(t, footer, `shared\nname`, "footer name must be line-sanitized")
+	assertContains(t, footer, "https://daemon.example:7777 extra", "footer endpoint must be line-sanitized")
+}
+
 func TestDaemonView_HelpIncludesDaemonBinding(t *testing.T) {
 	out := stripANSI(renderHelp(newKeymap(), 100, ListFilter{}))
 

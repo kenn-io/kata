@@ -79,8 +79,8 @@ func renderDaemonRow(row daemonRow, highlight bool, width int) string {
 		state = "current"
 	}
 	return daemonRowLayout(
-		sanitizeForDisplay(daemonName(row.target)),
-		sanitizeForDisplay(daemonEndpoint(row.target)),
+		sanitizeForLine(daemonName(row.target)),
+		sanitizeForLine(daemonEndpoint(row.target)),
 		daemonAuth(row.target),
 		state,
 		width,
@@ -128,14 +128,14 @@ func daemonEndpoint(target daemonTarget) string {
 }
 
 func daemonAuth(target daemonTarget) string {
-	if target.Token != "" {
+	if target.Token != "" || target.TokenEnv != "" {
 		return "token"
 	}
 	return "no token"
 }
 
 func daemonFooter(row daemonRow, width int) string {
-	text := daemonName(row.target) + " · " + daemonEndpoint(row.target)
+	text := sanitizeForLine(daemonName(row.target)) + " · " + sanitizeForLine(daemonEndpoint(row.target))
 	if row.target.AllowInsecure {
 		text += " · allow_insecure"
 	}

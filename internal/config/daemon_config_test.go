@@ -154,7 +154,7 @@ token = "  target-token  "
 	assert.Equal(t, "target-token", cfg.Daemons[0].Token)
 }
 
-func TestReadDaemonConfig_ResolvesDaemonTokenEnv(t *testing.T) {
+func TestReadDaemonConfig_PreservesDaemonTokenEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_WORK_TOKEN", "secret-from-env")
@@ -168,25 +168,33 @@ token_env = "KATA_WORK_TOKEN"
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
 	require.Len(t, cfg.Daemons, 1)
-	assert.Equal(t, "secret-from-env", cfg.Daemons[0].Token,
-		"token_env must resolve into Token during config load")
+	assert.Empty(t, cfg.Daemons[0].Token)
+	assert.Equal(t, "KATA_WORK_TOKEN", cfg.Daemons[0].TokenEnv,
+		"token_env resolution is deferred until a daemon target is selected")
 }
 
-func TestReadDaemonConfig_RejectsDaemonTokenEnvUnset(t *testing.T) {
+func TestReadDaemonConfig_AllowsInactiveDaemonTokenEnvUnset(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_WORK_TOKEN", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+active_daemon = "local"
+
+[[daemon]]
+name = "local"
+local = true
+
 [[daemon]]
 name = "work"
 url = "https://kata.example.test"
 token_env = "KATA_WORK_TOKEN"
 `), 0o600))
 
-	_, err := config.ReadDaemonConfig()
-	require.Error(t, err, "an unset token_env var must fail fast at config load")
-	assert.Contains(t, err.Error(), "token_env")
-	assert.Contains(t, err.Error(), "KATA_WORK_TOKEN")
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.Daemons, 2)
+	assert.Equal(t, "KATA_WORK_TOKEN", cfg.Daemons[1].TokenEnv)
+	assert.Empty(t, cfg.Daemons[1].Token)
 }
 
 func TestReadDaemonConfig_RejectsDaemonTokenAndTokenEnv(t *testing.T) {
@@ -221,7 +229,8 @@ token_env = "  KATA_WORK_TOKEN  "
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
 	require.Len(t, cfg.Daemons, 1)
-	assert.Equal(t, "secret-from-env", cfg.Daemons[0].Token)
+	assert.Equal(t, "KATA_WORK_TOKEN", cfg.Daemons[0].TokenEnv)
+	assert.Empty(t, cfg.Daemons[0].Token)
 }
 
 func TestReadDaemonConfig_ThrottleDefaultsEnabled(t *testing.T) {

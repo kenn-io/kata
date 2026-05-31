@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
@@ -16,6 +17,7 @@ type daemonTarget struct {
 	Local         bool
 	URL           string
 	Token         string
+	TokenEnv      string
 	AllowInsecure bool
 	Implicit      bool
 }
@@ -71,6 +73,7 @@ func daemonTargetsFromConfig(daemons []config.CatalogDaemonConfig) []daemonTarge
 			Local:         d.Local,
 			URL:           d.URL,
 			Token:         d.Token,
+			TokenEnv:      d.TokenEnv,
 			AllowInsecure: d.AllowInsecure,
 		})
 	}
@@ -122,11 +125,29 @@ func connectImplicitDaemonTarget(ctx context.Context) (daemonConnection, error) 
 }
 
 func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnection, error) {
+	var err error
+	target, err = resolveDaemonTargetToken(target)
+	if err != nil {
+		return daemonConnection{}, err
+	}
 	endpoint, err := resolveDaemonEndpoint(ctx, target)
 	if err != nil {
 		return daemonConnection{}, err
 	}
 	return connectResolvedDaemonTarget(ctx, target, endpoint)
+}
+
+func resolveDaemonTargetToken(target daemonTarget) (daemonTarget, error) {
+	if target.TokenEnv == "" {
+		return target, nil
+	}
+	token := strings.TrimSpace(os.Getenv(target.TokenEnv))
+	if token == "" {
+		return target, fmt.Errorf("daemon %q: token_env %q is unset or empty",
+			daemonTargetDisplay(target), target.TokenEnv)
+	}
+	target.Token = token
+	return target, nil
 }
 
 func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpoint string) (daemonConnection, error) {

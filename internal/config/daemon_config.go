@@ -75,7 +75,8 @@ type CatalogDaemonConfig struct {
 	// Token is the inline bearer token, mutually exclusive with TokenEnv.
 	Token string `toml:"token"`
 	// TokenEnv names an environment variable holding the bearer token, so
-	// the secret stays out of the config file. Resolved into Token at load.
+	// the secret stays out of the config file. Resolved by clients only when
+	// they select this daemon target.
 	TokenEnv      string `toml:"token_env"`
 	AllowInsecure bool   `toml:"allow_insecure"`
 }
@@ -214,13 +215,6 @@ func normalizeDaemonCatalog(cfg *DaemonConfig) error {
 		}
 		if d.Token != "" && d.TokenEnv != "" {
 			return fmt.Errorf("daemon %q: token and token_env are mutually exclusive", d.Name)
-		}
-		if d.TokenEnv != "" {
-			v := strings.TrimSpace(os.Getenv(d.TokenEnv))
-			if v == "" {
-				return fmt.Errorf("daemon %q: token_env %q is unset or empty", d.Name, d.TokenEnv)
-			}
-			d.Token = v
 		}
 	}
 	if cfg.ActiveDaemon != "" {

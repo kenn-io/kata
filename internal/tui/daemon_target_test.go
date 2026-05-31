@@ -15,17 +15,17 @@ import (
 func TestDaemonTargetsFromConfigIncludesConfiguredEntries(t *testing.T) {
 	daemons := []config.CatalogDaemonConfig{
 		{Name: "local", Local: true},
-		{Name: "shared", URL: "http://100.64.0.5:7777", Token: "tok", AllowInsecure: true},
+		{Name: "shared", URL: "http://100.64.0.5:7777", TokenEnv: "KATA_SHARED_TOKEN", AllowInsecure: true}, //nolint:gosec // env var name, not a credential
 	}
 
 	targets := daemonTargetsFromConfig(daemons)
 
 	require.Len(t, targets, 2)
 	assert.Equal(t, daemonTarget{Name: "local", Local: true}, targets[0])
-	assert.Equal(t, daemonTarget{
+	assert.Equal(t, daemonTarget{ //nolint:gosec // env var name, not a credential
 		Name:          "shared",
 		URL:           "http://100.64.0.5:7777",
-		Token:         "tok",
+		TokenEnv:      "KATA_SHARED_TOKEN",
 		AllowInsecure: true,
 	}, targets[1])
 }
@@ -251,6 +251,56 @@ func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
 	assert.Equal(t, target, gotNormal)
 	assert.Equal(t, target, gotSSE)
 	assert.Equal(t, "shared", conn.target.Name)
+}
+
+func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
+	oldNormalize := normalizeRemoteURLForTUI
+	oldProbe := probeRemoteForTUI
+	oldNewClient := newHTTPClientForTUI
+	oldBootScope := bootResolveScopeForTUI
+	t.Cleanup(func() {
+		normalizeRemoteURLForTUI = oldNormalize
+		probeRemoteForTUI = oldProbe
+		newHTTPClientForTUI = oldNewClient
+		bootResolveScopeForTUI = oldBootScope
+	})
+	t.Setenv("KATA_WORK_TOKEN", "secret-from-env")
+
+	target := daemonTarget{Name: "shared", URL: "https://daemon.example", TokenEnv: "KATA_WORK_TOKEN"} //nolint:gosec // env var name, not a credential
+	var gotNormal, gotSSE daemonTarget
+	normalizeRemoteURLForTUI = func(v string, _ bool) (string, error) {
+		return v, nil
+	}
+	probeRemoteForTUI = func(context.Context, string) bool { return true }
+	newHTTPClientForTUI = func(_ context.Context, _ string, target daemonTarget, kind clientOptsKind) (*http.Client, error) {
+		if kind == clientOptsNormal {
+			gotNormal = target
+		} else {
+			gotSSE = target
+		}
+		return &http.Client{}, nil
+	}
+	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
+	}
+
+	conn, err := connectDaemonTarget(context.Background(), target)
+
+	require.NoError(t, err)
+	assert.Equal(t, "secret-from-env", gotNormal.Token)
+	assert.Equal(t, "secret-from-env", gotSSE.Token)
+	assert.Equal(t, "secret-from-env", conn.target.Token)
+}
+
+func TestConnectDaemonTargetRemoteRejectsUnsetTokenEnvOnUse(t *testing.T) {
+	t.Setenv("KATA_WORK_TOKEN", "")
+
+	_, err := connectDaemonTarget(context.Background(),
+		daemonTarget{Name: "shared", URL: "https://daemon.example", TokenEnv: "KATA_WORK_TOKEN"}) //nolint:gosec // env var name, not a credential
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token_env")
+	assert.Contains(t, err.Error(), "KATA_WORK_TOKEN")
 }
 
 func TestBuildRunModelCarriesDaemonMetadata(t *testing.T) {

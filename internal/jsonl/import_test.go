@@ -190,6 +190,29 @@ func TestImportV1NormalizesGoStringIssueAndCommentTimestamps(t *testing.T) {
 	assert.Equal(t, "2026-05-04T00:21:07.000Z", commentCreatedAt)
 }
 
+func TestImportV1NormalizesFractionalGoStringTimestamps(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+
+	require.NoError(t, importJSONL(ctx, target,
+		validExportVersion,
+		validV1ProjectRow,
+		`{"kind":"issue","data":{"id":1,"project_id":1,"number":1,"title":"v1 issue","body":"","status":"open","closed_reason":null,"owner":null,"author":"tester","created_at":"2026-05-04 00:21:07.123 +0000 UTC","updated_at":"2026-05-04 00:21:07.123 +0000 UTC","closed_at":null,"deleted_at":null}}`,
+		`{"kind":"comment","data":{"id":1,"issue_id":1,"author":"tester","body":"legacy note","created_at":"2026-05-04 00:21:07.123 +0000 UTC"}}`,
+	))
+
+	var issueCreatedAt, issueUpdatedAt, commentCreatedAt string
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT CAST(created_at AS TEXT), CAST(updated_at AS TEXT) FROM issues WHERE id = 1`,
+	).Scan(&issueCreatedAt, &issueUpdatedAt))
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT CAST(created_at AS TEXT) FROM comments WHERE id = 1`,
+	).Scan(&commentCreatedAt))
+	assert.Equal(t, "2026-05-04T00:21:07.123Z", issueCreatedAt)
+	assert.Equal(t, "2026-05-04T00:21:07.123Z", issueUpdatedAt)
+	assert.Equal(t, "2026-05-04T00:21:07.123Z", commentCreatedAt)
+}
+
 func TestImportV1NormalizesGoStringEventTimestampForStats(t *testing.T) {
 	ctx := context.Background()
 	target := openImportTargetDB(t)
