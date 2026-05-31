@@ -1863,15 +1863,6 @@ func payloadString(t *testing.T, payload map[string]any, key string) string {
 	return got
 }
 
-func assertPayloadFieldOmittedOrNull(t *testing.T, payload map[string]any, key string) {
-	t.Helper()
-	raw, ok := payload[key]
-	if !ok {
-		return
-	}
-	assert.Nil(t, raw, "payload key %s must be omitted or null", key)
-}
-
 func claimPrincipal(t *testing.T, holder string) db.ClaimPrincipal {
 	t.Helper()
 	return db.ClaimPrincipal{
