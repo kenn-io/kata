@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/shortid"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 // ErrRemoteEventHashMismatch reports a remote event whose advertised content
@@ -91,6 +92,25 @@ type SkipFederationQuarantineParams struct {
 	Actor     string
 	Reason    string
 	Now       time.Time
+}
+
+// AdoptProjectIntoFederationParams configures adoption of an existing local
+// project into a hub federation.
+type AdoptProjectIntoFederationParams struct {
+	ProjectID            int64
+	HubURL               string
+	HubProjectID         int64
+	HubProjectUID        string
+	ReplayHorizonEventID int64
+	Actor                string
+}
+
+// AdoptProjectIntoFederationResult describes the adopted project, binding, and
+// snapshot emission count.
+type AdoptProjectIntoFederationResult struct {
+	Project               Project
+	Binding               FederationBinding
+	AdoptionSnapshotCount int64
 }
 
 // FederationSyncStatusByProject returns the stored sync status for one local
@@ -424,6 +444,160 @@ func (d *DB) InsertRemoteEvent(ctx context.Context, projectID int64, ev RemoteEv
 		return false, fmt.Errorf("commit remote event insert: %w", err)
 	}
 	return true, nil
+}
+
+// AdoptProjectIntoFederation converts an existing local project into a
+// push-enabled spoke replica for the hub project UID. The adoption emits a
+// current-state push baseline above the captured local push cursor floor.
+func (d *DB) AdoptProjectIntoFederation(
+	ctx context.Context,
+	p AdoptProjectIntoFederationParams,
+) (AdoptProjectIntoFederationResult, error) {
+	actor := strings.TrimSpace(p.Actor)
+	if actor == "" {
+		actor = "federation"
+	}
+	if !katauid.Valid(p.HubProjectUID) {
+		return AdoptProjectIntoFederationResult{}, fmt.Errorf("invalid hub project uid %q", p.HubProjectUID)
+	}
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return AdoptProjectIntoFederationResult{}, fmt.Errorf("begin federation adoption: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	project, err := scanProject(tx.QueryRowContext(ctx,
+		projectSelect+` WHERE id = ?`, p.ProjectID))
+	if err != nil {
+		return AdoptProjectIntoFederationResult{}, err
+	}
+	if project.DeletedAt != nil {
+		return AdoptProjectIntoFederationResult{}, fmt.Errorf("adopt project into federation: project %d is archived", p.ProjectID)
+	}
+
+	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
+		federationBindingSelect+` WHERE project_id = ?`, p.ProjectID))
+	if err == nil {
+		if existing.Role == FederationRoleSpoke && existing.HubProjectUID == p.HubProjectUID {
+			if err := tx.Commit(); err != nil {
+				return AdoptProjectIntoFederationResult{}, fmt.Errorf("commit idempotent federation adoption: %w", err)
+			}
+			return AdoptProjectIntoFederationResult{
+				Project: project,
+				Binding: existing,
+			}, nil
+		}
+		return AdoptProjectIntoFederationResult{}, fmt.Errorf("project %d already has %q federation binding", p.ProjectID, existing.Role)
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return AdoptProjectIntoFederationResult{}, err
+	}
+
+	issues, err := federationIssuesForSnapshot(ctx, tx, project.ID)
+	if err != nil {
+		return AdoptProjectIntoFederationResult{}, err
+	}
+
+	pushFloor, err := federationAdoptionPushFloor(ctx, tx, project.ID, d.InstanceUID())
+	if err != nil {
+		return AdoptProjectIntoFederationResult{}, err
+	}
+
+	if project.UID != p.HubProjectUID {
+		if err := replaceProjectUIDTx(ctx, tx, project.ID, p.HubProjectUID); err != nil {
+			return AdoptProjectIntoFederationResult{}, err
+		}
+		project.UID = p.HubProjectUID
+	}
+	if err := clearProjectClaimStateTx(ctx, tx, project.ID); err != nil {
+		return AdoptProjectIntoFederationResult{}, err
+	}
+	boundary, err := nextEventHLC(ctx, tx, time.Now().UTC())
+	if err != nil {
+		return AdoptProjectIntoFederationResult{}, err
+	}
+	baselineCreatedAt := time.Now().UTC().Format(sqliteTimeFormat)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, project.ID); err != nil {
+		return AdoptProjectIntoFederationResult{}, fmt.Errorf("delete pre-adoption local events: %w", err)
+	}
+
+	pullCursor := p.ReplayHorizonEventID - 1
+	if pullCursor < 0 {
+		pullCursor = 0
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO federation_bindings(
+			project_id, role, hub_url, hub_project_id, hub_project_uid,
+			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
+			push_cursor_event_id, enabled
+		)
+		VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, 1)`,
+		project.ID, string(FederationRoleSpoke), p.HubURL, p.HubProjectID, p.HubProjectUID,
+		p.ReplayHorizonEventID, pullCursor, pushFloor); err != nil {
+		return AdoptProjectIntoFederationResult{}, fmt.Errorf("insert adoption federation binding: %w", err)
+	}
+
+	if len(project.Metadata) > 0 && string(project.Metadata) != "{}" {
+		payload, err := projectMetadataAdoptionPayload(project.Metadata)
+		if err != nil {
+			return AdoptProjectIntoFederationResult{}, err
+		}
+		if _, err := d.insertEventTx(ctx, tx, eventInsert{
+			ProjectID:   project.ID,
+			ProjectUID:  project.UID,
+			ProjectName: project.Name,
+			Type:        "project.metadata_updated",
+			Actor:       actor,
+			Payload:     payload,
+			HLC:         &boundary,
+			CreatedAt:   baselineCreatedAt,
+		}); err != nil {
+			return AdoptProjectIntoFederationResult{}, err
+		}
+	}
+
+	var snapshotCount int64
+	for _, issue := range issues {
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
+		if err != nil {
+			return AdoptProjectIntoFederationResult{}, err
+		}
+		issueUID := issue.UID
+		if _, err := d.insertEventTx(ctx, tx, eventInsert{
+			ProjectID:   project.ID,
+			ProjectUID:  project.UID,
+			ProjectName: project.Name,
+			IssueID:     &issue.ID,
+			IssueUID:    &issueUID,
+			Type:        "issue.snapshot",
+			Actor:       actor,
+			Payload:     payload,
+			HLC:         &boundary,
+			CreatedAt:   baselineCreatedAt,
+		}); err != nil {
+			return AdoptProjectIntoFederationResult{}, err
+		}
+		snapshotCount++
+	}
+
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+		federationBindingSelect+` WHERE project_id = ?`, project.ID))
+	if err != nil {
+		return AdoptProjectIntoFederationResult{}, err
+	}
+	project, err = scanProject(tx.QueryRowContext(ctx,
+		projectSelect+` WHERE id = ?`, project.ID))
+	if err != nil {
+		return AdoptProjectIntoFederationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AdoptProjectIntoFederationResult{}, fmt.Errorf("commit federation adoption: %w", err)
+	}
+	return AdoptProjectIntoFederationResult{
+		Project:               project,
+		Binding:               binding,
+		AdoptionSnapshotCount: snapshotCount,
+	}, nil
 }
 
 // EnableProjectFederation marks a local project as a pull hub and writes a
@@ -761,9 +935,9 @@ func ensureFederatedMoveAllowedTx(ctx context.Context, q sqlReader, projectIDs .
 }
 
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
-       replay_horizon_event_id, pull_cursor_event_id, push_enabled, push_cursor_event_id,
-       enabled, created_at, updated_at, last_sync_at
-  FROM federation_bindings`
+	       replay_horizon_event_id, pull_cursor_event_id, push_enabled, push_cursor_event_id,
+	       enabled, created_at, updated_at, last_sync_at
+	  FROM federation_bindings`
 
 func scanFederationBinding(r rowScanner) (FederationBinding, error) {
 	var (
@@ -905,6 +1079,68 @@ func validateFederationQuarantine(p RecordFederationQuarantineParams) error {
 	return nil
 }
 
+func federationAdoptionPushFloor(ctx context.Context, tx *sql.Tx, projectID int64, originInstanceUID string) (int64, error) {
+	var maxID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT MAX(id)
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND `+federationPushEventTypeCondition("type"),
+		projectID, originInstanceUID).Scan(&maxID); err != nil {
+		return 0, fmt.Errorf("capture adoption push cursor floor: %w", err)
+	}
+	if maxID.Valid {
+		return maxID.Int64, nil
+	}
+	return 0, nil
+}
+
+func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid string) error {
+	if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS trg_projects_uid_immutable`); err != nil {
+		return fmt.Errorf("drop project uid immutability trigger for adoption: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET uid = ? WHERE id = ?`, uid, projectID); err != nil {
+		return fmt.Errorf("update adopted project uid: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TRIGGER trg_projects_uid_immutable
+		BEFORE UPDATE OF uid ON projects
+		FOR EACH ROW BEGIN
+		  SELECT RAISE(ABORT, 'projects.uid is immutable')
+		  WHERE NEW.uid <> OLD.uid;
+		END`); err != nil {
+		return fmt.Errorf("restore project uid immutability trigger after adoption: %w", err)
+	}
+	return nil
+}
+
+func projectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {
+	current := map[string]json.RawMessage{}
+	if len(metadata) > 0 {
+		if err := json.Unmarshal([]byte(metadata), &current); err != nil {
+			return "", fmt.Errorf("decode adopted project metadata: %w", err)
+		}
+	}
+	type diffEntry struct {
+		From any             `json:"from"`
+		To   json.RawMessage `json:"to"`
+	}
+	diff := make(map[string]diffEntry, len(current))
+	for key, value := range current {
+		diff[key] = diffEntry{From: nil, To: value}
+	}
+	payload, err := json.Marshal(struct {
+		Diff map[string]diffEntry `json:"diff"`
+	}{
+		Diff: diff,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal adopted project metadata event: %w", err)
+	}
+	return string(payload), nil
+}
+
 func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int64) ([]Issue, error) {
 	rows, err := tx.QueryContext(ctx,
 		issueSelect+` WHERE i.project_id = ? ORDER BY i.id ASC`, projectID)
@@ -991,8 +1227,9 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 
 func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLinkOut, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT l.type, peer.short_id, peer.uid
+		SELECT l.type, peer.short_id, peer.uid, subject.project_id, peer.project_id
 		  FROM links l
+		  JOIN issues subject ON subject.id = l.from_issue_id
 		  JOIN issues peer ON peer.id = l.to_issue_id
 		 WHERE l.from_issue_id = ?
 		 ORDER BY l.type ASC, peer.uid ASC`, issueID)
@@ -1002,9 +1239,15 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 	defer func() { _ = rows.Close() }()
 	var out []createdLinkOut
 	for rows.Next() {
-		var link createdLinkOut
-		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID); err != nil {
+		var (
+			link                        createdLinkOut
+			subjectProject, peerProject int64
+		)
+		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &subjectProject, &peerProject); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot link: %w", err)
+		}
+		if subjectProject != peerProject {
+			return nil, fmt.Errorf("out-of-project link in federation snapshot for issue %d", issueID)
 		}
 		out = append(out, link)
 	}
@@ -1104,9 +1347,10 @@ func projectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, err
 }
 
 func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := clearProjectClaimStateTx(ctx, tx, projectID); err != nil {
+		return err
+	}
 	for _, stmt := range []string{
-		`DELETE FROM pending_claim_requests WHERE project_id = ?`,
-		`DELETE FROM issue_claims WHERE project_id = ?`,
 		`DELETE FROM issue_labels WHERE issue_id IN (SELECT id FROM issues WHERE project_id = ?)`,
 		`DELETE FROM comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id = ?)`,
 		`DELETE FROM links WHERE project_id = ?`,
@@ -1114,6 +1358,18 @@ func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) 
 	} {
 		if _, err := tx.ExecContext(ctx, stmt, projectID); err != nil {
 			return fmt.Errorf("clear federated projection: %w", err)
+		}
+	}
+	return nil
+}
+
+func clearProjectClaimStateTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	for _, stmt := range []string{
+		`DELETE FROM pending_claim_requests WHERE project_id = ?`,
+		`DELETE FROM issue_claims WHERE project_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, projectID); err != nil {
+			return fmt.Errorf("clear project claim state: %w", err)
 		}
 	}
 	return nil

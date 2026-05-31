@@ -31,6 +31,60 @@ func (d *DB) PendingFederationPushEvents(
 	if limit <= 0 {
 		limit = 1000
 	}
+	out, err := d.queryPendingFederationPushEvents(ctx, `
+		WHERE e.project_id = ?
+		  AND e.origin_instance_uid = ?
+		  AND e.id > ?
+		  AND `+federationPushEventTypeCondition("e.type")+`
+		ORDER BY e.id ASC
+		LIMIT ?`, projectID, originInstanceUID, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == limit && len(out) > 0 && out[len(out)-1].Type == "issue.snapshot" {
+		runStartAfterID := afterID
+		for i := len(out) - 1; i >= 0; i-- {
+			if out[i].Type != "issue.snapshot" {
+				runStartAfterID = out[i].ID
+				break
+			}
+		}
+		extra, err := d.queryPendingFederationPushEvents(ctx, `
+			WHERE e.project_id = ?
+			  AND e.origin_instance_uid = ?
+			  AND e.id > ?
+			  AND e.type = 'issue.snapshot'
+			  AND NOT EXISTS (
+			    SELECT 1
+			      FROM events barrier
+			     WHERE barrier.project_id = e.project_id
+			       AND barrier.origin_instance_uid = e.origin_instance_uid
+			       AND barrier.id > ?
+			       AND barrier.id < e.id
+			       AND `+federationPushEventTypeCondition("barrier.type")+`
+			       AND barrier.type <> 'issue.snapshot'
+			  )
+			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, runStartAfterID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, extra...)
+	}
+	for i, ev := range out {
+		if ev.Type != "issue.snapshot" {
+			continue
+		}
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Type != "issue.snapshot" {
+				return out[:j], nil
+			}
+		}
+		break
+	}
+	return out, nil
+}
+
+func (d *DB) queryPendingFederationPushEvents(ctx context.Context, where string, args ...any) ([]Event, error) {
 	rows, err := d.QueryContext(ctx, `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 	             e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
 	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
@@ -38,12 +92,7 @@ func (d *DB) PendingFederationPushEvents(
 	      JOIN projects p ON p.id = e.project_id
 	      LEFT JOIN issues i ON i.project_id = e.project_id AND (i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid))
 	      LEFT JOIN issues ri ON ri.project_id = e.project_id AND (ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid))
-	      WHERE e.project_id = ?
-	        AND e.origin_instance_uid = ?
-	        AND e.id > ?
-	        AND `+federationPushEventTypeCondition("e.type")+`
-	      ORDER BY e.id ASC
-	      LIMIT ?`, projectID, originInstanceUID, afterID, limit)
+	      `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("pending federation push events: %w", err)
 	}
@@ -101,11 +150,14 @@ func federationPushEventTypeCondition(column string) string {
 func (d *DB) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
 	res, err := d.ExecContext(ctx, `
 		UPDATE federation_bindings
-		   SET push_cursor_event_id = ?,
+		   SET push_cursor_event_id = CASE
+		         WHEN push_cursor_event_id < ? THEN ?
+		         ELSE push_cursor_event_id
+		       END,
 		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 WHERE project_id = ?`,
-		nextCursor, projectID)
+		nextCursor, nextCursor, projectID)
 	if err != nil {
 		return fmt.Errorf("advance federation push cursor: %w", err)
 	}

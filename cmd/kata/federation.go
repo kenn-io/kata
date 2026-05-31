@@ -288,6 +288,13 @@ func federationJoinCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if bundle.AdoptExisting && !bundle.PushEnabled {
+				return &cliError{
+					Message:  "--adopt-existing requires --push",
+					Kind:     kindValidation,
+					ExitCode: ExitValidation,
+				}
+			}
 			if err := validateFederationJoinCapabilities(internalCaps, bundle.PushEnabled); err != nil {
 				return err
 			}
@@ -322,6 +329,7 @@ func federationJoinCmd() *cobra.Command {
 					"token":                     bundle.Token,
 					"capabilities":              internalCaps,
 					"push_enabled":              bundle.PushEnabled,
+					"adopt_existing":            bundle.AdoptExisting,
 				})
 			if err != nil {
 				return err
@@ -343,6 +351,7 @@ func federationJoinCmd() *cobra.Command {
 	cmd.Flags().StringVar(&bundle.Token, "token", "", "enrollment token")
 	cmd.Flags().StringVar(&bundle.DisplayCapabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease")
 	cmd.Flags().BoolVar(&bundle.PushEnabled, "push", false, "enable spoke push")
+	cmd.Flags().BoolVar(&bundle.AdoptExisting, "adopt-existing", false, "adopt matching existing local data into the federation")
 	return cmd
 }
 
@@ -400,6 +409,7 @@ type federationJoinBundle struct {
 	Capabilities           string `json:"capabilities,omitempty"`
 	DisplayCapabilities    string `json:"-"`
 	PushEnabled            bool   `json:"push_enabled,omitempty"`
+	AdoptExisting          bool   `json:"adopt_existing,omitempty"`
 }
 
 func hydrateFederationJoinMetadata(ctx context.Context, bundle *federationJoinBundle) error {
@@ -617,10 +627,18 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 			agentRowField("project", body.Project.Name),
 			agentRowField("project_id", strconv.FormatInt(body.Project.ID, 10)),
 			agentRowField("push_enabled", strconv.FormatBool(body.Binding.PushEnabled)),
+			agentRowField("adopted", strconv.FormatBool(body.Adopted)),
+			agentRowField("adoption_snapshots", strconv.FormatInt(body.AdoptionSnapshotCount, 10)),
 		)
 	}
 	if flags.Quiet {
 		return nil
+	}
+	if body.Adopted {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(),
+			"adopted existing project %s into federation\nqueued %d issue snapshots for hub push; local event history was not imported\nexisting issues now require hub leases before edits\n",
+			textsafe.Line(body.Project.Name), body.AdoptionSnapshotCount)
+		return err
 	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(), "joined federation project %s (push-enabled: %t)\n",
 		textsafe.Line(body.Project.Name), body.Binding.PushEnabled)
@@ -709,6 +727,9 @@ func federationJoinCommand(bundle federationJoinBundle) string {
 	}
 	if bundle.PushEnabled {
 		args = append(args, "--push")
+	}
+	if bundle.AdoptExisting {
+		args = append(args, "--adopt-existing")
 	}
 	quoted := make([]string, 0, len(args))
 	for _, arg := range args {

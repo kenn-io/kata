@@ -81,9 +81,14 @@ func (d *DB) ingestFederationEventsOnce(
 	if err != nil {
 		return FederationIngestResult{}, err
 	}
+	batchCreateSnapshotUIDs, err := federationIngestCreateSnapshotUIDSet(p.Events)
+	if err != nil {
+		return FederationIngestResult{}, err
+	}
 	prepared := make([]preparedFederationIngestEvent, 0, len(p.Events))
 	result := FederationIngestResult{}
 	seenBatch := map[string]string{}
+	freshSnapshotSeen := false
 	for _, in := range p.Events {
 		if in.SourceEventID <= 0 {
 			return FederationIngestResult{}, fmt.Errorf("%w: source event id must be positive", ErrFederationIngestValidation)
@@ -95,7 +100,7 @@ func (d *DB) ingestFederationEventsOnce(
 		if len(ev.Payload) == 0 {
 			ev.Payload = json.RawMessage(`{}`)
 		}
-		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs); err != nil {
+		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs, batchCreateSnapshotUIDs); err != nil {
 			return FederationIngestResult{}, err
 		}
 		if err := validateFederationEventHash(ev); err != nil {
@@ -130,8 +135,15 @@ func (d *DB) ingestFederationEventsOnce(
 		if !errors.Is(err, ErrNotFound) {
 			return FederationIngestResult{}, err
 		}
+		if freshSnapshotSeen && ev.Type != "issue.snapshot" {
+			return FederationIngestResult{}, fmt.Errorf("%w: non-snapshot event %s follows snapshot baseline in same batch",
+				ErrFederationIngestValidation, ev.EventUID)
+		}
 		if err := rejectFreshCreateSnapshotForKnownIssue(ev, knownIssueUIDs); err != nil {
 			return FederationIngestResult{}, err
+		}
+		if ev.Type == "issue.snapshot" {
+			freshSnapshotSeen = true
 		}
 		seenBatch[ev.EventUID] = ev.ContentHash
 		rememberIngestIssueUIDs(ev, knownIssueUIDs)
@@ -188,6 +200,10 @@ func insertFederationEventTx(
 	projectName string,
 	ev RemoteEvent,
 ) (bool, error) {
+	storedProjectName := ev.ProjectName
+	if storedProjectName == "" {
+		storedProjectName = projectName
+	}
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO events(
 		   uid, origin_instance_uid, project_id, project_name,
@@ -197,7 +213,7 @@ func insertFederationEventTx(
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(uid) DO NOTHING`,
 		ev.EventUID, ev.OriginInstanceUID,
-		projectID, projectName,
+		projectID, storedProjectName,
 		nil, stringPtrValue(ev.IssueUID),
 		nil, stringPtrValue(ev.RelatedIssueUID),
 		ev.Type, ev.Actor, string(ev.Payload),
@@ -285,6 +301,7 @@ func validateFederationProjectEvent(
 	projectUID, spokeInstanceUID string,
 	ev RemoteEvent,
 	knownIssueUIDs map[string]struct{},
+	batchCreateSnapshotUIDs map[string]struct{},
 ) error {
 	if ev.ProjectUID != projectUID {
 		return fmt.Errorf("%w: event %s targets project %s", ErrFederationIngestValidation, ev.EventUID, ev.ProjectUID)
@@ -328,15 +345,49 @@ func validateFederationProjectEvent(
 	default:
 		return fmt.Errorf("%w: unsupported event type %s", ErrFederationIngestValidation, ev.Type)
 	}
+	deferredSnapshotLinks := map[string]struct{}{}
+	if ev.Type == "issue.snapshot" {
+		for _, ref := range payloadLinkIssueUIDs(ev) {
+			if _, ok := batchCreateSnapshotUIDs[ref]; ok {
+				deferredSnapshotLinks[ref] = struct{}{}
+			}
+		}
+	}
 	for _, ref := range payloadReferencedIssueUIDs(ev, payload) {
 		if ref == issueUID {
 			continue
 		}
 		if _, ok := knownIssueUIDs[ref]; !ok {
+			if _, deferred := deferredSnapshotLinks[ref]; deferred {
+				continue
+			}
 			return fmt.Errorf("%w: event %s references unknown issue %s", ErrFederationIngestValidation, ev.EventUID, ref)
 		}
 	}
 	return nil
+}
+
+func federationIngestCreateSnapshotUIDSet(events []FederationIngestEvent) (map[string]struct{}, error) {
+	out := map[string]struct{}{}
+	for _, in := range events {
+		ev := in.Event
+		if len(ev.Payload) == 0 {
+			ev.Payload = json.RawMessage(`{}`)
+		}
+		switch ev.Type {
+		case "issue.created", "issue.snapshot":
+		default:
+			continue
+		}
+		uid, err := payloadIssueUID(ev, payloadMap(ev.Payload))
+		if err != nil {
+			return nil, err
+		}
+		if uid != "" {
+			out[uid] = struct{}{}
+		}
+	}
+	return out, nil
 }
 
 func rejectFreshCreateSnapshotForKnownIssue(ev RemoteEvent, knownIssueUIDs map[string]struct{}) error {
@@ -396,12 +447,18 @@ func payloadReferencedIssueUIDs(ev RemoteEvent, payload map[string]json.RawMessa
 	} {
 		refs = append(refs, stringSlice(payload[key])...)
 	}
+	refs = append(refs, payloadLinkIssueUIDs(ev)...)
+	return refs
+}
+
+func payloadLinkIssueUIDs(ev RemoteEvent) []string {
 	var created struct {
 		Links []struct {
 			ToIssueUID string `json:"to_issue_uid"`
 		} `json:"links"`
 	}
 	_ = json.Unmarshal(ev.Payload, &created)
+	var refs []string
 	for _, link := range created.Links {
 		if link.ToIssueUID != "" {
 			refs = append(refs, link.ToIssueUID)

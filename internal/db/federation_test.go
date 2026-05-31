@@ -411,6 +411,64 @@ func TestPendingFederationPushEvents(t *testing.T) {
 	assertSchemaObject(t, d, "idx_events_origin_project_id")
 }
 
+func TestPendingFederationPushEventsDoesNotSplitAdoptionSnapshots(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	parent, _ := createTesterIssue(ctx, t, d, p.ID, "parent")
+	child, _ := createTesterIssue(ctx, t, d, p.ID, "child")
+	_, err := d.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID:   child.ID,
+		Actor:     "tester",
+		SetParent: &parent.ID,
+	})
+	require.NoError(t, err)
+	adopted, err := d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID:            p.ID,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        newTestUID(t),
+		ReplayHorizonEventID: 1,
+		Actor:                "adopter",
+	})
+	require.NoError(t, err)
+
+	got, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), adopted.Binding.PushCursorEventID, 1)
+
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, []string{"issue.snapshot", "issue.snapshot"}, []string{got[0].Type, got[1].Type})
+}
+
+func TestPendingFederationPushEventsStopsAfterAdoptionSnapshotRun(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	baseline, _ := createTesterIssue(ctx, t, d, p.ID, "baseline")
+	adopted, err := d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID:            p.ID,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        newTestUID(t),
+		ReplayHorizonEventID: 1,
+		Actor:                "adopter",
+	})
+	require.NoError(t, err)
+	_, _, err = d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "post-adoption child",
+		Author:    "tester",
+		Links:     []db.InitialLink{{Type: "parent", ToNumber: baseline.ID}},
+	})
+	require.NoError(t, err)
+
+	got, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), adopted.Binding.PushCursorEventID, 100)
+
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "issue.snapshot", got[0].Type)
+	afterSnapshots, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), got[0].ID, 100)
+	require.NoError(t, err)
+	require.NotEmpty(t, afterSnapshots)
+	assert.Equal(t, "issue.created", afterSnapshots[0].Type)
+}
+
 func TestAdvanceFederationPushCursor(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -430,6 +488,477 @@ func TestAdvanceFederationPushCursor(t *testing.T) {
 	assert.Equal(t, int64(12), got.PushCursorEventID)
 
 	assert.ErrorIs(t, d.AdvanceFederationPushCursor(ctx, 999, 1), db.ErrNotFound)
+}
+
+func TestAdoptProjectIntoFederation(t *testing.T) {
+	t.Run("rejects invalid hub project uid", func(t *testing.T) {
+		d, ctx, p := setupTestProject(t)
+
+		_, err := d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+			ProjectID:            p.ID,
+			HubURL:               "http://127.0.0.1:7373",
+			HubProjectID:         42,
+			HubProjectUID:        "!!!!!!!!!!!!!!!!!!!!!!!!!!",
+			ReplayHorizonEventID: 9,
+			Actor:                "adopter",
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid hub project uid")
+	})
+
+	t.Run("adopts current state into push-enabled spoke stream", func(t *testing.T) {
+		d, ctx, p := setupTestProject(t)
+		require.NoError(t, renameProjectForAdoptionTest(ctx, d, p.ID, "shared-foo"))
+		p, err := d.ProjectByID(ctx, p.ID)
+		require.NoError(t, err)
+		oldProjectUID := p.UID
+
+		owner := "alice"
+		priority := int64(1)
+		openIssue, createEvent, err := d.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: p.ID,
+			Title:     "open adoption issue",
+			Body:      "body survives",
+			Author:    "alice",
+			Owner:     &owner,
+			Priority:  &priority,
+			Labels:    []string{"area:db"},
+		})
+		require.NoError(t, err)
+		closedIssue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: p.ID,
+			Title:     "closed adoption issue",
+			Author:    "bob",
+		})
+		require.NoError(t, err)
+		comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: openIssue.ID,
+			Author:  "carol",
+			Body:    "comment survives",
+		})
+		require.NoError(t, err)
+		metaOut, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+			IssueID:    openIssue.ID,
+			IfMatchRev: openIssue.Revision,
+			Actor:      "alice",
+			Patch: map[string]json.RawMessage{
+				"component": json.RawMessage(`"db"`),
+			},
+		})
+		require.NoError(t, err)
+		openIssue = metaOut.Issue
+		projectMetaOut, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+			ProjectID:  p.ID,
+			IfMatchRev: p.Revision,
+			Actor:      "alice",
+			Patch: map[string]json.RawMessage{
+				"team": json.RawMessage(`"federation"`),
+			},
+		})
+		require.NoError(t, err)
+		p = projectMetaOut.Project
+		closedIssue, _, _, err = d.CloseIssue(ctx, closedIssue.ID, "done", "bob", "completed before adoption", nil)
+		require.NoError(t, err)
+		_, err = d.CreateLink(ctx, db.CreateLinkParams{
+			ProjectID:   p.ID,
+			FromIssueID: openIssue.ID,
+			ToIssueID:   closedIssue.ID,
+			Type:        "related",
+			Author:      "alice",
+		})
+		require.NoError(t, err)
+
+		futurePhysical := time.Now().UTC().Add(10 * time.Minute).UnixMilli()
+		futureEventUID := newTestUID(t)
+		_, err = d.ExecContext(ctx, `
+			INSERT INTO events(
+				uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid,
+				type, actor, payload, hlc_physical_ms, hlc_counter, content_hash, created_at
+			)
+			VALUES(?, ?, ?, ?, ?, ?, 'issue.updated', 'tester',
+			       '{"title":"pre-adoption high water"}', ?, 7, ?, ?)`,
+			futureEventUID, d.InstanceUID(), p.ID, p.Name, openIssue.ID, openIssue.UID,
+			futurePhysical, strings.Repeat("a", 64),
+			time.Now().UTC().Format("2006-01-02T15:04:05.000Z"))
+		require.NoError(t, err)
+		var pushFloor int64
+		require.NoError(t, d.QueryRowContext(ctx, `SELECT MAX(id) FROM events WHERE project_id = ?`, p.ID).Scan(&pushFloor))
+
+		hubUID := newTestUID(t)
+		result, err := d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+			ProjectID:            p.ID,
+			HubURL:               "http://127.0.0.1:7373",
+			HubProjectID:         42,
+			HubProjectUID:        hubUID,
+			ReplayHorizonEventID: 9,
+			Actor:                "adopter",
+		})
+		require.NoError(t, err)
+		require.NotEqual(t, oldProjectUID, result.Project.UID)
+		assert.Equal(t, hubUID, result.Project.UID)
+		assert.Equal(t, int64(2), result.AdoptionSnapshotCount)
+		assert.Equal(t, db.FederationRoleSpoke, result.Binding.Role)
+		assert.True(t, result.Binding.PushEnabled)
+		assert.True(t, result.Binding.Enabled)
+		assert.Equal(t, int64(8), result.Binding.PullCursorEventID)
+		assert.Equal(t, pushFloor, result.Binding.PushCursorEventID)
+		assertRowCount(ctx, t, d, 0, "pre-adoption local events deleted during adoption",
+			`SELECT COUNT(*) FROM events WHERE project_id = ? AND id <= ?`, p.ID, pushFloor)
+
+		pending, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), result.Binding.PushCursorEventID, 20)
+		require.NoError(t, err)
+		require.Len(t, pending, 3)
+		for _, ev := range pending {
+			assert.Greater(t, ev.ID, pushFloor)
+			assert.Equal(t, hubUID, ev.ProjectUID)
+			assert.True(t, ev.HLCPhysicalMS > futurePhysical ||
+				(ev.HLCPhysicalMS == futurePhysical && ev.HLCCounter > 7),
+				"adoption event %s should sort after pre-adoption future event", ev.Type)
+		}
+		require.NoError(t, d.AdvanceFederationPushCursor(ctx, p.ID, 0))
+		unchangedFloor, err := d.FederationBindingByProject(ctx, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, pushFloor, unchangedFloor.PushCursorEventID)
+		afterLowAdvance, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), unchangedFloor.PushCursorEventID, 20)
+		require.NoError(t, err)
+		assert.Equal(t, eventIDs(pending), eventIDs(afterLowAdvance))
+		var eventCountBeforeRetry int
+		require.NoError(t, d.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE project_id = ?`, p.ID).Scan(&eventCountBeforeRetry))
+		retryResult, err := d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+			ProjectID:            p.ID,
+			HubURL:               "http://127.0.0.1:7373",
+			HubProjectID:         42,
+			HubProjectUID:        hubUID,
+			ReplayHorizonEventID: 9,
+			Actor:                "adopter",
+		})
+		require.NoError(t, err)
+		assert.Zero(t, retryResult.AdoptionSnapshotCount)
+		assert.Equal(t, pushFloor, retryResult.Binding.PushCursorEventID)
+		var eventCountAfterRetry int
+		require.NoError(t, d.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE project_id = ?`, p.ID).Scan(&eventCountAfterRetry))
+		assert.Equal(t, eventCountBeforeRetry, eventCountAfterRetry, "idempotent adoption retry must not emit duplicate events")
+		quarantine, err := d.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+			ProjectID:    p.ID,
+			Direction:    db.FederationQuarantineDirectionPush,
+			FirstEventID: 1,
+			LastEventID:  pushFloor - 1,
+			EventUIDs:    []string{futureEventUID},
+			Error:        "pre-adoption poisoned batch",
+			CreatedAt:    time.Now().UTC(),
+		})
+		require.NoError(t, err)
+		_, err = d.SkipFederationQuarantine(ctx, db.SkipFederationQuarantineParams{
+			ID:        quarantine.ID,
+			ProjectID: p.ID,
+			Actor:     "operator",
+			Reason:    "below adoption floor",
+			Now:       time.Now().UTC(),
+		})
+		require.NoError(t, err)
+		afterSkip, err := d.FederationBindingByProject(ctx, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, pushFloor, afterSkip.PushCursorEventID)
+
+		assert.Equal(t, []string{
+			"project.metadata_updated",
+			"issue.snapshot",
+			"issue.snapshot",
+		}, []string{pending[0].Type, pending[1].Type, pending[2].Type})
+
+		projectMetaPayload := unmarshalPayload[struct {
+			Diff map[string]struct {
+				From *json.RawMessage `json:"from"`
+				To   json.RawMessage  `json:"to"`
+			} `json:"diff"`
+		}](t, pending[0].Payload)
+		require.Contains(t, projectMetaPayload.Diff, "team")
+		assert.Nil(t, projectMetaPayload.Diff["team"].From)
+		assert.JSONEq(t, `"federation"`, string(projectMetaPayload.Diff["team"].To))
+
+		snapshots := map[string]db.Event{}
+		for _, ev := range pending {
+			if ev.Type == "issue.snapshot" {
+				require.NotNil(t, ev.IssueUID)
+				snapshots[*ev.IssueUID] = ev
+			}
+		}
+		require.Len(t, snapshots, 2)
+		openPayload := unmarshalPayload[federationSnapshotPayload](t, snapshots[openIssue.UID].Payload)
+		require.Len(t, openPayload.Links, 1)
+		assert.Equal(t, "related", openPayload.Links[0].Type)
+		assert.Equal(t, closedIssue.UID, openPayload.Links[0].ToIssueUID)
+		assert.Equal(t, openIssue.UID, openPayload.UID)
+		assert.Equal(t, "open adoption issue", openPayload.Title)
+		require.NotNil(t, openPayload.Owner)
+		assert.Equal(t, owner, *openPayload.Owner)
+		require.NotNil(t, openPayload.Priority)
+		assert.Equal(t, priority, *openPayload.Priority)
+		assert.JSONEq(t, `{"component":"db"}`, string(openPayload.Metadata))
+		assert.Equal(t, []string{"area:db"}, openPayload.Labels)
+		require.Len(t, openPayload.Comments, 1)
+		assert.Equal(t, comment.UID, openPayload.Comments[0].CommentUID)
+		assert.Equal(t, "comment survives", openPayload.Comments[0].Body)
+		closedPayload := unmarshalPayload[federationSnapshotPayload](t, snapshots[closedIssue.UID].Payload)
+		assert.Empty(t, closedPayload.Links)
+		assert.Equal(t, "closed", closedPayload.Status)
+		require.NotNil(t, closedPayload.ClosedReason)
+		assert.Equal(t, "done", *closedPayload.ClosedReason)
+		require.NotNil(t, closedPayload.ClosedAt)
+
+		require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+		materializedProject, err := d.ProjectByID(ctx, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, hubUID, materializedProject.UID)
+		assert.JSONEq(t, `{"team":"federation"}`, string(materializedProject.Metadata))
+		materializedOpen, err := d.IssueByUID(ctx, openIssue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "open adoption issue", materializedOpen.Title)
+		assert.Equal(t, openIssue.UpdatedAt, materializedOpen.UpdatedAt)
+		materializedClosed, err := d.IssueByUID(ctx, closedIssue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "closed", materializedClosed.Status)
+		assertRowCount(ctx, t, d, 1, "adopted related link materialized",
+			`SELECT COUNT(*) FROM links WHERE project_id = ? AND from_issue_uid = ? AND to_issue_uid = ? AND type = 'related'`,
+			p.ID, openIssue.UID, closedIssue.UID)
+		assert.Greater(t, createEvent.ID, int64(0), "pre-adoption fixture event should have existed before adoption")
+		require.NoError(t, d.AdvanceFederationPushCursor(ctx, p.ID, pending[len(pending)-1].ID))
+		require.NoError(t, d.ResetFederatedProjectIfNoPendingPush(ctx, p.ID, 20, 19, d.InstanceUID(), pending[len(pending)-1].ID))
+		afterResetPending, err := d.PendingFederationPushEvents(ctx, p.ID, d.InstanceUID(), 0, 20)
+		require.NoError(t, err)
+		assert.Empty(t, afterResetPending, "reset must delete pre-adoption history before a lower cursor can select it")
+	})
+
+	t.Run("rejects malformed out-of-project links before commit", func(t *testing.T) {
+		d, ctx, p := setupTestProject(t)
+		require.NoError(t, renameProjectForAdoptionTest(ctx, d, p.ID, "shared-foo"))
+		p, err := d.ProjectByID(ctx, p.ID)
+		require.NoError(t, err)
+		beforeUID := p.UID
+		base, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: p.ID,
+			Title:     "base",
+			Author:    "tester",
+		})
+		require.NoError(t, err)
+		otherProject, err := d.CreateProject(ctx, "other-project")
+		require.NoError(t, err)
+		foreign, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: otherProject.ID,
+			Title:     "foreign",
+			Author:    "tester",
+		})
+		require.NoError(t, err)
+		require.NoError(t, insertMalformedAdoptionLink(ctx, d, p.ID, base, foreign))
+
+		_, err = d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+			ProjectID:            p.ID,
+			HubURL:               "http://127.0.0.1:7373",
+			HubProjectID:         42,
+			HubProjectUID:        newTestUID(t),
+			ReplayHorizonEventID: 9,
+			Actor:                "adopter",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "out-of-project link")
+
+		after, err := d.ProjectByID(ctx, p.ID)
+		require.NoError(t, err)
+		assert.Equal(t, beforeUID, after.UID)
+		_, err = d.FederationBindingByProject(ctx, p.ID)
+		assert.ErrorIs(t, err, db.ErrNotFound)
+		assertRowCount(ctx, t, d, 0, "no adoption snapshots after rollback",
+			`SELECT COUNT(*) FROM events WHERE project_id = ? AND type = 'issue.snapshot'`, p.ID)
+	})
+
+	t.Run("materialization ignores issues moved out before adoption", func(t *testing.T) {
+		d, ctx, p := setupTestProject(t)
+		target, err := d.CreateProject(ctx, "target")
+		require.NoError(t, err)
+		moved, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: p.ID,
+			Title:     "moved before adoption",
+			Author:    "alice",
+		})
+		require.NoError(t, err)
+		moveOut, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID:       moved.ID,
+			FromProjectID: p.ID,
+			ToProjectID:   target.ID,
+			IfMatchRev:    moved.Revision,
+			Actor:         "alice",
+		})
+		require.NoError(t, err)
+		require.Equal(t, target.ID, moveOut.Issue.ProjectID)
+
+		hubUID := newTestUID(t)
+		_, err = d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+			ProjectID:            p.ID,
+			HubURL:               "http://127.0.0.1:7373",
+			HubProjectID:         42,
+			HubProjectUID:        hubUID,
+			ReplayHorizonEventID: 9,
+			Actor:                "adopter",
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))
+		after, err := d.IssueByUID(ctx, moved.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, target.ID, after.ProjectID)
+		assertRowCount(ctx, t, d, 0, "moved-out issue must not be recreated in adopted project",
+			`SELECT COUNT(*) FROM issues WHERE project_id = ? AND uid = ?`, p.ID, moved.UID)
+	})
+}
+
+func TestAdoptProjectIntoFederationClearsLocalClaimState(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	issue := makeIssue(t, ctx, d, p.ID, "claimed", "tester")
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	principal := claimPrincipal(t, "alice")
+	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: principal,
+		ClaimKind: "hard",
+		Now:       now,
+	})
+	require.NoError(t, err)
+	_, err = d.EnqueuePendingClaim(ctx, db.PendingClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: claimPrincipal(t, "bob"),
+		ClaimKind: "hard",
+		Now:       now,
+	})
+	require.NoError(t, err)
+
+	_, err = d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID:            p.ID,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        newTestUID(t),
+		ReplayHorizonEventID: 1,
+		Actor:                "adopter",
+	})
+	require.NoError(t, err)
+
+	assertClaimProjectionCounts(ctx, t, d, p.ID, 0, 0)
+	err = d.CheckClaimGate(ctx, db.ClaimGateParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: principal,
+		Now:       now,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, db.ErrClaimRequired)
+}
+
+func TestAdoptionSnapshotLinksIngestDoesNotEmitClaimViolation(t *testing.T) {
+	spoke, ctx, localProject := setupTestProject(t)
+	first, _ := createTesterIssue(ctx, t, spoke, localProject.ID, "first")
+	second, _ := createTesterIssue(ctx, t, spoke, localProject.ID, "second")
+	_, err := spoke.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID:    first.ID,
+		Actor:      "tester",
+		AddRelated: []int64{second.ID},
+	})
+	require.NoError(t, err)
+
+	hubUID := newTestUID(t)
+	adopted, err := spoke.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID:            localProject.ID,
+		HubURL:               "http://hub.example.test",
+		HubProjectID:         42,
+		HubProjectUID:        hubUID,
+		ReplayHorizonEventID: 1,
+		Actor:                "federation",
+	})
+	require.NoError(t, err)
+	pending, err := spoke.PendingFederationPushEvents(ctx, localProject.ID, spoke.InstanceUID(), adopted.Binding.PushCursorEventID, 20)
+	require.NoError(t, err)
+
+	var snapshots []db.FederationIngestEvent
+	for _, ev := range pending {
+		if ev.Type == "issue.snapshot" {
+			snapshots = append(snapshots, db.FederationIngestEvent{
+				SourceEventID: ev.ID,
+				Event:         remoteEventFromLocalEvent(ev),
+			})
+		}
+	}
+	require.Len(t, snapshots, 2)
+
+	hub := openTestDB(t)
+	hubProject, err := hub.CreateProjectWithUID(ctx, "hub", hubUID)
+	require.NoError(t, err)
+	_, err = hub.EnableProjectFederation(ctx, hubProject.ID, "hub")
+	require.NoError(t, err)
+
+	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID:        hubProject.ID,
+		SpokeInstanceUID: spoke.InstanceUID(),
+		Events:           snapshots,
+	})
+	require.NoError(t, err)
+	assertEventCount(t, hub, "claim.violated", 0)
+	assertRowCount(ctx, t, hub, 1, "adoption snapshot link materialized",
+		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'related'`,
+		hubProject.ID)
+}
+
+func TestAdoptionSnapshotParentLinkInSingleBaselineBatchDoesNotEmitClaimViolation(t *testing.T) {
+	spoke, ctx, localProject := setupTestProject(t)
+	parent, _ := createTesterIssue(ctx, t, spoke, localProject.ID, "parent")
+	child, _ := createTesterIssue(ctx, t, spoke, localProject.ID, "child")
+	_, err := spoke.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID:   child.ID,
+		Actor:     "tester",
+		SetParent: &parent.ID,
+	})
+	require.NoError(t, err)
+
+	hubUID := newTestUID(t)
+	adopted, err := spoke.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID:            localProject.ID,
+		HubURL:               "http://hub.example.test",
+		HubProjectID:         42,
+		HubProjectUID:        hubUID,
+		ReplayHorizonEventID: 1,
+		Actor:                "federation",
+	})
+	require.NoError(t, err)
+	pending, err := spoke.PendingFederationPushEvents(ctx, localProject.ID, spoke.InstanceUID(), adopted.Binding.PushCursorEventID, 20)
+	require.NoError(t, err)
+
+	var snapshots []db.FederationIngestEvent
+	for _, ev := range pending {
+		if ev.Type == "issue.snapshot" {
+			snapshots = append(snapshots, db.FederationIngestEvent{
+				SourceEventID: ev.ID,
+				Event:         remoteEventFromLocalEvent(ev),
+			})
+		}
+	}
+	require.Len(t, snapshots, 2)
+
+	hub := openTestDB(t)
+	hubProject, err := hub.CreateProjectWithUID(ctx, "hub", hubUID)
+	require.NoError(t, err)
+	_, err = hub.EnableProjectFederation(ctx, hubProject.ID, "hub")
+	require.NoError(t, err)
+
+	_, err = hub.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID:        hubProject.ID,
+		SpokeInstanceUID: spoke.InstanceUID(),
+		Events:           snapshots,
+	})
+	require.NoError(t, err)
+	assertEventCount(t, hub, "claim.violated", 0)
+	assertRowCount(ctx, t, hub, 1, "adoption snapshot parent link materialized",
+		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'parent'`,
+		hubProject.ID)
 }
 
 func TestEnableFederationPush(t *testing.T) {
@@ -1340,6 +1869,10 @@ func TestIngestFederationEvents(t *testing.T) {
 		issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		assert.Equal(t, "spoke work", issue.Title)
+		events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
+		require.NoError(t, err)
+		require.Len(t, events, 2, "project.federation_enabled + ingested event")
+		assert.Equal(t, ev.ProjectName, events[1].ProjectName)
 	})
 
 	t.Run("rejects hash mismatch before insert", func(t *testing.T) {
@@ -1584,6 +2117,70 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("rejects snapshot link reference missing from same batch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		fromUID := newTestUID(t)
+		missingUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &fromUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+fromUID+`","short_id":"`+shortID(fromUID)+`","title":"from","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+missingUID+`"}]}`)
+
+		_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, ev))
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	})
+
+	t.Run("rejects non-snapshot work after snapshot baseline in same batch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		baselineUID := newTestUID(t)
+		childUID := newTestUID(t)
+		snapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &baselineUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+baselineUID+`","short_id":"`+shortID(baselineUID)+`","title":"baseline","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		created := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &childUID, &baselineUID,
+			"issue.created", 101,
+			`{"uid":"`+childUID+`","short_id":"`+shortID(childUID)+`","title":"child","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"parent","to_issue_uid":"`+baselineUID+`"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+
+		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			Events: []db.FederationIngestEvent{
+				{SourceEventID: 1, Event: snapshot},
+				{SourceEventID: 2, Event: created},
+			},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	})
+
+	t.Run("allows duplicate snapshot before fresh work", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		baselineUID := newTestUID(t)
+		childUID := newTestUID(t)
+		snapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &baselineUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+baselineUID+`","short_id":"`+shortID(baselineUID)+`","title":"baseline","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, snapshot))
+		require.NoError(t, err)
+		created := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &childUID, &baselineUID,
+			"issue.created", 101,
+			`{"uid":"`+childUID+`","short_id":"`+shortID(childUID)+`","title":"child","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"parent","to_issue_uid":"`+baselineUID+`"}],"created_at":"2026-05-23T12:01:00.000Z"}`)
+
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			Events: []db.FederationIngestEvent{
+				{SourceEventID: 2, Event: snapshot},
+				{SourceEventID: 3, Event: created},
+			},
+		})
+
+		require.NoError(t, err)
+		assertEventCount(t, d, "claim.violated", 1)
+	})
+
 	for _, eventType := range []string{"issue.created", "issue.snapshot"} {
 		t.Run("rejects fresh "+eventType+" for known issue uid", func(t *testing.T) {
 			d, ctx, p, spokeUID := setupFederationIngestHub(t)
@@ -1635,6 +2232,32 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
 		assert.Equal(t, "after create", issue.Title)
+	})
+
+	t.Run("allows snapshot link reference created in same batch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		fromUID := newTestUID(t)
+		toUID := newTestUID(t)
+		fromSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &fromUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+fromUID+`","short_id":"`+shortID(fromUID)+`","title":"from","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+toUID+`"}]}`)
+		toSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &toUID, nil,
+			"issue.snapshot", 101,
+			`{"uid":"`+toUID+`","short_id":"`+shortID(toUID)+`","title":"to","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+
+		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			Events: []db.FederationIngestEvent{
+				{SourceEventID: 1, Event: fromSnapshot},
+				{SourceEventID: 2, Event: toSnapshot},
+			},
+		})
+
+		require.NoError(t, err)
+		assertRowCount(ctx, t, d, 1, "snapshot link materializes after target arrives in same batch",
+			`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'related'`,
+			p.ID)
 	})
 
 	t.Run("rejects related issue outside project", func(t *testing.T) {
@@ -1763,7 +2386,11 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 				remoteClaimWorkEvent(t, p, spokeUID, issue.UID, &peer.UID, eventType, "remote-agent")))
 
 			require.NoError(t, err)
-			assertEventCount(t, d, "claim.violated", 1)
+			wantViolations := 1
+			if eventType == "issue.linked" || eventType == "issue.unlinked" || eventType == "issue.links_changed" {
+				wantViolations = 2
+			}
+			assertEventCount(t, d, "claim.violated", wantViolations)
 		})
 	}
 
@@ -1786,6 +2413,205 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 			assertEventCount(t, d, "claim.violated", 0)
 		})
 	}
+}
+
+func TestIngestClaimAuditRejectsForgedAdoptionLinkBaseline(t *testing.T) {
+	d, ctx, p, spokeUID, issue, peer := setupIngestClaimIssue(t)
+	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: spokeUID, Holder: "holder"},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	ev := remoteClaimWorkEvent(t, p, spokeUID, issue.UID, &peer.UID, "issue.links_changed", "remote-agent")
+	ev.Payload = json.RawMessage(`{"issue_uid":"` + issue.UID + `","related_added_uids":["` + peer.UID + `"],"adoption_baseline":true}`)
+	ev.ContentHash = remoteEventHash(t, ev)
+
+	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, ev))
+
+	require.NoError(t, err)
+	assertEventCount(t, d, "claim.violated", 2)
+}
+
+func TestIngestClaimAuditRejectsForgedAdoptionLinkBaselineAfterSnapshots(t *testing.T) {
+	d, ctx, p, spokeUID := setupFederationIngestHub(t)
+	fromUID := newTestUID(t)
+	toUID := newTestUID(t)
+	fromSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &fromUID, nil,
+		"issue.snapshot", 100,
+		`{"uid":"`+fromUID+`","short_id":"`+shortID(fromUID)+`","title":"from","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	toSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &toUID, nil,
+		"issue.snapshot", 101,
+		`{"uid":"`+toUID+`","short_id":"`+shortID(toUID)+`","title":"to","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID:        p.ID,
+		SpokeInstanceUID: spokeUID,
+		Events: []db.FederationIngestEvent{
+			{SourceEventID: 1, Event: fromSnapshot},
+			{SourceEventID: 2, Event: toSnapshot},
+		},
+	})
+	require.NoError(t, err)
+	link := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &fromUID, &toUID,
+		"issue.links_changed", 102,
+		`{"issue_uid":"`+fromUID+`","related_added_uids":["`+toUID+`"],"adoption_baseline":true}`)
+
+	_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID:        p.ID,
+		SpokeInstanceUID: spokeUID,
+		Events:           []db.FederationIngestEvent{{SourceEventID: 3, Event: link}},
+	})
+
+	require.NoError(t, err)
+	assertEventCount(t, d, "claim.violated", 2)
+}
+
+func TestIngestClaimAuditSnapshotLinkToExistingIssueRequiresPeerClaim(t *testing.T) {
+	d, ctx, p, spokeUID := setupFederationIngestHub(t)
+	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "existing peer",
+		Author:    "hub-agent",
+	})
+	require.NoError(t, err)
+	fromUID := newTestUID(t)
+	snapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &fromUID, nil,
+		"issue.snapshot", 100,
+		`{"uid":"`+fromUID+`","short_id":"`+shortID(fromUID)+`","title":"from","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+peer.UID+`"}]}`)
+
+	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, snapshot))
+
+	require.NoError(t, err)
+	assertEventCount(t, d, "claim.violated", 1)
+	assertRowCount(ctx, t, d, 1, "snapshot link to existing peer materialized",
+		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'related'`,
+		p.ID)
+}
+
+func TestIngestClaimAuditSnapshotLinkToUnclaimedSameOriginPeerRequiresClaim(t *testing.T) {
+	d, ctx, p, spokeUID := setupFederationIngestHub(t)
+	parentUID := newTestUID(t)
+	childUID := newTestUID(t)
+	parentSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &parentUID, nil,
+		"issue.snapshot", 100,
+		`{"uid":"`+parentUID+`","short_id":"`+shortID(parentUID)+`","title":"parent","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	childSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &childUID, nil,
+		"issue.snapshot", 101,
+		`{"uid":"`+childUID+`","short_id":"`+shortID(childUID)+`","title":"child","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"parent","to_issue_uid":"`+parentUID+`"}]}`)
+
+	_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, parentSnapshot))
+	require.NoError(t, err)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, childSnapshot))
+
+	require.NoError(t, err)
+	assertEventCount(t, d, "claim.violated", 1)
+	assertRowCount(ctx, t, d, 1, "snapshot baseline parent link materialized",
+		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'parent'`,
+		p.ID)
+}
+
+func TestIngestClaimAuditSnapshotLinkToClaimedSameOriginPeerRequiresClaim(t *testing.T) {
+	d, ctx, p, spokeUID := setupFederationIngestHub(t)
+	peerUID := newTestUID(t)
+	childUID := newTestUID(t)
+	peerSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &peerUID, nil,
+		"issue.snapshot", 100,
+		`{"uid":"`+peerUID+`","short_id":"`+shortID(peerUID)+`","title":"peer","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	childSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &childUID, nil,
+		"issue.snapshot", 101,
+		`{"uid":"`+childUID+`","short_id":"`+shortID(childUID)+`","title":"child","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+peerUID+`"}]}`)
+
+	_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, peerSnapshot))
+	require.NoError(t, err)
+	peer, err := d.IssueByUID(ctx, peerUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  peer.ShortID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: d.InstanceUID(), Holder: "hub-agent"},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, childSnapshot))
+
+	require.NoError(t, err)
+	assertEventCount(t, d, "claim.violated", 1)
+	assertRowCount(ctx, t, d, 1, "snapshot link to claimed same-origin peer materialized",
+		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'related'`,
+		p.ID)
+}
+
+func TestIngestClaimAuditLaterSnapshotLinkToPriorSameOriginPeerRequiresClaim(t *testing.T) {
+	d, ctx, p, spokeUID := setupFederationIngestHub(t)
+	peerUID := newTestUID(t)
+	childUID := newTestUID(t)
+	peerSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &peerUID, nil,
+		"issue.snapshot", 100,
+		`{"uid":"`+peerUID+`","short_id":"`+shortID(peerUID)+`","title":"peer","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, peerSnapshot))
+	require.NoError(t, err)
+	laterSnapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &childUID, nil,
+		"issue.snapshot", 101,
+		`{"uid":"`+childUID+`","short_id":"`+shortID(childUID)+`","title":"child","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:01:00.000Z","links":[{"type":"parent","to_issue_uid":"`+peerUID+`"}]}`)
+
+	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, laterSnapshot))
+
+	require.NoError(t, err)
+	assertEventCount(t, d, "claim.violated", 1)
+	assertRowCount(ctx, t, d, 1, "later snapshot parent link materialized",
+		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'parent'`,
+		p.ID)
+}
+
+func TestIngestClaimAuditCreatedLinkToExistingIssueRequiresPeerClaim(t *testing.T) {
+	d, ctx, p, spokeUID := setupFederationIngestHub(t)
+	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "existing peer",
+		Author:    "hub-agent",
+	})
+	require.NoError(t, err)
+	_, err = d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  peer.ShortID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: d.InstanceUID(), Holder: "hub-agent"},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	issueUID := newTestUID(t)
+	created := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+		"issue.created", 100,
+		`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"created","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+peer.UID+`"}]}`)
+
+	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, created))
+
+	require.NoError(t, err)
+	assertEventCount(t, d, "claim.violated", 1)
+	assertRowCount(ctx, t, d, 1, "created initial link to existing peer materialized",
+		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'related'`,
+		p.ID)
+}
+
+func TestIngestClaimAuditLinksChangedRequiresPeerClaim(t *testing.T) {
+	d, ctx, p, spokeUID, issue, peer := setupIngestClaimIssue(t)
+	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: spokeUID, Holder: "remote-agent"},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	ev := remoteClaimWorkEvent(t, p, spokeUID, issue.UID, &peer.UID, "issue.links_changed", "remote-agent")
+
+	_, err = d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, ev))
+
+	require.NoError(t, err)
+	assertEventCount(t, d, "claim.violated", 1)
 }
 
 func TestIngestClaimViolationExpiresTimedClaimBeforeAudit(t *testing.T) {
@@ -2347,6 +3173,61 @@ func shortID(uid string) string {
 	return strings.ToLower(uid[len(uid)-4:])
 }
 
+func eventIDs(events []db.Event) []int64 {
+	out := make([]int64, 0, len(events))
+	for _, event := range events {
+		out = append(out, event.ID)
+	}
+	return out
+}
+
+func renameProjectForAdoptionTest(ctx context.Context, d *db.DB, projectID int64, name string) error {
+	_, err := d.ExecContext(ctx, `UPDATE projects SET name = ? WHERE id = ?`, name, projectID)
+	return err
+}
+
+func insertMalformedAdoptionLink(ctx context.Context, d *db.DB, projectID int64, base, foreign db.Issue) error {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DROP TRIGGER trg_links_same_project_insert`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TRIGGER trg_links_uid_consistency_insert`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		VALUES(?, ?, ?, ?, ?, 'related', 'tester')`,
+		projectID, base.ID, foreign.ID, base.UID, foreign.UID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TRIGGER trg_links_same_project_insert
+		BEFORE INSERT ON links
+		FOR EACH ROW BEGIN
+		  SELECT RAISE(ABORT, 'cross-project links are not allowed')
+		  WHERE (SELECT project_id FROM issues WHERE id = NEW.from_issue_id) <> NEW.project_id
+		     OR (SELECT project_id FROM issues WHERE id = NEW.to_issue_id)   <> NEW.project_id;
+		END`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TRIGGER trg_links_uid_consistency_insert
+		BEFORE INSERT ON links
+		FOR EACH ROW BEGIN
+		  SELECT RAISE(ABORT, 'from_issue_uid does not match from_issue_id')
+		  WHERE NEW.from_issue_uid <> (SELECT uid FROM issues WHERE id = NEW.from_issue_id);
+		  SELECT RAISE(ABORT, 'to_issue_uid does not match to_issue_id')
+		  WHERE NEW.to_issue_uid <> (SELECT uid FROM issues WHERE id = NEW.to_issue_id);
+		END`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func upsertTestHubFederationBinding(ctx context.Context, t *testing.T, d *db.DB, p db.Project, enabled bool) {
 	t.Helper()
 	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -2575,6 +3456,24 @@ func remoteEvent(
 	}
 	ev.ContentHash = remoteEventHash(t, ev)
 	return ev
+}
+
+func remoteEventFromLocalEvent(ev db.Event) db.RemoteEvent {
+	return db.RemoteEvent{
+		EventUID:          ev.UID,
+		OriginInstanceUID: ev.OriginInstanceUID,
+		ProjectUID:        ev.ProjectUID,
+		ProjectName:       ev.ProjectName,
+		IssueUID:          ev.IssueUID,
+		RelatedIssueUID:   ev.RelatedIssueUID,
+		Type:              ev.Type,
+		Actor:             ev.Actor,
+		HLCPhysicalMS:     ev.HLCPhysicalMS,
+		HLCCounter:        ev.HLCCounter,
+		ContentHash:       ev.ContentHash,
+		Payload:           json.RawMessage(ev.Payload),
+		CreatedAt:         ev.CreatedAt,
+	}
 }
 
 func remoteEventHash(t *testing.T, ev db.RemoteEvent) string {

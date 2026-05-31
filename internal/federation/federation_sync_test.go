@@ -1343,6 +1343,105 @@ func TestFederationPushOfflineReconnect(t *testing.T) {
 	assert.Equal(t, "offline second", comments[0])
 }
 
+func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
+	ctx := context.Background()
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+
+	hubProject := createFederatedHubForPush(t, hub)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token:            "adopt-token",
+		SpokeInstanceUID: spoke.DB.InstanceUID(),
+		ProjectID:        &hubProject.ID,
+		Capabilities:     "pull,push",
+	})
+	require.NoError(t, err)
+	hubBinding, err := hub.DB.FederationBindingByProject(ctx, hubProject.ID)
+	require.NoError(t, err)
+
+	localProject, err := spoke.DB.CreateProject(ctx, "shared-foo")
+	require.NoError(t, err)
+	source, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: localProject.ID,
+		Title:     "adopted source",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	target, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: localProject.ID,
+		Title:     "adopted target",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	deleted, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: localProject.ID,
+		Title:     "adopted deleted",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	deleted, _, _, err = spoke.DB.SoftDeleteIssue(ctx, deleted.ID, "tester")
+	require.NoError(t, err)
+	_, err = spoke.DB.CreateLink(ctx, db.CreateLinkParams{
+		ProjectID:   localProject.ID,
+		FromIssueID: source.ID,
+		ToIssueID:   target.ID,
+		Type:        "related",
+		Author:      "tester",
+	})
+	require.NoError(t, err)
+
+	var replica api.CreateFederationReplicaBody
+	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 hub.URL,
+		"hub_project_id":          hubProject.ID,
+		"hub_project_uid":         hubProject.UID,
+		"project_name":            localProject.Name,
+		"replay_horizon_event_id": hubBinding.ReplayHorizonEventID,
+		"token":                   created.Token,
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}, &replica)
+	require.True(t, replica.Adopted)
+	require.Equal(t, int64(3), replica.AdoptionSnapshotCount)
+
+	binding, err := spoke.DB.FederationBindingByProject(ctx, replica.Project.ID)
+	require.NoError(t, err)
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: hubProject.ID,
+		Token:        created.Token,
+		Capabilities: "pull,push",
+	})
+	require.NoError(t, err)
+
+	pushedSource, err := hub.DB.IssueByUID(ctx, source.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, "adopted source", pushedSource.Title)
+	pushedTarget, err := hub.DB.IssueByUID(ctx, target.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, "adopted target", pushedTarget.Title)
+	pushedDeleted, err := hub.DB.IssueByUID(ctx, deleted.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, "adopted deleted", pushedDeleted.Title)
+	require.NotNil(t, pushedDeleted.DeletedAt)
+	var linkCount int
+	require.NoError(t, hub.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM links
+		 WHERE project_id = ? AND from_issue_uid = ? AND to_issue_uid = ? AND type = 'related'`,
+		hubProject.ID, source.UID, target.UID).Scan(&linkCount))
+	assert.Equal(t, 1, linkCount)
+	var quarantineCount int
+	require.NoError(t, hub.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM federation_quarantine
+		 WHERE project_id = ? AND direction = 'push' AND skipped_at IS NULL`,
+		hubProject.ID).Scan(&quarantineCount))
+	assert.Zero(t, quarantineCount)
+	require.NoError(t, assertHubOriginEventCount(ctx, hub.DB, hubProject.ID, spoke.DB.InstanceUID(), 3))
+}
+
 func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {
 	ctx := context.Background()
 	spoke := testenv.New(t)

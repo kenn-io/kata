@@ -211,6 +211,232 @@ func TestFederationReplicaSetupRejectsPushEnabledWithoutPushCapability(t *testin
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
+func TestFederationReplicaSetupAdoptsExistingProject(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EA")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "local issue",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+
+	body := map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "spoke",
+		"replay_horizon_event_id": 9,
+		"token":                   "push-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}
+	var out api.CreateFederationReplicaBody
+	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &out)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, out.Adopted)
+	assert.Equal(t, int64(1), out.AdoptionSnapshotCount)
+	assert.Equal(t, project.ID, out.Project.ID)
+	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", out.Project.UID)
+	assert.True(t, out.Binding.PushEnabled)
+	assert.Equal(t, int64(42), out.Binding.HubProjectID)
+
+	adopted, err := env.DB.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", adopted.UID)
+	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.True(t, binding.PushEnabled)
+	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", binding.HubProjectUID)
+
+	var retry api.CreateFederationReplicaBody
+	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &retry)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.False(t, retry.Adopted)
+
+	creds, err := config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, "push-token", creds.Projects[out.Project.UID].Token)
+}
+
+func TestFederationReplicaSetupAdoptExistingBindsUnboundProjectWithHubUID(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EX")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "existing",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+
+	var out api.CreateFederationReplicaBody
+	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "spoke",
+		"replay_horizon_event_id": 9,
+		"token":                   "push-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}, &out)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, out.Adopted)
+	assert.Equal(t, int64(1), out.AdoptionSnapshotCount)
+	assert.Equal(t, project.ID, out.Project.ID)
+	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", out.Binding.HubProjectUID)
+	assert.True(t, out.Binding.PushEnabled)
+}
+
+func TestFederationReplicaSetupRejectsInvalidHubProjectUID(t *testing.T) {
+	env := testenv.New(t)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "!!!!!!!!!!!!!!!!!!!!!!!!!!",
+		"project_name":            "spoke",
+		"replay_horizon_event_id": 9,
+		"token":                   "push-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}, nil)
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "response: %s", raw)
+	assert.Contains(t, string(raw), "hub_project_uid must be a valid UID")
+}
+
+func TestFederationReplicaSetupAdoptExistingRejectsArchivedProjectWithHubUID(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EX")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "spoke",
+		"replay_horizon_event_id": 9,
+		"token":                   "push-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}, nil)
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode, "response: %s", raw)
+	assert.Contains(t, string(raw), "federation_project_collision")
+}
+
+func TestFederationReplicaSetupAdoptExistingRejectsHubUIDBoundToDifferentProject(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	bound, err := env.DB.CreateProjectWithUID(ctx, "already-bound", "01HZNQ7VFPK1XGD8R5MABCD4EX")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            bound.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		ReplayHorizonEventID: 9,
+		PullCursorEventID:    8,
+		PushEnabled:          true,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	spoke, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EA")
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "spoke",
+		"replay_horizon_event_id": 9,
+		"token":                   "push-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}, nil)
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "federation_project_collision")
+	assert.Contains(t, string(raw), "already-bound")
+	assert.Contains(t, string(raw), "spoke")
+	unchanged, err := env.DB.ProjectByID(ctx, spoke.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EA", unchanged.UID)
+	_, err = env.DB.FederationBindingByProject(ctx, spoke.ID)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestFederationReplicaSetupAdoptExistingRequiresPullAndPushCapabilities(t *testing.T) {
+	tests := []struct {
+		name         string
+		capabilities string
+	}{
+		{name: "missing push", capabilities: "pull"},
+		{name: "missing pull", capabilities: "push"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := testenv.New(t)
+			ctx := context.Background()
+			_, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EA")
+			require.NoError(t, err)
+
+			resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+				"hub_url":                 "http://127.0.0.1:7373",
+				"hub_project_id":          42,
+				"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+				"project_name":            "spoke",
+				"replay_horizon_event_id": 9,
+				"token":                   "push-token",
+				"capabilities":            tt.capabilities,
+				"push_enabled":            true,
+				"adopt_existing":          true,
+			}, nil)
+
+			assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
+			assert.Contains(t, string(raw), "federation_capability_mismatch")
+		})
+	}
+}
+
+func TestFederationReplicaSetupAdoptExistingRejectsMissingLocalProject(t *testing.T) {
+	env := testenv.New(t)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "typo-spoke",
+		"replay_horizon_event_id": 9,
+		"token":                   "push-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}, nil)
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "federation_project_not_found")
+	projects, err := env.DB.ListProjects(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, projects)
+}
+
 func TestFederationReplicaSetupRejectsCredentialDowngradeOnPushBinding(t *testing.T) {
 	env := testenv.New(t)
 	body := map[string]any{
@@ -392,6 +618,7 @@ func TestFederationReplicaSetupRejectsNameCollisionWithDifferentUID(t *testing.T
 
 	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
 	assert.Contains(t, string(raw), "federation_project_collision")
+	assert.Contains(t, string(raw), "--adopt-existing --push")
 }
 
 func TestFederatedSpokeMutationReturnsReadOnlyError(t *testing.T) {

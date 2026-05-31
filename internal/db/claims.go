@@ -1147,6 +1147,12 @@ type claimWorkMutationInput struct {
 	EventType         string
 	Actor             string
 	HolderInstanceUID string
+	RequireClaim      bool
+}
+
+type federationIngestClaimAuditIssue struct {
+	UID          string
+	RequireClaim bool
 }
 
 func (d *DB) annotateFederationIngestClaimWorkTx(
@@ -1156,38 +1162,109 @@ func (d *DB) annotateFederationIngestClaimWorkTx(
 	projectName string,
 	ev RemoteEvent,
 ) ([]Event, error) {
-	if !claimWorkMutationRequiresClaim(ev.Type) {
-		return nil, nil
-	}
-	issueUID := ""
-	if ev.IssueUID != nil {
-		issueUID = *ev.IssueUID
-	}
-	if issueUID == "" {
-		if uid, err := payloadIssueUID(ev, payloadMap(ev.Payload)); err == nil {
-			issueUID = uid
-		}
-	}
-	if issueUID == "" {
-		return nil, nil
-	}
-	issueID, err := issueIDByUIDForClaimAuditTx(ctx, tx, projectID, issueUID)
-	if errors.Is(err, ErrNotFound) {
-		return nil, nil
-	}
+	issueUIDs, err := federationIngestClaimAuditIssueUIDs(ev)
 	if err != nil {
 		return nil, err
 	}
-	return d.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
-		ProjectID:         projectID,
-		ProjectName:       projectName,
-		IssueID:           issueID,
-		IssueUID:          issueUID,
-		OffendingEventUID: ev.EventUID,
-		EventType:         ev.Type,
-		Actor:             ev.Actor,
-		HolderInstanceUID: ev.OriginInstanceUID,
-	})
+	if len(issueUIDs) == 0 {
+		return nil, nil
+	}
+	var events []Event
+	claimsExpired := false
+	ensureClaimsExpired := func() error {
+		if claimsExpired {
+			return nil
+		}
+		expiredEvents, err := d.expireTimedClaimsForProjectTx(ctx, tx, projectID, time.Now().UTC(), 0)
+		if err != nil {
+			return err
+		}
+		events = append(events, expiredEvents...)
+		claimsExpired = true
+		return nil
+	}
+	for _, issue := range issueUIDs {
+		issueID, err := issueIDByUIDForClaimAuditTx(ctx, tx, projectID, issue.UID)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := ensureClaimsExpired(); err != nil {
+			return nil, err
+		}
+		auditEvents, err := d.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
+			ProjectID:         projectID,
+			ProjectName:       projectName,
+			IssueID:           issueID,
+			IssueUID:          issue.UID,
+			OffendingEventUID: ev.EventUID,
+			EventType:         ev.Type,
+			Actor:             ev.Actor,
+			HolderInstanceUID: ev.OriginInstanceUID,
+			RequireClaim:      issue.RequireClaim,
+		})
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, auditEvents...)
+	}
+	return events, nil
+}
+
+func federationIngestClaimAuditIssueUIDs(ev RemoteEvent) ([]federationIngestClaimAuditIssue, error) {
+	payload := payloadMap(ev.Payload)
+	out := make([]federationIngestClaimAuditIssue, 0, 1)
+	seen := map[string]struct{}{}
+	add := func(issue federationIngestClaimAuditIssue) {
+		uid := issue.UID
+		if uid == "" {
+			return
+		}
+		if _, ok := seen[uid]; ok {
+			return
+		}
+		seen[uid] = struct{}{}
+		out = append(out, issue)
+	}
+	if claimWorkMutationRequiresClaim(ev.Type) {
+		issueUID := ""
+		if ev.IssueUID != nil {
+			issueUID = *ev.IssueUID
+		}
+		if issueUID == "" {
+			uid, err := payloadIssueUID(ev, payload)
+			if err != nil {
+				return nil, err
+			}
+			issueUID = uid
+		}
+		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
+	}
+	if ev.Type == "issue.snapshot" {
+		issueUID := ""
+		if ev.IssueUID != nil {
+			issueUID = *ev.IssueUID
+		}
+		if issueUID == "" {
+			uid, err := payloadIssueUID(ev, payload)
+			if err != nil {
+				return nil, err
+			}
+			issueUID = uid
+		}
+		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
+	}
+	if ev.Type == "issue.created" || ev.Type == "issue.snapshot" || claimWorkMutationRequiresPeerClaim(ev.Type) {
+		for _, ref := range payloadReferencedIssueUIDs(ev, payload) {
+			add(federationIngestClaimAuditIssue{
+				UID:          ref,
+				RequireClaim: true,
+			})
+		}
+	}
+	return out, nil
 }
 
 func (d *DB) annotateClaimWorkMutationTx(
@@ -1215,7 +1292,7 @@ func (d *DB) annotateClaimWorkMutationTx(
 	}
 	live, err := liveClaimForIssueTx(ctx, tx, in.IssueUID)
 	if errors.Is(err, ErrNotFound) {
-		if claimWorkMutationRequiresClaim(in.EventType) {
+		if in.RequireClaim || claimWorkMutationRequiresClaim(in.EventType) {
 			evt, err := d.insertClaimViolationWithoutLiveClaimTx(ctx, tx, in, "claim_required")
 			if err != nil {
 				return nil, err
@@ -1257,6 +1334,15 @@ func claimWorkMutationRequiresClaim(eventType string) bool {
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
 		"issue.labeled", "issue.unlabeled", "issue.linked", "issue.unlinked",
 		"issue.links_changed", "issue.metadata_updated", "issue.commented":
+		return true
+	default:
+		return false
+	}
+}
+
+func claimWorkMutationRequiresPeerClaim(eventType string) bool {
+	switch eventType {
+	case "issue.linked", "issue.unlinked", "issue.links_changed":
 		return true
 	default:
 		return false

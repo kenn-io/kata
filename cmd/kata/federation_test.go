@@ -333,6 +333,40 @@ func TestFederationJoinCLIRequiresPushCapabilityWhenPushEnabled(t *testing.T) {
 	assert.Contains(t, err.Error(), "push")
 }
 
+func TestFederationJoinCLIAdoptExistingRequiresPush(t *testing.T) {
+	env := testenv.New(t)
+
+	_, err := runCmdOutput(t, env, "federation", "join",
+		"--project", "fedlab",
+		"--hub-url", "http://127.0.0.1:7787",
+		"--hub-project-id", "42",
+		"--hub-project-uid", "01HZNQ7VFPK1XGD8R5MABCD4EG",
+		"--replay-horizon", "7",
+		"--token", "join-token",
+		"--adopt-existing")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--adopt-existing requires --push")
+}
+
+func TestFederationJoinCLIAdoptExistingRequiresPushCapability(t *testing.T) {
+	env := testenv.New(t)
+
+	_, err := runCmdOutput(t, env, "federation", "join",
+		"--project", "fedlab",
+		"--hub-url", "http://127.0.0.1:7787",
+		"--hub-project-id", "42",
+		"--hub-project-uid", "01HZNQ7VFPK1XGD8R5MABCD4EG",
+		"--replay-horizon", "7",
+		"--token", "join-token",
+		"--adopt-existing",
+		"--push",
+		"--capabilities", "pull,lease")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "push")
+}
+
 func TestFederationJoinCLICreatesPushEnabledReplicaAndCredential(t *testing.T) {
 	env := testenv.New(t)
 	hubProjectUID := "01HZNQ7VFPK1XGD8R5MABCD4EG"
@@ -360,6 +394,63 @@ func TestFederationJoinCLICreatesPushEnabledReplicaAndCredential(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "join-token", creds.Projects[project.UID].Token)
 	assert.Equal(t, "claim,pull,push", creds.Projects[project.UID].Capabilities)
+}
+
+func TestFederationJoinCLIAdoptExistingOutput(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "fedlab")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "local issue",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	hubProjectUID := "01HZNQ7VFPK1XGD8R5MABCD4EG"
+
+	out := requireCmdOutput(t, env, "federation", "join",
+		"--project", "fedlab",
+		"--hub-url", "http://100.64.0.5:7787",
+		"--hub-project-id", "42",
+		"--hub-project-uid", hubProjectUID,
+		"--replay-horizon", "7",
+		"--baseline-through", "9",
+		"--token", "join-token",
+		"--push",
+		"--adopt-existing")
+
+	assert.Contains(t, out, "adopted existing project fedlab into federation")
+	assert.Contains(t, out, "queued 1 issue snapshots for hub push; local event history was not imported")
+	assert.Contains(t, out, "existing issues now require hub leases before edits")
+}
+
+func TestFederationJoinCLIAgentOutputIncludesAdoptionFields(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "fedlab")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "local issue",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	hubProjectUID := "01HZNQ7VFPK1XGD8R5MABCD4EG"
+
+	out := requireCmdOutput(t, env, "--agent", "federation", "join",
+		"--project", "fedlab",
+		"--hub-url", "http://100.64.0.5:7787",
+		"--hub-project-id", "42",
+		"--hub-project-uid", hubProjectUID,
+		"--replay-horizon", "7",
+		"--baseline-through", "9",
+		"--token", "join-token",
+		"--push",
+		"--adopt-existing")
+
+	assert.Contains(t, out, "adopted=true")
+	assert.Contains(t, out, "adoption_snapshots=1")
 }
 
 func TestFederationJoinCLIFetchesMissingHubMetadata(t *testing.T) {

@@ -164,6 +164,40 @@ On each spoke:
    the local federation credentials file, and enables push only when `--push` is
    present.
 
+   If the spoke already has a non-federated local project that should join the
+   hub under the same name, opt in explicitly:
+
+   ```bash
+   kata federation join --project fedlab \
+     --hub-url http://<private-hub-ip>:7787 \
+     --hub-project-id 1 \
+     --token ... \
+     --push \
+     --adopt-existing
+   ```
+
+   Adoption works even when the local project name differs from the hub project
+   name; choose the local project with `--project` and the hub with the hub
+   selector:
+
+   ```bash
+   kata federation join --project shared-foo \
+     --hub-url http://<private-hub-ip>:7787 \
+     --hub-project-id 1 \
+     --token ... \
+     --push \
+     --adopt-existing
+   ```
+
+   Adoption preserves the current state of local issues, including closed and
+   soft-deleted issues, comments, labels, metadata, priority, owner, and
+   same-project links. It does not import the old local event history; instead
+   it queues fresh snapshots for the hub with same-project links embedded in the
+   snapshot payloads. That local-only event history is audit context below the
+   push cursor and may be discarded by a
+   later federation reset. After adoption, existing issues are ordinary
+   federated spoke issues, so future edits require live hub leases.
+
 Enrollment capabilities and local spoke behavior are separate knobs:
 `--capabilities pull,push,lease` on the hub says what the token may do, while
 `--push` on the spoke says this replica should actually push local-origin events
@@ -256,6 +290,8 @@ kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url>
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> [--push]
+kata federation join --project <existing-project> --hub-url <url> --hub-project-id <id> \
+  --token <token> --push --adopt-existing
 kata federation enrollments list
 kata federation revoke <enrollment-id>
 kata federation status

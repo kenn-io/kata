@@ -212,13 +212,16 @@ type CreateFederationReplicaRequest struct {
 		Token                  string `json:"token,omitempty"`
 		Capabilities           string `json:"capabilities,omitempty"`
 		PushEnabled            bool   `json:"push_enabled,omitempty"`
+		AdoptExisting          bool   `json:"adopt_existing,omitempty"`
 	}
 }
 
 // CreateFederationReplicaBody is returned after binding a local spoke project.
 type CreateFederationReplicaBody struct {
-	Project ProjectOut           `json:"project"`
-	Binding FederationBindingOut `json:"binding"`
+	Project               ProjectOut           `json:"project"`
+	Binding               FederationBindingOut `json:"binding"`
+	Adopted               bool                 `json:"adopted,omitempty"`
+	AdoptionSnapshotCount int64                `json:"adoption_snapshot_count,omitempty"`
 }
 
 // CreateFederationReplicaResponse wraps CreateFederationReplicaBody.

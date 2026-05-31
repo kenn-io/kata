@@ -424,6 +424,7 @@ func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
 	require.NotNil(t, bindingPayload)
 	assert.Equal(t, true, bindingPayload["push_enabled"])
 	assert.Equal(t, float64(5), bindingPayload["push_cursor_event_id"])
+	assert.NotContains(t, bindingPayload, "materialize_after_event_id")
 
 	dstDB := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
