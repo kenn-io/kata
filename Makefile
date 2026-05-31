@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway tui tui-demo
+.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway tui tui-demo docs-install docs-build docs-serve docs-check
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -22,6 +22,19 @@ test-stress:
 
 test-federation-docker:
 	./scripts/test-federation-docker.sh
+
+docs-install:
+	python3 -m venv .venv
+	.venv/bin/pip install -r requirements-docs.txt
+
+docs-build:
+	.venv/bin/zensical build --strict
+
+docs-serve:
+	.venv/bin/zensical serve
+
+docs-check:
+	bash scripts/check-docs-site.sh
 
 lint:
 	golangci-lint run --config .golangci.yml
@@ -64,4 +77,4 @@ tui-demo:
 
 clean:
 	rm -f kata kata.exe coverage.out
-	rm -rf dist
+	rm -rf dist site

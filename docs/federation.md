@@ -2,9 +2,9 @@
 
 Federation lets multiple kata daemons share selected projects while each user
 keeps a local daemon and local database. It is opt-in per project. A normal
-single-user kata installation with no federated bindings should not see
-federation commands in top-level help, should not read federation credentials,
-and should not make federation network calls.
+single-user kata installation with no federated bindings should not read
+federation credentials or make federation network calls unless an operator
+invokes federation commands.
 
 Federation is not a replacement for a shared daemon. Use a shared daemon when
 users need immediate single-copy reads and writes, centralized authorization, or
@@ -92,8 +92,8 @@ need the private-network trust opt-in.
   attachment, Unix-socket HTTP clients, TCP remote selection, and SSE clients.
 - `internal/federation`: spoke-side hub HTTP client, pull/push runner, pending
   lease retry, failpoints, and federation runner tests.
-- `cmd/kata`: hidden federation operator CLI, lease CLI, daemon runner startup,
-  and normal CLI client wiring.
+- `cmd/kata`: federation operator CLI, lease CLI, daemon runner startup, and
+  normal CLI client wiring.
 - `e2e` and `docker/federation`: multi-daemon, randomized stress, failpoint, and
   Docker Compose smoke coverage.
 

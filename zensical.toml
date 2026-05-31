@@ -1,0 +1,63 @@
+[project]
+site_name = "kata"
+site_url = "https://katatracker.com/"
+site_description = "Local-first issue tracking for humans and coding agents."
+site_author = "kenn.io"
+copyright = "Copyright &copy; 2026 kenn.io"
+docs_dir = "docs-site"
+site_dir = "site"
+repo_url = "https://github.com/kenn-io/kata"
+repo_name = "kenn-io/kata"
+edit_uri = "edit/main/docs-site/"
+extra_css = ["stylesheets/extra.css"]
+nav = [
+  {"Start" = [
+    {"Overview" = "index.md"},
+    {"Quickstart" = "get-started/quickstart.md"},
+    {"Install" = "get-started/install.md"},
+  ]},
+  {"Guide" = [
+    {"Concepts" = "guide/concepts.md"},
+    {"Workspaces and projects" = "guide/workspaces-projects.md"},
+  ]},
+  {"Reference" = [
+    {"CLI" = "reference/cli.md"},
+    {"Configuration" = "reference/configuration.md"},
+  ]},
+  {"Workflows" = [
+    {"Agent workflows" = "workflows/agents.md"},
+    {"Sharing models" = "workflows/sharing.md"},
+  ]},
+  {"Operations" = [
+    {"Remote daemon" = "operations/remote-daemon.md"},
+    {"Federation" = "operations/federation.md"},
+    {"Hosted mode" = "operations/hosted-mode.md"},
+    {"Backup and restore" = "operations/backup-restore.md"},
+  ]},
+  {"Development" = [
+    {"Contributing" = "development/contributing.md"},
+  ]},
+]
+
+[project.theme]
+variant = "modern"
+features = [
+  "navigation.instant",
+  "navigation.instant.progress",
+  "navigation.tracking",
+  "navigation.sections",
+  "navigation.path",
+  "content.action.edit",
+  "content.action.view",
+  "content.code.copy",
+]
+
+[project.theme.palette]
+scheme = "slate"
+primary = "custom"
+accent = "cyan"
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+edit = "lucide/pencil"
+view = "lucide/file-code"

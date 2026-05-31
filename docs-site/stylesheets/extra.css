@@ -1,0 +1,50 @@
+[data-md-color-scheme="slate"] {
+  --md-hue: 215;
+  --md-primary-fg-color: #47c2ff;
+  --md-primary-fg-color--light: #86d8ff;
+  --md-primary-fg-color--dark: #1683b5;
+  --md-accent-fg-color: #31d0aa;
+}
+
+:root {
+  --md-text-font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --md-code-font: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.md-typeset {
+  font-size: 0.82rem;
+  line-height: 1.65;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  letter-spacing: 0;
+}
+
+.md-typeset h1 {
+  font-weight: 680;
+}
+
+.md-typeset h2 {
+  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  padding-bottom: 0.25rem;
+}
+
+.md-typeset code,
+.md-typeset pre {
+  border-radius: 6px;
+}
+
+.md-typeset table:not([class]) {
+  font-size: 0.76rem;
+}
+
+.md-header,
+.md-tabs {
+  background: #071019;
+}
+
+.md-grid {
+  max-width: 1320px;
+}

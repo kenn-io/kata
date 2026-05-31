@@ -43,13 +43,13 @@ func newCreateCmd() *cobra.Command {
 	// silent last-wins on StringVar; collapseSingletonRef rejects multiple
 	// distinct values explicitly.
 	cmd.Flags().Var(newRefSliceValue(&parentRefSlice), "parent",
-		"initial parent (must finish before this issue starts; ≤1; ref: #N, N, UID, or 8+ char prefix)")
+		"initial parent (must finish before this issue starts; ≤1; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&blocks), "blocks",
-		"this issue blocks <ref> (this must finish before <ref> can; repeatable)")
+		"this issue blocks <ref> (this must finish before <ref> can; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&blockedBy), "blocked-by",
-		"this issue is blocked by <ref> (<ref> must finish before this; repeatable)")
+		"this issue is blocked by <ref> (<ref> must finish before this; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&related), "related",
-		"this issue is related to <ref> (symmetric, no ordering; repeatable)")
+		"this issue is related to <ref> (symmetric, no ordering; repeatable; "+issueRefHelp+")")
 	cmd.Flags().StringVar(&owner, "owner", "", "initial owner")
 	cmd.Flags().IntVar(&priority, "priority", 0, "initial priority (0..4; 0 = highest)")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "send Idempotency-Key header for safe retry")
@@ -421,7 +421,7 @@ func aliasInputBody(info config.AliasInfo) map[string]any {
 }
 
 // printMutation formats a mutation response (issue create/edit/close/reopen)
-// according to the active output mode: JSON envelope, quiet (issue number
+// according to the active output mode: JSON envelope, quiet (issue short_id
 // only), or human-readable one-liner.
 //
 // In human mode, when the response carries a `changes` block (kata edit

@@ -43,21 +43,21 @@ func newEditCmd() *cobra.Command {
 	// StringSliceVar so duplicate flags are visible to collapseSingletonRef
 	// rather than silently last-winning under cobra's StringVar.
 	cmd.Flags().Var(newRefSliceValue(&parentRefSlice), "parent",
-		"set parent to <ref> (replaces existing; ≤1; <ref> must finish before this issue starts)")
+		"set parent to <ref> (replaces existing; ≤1; <ref> must finish before this issue starts; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&blocks), "blocks",
-		"this issue blocks <ref> (this must finish before <ref> can; repeatable)")
+		"this issue blocks <ref> (this must finish before <ref> can; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&blockedBy), "blocked-by",
-		"this issue is blocked by <ref> (<ref> must finish before this; repeatable)")
+		"this issue is blocked by <ref> (<ref> must finish before this; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&related), "related",
-		"this issue is related to <ref> (symmetric, no ordering; repeatable)")
+		"this issue is related to <ref> (symmetric, no ordering; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&removeParentRefSlice), "remove-parent",
-		"remove parent (strict: ref must equal the current parent or 409)")
+		"remove parent (strict: ref must equal the current parent or 409; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&removeBlocks), "remove-blocks",
-		"remove blocks→<ref> (idempotent: no error if no such link or <ref> is missing; repeatable)")
+		"remove blocks→<ref> (idempotent: no error if no such link or <ref> is missing; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&removeBlockedBy), "remove-blocked-by",
-		"remove blocked-by←<ref> (idempotent; repeatable)")
+		"remove blocked-by←<ref> (idempotent; repeatable; "+issueRefHelp+")")
 	cmd.Flags().Var(newRefSliceValue(&removeRelated), "remove-related",
-		"remove related↔<ref> (idempotent; repeatable)")
+		"remove related↔<ref> (idempotent; repeatable; "+issueRefHelp+")")
 	addCommentFlag(cmd)
 
 	// RunE is set after flag registration so we can reference cmd.Flags().Changed.
@@ -97,7 +97,7 @@ func newEditCmd() *cobra.Command {
 		}
 
 		// Resolve the URL issue early so we have ctx/baseURL/pid available
-		// to resolve link-target refs (which may be #N, N, UID, or prefix).
+		// to resolve link-target refs (short_id, qualified short_id, or ULID).
 		ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
 		if err != nil {
 			return err

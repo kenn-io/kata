@@ -4,14 +4,15 @@ import (
 	"strings"
 )
 
+const issueRefHelp = "ref: short_id (abc4), qualified short_id (kata#abc4), or full ULID"
+
 // refSliceValue is a pflag.Value implementation backing a []string of
 // issue refs. It mirrors pflag's StringSlice behavior (comma-split,
 // append on each --flag call) but reports its Type() as "ref" instead
 // of "strings", so `--help` reads `--blocks ref` not `--blocks strings`.
 //
-// Issue refs are `#N`, a base-10 number, a full ULID UID, or an 8+ char
-// UID prefix. None of those forms can contain a comma, so the
-// comma-split behavior is safe.
+// Issue refs are short_id values, qualified short_id values, or full ULIDs.
+// None of those forms can contain a comma, so the comma-split behavior is safe.
 type refSliceValue struct {
 	target *[]string
 	// changed records whether Set has been called at least once.

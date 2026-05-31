@@ -2,6 +2,7 @@
 /kata
 /kata.exe
 /dist/
+/site/
 /result
 
 # Test outputs
@@ -11,6 +12,7 @@ coverage.out
 
 # Local data dir for manual testing
 /.kata/
+/.venv/
 
 # Git worktrees
 /.worktrees/

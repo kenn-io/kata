@@ -209,6 +209,21 @@ func TestRoot_QuickstartAdvertised(t *testing.T) {
 	assert.Contains(t, quickstart.Aliases, "agent-instructions")
 }
 
+func TestHelp_RefFlagsDoNotAdvertiseLegacyNumbers(t *testing.T) {
+	for _, args := range [][]string{
+		{"create", "--help"},
+		{"edit", "--help"},
+	} {
+		stdout, _, err := executeRootCapture(t, context.Background(), args...)
+		require.NoError(t, err)
+		assert.NotContains(t, stdout, "#N")
+		assert.NotContains(t, stdout, "bare number")
+		assert.NotContains(t, stdout, "8+ char prefix")
+		assert.Contains(t, stdout, "short_id")
+		assert.Contains(t, stdout, "kata#abc4")
+	}
+}
+
 // resetRunEEntered restores the package-level sentinel via t.Cleanup so tests
 // don't leak state across the shuffled order.
 func resetRunEEntered(t *testing.T) {

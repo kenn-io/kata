@@ -14,7 +14,7 @@ import (
 
 // newSearchCmd returns the cobra.Command for `kata search`. It calls the
 // daemon's GET /search endpoint and prints either the JSON envelope (under
-// --json) or one line per hit in `#N <score> <status>  <title>  (<matched_in>)`.
+// --json) or one line per hit with short_id, score, status, title, and match fields.
 func newSearchCmd() *cobra.Command {
 	var limit int
 	var includeDeleted bool

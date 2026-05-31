@@ -1,0 +1,219 @@
+# CLI reference
+
+This page summarizes the command surface. Run `kata <command> --help` for the
+current flag list in your installed binary.
+
+## Global flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--workspace <path>` | Resolve project context from a specific workspace. |
+| `--project <name>` | Select a project explicitly for project-scoped commands. |
+| `--as <actor>` | Override the actor for this command. |
+| `--agent` | Emit concise agent-readable text. |
+| `--json` | Emit machine-readable JSON. |
+| `--format human|json|agent` | Select output mode explicitly. |
+| `--quiet` | Suppress non-essential output. |
+
+## Issue lifecycle
+
+Create:
+
+```sh
+kata create <title> \
+  [--body TEXT | --body-file PATH | --body-stdin] \
+  [--label LABEL] \
+  [--owner NAME] \
+  [--priority 0..4] \
+  [--parent <ref>] \
+  [--blocks <ref>] \
+  [--blocked-by <ref>] \
+  [--related <ref>] \
+  [--idempotency-key KEY] \
+  [--force-new]
+```
+
+List and inspect:
+
+```sh
+kata list [--status open|closed|all] [--limit N]
+kata list [--label LABEL] [--no-label LABEL] [--owner NAME] [--unowned]
+kata show <issue-ref>
+kata search <query> [--limit N] [--include-deleted]
+```
+
+Edit:
+
+```sh
+kata edit <issue-ref> \
+  [--title TEXT] \
+  [--body TEXT] \
+  [--owner NAME] \
+  [--priority 0..4 | --priority -] \
+  [--parent <ref>] \
+  [--blocks <ref>] \
+  [--blocked-by <ref>] \
+  [--related <ref>] \
+  [--remove-parent <ref>] \
+  [--remove-blocks <ref>] \
+  [--remove-blocked-by <ref>] \
+  [--remove-related <ref>] \
+  [--comment TEXT]
+```
+
+Comment:
+
+```sh
+kata comment <ref> [--body TEXT | --body-file PATH | --body-stdin]
+```
+
+Close:
+
+```sh
+kata close <ref> --done --message <text> \
+  [--commit <sha>] \
+  [--pr <url>] \
+  [--test <command>] \
+  [--reviewed <path>] \
+  [--evidence <type:value>]
+```
+
+Other close reasons:
+
+```sh
+kata close <ref> --wontfix --message <rationale>
+kata close <ref> --duplicate-of <ref> --message <pointer>
+kata close <ref> --superseded-by <ref> --message <pointer>
+kata close <ref> --audit-no-change \
+  --message <scope-and-verification> \
+  --evidence "no-change-audit:<rationale>" \
+  --reviewed <path>
+```
+
+Reopen:
+
+```sh
+kata reopen <ref> [--comment TEXT]
+```
+
+## Labels, ownership, and claiming
+
+```sh
+kata label add <ref> <label> [--comment TEXT]
+kata label rm <ref> <label> [--comment TEXT]
+kata labels
+
+kata assign <ref> <owner> [--comment TEXT]
+kata unassign <ref> [--comment TEXT]
+kata claim <ref> [--force] [--comment TEXT]
+```
+
+`kata claim` atomically sets ownership to the current actor and fails if the
+issue is already owned by someone else unless `--force` is used.
+
+## Ready work
+
+```sh
+kata ready [--limit N] [--unowned] [--owner NAME]
+kata ready [--label LABEL] [--no-label LABEL]
+kata ready --all
+```
+
+`ready` returns open issues that do not have an open blocking predecessor.
+Filters combine with AND logic.
+
+## Events and audit
+
+```sh
+kata events [--after N] [--limit N]
+kata events --tail [--last-event-id N]
+kata digest --since 24h [--until ...] [--project-id N | --all-projects]
+kata audit closes [--actor NAME] [--reason done|wontfix|duplicate|superseded|audit-no-change]
+```
+
+`kata digest` groups recent activity by actor. `kata audit closes` is for
+reviewing close discipline and finding lazy or duplicate closes.
+
+## Projects
+
+```sh
+kata projects list
+kata projects show <project>
+kata projects rename <project> <name>
+kata projects merge <source> <target> [--rename-target NAME]
+kata projects remove <project> [--force]
+kata projects restore <project>
+kata projects detach <alias-identity>
+```
+
+## Daemon and diagnostics
+
+```sh
+kata daemon start [--listen <host:port>] [--insecure-readonly]
+kata daemon status
+kata daemon stop
+kata daemon reload
+kata daemon logs --hooks [--tail]
+kata health
+kata whoami
+kata quickstart
+kata version
+kata tui
+```
+
+Local commands auto-start the daemon when appropriate. `daemon start` runs in
+the foreground and is used for explicit service setups.
+
+## Backup and import
+
+```sh
+kata export [--project NAME] [--project-id N] [--output PATH]
+kata export --allow-running-daemon --output PATH
+
+kata import --input PATH --target PATH [--force]
+kata import --source-format beads --input PATH --target PATH
+```
+
+`kata import` creates a fresh database at the target path. It is not a merge
+operation.
+
+## Remote and identity tokens
+
+```sh
+kata tokens create --actor <actor> [--name <name>]
+kata tokens list
+kata tokens revoke <id>
+```
+
+Identity tokens are used when a remote/shared daemon has
+`require_token_identity = true`.
+
+## Federation
+
+```sh
+kata federation identity
+kata federation enable --project <project>
+kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url>
+kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
+  --token <token> [--push]
+kata federation status
+kata federation enrollments list
+kata federation revoke <enrollment-id>
+kata federation lease acquire <issue-ref> [--ttl 30m]
+kata federation lease release <issue-ref>
+kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --reason <text>
+```
+
+Federation is an operator workflow. Most users never need these commands.
+
+## Ref forms
+
+Issue refs accept a bare short ID, a qualified short ID, or a full ULID:
+
+```text
+abc4
+kata#abc4
+01HZNQ7VFPK1XGD8R5MABCD4EX
+```
+
+Legacy numeric refs no longer resolve.

@@ -11,6 +11,9 @@ predictable failure modes. The TUI is built for people: browse, triage, edit,
 and supervise agent-written work without reading raw JSON. Both talk to the
 same local daemon and SQLite database.
 
+The public documentation source lives in `docs-site/` and is built with
+Zensical for <https://katatracker.com/>.
+
 Status: early public preview. The CLI, daemon, and TUI are usable, but command
 contracts and UI details may still change before a stable release.
 
@@ -54,7 +57,8 @@ How it's built:
   projects.
 - `kata export` and `kata import` provide a git-friendly JSONL backup and
   schema cutover path.
-- Successful commands emit JSON for reliable parsing by agents and scripts.
+- Commands support `--json` for complete machine-readable output and `--agent`
+  for concise agent-readable logs.
 
 ## Goals
 
@@ -112,7 +116,7 @@ authenticated server is for.
 |---|---|---|
 | Storage boundary | Project-local `.beads/` Dolt database by default | User-local `KATA_HOME` SQLite database behind a daemon |
 | Repository footprint | Owns issue state near the repo by default; can sync via Dolt remotes | Repo stores only `.kata.toml` project binding |
-| Collaboration model | Dolt push/pull, Dolt server mode, federation, MCP tooling | Local daemon today; future authenticated shared server |
+| Collaboration model | Dolt push/pull, Dolt server mode, federation, MCP tooling | Local daemon, private-network remote daemon, and opt-in federation; full shared-server authorization remains future work |
 | IDs | Hash-based IDs by default; counter IDs optional | Short IDs derived from each issue's ULID (`kata#abc4`) |
 | Workflow shape | Rich graph tasks, priorities, claiming, messages, dependencies | Deliberately small issue ledger: status, comments, labels, owner, links, events |
 | Git relationship | Git integration is optional but first-class; commit conventions and doctor checks can connect code history to issues | Git can help identify workspaces; kata does not infer issue state from commits |
@@ -490,8 +494,9 @@ Today kata is local-first:
 
 - one local daemon;
 - one local SQLite database;
-- no authentication;
-- trusted same-user CLI and TUI clients.
+- no authentication for default same-user Unix-socket local mode;
+- token-gated remote TCP only when explicitly configured;
+- trusted same-user CLI and TUI clients by default.
 
 Multiple checkouts or repositories can share one kata project when they use
 the same `.kata.toml` project name and run `kata init` in each checkout.
@@ -505,15 +510,15 @@ source into the surviving target, for example:
 kata projects merge old-repo new-repo --rename-target new-repo
 ```
 
-Future shared mode should be a distinct deployment:
+Remote/shared operation is an explicit deployment choice:
 
-- a shared kata server reachable over HTTPS, SSH tunnel, or a private network;
-- authenticated users and service tokens;
-- server-derived actor identity;
+- a kata daemon reachable over HTTPS, SSH tunnel, or a private network;
+- bearer-token authentication for remote TCP;
+- optional server-derived actor identity with DB-backed API tokens;
 - server-side hooks and backups;
 - the same project, issue, event, and relationship model.
 
-The local daemon should not be exposed directly to a LAN or public network.
+Do not expose the default local daemon casually to a LAN or public network.
 
 ### Remote daemon (opt-in private network)
 
