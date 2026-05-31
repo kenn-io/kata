@@ -300,6 +300,78 @@ func TestImportEndpoint_FederatedExistingIssueDeniesOtherLeaseHolder(t *testing.
 	assert.Equal(t, "Old title", unchanged.Title)
 }
 
+func TestImportEndpoint_FederatedCommentOnlyImportBypassesOtherLeaseHolder(t *testing.T) {
+	ctx := context.Background()
+	env := testenv.New(t)
+	project := createImportTestProject(t, env, "github.com/wesm/kata", "kata")
+	initial := map[string]any{
+		"actor":  "importer",
+		"source": "beads",
+		"items": []map[string]any{{
+			"external_id": "beads-1",
+			"title":       "Imported",
+			"body":        "body",
+			"author":      "alice",
+			"status":      "open",
+			"created_at":  "2026-05-01T10:00:00Z",
+			"updated_at":  "2026-05-01T10:00:00Z",
+		}},
+	}
+	var first struct {
+		Items []struct {
+			IssueShortID string `json:"issue_short_id"`
+		} `json:"items"`
+	}
+	envPostJSON(t, env, importEndpointPath(project.ID), initial, &first)
+	require.Len(t, first.Items, 1)
+	issue, err := env.DB.IssueByShortID(ctx, project.ID, first.Items[0].IssueShortID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(ctx, project.ID, "tester")
+	require.NoError(t, err)
+	_, err = env.DB.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: env.DB.InstanceUID(),
+			Holder:            "other",
+			ClientKind:        "cli",
+		},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	commentOnly := map[string]any{
+		"actor":  "importer",
+		"source": "beads",
+		"items": []map[string]any{{
+			"external_id": "beads-1",
+			"title":       "Imported",
+			"body":        "body",
+			"author":      "alice",
+			"status":      "open",
+			"created_at":  "2026-05-01T10:00:00Z",
+			"updated_at":  "2026-05-01T10:00:00Z",
+			"comments": []map[string]any{{
+				"external_id": "c1",
+				"author":      "alice",
+				"body":        "append-only note",
+				"created_at":  "2026-05-01T10:01:00Z",
+			}},
+		}},
+	}
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, importEndpointPath(project.ID), commentOnly, nil)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var out struct {
+		Unchanged int `json:"unchanged"`
+		Comments  int `json:"comments"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, 1, out.Unchanged)
+	assert.Equal(t, 1, out.Comments)
+}
+
 func TestImportEndpoint_FederatedIdempotentReimportDoesNotRequireLease(t *testing.T) {
 	env := testenv.New(t)
 	project := createImportTestProject(t, env, "github.com/wesm/kata", "kata")

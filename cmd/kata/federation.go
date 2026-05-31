@@ -636,7 +636,7 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 	}
 	if body.Adopted {
 		_, err := fmt.Fprintf(cmd.OutOrStdout(),
-			"adopted existing project %s into federation\nqueued %d issue snapshots for hub push; local event history was not imported\nexisting issues now require hub leases before edits\n",
+			"adopted existing project %s into federation\nqueued %d issue snapshots for hub push; pre-adoption local event history was removed\nfuture edits remain local-first; acquire leases only for exclusive coordination\n",
 			textsafe.Line(body.Project.Name), body.AdoptionSnapshotCount)
 		return err
 	}

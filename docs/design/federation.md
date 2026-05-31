@@ -192,13 +192,12 @@ On each spoke:
 
    Adoption preserves the current state of local issues, including closed and
    soft-deleted issues, comments, labels, metadata, priority, owner, and
-   same-project links. It does not import the old local event history; instead
-   it queues fresh snapshots for the hub with same-project links embedded in the
-   snapshot payloads. That local-only event history is audit context below the
-   push cursor and may be discarded by a
-   later federation reset. After adoption, existing issues are ordinary
-   federated spoke issues. Future edits remain local-first; use live hub leases
-   only when you want exclusive coordination.
+   same-project links. It does not preserve the old local event history.
+   Instead it removes those pre-adoption local events and queues fresh snapshots
+   for the hub with same-project links embedded in the snapshot payloads. After
+   adoption, existing issues are ordinary federated spoke issues. Future edits
+   remain local-first; use live hub leases only when you want exclusive
+   coordination.
 
 Enrollment capabilities and local spoke behavior are separate knobs:
 `--capabilities pull,push,lease` on the hub says what the token may do, while

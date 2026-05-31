@@ -158,14 +158,5 @@ func importItemNeedsFederatedClaim(
 	if item.UpdatedAt.After(issue.UpdatedAt) {
 		return issue, true, nil
 	}
-	for _, comment := range item.Comments {
-		_, err := store.ImportMappingBySource(ctx, projectID, source, "comment", comment.ExternalID)
-		if errors.Is(err, db.ErrNotFound) {
-			return issue, true, nil
-		}
-		if err != nil {
-			return db.Issue{}, false, api.NewError(500, "internal", err.Error(), "", nil)
-		}
-	}
 	return issue, false, nil
 }

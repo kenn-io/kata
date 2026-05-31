@@ -421,8 +421,9 @@ func TestFederationJoinCLIAdoptExistingOutput(t *testing.T) {
 		"--adopt-existing")
 
 	assert.Contains(t, out, "adopted existing project fedlab into federation")
-	assert.Contains(t, out, "queued 1 issue snapshots for hub push; local event history was not imported")
-	assert.Contains(t, out, "existing issues now require hub leases before edits")
+	assert.Contains(t, out, "queued 1 issue snapshots for hub push; pre-adoption local event history was removed")
+	assert.Contains(t, out, "future edits remain local-first; acquire leases only for exclusive coordination")
+	assert.NotContains(t, out, "require hub leases before edits")
 }
 
 func TestFederationJoinCLIAgentOutputIncludesAdoptionFields(t *testing.T) {

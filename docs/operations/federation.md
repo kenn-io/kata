@@ -119,11 +119,10 @@ with `--project` and the hub project with the hub selector.
 
 Adoption preserves the current state of local issues, including closed and
 soft-deleted issues, comments, labels, metadata, priority, owner, and
-same-project links. It does not import the old local event history. Instead it
-queues fresh snapshots for the hub with same-project links embedded in the
-snapshot payloads, and reports how many snapshots were queued. That local-only
-history stays as audit context below the push cursor and may be discarded by a
-later reset.
+same-project links. It does not preserve the old local event history. Instead
+it removes those pre-adoption local events, queues fresh snapshots for the hub
+with same-project links embedded in the snapshot payloads, and reports how many
+snapshots were queued.
 
 Adopted issues become ordinary federated spoke issues. You can keep editing
 them locally; acquire a hub lease only when you want exclusive coordination.
