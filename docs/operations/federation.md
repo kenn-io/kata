@@ -125,8 +125,8 @@ snapshot payloads, and reports how many snapshots were queued. That local-only
 history stays as audit context below the push cursor and may be discarded by a
 later reset.
 
-After adoption, the adopted issues are ordinary federated spoke issues, so
-editing one requires a live hub lease.
+Adopted issues become ordinary federated spoke issues, so editing one requires
+a live hub lease.
 
 ## Sync model
 
