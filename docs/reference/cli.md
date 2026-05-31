@@ -213,6 +213,8 @@ kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url>
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> [--push]
+kata federation join --project <existing-project> --hub-url <url> \
+  --hub-project-id <id> --token <token> --push --adopt-existing
 kata federation status
 kata federation enrollments list
 kata federation revoke <enrollment-id>

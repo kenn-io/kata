@@ -165,7 +165,8 @@ On each spoke:
    present.
 
    If the spoke already has a non-federated local project that should join the
-   hub under the same name, opt in explicitly:
+   hub under the same name, opt in explicitly with `--adopt-existing`, which
+   requires `--push`:
 
    ```bash
    kata federation join --project fedlab \

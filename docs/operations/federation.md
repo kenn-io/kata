@@ -100,6 +100,34 @@ Enrollment capabilities and local spoke behavior are separate:
 If a token has `push` but the spoke joins without `--push`, the spoke remains
 pull-only and the CLI prints a warning.
 
+### Adopting an existing project
+
+If a spoke already has a non-federated local project that should join the hub,
+add `--adopt-existing`. Adoption requires `--push`:
+
+```sh
+kata federation join --project fedlab \
+  --hub-url http://100.64.0.5:7787 \
+  --hub-project-id 1 \
+  --token ... \
+  --push \
+  --adopt-existing
+```
+
+The local and hub project names do not have to match. Select the local project
+with `--project` and the hub project with the hub selector.
+
+Adoption preserves the current state of local issues, including closed and
+soft-deleted issues, comments, labels, metadata, priority, owner, and
+same-project links. It does not import the old local event history. Instead it
+queues fresh snapshots for the hub with same-project links embedded in the
+snapshot payloads, and reports how many snapshots were queued. That local-only
+history stays as audit context below the push cursor and may be discarded by a
+later reset.
+
+After adoption, the adopted issues are ordinary federated spoke issues, so
+editing one requires a live hub lease.
+
 ## Sync model
 
 A spoke polls the hub for events after its pull cursor. It applies hub events
@@ -144,6 +172,8 @@ kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url>
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> [--push]
+kata federation join --project <existing-project> --hub-url <url> \
+  --hub-project-id <id> --token <token> --push --adopt-existing
 kata federation enrollments list
 kata federation revoke <enrollment-id>
 kata federation status
