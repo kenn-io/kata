@@ -30,11 +30,11 @@ func resolveAuthToken() string {
 func resolveAuthConfig() config.AuthConfig {
 	envToken := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
 	envTrust := config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
-	cfg, err := config.ReadDaemonConfig()
-	if err != nil || cfg == nil {
+	auth, err := config.ReadAuthConfig()
+	if err != nil {
 		return config.AuthConfig{Token: envToken, TrustPrivateNetwork: envTrust}
 	}
-	return cfg.Auth
+	return auth
 }
 
 // withBearer wraps base with bearer-token injection when token is

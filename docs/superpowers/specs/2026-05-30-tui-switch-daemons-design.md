@@ -7,7 +7,8 @@ Enable `kata tui` to switch between multiple configured daemon targets during a 
 ## Configuration
 
 `<KATA_HOME>/config.toml` carries a top-level daemon catalog. It is not nested
-under `[tui]` because external clients (e.g. kataflow) read the same catalog:
+under `[tui]` because the catalog is shared client configuration rather than a
+TUI-only preference:
 
 ```toml
 active_daemon = "shared"

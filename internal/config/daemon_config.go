@@ -24,8 +24,8 @@ type DaemonConfig struct {
 	// Empty preserves the legacy implicit endpoint resolution.
 	ActiveDaemon string `toml:"active_daemon"`
 	// Daemons is the named daemon catalog. The TUI resolves its default
-	// target here; external clients (e.g. kataflow) read the same catalog,
-	// so it is top-level rather than nested under [tui].
+	// target here; other clients may also read this shared catalog, so it is
+	// top-level rather than nested under [tui].
 	Daemons []CatalogDaemonConfig `toml:"daemon"`
 	// TUI carries client-side interactive UI defaults. Unlike remote
 	// daemon overrides, these are user preferences and belong in
@@ -149,6 +149,43 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// ReadAuthConfig parses only the daemon auth settings from <KATA_HOME>/config.toml.
+// It intentionally skips daemon-catalog normalization so auth-only clients do not
+// lose [auth] settings because an unrelated catalog entry is unavailable.
+func ReadAuthConfig() (AuthConfig, error) {
+	path, err := DaemonConfigPath()
+	if err != nil {
+		return AuthConfig{}, err
+	}
+	var cfg DaemonConfig
+	data, err := os.ReadFile(path) //nolint:gosec // path is derived from KATA_HOME, not user input
+	switch {
+	case err == nil:
+		meta, err := toml.Decode(string(data), &cfg)
+		if err != nil {
+			return AuthConfig{}, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if u := meta.Undecoded(); len(u) > 0 {
+			keys := make([]string, len(u))
+			for i, k := range u {
+				keys[i] = k.String()
+			}
+			return AuthConfig{}, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+		}
+		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
+		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
+	case errors.Is(err, os.ErrNotExist):
+		// Absent file: env overlays below still apply.
+	default:
+		return AuthConfig{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	applyDaemonConfigEnv(&cfg)
+	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
+		return AuthConfig{}, err
+	}
+	return cfg.Auth, nil
 }
 
 func trimDaemonCatalog(cfg *DaemonConfig) {

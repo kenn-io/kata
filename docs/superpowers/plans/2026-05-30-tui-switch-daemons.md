@@ -55,7 +55,7 @@ Add:
 
 ```go
 // Catalog + active selection live at the top level of DaemonConfig so
-// external clients (kataflow) read the same catalog; [tui] keeps only Mouse.
+// clients share one catalog; [tui] keeps only Mouse.
 type DaemonConfig struct {
     // ... Listen, Close, Auth ...
     ActiveDaemon string                `toml:"active_daemon"`

@@ -30,6 +30,24 @@ func TestResolveAuthTokenFallsBackToTOML(t *testing.T) {
 	assert.Equal(t, "from-toml", resolveAuthToken())
 }
 
+func TestResolveAuthTokenIgnoresUnresolvedCatalogTokenEnv(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KATA_HOME", tmp)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_WORK_TOKEN", "")
+	require.NoError(t, writeRawConfig(tmp, `
+[auth]
+token = "from-toml"
+
+[[daemon]]
+name = "work"
+url = "https://kata.example.test"
+token_env = "KATA_WORK_TOKEN"
+`))
+
+	assert.Equal(t, "from-toml", resolveAuthToken())
+}
+
 func TestResolveAuthTokenEmpty(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)

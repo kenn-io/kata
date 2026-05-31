@@ -33,11 +33,11 @@ func ConfigureBearerClientWithTrust(c *http.Client, baseURL, token string, trust
 }
 
 func resolvedBearerTrustPrivateNetwork() bool {
-	cfg, err := ReadDaemonConfig()
-	if err != nil || cfg == nil {
+	auth, err := ReadAuthConfig()
+	if err != nil {
 		return EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
 	}
-	return cfg.Auth.TrustPrivateNetwork
+	return auth.TrustPrivateNetwork
 }
 
 // BearerTransport wraps base with bearer-token injection when token is
