@@ -40,11 +40,22 @@ if [[ "$missing" -ne 0 ]]; then
   exit 1
 fi
 
-grep -F 'site_name = "kata"' zensical.toml >/dev/null
-grep -F 'site_url = "https://katatracker.com/"' zensical.toml >/dev/null
-grep -F 'docs_dir = "docs"' zensical.toml >/dev/null
-grep -F 'site_dir = "site"' zensical.toml >/dev/null
-grep -F 'scheme = "slate"' zensical.toml >/dev/null
+require_line() {
+  local file="$1"
+  local expected="$2"
+
+  if ! grep -F "$expected" "$file" >/dev/null; then
+    printf 'missing required docs content in %s: %s\n' "$file" "$expected" >&2
+    exit 1
+  fi
+}
+
+require_line zensical.toml 'site_name = "kata カタ"'
+require_line zensical.toml 'site_url = "https://katatracker.com/"'
+require_line zensical.toml 'docs_dir = "docs"'
+require_line zensical.toml 'site_dir = "site"'
+require_line zensical.toml 'scheme = "slate"'
+require_line docs/index.md '# kata カタ'
 
 if [[ -x ".venv/bin/zensical" ]]; then
   .venv/bin/zensical build --strict
