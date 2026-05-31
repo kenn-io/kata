@@ -223,7 +223,7 @@ export KATA_AUTHOR=codex-wesm-laptop
 kata whoami
 ```
 
-Actor precedence is `--as` > `KATA_AUTHOR` > `git config user.name` >
+Actor precedence is `--as` > `$KATA_AUTHOR` > `$USER` > `git config user.name` >
 `anonymous`.
 
 ## Core Commands

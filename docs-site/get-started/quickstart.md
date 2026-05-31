@@ -113,7 +113,7 @@ used.
 Actor precedence is:
 
 ```text
---as > KATA_AUTHOR > git config user.name > USER > anonymous
+--as > $KATA_AUTHOR > $USER > git config user.name > anonymous
 ```
 
 For an agent session:

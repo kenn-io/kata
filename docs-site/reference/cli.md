@@ -96,6 +96,19 @@ Reopen:
 kata reopen <ref> [--comment TEXT]
 ```
 
+Delete, restore, and purge:
+
+```sh
+kata delete <ref> --force --confirm "DELETE <qualified-id>"
+kata restore <ref>
+kata purge <ref> --force --confirm "PURGE <qualified-id>"
+```
+
+`delete` is reversible with `restore`; `purge` is irreversible. The
+confirmation string is the issue's qualified short ID, for example
+`DELETE kata#abc4`. Agents must not run `delete` or `purge` unless the user
+explicitly asks for that exact operation and ref.
+
 ## Labels, ownership, and claiming
 
 ```sh
@@ -120,14 +133,15 @@ kata ready --all
 ```
 
 `ready` returns open issues that do not have an open blocking predecessor.
-Filters combine with AND logic.
+Filters combine with AND logic. `--all` lists ready issues across every
+non-archived project and cannot be combined with those filters or `--project`.
 
 ## Events and audit
 
 ```sh
 kata events [--after N] [--limit N]
 kata events --tail [--last-event-id N]
-kata digest --since 24h [--until ...] [--project-id N | --all-projects]
+kata digest --since 24h [--until ...] [--project-id N | --all-projects] [--actor NAME ...]
 kata audit closes [--actor NAME] [--reason done|wontfix|duplicate|superseded|audit-no-change]
 ```
 
@@ -162,7 +176,8 @@ kata tui
 ```
 
 Local commands auto-start the daemon when appropriate. `daemon start` runs in
-the foreground and is used for explicit service setups.
+the foreground and is used for explicit service setups. `kata agent-instructions`
+is an alias for `kata quickstart`.
 
 ## Backup and import
 

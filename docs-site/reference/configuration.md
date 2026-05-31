@@ -13,7 +13,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
 | `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. |
-| `KATA_HTTP_TIMEOUT` | Per-request CLI timeout for non-streaming daemon calls, such as `30s` or `2m`. |
+| `KATA_HTTP_TIMEOUT` | Per-request CLI timeout for non-streaming daemon calls, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. |
 | `KATA_FEDERATION_PULL_INTERVAL_MS` | Federation runner poll interval for tests or latency-sensitive private deployments. |
 | `PORT` | Hosted-mode listener port when no explicit listener is configured and the daemon is not an auto-start child. |
 | `XDG_RUNTIME_DIR` | Runtime socket parent on Unix when applicable. |
@@ -88,18 +88,24 @@ actor from that token.
 
 ## Close throttle
 
-kata refuses structurally dangerous close patterns, including closing a parent
-while children remain open. It also throttles bursts of sibling closes by one
-actor.
+kata refuses structurally dangerous close patterns. The parent-completeness
+guard always refuses closing an issue while it has open children. Two further
+guards throttle close bursts by one actor under a shared parent:
 
-Operators can disable the sibling throttle:
+- sibling-burst: closing more than three sibling issues within five minutes is
+  refused;
+- repeated-message: closing a second sibling with an identical `done` or
+  `audit-no-change` message within thirty minutes is refused.
+
+Operators can disable both throttles daemon-wide:
 
 ```toml
 [close.throttle]
 enabled = false
 ```
 
-The parent completeness refusal and substance/evidence checks remain active.
+The parent-completeness refusal and the message-substance and evidence checks
+always run; `enabled = false` relaxes only the two sibling throttles.
 
 ## Federation credentials
 

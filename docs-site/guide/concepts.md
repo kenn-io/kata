@@ -96,7 +96,7 @@ waiting on open predecessors.
 Each mutation records an actor string. Local actor precedence is:
 
 ```text
---as > KATA_AUTHOR > git config user.name > USER > anonymous
+--as > $KATA_AUTHOR > $USER > git config user.name > anonymous
 ```
 
 In shared-daemon identity mode, DB-backed API tokens can make actor attribution
