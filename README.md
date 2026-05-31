@@ -4,764 +4,121 @@ Local-first issue tracking for humans and coding agents.
 
 kata gives agents a structured place to record tasks, decisions, links,
 comments, and state changes without turning GitHub Issues, markdown plans, or
-chat transcripts into the source of truth.
+chat transcripts into the source of truth. The CLI is built for agents and
+automation: stable commands, JSON output, predictable failure modes. The TUI is
+built for people: browse, triage, edit, and supervise agent-written work without
+reading raw JSON. Both talk to the same local daemon and SQLite database.
 
-The CLI is built for agents and automation: stable commands, JSON output, and
-predictable failure modes. The TUI is built for people: browse, triage, edit,
-and supervise agent-written work without reading raw JSON. Both talk to the
-same local daemon and SQLite database.
-
-The public documentation source lives in `docs-site/` and is built with
-Zensical for <https://katatracker.com/>.
+The documentation in [`docs-site/`](docs-site/) is the definitive guide,
+published with Zensical at <https://katatracker.com/>.
 
 Status: early public preview. The CLI, daemon, and TUI are usable, but command
 contracts and UI details may still change before a stable release.
 
-## Quick Start
+## Quick start
 
 ```sh
-go install go.kenn.io/kata/cmd/kata@latest   # or see Install for other options
+go install go.kenn.io/kata/cmd/kata@latest   # or see Install below
 
 cd your-repo
-kata init                                         # bind this workspace to a kata project
-kata create "fix login race"                      # returns the issue's short_id, e.g. abc4
-kata list                                         # list open issues
-kata show abc4                                    # inspect by short_id
-kata close abc4 --done --message "Fixed the issue and verified the relevant tests pass." --commit <sha>
-kata tui                                          # browse and triage interactively
+kata init                                    # bind this workspace to a kata project
+kata create "fix login race"                 # returns the issue's short_id, e.g. abc4
+kata list                                    # list open issues
+kata show abc4                               # inspect by short_id
+kata close abc4 --done --message "Fixed and verified the tests pass." --commit <sha>
+kata tui                                     # browse and triage interactively
 ```
 
-See [Install](#install) for `go install`, build-from-source, and Windows
-instructions; see [Working with kata](#working-with-kata) for a longer
-walkthrough.
+`kata create` returns each issue's short_id; use it in later commands. Press `?`
+inside `kata tui` for keybindings.
 
-## What kata does today
+## What kata does
 
-What you can do:
-
-- Track issues separately per project, with short IDs derived from each
-  issue's ULID (`kata#abc4`).
-- Create, list, edit, close, reopen, comment, label, assign, and link issues.
-- Search, idempotent-create, soft-delete, restore, and irreversibly purge.
+- Track issues per project, with short IDs derived from each issue's ULID
+  (`kata#abc4`).
+- Create, list, edit, close, reopen, comment, label, assign, and claim issues;
+  relate them with `--parent`/`--blocks`/`--blocked-by`/`--related`; search,
+  soft-delete, restore, and purge.
 - Browse and triage in a TUI (`kata tui`) over the same data.
-- Stream state changes as durable events for polling, live tailing, hooks, and
-  TUI updates.
+- Stream durable events for polling, live tailing, hooks, and TUI updates.
+- Back up and migrate with a git-friendly JSONL export and import.
+- Run a private-network remote daemon or opt-in federation when one local
+  daemon is not enough.
 
-How it's built:
+The priorities are agent ergonomics (stable commands, JSON-first workflows,
+search-before-create, idempotency keys), human oversight (a TUI over the same
+event stream), and auditability (append-only comments, event history, actor
+attribution, explicit destructive operations).
 
-- Workspace-to-project binding lives in `.kata.toml`, falling back to a git
-  remote URL when no binding file exists.
-- Data lives locally in SQLite under `KATA_HOME` behind a long-running daemon.
-- Issues have stable ULID `uid` values; `short_id` (the lowercased last 4+
-  chars of the ULID) is the display label, qualified as `kata#abc4` across
-  projects.
-- `kata export` and `kata import` provide a git-friendly JSONL backup and
-  schema cutover path.
-- Commands support `--json` for complete machine-readable output and `--agent`
-  for concise agent-readable logs.
+Issue state lives in a user-local SQLite database under `KATA_HOME`, behind a
+daemon. A repository commits only a small, secret-free `.kata.toml` binding, so
+task state stays out of code history.
 
-## Goals
-
-Three priorities:
-
-- Agent ergonomics: stable commands, JSON-first workflows, explicit workspace
-  binding, search-before-create, idempotency keys, and predictable exit codes.
-- Human oversight: a TUI that helps people browse, triage, edit, and supervise
-  agent activity without reading raw JSON.
-- Auditability: append-only comments, event history, actor attribution, and
-  explicit destructive operations.
-
-Longer term, kata is intended to support a shared server mode for teams, CI,
-and multiple agents. That mode should be a real authenticated deployment, not
-the local daemon exposed on a public interface.
-
-## Why kata, and how is it different from Beads or git-bug?
+## How kata compares
 
 kata is intentionally small. It is not a project-management suite, a git
 workflow engine, or an agent worker pool. It is a durable task ledger that
-humans and agents can both understand.
+humans and agents can both operate.
 
-[Beads](https://github.com/gastownhall/beads) is a substantial tool in the
-same space: a Dolt-powered distributed graph issue tracker for AI agents. Its
-default shape is project-local: `bd init` creates a `.beads/` Dolt database
-alongside the code, with native Dolt history, branching, merging, push/pull,
-and optional server mode for concurrent writers. That does not mean Beads
-requires git; it also supports git-free workflows.
+[Beads](https://github.com/gastownhall/beads) keeps issue state in a
+project-local `.beads/` Dolt database with native history, branching, and
+push/pull. [git-bug](https://github.com/git-bug/git-bug) stores issues as git
+objects under custom refs and syncs them over `git push` and `git pull`. kata
+makes a different bet: the ledger is a local service next to your workspaces,
+not data carried in the repository. That keeps the workspace clean, works the
+same in non-git directories, and keeps issue history out of code history. The
+trade-off is that kata does not ride git remotes for sharing; the remote daemon
+and federation cover that instead.
 
-kata makes a different architectural bet: the issue ledger should be a local
-service adjacent to workspaces, not a database owned by each repository. A
-repository that uses kata gets only a small, secret-free `.kata.toml` binding;
-the canonical state lives in `KATA_HOME` behind a daemon API. That keeps task
-state out of code history while still giving agents a structured coordination
-layer and giving humans a TUI over the same event stream.
-
-It also has a different complexity budget. Beads is a large, capable system
-with distributed database semantics, merge behavior, federation, MCP
-integration, and agent workflow machinery. kata is deliberately smaller: one
-daemon, one local store, one HTTP API, one TUI, and a narrow issue model that
-should stay easy to understand, operate, and teach to agents.
-
-[git-bug](https://github.com/git-bug/git-bug) takes the most git-native
-approach of the three: it stores issues, comments, and identities as git
-objects under custom refs in the repository itself, and distributes them
-through ordinary `git push` / `git pull`. Every clone carries the full issue
-history offline, and bridges sync with GitHub, GitLab, and Jira. kata sits at
-the other end of that spectrum — issue state lives outside git entirely, so
-the workspace stays clean, non-git workspaces work identically, and issue
-history is not interleaved with code history. The trade-off is that kata
-cannot piggyback on git remotes for sharing; that is what the future
-authenticated server is for.
-
-| Design choice | Beads | kata |
-|---|---|---|
-| Storage boundary | Project-local `.beads/` Dolt database by default | User-local `KATA_HOME` SQLite database behind a daemon |
-| Repository footprint | Owns issue state near the repo by default; can sync via Dolt remotes | Repo stores only `.kata.toml` project binding |
-| Collaboration model | Dolt push/pull, Dolt server mode, federation, MCP tooling | Local daemon, private-network remote daemon, and opt-in federation; full shared-server authorization remains future work |
-| IDs | Hash-based IDs by default; counter IDs optional | Short IDs derived from each issue's ULID (`kata#abc4`) |
-| Workflow shape | Rich graph tasks, priorities, claiming, messages, dependencies | Deliberately small issue ledger: status, comments, labels, owner, links, events |
-| Git relationship | Git integration is optional but first-class; commit conventions and doctor checks can connect code history to issues | Git can help identify workspaces; kata does not infer issue state from commits |
-
-All three approaches are useful. Beads is strongest when you want
-distributed, database-versioned task memory that can travel with a project and
-merge across branches or agents. git-bug is strongest when you want issue
-state to live inside the repository's own git history and ride the same
-remotes the code does. kata is aimed at a smaller, API-first issue system
-that can span workspaces and eventually teams without forcing every user and
-agent to understand the repository, git remote, or distributed database that
-carries the issue state.
+Moving from Beads? See
+[Migrating from Beads](docs-site/guide/migrating-from-beads.md).
+`kata import --source-format beads` drives the `bd` CLI and merges your issues
+into a kata project.
 
 ## Install
 
-kata is a single Go binary with no runtime dependencies and builds on macOS,
-Linux, and Windows. Pre-built release binaries are not published yet; install
-from source using one of the options below. All paths require **Go 1.26 or
-later** (<https://go.dev/dl/>).
-
-### `go install` (any platform)
+kata is a single Go binary with no runtime dependencies, and builds on macOS,
+Linux, and Windows. It needs **Go 1.26 or later**. Pre-built binaries are not
+published yet.
 
 ```sh
 go install go.kenn.io/kata/cmd/kata@latest
 ```
 
-Go places `kata` in `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin`
-(typically `~/go/bin` on Unix, `%USERPROFILE%\go\bin` on Windows). Add that
-directory to your `PATH`.
-
-### Build from a clone (macOS / Linux)
-
-```sh
-make install                            # installs to ~/.local/bin
-make install GOBIN=/usr/local/bin       # or set GOBIN to install elsewhere
-```
-
-Add the install directory to your `PATH` if it isn't already. `GOBIN` from the
-environment is also honored (`export GOBIN=/opt/bin && make install`).
-
-### Build from a clone (Windows)
-
-PowerShell or cmd.exe:
-
-```powershell
-go build -o kata.exe ./cmd/kata
-# Move kata.exe to a directory on your PATH, e.g. %USERPROFILE%\.local\bin
-```
-
-The `go install` command above also works on Windows and is usually simpler.
-
-### Development
-
-```sh
-make test          # run the test suite
-make lint          # run golangci-lint
-```
-
-## Working with kata
-
-Initialize kata in a workspace:
-
-```sh
-kata init
-```
-
-`kata init` creates or resolves the project and writes `.kata.toml` when
-needed. In a git workspace, the default project name is derived from the
-remote URL. For a non-git workspace or an explicit shared project name:
-
-```sh
-kata init --project product
-```
-
-Create and inspect issues:
-
-```sh
-kata create "fix login race" --body "Safari can double-submit the callback."
-kata list
-# Each issue prints its short_id (e.g. abc4); use it for follow-up commands.
-kata show abc4
-kata comment abc4 --body "Reproduced on macOS."
-kata close abc4 --done --message "Fixed the issue and verified the relevant tests pass." --commit <sha>
-```
-
-Open the TUI for human triage:
-
-```sh
-kata tui
-```
-
-Press `?` inside the TUI for keybindings.
-
-Use `--workspace <path>` when running from outside the project directory:
-
-```sh
-kata --workspace ~/code/product list --status all
-```
-
-Set the actor for a session:
-
-```sh
-export KATA_AUTHOR=codex-wesm-laptop
-kata whoami
-```
-
-Actor precedence is `--as` > `$KATA_AUTHOR` > `$USER` > `git config user.name` >
-`anonymous`.
-
-## Core Commands
-
-Common issue commands:
-
-```sh
-kata create <title> [--body TEXT | --body-file PATH | --body-stdin]
-                  [--label LABEL] [--owner NAME] [--priority 0..4]
-                  [--parent <ref>] [--blocks <ref>] [--blocked-by <ref>]
-                  [--related <ref>] [--idempotency-key KEY] [--force-new]
-kata list [--status open|closed|all] [--limit N]
-kata show <issue-ref>
-kata edit <issue-ref> [--title TEXT] [--body TEXT] [--owner NAME]
-                  [--priority 0..4 | --priority -]
-                  [--parent <ref>] [--blocks <ref>] [--blocked-by <ref>] [--related <ref>]
-                  [--remove-parent <ref>] [--remove-blocks <ref>]
-                  [--remove-blocked-by <ref>] [--remove-related <ref>]
-                  [--comment TEXT]
-kata comment <ref> [--body TEXT | --body-file PATH | --body-stdin]
-kata close <ref> --done --message <text> [--commit|--pr|--test|--reviewed|--evidence] [--comment TEXT]
-kata close <ref> [--wontfix|--duplicate-of <ref>|--superseded-by <ref>|--audit-no-change] [--comment TEXT]
-kata reopen <ref> [--comment TEXT]
-kata claim <ref> [--force] [--comment TEXT]
-```
-
-`--comment TEXT` is available on `close`, `reopen`, `edit`, `assign`,
-`unassign`, and `label add`/`rm`. The mutation lands first; the comment is
-appended in a follow-up call. If the comment call fails, the error names
-the issue so you can retry with `kata comment <ref> --body ...`.
-
-Refs accept a bare short_id (`abc4`), a qualified short_id (`kata#abc4`), or
-a full 26-char ULID. The relationship flags on `create`/`edit` are
-documented in detail in "Relationships ride on `kata create` and `kata edit`"
-below.
-
-Closing issues:
-
-```sh
-kata close abc4 --done --message "<what changed and how it was verified>" \
-                --commit <sha>
-kata close abc4 --duplicate-of d4ex  --message "<short pointer>"
-kata close abc4 --superseded-by d4ex --message "<short pointer>"
-kata close abc4 --wontfix --message "<>=60 chars of rationale>"
-kata close abc4 --audit-no-change \
-                --message "<scope + verification of no-change conclusion>" \
-                --evidence "no-change-audit:<short rationale>" \
-                --reviewed <path/to/file>
-```
-
-Closing an issue asserts that the work is complete. Close each issue
-as soon as its work is verified — not at the end of a batch. Use the
-`needs-review` label and a comment when the work is incomplete instead.
-The daemon refuses these structurally dangerous patterns:
-
-- closing a parent while its children remain open
-- closing >3 siblings under the same parent within 5 minutes
-- closing two siblings of the same parent with the same close message
-  (within 30 minutes, for `done`/`audit-no-change`)
-
-The sibling-burst and repeated-message throttles can be disabled
-daemon-wide via `[close.throttle] enabled = false` in
-`<KATA_HOME>/config.toml`; the parent-completeness refusal and the
-substance/evidence checks on `--message`/`--evidence` always run.
-
-The TUI close path (`x` in `kata tui`) bypasses the substance and
-evidence checks — interactive humans close with a single keystroke.
-Structural guards still apply.
-
-`kata audit closes` lists close events with filters; specific lazy
-closes can be undone individually with `kata reopen <ref>`.
-
-Labels, ownership, claiming, and relationships:
-
-```sh
-kata label add <ref> <label> [--comment TEXT]
-kata label rm <ref> <label> [--comment TEXT]
-kata labels
-kata assign <ref> <owner> [--comment TEXT]
-kata unassign <ref> [--comment TEXT]
-kata claim <ref> [--force] [--comment TEXT]
-```
-
-Relationships ride on `kata create` and `kata edit` as repeatable flags,
-all framed from the operating issue's POV:
-
-```sh
-# Add (work on create + edit)
-kata create "..." --parent <ref> --blocks <ref> --blocked-by <ref> --related <ref>
-kata edit   <ref> --parent <ref> --blocks <ref> --blocked-by <ref> --related <ref>
-
-# Remove (edit only)
-kata edit <ref> --remove-parent <ref>        # strict: must equal current parent
-kata edit <ref> --remove-blocks <ref>        # idempotent
-kata edit <ref> --remove-blocked-by <ref>    # idempotent
-kata edit <ref> --remove-related <ref>       # idempotent
-```
-
-`--parent` is at-most-one and replaces any existing parent on `edit`.
-The other flags are repeatable. `--remove-parent <ref>` is strict: it fails
-loudly if the current parent is unset or different from `<ref>` (an
-optimistic-concurrency check against agents acting on stale state). All
-mutations in a single `edit` call apply atomically.
-
-Every `<ref>` above accepts a bare short_id (`abc4`), a qualified
-short_id (`kata#abc4`), or a 26-char ULID. Legacy numeric `#N` refs
-no longer resolve.
-
-Search, readiness, events, and project inspection:
-
-```sh
-kata search <query> [--limit N] [--include-deleted]
-kata ready [--limit N] [--unowned] [--owner NAME] [--label LABEL] [--no-label LABEL]
-kata events [--after N] [--limit N]
-kata events --tail [--last-event-id N]
-kata digest --since 24h [--until ...] [--project-id N | --all-projects]
-            [--actor NAME ...]
-kata projects list
-kata projects show <project>
-kata projects rename <project> <name>
-kata projects merge <source> <target> [--rename-target NAME]
-kata projects remove <project> [--force]
-kata projects restore <project>
-kata export [--project NAME] [--output PATH]
-kata import --input PATH --target PATH [--force]
-```
-
-`kata digest` summarizes activity over a time window. It groups events by
-actor and lists per-issue actions (created, commented:N, closed:done,
-labeled:bug, unblocks:abc4, ...) so you can see at a glance what each agent
-or person did overnight. `--since` accepts a duration (`24h`, `7d`) or an
-RFC3339 timestamp; `--until` defaults to now. The default scope is the
-current workspace's project; pass `--all-projects` for a cross-project
-digest, or `--project-id N` for an explicit one. `--actor` is repeatable to
-limit the report to one or more actors.
-
-Destructive operations are explicit:
-
-```sh
-kata delete <ref> --force --confirm "DELETE <qualified-id>"
-kata restore <ref>
-kata purge <ref> --force --confirm "PURGE <qualified-id>"
-```
-
-The confirmation string is the issue's qualified short_id, e.g.
-`DELETE kata#abc4`. `delete` is reversible. `purge` is not.
-
-Daemon, diagnostics, and agent instructions:
-
-```sh
-kata daemon status
-kata daemon stop
-kata daemon reload
-kata daemon logs --hooks [--tail]
-kata health
-kata whoami
-kata quickstart
-kata tui
-```
-
-## Agent Quickstart
-
-This is the short version to give any coding agent, regardless of whether that
-agent supports skills, memories, or custom instructions. It is also shipped
-with the CLI:
-
-```sh
-kata quickstart
-kata agent-instructions   # alias
-```
-
-Session setup:
-
-- Run from the project workspace, or pass `--workspace <path>`.
-- Set `KATA_AUTHOR` once at session start.
-- Default to `--agent` for ordinary kata reads and mutations in agent logs.
-- Use `--json` only when your script needs complete structured data, for
-  example when piping into `jq`.
-
-Per-task guidelines:
-
-- Never create a project implicitly. If the workspace is not initialized,
-  report that `kata init` is needed.
-- Search before creating; pass an idempotency key when you do create.
-- Prefer updating existing issues over opening duplicates.
-- Close only when the work is actually complete.
-- Do not run `delete` or `purge` unless the user explicitly asks for that
-  exact destructive action and issue ref.
-
-Use relationships deliberately. The link types mean:
-
-| Type | Meaning |
-|---|---|
-| `parent` | This issue is part of a larger issue. |
-| `blocks` | The first issue must be resolved before the second can proceed. |
-| `related` | Useful context, but not ordering. |
-
-Example session (using `abc4` as a placeholder for the issue's actual
-short_id, which `kata create --agent` and `kata search --agent` both
-return):
-
-```sh
-# Search before creating
-kata search "login race" --agent
-
-# If no existing issue fits, create with an idempotency key
-kata create "fix login race" \
-  --body "Observed double-submit in Safari callback." \
-  --idempotency-key "login-race-2026-05-02" \
-  --agent
-
-# Update an existing issue rather than open a duplicate
-kata show abc4 --agent
-kata comment abc4 --body "Found another reproduction path." --agent
-kata label add abc4 safari --agent
-kata edit abc4 --blocks d4ex --agent
-
-# Close when done
-kata close abc4 --done --message "Fixed the issue and verified the relevant tests pass." --commit <sha> --agent
-```
-
-For long-running agents, poll events and remember the returned cursor; resume
-from it on the next call. If a response says `reset_required`, discard cached
-kata state and resume from the reset cursor.
-
-```sh
-kata events --after 0 --limit 100 --agent
-```
-
-For live streams, use `--agent` for one line per event in agent logs. Use
-`--json` only when a consumer expects newline-delimited JSON:
-
-```sh
-kata events --tail --agent
-```
-
-## Agent Task Claiming
-
-When multiple agents share a project, use `kata claim` to atomically assign work
-to the current actor. The claim fails if another actor already claimed the issue:
-
-```sh
-# Find unclaimed work
-ISSUE=$(kata ready --unowned --json | jq -r '.issues[0].short_id')
-
-# Claim it (fails if someone else claimed it first)
-kata claim "$ISSUE" --agent || exit 1
-
-# Do the work...
-
-# Close when done
-kata close "$ISSUE" --done --message "Fixed the issue and verified the relevant tests pass." --commit "$SHA" --agent
-```
-
-The `kata ready` command supports filters for finding suitable work:
-
-- `--unowned`: show only issues with no owner
-- `--owner NAME`: show only issues owned by NAME
-- `--label LABEL`: show only issues with LABEL (repeatable)
-- `--no-label LABEL`: exclude issues with LABEL (repeatable)
-
-These filters combine (AND logic). Unowned work is a common starting point for
-agents polling for available tasks.
-
-## Sharing and multi-user workflows
-
-Today kata is local-first:
-
-- one local daemon;
-- one local SQLite database;
-- no authentication for default same-user Unix-socket local mode;
-- token-gated remote TCP only when explicitly configured;
-- trusted same-user CLI and TUI clients by default.
-
-Multiple checkouts or repositories can share one kata project when they use
-the same `.kata.toml` project name and run `kata init` in each checkout.
-That shares the issue ledger — short_ids, labels, links, and events —
-across those workspaces in the same local database.
-
-If a repository rename accidentally creates a second project, merge the old
-source into the surviving target, for example:
-
-```sh
-kata projects merge old-repo new-repo --rename-target new-repo
-```
-
-Remote/shared operation is an explicit deployment choice:
-
-- a kata daemon reachable over HTTPS, SSH tunnel, or a private network;
-- bearer-token authentication for remote TCP;
-- optional server-derived actor identity with DB-backed API tokens;
-- server-side hooks and backups;
-- the same project, issue, event, and relationship model.
-
-Do not expose the default local daemon casually to a LAN or public network.
-
-### Remote daemon (opt-in private network)
-
-A kata daemon can serve clients on other hosts over a private network
-(loopback, RFC1918, CGNAT, link-local, ULA — public addresses are rejected):
-
-```sh
-KATA_AUTH_TOKEN=change-me KATA_TRUST_PRIVATE_NETWORK=1 \
-  kata daemon start --listen 100.64.0.5:7777
-```
-
-Or set the address and auth persistently in `<KATA_HOME>/config.toml`:
-
-```toml
-listen = "100.64.0.5:7777"
-
-[auth]
-token = "change-me"
-trust_private_network = true
-```
-
-The CLI flag wins over the config file when both are present. Auto-started
-daemons (the on-demand path triggered by `kata create`, `kata list`, etc.)
-also pick up the config-file value, so on a host where you want every kata
-invocation to use the same TCP address you only have to set it once.
-
-Run the daemon under launchd / systemd / nohup on the host that holds the
-SQLite database. Clients on other hosts target it by setting `KATA_SERVER`:
-
-```sh
-export KATA_SERVER=http://100.64.0.5:7777
-kata list
-```
-
-Or by writing a per-developer, gitignored `.kata.local.toml` next to
-`.kata.toml`:
-
-```toml
-version = 1
-
-[server]
-url = "http://100.64.0.5:7777"
-```
-
-`kata init` adds `.kata.local.toml` to `.gitignore` automatically.
-`KATA_SERVER` wins over the file when both are set.
-
-The environment auth equivalents are `KATA_AUTH_TOKEN` and
-`KATA_TRUST_PRIVATE_NETWORK=1`. Clients use the same token sources. Mutable
-non-loopback HTTP requires both `token` and `trust_private_network`; without
-the trust flag, kata refuses the token-protected listener because the daemon
-does not terminate TLS. Plain HTTP with trusted bearer auth is limited to
-literal non-public addresses: loopback, RFC1918, CGNAT, link-local, and ULA.
-Public IPs and DNS hostnames are rejected; use HTTPS through a reverse proxy
-or an SSH tunnel for those shapes.
-
-For a shared daemon where each user should have a stable actor identity, mint
-per-user API tokens before enabling identity mode:
-
-```sh
-export KATA_AUTH_TOKEN=change-me
-kata tokens create --actor wesm --name laptop
-kata tokens list
-kata tokens revoke 1
-```
-
-`tokens create` prints the plaintext bearer token exactly once. Copy it at
-creation time and store it in the user's client config or environment; the
-daemon stores only a SHA-256 hash and cannot retrieve or show an existing token
-later. Lost tokens should be revoked and recreated.
-
-Then enable identity mode on the daemon:
-
-```toml
-[auth]
-token = "change-me"
-trust_private_network = true
-require_token_identity = true
-```
-
-In identity mode, `token` is a bootstrap/admin credential. It can create,
-list, and revoke user tokens, and it can perform reads, but it cannot perform
-attributed writes. Mutations must use a DB-backed token created with
-`kata tokens create`; the daemon derives the actor from that token and ignores
-any actor string sent in the request body. This preserves existing local CLI
-behavior while making shared-daemon attribution server-derived.
-
-Token lifecycle changes are stored in the event log so backup/restore and
-JSONL cutover preserve them, but the hidden system-project token events are
-excluded from ordinary project lists, stats, poll responses, and event streams.
-`require_token_identity = true` cannot be combined with
-`--insecure-readonly`.
-
-This identity layer is deliberately small. It is meant for trusted teams on a
-private network that need reliable attribution and a paper trail, not a full
-authorization system. There is no users table, role model, or impersonation
-scope in this pass. Multiple tokens can map to the same actor, and future roles
-or external identity providers can be added without changing historical events
-because events store actor text snapshots.
-
-API tokens are event-sourced operational state. `api_tokens` is a projection
-rebuilt from `token.created` and `token.revoked` events during JSONL import or
-schema cutover. Those token events are included in backup/restore for the local
-daemon, but they are excluded from ordinary event feeds and project federation.
-Federation enrollment tokens are separate spoke-to-hub transport credentials;
-see `docs/federation.md` for the token boundary.
-
-Web apps or OAuth frontends can sit above this model without daemon-side OAuth.
-The web app should authenticate the user, map that identity to an existing kata
-actor handle, and call the daemon with a server-side kata bearer token. The
-browser should hold only the web-app session, never the daemon token. Because
-the daemon stores only token hashes, a web app cannot retrieve an existing
-plaintext token later; it must either vault plaintext tokens server-side or
-mint and revoke tokens as part of its own session lifecycle. OAuth deactivation
-also needs an explicit revoke, expiry, or session-coupled design, because
-first-pass kata tokens are revoke-only.
-
-For unauthenticated private-network experiments, `kata daemon start --listen
-100.64.0.5:7777 --insecure-readonly` permits GET requests only; mutations and
-the event stream still require authentication. Network ACLs (firewall, VPN,
-tailnet) are the access boundary in that read-only dev mode. Default behavior
-(no flag, no env, no local file) is unchanged: a local Unix-socket daemon is
-auto-started on demand.
-
-## Backup and restore
-
-`kata export` writes the local database as JSONL; `kata import` rebuilds
-a database from that file. Together they cover backups, machine moves,
-and migrations between schema versions.
-
-Use JSONL exports for backups. Do **not** copy `~/.kata/kata.db` while the
-daemon is running: kata uses SQLite WAL mode, so recent writes can live in
-`kata.db-wal` and a plain `cp kata.db ...` can create a stale snapshot that
-looks successful. The `kata.db.bak.*` files created by schema cutover are
-temporary rollback files, not scheduled backups.
-
-Back up the local database:
-
-```sh
-kata daemon stop
-kata export --output backups/kata-$(date -u +%Y%m%d).jsonl
-kata daemon start
-```
-
-Without `--output`, `kata export` writes a timestamped file
-(`kata-export-YYYYMMDDTHHMMSSZ.jsonl`) in the current directory. Export
-refuses to run while a local daemon holds the database open; pass
-`--allow-running-daemon` when you need an online backup on the same host:
-
-```sh
-kata export --allow-running-daemon --output backups/kata-$(date -u +%Y%m%d).jsonl
-```
-
-Restore into a fresh database file:
-
-```sh
-kata import --input backups/kata-20260512.jsonl --target ~/.kata/restored.db
-```
-
-`kata import` always creates a brand-new database. The target must not
-exist; `--force` deletes it first. There is no merge mode today — see
-"Exporting a single project" below for what that means in practice. To
-activate a restored database, point `KATA_DB` at it (or move it into
-`KATA_HOME` as `kata.db`) and restart the daemon.
-
-JSONL is plain text and diffs cleanly, so a simple versioned-backup
-setup is to keep snapshots in a git repository:
-
-```sh
-mkdir -p ~/kata-backups && cd ~/kata-backups
-git init -q
-kata daemon stop
-kata export --output snapshot.jsonl
-kata daemon start
-git add snapshot.jsonl
-git commit -q -m "snapshot $(date -u +%FT%TZ)"
-```
-
-Run that on a schedule (cron, launchd, systemd timer) and you have
-point-in-time recovery without operating a backup service. Push the repo
-to a private remote if you want off-host storage.
-
-### Exporting a single project
-
-Use the global `--project NAME` flag to scope an export to one project:
-
-```sh
-kata daemon stop
-kata --project myproj export --output backups/myproj.jsonl
-kata daemon start
-```
-
-`--project-id N` works too if you prefer the numeric id from
-`kata projects list --json`.
-
-A single-project export round-trips into a **fresh** database that
-contains only that project:
-
-```sh
-kata import --input backups/myproj.jsonl --target /tmp/myproj-only.db
-```
-
-This is useful for archiving one project before deleting it, handing a
-project's full history to a collaborator who'll set up a fresh kata
-install, or moving a project to a different host.
-
-What does **not** work today:
-
-- Importing a per-project snapshot **into an existing populated
-  database**. `kata import` always wipes the target first; there is no
-  merge or "add this project" mode. So you cannot use per-project files
-  as building blocks to stitch a multi-project database together.
-- Re-importing a snapshot on top of itself to refresh it incrementally.
-
-For multi-project backups, take the full-database snapshot shown above
-instead of one file per project. A per-project merge import (apply one
-project's snapshot to an existing database without disturbing other
-projects) is planned — tracked in
-[kenn-io/kata#42](https://github.com/kenn-io/kata/issues/42).
-
-## Configuration
-
-Useful environment variables:
-
-- `KATA_HOME`: data directory. Defaults to `~/.kata`.
-- `KATA_DB`: explicit SQLite database path.
-- `KATA_AUTHOR`: default actor for mutations.
-- `KATA_HTTP_TIMEOUT`: per-request CLI timeout for non-streaming daemon calls
-  (any `time.ParseDuration` string, e.g. `30s`, `2m`). Defaults to `5s`. Bump
-  this for bulk imports where create requests can exceed the default.
-- `KATA_SERVER`: opt-in remote daemon URL (e.g. `http://100.64.0.5:7777`). When
-  set, the client skips local discovery and auto-start entirely. See "Remote
-  daemon" below.
-- `XDG_RUNTIME_DIR`: runtime socket parent on Unix.
-
-The workspace binding file is intentionally secret-free:
-
-```toml
-version = 1
-
-[project]
-name = "product"
-```
-
-Commit `.kata.toml` when multiple agents, clones, or worktrees should resolve
-to the same kata project.
+Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin` (often
+`~/go/bin`); put that directory on your `PATH`. To build from a clone, run
+`make install` (it defaults to `~/.local/bin`). See
+[Install](docs-site/get-started/install.md) for build-from-source and Windows
+steps.
+
+## Documentation
+
+The [docs site](docs-site/) is the definitive reference:
+
+- Get started: [Quickstart](docs-site/get-started/quickstart.md) ·
+  [Install](docs-site/get-started/install.md)
+- Guide: [Concepts](docs-site/guide/concepts.md) ·
+  [Workspaces and projects](docs-site/guide/workspaces-projects.md) ·
+  [Migrating from Beads](docs-site/guide/migrating-from-beads.md)
+- Reference: [CLI](docs-site/reference/cli.md) ·
+  [Configuration](docs-site/reference/configuration.md)
+- Workflows: [Agent workflows](docs-site/workflows/agents.md) ·
+  [Sharing models](docs-site/workflows/sharing.md)
+- Operations: [Remote daemon](docs-site/operations/remote-daemon.md) ·
+  [Federation](docs-site/operations/federation.md) ·
+  [Hosted mode](docs-site/operations/hosted-mode.md) ·
+  [Backup and restore](docs-site/operations/backup-restore.md)
+
+## For coding agents
+
+Run `kata quickstart` (alias `kata agent-instructions`) for the operating
+contract: search before creating, pass an idempotency key on create, prefer
+`--agent` output, claim work with `kata claim`, and close only when the work is
+verified. [Agent workflows](docs-site/workflows/agents.md) is the same contract
+in long form.
+
+## Contributing
+
+See [Contributing](docs-site/development/contributing.md) for the repository
+layout and local checks (`make test`, `make lint`, `make vet`, `make nilaway`).
+Licensed under the terms in [LICENSE](LICENSE).

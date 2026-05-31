@@ -89,7 +89,10 @@ What does not work today:
 - stitching multiple per-project files into one existing database;
 - re-importing a snapshot on top of itself to refresh incrementally.
 
-For multi-project backups, take a full-database export.
+For multi-project backups, take a full-database export. A per-project merge
+import (applying one project's snapshot to an existing database without
+disturbing other projects) is planned; see
+[kenn-io/kata#42](https://github.com/kenn-io/kata/issues/42).
 
 ## Beads import
 
