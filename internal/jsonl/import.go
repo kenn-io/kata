@@ -874,6 +874,9 @@ func fillEventV11ReplayFields(ctx context.Context, tx *sql.Tx, rec *eventRecord,
 		if !validContentHash(rec.ContentHash) {
 			return fmt.Errorf("event %d invalid content_hash %q", rec.ID, rec.ContentHash)
 		}
+		if err := validateEventContentHash(ctx, tx, rec); err != nil {
+			return err
+		}
 		return nil
 	}
 	t, err := parseExportTime(rec.CreatedAt)
@@ -920,6 +923,34 @@ func fillEventV11ReplayFields(ctx context.Context, tx *sql.Tx, rec *eventRecord,
 		return fmt.Errorf("fill event content hash: %w", err)
 	}
 	rec.ContentHash = hash
+	return nil
+}
+
+func validateEventContentHash(ctx context.Context, tx *sql.Tx, rec *eventRecord) error {
+	projectUID, err := lookupProjectUID(ctx, tx, rec.ProjectID)
+	if err != nil {
+		return fmt.Errorf("validate event content hash: %w", err)
+	}
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID:               rec.UID,
+		OriginInstanceUID: rec.OriginInstanceUID,
+		ProjectUID:        projectUID,
+		ProjectName:       rec.ProjectName,
+		IssueUID:          rec.IssueUID,
+		RelatedIssueUID:   rec.RelatedIssueUID,
+		Type:              rec.Type,
+		Actor:             rec.Actor,
+		HLCPhysicalMS:     rec.HLCPhysicalMS,
+		HLCCounter:        rec.HLCCounter,
+		CreatedAt:         rec.CreatedAt,
+		Payload:           rec.Payload,
+	})
+	if err != nil {
+		return fmt.Errorf("validate event content hash: %w", err)
+	}
+	if hash != rec.ContentHash {
+		return fmt.Errorf("event %d content_hash mismatch: got %s, want %s", rec.ID, rec.ContentHash, hash)
+	}
 	return nil
 }
 

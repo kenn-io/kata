@@ -208,6 +208,36 @@ func TestImportV1NormalizesGoStringEventTimestampForStats(t *testing.T) {
 		stats[1].LastEventAt.UTC().Format("2006-01-02T15:04:05.000Z"))
 }
 
+func TestImportCurrentVersionRejectsEventHashForPreNormalizedTimestamp(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+	projectUID := "01HZZZZZZZZZZZZZZZZZZZZZ11"
+	eventUID := "01HZNQ7VFPK1XGD8R5MABCD4EX"
+	originUID := "01HZNQ7VFPK1XGD8R5MABCD4EY"
+	createdAt := "2026-05-04 00:21:07 +0000 UTC"
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID:               eventUID,
+		OriginInstanceUID: originUID,
+		ProjectUID:        projectUID,
+		Type:              "project.imported",
+		Actor:             "tester",
+		HLCPhysicalMS:     1777854067000,
+		HLCCounter:        1,
+		CreatedAt:         createdAt,
+		Payload:           []byte(`{}`),
+	})
+	require.NoError(t, err)
+
+	err = importJSONL(ctx, target,
+		fmt.Sprintf(`{"kind":"meta","data":{"key":"export_version","value":"%d"}}`, db.CurrentSchemaVersion()),
+		`{"kind":"project","data":{"id":1,"uid":"`+projectUID+`","name":"kata","metadata":{},"revision":1,"created_at":"2026-05-04T00:00:00.000Z"}}`,
+		`{"kind":"event","data":{"id":1,"uid":"`+eventUID+`","origin_instance_uid":"`+originUID+`","project_id":1,"project_name":"kata","issue_id":null,"issue_uid":null,"related_issue_id":null,"related_issue_uid":null,"type":"project.imported","actor":"tester","payload":{},"hlc_physical_ms":1777854067000,"hlc_counter":1,"content_hash":"`+hash+`","created_at":"`+createdAt+`"}}`,
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "content_hash")
+}
+
 func TestImportLegacyEventSnapshotsUseFinalProjectName(t *testing.T) {
 	ctx := context.Background()
 	target := openImportTargetDB(t)
