@@ -199,6 +199,13 @@ On each spoke:
    remain local-first; use live hub leases only when you want exclusive
    coordination.
 
+   Adoption is a current-state cutover rather than a history merge. Operators
+   who need the pre-adoption event timeline for audit or rollback context should
+   run a scoped JSONL export before `--adopt-existing`, for example
+   `kata --project <project> export --output <path>.jsonl`. The federated event
+   stream starts from the adoption snapshots; kata does not currently retain a
+   separate in-product archive of pre-adoption events.
+
 Enrollment capabilities and local spoke behavior are separate knobs:
 `--capabilities pull,push,lease` on the hub says what the token may do, while
 `--push` on the spoke says this replica should actually push local-origin events

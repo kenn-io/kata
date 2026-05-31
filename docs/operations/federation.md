@@ -124,6 +124,12 @@ it removes those pre-adoption local events, queues fresh snapshots for the hub
 with same-project links embedded in the snapshot payloads, and reports how many
 snapshots were queued.
 
+> **Preserving the pre-adoption timeline:** Adoption is a cutover, not an
+> in-place history merge. If you need the old local event timeline for audit or
+> rollback context, run `kata --project <project> export --output <path>.jsonl`
+> before `kata federation join --adopt-existing`. kata does not currently keep a
+> separate in-product archive of pre-adoption events.
+
 Adopted issues become ordinary federated spoke issues. You can keep editing
 them locally; acquire a hub lease only when you want exclusive coordination.
 
