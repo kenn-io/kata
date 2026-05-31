@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -114,49 +115,220 @@ func requireFederatedImportClaims(
 	if !binding.Enabled {
 		return nil
 	}
+	states := make(map[string]importClaimItemState, len(items))
 	for _, item := range items {
-		issue, needsClaim, err := importItemNeedsFederatedClaim(ctx, cfg.DB, projectID, source, item)
+		state, err := importItemFederatedClaimState(ctx, cfg.DB, projectID, source, item)
 		if err != nil {
 			return err
 		}
-		if needsClaim {
-			if err := requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor); err != nil {
+		states[item.ExternalID] = state
+	}
+	for _, item := range items {
+		state := states[item.ExternalID]
+		if state.mapped && state.sourceNewer {
+			if err := requireFederatedIssueClaim(ctx, cfg, projectID, state.issue, actor); err != nil {
 				return err
 			}
+		}
+		if !state.reconcilesLinks() {
+			continue
+		}
+		peers, err := importItemLinkClaimPeers(ctx, cfg.DB, projectID, source, item, state, states)
+		if err != nil {
+			return err
+		}
+		if err := requireFederatedLinkClaims(ctx, cfg, projectID, actor, peers...); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func importItemNeedsFederatedClaim(
+type importClaimItemState struct {
+	issue       db.Issue
+	mapped      bool
+	sourceNewer bool
+}
+
+func (s importClaimItemState) reconcilesLinks() bool {
+	return !s.mapped || s.sourceNewer
+}
+
+func importItemFederatedClaimState(
 	ctx context.Context,
 	store *db.DB,
 	projectID int64,
 	source string,
 	item db.ImportItem,
-) (db.Issue, bool, error) {
+) (importClaimItemState, error) {
 	mapping, err := store.ImportMappingBySource(ctx, projectID, source, "issue", item.ExternalID)
 	if errors.Is(err, db.ErrNotFound) {
-		return db.Issue{}, false, nil
+		return importClaimItemState{}, nil
+	}
+	if err != nil {
+		return importClaimItemState{}, api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	if mapping.IssueID == nil {
+		return importClaimItemState{}, api.NewError(404, "issue_not_found", "import issue mapping is missing issue id", "", nil)
+	}
+	issue, err := store.IssueByID(ctx, *mapping.IssueID)
+	if errors.Is(err, db.ErrNotFound) {
+		return importClaimItemState{}, api.NewError(404, "issue_not_found", err.Error(), "", nil)
+	}
+	if err != nil {
+		return importClaimItemState{}, api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	if issue.DeletedAt != nil {
+		return importClaimItemState{}, api.NewError(404, "issue_not_found", "mapped import issue is deleted", "", nil)
+	}
+	return importClaimItemState{
+		issue:       issue,
+		mapped:      true,
+		sourceNewer: item.UpdatedAt.After(issue.UpdatedAt),
+	}, nil
+}
+
+func importItemLinkClaimPeers(
+	ctx context.Context,
+	store *db.DB,
+	projectID int64,
+	source string,
+	item db.ImportItem,
+	state importClaimItemState,
+	states map[string]importClaimItemState,
+) ([]db.Issue, error) {
+	peers, err := importItemLinkAddClaimPeers(ctx, store, projectID, source, item, state, states)
+	if err != nil {
+		return nil, err
+	}
+	removalPeers, err := importItemLinkRemovalClaimPeers(ctx, store, projectID, source, item, state)
+	if err != nil {
+		return nil, err
+	}
+	return append(peers, removalPeers...), nil
+}
+
+func importItemLinkAddClaimPeers(
+	ctx context.Context,
+	store *db.DB,
+	projectID int64,
+	source string,
+	item db.ImportItem,
+	state importClaimItemState,
+	states map[string]importClaimItemState,
+) ([]db.Issue, error) {
+	if len(item.Links) == 0 {
+		return nil, nil
+	}
+	var out []db.Issue
+	for _, importLink := range item.Links {
+		target, mapped, err := importLinkClaimTarget(ctx, store, projectID, source, importLink.TargetExternalID, states)
+		if err != nil {
+			return nil, err
+		}
+		if !mapped {
+			continue
+		}
+		if state.mapped {
+			fromID, toID := state.issue.ID, target.ID
+			if importLink.Type == "related" && fromID > toID {
+				fromID, toID = toID, fromID
+			}
+			if _, err := store.LinkByEndpoints(ctx, fromID, toID, importLink.Type); err == nil {
+				continue
+			} else if !errors.Is(err, db.ErrNotFound) {
+				return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			}
+		}
+		out = append(out, target)
+	}
+	return out, nil
+}
+
+func importItemLinkRemovalClaimPeers(
+	ctx context.Context,
+	store *db.DB,
+	projectID int64,
+	source string,
+	item db.ImportItem,
+	state importClaimItemState,
+) ([]db.Issue, error) {
+	if !state.mapped {
+		return nil, nil
+	}
+	desired := make(map[string]struct{}, len(item.Links))
+	for _, importLink := range item.Links {
+		desired[importClaimLinkExternalID(item.ExternalID, importLink)] = struct{}{}
+	}
+	mappings, err := store.ImportMappingsByProjectSource(ctx, projectID, source)
+	if err != nil {
+		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	var out []db.Issue
+	for _, mapping := range mappings {
+		if mapping.ObjectType != "link" || mapping.IssueID == nil || *mapping.IssueID != state.issue.ID {
+			continue
+		}
+		if _, keep := desired[mapping.ExternalID]; keep {
+			continue
+		}
+		if mapping.LinkID == nil {
+			continue
+		}
+		link, err := store.LinkByID(ctx, *mapping.LinkID)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		peerID := link.ToIssueID
+		if peerID == state.issue.ID {
+			peerID = link.FromIssueID
+		}
+		peer, err := store.IssueByID(ctx, peerID)
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		out = append(out, peer)
+	}
+	return out, nil
+}
+
+func importLinkClaimTarget(
+	ctx context.Context,
+	store *db.DB,
+	projectID int64,
+	source string,
+	externalID string,
+	states map[string]importClaimItemState,
+) (db.Issue, bool, error) {
+	if state, ok := states[externalID]; ok {
+		return state.issue, state.mapped, nil
+	}
+	mapping, err := store.ImportMappingBySource(ctx, projectID, source, "issue", externalID)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, false, api.NewError(404, "issue_not_found", fmt.Sprintf("import link target %q not found", externalID), "", nil)
 	}
 	if err != nil {
 		return db.Issue{}, false, api.NewError(500, "internal", err.Error(), "", nil)
 	}
 	if mapping.IssueID == nil {
-		return db.Issue{}, false, api.NewError(404, "issue_not_found", "import issue mapping is missing issue id", "", nil)
+		return db.Issue{}, false, api.NewError(404, "issue_not_found", fmt.Sprintf("import link target %q is missing issue id", externalID), "", nil)
 	}
 	issue, err := store.IssueByID(ctx, *mapping.IssueID)
 	if errors.Is(err, db.ErrNotFound) {
-		return db.Issue{}, false, api.NewError(404, "issue_not_found", err.Error(), "", nil)
+		return db.Issue{}, false, api.NewError(404, "issue_not_found", fmt.Sprintf("import link target %q not found", externalID), "", nil)
 	}
 	if err != nil {
 		return db.Issue{}, false, api.NewError(500, "internal", err.Error(), "", nil)
 	}
 	if issue.DeletedAt != nil {
-		return db.Issue{}, false, api.NewError(404, "issue_not_found", "mapped import issue is deleted", "", nil)
+		return db.Issue{}, false, api.NewError(404, "issue_not_found", fmt.Sprintf("import link target %q is deleted", externalID), "", nil)
 	}
-	if item.UpdatedAt.After(issue.UpdatedAt) {
-		return issue, true, nil
-	}
-	return issue, false, nil
+	return issue, true, nil
+}
+
+func importClaimLinkExternalID(issueExternalID string, link db.ImportLink) string {
+	return issueExternalID + ":" + link.Type + ":" + link.TargetExternalID
 }
