@@ -78,6 +78,18 @@ require_line zensical.toml '{"Design" = ['
 require_line docs/index.md '# kata カタ'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
 
+stale_config=".zensical-build.XXXXXX.toml"
+stale_docs="zensical-public-docs.XXXXXX"
+cleanup_check_docs() {
+  rm -rf "$stale_config" "$stale_docs"
+}
+trap cleanup_check_docs EXIT
+
+# Guard against macOS mktemp regressions where suffix templates become literal
+# repo-local paths and block repeat docs builds.
+: > "$stale_config"
+mkdir -p "$stale_docs"
+
 rm -rf site
 
 scripts/zensical-docs.sh build

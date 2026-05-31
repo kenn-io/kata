@@ -8,6 +8,14 @@ Latest stable Go. Be pragmatic — theoretical findings produce churn.
 The Go module path is `go.kenn.io/kata`, not `github.com/wesm/kata`.
 Imports using `go.kenn.io/kata/...` are correct for this repository.
 
+## Federation CLI is registered
+
+`cmd/kata/main.go` includes `newFederationCmd()` in the root command list,
+with implementation in `cmd/kata/federation.go` and lease subcommands in
+`cmd/kata/federation_lease.go`. `cmd/kata/main_test.go` pins that registration.
+Do not flag public `kata federation ...` docs as advertising an unavailable
+command unless those registrations or tests are removed.
+
 ## Don't assert external facts you cannot verify
 
 You see only the diff and have no network access. Don't claim a pinned

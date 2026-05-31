@@ -17,16 +17,41 @@ else
   exit 127
 fi
 
-tmp_docs="$(mktemp -d zensical-public-docs.XXXXXX)"
-tmp_config="$(mktemp .zensical-build.XXXXXX.toml)"
+tmp_docs=""
+tmp_config_base=""
+tmp_config=""
 
 cleanup() {
-  rm -rf "$tmp_docs" "$tmp_config"
+  if [[ -n "$tmp_docs" ]]; then
+    rm -rf "$tmp_docs"
+  fi
+  if [[ -n "$tmp_config" ]]; then
+    rm -f "$tmp_config"
+  fi
+  if [[ -n "$tmp_config_base" ]]; then
+    rm -f "$tmp_config_base"
+  fi
 }
 trap cleanup EXIT INT TERM
 
+tmp_docs="$(mktemp -d zensical-public-docs.XXXXXX)"
+tmp_config_base="$(mktemp .zensical-build.XXXXXX)"
+tmp_config="$tmp_config_base.toml"
+if [[ -e "$tmp_config" ]]; then
+  printf 'temporary config path already exists: %s\n' "$tmp_config" >&2
+  exit 1
+fi
+mv "$tmp_config_base" "$tmp_config"
+tmp_config_base=""
+
 (cd docs && tar --exclude './superpowers' -cf - .) | (cd "$tmp_docs" && tar -xf -)
-sed "s#docs_dir = \"docs\"#docs_dir = \"$tmp_docs\"#" zensical.toml > "$tmp_config"
+awk -v docs_dir="$tmp_docs" '
+  $0 == "docs_dir = \"docs\"" {
+    print "docs_dir = \"" docs_dir "\""
+    next
+  }
+  { print }
+' zensical.toml > "$tmp_config"
 
 case "$command_name" in
   build)
