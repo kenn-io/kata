@@ -24,13 +24,9 @@ required_files=(
   "docs/design/index.md"
   "docs/design/federation.md"
   "docs/design/hosted-mode.md"
-  "docs/superpowers/plans/2026-05-26-agent-output-format-implementation.md"
-  "docs/superpowers/plans/2026-05-28-trusted-proxy-actor-header.md"
-  "docs/superpowers/specs/2026-04-29-kata-design.md"
-  "docs/superpowers/specs/2026-04-29-kata-shared-server-mode.md"
-  "docs/superpowers/specs/2026-05-20-kata-federation-design.md"
-  "docs/superpowers/specs/2026-05-26-agent-output-format-design.md"
-  "docs/superpowers/specs/2026-05-27-trusted-proxy-actor-header-design.md"
+  "docs/design/architecture.md"
+  "docs/design/data-model.md"
+  "docs/reference/agent-output.md"
   "docs/stylesheets/extra.css"
 )
 
@@ -106,6 +102,8 @@ done
 
 for generated in \
   site/design/index.html \
+  site/design/architecture/index.html \
+  site/design/data-model/index.html \
   site/design/federation/index.html \
   site/design/hosted-mode/index.html; do
   if [[ ! -e "$generated" ]]; then

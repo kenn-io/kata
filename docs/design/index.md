@@ -9,8 +9,11 @@ constraints that are too detailed for the main documentation.
 
 ## Available notes
 
+- [Architecture and design principles](architecture.md)
+- [Data model and durability](data-model.md)
 - [Federation technical notes](federation.md)
 - [Hosted mode technical notes](hosted-mode.md)
 
-Historical planning specs under `docs/superpowers/` stay in the repository for
-maintainers, but they are not published on the public documentation site.
+These notes are the curated home for kata's design rationale. Earlier planning
+specs and implementation plans were folded into them once the work shipped; the
+superseded drafts remain in version control rather than on the published site.

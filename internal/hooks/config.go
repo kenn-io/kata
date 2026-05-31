@@ -1,7 +1,6 @@
-// Package hooks implements the daemon's post-commit hook dispatcher. See
-// docs/superpowers/specs/2026-04-30-kata-hooks-design.md for the full
-// design (delivery contract, dispatcher lifecycle, runner sequence, and
-// stdin payload shape).
+// Package hooks implements the daemon's post-commit hook dispatcher. See the
+// hooks section of docs/design/architecture.md for the design rationale (the
+// after-commit, no-shell, not-a-sandbox delivery contract).
 package hooks
 
 import (

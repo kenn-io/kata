@@ -383,6 +383,118 @@ federation cursors would otherwise become ambiguous.
 Federation does not add a global user registry. Actor strings remain audit
 metadata. Origin instance UIDs disambiguate daemon identity.
 
+## Design Rationale
+
+The operational sections above describe what federation does. This section
+records why it converges and why the lease model is shaped the way it is —
+the reasoning that is not recoverable from the behavior alone.
+
+### Why Federation Converges
+
+For federated projects the event log is the source of truth and the
+issue/comment/label/link/metadata tables are a deterministic projection — a pure
+`Fold` over the events. All mutable state is modeled as a CRDT: scalar fields and
+metadata leaves are last-writer-wins registers, labels and links are per-element
+LWW sets with tombstones, and comments are a grow-only log keyed by UID. Given a
+deterministic total order over the retained event set, the fold is
+commutative-after-sort: any two nodes holding the same events compute identical
+state regardless of arrival order, so there is no irreconcilable conflict to
+resolve by hand. A late event with a lower clock simply loses to an
+already-applied higher-clock write for the same field, without being discarded —
+it stays in the audit log and remains visible. This is property-tested by
+shuffling arrival order and asserting a byte-identical projection.
+
+Each mutation appends a complete event and applies its projection delta in one
+transaction, never "mutate the row, best-effort event afterward." That keeps the
+local write path and the replay path from drifting apart.
+
+### The Hybrid Logical Clock And Merge Order
+
+The total order is `(hlc, origin_instance_uid, event_uid)`. The HLC is a hybrid
+logical clock — a `(physical_ms, counter)` pair stamped when an event is emitted
+and advanced past the clock of every foreign event applied — so causally later
+work always sorts after what it saw. The local autoincrement event id is only a
+delivery cursor, never the merge order, and wall-clock `created_at` is kept for
+display and digests but is too skew-prone to order merges. An immutable
+`content_hash` over each event's identity and canonical contents lets a duplicate
+UID with the same hash be treated as a harmless retry, while a duplicate UID with
+a different hash is rejected as an integrity violation before it can be folded.
+An earlier groundwork column, `origin_seq`, was deliberately **not** revived as
+the merge clock; if gap detection is ever needed it can return as an optional
+per-origin continuity counter, orthogonal to the HLC.
+
+### The Drift-Guard Invariant
+
+The guarantee that event-truth can be trusted rests on one invariant: for every
+non-federated project, which still uses the direct-write path,
+`direct_write_projection == Fold(project_events)`. It is asserted at **project**
+scope, not per issue, because links and project metadata are project-scoped — an
+event on one issue can affect another issue's projection — so a per-issue
+comparison would be too narrow to catch a missing field. Holding this invariant
+across every mutation type proves events are replay-complete and keeps the
+direct-write and replay paths from diverging. It is the gate that had to pass
+before federation could be turned on.
+
+### Replay-Complete Events
+
+Before federation, events did not carry enough to reconstruct state:
+`issue.updated` was written with an empty payload and `issue.created` omitted the
+title and body, so folding from zero was impossible. Federation required every
+mutation event to carry the resulting state of what it touched, and added a `uid`
+to comments so they have a stable identity to fold on. Because pre-federation
+history is not replay-complete, enabling federation emits a baseline of
+`issue.snapshot` events at a replay horizon, captured from one consistent
+single-writer view; replicas fold forward from that horizon and keep older events
+as audit-only.
+
+### Metadata Merge Semantics
+
+Issue and project metadata is a per-key map, and unreserved keys may hold
+arbitrary nested JSON. To salvage concurrent edits to different sub-fields of the
+same key, the fold diffs each metadata event's per-key `{from, to}` down to
+JSON-pointer paths and resolves each leaf as an LWW register. Deletion keys off
+**structural absence, never off JSON `null`**: a path present in `from` but
+absent in `to` is a tombstone — covering the whole subtree if it was an object —
+while a leaf whose value is `null` in `to` is a real null value and is preserved.
+Arrays are atomic leaves, with no element-level array CRDT, so a checklist is
+replaced wholesale. The only place `null` acts as a marker is the top-level
+"clear this key" convention, which surfaces as structural absence anyway.
+
+### Why Leases Do Not Block Ordinary Edits
+
+A lease answers "who is actively working this issue right now," which is a
+different question from `owner` ("who is responsible"). Because edits are
+local-first and asynchronous, the hub cannot reject a mutation that already
+happened offline, so lease enforcement is not a synchronous write gate. It is
+layered, with no data loss:
+
+1. Lease exclusivity is **mechanical** — the hub guarantees at most one live
+   holder.
+2. A spoke refuses a *conflicting* mutation while another holder has a live
+   lease, but ordinary unleased edits proceed and converge by LWW.
+3. If conflicting work arrives anyway — for example from a spoke that was offline
+   — the hub records `claim.violated` and surfaces it rather than dropping the
+   data.
+
+A strictly synchronous hub-reject model is possible only by making agent edits
+synchronous, which trades away offline editing; this design declines that trade.
+Lease state — especially timed-lease expiry after renewals — is authoritative
+from the hub, not folded from events, so a spoke treats cached lease state as
+possibly stale and confirms against the hub before relying on exclusivity.
+
+### Rejected And Deferred Alternatives
+
+Hard purge of federated history is hub-admin-only and establishes a reset
+boundary rather than being routine, because deleting replay history fights
+event-truth. Recurrence materialization stays hub-only: running the scheduler on
+multiple spokes would each materialize duplicate occurrences, since the
+occurrence-uniqueness constraint is per-database and UIDs differ across nodes.
+Issue moves are allowed only between two federated projects on the same hub; a
+move across a federation boundary has no coherent single event log spanning it
+and is disallowed. Deferred work includes element-level array CRDTs for metadata,
+HLC skew-guard thresholds, a snapshot fast-path for very large projects, and
+federated authoring of recurrences from spokes.
+
 ## Consistency Limitations
 
 The following are expected federation behaviors. They are the main reasons to
@@ -507,7 +619,8 @@ KATA_FEDERATION_DOCKER_PROJECT=kata-federation-smoke-$USER make test-federation-
 
 ## Historical Design Context
 
-The original design discussion remains in
-`docs/superpowers/specs/2026-05-20-kata-federation-design.md`. That document is
-historical context. This file is the canonical description of the implemented
-federation behavior and limitations.
+This file is the canonical description of implemented federation behavior, its
+design rationale, and its limitations. The original phased design spec and the
+per-phase implementation plans were folded into this document and the
+[architecture](architecture.md) and [data model](data-model.md) notes after the
+work shipped; the superseded drafts remain available in version control.

@@ -71,18 +71,17 @@ static files from `site/` with a real static host, CDN, or web server.
 ## Documentation standards
 
 Public docs should describe implemented behavior first. Technical notes under
-`docs/design/` can cover deeper implementation context. Historical design specs
-under `docs/superpowers/specs` are useful for maintainers, but they should not
-be published wholesale because some decisions have changed during
-implementation.
+`docs/design/` cover deeper design rationale, trade-offs, and low-level
+constraints; keep them current as decisions change rather than letting stale
+design drafts accumulate.
 
 When changing behavior:
 
 - update CLI help when flags or contracts change;
 - update `README.md` if the project overview or quickstart changes;
 - update `docs/` for public user/operator behavior;
-- keep historical planning context under `docs/superpowers/` only when it helps
-  maintainers.
+- record durable design rationale in `docs/design/` when the "why" is not
+  obvious from the code.
 
 ## Commit discipline
 

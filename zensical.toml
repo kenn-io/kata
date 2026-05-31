@@ -24,6 +24,7 @@ nav = [
   {"Reference" = [
     {"CLI" = "reference/cli.md"},
     {"Configuration" = "reference/configuration.md"},
+    {"Agent output format" = "reference/agent-output.md"},
   ]},
   {"Workflows" = [
     {"Agent workflows" = "workflows/agents.md"},
@@ -37,6 +38,8 @@ nav = [
   ]},
   {"Design" = [
     {"Design notes" = "design/index.md"},
+    {"Architecture" = "design/architecture.md"},
+    {"Data model and durability" = "design/data-model.md"},
     {"Federation technical notes" = "design/federation.md"},
     {"Hosted mode technical notes" = "design/hosted-mode.md"},
   ]},
