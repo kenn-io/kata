@@ -64,3 +64,12 @@ func TestQuickstart_AgentInstructionsAliasMentionsAgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, out, "Use --json only when your script needs complete structured data")
 }
+
+func TestQuickstart_UsesValidNeedsReviewCommand(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newQuickstartCmd()))
+	// kata edit has no --label flag; the needs-review hint must use the real
+	// kata label add command so agents do not copy an invalid command.
+	assert.Contains(t, out, "kata label add <ref> needs-review")
+	assert.NotContains(t, out, "--label needs-review")
+}

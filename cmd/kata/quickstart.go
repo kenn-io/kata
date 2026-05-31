@@ -21,7 +21,7 @@ Use kata as the shared issue ledger for this workspace.
 2. Closing an issue asserts that the work is complete. If the work is
    not done, DO NOT close. Instead:
 
-      kata edit <ref> --label needs-review
+      kata label add <ref> needs-review
       kata comment <ref> --body "what was attempted, what remains"
 
    When done, close with substantive prose and typed --evidence:

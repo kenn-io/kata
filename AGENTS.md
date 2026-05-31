@@ -42,7 +42,7 @@ Closing an issue asserts that the work is complete. This is a stronger
 claim than a comment. If the work is not actually done, DO NOT close.
 Instead:
 
-    kata edit <ref> --label needs-review
+    kata label add <ref> needs-review
     kata comment <ref> --body "what was attempted, what remains"
 
 Close each issue as soon as its work is verified, not at the end of a
