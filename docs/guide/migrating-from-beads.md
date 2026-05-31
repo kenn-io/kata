@@ -108,11 +108,13 @@ tagged `beads-status:in_progress`.
 - **Dependency types.** Every dependency becomes a `blocks` link; `parent` and
   `related` are not generated.
 - **In-progress states.** Kept as `beads-status:` labels, not as a kata status.
-- **Out-of-range priorities and non-standard close reasons.** Normalized as
-  above, with the original values preserved in the body footer.
+- **Out-of-range priorities.** Dropped; the original priority is not preserved
+  in the body footer.
+- **Non-standard close reasons.** Normalized as above, with the original close
+  reason preserved in the body footer.
 
 The footer on each issue records the Beads ID, type, original labels,
-timestamps, raw close reason, and comment count, so dropped metadata is still
+timestamps, raw close reason, and comment count, so most normalized metadata is
 recoverable by reading the issue.
 
 ## Re-running is safe

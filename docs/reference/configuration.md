@@ -107,10 +107,11 @@ Operators can disable both throttles daemon-wide:
 enabled = false
 ```
 
-The parent-completeness refusal and the message-substance and evidence checks
-always run; `enabled = false` relaxes only the two sibling throttles. The TUI
-close path skips the message-substance and evidence checks, because an
-interactive human confirms each close; the structural guards still apply.
+`enabled = false` relaxes only the two sibling throttles. Normal CLI and API
+close paths still run the parent-completeness refusal, message-substance checks,
+and evidence checks. The TUI close path skips the message-substance and evidence
+checks because an interactive human confirms each close; the structural guards
+still apply.
 
 ## Federation credentials
 

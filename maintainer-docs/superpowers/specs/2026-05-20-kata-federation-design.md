@@ -1,7 +1,7 @@
 # kata federation — hub-and-spoke design
 
 **Status:** Historical design spec. The implemented behavior is documented in
-`docs/federation.md`; the per-phase implementation plans were consolidated and
+`maintainer-docs/federation.md`; the per-phase implementation plans were consolidated and
 removed after completion.
 **Date:** 2026-05-20
 **Topic:** Multi-master federation of shared kata projects across independent
@@ -27,7 +27,7 @@ every event carries a stable `uid` and an `origin_instance_uid`, event payloads
 cross-reference other entities by UID (not local integer id), soft-delete +
 purge tombstones exist, and `revision` columns exist as cache-coherency hints.
 
-A separate note (`docs/superpowers/specs/2026-04-29-kata-shared-server-mode.md`)
+A separate note (`maintainer-docs/superpowers/specs/2026-04-29-kata-shared-server-mode.md`)
 describes a **centralized** shared server — thin clients talking to one
 authoritative daemon. This spec describes something different and complementary:
 **each user keeps their own daemon holding a replica of shared projects**, with
@@ -614,7 +614,7 @@ UIDs differ across nodes, so cross-node dedup would not catch it).
 For the first federation phases, a federated project that uses recurrences is
 supported with hub-only materialization; full federated *authoring* of
 recurrences from spokes is deferred. The current operator-facing behavior and
-limitations are documented in `docs/federation.md`.
+limitations are documented in `maintainer-docs/federation.md`.
 
 ---
 
@@ -686,7 +686,7 @@ become complete (better audit) in Phase 0.
 
 ## 16. Original phased delivery outline
 
-The completed phase plans were consolidated into `docs/federation.md`. This
+The completed phase plans were consolidated into `maintainer-docs/federation.md`. This
 section remains as historical context for how the implementation was staged.
 
 ### Phase 0 — Replay-complete events + fold engine + HLC (no federation)
@@ -743,9 +743,9 @@ section remains as historical context for how the implementation was staged.
 
 ## 18. References
 
-- `docs/federation.md` — canonical documentation for the implemented behavior
+- `maintainer-docs/federation.md` — canonical documentation for the implemented behavior
   and consistency limits.
-- `docs/superpowers/specs/2026-04-29-kata-shared-server-mode.md` — centralized
+- `maintainer-docs/superpowers/specs/2026-04-29-kata-shared-server-mode.md` — centralized
   shared-server guardrails this design follows for auth/identity.
 - Prior federation groundwork (removed): commits `ee8b697`, `30dabf1`, `7877121`.
 - Ground-truth anchors: `internal/db/schema.sql:200` (events),

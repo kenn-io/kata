@@ -29,6 +29,16 @@ if [[ -d "docs-site" ]]; then
   missing=1
 fi
 
+for private_docs in \
+  docs/federation.md \
+  docs/hosted-mode.md \
+  docs/superpowers; do
+  if [[ -e "$private_docs" ]]; then
+    printf 'maintainer-only docs must live outside docs/: %s\n' "$private_docs" >&2
+    missing=1
+  fi
+done
+
 for file in "${required_files[@]}"; do
   if [[ ! -f "$file" ]]; then
     printf 'missing required docs file: %s\n' "$file" >&2
@@ -56,6 +66,9 @@ require_line zensical.toml 'docs_dir = "docs"'
 require_line zensical.toml 'site_dir = "site"'
 require_line zensical.toml 'scheme = "slate"'
 require_line docs/index.md '# kata カタ'
+require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
+
+rm -rf site
 
 if [[ -x ".venv/bin/zensical" ]]; then
   .venv/bin/zensical build --strict
@@ -65,3 +78,13 @@ else
   printf 'zensical not found; install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-docs.txt\n' >&2
   exit 127
 fi
+
+for generated in \
+  site/federation/index.html \
+  site/hosted-mode/index.html \
+  site/superpowers; do
+  if [[ -e "$generated" ]]; then
+    printf 'generated site contains maintainer-only docs: %s\n' "$generated" >&2
+    exit 1
+  fi
+done

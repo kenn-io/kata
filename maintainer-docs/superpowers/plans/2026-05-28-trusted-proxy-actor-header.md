@@ -10,7 +10,7 @@
 
 **Tech Stack:** Go, `net/http`, `github.com/danielgtaylor/huma/v2`, `github.com/BurntSushi/toml`, `github.com/stretchr/testify`.
 
-**Spec:** `docs/superpowers/specs/2026-05-27-trusted-proxy-actor-header-design.md`.
+**Spec:** `maintainer-docs/superpowers/specs/2026-05-27-trusted-proxy-actor-header-design.md`.
 
 ---
 

@@ -25,7 +25,7 @@ kata init                                    # bind this workspace to a kata pro
 kata create "fix login race"                 # returns the issue's short_id, e.g. abc4
 kata list                                    # list open issues
 kata show abc4                               # inspect by short_id
-kata close abc4 --done --message "Fixed and verified the tests pass." --commit <sha>
+kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>
 kata tui                                     # browse and triage interactively
 ```
 
