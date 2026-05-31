@@ -584,6 +584,7 @@ func TestEdge_DetailMutation_CompletesAfterPopToList(t *testing.T) {
 // Model.handleJumpDetail end-to-end (gen comes from m.nextGen).
 func TestEdge_DetailJumpBack(t *testing.T) {
 	m := newTestModel()
+	m.connGen = 11
 	m.view = viewDetail
 
 	// Build A with one link to issue #7. We seed activeTab=tabLinks and
@@ -614,6 +615,9 @@ func TestEdge_DetailJumpBack(t *testing.T) {
 	jm, ok := cmd().(jumpDetailMsg)
 	if !ok || jm.ref != "7bb" {
 		t.Fatalf("expected jumpDetailMsg(7bb), got %T (%v)", cmd(), cmd())
+	}
+	if jm.connGen != 11 {
+		t.Fatalf("jumpDetailMsg.connGen = %d, want 11", jm.connGen)
 	}
 
 	// Feed the jumpDetailMsg back so Model.handleJumpDetail performs

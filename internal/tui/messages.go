@@ -70,7 +70,9 @@ type openDetailMsg struct {
 // popDetailMsg reverts the top-level Model from viewDetail back to
 // viewList. The list cursor and filter state are preserved because
 // listModel is held by value and never reset on the round trip.
-type popDetailMsg struct{}
+type popDetailMsg struct {
+	connGen uint64
+}
 
 // openInputMsg asks the top-level Model to open an input shell of
 // the given kind. Sub-views emit this rather than constructing the
@@ -100,7 +102,8 @@ type openInputMsg struct {
 // daemon's path resolver — the same wire shape that any client-side
 // fetch path uses.
 type jumpDetailMsg struct {
-	ref string
+	connGen uint64
+	ref     string
 }
 
 // mutationDoneMsg is the result of any single mutation (create now,

@@ -1563,14 +1563,20 @@ func TestDetail_EscFromStackedDetail_PopsToPrior(t *testing.T) {
 // TestDetail_EscFromTopLevelDetail_ReturnsToList: with an empty nav
 // stack, Esc emits popDetailMsg as before.
 func TestDetail_EscFromTopLevelDetail_ReturnsToList(t *testing.T) {
-	dm := detailFixture()
-	km := newKeymap()
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEsc}, km, nil)
+	m := newTestModel()
+	m.connGen = 9
+	m.view = viewDetail
+	m.detail = detailFixture()
+	_, cmd := updateModel(m, tea.KeyMsg{Type: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatal("expected popDetailCmd")
 	}
-	if _, ok := cmd().(popDetailMsg); !ok {
+	msg, ok := cmd().(popDetailMsg)
+	if !ok {
 		t.Fatalf("expected popDetailMsg, got %T", cmd())
+	}
+	if msg.connGen != 9 {
+		t.Fatalf("popDetailMsg.connGen = %d, want 9", msg.connGen)
 	}
 }
 

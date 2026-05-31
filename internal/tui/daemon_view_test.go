@@ -293,6 +293,37 @@ func TestDaemonSwitchDropsOldOpenDetail(t *testing.T) {
 	assert.Nil(t, out.detail.issue)
 }
 
+func TestDaemonSwitchDropsOldJumpDetail(t *testing.T) {
+	m := newTestModel()
+	m.connGen = 2
+	m.view = viewDetail
+	m.detail.issue = &Issue{ProjectID: 7, UID: "new-uid", ShortID: "new1", Title: "new"}
+	m.detail.scopePID = 7
+	m.detail.gen = 4
+
+	out, cmd := updateModel(m, jumpDetailMsg{connGen: 1, ref: "old1"})
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, viewDetail, out.view)
+	require.NotNil(t, out.detail.issue)
+	assert.Equal(t, "new1", out.detail.issue.ShortID)
+	assert.Equal(t, int64(4), out.detail.gen)
+}
+
+func TestDaemonSwitchDropsOldPopDetail(t *testing.T) {
+	m := newTestModel()
+	m.connGen = 2
+	m.view = viewDetail
+	m.focus = focusDetail
+	m.detail.issue = &Issue{ProjectID: 7, UID: "new-uid", ShortID: "new1", Title: "new"}
+
+	out, cmd := updateModel(m, popDetailMsg{connGen: 1})
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, viewDetail, out.view)
+	assert.Equal(t, focusDetail, out.focus)
+}
+
 func TestDaemonSwitchDropsOldProjectsFetch(t *testing.T) {
 	m := newTestModel()
 	m.connGen = 2
