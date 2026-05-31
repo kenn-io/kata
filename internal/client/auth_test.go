@@ -215,12 +215,20 @@ func TestNewHTTPClientForTargetAttachesExplicitTokenOverGlobal(t *testing.T) {
 	assert.Equal(t, "Bearer target-token", got)
 }
 
-func TestNewHTTPClientForTargetAllowsBearerWhenAllowInsecureSet(t *testing.T) {
-	c, err := NewHTTPClientForTarget(context.Background(), "http://daemon.internal:7373",
+func TestNewHTTPClientForTargetAllowsBearerForPrivateIPWhenAllowInsecureSet(t *testing.T) {
+	c, err := NewHTTPClientForTarget(context.Background(), "http://100.64.0.5:7373",
 		TargetAuth{Token: "target-token", AllowInsecure: true}, Opts{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
+}
+
+func TestNewHTTPClientForTargetRefusesPlaintextHostnameWithAllowInsecure(t *testing.T) {
+	_, err := NewHTTPClientForTarget(context.Background(), "http://daemon.internal:7373",
+		TargetAuth{Token: "target-token", AllowInsecure: true}, Opts{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "literal IP")
 }
 
 func TestNewHTTPClientForTargetRefusesPlaintextHostnameWithoutAllowInsecure(t *testing.T) {
@@ -237,10 +245,10 @@ func TestNewHTTPClientForTargetAllowInsecureStillRefusesCrossOrigin(t *testing.T
 		called = true
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
 	})
-	rt, err := explicitBearerTransport(base, "target-token", "http://daemon.internal:7373", true)
+	rt, err := explicitBearerTransport(base, "target-token", "http://100.64.0.5:7373", true)
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"http://other.internal:7373/api/v1/ping", nil)
+		"http://100.64.0.6:7373/api/v1/ping", nil)
 	require.NoError(t, err)
 
 	resp, err := rt.RoundTrip(req)

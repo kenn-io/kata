@@ -293,6 +293,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := decodeData(env, &rec); err != nil {
 			return err
 		}
+		if err := normalizeProjectTimes(&rec); err != nil {
+			return err
+		}
 		if err := fillProjectUID(&rec, exportVersion); err != nil {
 			return err
 		}
@@ -336,6 +339,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := decodeData(env, &rec); err != nil {
 			return err
 		}
+		if err := normalizeProjectAliasTimes(&rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO project_aliases(id, project_id, alias_identity, alias_kind, root_path, created_at, last_seen_at)
 			 VALUES(?, ?, ?, ?, ?, ?, ?)`,
@@ -344,6 +350,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 	case KindRecurrence:
 		var rec recurrenceRecord
 		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		if err := normalizeRecurrenceTimes(&rec); err != nil {
 			return err
 		}
 		if len(rec.TemplateLabels) == 0 {
@@ -372,6 +381,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 			return err
 		}
 		if err := fillIssueUID(&rec, exportVersion); err != nil {
+			return err
+		}
+		if err := normalizeIssueTimes(&rec); err != nil {
 			return err
 		}
 		// Current-version envelopes carry short_id verbatim; older
@@ -423,6 +435,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := fillCommentUID(&rec); err != nil {
 			return err
 		}
+		if err := normalizeCommentTimes(&rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO comments(id, uid, issue_id, author, body, created_at) VALUES(?, ?, ?, ?, ?, ?)`,
 			rec.ID, rec.UID, rec.IssueID, rec.Author, rec.Body, rec.CreatedAt)
@@ -432,6 +447,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := decodeData(env, &rec); err != nil {
 			return err
 		}
+		if err := normalizeIssueLabelTimes(&rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO issue_labels(issue_id, label, author, created_at) VALUES(?, ?, ?, ?)`,
 			rec.IssueID, rec.Label, rec.Author, rec.CreatedAt)
@@ -439,6 +457,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 	case KindLink:
 		var rec linkRecord
 		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		if err := normalizeLinkTimes(&rec); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
@@ -458,6 +479,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := decodeData(env, &rec); err != nil {
 			return err
 		}
+		if err := normalizeImportMappingTimes(&rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO import_mappings(id, source, external_id, object_type, project_id, issue_id, comment_id, link_id, label, source_updated_at, imported_at)
 			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -467,6 +491,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 	case KindFederationBinding:
 		var rec federationBindingRecord
 		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		if err := normalizeFederationBindingTimes(&rec); err != nil {
 			return err
 		}
 		enabled := 0
@@ -495,6 +522,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := decodeData(env, &rec); err != nil {
 			return err
 		}
+		if err := normalizeFederationSyncStatusTimes(&rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO federation_sync_status(
 			   project_id, last_pull_started_at, last_pull_success_at,
@@ -511,6 +541,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := decodeData(env, &rec); err != nil {
 			return err
 		}
+		if err := normalizeFederationQuarantineTimes(&rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO federation_quarantine(
 			   id, project_id, direction, first_event_id, last_event_id,
@@ -525,6 +558,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 		if err := decodeData(env, &rec); err != nil {
 			return err
 		}
+		if err := normalizeFederationEnrollmentTimes(&rec); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO federation_enrollments(
 			   id, token_hash, spoke_instance_uid, project_id, capabilities,
@@ -537,6 +573,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 	case KindIssueClaim:
 		var rec issueClaimRecord
 		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		if err := normalizeIssueClaimTimes(&rec); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx,
@@ -559,6 +598,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 	case KindPendingClaimRequest:
 		var rec pendingClaimRequestRecord
 		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		if err := normalizePendingClaimRequestTimes(&rec); err != nil {
 			return err
 		}
 		skip, err := skipLegacyDuplicateActivePendingClaim(ctx, tx, rec, exportVersion)
@@ -588,6 +630,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 	case KindEvent:
 		var rec eventRecord
 		if err := decodeData(env, &rec); err != nil {
+			return err
+		}
+		if err := normalizeEventTimes(&rec); err != nil {
 			return err
 		}
 		if err := fillEventUIDs(ctx, tx, &rec); err != nil {
@@ -628,6 +673,9 @@ func importEnvelope(ctx context.Context, tx *sql.Tx, env Envelope, exportVersion
 			return err
 		}
 		if err := fillPurgeLogV3Identity(&rec, exportVersion, localInstanceUID); err != nil {
+			return err
+		}
+		if err := normalizePurgeLogTimes(&rec); err != nil {
 			return err
 		}
 		projectName, err := importedProjectName(ctx, tx, rec.ProjectID, rec.ProjectName, rec.LegacyProjectName)
@@ -945,6 +993,151 @@ func parseExportTime(s string) (time.Time, error) {
 
 func formatImportTime(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+func normalizeImportTime(field string, value *string) error {
+	if value == nil {
+		return nil
+	}
+	t, err := parseExportTime(*value)
+	if err != nil {
+		return fmt.Errorf("normalize %s: %w", field, err)
+	}
+	*value = formatImportTime(t)
+	return nil
+}
+
+func normalizeProjectTimes(rec *projectRecord) error {
+	if err := normalizeImportTime("project.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("project.deleted_at", rec.DeletedAt)
+}
+
+func normalizeProjectAliasTimes(rec *projectAliasRecord) error {
+	if err := normalizeImportTime("project_alias.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("project_alias.last_seen_at", &rec.LastSeenAt)
+}
+
+func normalizeRecurrenceTimes(rec *recurrenceRecord) error {
+	if err := normalizeImportTime("recurrence.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("recurrence.updated_at", &rec.UpdatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("recurrence.deleted_at", rec.DeletedAt)
+}
+
+func normalizeIssueTimes(rec *issueRecord) error {
+	if err := normalizeImportTime("issue.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue.updated_at", &rec.UpdatedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue.closed_at", rec.ClosedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("issue.deleted_at", rec.DeletedAt)
+}
+
+func normalizeCommentTimes(rec *commentRecord) error {
+	return normalizeImportTime("comment.created_at", &rec.CreatedAt)
+}
+
+func normalizeIssueLabelTimes(rec *issueLabelRecord) error {
+	return normalizeImportTime("issue_label.created_at", &rec.CreatedAt)
+}
+
+func normalizeLinkTimes(rec *linkRecord) error {
+	return normalizeImportTime("link.created_at", &rec.CreatedAt)
+}
+
+func normalizeImportMappingTimes(rec *importMappingRecord) error {
+	if err := normalizeImportTime("import_mapping.source_updated_at", rec.SourceUpdatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("import_mapping.imported_at", &rec.ImportedAt)
+}
+
+func normalizeFederationBindingTimes(rec *federationBindingRecord) error {
+	if err := normalizeImportTime("federation_binding.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("federation_binding.updated_at", &rec.UpdatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("federation_binding.last_sync_at", rec.LastSyncAt)
+}
+
+func normalizeFederationSyncStatusTimes(rec *federationSyncStatusRecord) error {
+	for field, value := range map[string]*string{
+		"federation_sync_status.last_pull_started_at": rec.LastPullStartedAt,
+		"federation_sync_status.last_pull_success_at": rec.LastPullSuccessAt,
+		"federation_sync_status.last_push_started_at": rec.LastPushStartedAt,
+		"federation_sync_status.last_push_success_at": rec.LastPushSuccessAt,
+		"federation_sync_status.last_error_at":        rec.LastErrorAt,
+		"federation_sync_status.last_reset_at":        rec.LastResetAt,
+	} {
+		if err := normalizeImportTime(field, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeFederationQuarantineTimes(rec *federationQuarantineRecord) error {
+	if err := normalizeImportTime("federation_quarantine.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("federation_quarantine.skipped_at", rec.SkippedAt)
+}
+
+func normalizeFederationEnrollmentTimes(rec *federationEnrollmentRecord) error {
+	if err := normalizeImportTime("federation_enrollment.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("federation_enrollment.updated_at", &rec.UpdatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("federation_enrollment.revoked_at", rec.RevokedAt)
+}
+
+func normalizeIssueClaimTimes(rec *issueClaimRecord) error {
+	if err := normalizeImportTime("issue_claim.acquired_at", &rec.AcquiredAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue_claim.expires_at", rec.ExpiresAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue_claim.released_at", rec.ReleasedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("issue_claim.updated_at", &rec.UpdatedAt)
+}
+
+func normalizePendingClaimRequestTimes(rec *pendingClaimRequestRecord) error {
+	if err := normalizeImportTime("pending_claim_request.requested_at", &rec.RequestedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("pending_claim_request.last_attempt_at", rec.LastAttemptAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("pending_claim_request.rejected_at", rec.RejectedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("pending_claim_request.resolved_at", rec.ResolvedAt)
+}
+
+func normalizeEventTimes(rec *eventRecord) error {
+	return normalizeImportTime("event.created_at", &rec.CreatedAt)
+}
+
+func normalizePurgeLogTimes(rec *purgeLogRecord) error {
+	return normalizeImportTime("purge_log.purged_at", &rec.PurgedAt)
 }
 
 func stringPtrValue(s *string) any {

@@ -157,7 +157,7 @@ func TestImportV1FillsUIDsDeterministically(t *testing.T) {
 	assert.Equal(t, fmt.Sprint(db.CurrentSchemaVersion()), schemaVersion)
 }
 
-func TestImportV1FillsCommentUIDFromGoStringTimestamp(t *testing.T) {
+func TestImportV1NormalizesGoStringIssueAndCommentTimestamps(t *testing.T) {
 	ctx := context.Background()
 	target := openImportTargetDB(t)
 
@@ -172,6 +172,22 @@ func TestImportV1FillsCommentUIDFromGoStringTimestamp(t *testing.T) {
 	require.NoError(t, target.QueryRowContext(ctx,
 		`SELECT uid FROM comments WHERE id = 1`).Scan(&commentUID))
 	assert.True(t, uid.Valid(commentUID), "invalid filled comment uid %q", commentUID)
+
+	issue, err := target.IssueByID(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-05-04T00:21:07.000Z", issue.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"))
+	assert.Equal(t, "2026-05-04T00:21:07.000Z", issue.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"))
+
+	var issueCreatedAt, issueUpdatedAt, commentCreatedAt string
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT CAST(created_at AS TEXT), CAST(updated_at AS TEXT) FROM issues WHERE id = 1`,
+	).Scan(&issueCreatedAt, &issueUpdatedAt))
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT CAST(created_at AS TEXT) FROM comments WHERE id = 1`,
+	).Scan(&commentCreatedAt))
+	assert.Equal(t, "2026-05-04T00:21:07.000Z", issueCreatedAt)
+	assert.Equal(t, "2026-05-04T00:21:07.000Z", issueUpdatedAt)
+	assert.Equal(t, "2026-05-04T00:21:07.000Z", commentCreatedAt)
 }
 
 func TestImportV1NormalizesGoStringEventTimestampForStats(t *testing.T) {
