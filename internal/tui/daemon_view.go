@@ -145,6 +145,7 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.projectIdentByID = map[int64]string{}
 	m.projectStats = map[int64]ProjectStatsSummary{}
 	m.projectsCursor = 0
+	m.projectsGen = 0
 	m.pendingRefetch = false
 	m.projectsStale = false
 	m.projectsRefetchPending = false

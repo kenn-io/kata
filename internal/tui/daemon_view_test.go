@@ -340,6 +340,25 @@ func TestDaemonSwitchDropsOldProjectsFetch(t *testing.T) {
 	assert.Equal(t, map[int64]string{7: "keep"}, out.projectsByID)
 }
 
+func TestDaemonSwitchResetsProjectsGeneration(t *testing.T) {
+	m := newTestModel()
+	m.connGen = 2
+	m.projectsGen = 5
+	m.projectsByID = map[int64]string{7: "old"}
+	conn := daemonConnection{
+		api:    &Client{},
+		target: daemonTarget{Name: "new", URL: "https://new.example"},
+		init: bootInit{
+			view:  viewList,
+			scope: homedScope(9, "new-project"),
+		},
+	}
+
+	out, _ := updateModel(m, daemonSwitchResultMsg{conn: conn})
+
+	assert.Equal(t, uint64(0), out.projectsGen)
+}
+
 func setupDaemonViewSource() Model {
 	m := initialModel(Options{})
 	m.view = viewList

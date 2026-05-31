@@ -2,12 +2,14 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -138,6 +140,33 @@ func TestRun_NonFileStdout_ReturnsNotATTY(t *testing.T) {
 	if !errors.Is(err, errNotATTY) {
 		t.Fatalf("Run returned %v, want errNotATTY", err)
 	}
+}
+
+func TestSSERestartIgnoresStaleGeneration(t *testing.T) {
+	root, cancelRoot := context.WithCancel(context.Background())
+	t.Cleanup(cancelRoot)
+
+	var cancelled int
+	var started []uint64
+	state := newSSERestartState(root, func() {
+		cancelled++
+	}, func(_ context.Context, _ sseClient, _ string, _ *int64, _ chan tea.Msg, gen uint64) {
+		started = append(started, gen)
+	})
+	conn := daemonConnection{
+		sseHC:    &http.Client{},
+		endpoint: "https://daemon.example",
+		init:     bootInit{scope: homedScope(7, "kata")},
+	}
+
+	newer := state.restart(conn, 3, nil)
+	older := state.restart(conn, 2, nil)
+
+	newer()
+	older()
+
+	assert.Equal(t, 1, cancelled)
+	assert.Equal(t, []uint64{3}, started)
 }
 
 // TestBoot_UnresolvedWithProjects_LandsViewProjects pins the new boot

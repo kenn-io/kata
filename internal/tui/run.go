@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,56 @@ import (
 
 const defaultHTTPTimeout = 5 * time.Second
 const remoteProbeTimeout = time.Second
+
+type sseStarter func(context.Context, sseClient, string, *int64, chan tea.Msg, uint64)
+
+type sseRestartState struct {
+	root   context.Context
+	start  sseStarter
+	mu     sync.Mutex
+	latest uint64
+	cancel context.CancelFunc
+}
+
+func newSSERestartState(root context.Context, cancel context.CancelFunc, start sseStarter) *sseRestartState {
+	return &sseRestartState{
+		root:   root,
+		start:  start,
+		cancel: cancel,
+	}
+}
+
+func (s *sseRestartState) restart(conn daemonConnection, gen uint64, ch chan tea.Msg) tea.Cmd {
+	s.mu.Lock()
+	if gen > s.latest {
+		s.latest = gen
+	}
+	s.mu.Unlock()
+	return func() tea.Msg {
+		s.mu.Lock()
+		if gen != s.latest {
+			s.mu.Unlock()
+			return nil
+		}
+		s.cancel()
+		sseCtx, cancel := context.WithCancel(s.root)
+		s.cancel = cancel
+		shouldStart := !conn.init.scope.empty && conn.sseHC != nil
+		s.mu.Unlock()
+
+		if shouldStart {
+			s.start(sseCtx, conn.sseHC, conn.endpoint, sseProjectScope(conn.init.scope), ch, gen)
+		}
+		return nil
+	}
+}
+
+func (s *sseRestartState) cancelCurrent() {
+	s.mu.Lock()
+	cancel := s.cancel
+	s.mu.Unlock()
+	cancel()
+}
 
 // Options controls TUI behavior. Stable across versions; new fields
 // must be optional.
@@ -51,20 +102,15 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	m := buildRunModel(opts, c, bi, conn)
 	sseCtx, cancelSSE := context.WithCancel(ctx)
-	defer func() { cancelSSE() }()
-	m.connGen = 1
-	m.sseRestart = func(conn daemonConnection, gen uint64, ch chan tea.Msg) tea.Cmd {
-		return func() tea.Msg {
-			cancelSSE()
-			sseCtx, cancelSSE = context.WithCancel(ctx)
-			if !conn.init.scope.empty && conn.sseHC != nil {
-				go startSSEForConnection(sseCtx, conn.sseHC, conn.endpoint, sseProjectScope(conn.init.scope), ch, gen)
-			}
-			return nil
-		}
+	startSSE := func(ctx context.Context, hc sseClient, endpoint string, projectID *int64, ch chan tea.Msg, gen uint64) {
+		go startSSEForConnection(ctx, hc, endpoint, projectID, ch, gen)
 	}
+	sseRestart := newSSERestartState(ctx, cancelSSE, startSSE)
+	defer sseRestart.cancelCurrent()
+	m.connGen = 1
+	m.sseRestart = sseRestart.restart
 	if !bi.scope.empty && sseHC != nil {
-		go startSSEForConnection(sseCtx, sseHC, endpoint, sseProjectScope(bi.scope), m.sseCh, m.connGen)
+		startSSE(sseCtx, sseHC, endpoint, sseProjectScope(bi.scope), m.sseCh, m.connGen)
 	}
 	if _, err := tea.NewProgram(m, programOpts(ctx, opts)...).Run(); err != nil {
 		return err
