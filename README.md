@@ -114,8 +114,9 @@ The [docs site](docs/) is the definitive reference:
 Run `kata quickstart` (alias `kata agent-instructions`) for the operating
 contract: search before creating, pass an idempotency key on create, prefer
 `--agent` output, claim work with `kata claim`, and close only when the work is
-verified. [Agent workflows](docs/workflows/agents.md) is the same contract
-in long form.
+verified. Close each verified issue promptly; batching sibling closes can trip
+the 60-second close throttle. [Agent workflows](docs/workflows/agents.md) is
+the same contract in long form.
 
 ## Contributing
 

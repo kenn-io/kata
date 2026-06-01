@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -270,6 +271,52 @@ func TestSiblingThrottle_FourthCloseUnderSameParentRefused(t *testing.T) {
 	assert.Contains(t, body, "sibling-close throttle")
 	// The error should reference the parent issue short_id.
 	assert.Contains(t, body, refForIssue(t, env, parent))
+}
+
+func TestSiblingThrottle_AllowsFourthCloseWhenOldestSiblingIsOutsideDefaultWindow(t *testing.T) {
+	env := testenv.New(t)
+	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	parent := createIssueViaHTTP(t, env, pid, "parent issue")
+	children := make([]int64, 0, 4)
+	for i := 0; i < 4; i++ {
+		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
+		postLink(t, env, pid, c, "parent", parent)
+		children = append(children, c)
+	}
+
+	resp, bs := closeIssueWithEvidence(t, env, pid, children[0], "agent-a",
+		"done",
+		"Implementation of child 1 complete and tested.",
+		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+	require.Equalf(t, http.StatusOK, resp.StatusCode,
+		"close child 1: %s", string(bs))
+
+	oldestOutsideWindow := time.Now().Add(-2 * time.Minute).UTC().Format("2006-01-02T15:04:05.000Z")
+	_, err := env.DB.ExecContext(t.Context(), `
+		UPDATE events
+		   SET created_at = ?
+		 WHERE project_id = ?
+		   AND issue_id = ?
+		   AND type = 'issue.closed'`,
+		oldestOutsideWindow, pid, children[0])
+	require.NoError(t, err)
+
+	for i, c := range children[1:3] {
+		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
+			"done",
+			fmt.Sprintf("Implementation of child %d complete and tested.", i+2),
+			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+		require.Equalf(t, http.StatusOK, resp.StatusCode,
+			"close child %d: %s", i+2, string(bs))
+	}
+
+	resp, bs = closeIssueWithEvidence(t, env, pid, children[3], "agent-a",
+		"done",
+		"Implementation of child 4 complete and tested.",
+		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+	require.Equalf(t, http.StatusOK, resp.StatusCode,
+		"oldest sibling close should be outside the default throttle window: %s",
+		string(bs))
 }
 
 // TestSiblingThrottle_DisabledByConfig pins that operators who opt out

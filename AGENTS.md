@@ -47,7 +47,7 @@ Instead:
 
 Close each issue as soon as its work is verified, not at the end of a
 batch. The daemon throttles >3 sibling closes by one actor under one
-parent in 5 minutes; close eagerly and you will not see it. Operators
+parent in 60 seconds; close eagerly and you will not see it. Operators
 can disable the throttle via `[close.throttle] enabled = false` in
 `<KATA_HOME>/config.toml`.
 

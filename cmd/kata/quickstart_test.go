@@ -31,6 +31,8 @@ func TestQuickstart_PromotesCloseStep(t *testing.T) {
 	assert.Contains(t, out, "asserts that the work is complete")
 	assert.Contains(t, out, "--evidence")
 	assert.Contains(t, out, "needs-review")
+	assert.Contains(t, out, "60 seconds")
+	assert.Contains(t, out, "not in a batch")
 }
 
 func TestQuickstart_JSON(t *testing.T) {
@@ -56,6 +58,7 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.NotContains(t, out, "Remote daemon")
 	assert.Contains(t, out, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, out, "Use --json only when your script needs complete structured data.")
+	assert.Contains(t, out, "Close each verified issue promptly; batching sibling closes can trigger the 60-second throttle.")
 }
 
 func TestQuickstart_AgentInstructionsAliasMentionsAgentOutput(t *testing.T) {

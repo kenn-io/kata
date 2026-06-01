@@ -37,9 +37,9 @@ substantive message.
 
 Close each issue as soon as its work is verified, not in a batch at
 the end. The daemon throttles >3 sibling closes by one actor under
-one parent in 5 minutes (operators can disable this via
+one parent in 60 seconds (operators can disable this via
 [close.throttle] enabled = false in <KATA_HOME>/config.toml), so a
-bulk "close everything now" pass will trip the guard.
+bulk "close everything now" pass can trip the guard.
 
 If you have not completed and tested this work, do not close it.
 Instead, label and comment:

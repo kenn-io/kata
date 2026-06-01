@@ -18,9 +18,9 @@ const openChildrenSampleLimit = 10
 // the same actor under the same parent are counted. siblingThrottleLimit is
 // the threshold: at the Nth close (N == limit) the actor has already closed
 // (limit) prior siblings, and the next close is refused. Spec §3.9 fixes both
-// values at "3 closes in 5 minutes" for v1; neither is configurable.
+// values at "3 closes in 60 seconds" for v1; neither is configurable.
 const (
-	siblingThrottleWindow = 5 * time.Minute
+	siblingThrottleWindow = 60 * time.Second
 	siblingThrottleLimit  = 3
 )
 

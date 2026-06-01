@@ -92,13 +92,14 @@ kata refuses structurally dangerous close patterns. The parent-completeness
 guard always refuses closing an issue while it has open children. Two further
 guards throttle close bursts by one actor under a shared parent:
 
-- sibling-burst: closing more than three sibling issues within five minutes is
+- sibling-burst: closing more than three sibling issues within 60 seconds is
   refused;
 - repeated-message: closing a second sibling with an identical `done` or
   `audit-no-change` message within thirty minutes is refused.
 
-Closing each issue as soon as its work is verified, rather than batching closes
-at the end of a run, keeps an actor under both limits.
+Close each issue as soon as its work is verified. Batching closes at the end of
+a run is the pattern this guard is meant to catch, and it can push one actor
+over the sibling-burst limit even when each individual issue is legitimate.
 
 Operators can disable both throttles daemon-wide:
 

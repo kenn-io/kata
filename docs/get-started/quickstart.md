@@ -155,3 +155,7 @@ kata close abc4 --done \
 
 Other close reasons are `--wontfix`, `--duplicate-of <ref>`,
 `--superseded-by <ref>`, and `--audit-no-change`.
+
+Close issues as soon as each one is complete and verified. Do not save a batch
+of sibling closes for the end of a run: the daemon refuses more than three
+sibling closes by one actor under one parent within 60 seconds.

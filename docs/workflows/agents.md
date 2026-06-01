@@ -106,9 +106,10 @@ kata close abc4 --done \
 ```
 
 Close each issue as soon as its work is verified, not in a batch at the end of a
-run. The daemon refuses more than three sibling closes under one parent within
-five minutes, so end-of-run close bursts get throttled; closing as you finish
-each issue keeps you under the limit. See
+run. The daemon refuses more than three sibling closes by one actor under one
+parent within 60 seconds, so end-of-run close bursts can get throttled even when
+the underlying work is complete. Closing as you finish each issue keeps you
+under the limit and leaves a better audit trail. See
 [Close throttle](../reference/configuration.md#close-throttle).
 
 If work is incomplete:
