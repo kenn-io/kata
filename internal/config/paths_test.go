@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -93,7 +94,14 @@ func TestDBHash_StableTwelveLowerHex(t *testing.T) {
 
 func TestDBHashSQLitePathUnchanged(t *testing.T) {
 	// Golden value pins the pre-1d SQLite hashing (sha256(abs(path))[:12]) so
-	// the move never relocates an existing database's runtime dir/socket.
+	// the move never relocates an existing database's runtime dir/socket. The
+	// hash is taken over filepath.Abs(dbPath); on Windows, "/var/lib/..." is
+	// not an absolute path so Abs prepends the CWD and produces a different
+	// digest. The backwards-compat property still holds on Windows (same
+	// formula in production), but the Unix-shaped golden doesn't apply there.
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix path golden value; Windows has its own path shape")
+	}
 	assert.Equal(t, "1f9b906d5e3f", config.DBHash("/var/lib/kata/kata.db"))
 }
 
