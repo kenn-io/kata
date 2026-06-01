@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -60,7 +59,7 @@ command = "true"
 		close(done)
 	}()
 
-	sigs <- syscall.SIGHUP
+	sigs <- os.Interrupt
 	require.Eventually(t, func() bool {
 		rec.mu.Lock()
 		defer rec.mu.Unlock()
