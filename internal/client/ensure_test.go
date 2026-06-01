@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func TestEnsureRunningRestartsWhenDaemonVersionDiffers(t *testing.T) {
@@ -239,10 +240,10 @@ func writeRuntimeRecordForPID(t *testing.T, home string, pid int, addr string) e
 	if err := ns.EnsureDirs(); err != nil {
 		return err
 	}
-	_, err = daemon.WriteRuntimeFile(ns.DataDir, daemon.RuntimeRecord{
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
 		PID:       pid,
 		Address:   addr,
-		DBPath:    filepath.Join(home, "kata.db"),
+		Metadata:  map[string]string{"db_path": filepath.Join(home, "kata.db")},
 		StartedAt: time.Now().UTC(),
 	})
 	return err

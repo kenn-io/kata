@@ -12,6 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/version"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 // BaseURLKey is the context key for injecting a daemon base URL during
@@ -95,16 +96,16 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 }
 
 func discoverForEnsure(ctx context.Context, dataDir string) (string, bool, bool) {
-	recs, err := daemon.ListRuntimeFiles(dataDir)
+	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
 		return "", false, false
 	}
 	var staleURL string
 	for _, r := range recs {
-		if !daemon.ProcessAlive(r.PID) {
+		if !kitdaemon.ProcessAlive(r.PID) {
 			continue
 		}
-		url, info, ok := probeAddress(ctx, r.Address)
+		url, info, ok := probeAddress(ctx, r.Endpoint().ConfigAddress())
 		if !ok {
 			continue
 		}
@@ -130,20 +131,21 @@ func daemonVersionCompatible(info PingInfo) bool {
 }
 
 func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
-	recs, err := daemon.ListRuntimeFiles(dataDir)
+	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
 		return err
 	}
 	for _, r := range recs {
-		if !daemon.ProcessAlive(r.PID) {
+		if !kitdaemon.ProcessAlive(r.PID) {
 			continue
 		}
-		_, info, ok := probeAddress(ctx, r.Address)
+		address := r.Endpoint().ConfigAddress()
+		_, info, ok := probeAddress(ctx, address)
 		if !ok || info.Service != daemonServiceName || daemonVersionCompatible(info) {
 			continue
 		}
 		if info.PID == 0 || info.PID != r.PID {
-			return fmt.Errorf("daemon at %s is running but its PID could not be verified; stop it manually", r.Address)
+			return fmt.Errorf("daemon at %s is running but its PID could not be verified; stop it manually", address)
 		}
 		if err := signalDaemonStopForEnsure(r, dbhash); err != nil {
 			return fmt.Errorf("stop old daemon pid %d: %w", r.PID, err)

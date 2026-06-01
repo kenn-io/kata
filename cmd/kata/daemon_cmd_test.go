@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/testenv"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func TestDaemonStatus_NoDaemonReportsAbsent(t *testing.T) {
@@ -36,10 +37,11 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	started := time.Date(2026, 5, 4, 1, 2, 3, 0, time.UTC)
-	_, err = daemon.WriteRuntimeFile(ns.DataDir, daemon.RuntimeRecord{
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
 		PID:       os.Getpid(),
-		Address:   "unix:///tmp/kata-test.sock",
-		DBPath:    filepath.Join(tmp, "kata.db"),
+		Network:   "unix",
+		Address:   "/tmp/kata-test.sock",
+		Metadata:  map[string]string{"db_path": filepath.Join(tmp, "kata.db")},
 		Version:   "v-test-status",
 		StartedAt: started,
 	})
@@ -65,6 +67,39 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	assert.Equal(t, "unix:///tmp/kata-test.sock", got.Daemons[0].Address)
 	assert.Equal(t, filepath.Join(tmp, "kata.db"), got.Daemons[0].DBPath)
 	assert.Equal(t, started.Format(time.RFC3339), got.Daemons[0].StartedAt)
+}
+
+func TestDaemonStatus_JSONReportsDBPathFromKitRuntimeMetadata(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	started := time.Date(2026, 5, 4, 1, 2, 3, 0, time.UTC)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID:       os.Getpid(),
+		Network:   "unix",
+		Address:   "/tmp/kata-test.sock",
+		Service:   "kata",
+		Version:   "v-test-status",
+		StartedAt: started,
+		Metadata: map[string]string{
+			"db_path": filepath.Join(tmp, "kata.db"),
+		},
+	})
+	require.NoError(t, err)
+
+	out := executeRoot(t, newRootCmd(), "daemon", "status", "--json")
+
+	var got struct {
+		Daemons []struct {
+			DBPath string `json:"db_path"`
+		} `json:"daemons"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got))
+	require.Len(t, got.Daemons, 1)
+	assert.Equal(t, filepath.Join(tmp, "kata.db"), got.Daemons[0].DBPath)
 }
 
 func TestDaemonStatus_JSONReportsEmptyDaemonList(t *testing.T) {
@@ -343,6 +378,8 @@ func TestDaemonStart_PortEnvBindsWildcard(t *testing.T) {
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
 	t.Setenv(daemon.AutoStartMarkerEnv, "")
 	t.Setenv("PORT", "8081")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
 	cmd := newRootCmd()
 	var buf bytes.Buffer
@@ -410,43 +447,43 @@ func TestDefaultEndpointForOS(t *testing.T) {
 
 	t.Run("windows uses loopback TCP", func(t *testing.T) {
 		ep := defaultEndpointForOS(ns, "windows")
-		assert.Equal(t, "tcp", ep.Kind())
-		assert.Equal(t, "127.0.0.1:0", ep.Address())
+		assert.Equal(t, "tcp", ep.Network)
+		assert.Equal(t, "127.0.0.1:0", ep.Address)
 	})
 
 	t.Run("unix uses runtime socket", func(t *testing.T) {
 		ep := defaultEndpointForOS(ns, "linux")
-		assert.Equal(t, "unix", ep.Kind())
-		assert.Equal(t, "unix://"+filepath.Join(ns.SocketDir, "daemon.sock"), ep.Address())
+		assert.Equal(t, "unix", ep.Network)
+		assert.Equal(t, "unix://"+filepath.Join(ns.SocketDir, "daemon.sock"), ep.ConfigAddress())
 	})
 }
 
-func TestRuntimeAddressForListener_UsesActualTCPPort(t *testing.T) {
-	ep := daemon.TCPEndpoint("127.0.0.1:0")
+func TestRuntimeEndpointForListener_UsesActualTCPPort(t *testing.T) {
+	ep := kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:0"}
 	l, err := ep.Listen()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = l.Close() })
 
-	got := runtimeAddressForListener(ep, l)
+	got := runtimeEndpointForListener(ep, l)
 
-	require.NotEqual(t, ep.Address(), got)
-	host, port, err := net.SplitHostPort(got)
+	require.NotEqual(t, ep.Address, got.Address)
+	host, port, err := net.SplitHostPort(got.Address)
 	require.NoError(t, err)
 	assert.Equal(t, "127.0.0.1", host)
 	assert.NotEqual(t, "0", port)
 }
 
-func TestRuntimeAddressForListener_KeepsExplicitTCPAddress(t *testing.T) {
-	ep := daemon.TCPEndpoint("127.0.0.1:0")
+func TestRuntimeEndpointForListener_KeepsExplicitTCPAddress(t *testing.T) {
+	ep := kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:0"}
 	l, err := ep.Listen()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = l.Close() })
 
-	_, actualPort, err := net.SplitHostPort(runtimeAddressForListener(ep, l))
+	_, actualPort, err := net.SplitHostPort(runtimeEndpointForListener(ep, l).Address)
 	require.NoError(t, err)
-	explicit := daemon.TCPEndpoint("127.0.0.1:" + actualPort)
+	explicit := kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:" + actualPort}
 
-	assert.Equal(t, explicit.Address(), runtimeAddressForListener(explicit, l))
+	assert.Equal(t, explicit, runtimeEndpointForListener(explicit, l))
 }
 
 func TestEnsureDaemon_ReturnsExistingURL(t *testing.T) {
@@ -498,10 +535,11 @@ func writeRuntimePID(t *testing.T, home string, pid int) {
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
-	_, err = daemon.WriteRuntimeFile(ns.DataDir, daemon.RuntimeRecord{
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
 		PID:       pid,
-		Address:   "unix://" + filepath.Join(home, "daemon.sock"),
-		DBPath:    filepath.Join(home, "kata.db"),
+		Network:   "unix",
+		Address:   filepath.Join(home, "daemon.sock"),
+		Metadata:  map[string]string{"db_path": filepath.Join(home, "kata.db")},
 		Version:   "v-test",
 		StartedAt: time.Now().UTC(),
 	})

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	kitdaemon "go.kenn.io/kit/daemon"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -510,15 +511,19 @@ func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, e
 	if err != nil {
 		return nil, err
 	}
-	recs, err := ListRuntimeFiles(ns.DataDir)
+	recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 	if err != nil {
 		return nil, err
 	}
 	for _, rec := range recs {
-		if !ProcessAlive(rec.PID) || !strings.HasPrefix(rec.Address, "unix://") {
+		if !kitdaemon.ProcessAlive(rec.PID) {
 			continue
 		}
-		path := strings.TrimPrefix(rec.Address, "unix://")
+		ep := rec.Endpoint()
+		if !ep.IsUnix() {
+			continue
+		}
+		path := ep.Address
 		probe := &http.Client{Transport: claimUnixTransport(path), Timeout: time.Second}
 		if !claimHubPing(ctx, probe) {
 			continue

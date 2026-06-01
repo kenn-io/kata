@@ -514,7 +514,7 @@ func TestSyncFederationOnceRecordsClientConstructionErrorStatus(t *testing.T) {
 	assert.Nil(t, status.LastPullSuccessAt)
 	assertStatusTimeSet(t, status.LastErrorAt)
 	require.NotNil(t, status.LastError)
-	assert.Contains(t, *status.LastError, "refusing to attach bearer token")
+	assert.Contains(t, *status.LastError, "plaintext trusted-private-network bearer target")
 }
 
 func TestSyncFederationOncePushPoisonLeavesCursorUnchanged(t *testing.T) {

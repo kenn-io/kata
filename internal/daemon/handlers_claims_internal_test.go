@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
@@ -68,10 +69,11 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 	}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	_, err = WriteRuntimeFile(ns.DataDir, RuntimeRecord{
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
 		PID:       os.Getpid(),
-		Address:   "unix://" + sock,
-		DBPath:    filepath.Join(tmp, "kata.db"),
+		Network:   "unix",
+		Address:   sock,
+		Metadata:  map[string]string{"db_path": filepath.Join(tmp, "kata.db")},
 		StartedAt: time.Now().UTC(),
 	})
 	require.NoError(t, err)

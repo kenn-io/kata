@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 // safeBuffer is a bytes.Buffer guarded by a mutex. os/exec writes the
@@ -122,6 +123,9 @@ func (d e2eDirs) env() []string {
 		"KATA_HOME="+d.home,
 		"KATA_DB="+d.dbPath,
 		"XDG_RUNTIME_DIR="+d.xdgDir,
+		"KATA_AUTH_TOKEN=",
+		"KATA_TRUST_PRIVATE_NETWORK=",
+		"KATA_SERVER=",
 	)
 }
 
@@ -251,14 +255,13 @@ func readDaemonSocketPath(runtimeDir string) (string, bool) {
 		if err != nil {
 			continue
 		}
-		var rec struct {
-			Address string `json:"address"`
-		}
+		var rec kitdaemon.RuntimeRecord
 		if err := json.Unmarshal(body, &rec); err != nil {
 			continue
 		}
-		if strings.HasPrefix(rec.Address, "unix://") {
-			return strings.TrimPrefix(rec.Address, "unix://"), true
+		ep := rec.Endpoint()
+		if ep.IsUnix() {
+			return ep.Address, true
 		}
 	}
 	return "", false

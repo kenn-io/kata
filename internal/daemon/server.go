@@ -26,7 +26,7 @@ import (
 type ServerConfig struct {
 	DB             db.Storage
 	StartedAt      time.Time
-	Endpoint       DaemonEndpoint
+	Endpoint       *DaemonEndpoint
 	Broadcaster    *EventBroadcaster
 	FederationWake func()
 	Hooks          hooks.Sink

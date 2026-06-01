@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
+	kitdaemon "go.kenn.io/kit/daemon"
 	gitcmd "go.kenn.io/kit/git/cmd"
 )
 
@@ -113,13 +114,13 @@ func writeRuntimeFor(home, addr string) error {
 	if err := ns.EnsureDirs(); err != nil {
 		return err
 	}
-	rec := daemon.RuntimeRecord{
+	rec := kitdaemon.RuntimeRecord{
 		PID:       os.Getpid(),
 		Address:   addr,
-		DBPath:    home + "/kata.db",
+		Metadata:  map[string]string{"db_path": home + "/kata.db"},
 		StartedAt: time.Now().UTC(),
 	}
-	_, err = daemon.WriteRuntimeFile(ns.DataDir, rec)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(rec)
 	return err
 }
 

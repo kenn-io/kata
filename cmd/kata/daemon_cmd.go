@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/version"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func newDaemonCmd() *cobra.Command {
@@ -69,18 +70,18 @@ func daemonStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			recs, err := daemon.ListRuntimeFiles(ns.DataDir)
+			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 			if err != nil {
 				return err
 			}
 			out := daemonStatusOutput{Daemons: make([]daemonStatusEntry, 0, len(recs))}
 			for _, r := range recs {
-				if daemon.ProcessAlive(r.PID) {
+				if kitdaemon.ProcessAlive(r.PID) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:       r.PID,
 						Version:   daemonRuntimeVersion(r),
-						Address:   r.Address,
-						DBPath:    r.DBPath,
+						Address:   r.Endpoint().ConfigAddress(),
+						DBPath:    r.Metadata["db_path"],
 						StartedAt: r.StartedAt,
 					})
 				}
@@ -121,7 +122,7 @@ type daemonStatusEntry struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
-func daemonRuntimeVersion(r daemon.RuntimeRecord) string {
+func daemonRuntimeVersion(r kitdaemon.RuntimeRecord) string {
 	if r.Version == "" {
 		return "unknown"
 	}
@@ -137,14 +138,14 @@ func daemonStopCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			recs, err := daemon.ListRuntimeFiles(ns.DataDir)
+			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 			if err != nil {
 				return err
 			}
 			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
-				if !daemon.ProcessAlive(r.PID) {
+				if !kitdaemon.ProcessAlive(r.PID) {
 					continue
 				}
 				// SignalDaemonStop is platform-specific: SIGTERM on Unix,
@@ -206,12 +207,12 @@ func daemonReloadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			recs, err := daemon.ListRuntimeFiles(ns.DataDir)
+			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 			if err != nil {
 				return err
 			}
 			for _, r := range recs {
-				if !daemon.ProcessAlive(r.PID) {
+				if !kitdaemon.ProcessAlive(r.PID) {
 					continue
 				}
 				// SignalDaemonReload is platform-specific: SIGHUP on Unix,
@@ -343,7 +344,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:             store,
 		StartedAt:      time.Now().UTC(),
-		Endpoint:       endpoint,
+		Endpoint:       &endpoint,
 		Hooks:          disp,
 		Broadcaster:    broadcaster,
 		FederationWake: federationWake,
@@ -355,27 +356,23 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	})
 	defer func() { _ = srv.Close() }()
 
-	listener, err := endpoint.Listen()
+	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = listener.Close() }()
 
-	rec := daemon.RuntimeRecord{
-		PID:       os.Getpid(),
-		Address:   runtimeAddressForListener(endpoint, listener),
-		DBPath:    redactRuntimeDSN(dbPath),
-		Version:   version.Version,
-		StartedAt: time.Now().UTC(),
-	}
-	if _, err := daemon.WriteRuntimeFile(ns.DataDir, rec); err != nil {
+	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpointForListener(endpoint, listener))
+	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
+	if _, err := runtimeStore.Write(rec); err != nil {
 		return err
 	}
 	runtimeFile := filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", os.Getpid()))
 	defer func() { _ = os.Remove(runtimeFile) }()
 
 	if listen != "" {
-		fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", rec.Address)
+		fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
 	}
 
 	return srv.Serve(ctx, listener)
@@ -458,54 +455,54 @@ func federationRunnerInterval() time.Duration {
 }
 
 // chooseEndpoint picks the daemon's listener: the platform default when
-// listen is empty (auto-start path) or TCPEndpointAny otherwise. We
+// listen is empty (auto-start path) or a kit TCP endpoint otherwise. We
 // pre-flight the address-rule check via ValidateNonPublicAddress so
 // the CLI surfaces a clear error before the server starts, without
 // the listen-then-close TOCTOU window where the validating bind could
 // race with another process or, with port 0, lose the bound port.
 // The actual bind happens once in runDaemonWithListen, before the runtime file
 // is published, so port 0 can be recorded as its concrete bound port.
-func chooseEndpoint(ns *daemon.Namespace, listen string) (daemon.DaemonEndpoint, error) {
+func chooseEndpoint(ns *daemon.Namespace, listen string) (kitdaemon.Endpoint, error) {
 	if listen == "" {
 		return defaultEndpoint(ns), nil
 	}
 	if _, _, err := net.SplitHostPort(listen); err != nil {
-		return nil, fmt.Errorf("kata daemon: invalid --listen value %q: %v", listen, err)
+		return kitdaemon.Endpoint{}, fmt.Errorf("kata daemon: invalid --listen value %q: %v", listen, err)
 	}
 	if err := daemon.ValidateNonPublicAddress(listen); err != nil {
-		return nil, fmt.Errorf("kata daemon: invalid --listen value %q: %v", listen, err)
+		return kitdaemon.Endpoint{}, fmt.Errorf("kata daemon: invalid --listen value %q: %v", listen, err)
 	}
-	return daemon.TCPEndpointAny(listen), nil
+	return kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: listen}, nil
 }
 
-func defaultEndpoint(ns *daemon.Namespace) daemon.DaemonEndpoint {
+func defaultEndpoint(ns *daemon.Namespace) kitdaemon.Endpoint {
 	return defaultEndpointForOS(ns, runtime.GOOS)
 }
 
-func defaultEndpointForOS(ns *daemon.Namespace, goos string) daemon.DaemonEndpoint {
+func defaultEndpointForOS(ns *daemon.Namespace, goos string) kitdaemon.Endpoint {
 	if goos == "windows" {
-		return daemon.TCPEndpoint("127.0.0.1:0")
+		return kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:0"}
 	}
 	socketPath := filepath.Join(ns.SocketDir, "daemon.sock")
-	return daemon.UnixEndpoint(socketPath)
+	return kitdaemon.Endpoint{Network: kitdaemon.NetworkUnix, Address: socketPath}
 }
 
-func runtimeAddressForListener(endpoint daemon.DaemonEndpoint, listener net.Listener) string {
-	if endpoint.Kind() != "tcp" {
-		return endpoint.Address()
+func runtimeEndpointForListener(endpoint kitdaemon.Endpoint, listener net.Listener) kitdaemon.Endpoint {
+	if endpoint.Network != "tcp" {
+		return endpoint
 	}
-	host, port, err := net.SplitHostPort(endpoint.Address())
+	host, port, err := net.SplitHostPort(endpoint.Address)
 	if err != nil {
-		return listener.Addr().String()
+		return kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: listener.Addr().String()}
 	}
 	if port != "0" {
-		return endpoint.Address()
+		return endpoint
 	}
 	_, boundPort, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {
-		return listener.Addr().String()
+		return kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: listener.Addr().String()}
 	}
-	return net.JoinHostPort(host, boundPort)
+	return kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: net.JoinHostPort(host, boundPort)}
 }
 
 // listenFromPortEnv reports the bind address to use when the daemon is

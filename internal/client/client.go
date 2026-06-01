@@ -17,6 +17,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 // UnixBase is the synthetic base URL used when the daemon listens on a Unix
@@ -37,15 +38,15 @@ type PingInfo struct {
 // respond — auto-start logic lives separately in EnsureRunning so callers
 // that should never spawn (e.g. health probes) can opt out.
 func Discover(ctx context.Context, dataDir string) (string, bool) {
-	recs, err := daemon.ListRuntimeFiles(dataDir)
+	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
 		return "", false
 	}
 	for _, r := range recs {
-		if !daemon.ProcessAlive(r.PID) {
+		if !kitdaemon.ProcessAlive(r.PID) {
 			continue
 		}
-		if url, ok := pingAddress(ctx, r.Address); ok {
+		if url, ok := pingAddress(ctx, r.Endpoint().ConfigAddress()); ok {
 			return url, true
 		}
 	}
@@ -233,15 +234,19 @@ func unixClientFromRuntime(ctx context.Context, opts Opts) (*http.Client, error)
 	if err != nil {
 		return nil, err
 	}
-	recs, err := daemon.ListRuntimeFiles(ns.DataDir)
+	recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range recs {
-		if !daemon.ProcessAlive(r.PID) || !strings.HasPrefix(r.Address, "unix://") {
+		if !kitdaemon.ProcessAlive(r.PID) {
 			continue
 		}
-		path := strings.TrimPrefix(r.Address, "unix://")
+		ep := r.Endpoint()
+		if !ep.IsUnix() {
+			continue
+		}
+		path := ep.Address
 		probe := &http.Client{Transport: UnixTransport(path), Timeout: 1 * time.Second}
 		if !Ping(ctx, probe, UnixBase) {
 			continue
