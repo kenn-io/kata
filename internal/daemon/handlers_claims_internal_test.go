@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -26,6 +27,9 @@ func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 }
 
 func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix sockets unsupported on windows")
+	}
 	tmp, err := os.MkdirTemp("/tmp", "kata-claim-unix-*")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
