@@ -38,9 +38,10 @@ var ErrSchemaCutoverRequired = errors.New("schema cutover required")
 // DB wraps *sql.DB. Use Open to construct one with PRAGMAs applied.
 type DB struct {
 	*sql.DB
-	path        string
-	instanceUID string
-	readOnly    bool
+	path              string
+	instanceUID       string
+	readOnly          bool
+	checkpointOnClose bool
 }
 
 // Open opens (and if needed initializes) the kata SQLite database at path.
@@ -52,6 +53,18 @@ type DB struct {
 // if the row is absent it generates one via uid.New(). The cached value is
 // exposed via InstanceUID for insert paths.
 func Open(ctx context.Context, path string) (*DB, error) {
+	return open(ctx, path, sqliteDSN("file:"+path), true)
+}
+
+// OpenMemory opens a named shared in-memory database. It is intended for
+// in-process test harnesses that need real SQLite semantics without creating
+// temporary DB/WAL/SHM files.
+func OpenMemory(ctx context.Context, name string) (*DB, error) {
+	uri := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
+	return open(ctx, uri, sqliteDSN(uri), false)
+}
+
+func sqliteDSN(base string) string {
 	synchronous := "NORMAL"
 	pragmas := []string{
 		"_pragma=foreign_keys(1)",
@@ -67,11 +80,14 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		fmt.Sprintf("_pragma=synchronous(%s)", synchronous),
 		"_pragma=busy_timeout(5000)",
 	)
-	dsn := fmt.Sprintf(
-		"file:%s?%s",
-		path,
-		strings.Join(pragmas, "&"),
-	)
+	sep := "?"
+	if strings.Contains(base, "?") {
+		sep = "&"
+	}
+	return base + sep + strings.Join(pragmas, "&")
+}
+
+func open(ctx context.Context, path, dsn string, checkpointOnClose bool) (*DB, error) {
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -81,7 +97,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping %s: %w", path, err)
 	}
-	d := &DB{DB: sdb, path: path}
+	d := &DB{DB: sdb, path: path, checkpointOnClose: checkpointOnClose}
 	if err := d.bootstrap(ctx); err != nil {
 		_ = sdb.Close()
 		return nil, err
@@ -203,7 +219,7 @@ func (d *DB) Close() error {
 		return nil
 	}
 	var checkpointErr error
-	if !d.readOnly {
+	if !d.readOnly && d.checkpointOnClose {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		checkpointErr = d.Checkpoint(ctx)
 		cancel()

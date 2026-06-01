@@ -8,7 +8,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,12 +89,30 @@ func New(t *testing.T, opts ...Option) *Env {
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
 
-	d, err := db.Open(context.Background(), filepath.Join(home, "kata.db"))
+	d, err := openHarnessDB(t, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 
 	url, client, bcast := serveDaemon(t, d, opts...)
 	return &Env{URL: url, HTTP: client, DB: d, Home: home, Broadcaster: bcast}
+}
+
+func openHarnessDB(t *testing.T, path string) (*db.DB, error) {
+	t.Helper()
+	if useMemoryHarnessDB() {
+		name := strings.NewReplacer("/", "_", "\\", "_", " ", "_").Replace(t.Name())
+		return db.OpenMemory(context.Background(), "kata-testenv-"+name+"-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	}
+	return db.Open(context.Background(), path)
+}
+
+func useMemoryHarnessDB() bool {
+	if os.Getenv("KATA_TEST_FAST_SQLITE") != "1" {
+		return false
+	}
+	bin := filepath.Base(os.Args[0])
+	return bin == "daemon.test" || bin == "daemon.test.exe" ||
+		bin == "testenv.test" || bin == "testenv.test.exe"
 }
 
 // NewFromDB launches a daemon backed by an existing SQLite database file. Use
