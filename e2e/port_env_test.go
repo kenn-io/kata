@@ -106,8 +106,8 @@ func TestPortEnvBind_ServesAndShutsDownCleanly(t *testing.T) {
 // TestPortEnvBind_AutostartMarkerSuppresses verifies the marker
 // honored by daemonclient.autoStart: when KATA_AUTOSTART=1 is set, a
 // stray PORT in the environment must not flip the daemon onto wildcard
-// TCP. The daemon falls back to the default Unix socket path, the
-// runtime file appears under KATA_HOME, and PORT remains unbound.
+// TCP. The daemon falls back to the platform-default local transport,
+// the runtime file appears under KATA_HOME, and PORT remains unbound.
 func TestPortEnvBind_AutostartMarkerSuppresses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("e2e")

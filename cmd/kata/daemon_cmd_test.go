@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -377,6 +378,50 @@ func TestDaemonStart_FlagWinsOverConfigFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "8.8.8.8")
 	assert.NotContains(t, err.Error(), "1.1.1.1",
 		"config.toml value must NOT win when --listen is set")
+}
+
+func TestDefaultEndpointForOS(t *testing.T) {
+	ns := &daemon.Namespace{SocketDir: t.TempDir()}
+
+	t.Run("windows uses loopback TCP", func(t *testing.T) {
+		ep := defaultEndpointForOS(ns, "windows")
+		assert.Equal(t, "tcp", ep.Kind())
+		assert.Equal(t, "127.0.0.1:0", ep.Address())
+	})
+
+	t.Run("unix uses runtime socket", func(t *testing.T) {
+		ep := defaultEndpointForOS(ns, "linux")
+		assert.Equal(t, "unix", ep.Kind())
+		assert.Equal(t, "unix://"+filepath.Join(ns.SocketDir, "daemon.sock"), ep.Address())
+	})
+}
+
+func TestRuntimeAddressForListener_UsesActualTCPPort(t *testing.T) {
+	ep := daemon.TCPEndpoint("127.0.0.1:0")
+	l, err := ep.Listen()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	got := runtimeAddressForListener(ep, l)
+
+	require.NotEqual(t, ep.Address(), got)
+	host, port, err := net.SplitHostPort(got)
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1", host)
+	assert.NotEqual(t, "0", port)
+}
+
+func TestRuntimeAddressForListener_KeepsExplicitTCPAddress(t *testing.T) {
+	ep := daemon.TCPEndpoint("127.0.0.1:0")
+	l, err := ep.Listen()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	_, actualPort, err := net.SplitHostPort(runtimeAddressForListener(ep, l))
+	require.NoError(t, err)
+	explicit := daemon.TCPEndpoint("127.0.0.1:" + actualPort)
+
+	assert.Equal(t, explicit.Address(), runtimeAddressForListener(explicit, l))
 }
 
 func TestEnsureDaemon_ReturnsExistingURL(t *testing.T) {

@@ -18,7 +18,8 @@ import (
 type DaemonConfig struct {
 	// Listen is the bind address used by `kata daemon start` when no
 	// --listen flag is supplied. Same syntax as the flag (host:port).
-	// An empty value (or a missing file) means "default Unix socket".
+	// An empty value (or a missing file) means the platform default:
+	// Unix socket on Unix platforms, loopback TCP on Windows.
 	Listen string `toml:"listen"`
 	// ActiveDaemon names the daemon catalog entry selected by default.
 	// Empty preserves the legacy implicit endpoint resolution.

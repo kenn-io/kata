@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -52,7 +53,7 @@ func daemonStartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&listen, "listen", "",
 		"bind TCP at host:port (admin-only; non-public addresses only). "+
 			"Falls back to $KATA_HOME/config.toml's `listen` value when "+
-			"unset. Default with neither: Unix socket under $KATA_HOME/runtime.")
+			"unset. Default with neither: Unix socket on Unix; loopback TCP on Windows.")
 	cmd.Flags().BoolVar(&insecureReadonly, "insecure-readonly", false,
 		"permit unauthenticated GETs on non-loopback TCP when no token "+
 			"is configured (DEV ONLY — production must use a token).")
@@ -246,16 +247,16 @@ type daemonReloadOutput struct {
 }
 
 // runDaemon is the foreground daemon entry point. Used by `kata daemon start`
-// (no --listen, default Unix socket) and by the auto-start child process
+// with the platform default endpoint and by the auto-start child process
 // spawned by ensureDaemon.
 func runDaemon(ctx context.Context) error {
 	return runDaemonWithListen(ctx, "", false)
 }
 
 // runDaemonWithListen is the variant used by `kata daemon start --listen`.
-// An empty listen string preserves the existing Unix-socket path exactly,
-// unless <KATA_HOME>/config.toml has a `listen = "..."` entry — in which
-// case the config value is used. CLI flag always wins over config.
+// An empty listen string uses the platform default unless
+// <KATA_HOME>/config.toml has a `listen = "..."` entry, in which case the
+// config value is used. CLI flag always wins over config.
 // insecureReadonly is the dev escape hatch from --insecure-readonly.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) error {
 	dcfg, err := config.ReadDaemonConfig()
@@ -345,9 +346,15 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	})
 	defer func() { _ = srv.Close() }()
 
+	listener, err := endpoint.Listen()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = listener.Close() }()
+
 	rec := daemon.RuntimeRecord{
 		PID:       os.Getpid(),
-		Address:   endpoint.Address(),
+		Address:   runtimeAddressForListener(endpoint, listener),
 		DBPath:    dbPath,
 		Version:   version.Version,
 		StartedAt: time.Now().UTC(),
@@ -359,10 +366,10 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	defer func() { _ = os.Remove(runtimeFile) }()
 
 	if listen != "" {
-		fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", endpoint.Address())
+		fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", rec.Address)
 	}
 
-	return srv.Run(ctx)
+	return srv.Serve(ctx, listener)
 }
 
 func startFederationRunner(
@@ -441,17 +448,17 @@ func federationRunnerInterval() time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// chooseEndpoint picks the daemon's listener: Unix socket when listen is
-// empty (default, auto-start path) or TCPEndpointAny otherwise. We
+// chooseEndpoint picks the daemon's listener: the platform default when
+// listen is empty (auto-start path) or TCPEndpointAny otherwise. We
 // pre-flight the address-rule check via ValidateNonPublicAddress so
 // the CLI surfaces a clear error before the server starts, without
 // the listen-then-close TOCTOU window where the validating bind could
 // race with another process or, with port 0, lose the bound port.
-// The actual bind happens once inside server.Run.
+// The actual bind happens once in runDaemonWithListen, before the runtime file
+// is published, so port 0 can be recorded as its concrete bound port.
 func chooseEndpoint(ns *daemon.Namespace, listen string) (daemon.DaemonEndpoint, error) {
 	if listen == "" {
-		socketPath := filepath.Join(ns.SocketDir, "daemon.sock")
-		return daemon.UnixEndpoint(socketPath), nil
+		return defaultEndpoint(ns), nil
 	}
 	if _, _, err := net.SplitHostPort(listen); err != nil {
 		return nil, fmt.Errorf("kata daemon: invalid --listen value %q: %v", listen, err)
@@ -460,6 +467,36 @@ func chooseEndpoint(ns *daemon.Namespace, listen string) (daemon.DaemonEndpoint,
 		return nil, fmt.Errorf("kata daemon: invalid --listen value %q: %v", listen, err)
 	}
 	return daemon.TCPEndpointAny(listen), nil
+}
+
+func defaultEndpoint(ns *daemon.Namespace) daemon.DaemonEndpoint {
+	return defaultEndpointForOS(ns, runtime.GOOS)
+}
+
+func defaultEndpointForOS(ns *daemon.Namespace, goos string) daemon.DaemonEndpoint {
+	if goos == "windows" {
+		return daemon.TCPEndpoint("127.0.0.1:0")
+	}
+	socketPath := filepath.Join(ns.SocketDir, "daemon.sock")
+	return daemon.UnixEndpoint(socketPath)
+}
+
+func runtimeAddressForListener(endpoint daemon.DaemonEndpoint, listener net.Listener) string {
+	if endpoint.Kind() != "tcp" {
+		return endpoint.Address()
+	}
+	host, port, err := net.SplitHostPort(endpoint.Address())
+	if err != nil {
+		return listener.Addr().String()
+	}
+	if port != "0" {
+		return endpoint.Address()
+	}
+	_, boundPort, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		return listener.Addr().String()
+	}
+	return net.JoinHostPort(host, boundPort)
 }
 
 // listenFromPortEnv reports the bind address to use when the daemon is

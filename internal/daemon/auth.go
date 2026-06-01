@@ -200,8 +200,8 @@ func isFederationTransportRoute(method, path string) bool {
 
 // checkAuthStartup refuses startup when the listen address would expose
 // the daemon to plaintext-on-the-wire access. listen uses the same
-// convention as runDaemonWithListen: "" means Unix socket; "host:port"
-// means TCP. The matrix on non-loopback TCP is:
+// convention as runDaemonWithListen: "" means platform-default local
+// transport; "host:port" means TCP. The matrix on non-loopback TCP is:
 //
 //	Token != "" && TrustPrivateNetwork -> permit (operator accepts private-network confidentiality)
 //	Token != "" && !TrustPrivateNetwork -> REFUSE (token would travel in cleartext)
@@ -261,11 +261,12 @@ func TrustPrivateNetworkWarning(listen string, auth config.AuthConfig) (string, 
 }
 
 // isNonLoopbackTCP reports whether listen designates a TCP bind that's
-// reachable from anywhere but loopback. Empty listen (Unix socket) returns
-// false. Hosts that resolve to loopback IPs return false. Wildcard binds
-// (empty host, 0.0.0.0, ::) and non-loopback IPs / unknown hostnames return
-// true so the auth-startup check defaults to "needs a token" for anything
-// that could plausibly be reached from another machine on the same network.
+// reachable from anywhere but loopback. Empty listen (platform-default local
+// transport) returns false. Hosts that resolve to loopback IPs return false.
+// Wildcard binds (empty host, 0.0.0.0, ::) and non-loopback IPs / unknown
+// hostnames return true so the auth-startup check defaults to "needs a token"
+// for anything that could plausibly be reached from another machine on the
+// same network.
 func isNonLoopbackTCP(listen string) bool {
 	if listen == "" {
 		return false

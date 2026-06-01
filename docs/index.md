@@ -8,7 +8,8 @@ coordination system.
 The public shape is intentionally small:
 
 - a single `kata` CLI for automation and agent workflows;
-- a local daemon with an HTTP API over a Unix socket by default;
+- a local daemon with an HTTP API over a Unix socket on Unix and loopback TCP
+  on Windows by default;
 - a SQLite database under `KATA_HOME`;
 - a TUI for human triage and supervision;
 - JSON, concise agent text, and human output modes;
@@ -52,9 +53,10 @@ explicit `--project` value. It talks to a daemon, starting one automatically for
 local use when needed. The daemon owns the SQLite connection, applies
 mutations, records events, and serves both CLI/TUI reads and event streams.
 
-Local mode uses a Unix socket under `KATA_HOME/runtime` on Unix platforms. TCP
-listeners are explicit and guarded because bearer tokens over plaintext
-non-loopback HTTP are only allowed for trusted private-network targets.
+Local mode uses a Unix socket under `KATA_HOME/runtime` on Unix platforms and
+loopback TCP on Windows. Non-loopback TCP listeners are explicit and guarded
+because bearer tokens over plaintext non-loopback HTTP are only allowed for
+trusted private-network targets.
 
 ## When to use it
 

@@ -55,9 +55,9 @@ does not pay that complexity until a measured hot path justifies it.
 
 ### Transport and discovery
 
-The daemon listens on a Unix socket by default (parent directory `0700`, socket
-`0600`), falling back to loopback TCP on Windows or where a socket is
-unavailable; TCP binds are validated as loopback unless an operator opts into a
+The daemon listens on a Unix socket by default on Unix platforms (parent
+directory `0700`, socket `0600`) and loopback TCP by default on Windows; TCP
+binds are validated as loopback unless an operator opts into a
 remote listener. Runtime state is namespaced per database: a `<dbhash>` derived
 from the absolute database path keeps two databases from colliding on sockets,
 runtime files, or logs. Clients discover a running daemon by computing the

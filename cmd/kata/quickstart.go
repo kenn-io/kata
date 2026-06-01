@@ -146,8 +146,8 @@ Or commit-free per-workspace:
 
 KATA_SERVER wins over the file when both are set. A configured-but-down
 remote returns exit 7 (kata server not responding) — no silent fallback to
-spawning a local daemon. The default (no env, no .kata.local.toml) is
-unchanged: a local Unix-socket daemon is auto-started on demand.
+spawning a local daemon. The default (no env, no .kata.local.toml) remains a
+local daemon: Unix socket on Unix platforms, loopback TCP on Windows.
 `
 
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
