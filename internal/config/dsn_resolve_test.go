@@ -151,14 +151,31 @@ func TestKataDSN_ReadsStorageDSNFromConfigToml(t *testing.T) {
 	assert.Equal(t, "postgres://h/db", got)
 }
 
-func TestKataDSN_StorageDSNOverridesKataDB(t *testing.T) {
-	// User-specified precedence: KATA_DSN > [storage].dsn > KATA_DB > default.
-	// A file-set DSN beats a legacy KATA_DB env so operators can override
-	// without touching shell rc files.
+func TestKataDSN_KataDBOverridesStorageDSN(t *testing.T) {
+	// User-specified precedence: KATA_DSN > KATA_DB > [storage].dsn > default.
+	// Env vars beat the config file so a user's existing shell (with KATA_DB
+	// exported) keeps pointing at the same database after [storage].dsn is
+	// added to config.toml — otherwise an absent-from-the-shell config-file
+	// knob would silently redirect long-running scripts to a different DB.
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DSN", "")
 	t.Setenv("KATA_DB", "/tmp/from-env.db")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[storage]\ndsn = \"postgres://from-toml/kata\"\n"), 0o600))
+
+	got, err := config.KataDSN(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/from-env.db", got)
+}
+
+func TestKataDSN_StorageDSNUsedWhenKataDBUnset(t *testing.T) {
+	// With env vars unset, the config file's [storage].dsn is picked up.
+	// Confirms the TOML branch is reachable in the new precedence order.
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_DB", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
 		[]byte("[storage]\ndsn = \"postgres://from-toml/kata\"\n"), 0o600))
 

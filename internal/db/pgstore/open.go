@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -42,7 +43,20 @@ func Open(ctx context.Context, dsn string, opts ...db.OpenOption) (*Store, error
 func openInternal(ctx context.Context, dsn string, readOnly bool) (*Store, error) {
 	connConfig, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("parse pgx config: %w", err)
+		// pgx.ParseConfig errors can echo DSN fragments — a quoted bad
+		// "password=..." kv or an unparseable URL whose path carries
+		// credentials. Drop err.Error() entirely and surface only the
+		// credential-free canonical form so logs, stderr, and any
+		// service journal stay clean. RedactDSN falls back to "" on
+		// shapes too ambiguous to safely redact (e.g. an unescaped ':'
+		// or '@' in the password); a static placeholder takes over so
+		// the error still names what was attempted.
+		_ = err
+		redacted := config.RedactDSN(dsn)
+		if redacted == "" {
+			redacted = "<dsn redacted>"
+		}
+		return nil, fmt.Errorf("parse pgx config for %s", redacted)
 	}
 	if connConfig.RuntimeParams == nil {
 		connConfig.RuntimeParams = map[string]string{}

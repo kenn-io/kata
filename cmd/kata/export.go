@@ -41,7 +41,12 @@ func newExportCmd() *cobra.Command {
 			if output == "" {
 				output = "kata-export-" + time.Now().UTC().Format("20060102T150405Z") + ".jsonl"
 			}
-			d, _, err := storeopen.Open(ctx, dbPath)
+			// Export opens read-only so it cannot mutate the source DB:
+			// storeopen.Open returns a writable handle that runs a WAL
+			// checkpoint on Close, which fails on a read-only mount and
+			// races a running daemon's writes when --allow-running-daemon
+			// is in play. The read-only handle skips both.
+			d, _, err := storeopen.OpenReadOnly(ctx, dbPath)
 			if err != nil {
 				return err
 			}

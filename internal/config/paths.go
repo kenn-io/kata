@@ -41,6 +41,12 @@ func KataDB() (string, error) { return KataDSN(context.Background()) }
 // Used to namespace runtime files, sockets, and hook output per database.
 // A postgres:// DSN is hashed by its credential-free canonical identity so
 // runtime files never derive from a string that carries a password.
+//
+// A sqlite:// DSN is reduced to the same filesystem path that storeopen
+// opens before hashing, so /path/kata.db and sqlite:///path/kata.db share a
+// runtime namespace and `kata daemon` running-daemon checks. Without this
+// normalization the two forms produce different hashes and the second one
+// could start a duplicate daemon against the same database.
 func DBHash(dbPath string) string {
 	if strings.HasPrefix(dbPath, "postgres://") || strings.HasPrefix(dbPath, "postgresql://") {
 		identity, err := CanonicalDSNIdentity(dbPath)
@@ -55,9 +61,10 @@ func DBHash(dbPath string) string {
 		sum := sha256.Sum256([]byte(identity))
 		return hex.EncodeToString(sum[:])[:12]
 	}
-	abs, err := filepath.Abs(dbPath)
+	path := strings.TrimPrefix(dbPath, "sqlite://")
+	abs, err := filepath.Abs(path)
 	if err != nil {
-		abs = dbPath
+		abs = path
 	}
 	sum := sha256.Sum256([]byte(abs))
 	return hex.EncodeToString(sum[:])[:12]

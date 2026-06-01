@@ -9,12 +9,18 @@ import (
 )
 
 // KataDSN returns the effective database DSN honoring (in precedence order)
-// $KATA_DSN, [storage].dsn from <KATA_HOME>/config.toml, $KATA_DB (legacy),
-// and the <KATA_HOME>/kata.db default. The returned string is whatever the
-// user supplied: a bare path, sqlite:// DSN, or postgres:// DSN. Callers pass
-// it directly to storeopen.Open. Shape validation rejects unknown schemes and
-// libpq query params on sqlite/bare DSNs with credential-free errors;
-// validation is shape-only and never dials.
+// $KATA_DSN, $KATA_DB (legacy env override), [storage].dsn from
+// <KATA_HOME>/config.toml, and the <KATA_HOME>/kata.db default. The returned
+// string is whatever the user supplied: a bare path, sqlite:// DSN, or
+// postgres:// DSN. Callers pass it directly to storeopen.Open. Shape
+// validation rejects unknown schemes and libpq query params on sqlite/bare
+// DSNs with credential-free errors; validation is shape-only and never dials.
+//
+// Env vars take precedence over the config file so a user's existing shell
+// (with KATA_DB exported) keeps pointing at the same database after the
+// config-file knob lands — without this ordering, an absent-from-the-shell
+// [storage].dsn would silently redirect long-running scripts to a different
+// DB the next time they re-resolved.
 //
 // The TOML branch reads only the [storage] section via readStorageConfig so
 // a parse error in an unrelated section (auth, listen, close, ...) does not
@@ -31,17 +37,17 @@ func KataDSN(ctx context.Context) (string, error) {
 		}
 		return v, nil
 	}
-	storage, err := readStorageConfig()
-	if err != nil {
-		return "", err
-	}
-	if v := storage.DSN; v != "" {
+	if v := strings.TrimSpace(os.Getenv("KATA_DB")); v != "" {
 		if err := validateDSN(v); err != nil {
 			return "", err
 		}
 		return v, nil
 	}
-	if v := strings.TrimSpace(os.Getenv("KATA_DB")); v != "" {
+	storage, err := readStorageConfig()
+	if err != nil {
+		return "", err
+	}
+	if v := storage.DSN; v != "" {
 		if err := validateDSN(v); err != nil {
 			return "", err
 		}
