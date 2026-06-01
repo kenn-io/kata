@@ -53,7 +53,7 @@ jobs:
 
       - name: Run tests
         env:
-          KATA_TEST_SKIP_DB_CLOSE_CHECKPOINT: "1"
+          KATA_TEST_FAST_SQLITE: "1"
         run: go test -p 4 ./...
 
   lint:

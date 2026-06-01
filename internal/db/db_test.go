@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,6 +16,8 @@ import (
 )
 
 func TestOpen_AppliesPragmasAndMigrations(t *testing.T) {
+	t.Setenv("KATA_TEST_FAST_SQLITE", "")
+
 	d := openTestDB(t)
 
 	var fk int
@@ -143,6 +144,8 @@ func TestOpen_TimestampColumnsScanIntoTime(t *testing.T) {
 }
 
 func TestCheckpointTruncatesWAL(t *testing.T) {
+	t.Setenv("KATA_TEST_FAST_SQLITE", "")
+
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := db.Open(ctx, path)
@@ -178,41 +181,24 @@ func TestCheckpointTruncatesWAL(t *testing.T) {
 	assert.Zero(t, after.Size(), "TRUNCATE checkpoint should leave no WAL bytes")
 }
 
-func TestCloseSkipsCheckpointWhenTestHarnessRequestsIt(t *testing.T) {
-	t.Setenv("KATA_TEST_SKIP_DB_CLOSE_CHECKPOINT", "1")
+func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) {
+	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
 
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := db.Open(ctx, path)
 	require.NoError(t, err)
-	d.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = d.Close() })
 
-	_, err = d.ExecContext(ctx, `PRAGMA wal_autocheckpoint=0`)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `CREATE TABLE close_noise(id INTEGER PRIMARY KEY, body BLOB)`)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `
-		WITH RECURSIVE seq(x) AS (
-			SELECT 1
-			UNION ALL
-			SELECT x + 1 FROM seq WHERE x < 128
-		)
-		INSERT INTO close_noise(body)
-		SELECT randomblob(4096) FROM seq`)
-	require.NoError(t, err)
+	var mode string
+	require.NoError(t, d.QueryRow("PRAGMA journal_mode").Scan(&mode))
+	assert.Equal(t, "wal", mode)
 
-	before, err := os.Stat(path + "-wal")
-	require.NoError(t, err)
-	require.Positive(t, before.Size(), "test setup must create WAL frames")
+	var sync int
+	require.NoError(t, d.QueryRow("PRAGMA synchronous").Scan(&sync))
+	assert.Zero(t, sync)
 
-	hold, err := sql.Open("sqlite", fmt.Sprintf("file:%s?mode=ro", path))
-	require.NoError(t, err)
-	defer func() { _ = hold.Close() }()
-	require.NoError(t, hold.PingContext(ctx))
-
-	require.NoError(t, d.Close())
-
-	after, err := os.Stat(path + "-wal")
-	require.NoError(t, err)
-	assert.Positive(t, after.Size(), "test harness close should not truncate WAL")
+	var tempStore int
+	require.NoError(t, d.QueryRow("PRAGMA temp_store").Scan(&tempStore))
+	assert.Equal(t, 2, tempStore)
 }

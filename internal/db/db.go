@@ -26,7 +26,7 @@ var schemaSQL string
 
 const currentSchemaVersion = 12
 
-const testSkipCloseCheckpointEnv = "KATA_TEST_SKIP_DB_CLOSE_CHECKPOINT"
+const testFastSQLiteEnv = "KATA_TEST_FAST_SQLITE"
 
 // CurrentSchemaVersion returns the schema version expected by this binary.
 func CurrentSchemaVersion() int { return currentSchemaVersion }
@@ -52,9 +52,25 @@ type DB struct {
 // if the row is absent it generates one via uid.New(). The cached value is
 // exposed via InstanceUID for insert paths.
 func Open(ctx context.Context, path string) (*DB, error) {
+	synchronous := "NORMAL"
+	pragmas := []string{
+		"_pragma=foreign_keys(1)",
+		"_pragma=journal_mode(WAL)",
+	}
+	if fastSQLiteForTestHarness() {
+		synchronous = "OFF"
+		pragmas = append(pragmas,
+			"_pragma=temp_store(MEMORY)",
+		)
+	}
+	pragmas = append(pragmas,
+		fmt.Sprintf("_pragma=synchronous(%s)", synchronous),
+		"_pragma=busy_timeout(5000)",
+	)
 	dsn := fmt.Sprintf(
-		"file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)",
+		"file:%s?%s",
 		path,
+		strings.Join(pragmas, "&"),
 	)
 	sdb, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -187,7 +203,7 @@ func (d *DB) Close() error {
 		return nil
 	}
 	var checkpointErr error
-	if !d.readOnly && !skipCloseCheckpointForTestHarness() {
+	if !d.readOnly {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		checkpointErr = d.Checkpoint(ctx)
 		cancel()
@@ -195,8 +211,12 @@ func (d *DB) Close() error {
 	return errors.Join(checkpointErr, d.DB.Close())
 }
 
-func skipCloseCheckpointForTestHarness() bool {
-	if os.Getenv(testSkipCloseCheckpointEnv) != "1" {
+func fastSQLiteForTestHarness() bool {
+	return testHarnessEnvEnabled(testFastSQLiteEnv)
+}
+
+func testHarnessEnvEnabled(name string) bool {
+	if os.Getenv(name) != "1" {
 		return false
 	}
 	bin := strings.ToLower(filepath.Base(os.Args[0]))
