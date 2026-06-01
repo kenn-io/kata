@@ -36,6 +36,28 @@ Not findings: missing API auth, `validateActor` "not authorizing"
 loops on local input, symlink-following under the kata data dir, races
 visible only to a colocated attacker.
 
+## Tailscale/private-overlay hostnames
+
+Kata intentionally supports private-network daemon access over operator-
+trusted plaintext. A configured `allow_insecure = true` daemon target, or
+`KATA_ALLOW_INSECURE=1` for `KATA_SERVER`, means the operator explicitly
+accepted HTTP for a trusted private overlay such as Tailscale. Do not raise a
+Medium/High finding merely because a token-bearing `http://hostname:port`
+request uses DNS or plaintext; Tailscale, MagicDNS, mDNS, and similar
+private-overlay hostnames are expected deployment shapes, not evidence of a
+public-network leak.
+
+Do not recommend DNS-resolution preflights that reject hostnames unless the
+diff is explicitly changing a literal-IP-only mode. Overlay hostnames can be
+the stable operator-facing identity while their addresses change underneath.
+
+Valid findings remain: bearer tokens sent to a different origin than the
+configured daemon, redirects that can receive tokens cross-origin, plaintext
+hostname access without an explicit `allow_insecure` opt-in, secrets logged or
+rendered in errors, a config/default that exposes bearer HTTP publicly by
+default, or a code path that claims to support `allow_insecure` but silently
+ignores it.
+
 ## Schema upgrades use JSONL cutover, not ALTER-TABLE migrations
 
 Schema lives in the embedded `internal/db/schema.sql`. There is no
