@@ -54,7 +54,7 @@ jobs:
       - name: Run tests
         env:
           KATA_TEST_FAST_SQLITE: "1"
-        run: go test -p 4 ./...
+        run: go test -p 4 -vet=off ./...
 
   lint:
     name: golangci-lint
