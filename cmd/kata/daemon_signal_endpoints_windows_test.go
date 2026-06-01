@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	"go.kenn.io/kata/internal/daemon"
 )
 
 // registerDaemonSignalEndpoints creates the manual-reset named events that a
@@ -15,7 +17,7 @@ import (
 // alive for the in-process command's OpenEvent call. On Unix this is a no-op.
 func registerDaemonSignalEndpoints(t *testing.T, dbhash string, pid int) {
 	t.Helper()
-	for _, name := range []string{stopEventName(dbhash, pid), reloadEventName(dbhash, pid)} {
+	for _, name := range []string{daemon.StopEventName(dbhash, pid), daemon.ReloadEventName(dbhash, pid)} {
 		namePtr, err := windows.UTF16PtrFromString(name)
 		if err != nil {
 			t.Fatalf("event name %q: %v", name, err)

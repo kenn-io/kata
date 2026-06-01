@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"go.kenn.io/kata/internal/daemon"
@@ -29,6 +28,7 @@ var (
 	currentVersionForEnsure     = func() string { return version.Version }
 	startDaemonForEnsure        = autoStart
 	stopRunningDaemonsForEnsure = stopRunningDaemons
+	signalDaemonStopForEnsure   = daemon.SignalDaemonStop
 )
 
 // EnsureRunning returns a live daemon's base URL, auto-starting the daemon
@@ -86,7 +86,7 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 		if compatible {
 			return url, nil
 		}
-		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir); err != nil {
+		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return "", err
 		}
 		return startDaemonForEnsure(ctx, ns.DataDir)
@@ -129,7 +129,7 @@ func daemonVersionCompatible(info PingInfo) bool {
 	return info.Service == daemonServiceName && info.Version == currentVersionForEnsure()
 }
 
-func stopRunningDaemons(ctx context.Context, dataDir string) error {
+func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 	recs, err := daemon.ListRuntimeFiles(dataDir)
 	if err != nil {
 		return err
@@ -145,11 +145,9 @@ func stopRunningDaemons(ctx context.Context, dataDir string) error {
 		if info.PID == 0 || info.PID != r.PID {
 			return fmt.Errorf("daemon at %s is running but its PID could not be verified; stop it manually", r.Address)
 		}
-		p, err := os.FindProcess(r.PID)
-		if err != nil {
-			continue
+		if err := signalDaemonStopForEnsure(r, dbhash); err != nil {
+			return fmt.Errorf("stop old daemon pid %d: %w", r.PID, err)
 		}
-		_ = p.Signal(syscall.SIGTERM)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)

@@ -4,9 +4,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"syscall"
 
 	"golang.org/x/sys/windows"
 
@@ -21,22 +19,14 @@ import (
 //	Local\kata-reload-<dbhash>-<pid>   — set by `kata daemon reload`
 //
 // The daemon creates the events at startup, waits on them in goroutines,
-// and translates a fire into ctx cancel (stop) or a synthetic SIGHUP fed
+// and translates a fire into ctx cancel (stop) or a synthetic reload fed
 // to the existing reload loop.
-
-func stopEventName(dbhash string, pid int) string {
-	return fmt.Sprintf(`Local\kata-stop-%s-%d`, dbhash, pid)
-}
-
-func reloadEventName(dbhash string, pid int) string {
-	return fmt.Sprintf(`Local\kata-reload-%s-%d`, dbhash, pid)
-}
 
 // installStopWatcher creates the stop event for this daemon process and
 // spawns a goroutine that waits on it. When the event fires (and we are
 // not already cleaning up) it cancels the daemon's context.
 func installStopWatcher(dbhash string, cancel context.CancelFunc) func() {
-	namePtr, err := windows.UTF16PtrFromString(stopEventName(dbhash, os.Getpid()))
+	namePtr, err := windows.UTF16PtrFromString(daemon.StopEventName(dbhash, os.Getpid()))
 	if err != nil {
 		return func() {}
 	}
@@ -64,12 +54,17 @@ func installStopWatcher(dbhash string, cancel context.CancelFunc) func() {
 	}
 }
 
-// installReloadSource creates the reload event and pumps a synthetic
-// syscall.SIGHUP onto the returned channel each time it fires, so the
-// existing runReloadLoop machinery works unchanged.
+type syntheticReloadSignal struct{}
+
+func (syntheticReloadSignal) String() string { return "reload" }
+func (syntheticReloadSignal) Signal()        {}
+
+// installReloadSource creates the reload event and pumps a private synthetic
+// signal onto the returned channel each time it fires, so the existing
+// runReloadLoop machinery works unchanged.
 func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, func()) {
 	sigs := make(chan os.Signal, 1)
-	namePtr, err := windows.UTF16PtrFromString(reloadEventName(dbhash, os.Getpid()))
+	namePtr, err := windows.UTF16PtrFromString(daemon.ReloadEventName(dbhash, os.Getpid()))
 	if err != nil {
 		return sigs, func() {}
 	}
@@ -95,7 +90,7 @@ func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, 
 			}
 			_ = windows.ResetEvent(h)
 			select {
-			case sigs <- syscall.SIGHUP:
+			case sigs <- syntheticReloadSignal{}:
 			default:
 			}
 		}
@@ -106,31 +101,4 @@ func installReloadSource(ctx context.Context, dbhash string) (<-chan os.Signal, 
 		<-done
 		_ = windows.CloseHandle(h)
 	}
-}
-
-// signalDaemonStop opens the daemon's stop event by name and sets it.
-// The daemon's installStopWatcher goroutine then drives a graceful exit.
-func signalDaemonStop(rec daemon.RuntimeRecord, dbhash string) error {
-	return setNamedEvent(stopEventName(dbhash, rec.PID))
-}
-
-// signalDaemonReload opens the daemon's reload event by name and sets it.
-func signalDaemonReload(rec daemon.RuntimeRecord, dbhash string) error {
-	return setNamedEvent(reloadEventName(dbhash, rec.PID))
-}
-
-func setNamedEvent(name string) error {
-	namePtr, err := windows.UTF16PtrFromString(name)
-	if err != nil {
-		return fmt.Errorf("event name %q: %w", name, err)
-	}
-	h, err := windows.OpenEvent(windows.EVENT_MODIFY_STATE, false, namePtr)
-	if err != nil {
-		return fmt.Errorf("open event %s: %w", name, err)
-	}
-	defer windows.CloseHandle(h) //nolint:errcheck // close is best-effort
-	if err := windows.SetEvent(h); err != nil {
-		return fmt.Errorf("set event %s: %w", name, err)
-	}
-	return nil
 }

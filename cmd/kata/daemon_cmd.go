@@ -146,10 +146,9 @@ func daemonStopCmd() *cobra.Command {
 				if !daemon.ProcessAlive(r.PID) {
 					continue
 				}
-				// signalDaemonStop is platform-specific: SIGTERM on Unix,
-				// a named stop event on Windows (which has no cross-process
-				// SIGTERM). See daemon_signaling_{unix,windows}.go.
-				if err := signalDaemonStop(r, ns.DBHash); err != nil {
+				// SignalDaemonStop is platform-specific: SIGTERM on Unix,
+				// a named stop event on Windows.
+				if err := daemon.SignalDaemonStop(r, ns.DBHash); err != nil {
 					return &cliError{
 						Kind: kindInternal, ExitCode: ExitInternal,
 						Message: fmt.Sprintf("stop pid %d: %v", r.PID, err),
@@ -214,10 +213,9 @@ func daemonReloadCmd() *cobra.Command {
 				if !daemon.ProcessAlive(r.PID) {
 					continue
 				}
-				// signalDaemonReload is platform-specific: SIGHUP on Unix,
-				// a named reload event on Windows. See
-				// daemon_signaling_{unix,windows}.go.
-				if err := signalDaemonReload(r, ns.DBHash); err != nil {
+				// SignalDaemonReload is platform-specific: SIGHUP on Unix,
+				// a named reload event on Windows.
+				if err := daemon.SignalDaemonReload(r, ns.DBHash); err != nil {
 					return &cliError{
 						Kind: kindInternal, ExitCode: ExitInternal,
 						Message: fmt.Sprintf("reload pid %d: %v", r.PID, err),

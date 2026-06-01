@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -76,27 +77,104 @@ func TestShouldRefuseAutoStartDaemonFromGoTestBinary(t *testing.T) {
 
 func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {
 	tmp := setupKataEnv(t)
-	cmd := exec.Command("sleep", "30")
-	require.NoError(t, cmd.Start())
-	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
-	t.Cleanup(func() {
-		if cmd.ProcessState == nil {
-			_ = cmd.Process.Kill()
-			<-waitCh
-		}
-	})
+	cmd, waitCh := startLongLivedTestProcess(t)
 
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, cmd.Process.Pid, "127.0.0.1:1"))
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
-	require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir))
+	require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
 
 	select {
 	case err := <-waitCh:
 		t.Fatalf("unverified runtime PID was signaled; process exited with %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+func startLongLivedTestProcess(t *testing.T) (*exec.Cmd, <-chan error) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=TestEnsureSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
+	cmd.Env = append(os.Environ(), "KATA_ENSURE_SLEEP_HELPER=1")
+	stdin, err := cmd.StdinPipe()
+	require.NoError(t, err)
+	require.NoError(t, cmd.Start())
+	waitCh := make(chan error, 1)
+	waitDone := make(chan struct{})
+	go func() {
+		waitCh <- cmd.Wait()
+		close(waitDone)
+	}()
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		select {
+		case <-waitDone:
+		case <-time.After(2 * time.Second):
+			_ = cmd.Process.Kill()
+			<-waitDone
+		}
+	})
+	return cmd, waitCh
+}
+
+func TestEnsureSleepHelperProcess(_ *testing.T) {
+	if os.Getenv("KATA_ENSURE_SLEEP_HELPER") != "1" {
+		return
+	}
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	os.Exit(0)
+}
+
+func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": "old-version",
+		"pid":     os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+
+	origSignal := signalDaemonStopForEnsure
+	var signaled daemon.RuntimeRecord
+	var signaledDBHash string
+	signalDaemonStopForEnsure = func(rec daemon.RuntimeRecord, dbhash string) error {
+		signaled = rec
+		signaledDBHash = dbhash
+		return os.Remove(filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", rec.PID)))
+	}
+	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+
+	require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
+	assert.Equal(t, os.Getpid(), signaled.PID)
+	assert.Equal(t, ns.DBHash, signaledDBHash)
+}
+
+func TestStopRunningDaemonsReturnsSignalError(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": "old-version",
+		"pid":     os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), addr))
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+
+	origSignal := signalDaemonStopForEnsure
+	signalDaemonStopForEnsure = func(daemon.RuntimeRecord, string) error {
+		return assert.AnError
+	}
+	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
+	require.ErrorIs(t, err, assert.AnError)
 }
 
 func TestStopRunningDaemonsErrorsOnUnverifiableIncompatibleRuntime(t *testing.T) {
@@ -113,7 +191,7 @@ func TestStopRunningDaemonsErrorsOnUnverifiableIncompatibleRuntime(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 
-	err = stopRunningDaemons(ctx, ns.DataDir)
+	err = stopRunningDaemons(ctx, ns.DataDir, ns.DBHash)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "PID could not be verified")
 
@@ -182,7 +260,7 @@ func patchEnsureHooks(t *testing.T, version, startedURL string) *ensurePatchStat
 	origStop := stopRunningDaemonsForEnsure
 	origStart := startDaemonForEnsure
 	currentVersionForEnsure = func() string { return version }
-	stopRunningDaemonsForEnsure = func(context.Context, string) error {
+	stopRunningDaemonsForEnsure = func(context.Context, string, string) error {
 		state.stopCalls++
 		return nil
 	}

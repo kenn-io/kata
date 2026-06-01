@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -395,15 +396,31 @@ func TestEnsureDaemon_ReturnsExistingURL(t *testing.T) {
 
 func startSleepProcess(t *testing.T) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command("sleep", "60") //nolint:gosec // test helper starts a controlled local process
+	cmd := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
+	cmd.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
+	stdin, err := cmd.StdinPipe()
+	require.NoError(t, err)
 	require.NoError(t, cmd.Start())
 	t.Cleanup(func() {
-		if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+		_ = stdin.Close()
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
 			_ = cmd.Process.Kill()
+			<-done
 		}
-		_ = cmd.Wait()
 	})
 	return cmd
+}
+
+func TestDaemonCommandSleepHelperProcess(_ *testing.T) {
+	if os.Getenv("KATA_DAEMON_CMD_SLEEP_HELPER") != "1" {
+		return
+	}
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	os.Exit(0)
 }
 
 func writeRuntimePID(t *testing.T, home string, pid int) {
