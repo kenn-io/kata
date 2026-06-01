@@ -1,0 +1,7 @@
+# Force LF line endings on checkout across all platforms. Git for Windows
+# defaults to core.autocrlf=true, which rewrites text files to CRLF on
+# checkout. The TUI golden snapshots in internal/tui/testdata/golden/ are
+# compared byte-for-byte against LF-rendered output, so a CRLF checkout
+# breaks every snapshot test on Windows CI. text=auto leaves detected
+# binary files untouched.
+* text=auto eol=lf
