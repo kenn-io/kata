@@ -19,6 +19,7 @@ nav = [
   {"Guide" = [
     {"Concepts" = "guide/concepts.md"},
     {"Workspaces and projects" = "guide/workspaces-projects.md"},
+    {"Comparisons" = "guide/comparisons.md"},
     {"Migrating from Beads" = "guide/migrating-from-beads.md"},
   ]},
   {"Reference" = [

@@ -60,6 +60,14 @@ kata is intentionally small. It is not a project-management suite, a git
 workflow engine, or an agent worker pool. It is a durable task ledger that
 humans and agents can both operate.
 
+It is also not a SaaS issue tracker. Linear, Jira, GitHub Issues, ClickUp, and
+similar tools are shared online systems for planning, dashboards, assignment,
+and cross-team reporting. kata is local-first, instant from the CLI/TUI, and
+designed around agent-first ergonomics: stable refs, predictable output,
+idempotent creates, claim flows, and evidence-based closes. See
+[Comparisons with SaaS issue trackers](docs/guide/comparisons.md) for the
+matrix.
+
 [Beads](https://github.com/gastownhall/beads) keeps issue state in a
 project-local `.beads/` Dolt database with native history, branching, and
 push/pull. [git-bug](https://github.com/git-bug/git-bug) stores issues as git

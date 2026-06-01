@@ -73,10 +73,16 @@ Avoid treating kata as a full project-management suite, a CI scheduler, an
 agent worker pool, or an authorization platform. Shared-server authorization is
 still deliberately narrow.
 
+If the comparison is to Linear, Jira, GitHub Issues, ClickUp, or another hosted
+project-management system, start with the category boundary: kata is
+local-first, not software-as-a-service. See
+[Comparisons](guide/comparisons.md) for the practical trade-offs.
+
 ## Start here
 
 Read the [Quickstart](get-started/quickstart.md), then skim
-[Concepts](guide/concepts.md) and the [CLI reference](reference/cli.md). Agents
-should use the [Agent workflows](workflows/agents.md) page as their operating
-contract. Coming from Beads? See
+[Concepts](guide/concepts.md), [Comparisons](guide/comparisons.md), and the
+[CLI reference](reference/cli.md). Agents should use the
+[Agent workflows](workflows/agents.md) page as their operating contract. Coming
+from Beads? See
 [Migrating from Beads](guide/migrating-from-beads.md).
