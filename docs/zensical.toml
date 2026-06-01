@@ -45,6 +45,7 @@ nav = [
   ]},
   {"Development" = [
     {"Contributing" = "development/contributing.md"},
+    {"Deploying docs" = "development/deploying-docs.md"},
   ]},
 ]
 

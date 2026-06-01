@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "uv sync --frozen --no-dev",
+  "buildCommand": "uv run --frozen bash ./vercel-build.sh",
+  "outputDirectory": "site"
+}

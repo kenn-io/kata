@@ -13,6 +13,8 @@ coverage.out
 # Local data dir for manual testing
 /.kata/
 /.venv/
+/docs/.venv/
+/docs/site/
 
 # Git worktrees
 /.worktrees/

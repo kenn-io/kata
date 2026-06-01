@@ -1,4 +1,4 @@
-# kata カタ
+# kata カタ: lightweight issue tracker for humans and agents
 
 kata is a local-first issue tracker for humans and coding agents. It gives
 agents a durable task ledger for issues, comments, links, ownership, and state
