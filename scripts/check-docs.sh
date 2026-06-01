@@ -4,7 +4,6 @@ set -euo pipefail
 missing=0
 
 required_files=(
-  "requirements-docs.txt"
   "docs/index.md"
   "docs/get-started/quickstart.md"
   "docs/get-started/install.md"
@@ -42,6 +41,11 @@ fi
 
 if [[ -e "zensical.toml" ]]; then
   printf 'Zensical config must live under docs/: zensical.toml\n' >&2
+  missing=1
+fi
+
+if [[ -e "requirements-docs.txt" ]]; then
+  printf 'docs dependencies must live under docs/pyproject.toml, not requirements-docs.txt\n' >&2
   missing=1
 fi
 
@@ -99,6 +103,13 @@ require_line docs/development/deploying-docs.md 'Vercel should install with `uv 
 require_line docs/development/deploying-docs.md 'Vercel should build with `uv run --frozen bash ./vercel-build.sh`'
 require_line docs/development/deploying-docs.md 'Vercel should publish the generated `site/` directory'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
+
+for stale_reference in Makefile scripts/zensical-docs.sh docs/development/deploying-docs.md; do
+  if grep -F -- "requirements-docs.txt" "$stale_reference" >/dev/null; then
+    printf 'stale requirements-docs.txt reference in %s\n' "$stale_reference" >&2
+    exit 1
+  fi
+done
 
 stale_config=".zensical-build.XXXXXX.toml"
 stale_docs="zensical-public-docs.XXXXXX"

@@ -54,8 +54,8 @@ dependencies = [
 package = false
 ```
 
-Keep the Zensical version aligned with `requirements-docs.txt` until the
-repository fully moves docs dependency management to uv.
+Update `docs/pyproject.toml` and refresh `docs/uv.lock` together whenever the
+docs toolchain changes.
 
 ## Verification
 

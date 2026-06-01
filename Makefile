@@ -24,14 +24,13 @@ test-federation-docker:
 	./scripts/test-federation-docker.sh
 
 docs-install:
-	python3 -m venv .venv
-	.venv/bin/pip install -r requirements-docs.txt
+	cd docs && uv sync --frozen --no-dev
 
 docs-build:
-	scripts/zensical-docs.sh build
+	cd docs && uv run --frozen bash ../scripts/zensical-docs.sh build
 
 docs-serve:
-	scripts/zensical-docs.sh serve
+	cd docs && uv run bash ../scripts/zensical-docs.sh serve
 
 docs-check:
 	bash scripts/check-docs.sh

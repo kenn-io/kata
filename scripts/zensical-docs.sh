@@ -16,10 +16,12 @@ if [[ -n "${VIRTUAL_ENV:-}" && -x "$VIRTUAL_ENV/bin/zensical" ]]; then
   zensical_bin="$VIRTUAL_ENV/bin/zensical"
 elif [[ -x "$repo_root/.venv/bin/zensical" ]]; then
   zensical_bin="$repo_root/.venv/bin/zensical"
+elif [[ -x "$repo_root/docs/.venv/bin/zensical" ]]; then
+  zensical_bin="$repo_root/docs/.venv/bin/zensical"
 elif command -v zensical >/dev/null 2>&1; then
   zensical_bin="zensical"
 else
-  printf 'zensical not found; install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-docs.txt\n' >&2
+  printf 'zensical not found; install with: cd docs && uv sync --frozen --no-dev\n' >&2
   exit 127
 fi
 
