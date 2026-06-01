@@ -139,9 +139,9 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	require.NoError(t, err)
 
 	origSignal := signalDaemonStopForEnsure
-	var signaled daemon.RuntimeRecord
+	var signaled kitdaemon.RuntimeRecord
 	var signaledDBHash string
-	signalDaemonStopForEnsure = func(rec daemon.RuntimeRecord, dbhash string) error {
+	signalDaemonStopForEnsure = func(rec kitdaemon.RuntimeRecord, dbhash string) error {
 		signaled = rec
 		signaledDBHash = dbhash
 		return os.Remove(filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", rec.PID)))
@@ -167,7 +167,7 @@ func TestStopRunningDaemonsReturnsSignalError(t *testing.T) {
 	require.NoError(t, err)
 
 	origSignal := signalDaemonStopForEnsure
-	signalDaemonStopForEnsure = func(daemon.RuntimeRecord, string) error {
+	signalDaemonStopForEnsure = func(kitdaemon.RuntimeRecord, string) error {
 		return assert.AnError
 	}
 	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })

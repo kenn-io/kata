@@ -11,6 +11,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
+	kitdaemon "go.kenn.io/kit/daemon"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
@@ -26,7 +27,7 @@ import (
 type ServerConfig struct {
 	DB             db.Storage
 	StartedAt      time.Time
-	Endpoint       *DaemonEndpoint
+	Endpoint       *kitdaemon.Endpoint
 	Broadcaster    *EventBroadcaster
 	FederationWake func()
 	Hooks          hooks.Sink

@@ -513,7 +513,7 @@ func newClaimHubHTTPClient(ctx context.Context, baseURL string) (*http.Client, e
 	}
 	recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errClaimHubTransportUnavailable, err)
 	}
 	for _, rec := range recs {
 		if !kitdaemon.ProcessAlive(rec.PID) {

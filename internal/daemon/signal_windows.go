@@ -5,6 +5,7 @@ package daemon
 import (
 	"fmt"
 
+	kitdaemon "go.kenn.io/kit/daemon"
 	"golang.org/x/sys/windows"
 )
 
@@ -21,12 +22,12 @@ func ReloadEventName(dbhash string, pid int) string {
 }
 
 // SignalDaemonStop asks a running daemon to shut down gracefully.
-func SignalDaemonStop(rec RuntimeRecord, dbhash string) error {
+func SignalDaemonStop(rec kitdaemon.RuntimeRecord, dbhash string) error {
 	return setNamedEvent(StopEventName(dbhash, rec.PID))
 }
 
 // SignalDaemonReload asks a running daemon to reload hook configuration.
-func SignalDaemonReload(rec RuntimeRecord, dbhash string) error {
+func SignalDaemonReload(rec kitdaemon.RuntimeRecord, dbhash string) error {
 	return setNamedEvent(ReloadEventName(dbhash, rec.PID))
 }
 

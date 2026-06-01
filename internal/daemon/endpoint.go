@@ -7,9 +7,6 @@ import (
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
-// DaemonEndpoint is the shared kit daemon endpoint type.
-type DaemonEndpoint = kitdaemon.Endpoint
-
 // AutoStartMarkerEnv names the environment variable set on implicitly spawned
 // daemon processes so hosted $PORT detection can be skipped.
 const AutoStartMarkerEnv = "KATA_AUTOSTART"
