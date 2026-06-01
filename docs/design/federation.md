@@ -460,27 +460,30 @@ Arrays are atomic leaves, with no element-level array CRDT, so a checklist is
 replaced wholesale. The only place `null` acts as a marker is the top-level
 "clear this key" convention, which surfaces as structural absence anyway.
 
-### Why Leases Do Not Block Ordinary Edits
+### Why Leases Are Optional Coordination, Not An Edit Gate
 
 A lease answers "who is actively working this issue right now," which is a
-different question from `owner` ("who is responsible"). Because edits are
-local-first and asynchronous, the hub cannot reject a mutation that already
-happened offline, so lease enforcement is not a synchronous write gate. It is
-layered, with no data loss:
+different question from `owner` ("who is responsible"). Leases exist to help
+agents avoid double-work; they are deliberately **not** a prerequisite for
+editing a federated issue. This is the point the implementation and docs were
+realigned to after some early drift toward treating a lease as a write gate.
 
-1. Lease exclusivity is **mechanical** — the hub guarantees at most one live
-   holder.
-2. A spoke refuses a *conflicting* mutation while another holder has a live
-   lease, but ordinary unleased edits proceed and converge by LWW.
-3. If conflicting work arrives anyway — for example from a spoke that was offline
-   — the hub records `claim.violated` and surfaces it rather than dropping the
-   data.
+The reason is the local-first goal. Edits are asynchronous and may happen
+offline, so requiring a live lease before every edit would force a synchronous
+hub round-trip and trade away the offline editing that federation exists to
+preserve. Ordinary edits are therefore always local-first and converge by LWW. A
+lease adds only temporary exclusivity against *conflicting* non-comment work by
+another holder while it is live — the hub guarantees at most one live holder.
+Unleased work is normal and is never a violation; pending or expired leases do
+not block edits; and comments always pass because they are append-only.
 
-A strictly synchronous hub-reject model is possible only by making agent edits
-synchronous, which trades away offline editing; this design declines that trade.
-Lease state — especially timed-lease expiry after renewals — is authoritative
-from the hub, not folded from events, so a spoke treats cached lease state as
-possibly stale and confirms against the hub before relying on exclusivity.
+Because the hub cannot reject a mutation that already happened offline, it does
+not try to. When pushed work conflicts with another holder's live lease the hub
+keeps the data and records a best-effort `claim.violated` annotation rather than
+dropping anything. Lease state — especially timed-lease expiry after renewals —
+is authoritative from the hub, not folded from events, so a spoke treats cached
+lease state as a hint and confirms against the hub before relying on
+exclusivity, never as proof that exclusivity still holds.
 
 ### Rejected And Deferred Alternatives
 
