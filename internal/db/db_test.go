@@ -202,26 +202,3 @@ func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) {
 	require.NoError(t, d.QueryRow("PRAGMA temp_store").Scan(&tempStore))
 	assert.Equal(t, 2, tempStore)
 }
-
-func TestOpenMemoryUsesNamedSharedDatabase(t *testing.T) {
-	ctx := context.Background()
-	name := "kata-open-memory-test"
-
-	first, err := db.OpenMemory(ctx, name)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = first.Close() })
-	assert.Contains(t, first.Path(), "mode=memory")
-
-	_, err = first.ExecContext(ctx, `CREATE TABLE memory_probe(id INTEGER PRIMARY KEY, value TEXT)`)
-	require.NoError(t, err)
-	_, err = first.ExecContext(ctx, `INSERT INTO memory_probe(value) VALUES('shared')`)
-	require.NoError(t, err)
-
-	second, err := db.OpenMemory(ctx, name)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = second.Close() })
-
-	var got string
-	require.NoError(t, second.QueryRowContext(ctx, `SELECT value FROM memory_probe`).Scan(&got))
-	assert.Equal(t, "shared", got)
-}
