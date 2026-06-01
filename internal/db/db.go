@@ -10,7 +10,10 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver registered as "sqlite"
@@ -22,6 +25,8 @@ import (
 var schemaSQL string
 
 const currentSchemaVersion = 12
+
+const testSkipCloseCheckpointEnv = "KATA_TEST_SKIP_DB_CLOSE_CHECKPOINT"
 
 // CurrentSchemaVersion returns the schema version expected by this binary.
 func CurrentSchemaVersion() int { return currentSchemaVersion }
@@ -182,12 +187,20 @@ func (d *DB) Close() error {
 		return nil
 	}
 	var checkpointErr error
-	if !d.readOnly {
+	if !d.readOnly && !skipCloseCheckpointForTestHarness() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		checkpointErr = d.Checkpoint(ctx)
 		cancel()
 	}
 	return errors.Join(checkpointErr, d.DB.Close())
+}
+
+func skipCloseCheckpointForTestHarness() bool {
+	if os.Getenv(testSkipCloseCheckpointEnv) != "1" {
+		return false
+	}
+	bin := strings.ToLower(filepath.Base(os.Args[0]))
+	return strings.HasSuffix(bin, ".test") || strings.HasSuffix(bin, ".test.exe")
 }
 
 // Path returns the resolved database path.

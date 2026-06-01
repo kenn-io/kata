@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -175,4 +176,43 @@ func TestCheckpointTruncatesWAL(t *testing.T) {
 	}
 	require.NoError(t, err)
 	assert.Zero(t, after.Size(), "TRUNCATE checkpoint should leave no WAL bytes")
+}
+
+func TestCloseSkipsCheckpointWhenTestHarnessRequestsIt(t *testing.T) {
+	t.Setenv("KATA_TEST_SKIP_DB_CLOSE_CHECKPOINT", "1")
+
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	d, err := db.Open(ctx, path)
+	require.NoError(t, err)
+	d.SetMaxOpenConns(1)
+
+	_, err = d.ExecContext(ctx, `PRAGMA wal_autocheckpoint=0`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `CREATE TABLE close_noise(id INTEGER PRIMARY KEY, body BLOB)`)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		WITH RECURSIVE seq(x) AS (
+			SELECT 1
+			UNION ALL
+			SELECT x + 1 FROM seq WHERE x < 128
+		)
+		INSERT INTO close_noise(body)
+		SELECT randomblob(4096) FROM seq`)
+	require.NoError(t, err)
+
+	before, err := os.Stat(path + "-wal")
+	require.NoError(t, err)
+	require.Positive(t, before.Size(), "test setup must create WAL frames")
+
+	hold, err := sql.Open("sqlite", fmt.Sprintf("file:%s?mode=ro", path))
+	require.NoError(t, err)
+	defer func() { _ = hold.Close() }()
+	require.NoError(t, hold.PingContext(ctx))
+
+	require.NoError(t, d.Close())
+
+	after, err := os.Stat(path + "-wal")
+	require.NoError(t, err)
+	assert.Positive(t, after.Size(), "test harness close should not truncate WAL")
 }
