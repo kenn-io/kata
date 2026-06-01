@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
@@ -353,7 +354,7 @@ func claimViolationLines(out string) []string {
 
 func enqueueCLIPendingClaim(
 	t *testing.T,
-	store *db.DB,
+	store *sqlitestore.Store,
 	projectID int64,
 	ref string,
 	holder string,

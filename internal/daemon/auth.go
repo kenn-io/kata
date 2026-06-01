@@ -43,8 +43,8 @@ type authPolicy struct {
 //
 // /api/v1/ping and /api/v1/health bypass unconditionally so health-check probes
 // do not need credentials.
-func requireBearer(p authPolicy, tokenStores ...*db.DB) func(http.Handler) http.Handler {
-	var tokenStore *db.DB
+func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) http.Handler {
+	var tokenStore db.Storage
 	if len(tokenStores) > 0 {
 		tokenStore = tokenStores[0]
 	}
@@ -96,7 +96,7 @@ func requireBearer(p authPolicy, tokenStores ...*db.DB) func(http.Handler) http.
 	}
 }
 
-func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Handler, p authPolicy, tokenStore *db.DB) {
+func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Handler, p authPolicy, tokenStore db.Storage) {
 	got := r.Header.Get(authHeader)
 	if !strings.HasPrefix(got, authBearerPrefix) {
 		api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required",

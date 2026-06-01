@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,12 +22,13 @@ type Namespace struct {
 	SocketDir string
 }
 
-// NewNamespace resolves directories from $KATA_HOME / $KATA_DB / $XDG_RUNTIME_DIR / $TMPDIR.
-// Directories are not created — call EnsureDirs at startup.
+// NewNamespace resolves directories from $KATA_HOME, the effective DB DSN
+// (via config.KataDSN), $XDG_RUNTIME_DIR, and $TMPDIR. Directories are not
+// created — call EnsureDirs at startup.
 func NewNamespace() (*Namespace, error) {
-	dbPath, err := config.KataDB()
+	dbPath, err := config.KataDSN(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("resolve KATA_DB: %w", err)
+		return nil, fmt.Errorf("resolve kata DSN: %w", err)
 	}
 	dataRoot, err := config.RuntimeDir()
 	if err != nil {

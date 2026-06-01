@@ -38,7 +38,7 @@ const repeatedMessageWindow = 30 * time.Minute
 // issueShortID is the user-facing ref quoted in the "kata show ... --json"
 // hint so the suggested command is something the user can actually run.
 func CheckParentCloseCompleteness(
-	ctx context.Context, d *db.DB, projectID, issueID int64, issueShortID string,
+	ctx context.Context, d db.Storage, projectID, issueID int64, issueShortID string,
 ) error {
 	children, total, err := d.OpenChildrenOf(ctx, projectID, issueID, openChildrenSampleLimit)
 	if err != nil {
@@ -88,7 +88,7 @@ func CheckParentCloseCompleteness(
 // record of refused attempts and the limit's eventual self-correction is
 // the practical bound.
 func CheckSiblingCloseThrottle(
-	ctx context.Context, d *db.DB,
+	ctx context.Context, d db.Storage,
 	projectID, issueID int64, actor string, now time.Time,
 ) (parentShortID string, cohort []string, refusal error) {
 	parentLink, err := d.ParentOf(ctx, issueID)
@@ -154,7 +154,7 @@ func CheckSiblingCloseThrottle(
 // the audit trail and the window's later self-correction bound the
 // exposure.
 func CheckRepeatedMessageGuard(
-	ctx context.Context, d *db.DB,
+	ctx context.Context, d db.Storage,
 	projectID, issueID int64,
 	actor, reason, message string, now time.Time,
 ) (priorShortID, parentShortID string, refusal error) {

@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
 )
 
@@ -33,14 +34,14 @@ func newExportCmd() *cobra.Command {
 					return err
 				}
 			}
-			dbPath, err := config.KataDB()
+			dbPath, err := config.KataDSN(ctx)
 			if err != nil {
 				return err
 			}
 			if output == "" {
 				output = "kata-export-" + time.Now().UTC().Format("20060102T150405Z") + ".jsonl"
 			}
-			d, err := db.OpenReadOnly(ctx, dbPath)
+			d, _, err := storeopen.Open(ctx, dbPath)
 			if err != nil {
 				return err
 			}
@@ -74,7 +75,7 @@ func newExportCmd() *cobra.Command {
 	return cmd
 }
 
-func writeExportOutput(ctx context.Context, d *db.DB, output string, opts jsonl.ExportOptions) error {
+func writeExportOutput(ctx context.Context, d db.Storage, output string, opts jsonl.ExportOptions) error {
 	dir := filepath.Dir(output)
 	base := filepath.Base(output)
 	f, err := os.CreateTemp(dir, "."+base+".tmp-*")
@@ -115,7 +116,7 @@ func writeExportOutput(ctx context.Context, d *db.DB, output string, opts jsonl.
 // using the read-only export handle. Conflicts and unknown names surface as
 // validation errors so scripts get a clean failure rather than a silent
 // full-DB export.
-func resolveExportProject(ctx context.Context, d *db.DB, projectID int64) (int64, error) {
+func resolveExportProject(ctx context.Context, d db.Storage, projectID int64) (int64, error) {
 	name := strings.TrimSpace(flags.Project)
 	if name == "" {
 		return projectID, nil

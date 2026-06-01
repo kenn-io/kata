@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -560,7 +561,7 @@ func testShowIssueClaimRefreshStatusErrorWithoutPendingDoesNotHotLoop(t *testing
 
 func enqueueShowPendingClaim(
 	t *testing.T,
-	store *db.DB,
+	store *sqlitestore.Store,
 	projectID int64,
 	ref string,
 	holder string,
@@ -582,7 +583,7 @@ func enqueueShowPendingClaim(
 	return pending
 }
 
-func assertShowLiveClaimCount(t *testing.T, store *db.DB, issueUID string, want int) {
+func assertShowLiveClaimCount(t *testing.T, store *sqlitestore.Store, issueUID string, want int) {
 	t.Helper()
 	var got int
 	require.NoError(t, store.QueryRow(
@@ -591,7 +592,7 @@ func assertShowLiveClaimCount(t *testing.T, store *db.DB, issueUID string, want 
 	assert.Equal(t, want, got)
 }
 
-func assertShowEventCount(t *testing.T, store *db.DB, eventType string, want int) {
+func assertShowEventCount(t *testing.T, store *sqlitestore.Store, eventType string, want int) {
 	t.Helper()
 	var got int
 	require.NoError(t, store.QueryRow(

@@ -3,11 +3,13 @@
 package config
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // KataHome returns the resolved data directory honoring $KATA_HOME, falling back
@@ -23,22 +25,36 @@ func KataHome() (string, error) {
 	return filepath.Join(home, ".kata"), nil
 }
 
-// KataDB returns the effective DB path honoring $KATA_DB, falling back to
-// <KataHome>/kata.db. Returned path is not validated for existence.
-func KataDB() (string, error) {
-	if v := os.Getenv("KATA_DB"); v != "" {
-		return v, nil
-	}
-	home, err := KataHome()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, "kata.db"), nil
-}
+// KataDB returns the effective database DSN. It now delegates to KataDSN so
+// existing callers pick up the full precedence chain (KATA_DSN env >
+// [storage].dsn in config.toml > legacy KATA_DB env > default
+// <KataHome>/kata.db). The returned value is whatever the user supplied: a
+// bare filesystem path (default and KATA_DB cases) or a sqlite/postgres DSN
+// (KATA_DSN / [storage].dsn cases).
+//
+// Kept under the old name so call sites and external scripts that spell it
+// the older way continue to resolve through the same path; new code should
+// prefer KataDSN.
+func KataDB() (string, error) { return KataDSN(context.Background()) }
 
 // DBHash returns the first 12 lower-hex chars of sha256(absolute(dbPath)).
 // Used to namespace runtime files, sockets, and hook output per database.
+// A postgres:// DSN is hashed by its credential-free canonical identity so
+// runtime files never derive from a string that carries a password.
 func DBHash(dbPath string) string {
+	if strings.HasPrefix(dbPath, "postgres://") || strings.HasPrefix(dbPath, "postgresql://") {
+		identity, err := CanonicalDSNIdentity(dbPath)
+		if err != nil {
+			// Never hash a raw postgres DSN — it may carry credentials. Fall
+			// back to the redacted form so a malformed DSN still produces a
+			// stable, credential-free hash.
+			identity = RedactDSN(dbPath)
+		}
+		// A postgres identity is credential-free and is not a filesystem path,
+		// so it must not pass through filepath.Abs.
+		sum := sha256.Sum256([]byte(identity))
+		return hex.EncodeToString(sum[:])[:12]
+	}
 	abs, err := filepath.Abs(dbPath)
 	if err != nil {
 		abs = dbPath

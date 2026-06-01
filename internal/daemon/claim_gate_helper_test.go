@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -190,17 +191,22 @@ func TestClaimGateHelperPullOnlySpokeRejectsEvenWithCachedClaim(t *testing.T) {
 	assertClaimGateHelperAPIError(t, err, http.StatusConflict, "federated_read_only")
 }
 
-func openClaimGateHelperDB(t *testing.T) *db.DB {
+func openClaimGateHelperDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
-	store, err := db.Open(context.Background(), filepath.Join(home, "kata.db"))
+	ctx := context.Background()
+	store, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
+	if _, err := store.Migrate(ctx); err != nil {
+		_ = store.Close()
+		t.Fatalf("migrate claim-gate helper db: %v", err)
+	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
-func createClaimGateHelperIssue(t *testing.T, store *db.DB) (db.Project, db.Issue) {
+func createClaimGateHelperIssue(t *testing.T, store *sqlitestore.Store) (db.Project, db.Issue) {
 	t.Helper()
 	project, err := store.CreateProject(context.Background(), "claim-helper")
 	require.NoError(t, err)
@@ -213,18 +219,18 @@ func createClaimGateHelperIssue(t *testing.T, store *db.DB) (db.Project, db.Issu
 	return project, issue
 }
 
-func enableClaimGateHelperHub(t *testing.T, store *db.DB, projectID int64) {
+func enableClaimGateHelperHub(t *testing.T, store *sqlitestore.Store, projectID int64) {
 	t.Helper()
 	_, err := store.EnableProjectFederation(context.Background(), projectID, "tester")
 	require.NoError(t, err)
 }
 
-func enableClaimGateHelperSpoke(t *testing.T, store *db.DB, project db.Project, hubURL string, hubProjectID int64) {
+func enableClaimGateHelperSpoke(t *testing.T, store *sqlitestore.Store, project db.Project, hubURL string, hubProjectID int64) {
 	t.Helper()
 	enableClaimGateHelperSpokeWithPush(t, store, project, hubURL, hubProjectID, true)
 }
 
-func enableClaimGateHelperSpokeWithPush(t *testing.T, store *db.DB, project db.Project, hubURL string, hubProjectID int64, pushEnabled bool) {
+func enableClaimGateHelperSpokeWithPush(t *testing.T, store *sqlitestore.Store, project db.Project, hubURL string, hubProjectID int64, pushEnabled bool) {
 	t.Helper()
 	_, err := store.UpsertFederationBinding(context.Background(), db.FederationBinding{
 		ProjectID:     project.ID,

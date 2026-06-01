@@ -24,7 +24,7 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
-	DB             *db.DB
+	DB             db.Storage
 	StartedAt      time.Time
 	Endpoint       DaemonEndpoint
 	Broadcaster    *EventBroadcaster

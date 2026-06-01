@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	gitcmd "go.kenn.io/kit/git/cmd"
 	"pgregory.net/rapid"
 )
@@ -59,7 +60,7 @@ type federationStressNode struct {
 	dirs    e2eDirs
 	url     string
 	http    *http.Client
-	db      *db.DB
+	db      *sqlitestore.Store
 	stderr  *safeBuffer
 	cmd     *exec.Cmd
 	online  bool
@@ -621,8 +622,8 @@ func (fx *federationStressFixture) waitForFoldedProjectionMatch(t federationStre
 
 func stressFoldedProjections(
 	t federationStressTB,
-	hub *db.DB,
-	spoke *db.DB,
+	hub *sqlitestore.Store,
+	spoke *sqlitestore.Store,
 	hubProjectID int64,
 	spokeProjectID int64,
 	hubAfterID int64,
@@ -684,7 +685,7 @@ func startFederationStressHub(t federationStressTB, bin string) federationStress
 	cmd := startFederationStressTCPDaemon(t, bin, dirs, stderr, addr)
 	url := "http://" + addr
 	stressWaitForPing(t, url, 5*time.Second)
-	store, err := db.Open(context.Background(), dirs.dbPath)
+	store, err := sqlitestore.Open(context.Background(), dirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return federationStressNode{
@@ -728,7 +729,7 @@ func startFederationStressSpoke(t federationStressTB, bin string) federationStre
 	stderr := &safeBuffer{}
 	cmd := startFederationStressUnixDaemon(t, bin, dirs, stderr)
 	url, client := stressConnectDaemon(t, dirs, stderr)
-	store, err := db.Open(context.Background(), dirs.dbPath)
+	store, err := sqlitestore.Open(context.Background(), dirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return federationStressNode{dirs: dirs, url: url, http: client, db: store, stderr: stderr, cmd: cmd, online: true}
@@ -752,7 +753,7 @@ func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eD
 	return cmd
 }
 
-func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node string, store *db.DB) {
+func assertNoDuplicateLiveClaimsOnNode(t federationStressTB, node string, store *sqlitestore.Store) {
 	t.Helper()
 	rows, err := store.QueryContext(context.Background(), `
 		SELECT issue_uid, COUNT(*)

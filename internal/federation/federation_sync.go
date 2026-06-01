@@ -36,7 +36,7 @@ var ErrFederationResetBlockedByQuarantine = db.ErrFederationResetBlockedByQuaran
 // SyncFederationOnce pulls one spoke binding from its configured hub.
 func SyncFederationOnce(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	binding db.FederationBinding,
 	creds config.FederationCredential,
 ) error {
@@ -49,7 +49,7 @@ func SyncFederationOnce(
 // package depend on daemon internals.
 func SyncFederationOnceWithPulledEvents(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	binding db.FederationBinding,
 	creds config.FederationCredential,
 	opts clientpkg.Opts,
@@ -177,7 +177,7 @@ func SyncFederationOnceWithPulledEvents(
 		}
 	}
 	var pulledEvents []db.Event
-	if err := db.RetryLockContention(ctx, func() error {
+	if err := store.RetryTransient(ctx, func() error {
 		currentBinding, err := store.FederationBindingByProject(ctx, binding.ProjectID)
 		if err != nil {
 			return err
@@ -228,7 +228,7 @@ func SyncFederationOnceWithPulledEvents(
 
 func shouldDeliverDuplicatePulledEvent(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	binding db.FederationBinding,
 	runStartBinding db.FederationBinding,
 	ev api.EventEnvelope,
@@ -309,7 +309,7 @@ func isPoisonedFederationPushError(err error) bool {
 
 func recordFederationPushQuarantine(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	projectID int64,
 	events []db.Event,
 	syncErr error,
@@ -353,7 +353,7 @@ func remoteEventFromEnvelope(ev api.EventEnvelope) db.RemoteEvent {
 
 // Runner quietly pulls every enabled spoke binding.
 type Runner struct {
-	DB             *db.DB
+	DB             db.Storage
 	Opts           clientpkg.Opts
 	Interval       time.Duration
 	Wake           <-chan struct{}
@@ -455,7 +455,7 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 // authoritative hub.
 func RetryPendingClaimsOnce(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	binding db.FederationBinding,
 	creds config.FederationCredential,
 	opts clientpkg.Opts,
@@ -510,7 +510,7 @@ func RetryPendingClaimsOnce(
 	return store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC())
 }
 
-func recordFederationSyncError(ctx context.Context, store *db.DB, projectID int64, syncErr error) error {
+func recordFederationSyncError(ctx context.Context, store db.Storage, projectID int64, syncErr error) error {
 	if syncErr == nil {
 		return nil
 	}
@@ -522,7 +522,7 @@ func recordFederationSyncError(ctx context.Context, store *db.DB, projectID int6
 
 func retryPendingClaim(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	client *Client,
 	hubProjectID int64,
 	pending db.PendingClaimRequest,

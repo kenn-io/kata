@@ -103,7 +103,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 
 		var result db.ClaimResult
-		err = db.RetryLockContention(ctx, func() error {
+		err = cfg.DB.RetryTransient(ctx, func() error {
 			var err error
 			result, err = cfg.DB.ClaimOwner(ctx, issue.ID, actor, in.Body.Force)
 			return err

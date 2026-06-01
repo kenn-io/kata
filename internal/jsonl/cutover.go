@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 // ErrCutoverInProgress means a previous JSONL cutover left temp files behind.
@@ -26,7 +26,7 @@ func AutoCutover(ctx context.Context, path string) error {
 	if err := rejectCutoverTemps(tmpJSONL, tmpDB); err != nil {
 		return err
 	}
-	version, err := db.PeekSchemaVersion(ctx, path)
+	version, err := sqlitestore.PeekSchemaVersion(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func rejectCutoverTemps(paths ...string) error {
 }
 
 func exportCutoverSource(ctx context.Context, sourcePath, tmpJSONL string) error {
-	source, err := db.OpenReadOnly(ctx, sourcePath)
+	source, err := sqlitestore.Open(ctx, sourcePath, db.ReadOnly())
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func exportCutoverSource(ctx context.Context, sourcePath, tmpJSONL string) error
 	if err != nil {
 		return fmt.Errorf("create cutover jsonl: %w", err)
 	}
-	if err := Export(ctx, source, f, ExportOptions{IncludeDeleted: true}); err != nil {
+	if err := exportForCutover(ctx, source, f, ExportOptions{IncludeDeleted: true}); err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -108,11 +108,17 @@ func exportCutoverSource(ctx context.Context, sourcePath, tmpJSONL string) error
 }
 
 func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string) error {
-	target, err := db.Open(ctx, tmpDB)
+	target, err := sqlitestore.Open(ctx, tmpDB)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = target.Close() }()
+	// sqlitestore.Open no longer bootstraps; Migrate is now the single owner
+	// of the baseline schema, so the cutover target needs an explicit
+	// Migrate before any import row can land.
+	if _, err := target.Migrate(ctx); err != nil {
+		return fmt.Errorf("migrate cutover target: %w", err)
+	}
 	in, err := os.Open(tmpJSONL) //nolint:gosec // temp path is generated from trusted DB path
 	if err != nil {
 		return fmt.Errorf("open cutover jsonl: %w", err)
@@ -121,12 +127,8 @@ func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string) error {
 	if err := Import(ctx, in, target); err != nil {
 		return err
 	}
-	if _, err := target.ExecContext(ctx,
-		`INSERT INTO meta(key, value) VALUES('schema_version', ?)
-		 ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
-		strconv.Itoa(db.CurrentSchemaVersion())); err != nil {
-		return fmt.Errorf("record cutover schema version: %w", err)
-	}
+	// ImportReplay stamps meta.schema_version inside the import transaction, so
+	// no follow-up write is needed here.
 	return nil
 }
 

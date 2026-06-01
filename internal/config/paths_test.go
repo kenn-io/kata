@@ -56,6 +56,30 @@ func TestKataDB_DefaultsToHomeKataDB(t *testing.T) {
 	assert.Equal(t, filepath.Join(home, "kata.db"), got)
 }
 
+func TestKataDB_DelegatesToKataDSN_EnvDSN(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_DSN", "postgres://db/kata")
+	t.Setenv("KATA_DB", "")
+
+	got, err := config.KataDB()
+	require.NoError(t, err)
+	assert.Equal(t, "postgres://db/kata", got,
+		"KataDB must now resolve through KataDSN so KATA_DSN reaches the same callers")
+}
+
+func TestKataDB_DelegatesToKataDSN_StorageDSN(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_DB", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[storage]\ndsn = \"postgres://from-toml/kata\"\n"), 0o600))
+
+	got, err := config.KataDB()
+	require.NoError(t, err)
+	assert.Equal(t, "postgres://from-toml/kata", got)
+}
+
 func TestDBHash_StableTwelveLowerHex(t *testing.T) {
 	a := config.DBHash("/Users/foo/.kata/kata.db")
 	b := config.DBHash("/Users/foo/.kata/kata.db")
@@ -65,6 +89,23 @@ func TestDBHash_StableTwelveLowerHex(t *testing.T) {
 	assert.Equal(t, a, b)
 	assert.NotEqual(t, a, c)
 	assert.Equal(t, strings.ToLower(a), a)
+}
+
+func TestDBHashSQLitePathUnchanged(t *testing.T) {
+	// Golden value pins the pre-1d SQLite hashing (sha256(abs(path))[:12]) so
+	// the move never relocates an existing database's runtime dir/socket.
+	assert.Equal(t, "1f9b906d5e3f", config.DBHash("/var/lib/kata/kata.db"))
+}
+
+func TestDBHashPostgresUsesCredentialFreeCanonicalForm(t *testing.T) {
+	full := "postgres://user:SECRET@db.example.com:5432/kata?sslmode=require" //nolint:gosec // fixture proves the credential never reaches the hash
+	got := config.DBHash(full)
+	// Stable canonical identity, independent of credentials, query params, and
+	// the postgres default port (5432).
+	assert.Equal(t, "7d5d38a526ca", got)
+	assert.Equal(t, got, config.DBHash("postgres://other:pw2@db.example.com:5432/kata?application_name=x"))
+	// Explicit :5432 must hash the same as no-port (same logical DB).
+	assert.Equal(t, got, config.DBHash("postgres://db.example.com/kata"))
 }
 
 func TestRuntimeDir_NamespaceIsDBHashUnderHome(t *testing.T) {

@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -370,7 +369,7 @@ func federationCapabilitiesContain(capabilities, want string) bool {
 
 func ensureReplicaBindingOrAdopt(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	in *api.CreateFederationReplicaRequest,
 ) (db.Project, db.FederationBinding, bool, int64, error) {
 	if in.Body.AdoptExisting {
@@ -386,7 +385,7 @@ func ensureReplicaBindingOrAdopt(
 
 func adoptExistingReplica(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	in *api.CreateFederationReplicaRequest,
 ) (db.AdoptProjectIntoFederationResult, bool, error) {
 	projectName := strings.TrimSpace(in.Body.ProjectName)
@@ -472,7 +471,7 @@ func adoptExistingReplica(
 
 func ensureReplicaBinding(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	in *api.CreateFederationReplicaRequest,
 ) (db.Project, db.FederationBinding, error) {
 	projectName := strings.TrimSpace(in.Body.ProjectName)
@@ -540,7 +539,7 @@ func ensureReplicaBinding(
 	return project, binding, nil
 }
 
-func enableReplicaPush(ctx context.Context, store *db.DB, projectID int64) (db.FederationBinding, error) {
+func enableReplicaPush(ctx context.Context, store db.Storage, projectID int64) (db.FederationBinding, error) {
 	localCursor, err := maxLocalOriginEventID(ctx, store, projectID)
 	if err != nil {
 		return db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
@@ -552,20 +551,8 @@ func enableReplicaPush(ctx context.Context, store *db.DB, projectID int64) (db.F
 	return binding, nil
 }
 
-func maxLocalOriginEventID(ctx context.Context, store *db.DB, projectID int64) (int64, error) {
-	var n sql.NullInt64
-	if err := store.QueryRowContext(ctx, `
-		SELECT MAX(id)
-		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?`,
-		projectID, store.InstanceUID()).Scan(&n); err != nil {
-		return 0, fmt.Errorf("max local-origin event id: %w", err)
-	}
-	if !n.Valid {
-		return 0, nil
-	}
-	return n.Int64, nil
+func maxLocalOriginEventID(ctx context.Context, store db.Storage, projectID int64) (int64, error) {
+	return store.MaxLocalOriginEventID(ctx, projectID)
 }
 
 func compatibleReplicaBinding(existing db.FederationBinding, in *api.CreateFederationReplicaRequest) bool {
@@ -607,7 +594,7 @@ func federationEnrollmentToOut(enrollment db.FederationEnrollment, token string)
 	}
 }
 
-func federationStatusBody(ctx context.Context, store *db.DB, projectID *int64) (api.FederationStatusBody, error) {
+func federationStatusBody(ctx context.Context, store db.Storage, projectID *int64) (api.FederationStatusBody, error) {
 	bindings, err := federationStatusBindings(ctx, store, projectID)
 	if err != nil {
 		return api.FederationStatusBody{}, err
@@ -634,7 +621,7 @@ func isProjectNotFound(err error) bool {
 		apiErr.Code == "project_not_found"
 }
 
-func federationStatusBindings(ctx context.Context, store *db.DB, projectID *int64) ([]db.FederationBinding, error) {
+func federationStatusBindings(ctx context.Context, store db.Storage, projectID *int64) ([]db.FederationBinding, error) {
 	if projectID == nil {
 		bindings, err := store.ListFederationBindings(ctx)
 		if err != nil {
@@ -655,7 +642,7 @@ func federationStatusBindings(ctx context.Context, store *db.DB, projectID *int6
 	return []db.FederationBinding{binding}, nil
 }
 
-func federationProjectStatus(ctx context.Context, store *db.DB, binding db.FederationBinding) (api.FederationProjectStatus, error) {
+func federationProjectStatus(ctx context.Context, store db.Storage, binding db.FederationBinding) (api.FederationProjectStatus, error) {
 	project, err := activeProjectByID(ctx, store, binding.ProjectID)
 	if err != nil {
 		return api.FederationProjectStatus{}, err
@@ -772,55 +759,26 @@ func federationViolationSummaries(violations []db.ClaimViolationSummary) []api.F
 	return out
 }
 
-func federationPendingPushStats(ctx context.Context, store *db.DB, binding db.FederationBinding) (int64, int64, error) {
+func federationPendingPushStats(ctx context.Context, store db.Storage, binding db.FederationBinding) (int64, int64, error) {
 	if binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
 		return 0, 0, nil
 	}
 	return store.PendingFederationPushStats(ctx, binding.ProjectID, store.InstanceUID(), binding.PushCursorEventID)
 }
 
-func federationEnrollmentCount(ctx context.Context, store *db.DB, binding db.FederationBinding) (int64, error) {
+func federationEnrollmentCount(ctx context.Context, store db.Storage, binding db.FederationBinding) (int64, error) {
 	if binding.Role != db.FederationRoleHub {
 		return 0, nil
 	}
-	var count int64
-	if err := store.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		  FROM federation_enrollments
-		 WHERE revoked_at IS NULL
-		   AND (project_id = ? OR project_id IS NULL)`,
-		binding.ProjectID).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count federation enrollments: %w", err)
-	}
-	return count, nil
+	return store.CountActiveFederationEnrollments(ctx, binding.ProjectID)
 }
 
-func federationLiveClaimCount(ctx context.Context, store *db.DB, projectID int64) (int64, error) {
-	var count int64
-	if err := store.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		  FROM issue_claims
-		 WHERE project_id = ?
-		   AND released_at IS NULL
-		   AND (claim_kind = 'hard' OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
-		projectID).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count live federation claims: %w", err)
-	}
-	return count, nil
+func federationLiveClaimCount(ctx context.Context, store db.Storage, projectID int64) (int64, error) {
+	return store.CountLiveClaims(ctx, projectID)
 }
 
-func federationPendingClaimCount(ctx context.Context, store *db.DB, projectID int64) (int64, error) {
-	var count int64
-	if err := store.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		  FROM pending_claim_requests
-		 WHERE project_id = ?
-		   AND rejected_at IS NULL
-		   AND resolved_at IS NULL`,
-		projectID).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count pending federation claims: %w", err)
-	}
-	return count, nil
+func federationPendingClaimCount(ctx context.Context, store db.Storage, projectID int64) (int64, error) {
+	return store.CountPendingClaims(ctx, projectID)
 }
 
 func latestTime(times ...*time.Time) *time.Time {
@@ -836,7 +794,7 @@ func latestTime(times ...*time.Time) *time.Time {
 	return latest
 }
 
-func projectFederationBody(ctx context.Context, store *db.DB, projectID int64) (api.ProjectFederationBody, error) {
+func projectFederationBody(ctx context.Context, store db.Storage, projectID int64) (api.ProjectFederationBody, error) {
 	project, err := activeProjectByID(ctx, store, projectID)
 	if err != nil {
 		return api.ProjectFederationBody{}, err
@@ -857,19 +815,13 @@ func projectFederationBody(ctx context.Context, store *db.DB, projectID int64) (
 			}
 		}
 	}
-	var baselineThrough sql.NullInt64
-	if err := store.QueryRowContext(ctx, `
-		SELECT MAX(id)
-		  FROM events
-		 WHERE project_id = ?
-		   AND type = 'issue.snapshot'
-		   AND id >= ?`,
-		projectID, binding.ReplayHorizonEventID).Scan(&baselineThrough); err != nil {
+	through := binding.ReplayHorizonEventID
+	maxSnapshot, err := store.MaxFederationBaselineEventID(ctx, projectID, binding.ReplayHorizonEventID)
+	if err != nil {
 		return api.ProjectFederationBody{}, api.NewError(500, "internal", err.Error(), "", nil)
 	}
-	through := binding.ReplayHorizonEventID
-	if baselineThrough.Valid {
-		through = baselineThrough.Int64
+	if maxSnapshot > 0 {
+		through = maxSnapshot
 	}
 	return api.ProjectFederationBody{
 		ProjectID:              project.ID,

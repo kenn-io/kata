@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -31,7 +32,7 @@ func TestInstance_ReturnsLocalUID(t *testing.T) {
 }
 
 // TestInstance_503WhenUIDUnset covers spec §8.8 second bullet: the handler
-// returns 503 instance_uid_unset when the *db.DB's cached InstanceUID() is
+// returns 503 instance_uid_unset when the *sqlitestore.Store's cached InstanceUID() is
 // empty. In production this is theoretical (db.Open always seeds the row);
 // the test reaches it by routing the server through OpenReadOnly, which
 // skips the seed step and yields a *DB with empty cached value.
@@ -40,12 +41,12 @@ func TestInstance_503WhenUIDUnset(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kata.db")
 
 	// Materialize a real DB file so OpenReadOnly has something to attach to.
-	primary, err := db.Open(ctx, path)
+	primary, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	require.NoError(t, primary.Close())
 
 	// Read-only handle bypasses ensureInstanceUID; cached InstanceUID() is "".
-	ro, err := db.OpenReadOnly(ctx, path)
+	ro, err := sqlitestore.Open(ctx, path, db.ReadOnly())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ro.Close() })
 	require.Empty(t, ro.InstanceUID(), "OpenReadOnly must yield empty cached InstanceUID")

@@ -17,9 +17,9 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/hooks"
-	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/version"
 )
 
@@ -253,6 +253,20 @@ func runDaemon(ctx context.Context) error {
 	return runDaemonWithListen(ctx, "", false)
 }
 
+// redactRuntimeDSN returns dsn safe for inclusion in the runtime file and
+// the `kata daemon status` output. Bare paths and sqlite DSNs pass through
+// unchanged via config.RedactDSN; a postgres DSN has its password masked.
+// The fallback to dsn handles the (defensive) ambiguous-credentials case
+// where config.RedactDSN returns ""; in practice KataDSN validation has
+// already rejected the bleed shape upstream, so this branch is unreachable
+// through the normal startup path.
+func redactRuntimeDSN(dsn string) string {
+	if r := config.RedactDSN(dsn); r != "" {
+		return r
+	}
+	return dsn
+}
+
 // runDaemonWithListen is the variant used by `kata daemon start --listen`.
 // An empty listen string uses the platform default unless
 // <KATA_HOME>/config.toml has a `listen = "..."` entry, in which case the
@@ -301,16 +315,11 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	stopCleanup := installStopWatcher(ns.DBHash, cancel)
 	defer stopCleanup()
 
-	dbPath, err := config.KataDB()
+	dbPath, err := config.KataDSN(ctx)
 	if err != nil {
 		return err
 	}
-	if ver, err := db.PeekSchemaVersion(ctx, dbPath); err == nil && ver < db.CurrentSchemaVersion() {
-		if err := jsonl.AutoCutover(ctx, dbPath); err != nil {
-			return err
-		}
-	}
-	store, err := db.Open(ctx, dbPath)
+	store, _, err := storeopen.Open(ctx, dbPath, db.ApplyMigrations())
 	if err != nil {
 		return err
 	}
@@ -355,7 +364,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	rec := daemon.RuntimeRecord{
 		PID:       os.Getpid(),
 		Address:   runtimeAddressForListener(endpoint, listener),
-		DBPath:    dbPath,
+		DBPath:    redactRuntimeDSN(dbPath),
 		Version:   version.Version,
 		StartedAt: time.Now().UTC(),
 	}
@@ -374,7 +383,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 
 func startFederationRunner(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	bcast *daemon.EventBroadcaster,
 	hookSink hooks.Sink,
 	daemonLog *log.Logger,
@@ -527,7 +536,7 @@ func listenFromPortEnv() (string, bool) {
 // into runDaemon: the dispatcher feeds ServerConfig.Hooks, the logger
 // is shared with runReloadLoop, and the config path is passed to
 // runReloadLoop so SIGHUP re-reads the same file.
-func setupHooks(store *db.DB, dbPath string) (*hooks.Dispatcher, *log.Logger, string, error) {
+func setupHooks(store db.Storage, dbPath string) (*hooks.Dispatcher, *log.Logger, string, error) {
 	home, err := config.KataHome()
 	if err != nil {
 		return nil, nil, "", err

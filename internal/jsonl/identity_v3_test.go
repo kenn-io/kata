@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -166,7 +167,7 @@ func TestRoundtripV3PreservesInstanceUID(t *testing.T) {
 }
 
 // TestImportRefreshesCachedInstanceUID guards the default-mode contract that
-// a successful import leaves the *db.DB handle internally consistent: SQL,
+// a successful import leaves the *sqlitestore.Store handle internally consistent: SQL,
 // InstanceUID(), and any subsequent event insert all use the source's
 // identity. Without the post-commit refresh the cached field would still hold
 // the pre-import LOCAL_FRESH while meta.instance_uid stored the source's
@@ -229,7 +230,7 @@ func TestImportNewInstanceRegeneratesIdentity(t *testing.T) {
 	}
 }
 
-func scanUIDs(t *testing.T, d *db.DB, query string) []string {
+func scanUIDs(t *testing.T, d *sqlitestore.Store, query string) []string {
 	t.Helper()
 	rows, err := d.Query(query)
 	require.NoError(t, err)

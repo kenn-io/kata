@@ -28,7 +28,7 @@ func FoldEvents(events []FoldEvent) FoldProjection {
 }
 
 func (p *FoldProjection) apply(e FoldEvent) {
-	payload := payloadMap(e.Payload)
+	payload := PayloadMap(e.Payload)
 	switch e.Type {
 	case "issue.created", "issue.snapshot":
 		p.applyIssueCreated(e)
@@ -475,7 +475,10 @@ func issueUpdatedAt(e FoldEvent, payload map[string]json.RawMessage) string {
 	return e.CreatedAt
 }
 
-func payloadMap(raw json.RawMessage) map[string]json.RawMessage {
+// PayloadMap decodes the event payload bytes into a map of raw JSON fields.
+// It returns an empty map on empty input or parse failures; the fold/replay
+// paths treat missing fields the same as nil entries.
+func PayloadMap(raw json.RawMessage) map[string]json.RawMessage {
 	out := map[string]json.RawMessage{}
 	if len(raw) == 0 {
 		return out
@@ -484,7 +487,9 @@ func payloadMap(raw json.RawMessage) map[string]json.RawMessage {
 	return out
 }
 
-func stringValue(raw json.RawMessage) (string, bool) {
+// StringValue decodes a JSON string field. It returns ok=false when raw is
+// empty, JSON null, or not a string.
+func StringValue(raw json.RawMessage) (string, bool) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", false
 	}
@@ -494,6 +499,9 @@ func stringValue(raw json.RawMessage) (string, bool) {
 	}
 	return v, true
 }
+
+// stringValue is the internal alias for fold.go's existing callers.
+func stringValue(raw json.RawMessage) (string, bool) { return StringValue(raw) }
 
 func optionalString(raw json.RawMessage) (*string, bool) {
 	if len(raw) == 0 {
@@ -534,7 +542,9 @@ func optionalInt64(raw json.RawMessage) (*int64, bool) {
 	return &v, true
 }
 
-func stringSlice(raw json.RawMessage) []string {
+// StringSlice decodes a JSON array of strings. It returns nil on empty input,
+// null, or a non-array payload.
+func StringSlice(raw json.RawMessage) []string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
 	}
@@ -542,6 +552,9 @@ func stringSlice(raw json.RawMessage) []string {
 	_ = json.Unmarshal(raw, &out)
 	return out
 }
+
+// stringSlice is the internal alias for fold.go's existing callers.
+func stringSlice(raw json.RawMessage) []string { return StringSlice(raw) }
 
 func applyMetadataDiff(current json.RawMessage, diffRaw json.RawMessage) json.RawMessage {
 	var currentMap map[string]json.RawMessage

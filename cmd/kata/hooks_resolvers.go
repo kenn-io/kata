@@ -13,7 +13,7 @@ import (
 // makeProjectResolver returns a hook ProjectResolver backed by the live
 // DB. Only the human-readable name is needed; id and identity already
 // live on the Event itself.
-func makeProjectResolver(store *db.DB) func(context.Context, int64) (hooks.ProjectSnapshot, error) {
+func makeProjectResolver(store db.Storage) func(context.Context, int64) (hooks.ProjectSnapshot, error) {
 	return func(ctx context.Context, id int64) (hooks.ProjectSnapshot, error) {
 		p, err := store.ProjectByID(ctx, id)
 		if err != nil {
@@ -26,7 +26,7 @@ func makeProjectResolver(store *db.DB) func(context.Context, int64) (hooks.Proje
 // makeIssueResolver returns a hook IssueResolver. Owner is *string in
 // the DB row; the snapshot exposes "" for the unassigned case so the
 // payload assembler can emit the empty string consistently.
-func makeIssueResolver(store *db.DB) func(context.Context, int64) (hooks.IssueSnapshot, error) {
+func makeIssueResolver(store db.Storage) func(context.Context, int64) (hooks.IssueSnapshot, error) {
 	return func(ctx context.Context, id int64) (hooks.IssueSnapshot, error) {
 		issue, err := store.IssueByID(ctx, id)
 		if err != nil {
@@ -55,7 +55,7 @@ func makeIssueResolver(store *db.DB) func(context.Context, int64) (hooks.IssueSn
 // makeCommentResolver returns a hook CommentResolver. sql.ErrNoRows is
 // translated into a typed not-found message so the dispatcher's log
 // gets a clearer hint than "no rows in result set".
-func makeCommentResolver(store *db.DB) func(context.Context, int64) (hooks.CommentSnapshot, error) {
+func makeCommentResolver(store db.Storage) func(context.Context, int64) (hooks.CommentSnapshot, error) {
 	return func(ctx context.Context, id int64) (hooks.CommentSnapshot, error) {
 		body, err := store.CommentBodyByID(ctx, id)
 		if err != nil {
@@ -72,7 +72,7 @@ func makeCommentResolver(store *db.DB) func(context.Context, int64) (hooks.Comme
 // alias for the event's project is reported. Projects with zero aliases
 // produce (_, false, nil) and the alias block is omitted from the hook
 // payload.
-func makeAliasResolver(store *db.DB) func(context.Context, db.Event) (hooks.AliasSnapshot, bool, error) {
+func makeAliasResolver(store db.Storage) func(context.Context, db.Event) (hooks.AliasSnapshot, bool, error) {
 	return func(ctx context.Context, evt db.Event) (hooks.AliasSnapshot, bool, error) {
 		alias, has, err := store.LatestAliasForProject(ctx, evt.ProjectID)
 		if err != nil {

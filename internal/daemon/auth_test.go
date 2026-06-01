@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 func TestAuthMiddleware_NoTokenConfigured_AllRequestsPass(t *testing.T) {
@@ -297,10 +298,16 @@ func TestAuthMiddleware_FederationSetupRouteUsesAdminBearer(t *testing.T) {
 	assert.Equal(t, http.StatusAccepted, rr.Code)
 }
 
-func openAuthTestDB(t *testing.T) *db.DB {
+func openAuthTestDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
-	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
+	if _, err := d.Migrate(ctx); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate auth test db: %v", err)
+	}
 	t.Cleanup(func() { _ = d.Close() })
 	return d
 }

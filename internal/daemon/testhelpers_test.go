@@ -18,6 +18,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/testfix"
@@ -29,13 +30,13 @@ import (
 type httptestServerHandle struct {
 	ts  any // *httptest.Server, but kept generic to avoid import cycles in helpers
 	dir string
-	db  *db.DB
+	db  *sqlitestore.Store
 }
 
-// DB returns the *db.DB the test server is wired against, so a test can
+// DB returns the *sqlitestore.Store the test server is wired against, so a test can
 // reach below the HTTP surface to set up state (e.g. soft-delete an issue
 // before retrying create-with-idempotency-key).
-func (h *httptestServerHandle) DB() *db.DB { return h.db }
+func (h *httptestServerHandle) DB() *sqlitestore.Store { return h.db }
 
 // serverOption mutates a daemon.ServerConfig before the test server starts.
 // Used by helpers that wire a fresh server (e.g. newServerWithGitWorkspace,
@@ -183,10 +184,10 @@ func assertAPIError(t *testing.T, status int, body []byte, wantStatus int, wantC
 	assert.Equal(t, wantCode, envelope.Error.Code, string(body))
 }
 
-// testDBHandle bundles a fresh *db.DB and a started-at timestamp for daemon
+// testDBHandle bundles a fresh *sqlitestore.Store and a started-at timestamp for daemon
 // server tests.
 type testDBHandle struct {
-	db  *db.DB
+	db  *sqlitestore.Store
 	now time.Time
 }
 
@@ -194,8 +195,14 @@ type testDBHandle struct {
 // cleanup to close it. The returned handle is suitable for daemon.ServerConfig.
 func openTestDB(t *testing.T) testDBHandle {
 	t.Helper()
-	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
+	if _, err := d.Migrate(ctx); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate daemon test db: %v", err)
+	}
 	t.Cleanup(func() { _ = d.Close() })
 	return testDBHandle{db: d, now: time.Now().UTC()}
 }
@@ -272,7 +279,7 @@ func postJSON(t *testing.T, ts *httptest.Server, path string, body any) (*http.R
 }
 
 // newTestServer is a thin convenience wrapper over startDefaultTestServer for
-// tests that don't need access to the underlying *db.DB.
+// tests that don't need access to the underlying *sqlitestore.Store.
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	ts, _ := startDefaultTestServer(t)

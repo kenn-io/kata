@@ -23,7 +23,7 @@ func registerMoveHandlers(humaAPI huma.API, cfg ServerConfig) {
 // activeProjectByUID resolves a target project by its UID and refuses
 // archived rows. Returns the api.NewError envelope so the caller can
 // `return nil, err`.
-func activeProjectByUID(ctx context.Context, store *db.DB, uid string) (db.Project, error) {
+func activeProjectByUID(ctx context.Context, store db.Storage, uid string) (db.Project, error) {
 	p, err := store.ProjectByUID(ctx, uid)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {

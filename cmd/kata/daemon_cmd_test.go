@@ -90,6 +90,31 @@ func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 	assert.Equal(t, "OK daemon status=stopped\n", string(out))
 }
 
+func TestRuntimeRecordRedactsPostgresDSN(t *testing.T) {
+	// Build the runtime-record DBPath the way the daemon does and assert the
+	// password is hidden. Direct unit test on the assembly function avoids
+	// spinning up the daemon.
+	dsn := "postgres://user:SECRET@db.example.com:5432/kata?sslmode=require" //nolint:gosec // fixture
+	got := redactRuntimeDSN(dsn)
+	assert.NotContains(t, got, "SECRET")
+	assert.Contains(t, got, "db.example.com")
+	// Mutation guard: the raw DSN really does contain the secret.
+	assert.Contains(t, dsn, "SECRET")
+}
+
+func TestRuntimeRecordKeepsSQLitePath(t *testing.T) {
+	got := redactRuntimeDSN("/var/lib/kata/kata.db")
+	assert.Equal(t, "/var/lib/kata/kata.db", got)
+}
+
+func TestRuntimeRecordPassesThroughSQLiteSchemeDSN(t *testing.T) {
+	// A sqlite:// URL has no credential to redact; the helper must not
+	// mangle it. RedactDSN already preserves the userinfo-free form, so
+	// the round-trip is identity.
+	got := redactRuntimeDSN("sqlite:///var/lib/kata/kata.db")
+	assert.Equal(t, "sqlite:///var/lib/kata/kata.db", got)
+}
+
 func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) {
 	for _, args := range [][]string{
 		{"--agent", "daemon", "start", "--listen", "8.8.8.8:7777"},

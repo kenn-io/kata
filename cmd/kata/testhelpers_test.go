@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/version"
 	gitcmd "go.kenn.io/kit/git/cmd"
@@ -33,6 +34,22 @@ func setupKataEnv(t *testing.T) string {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
 	return tmp
+}
+
+// openMigratedKataDB opens a SQLite store at path and brings it to current
+// via Migrate. Phase 2 moves DDL out of sqlitestore.Open into Migrate, so
+// every cmd/kata test that needs a populated DB calls Open+Migrate explicitly
+// or routes through this helper.
+func openMigratedKataDB(t *testing.T, path string) *sqlitestore.Store {
+	t.Helper()
+	ctx := context.Background()
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	if _, err := d.Migrate(ctx); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate cmd/kata test db: %v", err)
+	}
+	return d
 }
 
 // executeRoot runs the given cobra command with args and returns stdout. It

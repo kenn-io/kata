@@ -133,7 +133,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var evt *db.Event
 		var events []db.Event
 		var changed bool
-		err = db.RetryLockContention(ctx, func() error {
+		err = cfg.DB.RetryTransient(ctx, func() error {
 			var err error
 			evt = nil
 			events = nil
@@ -202,7 +202,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		var updated db.Issue
 		var evt *db.Event
 		var changed bool
-		err = db.RetryLockContention(ctx, func() error {
+		err = cfg.DB.RetryTransient(ctx, func() error {
 			var err error
 			updated, evt, changed, err = cfg.DB.ReopenIssue(ctx, issue.ID, actor)
 			return err
@@ -235,7 +235,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 // Errors are plain so the caller can wrap them in the 400 validation
 // envelope alongside the other shape-check errors.
 func validateEvidenceTargets(
-	ctx context.Context, store *db.DB,
+	ctx context.Context, store db.Storage,
 	projectID int64, closingShortID string, evidence []api.Evidence,
 ) error {
 	for i, e := range evidence {

@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -1507,7 +1508,7 @@ func TestFederationEnrollmentRevokedEnrollmentNoLongerAuthorizesTransport(t *tes
 	assert.Equal(t, beforeEvents, countEvents(t, env.DB))
 }
 
-func assertFederationEventCount(t *testing.T, store *db.DB, eventType string, expected int) {
+func assertFederationEventCount(t *testing.T, store *sqlitestore.Store, eventType string, expected int) {
 	t.Helper()
 	var got int
 	require.NoError(t, store.QueryRow(
@@ -1525,14 +1526,14 @@ func createFederatedHubProject(t *testing.T, env *testenv.Env, name string) db.P
 	return project
 }
 
-func countEvents(t *testing.T, store *db.DB) int {
+func countEvents(t *testing.T, store *sqlitestore.Store) int {
 	t.Helper()
 	var got int
 	require.NoError(t, store.QueryRow(`SELECT count(*) FROM events`).Scan(&got))
 	return got
 }
 
-func countIssues(t *testing.T, store *db.DB) int {
+func countIssues(t *testing.T, store *sqlitestore.Store) int {
 	t.Helper()
 	var got int
 	require.NoError(t, store.QueryRow(`SELECT count(*) FROM issues`).Scan(&got))

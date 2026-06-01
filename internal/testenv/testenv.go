@@ -14,14 +14,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 // Env is a per-test daemon + DB + HTTP client bundle.
 type Env struct {
 	URL         string
 	HTTP        *http.Client
-	DB          *db.DB
+	DB          *sqlitestore.Store
 	Home        string
 	Broadcaster *daemon.EventBroadcaster
 }
@@ -86,8 +86,13 @@ func New(t *testing.T, opts ...Option) *Env {
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
 
-	d, err := db.Open(context.Background(), filepath.Join(home, "kata.db"))
+	ctx := context.Background()
+	d, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
+	if _, err := d.Migrate(ctx); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate testenv db: %v", err)
+	}
 	t.Cleanup(func() { _ = d.Close() })
 
 	url, client, bcast := serveDaemon(t, d, opts...)
@@ -99,8 +104,13 @@ func New(t *testing.T, opts ...Option) *Env {
 // flows. KATA_HOME is not modified — the caller's environment is preserved.
 func NewFromDB(t *testing.T, dbPath string) *Env {
 	t.Helper()
-	d, err := db.Open(context.Background(), dbPath)
+	ctx := context.Background()
+	d, err := sqlitestore.Open(ctx, dbPath)
 	require.NoError(t, err)
+	if _, err := d.Migrate(ctx); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate testenv db: %v", err)
+	}
 	t.Cleanup(func() { _ = d.Close() })
 
 	url, client, bcast := serveDaemon(t, d)
@@ -132,7 +142,7 @@ func (e *Env) RequireOK(t *testing.T, path string) []byte {
 // shutdown wait) is wired via t.Cleanup. Callers are responsible for closing d
 // in a separately registered cleanup so LIFO ordering closes the DB after
 // Serve returns.
-func serveDaemon(t *testing.T, d *db.DB, opts ...Option) (string, *http.Client, *daemon.EventBroadcaster) {
+func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *http.Client, *daemon.EventBroadcaster) {
 	t.Helper()
 	// Bind the listener once and hand it directly to Server.Serve so no other
 	// process can grab the port between bind and serve (the close-then-reopen

@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -24,7 +25,7 @@ func TestSmoke_FederationPhase2BidirectionalSync(t *testing.T) {
 	bin := buildKataBinary(t)
 	spokeStderr := startDaemon(t, bin, append(spokeDirs.env(), "KATA_FEDERATION_PULL_INTERVAL_MS=60000"))
 	spokeURL, spokeHTTP := connectDaemon(t, spokeDirs, spokeStderr)
-	spokeDB, err := db.Open(ctx, spokeDirs.dbPath)
+	spokeDB, err := sqlitestore.Open(ctx, spokeDirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = spokeDB.Close() })
 
@@ -99,7 +100,7 @@ func TestFederationPhase2PushWakeLatency(t *testing.T) {
 	bin := buildKataBinary(t)
 	spokeStderr := startDaemon(t, bin, append(spokeDirs.env(), "KATA_FEDERATION_PULL_INTERVAL_MS=60000"))
 	spokeURL, spokeHTTP := connectDaemon(t, spokeDirs, spokeStderr)
-	spokeDB, err := db.Open(ctx, spokeDirs.dbPath)
+	spokeDB, err := sqlitestore.Open(ctx, spokeDirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = spokeDB.Close() })
 
@@ -139,7 +140,7 @@ func TestFederationPhase2PushWakeLatency(t *testing.T) {
 
 func waitForFederatedTitle(
 	t *testing.T,
-	store *db.DB,
+	store *sqlitestore.Store,
 	title string,
 	daemonStderr *safeBuffer,
 	timeout time.Duration,
@@ -166,8 +167,8 @@ func waitForFederatedTitle(
 
 func waitForFoldedProjectionMatch(
 	t *testing.T,
-	hub *db.DB,
-	spoke *db.DB,
+	hub *sqlitestore.Store,
+	spoke *sqlitestore.Store,
 	hubProjectID int64,
 	spokeProjectID int64,
 	hubAfterID int64,
@@ -195,8 +196,8 @@ func waitForFoldedProjectionMatch(
 
 func foldedProjections(
 	t *testing.T,
-	hub *db.DB,
-	spoke *db.DB,
+	hub *sqlitestore.Store,
+	spoke *sqlitestore.Store,
 	hubProjectID int64,
 	spokeProjectID int64,
 	hubAfterID int64,

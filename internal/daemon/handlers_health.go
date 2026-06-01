@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -35,14 +34,9 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/health",
 	}, func(ctx context.Context, _ *struct{}) (*api.HealthResponse, error) {
-		var v string
-		if err := cfg.DB.QueryRowContext(ctx,
-			`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&v); err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
-		}
-		schema, err := strconv.Atoi(v)
+		schema, err := cfg.DB.SchemaVersion(ctx)
 		if err != nil {
-			return nil, api.NewError(500, "internal", "invalid schema_version: "+v, "", nil)
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
 		out := &api.HealthResponse{}
 		out.Body.OK = true

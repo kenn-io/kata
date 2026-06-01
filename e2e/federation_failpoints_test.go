@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 func TestFederationFailpointHubRestartMidIngestBatch(t *testing.T) {
@@ -223,7 +224,7 @@ func (fx *federationStressFixture) restartSpoke(t *testing.T, i int) {
 	fx.spokes[i].online = true
 }
 
-func (fx *federationStressFixture) assertEventOrderValid(t *testing.T, store *db.DB, projectID int64) {
+func (fx *federationStressFixture) assertEventOrderValid(t *testing.T, store *sqlitestore.Store, projectID int64) {
 	t.Helper()
 	rows, err := store.QueryContext(context.Background(), `
 		SELECT id, hlc_physical_ms, hlc_counter

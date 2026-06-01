@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 )
 
@@ -75,7 +76,7 @@ func buildJSONL(lines ...string) string {
 
 // importJSONL builds JSONL from lines and runs jsonl.Import against d,
 // returning the import error so callers can assert success or failure.
-func importJSONL(ctx context.Context, d *db.DB, lines ...string) error {
+func importJSONL(ctx context.Context, d *sqlitestore.Store, lines ...string) error {
 	return jsonl.Import(ctx, strings.NewReader(buildJSONL(lines...)), d)
 }
 
@@ -85,10 +86,15 @@ func importJSONL(ctx context.Context, d *db.DB, lines ...string) error {
 // file with no open handles.
 func setupClosedTestDB(t *testing.T) (context.Context, string) {
 	t.Helper()
+	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
-	d, err := db.Open(ctx, path)
+	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
+	if _, err := d.Migrate(ctx); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate closed test db: %v", err)
+	}
 	require.NoError(t, d.Close())
 	return ctx, path
 }
@@ -104,7 +110,7 @@ func assertCurrentSchemaVersion(t *testing.T, path string) {
 // the expected schema version.
 func assertSchemaVersion(t *testing.T, path string, expected int) {
 	t.Helper()
-	ver, err := db.PeekSchemaVersion(context.Background(), path)
+	ver, err := sqlitestore.PeekSchemaVersion(context.Background(), path)
 	require.NoError(t, err)
 	assert.Equal(t, expected, ver, "schema version mismatch")
 }
@@ -140,19 +146,19 @@ func writeLegacyV3DB(t *testing.T, path string) {
 // openCutoverDB writes a legacy database at a fresh temp path using seedFn,
 // runs jsonl.AutoCutover, and opens the upgraded database. The opened handle
 // is closed via t.Cleanup.
-func openCutoverDB(ctx context.Context, t *testing.T, seedFn func(*testing.T, string)) *db.DB {
+func openCutoverDB(ctx context.Context, t *testing.T, seedFn func(*testing.T, string)) *sqlitestore.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedFn(t, path)
 	require.NoError(t, jsonl.AutoCutover(ctx, path))
-	d, err := db.Open(ctx, path)
+	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d
 }
 
 // fetchInstanceUID returns the raw meta.instance_uid value stored in d.
-func fetchInstanceUID(ctx context.Context, t *testing.T, d *db.DB) string {
+func fetchInstanceUID(ctx context.Context, t *testing.T, d *sqlitestore.Store) string {
 	t.Helper()
 	var s string
 	require.NoError(t, d.QueryRowContext(ctx,
@@ -162,7 +168,7 @@ func fetchInstanceUID(ctx context.Context, t *testing.T, d *db.DB) string {
 
 // exportToBuffer runs jsonl.Export with IncludeDeleted:true and returns the
 // encoded bytes.
-func exportToBuffer(ctx context.Context, t *testing.T, src *db.DB) *bytes.Buffer {
+func exportToBuffer(ctx context.Context, t *testing.T, src *sqlitestore.Store) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
 	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{IncludeDeleted: true}))
@@ -170,14 +176,14 @@ func exportToBuffer(ctx context.Context, t *testing.T, src *db.DB) *bytes.Buffer
 }
 
 type richJSONLFixture struct {
-	DB      *db.DB
+	DB      *sqlitestore.Store
 	Project db.Project
 }
 
 // createTesterIssue creates an issue authored by "tester" with the given title,
 // body, and labels. Used to cut the CreateIssue + require.NoError boilerplate
 // from fixture builders that share the "tester" author convention.
-func createTesterIssue(ctx context.Context, t *testing.T, d *db.DB, projectID int64, title, body string, labels ...string) db.Issue {
+func createTesterIssue(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID int64, title, body string, labels ...string) db.Issue {
 	t.Helper()
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: projectID,
@@ -191,7 +197,7 @@ func createTesterIssue(ctx context.Context, t *testing.T, d *db.DB, projectID in
 }
 
 // addTesterComment posts a comment on issueID authored by "tester".
-func addTesterComment(ctx context.Context, t *testing.T, d *db.DB, issueID int64, body string) {
+func addTesterComment(ctx context.Context, t *testing.T, d *sqlitestore.Store, issueID int64, body string) {
 	t.Helper()
 	_, _, err := d.CreateComment(ctx, db.CreateCommentParams{
 		IssueID: issueID,
@@ -203,7 +209,7 @@ func addTesterComment(ctx context.Context, t *testing.T, d *db.DB, issueID int64
 
 // attachAlias attaches an alias to projectID, asserting no error. The kind
 // argument lets callers choose "git", "local", etc.
-func attachAlias(ctx context.Context, t *testing.T, d *db.DB, projectID int64, identity, kind, path string) {
+func attachAlias(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID int64, identity, kind, path string) {
 	t.Helper()
 	_, err := d.AttachAlias(ctx, projectID, identity, kind, path)
 	require.NoError(t, err)
@@ -548,11 +554,16 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	t.Helper()
 	ctx := context.Background()
 
-	// Phase 1: bootstrap the current schema with db.Open so meta is
-	// populated correctly, then close to release the handle before the
-	// raw connection takes over.
-	d, err := db.Open(ctx, path)
+	// Phase 1: bring the DB to current via Open+Migrate so meta is populated
+	// correctly, then close to release the handle before the raw connection
+	// takes over.
+	t.Setenv("KATA_HOME", t.TempDir())
+	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
+	if _, err := d.Migrate(ctx); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate fixture db: %v", err)
+	}
 	require.NoError(t, d.Close())
 
 	raw, err := sql.Open("sqlite", path)

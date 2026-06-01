@@ -156,7 +156,7 @@ func (s importClaimItemState) reconcilesLinks() bool {
 
 func importItemFederatedClaimState(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	projectID int64,
 	source string,
 	item db.ImportItem,
@@ -190,7 +190,7 @@ func importItemFederatedClaimState(
 
 func importItemLinkClaimPeers(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	projectID int64,
 	source string,
 	item db.ImportItem,
@@ -210,7 +210,7 @@ func importItemLinkClaimPeers(
 
 func importItemLinkAddClaimPeers(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	projectID int64,
 	source string,
 	item db.ImportItem,
@@ -247,7 +247,7 @@ func importItemLinkAddClaimPeers(
 
 func importItemLinkRemovalClaimPeers(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	projectID int64,
 	source string,
 	item db.ImportItem,
@@ -297,7 +297,7 @@ func importItemLinkRemovalClaimPeers(
 
 func importLinkClaimTarget(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	projectID int64,
 	source string,
 	externalID string,

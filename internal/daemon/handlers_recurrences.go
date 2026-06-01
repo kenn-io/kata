@@ -73,7 +73,7 @@ func parseIfMatchRevision(raw string) (int64, error) {
 // recurrence and its parent project are not soft-deleted. All failure modes
 // return 404 errors to keep parent-project archival invisible to clients.
 func activeRecurrenceByUID(
-	ctx context.Context, d *db.DB, projectID int64, recUID string,
+	ctx context.Context, d db.Storage, projectID int64, recUID string,
 ) (db.Recurrence, error) {
 	rec, err := d.GetRecurrenceByUID(ctx, recUID)
 	if err != nil {

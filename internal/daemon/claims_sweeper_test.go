@@ -11,6 +11,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -133,7 +134,7 @@ func TestTimedClaimSweeperSkipsArchivedHubBindings(t *testing.T) {
 func TestTimedClaimSweeperRunReportsPassErrorsToOnError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	store, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+	store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	errCh := make(chan error, 1)

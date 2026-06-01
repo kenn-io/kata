@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -404,7 +405,7 @@ func TestImportRejectsTokenEventsOutsideSystemProject(t *testing.T) {
 	err := importJSONL(ctx, target,
 		`{"kind":"meta","data":{"key":"export_version","value":"11"}}`,
 		`{"kind":"project","data":{"id":1,"uid":"01HZNQ7VFPK1XGD8R5MABCD4EZ","name":"normal","created_at":"2026-05-03T00:00:00.000Z","metadata":{},"revision":1}}`,
-		`{"kind":"event","data":{"id":1,"uid":"01HZNQ7VFPK1XGD8R5MABCD4EX","origin_instance_uid":"01HZNQ7VFPK1XGD8R5MABCD4EY","project_id":1,"project_name":"normal","issue_id":null,"issue_uid":null,"related_issue_id":null,"related_issue_uid":null,"type":"token.created","actor":"bootstrap","payload":{"token_id":1,"token_hash":"`+db.HashTokenForTest("evil-token")+`","target_actor":"mallory"},"created_at":"2026-05-03T00:00:01.000Z"}}`,
+		`{"kind":"event","data":{"id":1,"uid":"01HZNQ7VFPK1XGD8R5MABCD4EX","origin_instance_uid":"01HZNQ7VFPK1XGD8R5MABCD4EY","project_id":1,"project_name":"normal","issue_id":null,"issue_uid":null,"related_issue_id":null,"related_issue_uid":null,"type":"token.created","actor":"bootstrap","payload":{"token_id":1,"token_hash":"`+sqlitestore.HashTokenForTest("evil-token")+`","target_actor":"mallory"},"created_at":"2026-05-03T00:00:01.000Z"}}`,
 	)
 
 	require.Error(t, err)
@@ -425,7 +426,7 @@ func TestImportRejectsMalformedTokenReplayFields(t *testing.T) {
 		},
 		{
 			name:        "reserved actor",
-			payload:     `{"token_id":1,"token_hash":"` + db.HashTokenForTest("secret-token") + `","target_actor":"bootstrap"}`,
+			payload:     `{"token_id":1,"token_hash":"` + sqlitestore.HashTokenForTest("secret-token") + `","target_actor":"bootstrap"}`,
 			wantMessage: "reserved",
 		},
 	} {
@@ -445,15 +446,20 @@ func TestImportRejectsMalformedTokenReplayFields(t *testing.T) {
 	}
 }
 
-func openImportTargetDB(t *testing.T) *db.DB {
+func openImportTargetDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
-	d, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "target.db"))
+	t.Setenv("KATA_HOME", t.TempDir())
+	d, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "target.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
+	if _, err := d.Migrate(context.Background()); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate import target db: %v", err)
+	}
 	return d
 }
 
-func assertTableCount(t *testing.T, src, dst *db.DB, table string) {
+func assertTableCount(t *testing.T, src, dst *sqlitestore.Store, table string) {
 	t.Helper()
 	var want, got int
 	require.NoError(t, src.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&want))
@@ -461,7 +467,7 @@ func assertTableCount(t *testing.T, src, dst *db.DB, table string) {
 	assert.Equal(t, want, got, table)
 }
 
-func assertTableEmpty(t *testing.T, d *db.DB, table string) {
+func assertTableEmpty(t *testing.T, d *sqlitestore.Store, table string) {
 	t.Helper()
 	var got int
 	query := `SELECT COUNT(*) FROM ` + table
@@ -472,7 +478,7 @@ func assertTableEmpty(t *testing.T, d *db.DB, table string) {
 	assert.Equal(t, 0, got, table)
 }
 
-func readFilledUIDs(t *testing.T, d *db.DB) []string {
+func readFilledUIDs(t *testing.T, d *sqlitestore.Store) []string {
 	t.Helper()
 	var projectUID, issueUID, eventIssueUID string
 	require.NoError(t, d.QueryRow(`SELECT uid FROM projects WHERE id = 1`).Scan(&projectUID))

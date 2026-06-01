@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 // startTrustedProxyTestServer pre-binds a loopback TCP listener, then builds a
@@ -93,7 +94,7 @@ func (b *syncBuffer) String() string {
 // mint DB tokens against the same store the daemon resolves through), and a
 // log capture so tests can assert on the slog warning emitted when a
 // trusted-proxy header overwrites an upstream bearer-derived principal.
-func startBearerProxyTestServer(t *testing.T, headerName string, auth bearerProxyOpts) (*httptest.Server, *db.DB, *syncBuffer) {
+func startBearerProxyTestServer(t *testing.T, headerName string, auth bearerProxyOpts) (*httptest.Server, *sqlitestore.Store, *syncBuffer) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

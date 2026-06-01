@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -169,7 +170,7 @@ type federationClaimSpoke struct {
 	dirs    e2eDirs
 	url     string
 	http    *http.Client
-	db      *db.DB
+	db      *sqlitestore.Store
 	stderr  *safeBuffer
 	replica api.CreateFederationReplicaBody
 }
@@ -216,7 +217,7 @@ func startFederationClaimSpoke(ctx context.Context, t *testing.T, bin string) fe
 	dirs := newE2EDirs(t)
 	stderr := startDaemon(t, bin, append(dirs.env(), "KATA_FEDERATION_PULL_INTERVAL_MS=25"))
 	url, client := connectDaemon(t, dirs, stderr)
-	store, err := db.Open(ctx, dirs.dbPath)
+	store, err := sqlitestore.Open(ctx, dirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return federationClaimSpoke{dirs: dirs, url: url, http: client, db: store, stderr: stderr}

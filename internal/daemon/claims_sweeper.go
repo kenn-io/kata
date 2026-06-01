@@ -17,7 +17,7 @@ const (
 // TimedClaimSweeper expires authoritative hub timed claims and fans emitted
 // claim.expired events out through the daemon's normal event surfaces.
 type TimedClaimSweeper struct {
-	DB          *db.DB
+	DB          db.Storage
 	Broadcaster *EventBroadcaster
 	Hooks       hooks.Sink
 	Interval    time.Duration
@@ -26,7 +26,7 @@ type TimedClaimSweeper struct {
 }
 
 // NewTimedClaimSweeper creates a timed-claim sweeper with default event sinks.
-func NewTimedClaimSweeper(store *db.DB, broadcaster *EventBroadcaster, sink hooks.Sink) *TimedClaimSweeper {
+func NewTimedClaimSweeper(store db.Storage, broadcaster *EventBroadcaster, sink hooks.Sink) *TimedClaimSweeper {
 	if broadcaster == nil {
 		broadcaster = NewEventBroadcaster()
 	}

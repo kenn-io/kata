@@ -576,7 +576,7 @@ func linksDeltaNonEmpty(d *api.LinksDelta) bool {
 		len(d.RemoveBlocks) > 0 || len(d.RemoveBlockedBy) > 0 || len(d.RemoveRelated) > 0
 }
 
-func resolveIssueByUIDOrPrefix(ctx context.Context, store *db.DB, ref string, include db.IncludeDeleted) (db.Issue, error) {
+func resolveIssueByUIDOrPrefix(ctx context.Context, store db.Storage, ref string, include db.IncludeDeleted) (db.Issue, error) {
 	// ULIDs are spec-defined as case-insensitive. Uppercase the ref
 	// before validation/lookup so a user typing the lowercase form
 	// they got from a copy-paste pipeline isn't told their input is
@@ -694,7 +694,7 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	return out, nil
 }
 
-func hydrateClaimViolationsForIssue(ctx context.Context, store *db.DB, issue db.Issue, out *api.ShowIssueResponse) error {
+func hydrateClaimViolationsForIssue(ctx context.Context, store db.Storage, issue db.Issue, out *api.ShowIssueResponse) error {
 	violations, count, err := store.UnresolvedClaimViolationsForIssue(ctx, issue.ProjectID, issue.UID, 3)
 	if err != nil {
 		return err
@@ -738,7 +738,7 @@ func issueRefFromDB(iss db.Issue, projectName string) api.IssueRef {
 	}
 }
 
-func loadParentRef(ctx context.Context, store *db.DB, issue db.Issue) (*api.IssueRef, error) {
+func loadParentRef(ctx context.Context, store db.Storage, issue db.Issue) (*api.IssueRef, error) {
 	link, err := store.ParentOf(ctx, issue.ID)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
@@ -764,7 +764,7 @@ func loadParentRef(ctx context.Context, store *db.DB, issue db.Issue) (*api.Issu
 // project_id, so we group by ProjectID and run them per group, then assemble
 // the IssueOut slice in the input order. Realistic project counts are tiny
 // (≤10) so the per-group cost is bounded.
-func hydrateIssueOutsCrossProject(ctx context.Context, store *db.DB, issues []db.Issue) ([]api.IssueOut, error) {
+func hydrateIssueOutsCrossProject(ctx context.Context, store db.Storage, issues []db.Issue) ([]api.IssueOut, error) {
 	if len(issues) == 0 {
 		return []api.IssueOut{}, nil
 	}
@@ -789,7 +789,7 @@ func hydrateIssueOutsCrossProject(ctx context.Context, store *db.DB, issues []db
 	return out, nil
 }
 
-func hydrateIssueOuts(ctx context.Context, store *db.DB, projectID int64, issues []db.Issue) ([]api.IssueOut, error) {
+func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, issues []db.Issue) ([]api.IssueOut, error) {
 	project, err := store.ProjectByID(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -905,7 +905,7 @@ func peerSlice(cache map[int64]api.LinkPeer, ids []int64) []api.LinkPeer {
 // short_ids so the wire response carries LinkPeer (UID + short_id) for each
 // side. One IssueByID call per endpoint is fine for show; pagination is a
 // Plan 4 concern.
-func loadLinkOuts(ctx context.Context, store *db.DB, issueID int64) ([]api.LinkOut, error) {
+func loadLinkOuts(ctx context.Context, store db.Storage, issueID int64) ([]api.LinkOut, error) {
 	rows, err := store.LinksByIssue(ctx, issueID)
 	if err != nil {
 		return nil, err
@@ -935,22 +935,8 @@ func loadLinkOuts(ctx context.Context, store *db.DB, issueID int64) ([]api.LinkO
 
 // listComments fetches every comment attached to issueID in chronological
 // order. Plan 1 ships no pagination; the show handler embeds the full slice.
-func listComments(ctx context.Context, store *db.DB, issueID int64) ([]db.Comment, error) {
-	rows, err := store.QueryContext(ctx,
-		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ? ORDER BY created_at ASC, id ASC`, issueID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []db.Comment
-	for rows.Next() {
-		var c db.Comment
-		if err := rows.Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
+func listComments(ctx context.Context, store db.Storage, issueID int64) ([]db.Comment, error) {
+	return store.CommentsByIssue(ctx, issueID)
 }
 
 const (

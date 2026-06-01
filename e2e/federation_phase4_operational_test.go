@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 func TestFederationPhase4OperationalRecovery(t *testing.T) {
@@ -92,7 +93,7 @@ type e2eFederationStatusBody struct {
 	} `json:"statuses"`
 }
 
-func waitForFederatedIssueGone(t *testing.T, store *db.DB, issueUID string, daemonStderr *safeBuffer) {
+func waitForFederatedIssueGone(t *testing.T, store *sqlitestore.Store, issueUID string, daemonStderr *safeBuffer) {
 	t.Helper()
 	var lastErr error
 	require.Eventually(t, func() bool {

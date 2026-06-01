@@ -485,6 +485,50 @@ func TestReadDaemonConfig_EnvCompletesPartialTOMLProxy(t *testing.T) {
 	assert.Equal(t, []string{"unix:///s"}, cfg.Auth.Proxy.TrustedProxyListeners)
 }
 
+func TestReadDaemonConfig_ReadsStorageDSN(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[storage]\ndsn = \"postgres://db/kata\"\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "postgres://db/kata", cfg.Storage.DSN)
+}
+
+func TestReadDaemonConfig_TrimsStorageDSN(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[storage]\ndsn = \"  postgres://db/kata  \"\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "postgres://db/kata", cfg.Storage.DSN)
+}
+
+func TestReadDaemonConfig_EmptyStorageDSNIsZero(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[storage]\ndsn = \"\"\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Storage.DSN)
+}
+
+func TestReadDaemonConfig_StorageRejectsUnknownKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[storage]\nfoo = \"bar\"\n"), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err, "meta.Undecoded() must catch typo'd storage keys")
+	assert.Contains(t, err.Error(), "storage.foo")
+}
+
 func TestApplyDaemonConfigEnv_AuthProxyListeners(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")

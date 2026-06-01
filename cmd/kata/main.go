@@ -100,6 +100,7 @@ func newRootCmd() *cobra.Command {
 		newEventsCmd(),
 		newExportCmd(),
 		newImportCmd(),
+		newMigrateCmd(),
 		newDigestCmd(),
 		newAuditCmd(),
 		newQuickstartCmd(),

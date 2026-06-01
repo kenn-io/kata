@@ -316,7 +316,7 @@ func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, r
 	return resp, nil
 }
 
-func claimBinding(ctx context.Context, store *db.DB, projectID int64) (db.FederationBinding, error) {
+func claimBinding(ctx context.Context, store db.Storage, projectID int64) (db.FederationBinding, error) {
 	if _, err := activeProjectByID(ctx, store, projectID); err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -338,7 +338,7 @@ func claimBinding(ctx context.Context, store *db.DB, projectID int64) (db.Federa
 
 func claimForwardClient(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	binding db.FederationBinding,
 ) (*claimHubClient, config.FederationCredential, error) {
 	project, err := store.ProjectByID(ctx, binding.ProjectID)
@@ -377,7 +377,7 @@ func forwardedClaimRequest(body api.ClaimActionBody, principal db.ClaimPrincipal
 
 func applyForwardedClaimAction(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	projectID int64,
 	ref string,
 	resp api.ClaimActionResponseBody,
@@ -642,7 +642,7 @@ func claimHubPath(hubProjectID int64, ref, suffix string) string {
 	return fmt.Sprintf("/api/v1/projects/%d/issues/%s/%s", hubProjectID, url.PathEscape(ref), suffix)
 }
 
-func requireHubClaimBinding(ctx context.Context, store *db.DB, projectID int64) error {
+func requireHubClaimBinding(ctx context.Context, store db.Storage, projectID int64) error {
 	if _, err := activeProjectByID(ctx, store, projectID); err != nil {
 		return err
 	}
@@ -717,7 +717,7 @@ func claimStatusBody(status db.ClaimStatus) api.ClaimStatusBody {
 
 const showClaimStatusRetryAfter = time.Minute
 
-func showIssueClaimRelevant(ctx context.Context, store *db.DB, projectID int64) (bool, error) {
+func showIssueClaimRelevant(ctx context.Context, store db.Storage, projectID int64) (bool, error) {
 	binding, err := store.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return false, nil
@@ -786,7 +786,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	return &hubNow, nil
 }
 
-func skipRecentShowClaimStatusError(ctx context.Context, store *db.DB, issue db.Issue, now time.Time) (bool, error) {
+func skipRecentShowClaimStatusError(ctx context.Context, store db.Storage, issue db.Issue, now time.Time) (bool, error) {
 	statusErr, err := store.ClaimStatusRefreshError(ctx, issue.ProjectID, issue.UID)
 	if err == nil && now.Sub(statusErr.LastAttemptAt.UTC()) < showClaimStatusRetryAfter {
 		return true, nil
@@ -812,7 +812,7 @@ func skipRecentShowClaimStatusError(ctx context.Context, store *db.DB, issue db.
 
 func markShowClaimStatusError(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	issue db.Issue,
 	statusErr *claimHubStatusError,
 	now time.Time,
@@ -823,7 +823,7 @@ func markShowClaimStatusError(
 
 func markShowClaimStatusRefreshFailure(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	issue db.Issue,
 	statusCode int,
 	msg string,

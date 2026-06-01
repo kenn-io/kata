@@ -9,8 +9,8 @@ import (
 
 func TestHLCNextAdvancesCounterWhenClockDoesNotMoveForward(t *testing.T) {
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
-	first := nextEventHLCValue(eventHLCTimestamp{}, now)
-	second := nextEventHLCValue(first, now.Add(-time.Second))
+	first := NextEventHLCValue(EventHLCTimestamp{}, now)
+	second := NextEventHLCValue(first, now.Add(-time.Second))
 
 	assert.Equal(t, first.PhysicalMS, second.PhysicalMS)
 	assert.Equal(t, first.Counter+1, second.Counter)
@@ -18,10 +18,10 @@ func TestHLCNextAdvancesCounterWhenClockDoesNotMoveForward(t *testing.T) {
 
 func TestHLCAdvanceMovesPastIncomingForeignTimestamp(t *testing.T) {
 	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
-	local := eventHLCTimestamp{PhysicalMS: now.UnixMilli(), Counter: 2}
-	incoming := eventHLCTimestamp{PhysicalMS: now.Add(time.Second).UnixMilli(), Counter: 4}
+	local := EventHLCTimestamp{PhysicalMS: now.UnixMilli(), Counter: 2}
+	incoming := EventHLCTimestamp{PhysicalMS: now.Add(time.Second).UnixMilli(), Counter: 4}
 
-	got := advanceEventHLC(local, incoming, now)
+	got := AdvanceEventHLC(local, incoming, now)
 
 	assert.Equal(t, incoming.PhysicalMS, got.PhysicalMS)
 	assert.Equal(t, incoming.Counter+1, got.Counter)

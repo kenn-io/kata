@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 // knownOrphanClasses is the ordered list of child tables whose
@@ -89,7 +90,7 @@ func classifyKnownOrphan(table, parent, column string) orphanDisposition {
 // later scrub entry for that rowid is skipped). The source DB is
 // not modified.
 func PreflightSourceFKs(ctx context.Context, path string) (OrphanReport, error) {
-	source, err := db.OpenReadOnly(ctx, path)
+	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
 	if err != nil {
 		return OrphanReport{}, fmt.Errorf("preflight open: %w", err)
 	}
@@ -124,7 +125,7 @@ func PreflightSourceFKs(ctx context.Context, path string) (OrphanReport, error) 
 		DroppedRowsByTable:  map[string]map[int64]struct{}{},
 		ScrubbedRowsByTable: map[string]map[int64]struct{}{},
 	}
-	resolver := newFKColumnResolver(source)
+	resolver := sqlitestore.NewFKColumnResolver(source)
 	for _, r := range raws {
 		// Classification depends on the column name -- if we can't resolve
 		// it, we cannot safely distinguish a known orphan class from an
@@ -133,7 +134,7 @@ func PreflightSourceFKs(ctx context.Context, path string) (OrphanReport, error) 
 		// (This intentionally differs from import.go's checkForeignKeyViolations,
 		// which annotates the row and continues; that path is reporting
 		// failures to a user, not making a go/no-go decision.)
-		col, err := resolver.resolve(ctx, r.Table, r.FKID)
+		col, err := resolver.Resolve(ctx, r.Table, r.FKID)
 		if err != nil {
 			return OrphanReport{}, fmt.Errorf("preflight resolve %s: %w", r.Table, err)
 		}

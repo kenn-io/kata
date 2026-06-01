@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/uid"
 	_ "modernc.org/sqlite"
@@ -61,7 +62,7 @@ func TestAutoCutoverUpgradesLegacyV1DB(t *testing.T) {
 
 	require.NoError(t, jsonl.AutoCutover(ctx, path))
 
-	d, err := db.Open(ctx, path)
+	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	assertCurrentSchemaVersion(t, path)
@@ -79,8 +80,7 @@ func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
-	d, err := db.Open(ctx, path)
-	require.NoError(t, err)
+	d := openMigratedTestDB(t, ctx, path)
 	project, err := d.CreateProject(ctx, "legacy-v11")
 	require.NoError(t, err)
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -101,7 +101,7 @@ func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
 
 	require.NoError(t, jsonl.AutoCutover(ctx, path))
 
-	upgraded, err := db.Open(ctx, path)
+	upgraded, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
 	assertCurrentSchemaVersion(t, path)
@@ -120,8 +120,7 @@ func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
 func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
-	d, err := db.Open(ctx, path)
-	require.NoError(t, err)
+	d := openMigratedTestDB(t, ctx, path)
 	active, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "active-token",
 		Actor:          "wesm",
@@ -144,7 +143,7 @@ func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
 
 	require.NoError(t, jsonl.AutoCutover(ctx, path))
 
-	upgraded, err := db.Open(ctx, path)
+	upgraded, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = upgraded.Close() })
 	got, err := upgraded.ResolveAPIToken(ctx, "active-token")
@@ -168,7 +167,7 @@ func TestPeekSchemaVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, raw.PingContext(ctx))
 	require.NoError(t, raw.Close())
-	ver, err := db.PeekSchemaVersion(ctx, noMeta)
+	ver, err := sqlitestore.PeekSchemaVersion(ctx, noMeta)
 	require.NoError(t, err)
 	assert.Equal(t, 0, ver)
 }
@@ -208,9 +207,7 @@ func TestRoundtripV4PreservesDeletedAt(t *testing.T) {
 	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{IncludeDeleted: true}))
 
 	dstPath := filepath.Join(t.TempDir(), "dst.db")
-	dst, err := db.Open(ctx, dstPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = dst.Close() })
+	dst := openMigratedTestDB(t, ctx, dstPath)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dst))
 
 	var got sql.NullTime
@@ -222,9 +219,14 @@ func TestRoundtripV4PreservesDeletedAt(t *testing.T) {
 
 func writeVersionZeroDB(t *testing.T, path string) {
 	t.Helper()
+	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
-	d, err := db.Open(ctx, path)
+	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
+	if _, err := d.Migrate(ctx); err != nil {
+		_ = d.Close()
+		t.Fatalf("migrate before stamping v0: %v", err)
+	}
 	_, err = d.ExecContext(ctx, `UPDATE meta SET value='0' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
@@ -377,7 +379,7 @@ func TestAutoCutover_V8DropsAllKnownOrphanClasses(t *testing.T) {
 	defer restore()
 	require.NoError(t, jsonl.AutoCutover(ctx, path))
 
-	d, err := db.Open(ctx, path)
+	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 
@@ -447,7 +449,7 @@ func TestAutoCutover_DropsAllKnownOrphanClasses(t *testing.T) {
 	defer restore()
 	require.NoError(t, jsonl.AutoCutover(ctx, path))
 
-	d, err := db.Open(ctx, path)
+	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 
@@ -495,7 +497,7 @@ func TestV3ToV4CutoverPreservesProjects(t *testing.T) {
 
 	assertCurrentSchemaVersion(t, path)
 
-	d2, err := db.Open(ctx, path)
+	d2, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d2.Close() })
 
@@ -698,129 +700,11 @@ func TestCutover_PreservesStoredShortIDs(t *testing.T) {
 }
 
 // --- v9 → v10 ---
-
-// seedV9SchemaDB builds a SQLite DB whose actual on-disk schema matches v9
-// (no metadata / revision columns, no recurrences). meta.schema_version is
-// rewritten to '9' so jsonl.Export's version-dispatch picks the pre-v10
-// branches. Shape is asserted via assertV8V9Shape so a future v11 column
-// added without a corresponding drop here fails loudly rather than passing
-// tests and crashing real-source cutover.
-func seedV9SchemaDB(t *testing.T, path string) {
-	t.Helper()
-	ctx := context.Background()
-
-	d, err := db.Open(ctx, path)
-	require.NoError(t, err)
-	require.NoError(t, d.Close())
-
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	defer func() { _ = raw.Close() }()
-
-	dropV10Additions(t, raw)
-	assertV8V9Shape(t, raw)
-	deleteAutoSystemProject(t, raw)
-
-	const projectUID = "01HZZZZZZZZZZZZZZZZZZZZZZZ"
-	const issueUID = "01HZZZZZZZZZZZZZZZZZZZZA01"
-	_, err = raw.Exec(`INSERT INTO projects(id, uid, name) VALUES (1, ?, 'kata')`, projectUID)
-	require.NoError(t, err)
-	_, err = raw.Exec(
-		`INSERT INTO issues(id, uid, project_id, short_id, title, author)
-		 VALUES (1, ?, 1, 'za01', 'v9 issue', 'tester')`, issueUID)
-	require.NoError(t, err)
-	_, err = raw.Exec(
-		`INSERT INTO events(uid, origin_instance_uid, project_id, project_name, issue_id, type, actor, payload)
-		 VALUES ('01HZZZZZZZZZZZZZZZZZEVAL01', '01HZZZZZZZZZZZZZZZZZZZZZ00', 1, 'kata', 1, 'issue.created', 'tester', '{}')`)
-	require.NoError(t, err)
-
-	_, err = raw.Exec(`UPDATE meta SET value='9' WHERE key='schema_version'`)
-	require.NoError(t, err)
-}
-
-// TestExport_PreV10_NoMissingColumnError pins the v8/v9 export projection.
-// A real v9 source DB has no metadata / revision / recurrence_id /
-// occurrence_key columns; the export must omit all of them. Before this
-// guard, jsonl.Export against a v9 source produced "no such column:
-// metadata" during the JSONL cutover.
-func TestExport_PreV10_NoMissingColumnError(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "kata.db")
-	seedV9SchemaDB(t, path)
-
-	d, err := db.OpenReadOnly(ctx, path)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = d.Close() })
-
-	var buf bytes.Buffer
-	err = jsonl.Export(ctx, d, &buf, jsonl.ExportOptions{IncludeDeleted: true})
-	require.NoError(t, err, "export must not reference v10-only columns when source is v9")
-
-	records := decodeJSONLLines(t, buf.Bytes())
-
-	var sawIssue, sawProject, sawEvent, sawRecurrence bool
-	for _, rec := range records {
-		data, _ := rec["data"].(map[string]any)
-		switch rec["kind"] {
-		case "issue":
-			sawIssue = true
-			assert.NotContains(t, data, "recurrence_id", "v9 issue export must omit recurrence_id")
-			assert.NotContains(t, data, "recurrence_uid", "v9 issue export must omit recurrence_uid")
-			assert.NotContains(t, data, "occurrence_key", "v9 issue export must omit occurrence_key")
-			assert.NotContains(t, data, "metadata", "v9 issue export must omit metadata (v10 column)")
-			assert.NotContains(t, data, "revision", "v9 issue export must omit revision (v10 column)")
-		case "project":
-			sawProject = true
-			assert.NotContains(t, data, "metadata", "v9 project export must omit metadata (v10 column)")
-			assert.NotContains(t, data, "revision", "v9 project export must omit revision (v10 column)")
-		case "event":
-			sawEvent = true
-			assert.Contains(t, data, "uid", "v9 event export must keep uid")
-			assert.Contains(t, data, "origin_instance_uid",
-				"v9 event export must keep origin_instance_uid")
-		case "recurrence":
-			sawRecurrence = true
-		}
-	}
-	assert.True(t, sawIssue, "expected at least one issue record")
-	assert.True(t, sawProject, "expected at least one project record")
-	assert.True(t, sawEvent, "expected at least one event record")
-	assert.False(t, sawRecurrence, "v9 export must not emit recurrence records")
-}
-
-// TestExport_PreV10_RoundtripsThroughImport pins the end-to-end cutover
-// path: a v9-shape DB exports without error, and the JSONL imports
-// cleanly into a fresh v10 target. The user-facing regression signal for
-// the v9 → v10 cutover.
-func TestExport_PreV10_RoundtripsThroughImport(t *testing.T) {
-	ctx := context.Background()
-	srcPath := filepath.Join(t.TempDir(), "src.db")
-	seedV9SchemaDB(t, srcPath)
-
-	src, err := db.OpenReadOnly(ctx, srcPath)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = src.Close() })
-
-	var buf bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{IncludeDeleted: true}))
-
-	first := strings.SplitN(buf.String(), "\n", 2)[0]
-	var meta map[string]any
-	require.NoError(t, json.Unmarshal([]byte(first), &meta))
-	data := meta["data"].(map[string]any)
-	assert.Equal(t, "9", data["value"], "export_version should reflect source schema_version")
-
-	target := openImportTargetDB(t)
-	require.NoError(t, jsonl.Import(ctx, &buf, target))
-
-	var issueCount, eventCount int
-	require.NoError(t, target.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM issues`).Scan(&issueCount))
-	require.NoError(t, target.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM events`).Scan(&eventCount))
-	assert.Equal(t, 1, issueCount, "v9 issue must survive cutover")
-	assert.Equal(t, 1, eventCount, "v9 event must survive cutover")
-}
+//
+// The v9 pre-cutover export tests live in cutover_export_v9_internal_test.go
+// (package jsonl) because the unexported exportForCutover (which they need to
+// exercise the legacy projection) is not reachable from package jsonl_test
+// after the backend-neutral Export refactor.
 
 func trimCurrentDBToV11Shape(t *testing.T, path string) {
 	t.Helper()

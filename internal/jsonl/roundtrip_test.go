@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -141,7 +142,7 @@ func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {
 	assert.Equal(t, firstRevokedAt, got)
 }
 
-func assertRoundtripTableCounts(t *testing.T, src, dst *db.DB) {
+func assertRoundtripTableCounts(t *testing.T, src, dst *sqlitestore.Store) {
 	t.Helper()
 	for _, table := range []string{
 		"projects", "project_aliases", "issues", "comments", "issue_labels",
@@ -296,12 +297,12 @@ func TestClaimRoundTripRows(t *testing.T) {
 	assert.False(t, gotResolvedAt.Valid, "pending request must stay unresolved")
 }
 
-func assertSQLiteSequenceRows(t *testing.T, src, dst *db.DB) {
+func assertSQLiteSequenceRows(t *testing.T, src, dst *sqlitestore.Store) {
 	t.Helper()
 	assert.Equal(t, sqliteSequenceSnapshot(t, src), sqliteSequenceSnapshot(t, dst))
 }
 
-func sqliteSequenceSnapshot(t *testing.T, d *db.DB) []map[string]any {
+func sqliteSequenceSnapshot(t *testing.T, d *sqlitestore.Store) []map[string]any {
 	t.Helper()
 	rows, err := d.Query(`SELECT name, seq FROM sqlite_sequence ORDER BY name ASC`)
 	require.NoError(t, err)
@@ -317,7 +318,7 @@ func sqliteSequenceSnapshot(t *testing.T, d *db.DB) []map[string]any {
 	return out
 }
 
-func assertSearchResultsMatch(t *testing.T, src, dst *db.DB, projectID int64, query string) {
+func assertSearchResultsMatch(t *testing.T, src, dst *sqlitestore.Store, projectID int64, query string) {
 	t.Helper()
 	srcHits, err := src.SearchFTS(context.Background(), projectID, query, 20, true)
 	require.NoError(t, err)

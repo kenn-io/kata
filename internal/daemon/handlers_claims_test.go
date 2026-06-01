@@ -14,6 +14,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -1041,7 +1042,7 @@ func createClaimHubIssueNamed(t *testing.T, env *testenv.Env, name string) (db.P
 	return project, issue
 }
 
-func createClaimHubIssueInDB(t *testing.T, store *db.DB) (db.Project, db.Issue) {
+func createClaimHubIssueInDB(t *testing.T, store *sqlitestore.Store) (db.Project, db.Issue) {
 	t.Helper()
 	ctx := context.Background()
 	project, err := store.CreateProject(ctx, "hub")

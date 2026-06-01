@@ -20,6 +20,7 @@ import (
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -2059,7 +2060,7 @@ func TestFederationClaimRetryCapabilityRules(t *testing.T) {
 	})
 }
 
-func requireFederationSyncStatus(t *testing.T, store *db.DB, projectID int64) db.FederationSyncStatus {
+func requireFederationSyncStatus(t *testing.T, store *sqlitestore.Store, projectID int64) db.FederationSyncStatus {
 	t.Helper()
 	got, err := store.FederationSyncStatusByProject(context.Background(), projectID)
 	require.NoError(t, err)
@@ -2072,7 +2073,7 @@ func assertStatusTimeSet(t *testing.T, got *time.Time) {
 	assert.False(t, got.IsZero())
 }
 
-func mustIssueUIDByTitle(t *testing.T, store *db.DB, title string) string {
+func mustIssueUIDByTitle(t *testing.T, store *sqlitestore.Store, title string) string {
 	t.Helper()
 	var uid string
 	require.NoError(t, store.QueryRowContext(context.Background(),
@@ -2080,7 +2081,7 @@ func mustIssueUIDByTitle(t *testing.T, store *db.DB, title string) string {
 	return uid
 }
 
-func createPendingClaimRetrySpoke(t *testing.T, store *db.DB, name string) (db.Project, db.Issue, db.FederationBinding) {
+func createPendingClaimRetrySpoke(t *testing.T, store *sqlitestore.Store, name string) (db.Project, db.Issue, db.FederationBinding) {
 	t.Helper()
 	ctx := context.Background()
 	project, err := store.CreateProject(ctx, name)
@@ -2104,7 +2105,7 @@ func createPendingClaimRetrySpoke(t *testing.T, store *db.DB, name string) (db.P
 	return project, issue, binding
 }
 
-func pendingClaimParams(store *db.DB, projectID int64, issueRef, holder string) db.PendingClaimParams {
+func pendingClaimParams(store *sqlitestore.Store, projectID int64, issueRef, holder string) db.PendingClaimParams {
 	return db.PendingClaimParams{
 		ProjectID: projectID,
 		IssueRef:  issueRef,
@@ -2118,7 +2119,7 @@ func pendingClaimParams(store *db.DB, projectID int64, issueRef, holder string) 
 	}
 }
 
-func assertPendingRejectedWithError(t *testing.T, store *db.DB, requestUID, wantError string) {
+func assertPendingRejectedWithError(t *testing.T, store *sqlitestore.Store, requestUID, wantError string) {
 	t.Helper()
 	var (
 		rejectedAt time.Time
@@ -2132,7 +2133,7 @@ func assertPendingRejectedWithError(t *testing.T, store *db.DB, requestUID, want
 	assert.Contains(t, lastError, wantError)
 }
 
-func assertHubOriginEventCount(ctx context.Context, store *db.DB, projectID int64, originInstanceUID string, want int) error {
+func assertHubOriginEventCount(ctx context.Context, store *sqlitestore.Store, projectID int64, originInstanceUID string, want int) error {
 	var got int
 	err := store.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM events WHERE project_id = ? AND origin_instance_uid = ?`,
@@ -2167,7 +2168,7 @@ func postJSON(t *testing.T, baseURL, path string, body, out any) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(out))
 }
 
-func assertFoldedIssuesMatch(t *testing.T, hub, spoke *db.DB, hubProjectID, spokeProjectID, hubAfterID int64) {
+func assertFoldedIssuesMatch(t *testing.T, hub, spoke *sqlitestore.Store, hubProjectID, spokeProjectID, hubAfterID int64) {
 	t.Helper()
 	ctx := context.Background()
 	hubEvents, err := hub.EventsAfter(ctx, db.EventsAfterParams{ProjectID: hubProjectID, AfterID: hubAfterID, Limit: 1000})
@@ -2299,11 +2300,17 @@ func shortIDForSyncTest(uid string) string {
 	return strings.ToLower(uid[len(uid)-4:])
 }
 
-func openDaemonclientTestDB(t *testing.T) (*db.DB, string) {
+func openDaemonclientTestDB(t *testing.T) (*sqlitestore.Store, string) {
 	t.Helper()
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
-	store, err := db.Open(context.Background(), path)
+	store, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
+	if _, err := store.Migrate(ctx); err != nil {
+		_ = store.Close()
+		t.Fatalf("migrate federation test db: %v", err)
+	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store, path
 }

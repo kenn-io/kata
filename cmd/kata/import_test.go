@@ -28,8 +28,7 @@ func TestImportCreatesTargetDB(t *testing.T) {
 	out, err := runCmdOutput(t, nil, "import", "--input", input, "--target", target)
 	require.NoError(t, err)
 
-	d, err := db.Open(context.Background(), target)
-	require.NoError(t, err)
+	d := openMigratedKataDB(t, target)
 	t.Cleanup(func() { _ = d.Close() })
 	got, err := d.ProjectByName(context.Background(), "kata")
 	require.NoError(t, err)
@@ -43,8 +42,7 @@ func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
 	out, err := runCmdOutput(t, nil, "import", "--format", "agent", "--source-format", "kata", "--input", input, "--target", target)
 	require.NoError(t, err)
 
-	d, err := db.Open(context.Background(), target)
-	require.NoError(t, err)
+	d := openMigratedKataDB(t, target)
 	t.Cleanup(func() { _ = d.Close() })
 	got, err := d.ProjectByName(context.Background(), "kata")
 	require.NoError(t, err)
@@ -101,9 +99,8 @@ func TestImportLegacyFormatBeadsParseErrorPreservesJSONMode(t *testing.T) {
 
 func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	_, input, target := setupImportTest(t)
-	d, err := db.Open(context.Background(), target)
-	require.NoError(t, err)
-	_, err = d.CreateProject(context.Background(), "existing")
+	d := openMigratedKataDB(t, target)
+	_, err := d.CreateProject(context.Background(), "existing")
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
 
@@ -196,17 +193,15 @@ func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) {
 	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
 	target := filepath.Join(home, "target.db")
 	ctx := context.Background()
-	d, err := db.Open(ctx, target)
-	require.NoError(t, err)
-	_, err = d.CreateProject(ctx, "existing")
+	d := openMigratedKataDB(t, target)
+	_, err := d.CreateProject(ctx, "existing")
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
 
 	_, err = runCmdOutput(t, nil, "import", "--force", "--input", input, "--target", target)
 	require.Error(t, err)
 
-	d, err = db.Open(ctx, target)
-	require.NoError(t, err)
+	d = openMigratedKataDB(t, target)
 	t.Cleanup(func() { _ = d.Close() })
 	_, err = d.ProjectByName(ctx, "existing")
 	require.NoError(t, err)
@@ -274,14 +269,13 @@ func TestMoveSQLiteFileSetRollsBackAlreadyMovedSidecarOnError(t *testing.T) {
 func TestImportRefusesDaemon(t *testing.T) {
 	home, input, target := setupImportTest(t)
 	dbPath := filepath.Join(home, "kata.db")
-	d, err := db.Open(context.Background(), dbPath)
-	require.NoError(t, err)
+	d := openMigratedKataDB(t, dbPath)
 	require.NoError(t, d.Close())
 	addr, cleanup := pipeServer(t)
 	t.Cleanup(cleanup)
 	require.NoError(t, writeRuntimeFor(home, addr))
 
-	_, err = runCmdOutput(t, nil, "import", "--input", input, "--target", target)
+	_, err := runCmdOutput(t, nil, "import", "--input", input, "--target", target)
 	ce := requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, ce.Message, "daemon is running")
 	assert.NotContains(t, ce.Message, "--allow-running-daemon")
@@ -290,8 +284,7 @@ func TestImportRefusesDaemon(t *testing.T) {
 func writeExportFixture(t *testing.T, home string) string {
 	t.Helper()
 	srcPath := filepath.Join(home, "source.db")
-	src, err := db.Open(context.Background(), srcPath)
-	require.NoError(t, err)
+	src := openMigratedKataDB(t, srcPath)
 	p, err := src.CreateProject(context.Background(), "kata")
 	require.NoError(t, err)
 	_, _, err = src.CreateIssue(context.Background(), db.CreateIssueParams{

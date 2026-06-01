@@ -20,7 +20,7 @@ import (
 //
 // Internal helpers (merge, restore, alias resolve) that need to operate on
 // archived rows must use store.ProjectByID directly.
-func activeProjectByID(ctx context.Context, store *db.DB, id int64) (db.Project, error) {
+func activeProjectByID(ctx context.Context, store db.Storage, id int64) (db.Project, error) {
 	p, err := store.ProjectByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -379,7 +379,7 @@ func resolveProjectRequestCanMutate(in *api.ResolveProjectRequest) bool {
 // first-seen attach), then bare name (strict path-free lookup), then
 // start_path (legacy local-daemon walk). Resolve never creates
 // projects: alias misses without a name match return 404.
-func resolveProject(ctx context.Context, store *db.DB, alias *api.AliasInput, name, startPath string) (*api.ProjectResolveBody, error) {
+func resolveProject(ctx context.Context, store db.Storage, alias *api.AliasInput, name, startPath string) (*api.ProjectResolveBody, error) {
 	if alias != nil {
 		return resolveByAliasInput(ctx, store, alias, name)
 	}
@@ -423,7 +423,7 @@ func resolveProject(ctx context.Context, store *db.DB, alias *api.AliasInput, na
 // different host upgrades to the alias-first path on the next call.
 // Resolve never creates projects: an unknown alias with an unknown (or
 // absent) name returns 404.
-func resolveByAliasInput(ctx context.Context, store *db.DB, in *api.AliasInput, name string) (*api.ProjectResolveBody, error) {
+func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInput, name string) (*api.ProjectResolveBody, error) {
 	info := config.AliasInfo{
 		Identity: in.Identity,
 		Kind:     in.Kind,
@@ -500,7 +500,7 @@ func resolveByAliasInput(ctx context.Context, store *db.DB, in *api.AliasInput, 
 	}, nil
 }
 
-func resolveByName(ctx context.Context, store *db.DB, name string) (*api.ProjectResolveBody, error) {
+func resolveByName(ctx context.Context, store db.Storage, name string) (*api.ProjectResolveBody, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, api.NewError(400, "validation", "name must be non-empty", "", nil)
@@ -523,7 +523,7 @@ func resolveByName(ctx context.Context, store *db.DB, name string) (*api.Project
 // resolveByKataToml returns (body, true, nil) when a .kata.toml binding
 // exists at the workspace root and resolves to a project. Returns
 // (nil, false, nil) when there is no .kata.toml. Surfaces parse errors.
-func resolveByKataToml(ctx context.Context, store *db.DB, disc config.DiscoveredPaths) (*api.ProjectResolveBody, bool, error) {
+func resolveByKataToml(ctx context.Context, store db.Storage, disc config.DiscoveredPaths) (*api.ProjectResolveBody, bool, error) {
 	if disc.WorkspaceRoot == "" {
 		return nil, false, nil
 	}
@@ -567,7 +567,7 @@ func resolveByKataToml(ctx context.Context, store *db.DB, disc config.Discovered
 	}, true, nil
 }
 
-func resolveByAliasIfAvailable(ctx context.Context, store *db.DB, disc config.DiscoveredPaths) (*api.ProjectResolveBody, bool, error) {
+func resolveByAliasIfAvailable(ctx context.Context, store db.Storage, disc config.DiscoveredPaths) (*api.ProjectResolveBody, bool, error) {
 	if disc.GitRoot == "" && disc.WorkspaceRoot == "" {
 		return nil, false, nil
 	}
@@ -601,7 +601,7 @@ func resolveByAliasIfAvailable(ctx context.Context, store *db.DB, disc config.Di
 
 // resolveByAlias looks up the alias derived from the git root and returns
 // the bound project. Caller guarantees disc.GitRoot != "".
-func resolveByAlias(ctx context.Context, store *db.DB, disc config.DiscoveredPaths) (*api.ProjectResolveBody, error) {
+func resolveByAlias(ctx context.Context, store db.Storage, disc config.DiscoveredPaths) (*api.ProjectResolveBody, error) {
 	info, err := config.ComputeAliasIdentity(ctx, disc)
 	if err != nil {
 		return nil, api.NewError(400, "validation", err.Error(), "", nil)
@@ -634,7 +634,7 @@ func resolveByAlias(ctx context.Context, store *db.DB, disc config.DiscoveredPat
 	}, nil
 }
 
-func initProject(ctx context.Context, store *db.DB, req *api.InitProjectRequest) (*api.ProjectResolveBody, bool, error) {
+func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequest) (*api.ProjectResolveBody, bool, error) {
 	if req.Body.StartPath == "" {
 		if req.Body.Name == "" {
 			return nil, false, api.NewError(400, "validation",
@@ -702,7 +702,7 @@ func initProject(ctx context.Context, store *db.DB, req *api.InitProjectRequest)
 		// project row so retries observe consistent state regardless of which
 		// failure we hit.
 		if created {
-			_, _ = store.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, project.ID)
+			_ = store.HardDeleteProject(ctx, project.ID)
 		}
 		return nil, false, err
 	}
@@ -721,7 +721,7 @@ func initProject(ctx context.Context, store *db.DB, req *api.InitProjectRequest)
 	}, created, nil
 }
 
-func initByName(ctx context.Context, store *db.DB, req *api.InitProjectRequest) (*api.ProjectResolveBody, bool, error) {
+func initByName(ctx context.Context, store db.Storage, req *api.InitProjectRequest) (*api.ProjectResolveBody, bool, error) {
 	name := strings.TrimSpace(req.Body.Name)
 	if err := config.ValidateProjectName(name); err != nil {
 		return nil, false, api.NewError(400, "validation", err.Error(), "", nil)
@@ -771,7 +771,7 @@ func initByName(ctx context.Context, store *db.DB, req *api.InitProjectRequest) 
 			// the orphan project row so retries observe consistent
 			// state, matching the path-based recovery.
 			if created {
-				_, _ = store.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, project.ID)
+				_ = store.HardDeleteProject(ctx, project.ID)
 			}
 			return nil, false, err
 		}
@@ -815,7 +815,7 @@ func pickInitName(ctx context.Context, req *api.InitProjectRequest, disc config.
 	return choice.Name, nil
 }
 
-func upsertProject(ctx context.Context, store *db.DB, name string) (db.Project, bool, error) {
+func upsertProject(ctx context.Context, store db.Storage, name string) (db.Project, bool, error) {
 	got, err := store.ProjectByName(ctx, name)
 	if err == nil {
 		return got, false, nil
@@ -838,7 +838,7 @@ func upsertProject(ctx context.Context, store *db.DB, name string) (db.Project, 
 
 // upsertAliasFor is the disc-flavored entry point used during resolve, where
 // no preflight has happened. It computes the alias identity then delegates.
-func upsertAliasFor(ctx context.Context, store *db.DB, projectID int64, disc config.DiscoveredPaths, reassign bool) (db.ProjectAlias, error) {
+func upsertAliasFor(ctx context.Context, store db.Storage, projectID int64, disc config.DiscoveredPaths, reassign bool) (db.ProjectAlias, error) {
 	info, err := config.ComputeAliasIdentity(ctx, disc)
 	if err != nil {
 		return db.ProjectAlias{}, api.NewError(400, "validation", err.Error(), "", nil)
@@ -851,7 +851,7 @@ func upsertAliasFor(ctx context.Context, store *db.DB, projectID int64, disc con
 // project_alias_conflict (409) unless reassign is true (in which case we move
 // it). When called after preflightAliasConflict, the conflict branch is
 // unreachable but kept for callers that haven't preflit.
-func attachAlias(ctx context.Context, store *db.DB, projectID int64, info config.AliasInfo, reassign bool) (db.ProjectAlias, error) {
+func attachAlias(ctx context.Context, store db.Storage, projectID int64, info config.AliasInfo, reassign bool) (db.ProjectAlias, error) {
 	existing, err := store.AliasByIdentity(ctx, info.Identity)
 	if err == nil {
 		return applyExistingAlias(ctx, store, projectID, info, existing, reassign)
@@ -882,7 +882,7 @@ func attachAlias(ctx context.Context, store *db.DB, projectID int64, info config
 // If the alias belongs to projectID it is touched (last_seen updated) and
 // returned — enabling idempotent concurrent inits. Otherwise the alias is
 // either moved (reassign=true) or a 409 is returned.
-func applyExistingAlias(ctx context.Context, store *db.DB, projectID int64, info config.AliasInfo, existing db.ProjectAlias, reassign bool) (db.ProjectAlias, error) {
+func applyExistingAlias(ctx context.Context, store db.Storage, projectID int64, info config.AliasInfo, existing db.ProjectAlias, reassign bool) (db.ProjectAlias, error) {
 	if existing.ProjectID == projectID {
 		if err := store.TouchAlias(ctx, existing.ID, info.RootPath); err != nil && !errors.Is(err, db.ErrNotFound) {
 			return db.ProjectAlias{}, api.NewError(500, "internal", err.Error(), "", nil)
@@ -898,11 +898,7 @@ func applyExistingAlias(ctx context.Context, store *db.DB, projectID int64, info
 				"existing_project_id": existing.ProjectID,
 			})
 	}
-	if _, execErr := store.ExecContext(ctx,
-		`UPDATE project_aliases
-		 SET project_id = ?, root_path = ?, last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ?`,
-		projectID, info.RootPath, existing.ID); execErr != nil {
+	if execErr := store.ReassignAlias(ctx, existing.ID, projectID, info.RootPath); execErr != nil {
 		return db.ProjectAlias{}, api.NewError(500, "internal", execErr.Error(), "", nil)
 	}
 	refreshed, _ := store.AliasByIdentity(ctx, info.Identity)
@@ -913,7 +909,7 @@ func applyExistingAlias(ctx context.Context, store *db.DB, projectID int64, info
 // alias is bound to a different project than targetName and reassign is
 // false. Run before any project mutation so a doomed init does not leave an
 // orphan project row.
-func preflightAliasConflict(ctx context.Context, store *db.DB, info config.AliasInfo, targetName string, reassign bool) error {
+func preflightAliasConflict(ctx context.Context, store db.Storage, info config.AliasInfo, targetName string, reassign bool) error {
 	if reassign {
 		return nil
 	}

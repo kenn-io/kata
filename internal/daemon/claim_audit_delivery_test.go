@@ -12,6 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 func TestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing.T) {
@@ -160,7 +161,7 @@ func TestIngestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *test
 	assert.Greater(t, captured[1].ID, captured[0].ID)
 }
 
-func createClaimAuditDeliveryEnrollment(t *testing.T, store *db.DB, projectID int64) db.CreatedFederationEnrollment {
+func createClaimAuditDeliveryEnrollment(t *testing.T, store *sqlitestore.Store, projectID int64) db.CreatedFederationEnrollment {
 	t.Helper()
 	created, err := store.CreateFederationEnrollment(context.Background(), db.CreateFederationEnrollmentParams{
 		Token:            "claim-audit-delivery-token",

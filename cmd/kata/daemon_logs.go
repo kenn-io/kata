@@ -416,9 +416,9 @@ func emitOne(content []byte, lineNo int, path string, stdout, stderr io.Writer, 
 	writeHookLogRecord(stdout, rec)
 }
 
-// hookRunsRoot returns $KATA_HOME/hooks/<dbhash> for the active KATA_DB.
+// hookRunsRoot returns $KATA_HOME/hooks/<dbhash> for the active DSN.
 func hookRunsRoot() (string, error) {
-	dbPath, err := config.KataDB()
+	dbPath, err := config.KataDSN(context.Background())
 	if err != nil {
 		return "", err
 	}

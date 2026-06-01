@@ -24,7 +24,7 @@ import (
 // names a different project than the URL's project_id, the lookup is
 // rejected — otherwise a same-suffix issue in the URL project could be
 // silently substituted for the one the qualifier intended.
-func resolveIssueRef(ctx context.Context, store *db.DB, projectID int64, ref string, include db.IncludeDeleted) (db.Issue, error) {
+func resolveIssueRef(ctx context.Context, store db.Storage, projectID int64, ref string, include db.IncludeDeleted) (db.Issue, error) {
 	parsed, err := shortid.Parse(ref)
 	if err != nil {
 		return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
@@ -69,7 +69,7 @@ func resolveIssueRef(ctx context.Context, store *db.DB, projectID int64, ref str
 // return project_not_found). Internal callers that need to operate on
 // issues whose parent project is archived should call resolveIssueRef
 // directly.
-func activeIssueByRef(ctx context.Context, store *db.DB, projectID int64, ref string, include db.IncludeDeleted) (db.Issue, error) {
+func activeIssueByRef(ctx context.Context, store db.Storage, projectID int64, ref string, include db.IncludeDeleted) (db.Issue, error) {
 	if _, err := activeProjectByID(ctx, store, projectID); err != nil {
 		return db.Issue{}, err
 	}
@@ -86,7 +86,7 @@ func qualifiedID(projectName, shortID string) string {
 // db.InitialLink entries (int64 ToNumber, which the db layer treats as an
 // issue row id). Soft-deleted targets are excluded — initial-link creation
 // must reject hidden peers per spec §6.
-func resolveInitialLinks(ctx context.Context, store *db.DB, projectID int64, links []api.CreateInitialLinkBody) ([]db.InitialLink, error) {
+func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64, links []api.CreateInitialLinkBody) ([]db.InitialLink, error) {
 	out := make([]db.InitialLink, 0, len(links))
 	for _, l := range links {
 		target, err := resolveIssueRef(ctx, store, projectID, l.ToRef, db.IncludeDeletedNo)
@@ -106,7 +106,7 @@ func resolveInitialLinks(ctx context.Context, store *db.DB, projectID int64, lin
 // issue id and stuffs the int64-keyed slices into params. Each ref is
 // resolved through resolveIssueRef, which already maps to issue_not_found
 // 404 for misses, so error returns are wire-ready.
-func fillLinksDeltaParams(ctx context.Context, store *db.DB, projectID int64, d *api.LinksDelta, params *db.EditIssueAtomicParams) error {
+func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64, d *api.LinksDelta, params *db.EditIssueAtomicParams) error {
 	if d == nil {
 		return nil
 	}
@@ -194,7 +194,7 @@ func fillLinksDeltaParams(ctx context.Context, store *db.DB, projectID int64, d 
 // buildLinkChanges projects db.AtomicEditChanges into the wire-facing
 // api.LinkChanges. The db layer reports parallel slices of (short_id, uid);
 // peers project 1:1 onto LinkPeer.
-func buildLinkChanges(_ context.Context, _ *db.DB, changes db.AtomicEditChanges) (*api.LinkChanges, error) {
+func buildLinkChanges(_ context.Context, _ db.Storage, changes db.AtomicEditChanges) (*api.LinkChanges, error) {
 	peer := func(short string, uid string) api.LinkPeer {
 		return api.LinkPeer{UID: uid, ShortID: short}
 	}

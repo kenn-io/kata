@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -28,19 +26,12 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(503, "instance_uid_unset",
 				"meta.instance_uid not yet set", "", nil)
 		}
-		var schemaValue string
-		if err := cfg.DB.QueryRowContext(ctx,
-			`SELECT value FROM meta WHERE key='schema_version'`,
-		).Scan(&schemaValue); err != nil {
+		schema, err := cfg.DB.SchemaVersion(ctx)
+		if err != nil {
 			return nil, api.NewError(500, "schema_version_unavailable",
 				err.Error(), "", nil)
 		}
-		sv, err := strconv.ParseInt(schemaValue, 10, 64)
-		if err != nil {
-			return nil, api.NewError(500, "schema_version_parse",
-				fmt.Sprintf("parse schema_version %q: %v", schemaValue, err),
-				"", nil)
-		}
+		sv := int64(schema)
 		out := &api.InstanceResponse{}
 		out.Body.InstanceUID = uid
 		out.Body.Version = version.Version

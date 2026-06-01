@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -24,7 +25,7 @@ func TestSmoke_FederationPhase1PullReplication(t *testing.T) {
 	bin := buildKataBinary(t)
 	spokeStderr := startDaemon(t, bin, append(spokeDirs.env(), "KATA_FEDERATION_PULL_INTERVAL_MS=25"))
 	spokeURL, spokeHTTP := connectDaemon(t, spokeDirs, spokeStderr)
-	spokeDB, err := db.Open(ctx, spokeDirs.dbPath)
+	spokeDB, err := sqlitestore.Open(ctx, spokeDirs.dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = spokeDB.Close() })
 
@@ -80,7 +81,7 @@ func decodePOST(t *testing.T, client *http.Client, url string, body, out any) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(out))
 }
 
-func waitForFederatedIssue(t *testing.T, store *db.DB, issueUID string, daemonStderr *safeBuffer) db.Issue {
+func waitForFederatedIssue(t *testing.T, store *sqlitestore.Store, issueUID string, daemonStderr *safeBuffer) db.Issue {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	var lastErr error
@@ -97,7 +98,7 @@ func waitForFederatedIssue(t *testing.T, store *db.DB, issueUID string, daemonSt
 	return db.Issue{}
 }
 
-func assertFoldedProjectionMatch(t *testing.T, hub, spoke *db.DB, hubProjectID, spokeProjectID, hubAfterID int64) {
+func assertFoldedProjectionMatch(t *testing.T, hub, spoke *sqlitestore.Store, hubProjectID, spokeProjectID, hubAfterID int64) {
 	t.Helper()
 	ctx := context.Background()
 	hubEvents, err := hub.EventsAfter(ctx, db.EventsAfterParams{

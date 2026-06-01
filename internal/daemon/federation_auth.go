@@ -18,7 +18,7 @@ type federationPrincipal struct {
 
 func authorizeFederationRequest(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	authHeader string,
 	projectID int64,
 	capability string,

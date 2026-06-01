@@ -36,6 +36,16 @@ type DaemonConfig struct {
 	Close CloseConfig `toml:"close"`
 	// Auth carries the daemon's bearer-auth token, if any.
 	Auth AuthConfig `toml:"auth"`
+	// Storage carries DB-selection settings. Today only `dsn` is honored;
+	// see config.KataDSN for the full precedence (env > file > default).
+	Storage StorageConfig `toml:"storage"`
+}
+
+// StorageConfig is the [storage] block of <KATA_HOME>/config.toml. An empty
+// DSN means "no override from the file" — env (KATA_DSN, KATA_DB) or the
+// default <KATA_HOME>/kata.db wins. See config.KataDSN.
+type StorageConfig struct {
+	DSN string `toml:"dsn"`
 }
 
 // AuthConfig is the [auth] block of <KATA_HOME>/config.toml. An empty
@@ -135,6 +145,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Listen = strings.TrimSpace(cfg.Listen)
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
+		cfg.Storage.DSN = strings.TrimSpace(cfg.Storage.DSN)
 		trimDaemonCatalog(&cfg)
 	case errors.Is(err, os.ErrNotExist):
 		// Absent file: fall through with zero-value cfg. Env merge and
