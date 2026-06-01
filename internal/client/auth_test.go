@@ -223,12 +223,12 @@ func TestNewHTTPClientForTargetAllowsBearerForPrivateIPWhenAllowInsecureSet(t *t
 	assert.NotNil(t, c)
 }
 
-func TestNewHTTPClientForTargetRefusesPlaintextHostnameWithAllowInsecure(t *testing.T) {
-	_, err := NewHTTPClientForTarget(context.Background(), "http://daemon.internal:7373",
+func TestNewHTTPClientForTargetAllowsTailscaleHostnameWithAllowInsecure(t *testing.T) {
+	c, err := NewHTTPClientForTarget(context.Background(), "http://tailscale-host:7777",
 		TargetAuth{Token: "target-token", AllowInsecure: true}, Opts{})
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "literal IP")
+	require.NoError(t, err)
+	assert.NotNil(t, c)
 }
 
 func TestNewHTTPClientForTargetRefusesPlaintextHostnameWithoutAllowInsecure(t *testing.T) {

@@ -49,13 +49,29 @@ func BearerTransport(base http.RoundTripper, token, origin string) http.RoundTri
 // BearerTransportWithTrust wraps base with bearer-token injection when token is
 // non-empty, allowing plaintext private-IP targets only when trust is explicit.
 func BearerTransportWithTrust(base http.RoundTripper, token, origin string, trustPrivateNetwork bool) http.RoundTripper {
+	return BearerTransportWithPolicy(base, token, origin, BearerPolicy{TrustPrivateNetwork: trustPrivateNetwork})
+}
+
+// BearerPolicy controls bearer-token target validation.
+type BearerPolicy struct {
+	// TrustPrivateNetwork allows plaintext HTTP only for literal non-public
+	// IPs. It is intended for daemon-wide private-network opt-in.
+	TrustPrivateNetwork bool
+	// AllowInsecurePlaintext skips the plaintext target safety check. Origin
+	// pinning still applies, so cross-origin redirects cannot receive tokens.
+	AllowInsecurePlaintext bool
+}
+
+// BearerTransportWithPolicy wraps base with bearer-token injection when token
+// is non-empty, applying the supplied target-validation policy.
+func BearerTransportWithPolicy(base http.RoundTripper, token, origin string, policy BearerPolicy) http.RoundTripper {
 	if token == "" {
 		return base
 	}
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return &bearerTransport{base: base, token: token, origin: origin, trustPrivateNetwork: trustPrivateNetwork}
+	return &bearerTransport{base: base, token: token, origin: origin, policy: policy}
 }
 
 // BearerOriginForBaseURL validates baseURL as a safe bearer target and returns
@@ -77,19 +93,42 @@ func BearerOriginForBaseURLWithTrust(baseURL string, trustPrivateNetwork bool) (
 	return u.Scheme + "://" + u.Host, nil
 }
 
+// BearerOriginForBaseURLAllowInsecure validates only the URL shape and returns
+// the scheme://host origin used for redirect pinning. It is for explicit
+// per-target allow_insecure configuration where the operator has opted out of
+// plaintext target safety checks.
+func BearerOriginForBaseURLAllowInsecure(baseURL string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse base URL %q for bearer-token safety check: %w", baseURL, err)
+	}
+	if u.Host == "kata.invalid" {
+		return u.Scheme + "://" + u.Host, nil
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("unsupported URL scheme %q for bearer-token client", u.Scheme)
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("bearer-token target %q must include host", u.Redacted())
+	}
+	return u.Scheme + "://" + u.Host, nil
+}
+
 type bearerTransport struct {
-	base                http.RoundTripper
-	token               string
-	origin              string
-	trustPrivateNetwork bool
+	base   http.RoundTripper
+	token  string
+	origin string
+	policy BearerPolicy
 }
 
 func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.token == "" || req.Header.Get("Authorization") != "" {
 		return t.base.RoundTrip(req)
 	}
-	if err := CheckBearerTargetSafeURLWithTrust(req.URL, t.trustPrivateNetwork); err != nil {
-		return nil, err
+	if !t.policy.AllowInsecurePlaintext {
+		if err := CheckBearerTargetSafeURLWithTrust(req.URL, t.policy.TrustPrivateNetwork); err != nil {
+			return nil, err
+		}
 	}
 	if reqOrigin := req.URL.Scheme + "://" + req.URL.Host; reqOrigin != t.origin {
 		return nil, fmt.Errorf("refusing to attach bearer token to %q - "+

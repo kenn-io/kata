@@ -62,6 +62,14 @@ func explicitBearerTransport(
 	if token == "" {
 		return base, nil
 	}
+	if allowInsecure {
+		origin, err := config.BearerOriginForBaseURLAllowInsecure(baseURL)
+		if err != nil {
+			return nil, err
+		}
+		return config.BearerTransportWithPolicy(base, token, origin,
+			config.BearerPolicy{AllowInsecurePlaintext: true}), nil
+	}
 	origin, err := checkBearerTargetSafe(baseURL, allowInsecure)
 	if err != nil {
 		return nil, err
