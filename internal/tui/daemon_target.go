@@ -54,12 +54,16 @@ var (
 		target daemonTarget,
 		kind clientOptsKind,
 	) (*http.Client, error) {
+		opts := optsForKind(kind)
 		if (target.Local || target.Implicit) && target.Token == "" {
-			return client.NewHTTPClient(ctx, endpoint, optsForKind(kind))
+			if target.Implicit {
+				opts.AllowInsecure = client.RemoteAllowInsecureForBaseURL(endpoint, "")
+			}
+			return client.NewHTTPClient(ctx, endpoint, opts)
 		}
 		return client.NewHTTPClientForTarget(ctx, endpoint,
 			client.TargetAuth{Token: target.Token, AllowInsecure: target.AllowInsecure},
-			optsForKind(kind))
+			opts)
 	}
 	bootResolveScopeForTUI    = bootResolveScope
 	connectDaemonTargetForTUI = connectDaemonTarget

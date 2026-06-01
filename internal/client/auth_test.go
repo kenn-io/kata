@@ -352,6 +352,39 @@ func TestNewHTTPClient_TrustPrivateNetworkRejectsPlaintextHostname(t *testing.T)
 	assert.Contains(t, err.Error(), "literal IP")
 }
 
+func TestNewHTTPClient_EnvRemoteAllowInsecureAllowsBearerOnPlaintextHostname(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KATA_HOME", tmp)
+	t.Setenv("KATA_AUTH_TOKEN", "secret")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	t.Setenv("KATA_SERVER", "http://tailscale-host:7777")
+	t.Setenv("KATA_ALLOW_INSECURE", "1")
+
+	_, err := NewHTTPClient(context.Background(), "http://tailscale-host:7777", Opts{})
+	require.NoError(t, err)
+}
+
+func TestNewHTTPClient_FileRemoteAllowInsecureAllowsBearerOnPlaintextHostname(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KATA_HOME", tmp)
+	t.Setenv("KATA_AUTH_TOKEN", "secret")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+	t.Setenv("KATA_SERVER", "")
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeWorkspaceMarker(t, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "http://tailscale-host:7777"
+allow_insecure = true
+`), 0o600))
+
+	_, err := NewHTTPClient(context.Background(), "http://tailscale-host:7777", Opts{})
+	require.NoError(t, err)
+}
+
 // TestNewHTTPClient_AllowsBearerOnLoopback covers the safe-target arm of
 // checkBearerTargetSafe: 127.0.0.1 and [::1] keep the token in-host even
 // over plaintext HTTP.

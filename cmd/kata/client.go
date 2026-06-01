@@ -136,7 +136,10 @@ func discoverDaemon(ctx context.Context) (string, error) {
 // CLI command site is already named for it.
 func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	return client.NewHTTPClient(ctx, baseURL,
-		client.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
+		client.Opts{
+			Timeout:       envHTTPTimeout(defaultHTTPTimeout),
+			AllowInsecure: client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStartForRemote()),
+		})
 }
 
 // streamingClientFor builds the SSE-friendly variant: no overall
@@ -146,6 +149,7 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	return client.NewHTTPClient(ctx, baseURL, client.Opts{
 		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
+		AllowInsecure:         client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStartForRemote()),
 	})
 }
 

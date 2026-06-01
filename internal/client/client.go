@@ -130,6 +130,7 @@ const SSEHandshakeTimeout = 10 * time.Second
 type Opts struct {
 	Timeout               time.Duration
 	ResponseHeaderTimeout time.Duration
+	AllowInsecure         bool
 }
 
 // TargetAuth is explicit per-target bearer configuration. It is used by
@@ -191,13 +192,12 @@ func newHTTPClientWithAuth(ctx context.Context, baseURL string, auth config.Auth
 	if err != nil {
 		return nil, err
 	}
-	var origin string
-	if auth.Token != "" {
-		if origin, err = checkBearerTargetSafe(baseURL, auth.TrustPrivateNetwork); err != nil {
-			return nil, err
-		}
+	allowInsecure := opts.AllowInsecure || remoteAllowInsecureForBaseURL(baseURL, "")
+	rt, err := authBearerTransport(c.Transport, auth.Token, baseURL, auth.TrustPrivateNetwork, allowInsecure)
+	if err != nil {
+		return nil, err
 	}
-	c.Transport = withBearer(c.Transport, auth.Token, origin, auth.TrustPrivateNetwork)
+	c.Transport = rt
 	return c, nil
 }
 

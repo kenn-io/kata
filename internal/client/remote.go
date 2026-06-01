@@ -47,6 +47,12 @@ func NormalizeRemoteURL(v string, allowInsecure bool) (string, error) {
 	return normalizeRemoteURL(v, allowInsecure)
 }
 
+// RemoteAllowInsecureForBaseURL reports whether the configured remote source
+// for workspaceStart explicitly opted baseURL into plaintext HTTP.
+func RemoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
+	return remoteAllowInsecureForBaseURL(baseURL, workspaceStart)
+}
+
 // resolveRemote checks the two opt-in remote sources, in order:
 //
 //  1. KATA_SERVER env (highest precedence)
@@ -104,6 +110,24 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 func envAllowInsecure() bool {
 	v := strings.TrimSpace(os.Getenv(allowInsecureEnvVar))
 	return v == "1" || strings.EqualFold(v, "true")
+}
+
+func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
+	if v := os.Getenv(remoteServerEnvVar); v != "" {
+		allow := envAllowInsecure()
+		u, err := normalizeRemoteURL(v, allow)
+		return err == nil && u == baseURL && allow
+	}
+	root, _, ok := findLocalConfig(workspaceStart)
+	if !ok {
+		return false
+	}
+	cfg, err := config.ReadLocalConfig(root)
+	if err != nil || cfg.Server.URL == "" || !cfg.Server.AllowInsecure {
+		return false
+	}
+	u, err := normalizeRemoteURL(cfg.Server.URL, true)
+	return err == nil && u == baseURL
 }
 
 // findLocalConfig walks upward from start looking for .kata.local.toml,

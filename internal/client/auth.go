@@ -54,9 +54,10 @@ func checkBearerTargetSafe(baseURL string, trustPrivateNetwork bool) (string, er
 	return config.BearerOriginForBaseURLWithTrust(baseURL, trustPrivateNetwork)
 }
 
-func explicitBearerTransport(
+func authBearerTransport(
 	base http.RoundTripper,
 	token, baseURL string,
+	trustPrivateNetwork bool,
 	allowInsecure bool,
 ) (http.RoundTripper, error) {
 	if token == "" {
@@ -70,9 +71,17 @@ func explicitBearerTransport(
 		return config.BearerTransportWithPolicy(base, token, origin,
 			config.BearerPolicy{AllowInsecurePlaintext: true}), nil
 	}
-	origin, err := checkBearerTargetSafe(baseURL, allowInsecure)
+	origin, err := checkBearerTargetSafe(baseURL, trustPrivateNetwork)
 	if err != nil {
 		return nil, err
 	}
-	return withBearer(base, token, origin, allowInsecure), nil
+	return withBearer(base, token, origin, trustPrivateNetwork), nil
+}
+
+func explicitBearerTransport(
+	base http.RoundTripper,
+	token, baseURL string,
+	allowInsecure bool,
+) (http.RoundTripper, error) {
+	return authBearerTransport(base, token, baseURL, false, allowInsecure)
 }
