@@ -30,6 +30,8 @@ func TestAuthMiddleware_TokenConfigured_MissingHeader_401(t *testing.T) {
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	assert.Contains(t, rr.Body.String(), `"auth_required"`)
+	assert.Contains(t, rr.Body.String(), "Authorization bearer required")
+	assert.NotContains(t, rr.Body.String(), "Bearer <token>")
 }
 
 func TestAuthMiddleware_TokenConfigured_WrongToken_403(t *testing.T) {
@@ -87,6 +89,8 @@ func TestAuthMiddleware_IdentityModeMissingBearer401(t *testing.T) {
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	assert.Contains(t, rr.Body.String(), `"auth_required"`)
+	assert.Contains(t, rr.Body.String(), "Authorization bearer required")
+	assert.NotContains(t, rr.Body.String(), "Bearer <token>")
 }
 
 func TestAuthMiddleware_IdentityModeUnknownToken403(t *testing.T) {

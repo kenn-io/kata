@@ -26,12 +26,12 @@ func authorizeFederationRequest(
 ) (federationPrincipal, error) {
 	if !strings.HasPrefix(authHeader, authBearerPrefix) {
 		return federationPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
-			"Authorization: Bearer <token> required", "", nil)
+			"Authorization bearer required", "", nil)
 	}
 	token := strings.TrimPrefix(authHeader, authBearerPrefix)
 	if token == "" {
 		return federationPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
-			"Authorization: Bearer <token> required", "", nil)
+			"Authorization bearer required", "", nil)
 	}
 
 	enrollment, err := store.AuthorizeFederationToken(ctx, token, projectID, capability)

@@ -165,7 +165,7 @@ func localAuthError(cfg ServerConfig, authz string) error {
 	}
 	if !strings.HasPrefix(authz, authBearerPrefix) {
 		return api.NewError(http.StatusUnauthorized, "auth_required",
-			"Authorization: Bearer <token> required", "", nil)
+			"Authorization bearer required", "", nil)
 	}
 	return api.NewError(http.StatusForbidden, "auth_invalid", "token mismatch", "", nil)
 }

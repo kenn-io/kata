@@ -39,6 +39,18 @@ func TestClaimAuthLocalDaemonBearerCanClaimHubProject(t *testing.T) {
 	assert.Equal(t, "local-cli", out.Holder.Holder)
 }
 
+func TestClaimAuthLocalDaemonMissingBearerRedactsPlaceholder(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
+	project, issue := createClaimHubIssue(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodGet, claimStatusPath(project.ID, issue.ShortID), nil, nil)
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(raw))
+	assert.Contains(t, string(raw), "auth_required")
+	assert.Contains(t, string(raw), "Authorization bearer required")
+	assert.NotContains(t, string(raw), "Bearer <token>")
+}
+
 func TestClaimRoutesRejectArchivedFederatedProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
 	project, issue := createClaimHubIssue(t, env)

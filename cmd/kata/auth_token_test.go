@@ -12,7 +12,7 @@ import (
 
 // TestCLIInjectsAuthTokenAgainstProtectedDaemon covers roborev finding 19207:
 // when the daemon enforces bearer auth, the CLI's client must attach
-// Authorization: Bearer <token> to every API call. Without the fix the
+// an Authorization bearer header to every API call. Without the fix the
 // `kata projects list` call below would get a 401 from the daemon's middleware
 // and surface as a CLI error.
 //
@@ -49,6 +49,6 @@ func TestCLIRejectedWithoutAuthTokenEnv(t *testing.T) {
 	_, err := runCmdOutput(t, env, "projects", "list")
 	require.Error(t, err,
 		"projects list without an auth token must surface a daemon error")
-	assert.Contains(t, strings.ToLower(err.Error()), "authorization: bearer",
+	assert.Contains(t, strings.ToLower(err.Error()), "authorization bearer required",
 		"expected the daemon's bearer-auth rejection, got %v", err)
 }

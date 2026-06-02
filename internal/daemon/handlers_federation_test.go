@@ -1496,6 +1496,8 @@ func TestFederationAuthTransportPathsRequireEnrollmentBearer(t *testing.T) {
 			resp, raw := envDoRaw(t, env, tc.method, tc.path, tc.body, nil)
 			require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "%s response: %s", tc.name, raw)
 			assert.Contains(t, string(raw), "auth_required")
+			assert.Contains(t, string(raw), "Authorization bearer required")
+			assert.NotContains(t, string(raw), "Bearer <token>")
 		})
 
 		t.Run(tc.name+"/unknown", func(t *testing.T) {

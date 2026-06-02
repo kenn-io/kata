@@ -81,7 +81,7 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 			got := r.Header.Get(authHeader)
 			if !strings.HasPrefix(got, authBearerPrefix) {
 				api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required",
-					"Authorization: Bearer <token> required")
+					"Authorization bearer required")
 				return
 			}
 			presented := strings.TrimPrefix(got, authBearerPrefix)
@@ -100,7 +100,7 @@ func requireIdentityBearer(w http.ResponseWriter, r *http.Request, next http.Han
 	got := r.Header.Get(authHeader)
 	if !strings.HasPrefix(got, authBearerPrefix) {
 		api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required",
-			"Authorization: Bearer <token> required")
+			"Authorization bearer required")
 		return
 	}
 	presented := strings.TrimPrefix(got, authBearerPrefix)
