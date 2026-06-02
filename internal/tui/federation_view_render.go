@@ -24,6 +24,8 @@ func renderFederation(m Model) string {
 		return renderFederationSelectHub(m)
 	case federationModeSelectHubProject:
 		return renderFederationSelectHubProject(m)
+	case federationModeBrowseHubs:
+		return renderFederationBrowseHubs(m)
 	case federationModePreview:
 		return renderFederationPreview(m)
 	case federationModeResult:
@@ -129,6 +131,33 @@ func renderFederationSelectHubProject(m Model) string {
 	}
 	body = appendFederationEnrollErr(body, m)
 	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [enter] preview  [esc] back"))
+	return strings.Join(body, "\n")
+}
+
+func renderFederationBrowseHubs(m Model) string {
+	target := m.federationDraft.HubTarget
+	body := federationModeHeader(m, "Browse catalog hub projects")
+	body = append(body,
+		"catalog hub: "+sanitizeForLine(daemonName(target))+
+			" "+sanitizeForLine(federationDaemonEndpoint(target)),
+		fmt.Sprintf("allow_insecure: %t", target.AllowInsecure),
+		"mode: read-only",
+		"",
+	)
+	if m.federationHubProjectsLoading {
+		body = append(body, subtleStyle.Render("  loading hub projects..."))
+	} else if m.federationEnrollErr != nil {
+		body = append(body, errorStyle.Render("  failed to load hub projects: "+
+			sanitizeForLine(m.federationEnrollErr.Error())))
+	} else if len(m.federationHubProjects) == 0 {
+		body = append(body, subtleStyle.Render("  no hub projects"))
+	} else {
+		cursor := clampFederationIndex(m.federationHubProjectCursor, len(m.federationHubProjects), 0)
+		for i, project := range m.federationHubProjects {
+			body = append(body, renderFederationChoice(federationBrowseHubProjectLabel(project), i == cursor))
+		}
+	}
+	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -249,6 +278,10 @@ func federationHubProjectLabels(m Model) []string {
 		return []string{"no hub projects"}
 	}
 	return labels
+}
+
+func federationBrowseHubProjectLabel(project ProjectSummary) string {
+	return fmt.Sprintf("%d %s", project.ID, project.Name)
 }
 
 func federationOperationLabel(operation federationOperation) string {

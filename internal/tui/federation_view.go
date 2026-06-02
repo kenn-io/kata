@@ -152,6 +152,9 @@ func (m Model) handleFederationHubProjectsLoaded(msg federationHubProjectsLoaded
 	if m.staleConnMsg(msg.connGen) || msg.gen != m.federationEnrollGen {
 		return m
 	}
+	if m.federationMode != federationModeSelectHubProject && m.federationMode != federationModeBrowseHubs {
+		return m
+	}
 	m.federationHubProjectsLoading = false
 	m.federationEnrollErr = msg.err
 	if msg.err != nil {
@@ -159,7 +162,11 @@ func (m Model) handleFederationHubProjectsLoaded(msg federationHubProjectsLoaded
 	}
 	m.federationDraft.HubTarget = msg.target
 	m.federationHubProjects = msg.projects
-	m.federationHubProjectCursor = clampFederationIndex(m.federationHubProjectCursor, federationHubProjectRowCount(m), 0)
+	count := federationHubProjectRowCount(m)
+	if m.federationMode == federationModeBrowseHubs {
+		count = len(m.federationHubProjects)
+	}
+	m.federationHubProjectCursor = clampFederationIndex(m.federationHubProjectCursor, count, 0)
 	return m
 }
 
@@ -193,6 +200,8 @@ func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.routeFederationHubKey(msg)
 	case federationModeSelectHubProject:
 		return m.routeFederationHubProjectKey(msg)
+	case federationModeBrowseHubs:
+		return m.routeFederationBrowseHubsKey(msg)
 	case federationModePreview:
 		return m.routeFederationPreviewKey(msg)
 	case federationModeRecovery:
@@ -213,6 +222,8 @@ func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.federationErr = nil
 		m.federationGen++
 		return m, m.fetchFederationStatus()
+	case "b":
+		return m.startFederationHubBrowse()
 	case "enter":
 		if m.federationCursor < 0 || m.federationCursor >= len(rows) {
 			return m, nil
@@ -311,6 +322,22 @@ func (m Model) routeFederationHubProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) routeFederationBrowseHubsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	count := len(m.federationHubProjects)
+	if next, ok := nextFederationCursor(msg, m.federationHubProjectCursor, count); ok {
+		m.federationHubProjectCursor = next
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "backspace":
+		m.federationMode = federationModeList
+		return m, nil
+	case "enter":
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m Model) routeFederationPreviewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace":
@@ -372,6 +399,27 @@ func (m Model) cursorMoveFederation(msg tea.KeyMsg, rows []FederationProjectStat
 		return m, true
 	}
 	return m, false
+}
+
+func (m Model) startFederationHubBrowse() (Model, tea.Cmd) {
+	target, cursor, ok := selectedFederationBrowseHub(m)
+	m.federationMode = federationModeBrowseHubs
+	m.federationHubCursor = cursor
+	m.federationHubProjectCursor = 0
+	m.federationHubProjects = nil
+	m.federationHubProjectsLoading = false
+	m.federationEnrollErr = nil
+	m.federationDraft = federationDraft{}
+	m.federationResult = federationEnrollResult{}
+	m.federationRecovery = federationRecovery{}
+	if !ok {
+		m.federationEnrollErr = errors.New("no catalog hub daemons configured")
+		return m, nil
+	}
+	m.federationDraft.HubTarget = target
+	m.federationHubProjectsLoading = true
+	m.federationEnrollGen++
+	return m, m.fetchFederationHubProjects(target)
 }
 
 func (m Model) startFederationEnrollment() (Model, tea.Cmd) {
@@ -462,6 +510,23 @@ func federationHubRows(m Model) []federationHubRow {
 		rows = append(rows, federationHubRow{target: target})
 	}
 	return rows
+}
+
+func selectedFederationBrowseHub(m Model) (daemonTarget, int, bool) {
+	rows := federationHubRows(m)
+	if len(rows) == 0 {
+		return daemonTarget{}, 0, false
+	}
+	cursor := clampFederationIndex(m.federationHubCursor, len(rows), 0)
+	if !daemonTargetsMatch(rows[cursor].target, m.activeDaemon) {
+		return rows[cursor].target, cursor, true
+	}
+	for i, row := range rows {
+		if !daemonTargetsMatch(row.target, m.activeDaemon) {
+			return row.target, i, true
+		}
+	}
+	return daemonTarget{}, cursor, false
 }
 
 func (m Model) selectFederationHub(target daemonTarget) (Model, tea.Cmd) {

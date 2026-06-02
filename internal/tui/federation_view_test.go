@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -86,6 +87,94 @@ func TestFederationView_HelpAndFooterIncludeFederationBinding(t *testing.T) {
 
 	m := Model{list: listModel{issues: hierarchyIssues()}}
 	assertHelpItemPresent(t, flattenHelpRows(m.queueHelpRows()), helpItem{key: "F", desc: "federation"})
+}
+
+func TestFederationBrowse_BKeyListsCatalogHubProjectsWithoutSwitchingActiveDaemon(t *testing.T) {
+	spokeAPI := &Client{}
+	spokeTarget := daemonTarget{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"}
+	hubTarget := daemonTarget{Name: "catalog-hub", URL: "https://hub.example", Token: "hub-auth"}
+	hub := &recordingFederationHubAdmin{
+		projects: []ProjectSummary{
+			{ID: 42, Name: "hub-project"},
+			{ID: 43, Name: "other-hub-project"},
+		},
+	}
+	var requestedTarget daemonTarget
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		target daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		requestedTarget = target
+		return hub, target, nil
+	})
+	m := setupFederationView()
+	m.api = spokeAPI
+	m.activeDaemon = spokeTarget
+	m.daemonTargets = []daemonTarget{spokeTarget, hubTarget}
+	m.federationHubCursor = 1
+	initialScope := m.scope
+	initialSSE := m.sseCh
+	initialConnGen := m.connGen
+	initialSwitchAttempt := m.daemonSwitchAttempt
+
+	out, cmd := m.routeFederationViewKey(keyRune('b'))
+	require.NotNil(t, cmd)
+	assert.Equal(t, federationModeBrowseHubs, out.federationMode)
+
+	msg := cmd().(federationHubProjectsLoadedMsg)
+	out, nextCmd := updateModel(out, msg)
+
+	require.Nil(t, nextCmd)
+	assert.Equal(t, hubTarget, requestedTarget)
+	assert.Equal(t, 1, hub.listProjectsCalls)
+	assert.Equal(t, spokeTarget, out.activeDaemon)
+	assert.Same(t, spokeAPI, out.api)
+	assert.Equal(t, initialScope, out.scope)
+	assert.True(t, out.sseCh == initialSSE)
+	assert.Equal(t, initialConnGen, out.connGen)
+	assert.Equal(t, initialSwitchAttempt, out.daemonSwitchAttempt)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "catalog-hub")
+	assert.Contains(t, rendered, "https://hub.example")
+	assert.Contains(t, rendered, "hub-project")
+	assert.Contains(t, rendered, "other-hub-project")
+}
+
+func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
+	hubTarget := daemonTarget{Name: "catalog-hub", URL: "https://hub.example", Token: "hub-auth"}
+	hub := &recordingFederationHubAdmin{
+		projects: []ProjectSummary{{ID: 42, Name: "hub-project"}},
+	}
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		target daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		return hub, target, nil
+	})
+	m := setupFederationView()
+	m.api = &Client{}
+	m.activeDaemon = daemonTarget{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"}
+	m.daemonTargets = []daemonTarget{m.activeDaemon, hubTarget}
+	m.federationHubCursor = 1
+
+	out, cmd := m.routeFederationViewKey(keyRune('b'))
+	require.NotNil(t, cmd)
+	out, _ = updateModel(out, cmd().(federationHubProjectsLoadedMsg))
+
+	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeBrowseHubs, out.federationMode)
+	assert.Equal(t, 0, hub.ensureProjectCalls)
+	assert.Equal(t, 0, hub.enableFederationCalls)
+	assert.Equal(t, 0, hub.createEnrollmentCalls)
+	assert.NotEqual(t, federationModePreview, out.federationMode)
+	assert.Empty(t, out.federationRecovery.Token)
+	assert.Empty(t, out.federationRecovery.Command.Token)
+	rendered := stripANSI(renderFederation(out))
+	assert.NotContains(t, rendered, "single-use/secret-bearing")
+	assert.NotContains(t, rendered, enrollmentSecret())
 }
 
 func TestFederationEnroll_NWithCurrentProjectStartsHubSelection(t *testing.T) {
@@ -560,4 +649,54 @@ func federationMetadataBody() api.ProjectFederationBody {
 
 func enrollmentSecret() string {
 	return strings.Join([]string{"enrollment", "secret"}, "-")
+}
+
+type recordingFederationHubAdmin struct {
+	projects              []ProjectSummary
+	listProjectsCalls     int
+	ensureProjectCalls    int
+	enableFederationCalls int
+	createEnrollmentCalls int
+}
+
+func (h *recordingFederationHubAdmin) ListProjects(_ context.Context) ([]ProjectSummary, error) {
+	h.listProjectsCalls++
+	return h.projects, nil
+}
+
+func (h *recordingFederationHubAdmin) EnsureProject(
+	_ context.Context,
+	name string,
+) (ProjectSummary, error) {
+	h.ensureProjectCalls++
+	return ProjectSummary{ID: 99, Name: name}, nil
+}
+
+func (h *recordingFederationHubAdmin) EnableFederation(
+	_ context.Context,
+	projectID int64,
+	_ string,
+) (ProjectFederationMetadata, error) {
+	h.enableFederationCalls++
+	return ProjectFederationMetadata{ProjectID: projectID}, nil
+}
+
+func (h *recordingFederationHubAdmin) CreateFederationEnrollment(
+	_ context.Context,
+	_ CreateFederationEnrollmentInput,
+) (FederationEnrollment, error) {
+	h.createEnrollmentCalls++
+	return FederationEnrollment{Token: enrollmentSecret()}, nil
+}
+
+func restoreFederationHubAdminClient(
+	t *testing.T,
+	replacement func(context.Context, daemonTarget) (federationHubAdminAPI, daemonTarget, error),
+) {
+	t.Helper()
+	orig := newFederationHubAdminClient
+	newFederationHubAdminClient = replacement
+	t.Cleanup(func() {
+		newFederationHubAdminClient = orig
+	})
 }
