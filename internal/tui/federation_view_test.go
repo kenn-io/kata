@@ -433,13 +433,18 @@ func TestFederationEnroll_MetadataFailureRecoveryRevealUsesOnlyAvailableFields(t
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "single-use/secret-bearing")
 	assert.Contains(t, rendered, "spoke target")
+	assert.Contains(t, rendered, "KATA_SERVER=")
 	assert.Contains(t, rendered, "--hub-url")
 	assert.Contains(t, rendered, "--hub-project-id 42")
-	assert.Contains(t, rendered, "--project-name spoke-project")
+	assert.Contains(t, rendered, "--project spoke-project")
 	assert.Contains(t, rendered, enrollmentSecret())
 	assert.NotContains(t, rendered, "--hub-project-uid")
+	assert.NotContains(t, rendered, "--project-name")
 	assert.NotContains(t, rendered, "--replay-horizon-event-id")
 	assert.NotContains(t, rendered, "--baseline-through-event-id")
+	assert.NotContains(t, rendered, "--replay-horizon")
+	assert.NotContains(t, rendered, "--baseline-through")
+	assert.NotContains(t, rendered, "--server")
 }
 
 func TestFederationEnroll_JoinFailureShowsSpokeLabeledRecoveryAndHidesToken(t *testing.T) {
@@ -470,13 +475,18 @@ func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t 
 	assert.Contains(t, rendered, "single-use/secret-bearing")
 	assert.Contains(t, rendered, "valid and not revoked")
 	assert.Contains(t, rendered, "spoke target")
+	assert.Contains(t, rendered, "KATA_SERVER=")
 	assert.Contains(t, rendered, "--hub-url")
 	assert.Contains(t, rendered, "--hub-project-id 42")
 	assert.Contains(t, rendered, "--hub-project-uid 01HZNQ7VFPK1XGD8R5MABCD4EX")
-	assert.Contains(t, rendered, "--project-name spoke-project")
-	assert.Contains(t, rendered, "--replay-horizon-event-id 9")
-	assert.Contains(t, rendered, "--baseline-through-event-id 11")
+	assert.Contains(t, rendered, "--project spoke-project")
+	assert.Contains(t, rendered, "--replay-horizon 9")
+	assert.Contains(t, rendered, "--baseline-through 11")
 	assert.Contains(t, rendered, enrollmentSecret())
+	assert.NotContains(t, rendered, "--project-name")
+	assert.NotContains(t, rendered, "--replay-horizon-event-id")
+	assert.NotContains(t, rendered, "--baseline-through-event-id")
+	assert.NotContains(t, rendered, "--server")
 }
 
 func setupFederationSourceModel() Model {

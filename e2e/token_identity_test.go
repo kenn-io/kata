@@ -70,7 +70,7 @@ func TestTokenIdentity_RemoteCLIUsesUserTokenActor(t *testing.T) {
 	userToken := createIdentityTokenCLI(t, bin, adminEnv, "alice")
 
 	clientHome := t.TempDir()
-	clientWS := initRepo(t, "https://github.com/wesm/identity-cli.git")
+	clientWS := initRepo(t, "https://example.invalid/team/identity-cli.git")
 	clientEnv := identityCLIEnv(clientHome, addr, userToken)
 
 	runRemoteCmd(t, bin, clientWS, clientEnv,
@@ -105,7 +105,7 @@ func TestTokenIdentity_BootstrapCanResolveButCannotWrite(t *testing.T) {
 	userToken := createIdentityTokenCLI(t, bin, adminEnv, "alice")
 
 	clientHome := t.TempDir()
-	clientWS := initRepo(t, "https://github.com/wesm/bootstrap-boundary.git")
+	clientWS := initRepo(t, "https://example.invalid/team/bootstrap-boundary.git")
 	userEnv := identityCLIEnv(clientHome, addr, userToken)
 	runRemoteCmd(t, bin, clientWS, userEnv,
 		"--project", "bootstrap-boundary", "init")
@@ -118,7 +118,7 @@ func TestTokenIdentity_BootstrapCanResolveButCannotWrite(t *testing.T) {
 		map[string]any{
 			"name": "bootstrap-boundary",
 			"alias": map[string]any{
-				"identity":  "github.com/wesm/bootstrap-boundary",
+				"identity":  "example.invalid/team/bootstrap-boundary",
 				"kind":      "git",
 				"root_path": clientWS,
 			},
@@ -159,7 +159,7 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 	userToken := createIdentityTokenCLI(t, bin, adminEnv, "wesm")
 	hubClientHome := t.TempDir()
 	hubEnv := identityCLIEnv(hubClientHome, hubAddr, userToken)
-	hubWS := initRepo(t, "https://github.com/wesm/identity-federation-hub.git")
+	hubWS := initRepo(t, "https://example.invalid/team/identity-federation-hub.git")
 	runRemoteCmd(t, bin, hubWS, hubEnv, "--project", projectName, "init")
 
 	spokeDirs := newE2EDirs(t)

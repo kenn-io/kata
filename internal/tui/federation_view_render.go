@@ -308,25 +308,28 @@ func federationHubProjectBehavior(draft federationDraft) string {
 }
 
 func federationRecoveryCommandString(cmd federationRecoveryCommand) string {
-	parts := []string{
+	parts := []string{}
+	if cmd.SpokeEndpoint != "" && cmd.SpokeEndpoint != "local" {
+		parts = append(parts, "KATA_SERVER="+shellWord(cmd.SpokeEndpoint))
+	}
+	parts = append(parts,
 		"kata",
-		"--server", shellWord(cmd.SpokeEndpoint),
 		"federation", "join",
 		"--hub-url", shellWord(cmd.HubURL),
 		"--hub-project-id", fmt.Sprintf("%d", cmd.HubProjectID),
-		"--project-name", shellWord(cmd.ProjectName),
+		"--project", shellWord(cmd.ProjectName),
 		"--token", shellWord(cmd.Token),
 		"--actor", shellWord(cmd.Actor),
 		"--capabilities", shellWord(cmd.Capabilities),
-	}
+	)
 	if cmd.HubProjectUID != "" {
 		parts = append(parts, "--hub-project-uid", shellWord(cmd.HubProjectUID))
 	}
 	if cmd.ReplayHorizonEventID != 0 {
-		parts = append(parts, "--replay-horizon-event-id", fmt.Sprintf("%d", cmd.ReplayHorizonEventID))
+		parts = append(parts, "--replay-horizon", fmt.Sprintf("%d", cmd.ReplayHorizonEventID))
 	}
 	if cmd.BaselineThroughEventID != 0 {
-		parts = append(parts, "--baseline-through-event-id", fmt.Sprintf("%d", cmd.BaselineThroughEventID))
+		parts = append(parts, "--baseline-through", fmt.Sprintf("%d", cmd.BaselineThroughEventID))
 	}
 	if cmd.PushEnabled {
 		parts = append(parts, "--push")
