@@ -176,18 +176,29 @@ type ProjectSummary struct {
 	Name string `json:"name"`
 }
 
+// InstanceInfo is the daemon instance identity returned by /api/v1/instance.
 type InstanceInfo struct {
 	InstanceUID   string `json:"instance_uid"`
 	Version       string `json:"version"`
 	SchemaVersion int64  `json:"schema_version"`
 }
 
+// FederationStatusBody is the daemon federation status response.
 type FederationStatusBody = api.FederationStatusBody
+
+// FederationProjectStatus is one project row from the federation status API.
 type FederationProjectStatus = api.FederationProjectStatus
+
+// FederationEnrollment is the hub-created temporary enrollment token response.
 type FederationEnrollment = api.FederationEnrollmentOut
+
+// ProjectFederationMetadata is hub metadata needed to join a spoke replica.
 type ProjectFederationMetadata = api.ProjectFederationBody
+
+// FederationReplicaResult is the spoke join/adoption result response.
 type FederationReplicaResult = api.CreateFederationReplicaBody
 
+// CreateFederationReplicaInput is the spoke join/adoption request body.
 type CreateFederationReplicaInput struct {
 	HubURL                 string `json:"hub_url"`
 	HubProjectID           int64  `json:"hub_project_id"`
@@ -203,6 +214,7 @@ type CreateFederationReplicaInput struct {
 	AdoptExisting          bool   `json:"adopt_existing,omitempty"`
 }
 
+// CreateFederationEnrollmentInput is the hub enrollment creation request body.
 type CreateFederationEnrollmentInput struct {
 	SpokeInstanceUID string `json:"spoke_instance_uid"`
 	ProjectID        *int64 `json:"project_id"`

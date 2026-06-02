@@ -26,6 +26,8 @@ type FederationCredential struct {
 	AllowInsecure bool   `toml:"allow_insecure,omitempty"`
 }
 
+// FederationCredentialMetadata is the redacted credential information safe
+// to expose in daemon status responses.
 type FederationCredentialMetadata struct {
 	Status        string
 	HubURL        string
@@ -59,6 +61,8 @@ func ReadFederationCredentials() (*FederationCredentials, error) {
 	return &creds, nil
 }
 
+// FederationCredentialMetadataFor returns redacted federation credential
+// metadata for projectUID without exposing the stored token.
 func FederationCredentialMetadataFor(projectUID string) FederationCredentialMetadata {
 	creds, err := ReadFederationCredentials()
 	if err != nil {

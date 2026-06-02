@@ -25,6 +25,7 @@ type Client struct {
 // base is the daemon URL — "http://kata.invalid" for unix-socket transport.
 func NewClient(base string, hc *http.Client) *Client { return &Client{base: base, hc: hc} }
 
+// GetInstance returns the daemon instance identity and schema version.
 func (c *Client) GetInstance(ctx context.Context) (InstanceInfo, error) {
 	var resp InstanceInfo
 	err := c.do(ctx, http.MethodGet, "/api/v1/instance", nil, &resp)
@@ -327,6 +328,7 @@ func (c *Client) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 	return resp.Projects, nil
 }
 
+// EnsureProject creates or returns a project by name on the target daemon.
 func (c *Client) EnsureProject(ctx context.Context, name string) (ProjectSummary, error) {
 	var resp struct {
 		Project ProjectSummary `json:"project"`
@@ -335,12 +337,14 @@ func (c *Client) EnsureProject(ctx context.Context, name string) (ProjectSummary
 	return resp.Project, err
 }
 
+// FederationStatus returns redacted federation status for all local bindings.
 func (c *Client) FederationStatus(ctx context.Context) (FederationStatusBody, error) {
 	var resp FederationStatusBody
 	err := c.do(ctx, http.MethodGet, "/api/v1/federation/status", nil, &resp)
 	return resp, err
 }
 
+// EnableFederation enables federation metadata for an existing project.
 func (c *Client) EnableFederation(
 	ctx context.Context,
 	projectID int64,
@@ -353,6 +357,7 @@ func (c *Client) EnableFederation(
 	return resp, err
 }
 
+// CreateFederationEnrollment creates a temporary hub enrollment token.
 func (c *Client) CreateFederationEnrollment(
 	ctx context.Context,
 	body CreateFederationEnrollmentInput,
@@ -362,6 +367,7 @@ func (c *Client) CreateFederationEnrollment(
 	return resp, err
 }
 
+// CreateFederationReplica joins or adopts a local project as a spoke.
 func (c *Client) CreateFederationReplica(
 	ctx context.Context,
 	body CreateFederationReplicaInput,

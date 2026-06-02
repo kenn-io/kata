@@ -7,11 +7,15 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// Capabilities is the canonical API value plus the human-facing display
+// value for a federation capability set.
 type Capabilities struct {
 	API     string
 	Display string
 }
 
+// NormalizeCapabilities maps user-facing federation capabilities to the
+// canonical API/storage representation and the deterministic display value.
 func NormalizeCapabilities(raw string) (Capabilities, error) {
 	if strings.TrimSpace(raw) == "" {
 		raw = "pull,push,lease"
@@ -35,6 +39,8 @@ func NormalizeCapabilities(raw string) (Capabilities, error) {
 	return Capabilities{API: apiCaps, Display: DisplayCapabilities(apiCaps)}, nil
 }
 
+// DisplayCapabilities converts API/storage capabilities to the TUI/CLI
+// display spelling, including claim -> lease.
 func DisplayCapabilities(apiCaps string) string {
 	parts := strings.Split(apiCaps, ",")
 	seen := make(map[string]bool, len(parts))

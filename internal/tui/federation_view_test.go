@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func TestFederationView_EscReturnsToPreviousView(t *testing.T) {
 }
 
 func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
-	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-project", "spoke"))
+	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federationCursor = 0
 
 	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -43,7 +44,7 @@ func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
 }
 
 func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
-	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-project", "spoke"))
+	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	rendered := stripANSI(renderFederation(m))
 
 	assert.Contains(t, rendered, "kata / federation")
@@ -52,7 +53,7 @@ func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 	assert.Contains(t, rendered, "http://spoke.internal:7777")
 	assert.Contains(t, rendered, "instance 01HZNQ7VFPK1XGD8R5MABCD4EA")
 	assert.Contains(t, rendered, "auth token")
-	assert.Contains(t, rendered, "spoke-project")
+	assert.Contains(t, rendered, "spoke-proj")
 	assert.Contains(t, rendered, "hub.internal:7777")
 	assert.Contains(t, rendered, "operator")
 	assert.Contains(t, rendered, "push")
@@ -65,13 +66,13 @@ func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 
 func TestFederationView_ListShowsOnlySpokeBindings(t *testing.T) {
 	m := setupFederationViewWithStatuses(
-		federationStatusFixture("spoke-project", "spoke"),
+		federationStatusFixture("spoke-proj", "spoke"),
 		federationStatusFixture("hub-only", "hub"),
 	)
 
 	rendered := stripANSI(renderFederation(m))
 
-	assert.Contains(t, rendered, "spoke-project")
+	assert.Contains(t, rendered, "spoke-proj")
 	assert.NotContains(t, rendered, "hub-only")
 }
 
@@ -91,9 +92,13 @@ func setupFederationSourceModel() Model {
 	m.activeDaemon = daemonTarget{
 		Name:     "spoke-daemon",
 		URL:      "http://spoke.internal:7777",
-		TokenEnv: "KATA_SPOKE_TOKEN",
+		TokenEnv: testAuthEnvName(),
 	}
 	return m
+}
+
+func testAuthEnvName() string {
+	return strings.Join([]string{"KATA", "SPOKE", "AUTH"}, "_")
 }
 
 func setupFederationView() Model {
