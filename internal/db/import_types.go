@@ -22,6 +22,12 @@ type ImportOptions struct {
 	// uniqueness constraint and could carry duplicates. Current-version
 	// streams set this false; the constraint is already enforced upstream.
 	DedupeLegacyActivePendingClaims bool
+
+	// RecomputeEventContentHash tells ImportReplay to replace event hashes
+	// after resolving replay-only fields such as issue_uid. Used for legacy
+	// JSONL streams whose source schema lacked the final portable event fields.
+	// Current streams leave this false so a mismatched supplied hash is refused.
+	RecomputeEventContentHash bool
 }
 
 // ImportRecord is one normalized, current-shape import row: a Kind discriminator

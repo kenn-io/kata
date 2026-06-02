@@ -73,6 +73,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 	return store.ImportReplay(ctx, recs, db.ImportOptions{
 		NewInstance:                     opts.NewInstance,
 		DedupeLegacyActivePendingClaims: exportVersion < 12,
+		RecomputeEventContentHash:       exportVersion < db.CurrentSchemaVersion(),
 	})
 }
 
@@ -314,6 +315,9 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		}
 		if err := fillEventV11ReplayFields(&rec.EventExport, exportVersion, projectUIDByID); err != nil {
 			return db.ImportRecord{}, err
+		}
+		if rec.ProjectUID == "" {
+			rec.ProjectUID = projectUIDByID[rec.ProjectID]
 		}
 		e := rec.EventExport
 		return db.ImportRecord{Kind: string(KindEvent), Event: &e}, nil

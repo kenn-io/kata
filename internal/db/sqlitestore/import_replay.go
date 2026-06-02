@@ -104,7 +104,7 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 	case db.ImportKindPendingClaimRequest:
 		return importPendingClaimRequest(ctx, tx, r.PendingClaimRequest, opts)
 	case db.ImportKindEvent:
-		return importEvent(ctx, tx, r.Event)
+		return importEvent(ctx, tx, r.Event, opts)
 	case db.ImportKindPurgeLog:
 		return importPurgeLog(ctx, tx, r.PurgeLog)
 	case db.ImportKindSQLiteSequence:
@@ -424,11 +424,11 @@ func skipLegacyDuplicateActivePendingClaim(ctx context.Context, tx *sql.Tx, rec 
 	return false, err
 }
 
-func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport) error {
+func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.ImportOptions) error {
 	if err := fillEventIssueUIDs(ctx, tx, e); err != nil {
 		return err // raw: preserves the "corrupt_event_fk: …" prefix asserted by import_test.go
 	}
-	projectName, err := importedProjectName(ctx, tx, e.ProjectID, e.ProjectName)
+	projectName, projectUID, err := importedEventProjectIdentity(ctx, tx, e)
 	if err != nil {
 		return err
 	}
@@ -440,8 +440,17 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport) error {
 	if e.HLCCounter < 0 {
 		return fmt.Errorf("event %d has negative hlc_counter", e.ID)
 	}
-	if !validContentHash(e.ContentHash) {
+	if !opts.RecomputeEventContentHash && !validContentHash(e.ContentHash) {
 		return fmt.Errorf("event %d invalid content_hash %q", e.ID, e.ContentHash)
+	}
+	recomputed, err := eventReplayContentHash(e, projectUID, projectName)
+	if err != nil {
+		return fmt.Errorf("event %d content_hash: %w", e.ID, err)
+	}
+	if opts.RecomputeEventContentHash {
+		e.ContentHash = recomputed
+	} else if recomputed != e.ContentHash {
+		return fmt.Errorf("event %d content_hash mismatch (supplied %s, recomputed %s)", e.ID, e.ContentHash, recomputed)
 	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO events(id, uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid, related_issue_id, related_issue_uid,
@@ -678,6 +687,39 @@ func lookupIssueUID(ctx context.Context, tx *sql.Tx, issueID int64) (string, err
 		return "", err
 	}
 	return issueUID, nil
+}
+
+func importedEventProjectIdentity(ctx context.Context, tx *sql.Tx, rec *db.EventExport) (name string, uid string, err error) {
+	err = tx.QueryRowContext(ctx,
+		`SELECT name, uid FROM projects WHERE id = ?`,
+		rec.ProjectID).Scan(&name, &uid)
+	if err == nil {
+		return name, uid, nil
+	}
+	if rec.ProjectName != "" && rec.ProjectUID != "" {
+		return rec.ProjectName, rec.ProjectUID, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", fmt.Errorf("project %d not imported before event %d: %w", rec.ProjectID, rec.ID, db.ErrNotFound)
+	}
+	return "", "", err
+}
+
+func eventReplayContentHash(rec *db.EventExport, projectUID, projectName string) (string, error) {
+	return db.EventContentHash(db.EventHashInput{
+		UID:               rec.UID,
+		OriginInstanceUID: rec.OriginInstanceUID,
+		ProjectUID:        projectUID,
+		ProjectName:       projectName,
+		IssueUID:          rec.IssueUID,
+		RelatedIssueUID:   rec.RelatedIssueUID,
+		Type:              rec.Type,
+		Actor:             rec.Actor,
+		HLCPhysicalMS:     rec.HLCPhysicalMS,
+		HLCCounter:        rec.HLCCounter,
+		CreatedAt:         rec.CreatedAt,
+		Payload:           rec.Payload,
+	})
 }
 
 func importedProjectName(ctx context.Context, tx *sql.Tx, projectID int64, projectName string) (string, error) {

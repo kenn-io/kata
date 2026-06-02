@@ -22,9 +22,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/federation/enable",
 	}, func(ctx context.Context, in *api.EnableProjectFederationRequest) (*api.ProjectFederationResponse, error) {
-		actor := in.Body.Actor
-		if actor == "" {
-			actor = "federation"
+		requestedActor := in.Body.Actor
+		if requestedActor == "" {
+			requestedActor = "federation"
+		}
+		actor, err := attributedActor(ctx, requestedActor)
+		if err != nil {
+			return nil, err
 		}
 		if _, err := cfg.DB.EnableProjectFederation(ctx, in.ProjectID, actor); err != nil {
 			return nil, federationError(err)
@@ -77,7 +81,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/federation/quarantine/{quarantine_id}/skip",
 	}, func(ctx context.Context, in *api.SkipFederationQuarantineRequest) (*api.SkipFederationQuarantineResponse, error) {
-		if err := validateActor(in.Body.Actor); err != nil {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		if err := validateExactConfirm(in.Confirm, fmt.Sprintf("SKIP FEDERATION BATCH %d", in.QuarantineID)); err != nil {
@@ -86,7 +91,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		q, err := cfg.DB.SkipFederationQuarantine(ctx, db.SkipFederationQuarantineParams{
 			ID:        in.QuarantineID,
 			ProjectID: in.ProjectID,
-			Actor:     in.Body.Actor,
+			Actor:     actor,
 			Reason:    in.Body.Reason,
 			Now:       time.Now().UTC(),
 		})

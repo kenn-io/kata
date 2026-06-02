@@ -2,6 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -110,6 +111,38 @@ func TestImportReplayInsertsEveryEntity(t *testing.T) {
 	}
 }
 
+func TestImportReplayRejectsEventHashComputedBeforeResolvedIssueUID(t *testing.T) {
+	ctx := context.Background()
+	src, _, _, _ := setupTestIssue(t)
+	recs := collectImportRecords(t, ctx, src)
+	staleEventID, _, _ := makeFirstIssueEventHashStale(t, recs)
+
+	dst := openTestDB(t)
+	err := dst.ImportReplay(ctx, recs, db.ImportOptions{})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "event "+strconv.FormatInt(staleEventID, 10)+" content_hash mismatch")
+	require.Equal(t, 0, tableCount(t, ctx, dst, "events"), "failed import must not persist stale events")
+}
+
+func TestImportReplayRecomputesLegacyEventHashAfterResolvedIssueUID(t *testing.T) {
+	ctx := context.Background()
+	src, _, _, _ := setupTestIssue(t)
+	recs := collectImportRecords(t, ctx, src)
+	staleEventID, wantHash, wantIssueUID := makeFirstIssueEventHashStale(t, recs)
+
+	dst := openTestDB(t)
+	require.NoError(t, dst.ImportReplay(ctx, recs, db.ImportOptions{
+		RecomputeEventContentHash: true,
+	}))
+
+	var gotHash, gotIssueUID string
+	require.NoError(t, dst.QueryRowContext(ctx,
+		`SELECT content_hash, issue_uid FROM events WHERE id = ?`, staleEventID).Scan(&gotHash, &gotIssueUID))
+	require.Equal(t, wantIssueUID, gotIssueUID)
+	require.Equal(t, wantHash, gotHash)
+}
+
 // collectImportRecords drains the db export iterators into the current-shape
 // ImportRecord slice (no version fills needed — the source is current schema).
 //
@@ -208,6 +241,55 @@ func collectImportRecords(t *testing.T, ctx context.Context, d *sqlitestore.Stor
 		recs = append(recs, db.ImportRecord{Kind: "sqlite_sequence", Sequence: &v})
 	}
 	return recs
+}
+
+func makeFirstIssueEventHashStale(t *testing.T, recs []db.ImportRecord) (eventID int64, finalHash string, issueUID string) {
+	t.Helper()
+	for _, r := range recs {
+		if r.Kind != db.ImportKindEvent || r.Event == nil || r.Event.IssueID == nil || r.Event.IssueUID == nil {
+			continue
+		}
+		e := r.Event
+		issueUID = *e.IssueUID
+		e.IssueUID = nil
+		staleHash, err := db.EventContentHash(db.EventHashInput{
+			UID:               e.UID,
+			OriginInstanceUID: e.OriginInstanceUID,
+			ProjectUID:        e.ProjectUID,
+			ProjectName:       e.ProjectName,
+			IssueUID:          e.IssueUID,
+			RelatedIssueUID:   e.RelatedIssueUID,
+			Type:              e.Type,
+			Actor:             e.Actor,
+			HLCPhysicalMS:     e.HLCPhysicalMS,
+			HLCCounter:        e.HLCCounter,
+			CreatedAt:         e.CreatedAt,
+			Payload:           e.Payload,
+		})
+		require.NoError(t, err)
+		e.ContentHash = staleHash
+
+		e.IssueUID = &issueUID
+		finalHash, err = db.EventContentHash(db.EventHashInput{
+			UID:               e.UID,
+			OriginInstanceUID: e.OriginInstanceUID,
+			ProjectUID:        e.ProjectUID,
+			ProjectName:       e.ProjectName,
+			IssueUID:          e.IssueUID,
+			RelatedIssueUID:   e.RelatedIssueUID,
+			Type:              e.Type,
+			Actor:             e.Actor,
+			HLCPhysicalMS:     e.HLCPhysicalMS,
+			HLCCounter:        e.HLCCounter,
+			CreatedAt:         e.CreatedAt,
+			Payload:           e.Payload,
+		})
+		require.NoError(t, err)
+		e.IssueUID = nil
+		return e.ID, finalHash, issueUID
+	}
+	t.Fatal("fixture did not export an issue event with issue_uid")
+	return 0, "", ""
 }
 
 //nolint:revive // test helper: t *testing.T conventionally precedes ctx.

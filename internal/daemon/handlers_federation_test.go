@@ -61,6 +61,48 @@ func TestFederationEnableAndMetadata(t *testing.T) {
 	assert.Equal(t, enabled, got)
 }
 
+func TestFederationEnableIdentityModeBootstrapTokenCannotWrite(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/enable",
+		map[string]any{"actor": "spoofed"},
+		bearer("bootstrap-token"))
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "bootstrap_token_write_forbidden")
+	assertFederationEventCount(t, env.DB, "project.federation_enabled", 0)
+}
+
+func TestFederationEnableIdentityModeUsesDBTokenActor(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "alice-token",
+		Actor:          "alice",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/enable",
+		map[string]any{"actor": "spoofed"},
+		bearer("alice-token"))
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	var actor string
+	require.NoError(t, env.DB.QueryRow(`
+		SELECT actor
+		  FROM events
+		 WHERE project_id = ? AND type = 'project.federation_enabled'`,
+		project.ID).Scan(&actor))
+	assert.Equal(t, "alice", actor)
+}
+
 func TestFederationMetadataRecoversBaselineAfterPurgeReset(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -826,31 +868,7 @@ func TestFederationStatusIncludesActiveQuarantine(t *testing.T) {
 func TestFederationQuarantineSkipRequiresConfirmAndAdvancesCursor(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
-	project, err := env.DB.CreateProject(ctx, "spoke")
-	require.NoError(t, err)
-	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
-		ProjectID:            project.ID,
-		Role:                 db.FederationRoleSpoke,
-		HubURL:               "http://127.0.0.1:7373",
-		HubProjectID:         42,
-		HubProjectUID:        project.UID,
-		ReplayHorizonEventID: 9,
-		PullCursorEventID:    12,
-		PushEnabled:          true,
-		PushCursorEventID:    0,
-		Enabled:              true,
-	})
-	require.NoError(t, err)
-	q, err := env.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
-		ProjectID:    project.ID,
-		Direction:    db.FederationQuarantineDirectionPush,
-		FirstEventID: 7,
-		LastEventID:  9,
-		EventUIDs:    []string{"evt-7"},
-		Error:        "hub rejected batch",
-		CreatedAt:    time.Now().UTC(),
-	})
-	require.NoError(t, err)
+	project, q := createPushQuarantineFixture(t, env)
 	path := fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/skip", project.ID, q.ID)
 
 	resp, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{
@@ -871,6 +889,56 @@ func TestFederationQuarantineSkipRequiresConfirmAndAdvancesCursor(t *testing.T) 
 	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(9), binding.PushCursorEventID)
+}
+
+func TestFederationQuarantineSkipIdentityModeBootstrapTokenCannotWrite(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	ctx := context.Background()
+	project, q := createPushQuarantineFixture(t, env)
+	path := fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/skip", project.ID, q.ID)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{
+		"actor":  "spoofed",
+		"reason": "intentional skip",
+	}, map[string]string{
+		"Authorization":  "Bearer bootstrap-token",
+		"X-Kata-Confirm": fmt.Sprintf("SKIP FEDERATION BATCH %d", q.ID),
+	})
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "bootstrap_token_write_forbidden")
+	active, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+	assert.Nil(t, active.SkippedAt)
+}
+
+func TestFederationQuarantineSkipIdentityModeUsesDBTokenActor(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	ctx := context.Background()
+	project, q := createPushQuarantineFixture(t, env)
+	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "alice-token",
+		Actor:          "alice",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/skip", project.ID, q.ID)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{
+		"actor":  "spoofed",
+		"reason": "intentional skip",
+	}, map[string]string{
+		"Authorization":  "Bearer alice-token",
+		"X-Kata-Confirm": fmt.Sprintf("SKIP FEDERATION BATCH %d", q.ID),
+	})
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	var skippedBy string
+	require.NoError(t, env.DB.QueryRow(`
+		SELECT skipped_by
+		  FROM federation_quarantine
+		 WHERE id = ?`,
+		q.ID).Scan(&skippedBy))
+	assert.Equal(t, "alice", skippedBy)
 }
 
 func TestFederationQuarantineSkipRejectsWrongProjectWithoutMutation(t *testing.T) {
@@ -1514,6 +1582,37 @@ func assertFederationEventCount(t *testing.T, store *sqlitestore.Store, eventTyp
 	require.NoError(t, store.QueryRow(
 		`SELECT count(*) FROM events WHERE type = ?`, eventType).Scan(&got))
 	assert.Equal(t, expected, got)
+}
+
+func createPushQuarantineFixture(t *testing.T, env *testenv.Env) (db.Project, db.FederationQuarantine) {
+	t.Helper()
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 9,
+		PullCursorEventID:    12,
+		PushEnabled:          true,
+		PushCursorEventID:    0,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	q, err := env.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID:    project.ID,
+		Direction:    db.FederationQuarantineDirectionPush,
+		FirstEventID: 7,
+		LastEventID:  9,
+		EventUIDs:    []string{"evt-7"},
+		Error:        "hub rejected batch",
+		CreatedAt:    time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	return project, q
 }
 
 func createFederatedHubProject(t *testing.T, env *testenv.Env, name string) db.Project {
