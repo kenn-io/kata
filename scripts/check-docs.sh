@@ -50,6 +50,11 @@ if [[ -e "requirements-docs.txt" ]]; then
   missing=1
 fi
 
+if [[ -e "scripts/zensical-docs.sh" ]]; then
+  printf 'docs build helper must live under docs/: scripts/zensical-docs.sh\n' >&2
+  missing=1
+fi
+
 for private_docs in \
   docs/federation.md \
   docs/hosted-mode.md; do
@@ -111,7 +116,7 @@ require_line Makefile 'docs-deploy:'
 require_line Makefile 'vercel deploy --cwd docs --prod'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
 
-for stale_reference in Makefile scripts/zensical-docs.sh docs/zensical-docs.sh docs/development/deploying-docs.md; do
+for stale_reference in Makefile docs/zensical-docs.sh docs/development/deploying-docs.md; do
   if grep -F -- "requirements-docs.txt" "$stale_reference" >/dev/null; then
     printf 'stale requirements-docs.txt reference in %s\n' "$stale_reference" >&2
     exit 1
