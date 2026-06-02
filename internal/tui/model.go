@@ -133,17 +133,25 @@ type Model struct {
 	projectIdentByID map[int64]string
 	// projectsCursor is the highlighted row in viewProjects. Reset when
 	// transitioning into the view; preserved across re-renders.
-	projectsCursor     int
-	activeDaemon       daemonTarget
-	daemonTargets      []daemonTarget
-	daemonCursor       int
-	federationInstance InstanceInfo
-	federationStatuses []FederationProjectStatus
-	federationCursor   int
-	federationLoading  bool
-	federationErr      error
-	federationGen      uint64
-	federationMode     federationMode
+	projectsCursor               int
+	activeDaemon                 daemonTarget
+	daemonTargets                []daemonTarget
+	daemonCursor                 int
+	federationInstance           InstanceInfo
+	federationStatuses           []FederationProjectStatus
+	federationCursor             int
+	federationLoading            bool
+	federationErr                error
+	federationGen                uint64
+	federationMode               federationMode
+	federationDraft              federationDraft
+	federationLocalProjectCursor int
+	federationHubCursor          int
+	federationHubProjectCursor   int
+	federationHubProjects        []ProjectSummary
+	federationHubProjectsLoading bool
+	federationEnrollErr          error
+	federationEnrollGen          uint64
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
@@ -444,6 +452,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if fl, ok := msg.(federationLoadedMsg); ok {
 		next := m.handleFederationLoaded(fl)
+		return next, nil
+	}
+	if fhp, ok := msg.(federationHubProjectsLoadedMsg); ok {
+		next := m.handleFederationHubProjectsLoaded(fhp)
 		return next, nil
 	}
 	if _, ok := msg.(projectsDebounceFireMsg); ok {

@@ -15,8 +15,17 @@ const federationViewChromeRows = 9
 func renderFederation(m Model) string {
 	rows := federationSpokeStatuses(m.federationStatuses)
 	cursor := clampFederationCursor(m.federationCursor, rows)
-	if m.federationMode == federationModeDetail {
+	switch m.federationMode {
+	case federationModeDetail:
 		return renderFederationDetail(m, rows, cursor)
+	case federationModeSelectLocalProject:
+		return renderFederationSelectLocalProject(m)
+	case federationModeSelectHub:
+		return renderFederationSelectHub(m)
+	case federationModeSelectHubProject:
+		return renderFederationSelectHubProject(m)
+	case federationModePreview:
+		return renderFederationPreview(m)
 	}
 	rowBudget := len(rows)
 	if m.height > 0 {
@@ -53,6 +62,166 @@ func renderFederation(m Model) string {
 	body = append(body, subtleStyle.Render(
 		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [b] browse hubs  [?] help"))
 	return strings.Join(body, "\n")
+}
+
+func renderFederationSelectLocalProject(m Model) string {
+	rows := federationLocalProjectRows(m)
+	cursor := clampFederationIndex(m.federationLocalProjectCursor, len(rows), 0)
+	body := federationModeHeader(m, "Select local spoke project")
+	for i, row := range rows {
+		label := "create new local replica from hub project"
+		if !row.createReplica {
+			label = row.project.Name
+		}
+		body = append(body, renderFederationChoice(label, i == cursor))
+	}
+	body = appendFederationEnrollErr(body, m)
+	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [enter] select  [esc] back"))
+	return strings.Join(body, "\n")
+}
+
+func renderFederationSelectHub(m Model) string {
+	rows := federationHubRows(m)
+	cursor := clampFederationIndex(m.federationHubCursor, len(rows), 0)
+	body := federationModeHeader(m, "Select hub daemon")
+	if m.federationDraft.SpokeProjectName != "" {
+		body = append(body, "local spoke project: "+sanitizeForLine(m.federationDraft.SpokeProjectName))
+	}
+	if m.federationDraft.CreateReplica {
+		body = append(body, "local spoke project: create after selecting hub project")
+	}
+	body = append(body, "")
+	for i, row := range rows {
+		label := daemonName(row.target) + " " + federationDaemonEndpoint(row.target)
+		if row.target.AllowInsecure {
+			label += " allow_insecure"
+		}
+		if daemonTargetsMatch(row.target, m.activeDaemon) {
+			label += " (active spoke)"
+		}
+		body = append(body, renderFederationChoice(label, i == cursor))
+	}
+	body = appendFederationEnrollErr(body, m)
+	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [enter] select  [esc] back"))
+	return strings.Join(body, "\n")
+}
+
+func renderFederationSelectHubProject(m Model) string {
+	body := federationModeHeader(m, "Select hub project")
+	body = append(body,
+		"hub daemon: "+sanitizeForLine(daemonName(m.federationDraft.HubTarget))+
+			" "+sanitizeForLine(federationDaemonEndpoint(m.federationDraft.HubTarget)),
+		fmt.Sprintf("allow_insecure: %t", m.federationDraft.HubTarget.AllowInsecure),
+		"",
+	)
+	if m.federationHubProjectsLoading {
+		body = append(body, subtleStyle.Render("  loading hub projects..."))
+	} else {
+		rows := federationHubProjectLabels(m)
+		cursor := clampFederationIndex(m.federationHubProjectCursor, len(rows), 0)
+		for i, label := range rows {
+			body = append(body, renderFederationChoice(label, i == cursor))
+		}
+	}
+	body = appendFederationEnrollErr(body, m)
+	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [enter] preview  [esc] back"))
+	return strings.Join(body, "\n")
+}
+
+func renderFederationPreview(m Model) string {
+	draft := m.federationDraft
+	body := federationModeHeader(m, "Enrollment Preview")
+	body = append(body,
+		"Operation: "+federationOperationLabel(draft.Operation),
+		"local spoke project: "+sanitizeForLine(emptyDash(draft.SpokeProjectName)),
+		"hub daemon: "+sanitizeForLine(daemonName(draft.HubTarget))+
+			" "+sanitizeForLine(federationDaemonEndpoint(draft.HubTarget)),
+		"hub project: "+sanitizeForLine(federationHubProjectBehavior(draft)),
+		"requested actor: "+sanitizeForLine(emptyDash(draft.RequestedActor)),
+		"capabilities: "+sanitizeForLine(draft.DisplayCapabilities),
+		fmt.Sprintf("push enabled: %t", draft.PushEnabled),
+		fmt.Sprintf("allow_insecure: %t", draft.AllowInsecure),
+	)
+	if draft.AdoptExisting {
+		body = append(body,
+			"",
+			"adoption warning: pre-adoption event history is replaced by snapshot events for federation",
+		)
+	}
+	if draft.BlockedReason != "" {
+		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
+	}
+	body = append(body, "", subtleStyle.Render("[enter] confirm  [esc] back"))
+	return strings.Join(body, "\n")
+}
+
+func federationModeHeader(m Model, title string) []string {
+	return []string{
+		titleStyle.Render("kata / federation"),
+		subtleStyle.Render(federationHeaderLine(m)),
+		"",
+		titleStyle.Render(title),
+		"",
+	}
+}
+
+func renderFederationChoice(label string, highlight bool) string {
+	prefix := "  "
+	if highlight {
+		prefix = "▶ "
+	}
+	line := prefix + sanitizeForLine(label)
+	if highlight {
+		line = lipgloss.NewStyle().Bold(true).Render(line)
+	}
+	return line
+}
+
+func appendFederationEnrollErr(body []string, m Model) []string {
+	if m.federationEnrollErr == nil {
+		return body
+	}
+	return append(body, "", errorStyle.Render(sanitizeForLine(m.federationEnrollErr.Error())))
+}
+
+func federationHubProjectLabels(m Model) []string {
+	labels := []string{}
+	if !m.federationDraft.CreateReplica {
+		labels = append(labels, fmt.Sprintf(
+			"hub project %q will be created if missing or enabled if present",
+			m.federationDraft.SpokeProjectName,
+		))
+	}
+	for _, project := range m.federationHubProjects {
+		labels = append(labels, project.Name)
+	}
+	if len(labels) == 0 {
+		return []string{"no hub projects"}
+	}
+	return labels
+}
+
+func federationOperationLabel(operation federationOperation) string {
+	switch operation {
+	case federationOperationAdoptSameName:
+		return "adopt existing local project"
+	case federationOperationAdoptSelectedHub:
+		return "adopt existing local project into selected hub project"
+	case federationOperationCreateReplica:
+		return "create new local replica from hub project"
+	default:
+		return "-"
+	}
+}
+
+func federationHubProjectBehavior(draft federationDraft) string {
+	if draft.Operation == federationOperationAdoptSameName {
+		return fmt.Sprintf("hub project %q will be created if missing or enabled if present", draft.SpokeProjectName)
+	}
+	if draft.HubProjectName != "" {
+		return draft.HubProjectName
+	}
+	return "-"
 }
 
 type federationVisibleRow struct {

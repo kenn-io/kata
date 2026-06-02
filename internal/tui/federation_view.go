@@ -3,17 +3,53 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	hubfederation "go.kenn.io/kata/internal/federation"
 )
 
 type federationMode int
 
 const (
 	federationModeList federationMode = iota
+	federationModePreview
+	federationModeResult
+	federationModeRecovery
 	federationModeDetail
+	federationModeSelectLocalProject
+	federationModeSelectHub
+	federationModeSelectHubProject
+	federationModeBrowseHubs
 )
+
+type federationOperation string
+
+const (
+	federationOperationAdoptSameName    federationOperation = "adopt-same-name"
+	federationOperationAdoptSelectedHub federationOperation = "adopt-selected-hub"
+	federationOperationCreateReplica    federationOperation = "create-replica"
+)
+
+type federationDraft struct {
+	Operation           federationOperation
+	SpokeProjectID      int64
+	SpokeProjectName    string
+	CreateReplica       bool
+	HubTarget           daemonTarget
+	HubProjectID        int64
+	HubProjectName      string
+	RequestedActor      string
+	APICapabilities     string
+	DisplayCapabilities string
+	PushEnabled         bool
+	AllowInsecure       bool
+	AdoptExisting       bool
+	BlockedReason       string
+}
 
 func (m Model) transitionToFederation() (Model, tea.Cmd) {
 	m.prevView = m.view
@@ -65,14 +101,34 @@ func (m Model) handleFederationLoaded(msg federationLoadedMsg) Model {
 	return m
 }
 
+func (m Model) handleFederationHubProjectsLoaded(msg federationHubProjectsLoadedMsg) Model {
+	if m.staleConnMsg(msg.connGen) || msg.gen != m.federationEnrollGen {
+		return m
+	}
+	m.federationHubProjectsLoading = false
+	m.federationEnrollErr = msg.err
+	if msg.err != nil {
+		return m
+	}
+	m.federationDraft.HubTarget = msg.target
+	m.federationHubProjects = msg.projects
+	m.federationHubProjectCursor = clampFederationIndex(m.federationHubProjectCursor, federationHubProjectRowCount(m), 0)
+	return m
+}
+
 func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	rows := federationSpokeStatuses(m.federationStatuses)
-	if m.federationMode == federationModeDetail {
-		switch msg.String() {
-		case "esc", "backspace":
-			m.federationMode = federationModeList
-			return m, nil
-		}
+	switch m.federationMode {
+	case federationModeDetail:
+		return m.routeFederationDetailKey(msg)
+	case federationModeSelectLocalProject:
+		return m.routeFederationLocalProjectKey(msg)
+	case federationModeSelectHub:
+		return m.routeFederationHubKey(msg)
+	case federationModeSelectHubProject:
+		return m.routeFederationHubProjectKey(msg)
+	case federationModePreview:
+		return m.routeFederationPreviewKey(msg)
 	}
 	if next, ok := m.cursorMoveFederation(msg, rows); ok {
 		return next, nil
@@ -80,6 +136,8 @@ func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		return m.escFromFederationView()
+	case "n":
+		return m.startFederationEnrollment()
 	case "r":
 		m.federationLoading = true
 		m.federationErr = nil
@@ -90,6 +148,105 @@ func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.federationMode = federationModeDetail
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) routeFederationDetailKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "backspace":
+		m.federationMode = federationModeList
+		return m, nil
+	case "r":
+		m.federationLoading = true
+		m.federationErr = nil
+		m.federationGen++
+		return m, m.fetchFederationStatus()
+	}
+	return m, nil
+}
+
+func (m Model) routeFederationLocalProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	rows := federationLocalProjectRows(m)
+	if next, ok := nextFederationCursor(msg, m.federationLocalProjectCursor, len(rows)); ok {
+		m.federationLocalProjectCursor = next
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc":
+		m.federationMode = federationModeList
+		return m, nil
+	case "enter":
+		if len(rows) == 0 {
+			return m, nil
+		}
+		row := rows[clampFederationIndex(m.federationLocalProjectCursor, len(rows), 0)]
+		if row.createReplica {
+			m.federationDraft.CreateReplica = true
+			m.federationDraft.AdoptExisting = false
+			m.federationDraft.SpokeProjectID = 0
+			m.federationDraft.SpokeProjectName = ""
+		} else {
+			m.federationDraft.CreateReplica = false
+			m.federationDraft.AdoptExisting = true
+			m.federationDraft.SpokeProjectID = row.project.ID
+			m.federationDraft.SpokeProjectName = row.project.Name
+		}
+		m.federationMode = federationModeSelectHub
+		m.federationHubCursor = 0
+		m.federationEnrollErr = nil
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) routeFederationHubKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	rows := federationHubRows(m)
+	if next, ok := nextFederationCursor(msg, m.federationHubCursor, len(rows)); ok {
+		m.federationHubCursor = next
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc":
+		if m.federationDraft.SpokeProjectID == 0 && !m.federationDraft.CreateReplica {
+			m.federationMode = federationModeSelectLocalProject
+		} else {
+			m.federationMode = federationModeList
+		}
+		return m, nil
+	case "enter":
+		if len(rows) == 0 {
+			return m, nil
+		}
+		target := rows[clampFederationIndex(m.federationHubCursor, len(rows), 0)].target
+		return m.selectFederationHub(target)
+	}
+	return m, nil
+}
+
+func (m Model) routeFederationHubProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	count := federationHubProjectRowCount(m)
+	if next, ok := nextFederationCursor(msg, m.federationHubProjectCursor, count); ok {
+		m.federationHubProjectCursor = next
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc":
+		m.federationMode = federationModeSelectHub
+		return m, nil
+	case "enter":
+		return m.previewFederationEnrollment()
+	}
+	return m, nil
+}
+
+func (m Model) routeFederationPreviewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "backspace":
+		m.federationMode = federationModeSelectHubProject
+		return m, nil
+	case "enter":
 		return m, nil
 	}
 	return m, nil
@@ -118,6 +275,247 @@ func (m Model) cursorMoveFederation(msg tea.KeyMsg, rows []FederationProjectStat
 		return m, true
 	}
 	return m, false
+}
+
+func (m Model) startFederationEnrollment() (Model, tea.Cmd) {
+	m.federationDraft = newFederationDraft(m.list.actor)
+	m.federationLocalProjectCursor = 0
+	m.federationHubCursor = 0
+	m.federationHubProjectCursor = 0
+	m.federationHubProjects = nil
+	m.federationHubProjectsLoading = false
+	m.federationEnrollErr = nil
+	if projectID, projectName, ok := m.currentFederationProject(); ok {
+		m.federationDraft.SpokeProjectID = projectID
+		m.federationDraft.SpokeProjectName = projectName
+		m.federationDraft.AdoptExisting = true
+		m.federationMode = federationModeSelectHub
+		return m, nil
+	}
+	m.federationMode = federationModeSelectLocalProject
+	return m, nil
+}
+
+func newFederationDraft(actor string) federationDraft {
+	caps, err := hubfederation.NormalizeCapabilities("pull,push,lease")
+	if err != nil {
+		caps.API = "claim,pull,push"
+		caps.Display = "pull,push,lease"
+	}
+	if strings.TrimSpace(actor) == "" {
+		actor = "anonymous"
+	}
+	return federationDraft{
+		RequestedActor:      actor,
+		APICapabilities:     caps.API,
+		DisplayCapabilities: caps.Display,
+		PushEnabled:         true,
+		AdoptExisting:       true,
+	}
+}
+
+func (m Model) currentFederationProject() (int64, string, bool) {
+	if m.scope.allProjects || m.scope.empty || m.scope.projectID == 0 {
+		return 0, "", false
+	}
+	name := m.scope.projectName
+	if name == "" {
+		name = m.scope.homeProjectName
+	}
+	if name == "" {
+		name = m.projectsByID[m.scope.projectID]
+	}
+	if name == "" {
+		return 0, "", false
+	}
+	return m.scope.projectID, name, true
+}
+
+type federationLocalProjectRow struct {
+	createReplica bool
+	project       ProjectSummary
+}
+
+func federationLocalProjectRows(m Model) []federationLocalProjectRow {
+	rows := []federationLocalProjectRow{{createReplica: true}}
+	projects := make([]ProjectSummary, 0, len(m.projectsByID))
+	for id, name := range m.projectsByID {
+		projects = append(projects, ProjectSummary{ID: id, Name: name})
+	}
+	sort.SliceStable(projects, func(i, j int) bool {
+		li, lj := strings.ToLower(projects[i].Name), strings.ToLower(projects[j].Name)
+		if li != lj {
+			return li < lj
+		}
+		return projects[i].ID < projects[j].ID
+	})
+	for _, project := range projects {
+		rows = append(rows, federationLocalProjectRow{project: project})
+	}
+	return rows
+}
+
+type federationHubRow struct {
+	target daemonTarget
+}
+
+func federationHubRows(m Model) []federationHubRow {
+	rows := make([]federationHubRow, 0, len(m.daemonTargets))
+	for _, target := range m.daemonTargets {
+		rows = append(rows, federationHubRow{target: target})
+	}
+	return rows
+}
+
+func (m Model) selectFederationHub(target daemonTarget) (Model, tea.Cmd) {
+	m.federationEnrollErr = nil
+	if daemonTargetsMatch(target, m.activeDaemon) {
+		m.federationEnrollErr = errors.New("active daemon cannot be selected as hub")
+		return m, nil
+	}
+	resolved, err := resolveDaemonTargetToken(target)
+	if err != nil {
+		m.federationEnrollErr = err
+		return m, nil
+	}
+	if !resolved.Local {
+		if _, err := normalizeRemoteURLForTUI(resolved.URL, resolved.AllowInsecure); err != nil {
+			m.federationEnrollErr = err
+			return m, nil
+		}
+	}
+	m.federationDraft.HubTarget = resolved
+	m.federationDraft.AllowInsecure = resolved.AllowInsecure
+	m.federationMode = federationModeSelectHubProject
+	m.federationHubProjectsLoading = true
+	m.federationHubProjects = nil
+	m.federationHubProjectCursor = 0
+	m.federationEnrollGen++
+	return m, m.fetchFederationHubProjects(resolved)
+}
+
+func (m Model) fetchFederationHubProjects(target daemonTarget) tea.Cmd {
+	connGen := m.connGen
+	gen := m.federationEnrollGen
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		client, resolved, err := newHubAdminClient(ctx, target)
+		if err != nil {
+			return federationHubProjectsLoadedMsg{connGen: connGen, gen: gen, target: target, err: err}
+		}
+		projects, err := client.ListProjects(ctx)
+		return federationHubProjectsLoadedMsg{
+			connGen:  connGen,
+			gen:      gen,
+			target:   resolved,
+			projects: projects,
+			err:      err,
+		}
+	}
+}
+
+func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
+	m.federationEnrollErr = nil
+	draft := m.federationDraft
+	project, hasProject := m.selectedFederationHubProject()
+	if draft.CreateReplica {
+		if !hasProject {
+			m.federationEnrollErr = errors.New("select an existing hub project to create a local replica")
+			return m, nil
+		}
+		draft.Operation = federationOperationCreateReplica
+		draft.HubProjectID = project.ID
+		draft.HubProjectName = project.Name
+		draft.SpokeProjectName = project.Name
+		draft.AdoptExisting = false
+		if localProjectNameExists(m, draft.SpokeProjectName) {
+			draft.BlockedReason = fmt.Sprintf("local project %q already exists", draft.SpokeProjectName)
+		}
+	} else {
+		draft.AdoptExisting = true
+		if m.federationHubProjectCursor == 0 {
+			draft.Operation = federationOperationAdoptSameName
+			draft.HubProjectName = draft.SpokeProjectName
+			if same, ok := hubProjectByName(m.federationHubProjects, draft.SpokeProjectName); ok {
+				draft.HubProjectID = same.ID
+			}
+		} else if hasProject {
+			draft.Operation = federationOperationAdoptSelectedHub
+			draft.HubProjectID = project.ID
+			draft.HubProjectName = project.Name
+		}
+	}
+	draft.AllowInsecure = draft.HubTarget.AllowInsecure
+	m.federationDraft = draft
+	m.federationMode = federationModePreview
+	return m, nil
+}
+
+func federationHubProjectRowCount(m Model) int {
+	if m.federationDraft.CreateReplica {
+		return len(m.federationHubProjects)
+	}
+	return len(m.federationHubProjects) + 1
+}
+
+func (m Model) selectedFederationHubProject() (ProjectSummary, bool) {
+	if len(m.federationHubProjects) == 0 {
+		return ProjectSummary{}, false
+	}
+	idx := m.federationHubProjectCursor
+	if !m.federationDraft.CreateReplica {
+		idx--
+	}
+	if idx < 0 || idx >= len(m.federationHubProjects) {
+		return ProjectSummary{}, false
+	}
+	return m.federationHubProjects[idx], true
+}
+
+func hubProjectByName(projects []ProjectSummary, name string) (ProjectSummary, bool) {
+	for _, project := range projects {
+		if project.Name == name {
+			return project, true
+		}
+	}
+	return ProjectSummary{}, false
+}
+
+func localProjectNameExists(m Model, name string) bool {
+	for _, existing := range m.projectsByID {
+		if existing == name {
+			return true
+		}
+	}
+	return false
+}
+
+func nextFederationCursor(msg tea.KeyMsg, cursor, count int) (int, bool) {
+	switch msg.String() {
+	case "j", "down":
+		return clampFederationIndex(cursor+1, count, 0), true
+	case "k", "up":
+		return clampFederationIndex(cursor-1, count, 0), true
+	case "g", "home":
+		return 0, true
+	case "G", "end":
+		return clampFederationIndex(count-1, count, 0), true
+	}
+	return cursor, false
+}
+
+func clampFederationIndex(v, count, fallback int) int {
+	if count <= 0 {
+		return fallback
+	}
+	if v < 0 {
+		return 0
+	}
+	if v >= count {
+		return count - 1
+	}
+	return v
 }
 
 func (m Model) escFromFederationView() (Model, tea.Cmd) {
