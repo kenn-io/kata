@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -28,6 +30,10 @@ func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "manage the kata daemon"}
 	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonStopCmd(), daemonReloadCmd(), daemonLogsCmd())
 	return cmd
+}
+
+var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
+	return telemetry.NewReporterOrDisabled(opts)
 }
 
 func daemonStartCmd() *cobra.Command {
@@ -332,6 +338,14 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	}
 	defer shutdownHooks(disp)
 
+	telemetryReporter := newDaemonTelemetryReporter(store)
+	defer func() {
+		if err := telemetryReporter.Close(); err != nil {
+			daemonLog.Printf("telemetry: close: %v", err)
+		}
+	}()
+	captureDaemonStartedTelemetry(ctx, store, telemetryReporter)
+
 	// installReloadSource is platform-specific: SIGHUP delivery on Unix,
 	// a named reload event pumped onto the channel on Windows. See
 	// daemon_signaling_{unix,windows}.go.
@@ -376,6 +390,27 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	}
 
 	return srv.Serve(ctx, listener)
+}
+
+func newDaemonTelemetryReporter(store db.Storage) telemetry.Client {
+	return newTelemetryReporter(telemetry.Options{
+		DistinctID: store.InstanceUID(),
+		Version:    version.Version,
+		Commit:     version.Commit,
+	})
+}
+
+func captureDaemonStartedTelemetry(ctx context.Context, store db.Storage, reporter telemetry.Client) {
+	if reporter == nil || !reporter.Enabled() {
+		return
+	}
+	properties := map[string]any{}
+	if projects, err := store.ListProjects(ctx); err == nil {
+		properties["project_count"] = len(projects)
+	}
+	if err := reporter.Capture("daemon_started", properties); err != nil {
+		slog.Warn("capture telemetry event", "err", err)
+	}
 }
 
 func startFederationRunner(

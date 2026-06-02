@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -442,6 +443,42 @@ func TestDaemonStart_FlagWinsOverConfigFile(t *testing.T) {
 		"config.toml value must NOT win when --listen is set")
 }
 
+func TestNewDaemonTelemetryReporterUsesInstanceUID(t *testing.T) {
+	tmp := t.TempDir()
+	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
+	defer func() { _ = store.Close() }()
+
+	var got telemetry.Options
+	orig := newTelemetryReporter
+	newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
+		got = opts
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = orig })
+
+	reporter := newDaemonTelemetryReporter(store)
+
+	require.NotNil(t, reporter)
+	assert.Equal(t, store.InstanceUID(), got.DistinctID)
+	assert.NotEmpty(t, got.Version)
+	assert.NotEmpty(t, got.Commit)
+}
+
+func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
+	tmp := t.TempDir()
+	store := openKataTestDB(t, filepath.Join(tmp, "kata.db"))
+	defer func() { _ = store.Close() }()
+	_, err := store.CreateProject(t.Context(), "alpha")
+	require.NoError(t, err)
+
+	reporter := &fakeTelemetryReporter{}
+	captureDaemonStartedTelemetry(t.Context(), store, reporter)
+
+	require.Len(t, reporter.events, 1)
+	assert.Equal(t, "daemon_started", reporter.events[0].event)
+	assert.Equal(t, 1, reporter.events[0].properties["project_count"])
+}
+
 func TestDefaultEndpointForOS(t *testing.T) {
 	ns := &daemon.Namespace{SocketDir: t.TempDir()}
 
@@ -457,6 +494,24 @@ func TestDefaultEndpointForOS(t *testing.T) {
 		assert.Equal(t, "unix://"+filepath.Join(ns.SocketDir, "daemon.sock"), ep.ConfigAddress())
 	})
 }
+
+type fakeTelemetryReporter struct {
+	events []fakeTelemetryEvent
+}
+
+type fakeTelemetryEvent struct {
+	event      string
+	properties map[string]any
+}
+
+func (f *fakeTelemetryReporter) Enabled() bool { return true }
+
+func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
+	f.events = append(f.events, fakeTelemetryEvent{event: event, properties: properties})
+	return nil
+}
+
+func (f *fakeTelemetryReporter) Close() error { return nil }
 
 func TestRuntimeEndpointForListener_UsesActualTCPPort(t *testing.T) {
 	ep := kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:0"}

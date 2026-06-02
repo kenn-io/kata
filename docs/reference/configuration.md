@@ -15,6 +15,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
 | `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. |
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
+| `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
 | `KATA_HTTP_TIMEOUT` | Per-request CLI timeout for non-streaming daemon calls, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. |
 | `KATA_FEDERATION_PULL_INTERVAL_MS` | Federation runner poll interval for tests or latency-sensitive private deployments. |
 | `PORT` | Hosted-mode listener port when no explicit listener is configured and the daemon is not an auto-start child. |
@@ -155,6 +156,20 @@ close paths still run the parent-completeness refusal, message-substance checks,
 and evidence checks. The TUI close path skips the message-substance and evidence
 checks because an interactive human confirms each close; the structural guards
 still apply.
+
+## Telemetry
+
+kata sends limited anonymous telemetry to PostHog when the daemon starts. The
+event is `daemon_started` with `project_count`, build version, commit, OS/arch,
+and the database's stable anonymous `instance_uid` as the distinct ID. It does
+not send project names, issue refs, issue content, comments, labels, paths, or
+actor names. GeoIP collection is disabled.
+
+Disable telemetry with:
+
+```sh
+export KATA_TELEMETRY_ENABLED=0
+```
 
 ## Federation credentials
 
