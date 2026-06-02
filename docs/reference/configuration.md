@@ -159,11 +159,15 @@ still apply.
 
 ## Telemetry
 
-kata sends limited anonymous telemetry to PostHog when the daemon starts. The
-event is `daemon_started` with `project_count`, build version, commit, OS/arch,
-and the database's stable anonymous `instance_uid` as the distinct ID. It does
-not send project names, issue refs, issue content, comments, labels, paths, or
-actor names. GeoIP collection is disabled.
+kata sends limited anonymous telemetry to PostHog when the daemon starts, and
+then emits an in-process daily `daemon_active` heartbeat while the daemon keeps
+running. Restarting the daemon may send another heartbeat; kata does not store
+heartbeat state in the database.
+
+The events are `daemon_started` and `daemon_active` with `project_count`, build
+version, commit, OS/arch, and the database's stable anonymous `instance_uid` as
+the distinct ID. They do not send project names, issue refs, issue content,
+comments, labels, paths, or actor names. GeoIP collection is disabled.
 
 Disable telemetry with:
 

@@ -63,6 +63,23 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 	assert.True(t, capture.Properties["$geoip_disable"].(bool))
 }
 
+func TestReporterCaptureAllowsDaemonActive(t *testing.T) {
+	client := &fakePostHogClient{}
+	reporter := &Reporter{
+		client:     client,
+		distinctID: "anonymous-instance-id",
+		enabled:    true,
+	}
+
+	err := reporter.Capture("daemon_active", map[string]any{"project_count": 2})
+	require.NoError(t, err)
+
+	capture, ok := client.message.(posthog.Capture)
+	require.True(t, ok)
+	assert.Equal(t, "daemon_active", capture.Event)
+	assert.Equal(t, 2, capture.Properties["project_count"])
+}
+
 func TestReporterCaptureRejectsUnsupportedEvents(t *testing.T) {
 	client := &fakePostHogClient{}
 	reporter := &Reporter{

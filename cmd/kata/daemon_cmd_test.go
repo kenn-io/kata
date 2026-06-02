@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -474,9 +476,47 @@ func TestCaptureDaemonStartedTelemetryIncludesProjectCount(t *testing.T) {
 	reporter := &fakeTelemetryReporter{}
 	captureDaemonStartedTelemetry(t.Context(), store, reporter)
 
-	require.Len(t, reporter.events, 1)
-	assert.Equal(t, "daemon_started", reporter.events[0].event)
-	assert.Equal(t, 1, reporter.events[0].properties["project_count"])
+	require.Equal(t, 1, reporter.eventCount())
+	event := reporter.eventAt(0)
+	assert.Equal(t, "daemon_started", event.event)
+	assert.Equal(t, 1, event.properties["project_count"])
+}
+
+func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		captures := []time.Time{}
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			runDaemonTelemetryHeartbeat(ctx, func(context.Context) {
+				captures = append(captures, time.Now())
+			}, daemonTelemetryHeartbeatInterval)
+		}()
+
+		synctest.Wait()
+		require.Len(t, captures, 1)
+		first := captures[0]
+
+		time.Sleep(daemonTelemetryHeartbeatInterval - time.Nanosecond)
+		synctest.Wait()
+		require.Len(t, captures, 1)
+
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		require.Len(t, captures, 2)
+		assert.Equal(t, first.Add(daemonTelemetryHeartbeatInterval), captures[1])
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("heartbeat goroutine did not exit after cancellation")
+		}
+	})
 }
 
 func TestDefaultEndpointForOS(t *testing.T) {
@@ -496,6 +536,7 @@ func TestDefaultEndpointForOS(t *testing.T) {
 }
 
 type fakeTelemetryReporter struct {
+	mu     sync.Mutex
 	events []fakeTelemetryEvent
 }
 
@@ -507,11 +548,31 @@ type fakeTelemetryEvent struct {
 func (f *fakeTelemetryReporter) Enabled() bool { return true }
 
 func (f *fakeTelemetryReporter) Capture(event string, properties map[string]any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.events = append(f.events, fakeTelemetryEvent{event: event, properties: properties})
 	return nil
 }
 
 func (f *fakeTelemetryReporter) Close() error { return nil }
+
+func (f *fakeTelemetryReporter) eventCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.events)
+}
+
+func (f *fakeTelemetryReporter) eventAt(i int) fakeTelemetryEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	event := f.events[i]
+	props := make(map[string]any, len(event.properties))
+	for key, value := range event.properties {
+		props[key] = value
+	}
+	event.properties = props
+	return event
+}
 
 func TestRuntimeEndpointForListener_UsesActualTCPPort(t *testing.T) {
 	ep := kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:0"}

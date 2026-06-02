@@ -24,6 +24,9 @@ var ErrUnsupportedEvent = errors.New("unsupported telemetry event")
 type propertyFilter func(any) (any, bool)
 
 var allowedEvents = map[string]map[string]propertyFilter{
+	"daemon_active": {
+		"project_count": safeTelemetryNumber,
+	},
 	"daemon_started": {
 		"project_count": safeTelemetryNumber,
 	},

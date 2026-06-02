@@ -32,6 +32,8 @@ func newDaemonCmd() *cobra.Command {
 	return cmd
 }
 
+const daemonTelemetryHeartbeatInterval = 24 * time.Hour
+
 var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
 }
@@ -345,6 +347,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		}
 	}()
 	captureDaemonStartedTelemetry(ctx, store, telemetryReporter)
+	startDaemonTelemetryHeartbeat(ctx, store, telemetryReporter)
 
 	// installReloadSource is platform-specific: SIGHUP delivery on Unix,
 	// a named reload event pumped onto the channel on Windows. See
@@ -401,6 +404,40 @@ func newDaemonTelemetryReporter(store db.Storage) telemetry.Client {
 }
 
 func captureDaemonStartedTelemetry(ctx context.Context, store db.Storage, reporter telemetry.Client) {
+	captureDaemonTelemetryEvent(ctx, store, reporter, "daemon_started")
+}
+
+func startDaemonTelemetryHeartbeat(ctx context.Context, store db.Storage, reporter telemetry.Client) {
+	if reporter == nil || !reporter.Enabled() {
+		return
+	}
+	go func() {
+		runDaemonTelemetryHeartbeat(ctx, func(ctx context.Context) {
+			captureDaemonTelemetryEvent(ctx, store, reporter, "daemon_active")
+		}, daemonTelemetryHeartbeatInterval)
+	}()
+}
+
+func runDaemonTelemetryHeartbeat(ctx context.Context, capture func(context.Context), interval time.Duration) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	capture(ctx)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			capture(ctx)
+		}
+	}
+}
+
+func captureDaemonTelemetryEvent(ctx context.Context, store db.Storage, reporter telemetry.Client, event string) {
 	if reporter == nil || !reporter.Enabled() {
 		return
 	}
@@ -408,7 +445,7 @@ func captureDaemonStartedTelemetry(ctx context.Context, store db.Storage, report
 	if projects, err := store.ListProjects(ctx); err == nil {
 		properties["project_count"] = len(projects)
 	}
-	if err := reporter.Capture("daemon_started", properties); err != nil {
+	if err := reporter.Capture(event, properties); err != nil {
 		slog.Warn("capture telemetry event", "err", err)
 	}
 }
