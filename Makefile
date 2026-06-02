@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway tui tui-demo docs-install docs-build docs-serve docs-check
+.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -34,6 +34,9 @@ docs-serve:
 
 docs-check:
 	bash scripts/check-docs.sh
+
+docs-deploy:
+	vercel deploy --cwd docs --prod
 
 lint:
 	golangci-lint run --config .golangci.yml

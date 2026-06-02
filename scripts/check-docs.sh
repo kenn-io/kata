@@ -102,6 +102,10 @@ require_line docs/development/deploying-docs.md '| Root directory | `docs` |'
 require_line docs/development/deploying-docs.md 'Vercel should install with `uv sync --frozen --no-dev`'
 require_line docs/development/deploying-docs.md 'Vercel should build with `uv run --frozen bash ./vercel-build.sh`'
 require_line docs/development/deploying-docs.md 'Vercel should publish the generated `site/` directory'
+require_line docs/development/deploying-docs.md 'vercel link --cwd docs'
+require_line docs/development/deploying-docs.md 'make docs-deploy'
+require_line Makefile 'docs-deploy:'
+require_line Makefile 'vercel deploy --cwd docs --prod'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
 
 for stale_reference in Makefile scripts/zensical-docs.sh docs/development/deploying-docs.md; do

@@ -57,6 +57,28 @@ package = false
 Update `docs/pyproject.toml` and refresh `docs/uv.lock` together whenever the
 docs toolchain changes.
 
+## CLI deployment
+
+After the Vercel GitHub integration is disconnected, deploy the docs project
+from the command line. Link the local docs directory to the existing Vercel
+project once:
+
+```sh
+vercel link --cwd docs
+```
+
+Then deploy the current workspace to production from the repository root:
+
+```sh
+make docs-deploy
+```
+
+The Make target runs:
+
+```sh
+vercel deploy --cwd docs --prod
+```
+
 ## Verification
 
 Before changing the Vercel project or merging deployment config, verify the
