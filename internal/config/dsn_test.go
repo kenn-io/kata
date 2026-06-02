@@ -70,11 +70,27 @@ func TestRedactDSNRedactsSchemeLessKeywordPassword(t *testing.T) {
 	assert.Contains(t, dsn, "SECRET")
 }
 
+func TestRedactDSNRedactsSchemeLessKeywordPasswordWithSpacedEquals(t *testing.T) {
+	dsn := "host = db user = kata password = SECRET dbname = kata" //nolint:gosec // fixture proves spaced libpq credentials are hidden
+	got := config.RedactDSN(dsn)
+	assert.NotContains(t, got, "SECRET")
+	assert.NotContains(t, got, "password = SECRET")
+	assert.Contains(t, dsn, "SECRET")
+}
+
 func TestRedactDSNRedactsSchemeLessKeywordSSLPassword(t *testing.T) {
 	dsn := "host=db user=kata sslpassword=SECRET dbname=kata" //nolint:gosec // fixture proves scheme-less libpq credentials are hidden
 	got := config.RedactDSN(dsn)
 	assert.NotContains(t, got, "SECRET")
 	assert.NotContains(t, got, "sslpassword=SECRET")
+	assert.Contains(t, dsn, "SECRET")
+}
+
+func TestRedactDSNRedactsSchemeLessKeywordSSLPasswordWithSpacedEquals(t *testing.T) {
+	dsn := "host = db user = kata sslpassword = SECRET dbname = kata" //nolint:gosec // fixture proves spaced libpq credentials are hidden
+	got := config.RedactDSN(dsn)
+	assert.NotContains(t, got, "SECRET")
+	assert.NotContains(t, got, "sslpassword = SECRET")
 	assert.Contains(t, dsn, "SECRET")
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -152,41 +153,20 @@ var libpqKeywordParams = map[string]struct{}{
 	"user":                 {},
 }
 
-var libpqCredentialParams = map[string]struct{}{
-	"password":    {},
-	"sslpassword": {},
-}
+var libpqKeywordPattern = regexp.MustCompile(`(?i)(?:^|[[:space:]])(application_name|connect_timeout|dbname|host|hostaddr|keepalives|keepalives_count|keepalives_idle|keepalives_interval|passfile|password|port|sslcert|sslkey|sslmode|sslpassword|sslrootcert|target_session_attrs|user)[[:space:]]*=`)
+
+var libpqCredentialPattern = regexp.MustCompile(`(?i)(?:^|[[:space:]])(password|sslpassword)[[:space:]]*=`)
 
 func firstLibpqKeywordParam(dsn string) (string, bool) {
-	for _, field := range strings.Fields(dsn) {
-		key, ok := libpqKeywordKey(field)
-		if !ok {
-			continue
-		}
-		if _, ok := libpqKeywordParams[key]; ok {
-			return key, true
-		}
+	match := libpqKeywordPattern.FindStringSubmatch(dsn)
+	if len(match) < 2 {
+		return "", false
 	}
-	return "", false
+	key := strings.ToLower(match[1])
+	_, ok := libpqKeywordParams[key]
+	return key, ok
 }
 
 func hasLibpqKeywordCredential(dsn string) bool {
-	for _, field := range strings.Fields(dsn) {
-		key, ok := libpqKeywordKey(field)
-		if !ok {
-			continue
-		}
-		if _, ok := libpqCredentialParams[key]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func libpqKeywordKey(field string) (string, bool) {
-	i := strings.Index(field, "=")
-	if i <= 0 {
-		return "", false
-	}
-	return strings.ToLower(strings.TrimSpace(field[:i])), true
+	return libpqCredentialPattern.MatchString(dsn)
 }
