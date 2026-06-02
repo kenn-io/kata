@@ -34,3 +34,7 @@ coverage.out
 .kata.local.toml
 # roborev snapshots
 /.roborev/
+
+# docs Vercel artifacts
+docs/.vercel
+docs/.env*.local
