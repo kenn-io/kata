@@ -205,3 +205,38 @@ func TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError(t *testing.T) {
 	assert.NotContains(t, err.Error(), "not yet available")
 	assert.NotContains(t, err.Error(), "SECRET")
 }
+
+func TestDatabaseOpenTerminologyAvoidsMigrationLanguage(t *testing.T) {
+	repoRoot := filepath.Clean("../../..")
+	files := []string{
+		"cmd/kata/testhelpers_test.go",
+		"cmd/kata/export_test.go",
+		"cmd/kata/import_test.go",
+		"internal/db/pgstore/open.go",
+		"internal/db/pgstore/store.go",
+		"internal/db/pgstore/stubs_gen.go",
+		"internal/db/pgstore/stubgen/main.go",
+		"internal/db/sqlitestore/schema_completeness_test.go",
+		"internal/db/sqlitestore/store.go",
+		"internal/db/storeopen/storeopen.go",
+		"internal/jsonl/cutover_test.go",
+		"internal/jsonl/testdb_helper_test.go",
+	}
+	banned := []string{
+		"already-migrated",
+		"migrate externally",
+		"migrate.go",
+		"migration runner",
+		"openMigrated",
+	}
+	for _, file := range files {
+		body, err := os.ReadFile(filepath.Join(repoRoot, file))
+		require.NoError(t, err)
+		text := string(body)
+		for _, phrase := range banned {
+			if strings.Contains(text, phrase) {
+				t.Errorf("%s still contains stale DB-open terminology %q", file, phrase)
+			}
+		}
+	}
+}

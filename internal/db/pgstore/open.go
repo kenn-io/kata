@@ -118,8 +118,8 @@ func openInternal(ctx context.Context, dsn string, readOnly bool) (*Store, error
 
 // bootstrap initializes a fresh database from schema.sql or refuses to open
 // a database whose schema_version disagrees with the binary's. Postgres has
-// no JSONL-cutover path; the operator must restore from backup or migrate
-// externally before reopening.
+// no JSONL-cutover path; the operator must restore a current-schema backup
+// before reopening.
 func (s *Store) bootstrap(ctx context.Context) error {
 	current, err := s.currentVersion(ctx)
 	if err != nil {

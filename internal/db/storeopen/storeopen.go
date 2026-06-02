@@ -4,10 +4,9 @@
 //
 // Open peeks the on-disk schema, runs JSONL cutover for SQLite DBs whose
 // schema_version predates db.CurrentSchemaVersion(), and hands the path to
-// the backend's Open — which bootstraps a fresh DB from its canonical
-// schema.sql inside a transaction. There is no migration runner: every Open
-// returns a ready-to-use Storage or a concrete error explaining why it
-// couldn't.
+// the backend's Open, which bootstraps a fresh DB from its canonical schema.sql
+// inside a transaction. Every Open returns a ready-to-use Storage or a
+// concrete error explaining why it couldn't.
 package storeopen
 
 import (
@@ -93,7 +92,7 @@ func openPostgres(ctx context.Context, dsn string, cfg db.OpenConfig, opts []db.
 			ver, db.CurrentSchemaVersion())
 	case ver > 0 && ver != db.CurrentSchemaVersion():
 		// Postgres has no JSONL cutover path. The operator must restore
-		// from backup or migrate externally before reopening.
+		// a current-schema backup before reopening.
 		return nil, fmt.Errorf("postgres schema_version %d disagrees with binary schema %d; restore from operator backup before reopening",
 			ver, db.CurrentSchemaVersion())
 	}

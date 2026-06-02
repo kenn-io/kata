@@ -80,7 +80,7 @@ func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
-	d := openMigratedTestDB(t, ctx, path)
+	d := openCutoverTargetDB(t, ctx, path)
 	project, err := d.CreateProject(ctx, "legacy-v11")
 	require.NoError(t, err)
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -120,7 +120,7 @@ func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
 func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
-	d := openMigratedTestDB(t, ctx, path)
+	d := openCutoverTargetDB(t, ctx, path)
 	active, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "active-token",
 		Actor:          "wesm",
@@ -207,7 +207,7 @@ func TestRoundtripV4PreservesDeletedAt(t *testing.T) {
 	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{IncludeDeleted: true}))
 
 	dstPath := filepath.Join(t.TempDir(), "dst.db")
-	dst := openMigratedTestDB(t, ctx, dstPath)
+	dst := openCutoverTargetDB(t, ctx, dstPath)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dst))
 
 	var got sql.NullTime

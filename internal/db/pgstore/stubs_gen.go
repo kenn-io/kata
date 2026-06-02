@@ -10,7 +10,7 @@
 //
 //	go run ./stubgen
 //
-// Methods implemented in store.go, migrate.go, or inherited from the
+// Methods implemented in store.go, open.go, or inherited from the
 // embedded *sql.DB are skipped via stubgen/main.go's alreadyImplemented
 // allow-list. Phase 4 work moves a method by:
 //

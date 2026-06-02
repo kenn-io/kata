@@ -130,7 +130,7 @@ func (s *Store) tableExists(ctx context.Context, name string) (bool, error) {
 }
 
 // cacheInstanceUIDIfPresent populates s.instanceUID when the meta table
-// already holds an instance_uid row. Used by Open on already-migrated DBs.
+// already holds an instance_uid row. Used by read-only Open on existing DBs.
 func (s *Store) cacheInstanceUIDIfPresent(ctx context.Context) error {
 	exists, err := s.tableExists(ctx, "meta")
 	if err != nil {

@@ -28,7 +28,7 @@ func TestImportCreatesTargetDB(t *testing.T) {
 	out, err := runCmdOutput(t, nil, "import", "--input", input, "--target", target)
 	require.NoError(t, err)
 
-	d := openMigratedKataDB(t, target)
+	d := openKataTestDB(t, target)
 	t.Cleanup(func() { _ = d.Close() })
 	got, err := d.ProjectByName(context.Background(), "kata")
 	require.NoError(t, err)
@@ -42,7 +42,7 @@ func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
 	out, err := runCmdOutput(t, nil, "import", "--format", "agent", "--source-format", "kata", "--input", input, "--target", target)
 	require.NoError(t, err)
 
-	d := openMigratedKataDB(t, target)
+	d := openKataTestDB(t, target)
 	t.Cleanup(func() { _ = d.Close() })
 	got, err := d.ProjectByName(context.Background(), "kata")
 	require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestImportLegacyFormatBeadsParseErrorPreservesJSONMode(t *testing.T) {
 
 func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	_, input, target := setupImportTest(t)
-	d := openMigratedKataDB(t, target)
+	d := openKataTestDB(t, target)
 	_, err := d.CreateProject(context.Background(), "existing")
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
@@ -193,7 +193,7 @@ func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) {
 	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
 	target := filepath.Join(home, "target.db")
 	ctx := context.Background()
-	d := openMigratedKataDB(t, target)
+	d := openKataTestDB(t, target)
 	_, err := d.CreateProject(ctx, "existing")
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
@@ -201,7 +201,7 @@ func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) {
 	_, err = runCmdOutput(t, nil, "import", "--force", "--input", input, "--target", target)
 	require.Error(t, err)
 
-	d = openMigratedKataDB(t, target)
+	d = openKataTestDB(t, target)
 	t.Cleanup(func() { _ = d.Close() })
 	_, err = d.ProjectByName(ctx, "existing")
 	require.NoError(t, err)
@@ -269,7 +269,7 @@ func TestMoveSQLiteFileSetRollsBackAlreadyMovedSidecarOnError(t *testing.T) {
 func TestImportRefusesDaemon(t *testing.T) {
 	home, input, target := setupImportTest(t)
 	dbPath := filepath.Join(home, "kata.db")
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	require.NoError(t, d.Close())
 	addr, cleanup := pipeServer(t)
 	t.Cleanup(cleanup)
@@ -284,7 +284,7 @@ func TestImportRefusesDaemon(t *testing.T) {
 func writeExportFixture(t *testing.T, home string) string {
 	t.Helper()
 	srcPath := filepath.Join(home, "source.db")
-	src := openMigratedKataDB(t, srcPath)
+	src := openKataTestDB(t, srcPath)
 	p, err := src.CreateProject(context.Background(), "kata")
 	require.NoError(t, err)
 	_, _, err = src.CreateIssue(context.Background(), db.CreateIssueParams{

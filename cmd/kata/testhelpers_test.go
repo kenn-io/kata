@@ -36,9 +36,8 @@ func setupKataEnv(t *testing.T) string {
 	return tmp
 }
 
-// openMigratedKataDB opens a SQLite store at path. The helper name is kept for
-// older tests that predate bootstrap-on-Open.
-func openMigratedKataDB(t *testing.T, path string) *sqlitestore.Store {
+// openKataTestDB opens a SQLite store at path.
+func openKataTestDB(t *testing.T, path string) *sqlitestore.Store {
 	t.Helper()
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, path)

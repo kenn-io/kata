@@ -8,13 +8,13 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
-// openMigratedTestDB opens a SQLite store at path. sqlitestore.Open
+// openCutoverTargetDB opens a SQLite store at path. sqlitestore.Open
 // bootstraps the canonical schema in one transaction when the file is
 // fresh, so the returned handle is immediately ready for use. KATA_HOME
 // is scoped to a per-test TempDir so snapshot files land under it.
 //
 //nolint:revive // test helper: t *testing.T conventionally precedes ctx.
-func openMigratedTestDB(t *testing.T, ctx context.Context, path string) *sqlitestore.Store {
+func openCutoverTargetDB(t *testing.T, ctx context.Context, path string) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
 	d, err := sqlitestore.Open(ctx, path)

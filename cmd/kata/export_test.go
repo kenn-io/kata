@@ -16,7 +16,7 @@ import (
 func TestExportWritesJSONLToOutput(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	p, err := d.CreateProject(context.Background(), "kata")
 	require.NoError(t, err)
 	_, _, err = d.CreateIssue(context.Background(), db.CreateIssueParams{
@@ -41,7 +41,7 @@ func TestExportWritesJSONLToOutput(t *testing.T) {
 func TestExportReadsDatabaseWithoutWritePermission(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	p, err := d.CreateProject(context.Background(), "kata")
 	require.NoError(t, err)
 	_, _, err = d.CreateIssue(context.Background(), db.CreateIssueParams{
@@ -68,7 +68,7 @@ func TestExportDoesNotReplaceExistingOutputOnFailure(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	ctx := context.Background()
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	p, err := d.CreateProject(ctx, "kata")
 	require.NoError(t, err)
 	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -134,7 +134,7 @@ func TestReplaceExportOutputReplacesExistingOutput(t *testing.T) {
 func TestExportAgentOutput(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	p, err := d.CreateProject(context.Background(), "kata")
 	require.NoError(t, err)
 	_, _, err = d.CreateIssue(context.Background(), db.CreateIssueParams{
@@ -158,7 +158,7 @@ func TestExportScopesByProjectName(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
 	ctx := context.Background()
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	alpha, err := d.CreateProject(ctx, "alpha")
 	require.NoError(t, err)
 	beta, err := d.CreateProject(ctx, "beta")
@@ -181,7 +181,7 @@ func TestExportScopesByProjectName(t *testing.T) {
 func TestExportProjectNameNotFound(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	_, err := d.CreateProject(context.Background(), "alpha")
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
@@ -194,7 +194,7 @@ func TestExportProjectNameNotFound(t *testing.T) {
 func TestExportProjectFlagConflict(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	alpha, err := d.CreateProject(context.Background(), "alpha")
 	require.NoError(t, err)
 	beta, err := d.CreateProject(context.Background(), "beta")
@@ -213,7 +213,7 @@ func TestExportProjectFlagConflict(t *testing.T) {
 func TestExportRefusesRunningDaemonUnlessAllowed(t *testing.T) {
 	home := setupKataEnv(t)
 	dbPath := filepath.Join(home, "kata.db")
-	d := openMigratedKataDB(t, dbPath)
+	d := openKataTestDB(t, dbPath)
 	require.NoError(t, d.Close())
 	addr, cleanup := pipeServer(t)
 	t.Cleanup(cleanup)

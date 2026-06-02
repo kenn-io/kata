@@ -1,8 +1,8 @@
 // Package sqlitestore opens the kata SQLite database and bootstraps it from
-// the canonical schema.sql. There is no migration runner: a fresh DB lands at
-// db.CurrentSchemaVersion() in one transaction; an existing DB at the current
-// version opens unchanged; an older DB returns ErrSchemaCutoverRequired so
-// storeopen can drive a JSONL cutover before reopening.
+// the canonical schema.sql. A fresh DB lands at db.CurrentSchemaVersion() in
+// one transaction; an existing DB at the current version opens unchanged; an
+// older DB returns ErrSchemaCutoverRequired so storeopen can drive a JSONL
+// cutover before reopening.
 package sqlitestore
 
 import (
