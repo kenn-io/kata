@@ -23,6 +23,7 @@ required_files=(
   "docs/zensical.toml"
   "docs/vercel.json"
   "docs/vercel-build.sh"
+  "docs/zensical-docs.sh"
   "docs/pyproject.toml"
   "docs/uv.lock"
   "docs/design/index.md"
@@ -83,13 +84,15 @@ require_line docs/vercel.json '"framework": null'
 require_line docs/vercel.json '"installCommand": "uv sync --frozen --no-dev"'
 require_line docs/vercel.json '"buildCommand": "uv run --frozen bash ./vercel-build.sh"'
 require_line docs/vercel.json '"outputDirectory": "site"'
-require_line docs/vercel-build.sh 'KATA_DOCS_SITE_DIR="docs/site"'
+require_line docs/vercel-build.sh '"$script_dir/zensical-docs.sh" build'
 require_line docs/pyproject.toml 'requires-python = ">=3.12"'
 require_line docs/pyproject.toml '"zensical==0.0.43"'
 require_line docs/pyproject.toml 'package = false'
-require_line scripts/zensical-docs.sh '"$repo_root/docs/zensical.toml"'
-require_line scripts/zensical-docs.sh "--exclude './.venv'"
-require_line scripts/zensical-docs.sh "--exclude './site'"
+require_line docs/zensical-docs.sh '"$docs_root/zensical.toml"'
+require_line docs/zensical-docs.sh "--exclude './.venv'"
+require_line docs/zensical-docs.sh "--exclude './site'"
+require_line docs/zensical-docs.sh "--exclude './zensical-public-docs.*'"
+require_line docs/zensical-docs.sh "--exclude './.zensical-build.*'"
 require_line docs/zensical.toml 'site_name = "kata カタ"'
 require_line docs/zensical.toml 'site_url = "https://katatracker.com/"'
 require_line docs/zensical.toml 'docs_dir = "docs"'
@@ -108,17 +111,21 @@ require_line Makefile 'docs-deploy:'
 require_line Makefile 'vercel deploy --cwd docs --prod'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
 
-for stale_reference in Makefile scripts/zensical-docs.sh docs/development/deploying-docs.md; do
+for stale_reference in Makefile scripts/zensical-docs.sh docs/zensical-docs.sh docs/development/deploying-docs.md; do
   if grep -F -- "requirements-docs.txt" "$stale_reference" >/dev/null; then
     printf 'stale requirements-docs.txt reference in %s\n' "$stale_reference" >&2
     exit 1
   fi
 done
 
-stale_config=".zensical-build.XXXXXX.toml"
-stale_docs="zensical-public-docs.XXXXXX"
+stale_config="docs/.zensical-build.XXXXXX.toml"
+stale_docs="docs/zensical-public-docs.XXXXXX"
+vercel_docs_root=""
 cleanup_check_docs() {
   rm -rf "$stale_config" "$stale_docs"
+  if [[ -n "$vercel_docs_root" ]]; then
+    rm -rf "$vercel_docs_root"
+  fi
 }
 trap cleanup_check_docs EXIT
 
@@ -127,14 +134,26 @@ trap cleanup_check_docs EXIT
 : > "$stale_config"
 mkdir -p "$stale_docs"
 
-rm -rf site
+rm -rf docs/site
 
-scripts/zensical-docs.sh build
+vercel_docs_root="$(mktemp -d)"
+mkdir -p "$vercel_docs_root/docs"
+(
+  cd docs
+  tar \
+    --exclude './site' \
+    --exclude './.ruff_cache' \
+    --exclude './.mypy_cache' \
+    -cf - .
+) | (cd "$vercel_docs_root/docs" && tar -xf -)
+(cd "$vercel_docs_root/docs" && bash ./vercel-build.sh)
+
+docs/zensical-docs.sh build
 
 for generated in \
-  site/federation/index.html \
-  site/hosted-mode/index.html \
-  site/superpowers; do
+  docs/site/federation/index.html \
+  docs/site/hosted-mode/index.html \
+  docs/site/superpowers; do
   if [[ -e "$generated" ]]; then
     printf 'generated site contains maintainer-only docs: %s\n' "$generated" >&2
     exit 1
@@ -142,11 +161,11 @@ for generated in \
 done
 
 for generated in \
-  site/design/index.html \
-  site/design/architecture/index.html \
-  site/design/data-model/index.html \
-  site/design/federation/index.html \
-  site/design/hosted-mode/index.html; do
+  docs/site/design/index.html \
+  docs/site/design/architecture/index.html \
+  docs/site/design/data-model/index.html \
+  docs/site/design/federation/index.html \
+  docs/site/design/hosted-mode/index.html; do
   if [[ ! -e "$generated" ]]; then
     printf 'generated site is missing design docs page: %s\n' "$generated" >&2
     exit 1

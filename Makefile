@@ -27,10 +27,10 @@ docs-install:
 	cd docs && uv sync --frozen --no-dev
 
 docs-build:
-	cd docs && uv run --frozen bash ../scripts/zensical-docs.sh build
+	cd docs && uv run --frozen bash ./zensical-docs.sh build
 
 docs-serve:
-	cd docs && uv run bash ../scripts/zensical-docs.sh serve
+	cd docs && uv run bash ./zensical-docs.sh serve
 
 docs-check:
 	bash scripts/check-docs.sh
@@ -79,4 +79,4 @@ tui-demo:
 
 clean:
 	rm -f kata kata.exe coverage.out
-	rm -rf dist site
+	rm -rf dist site docs/site
