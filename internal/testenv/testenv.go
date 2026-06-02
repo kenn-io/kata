@@ -17,6 +17,11 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
+const (
+	daemonReadyTimeout   = 2 * time.Second
+	daemonRequestTimeout = 10 * time.Second
+)
+
 // Env is a per-test daemon + DB + HTTP client bundle.
 type Env struct {
 	URL         string
@@ -171,12 +176,12 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 	// loudly here rather than letting the test report a confusing failure on
 	// its first real request.
 	url := "http://" + addr
-	deadline := time.Now().Add(2 * time.Second)
-	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.Now().Add(daemonReadyTimeout)
+	probeClient := &http.Client{Timeout: daemonReadyTimeout}
 	var lastErr error
 	ready := false
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(url + "/api/v1/ping") //nolint:noctx // polling loop; context would add noise without benefit
+		resp, err := probeClient.Get(url + "/api/v1/ping") //nolint:noctx // polling loop; context would add noise without benefit
 		if err == nil {
 			status := resp.StatusCode
 			_ = resp.Body.Close()
@@ -190,6 +195,7 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	require.Truef(t, ready, "daemon did not become ready within 2s: %v", lastErr)
+	require.Truef(t, ready, "daemon did not become ready within %s: %v", daemonReadyTimeout, lastErr)
+	client := &http.Client{Timeout: daemonRequestTimeout}
 	return url, client, bcast
 }
