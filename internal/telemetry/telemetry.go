@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	applicationName = "kata"
 	EnabledEnv      = "KATA_TELEMETRY_ENABLED"
 	postHogAPIKey   = "phc_AzHd9YvuHR7M5poKzC6eW654d3SgKyBdoQPuwkWhimUf"
 	postHogEndpoint = "https://us.i.posthog.com"
@@ -41,6 +42,8 @@ type Client interface {
 type Reporter struct {
 	client     enqueueCloser
 	distinctID string
+	version    string
+	commit     string
 	enabled    bool
 }
 
@@ -81,7 +84,9 @@ func SanitizeProperties(event string, properties map[string]any) (map[string]any
 			safeProperties[key] = safeValue
 		}
 	}
+	safeProperties["$process_person_profile"] = false
 	safeProperties["$geoip_disable"] = true
+	safeProperties["application"] = applicationName
 	return safeProperties, nil
 }
 
@@ -99,13 +104,14 @@ func NewReporter(opts Options) (*Reporter, error) {
 		Endpoint:     postHogEndpoint,
 		DisableGeoIP: &disableGeoIP,
 		DefaultEventProperties: posthog.Properties{
-			"app":            "kata",
-			"source":         "daemon",
-			"version":        opts.Version,
-			"commit":         opts.Commit,
-			"goos":           runtime.GOOS,
-			"goarch":         runtime.GOARCH,
-			"$geoip_disable": true,
+			"application":             applicationName,
+			"source":                  "daemon",
+			"version":                 opts.Version,
+			"commit":                  opts.Commit,
+			"goos":                    runtime.GOOS,
+			"goarch":                  runtime.GOARCH,
+			"$process_person_profile": false,
+			"$geoip_disable":          true,
 		},
 	})
 	if err != nil {
@@ -115,6 +121,8 @@ func NewReporter(opts Options) (*Reporter, error) {
 	return &Reporter{
 		client:     client,
 		distinctID: distinctID,
+		version:    opts.Version,
+		commit:     opts.Commit,
 		enabled:    true,
 	}, nil
 }
@@ -153,6 +161,14 @@ func (r *Reporter) Capture(event string, properties map[string]any) error {
 
 	props := posthog.Properties{}
 	maps.Copy(props, safeProperties)
+	props["$process_person_profile"] = false
+	props["$geoip_disable"] = true
+	props["application"] = applicationName
+	props["version"] = r.version
+	props["commit"] = r.commit
+	props["goos"] = runtime.GOOS
+	props["goarch"] = runtime.GOARCH
+	props["source"] = "daemon"
 
 	return r.client.Enqueue(posthog.Capture{
 		DistinctId: r.distinctID,

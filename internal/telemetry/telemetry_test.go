@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/posthog/posthog-go"
@@ -42,14 +43,20 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 	reporter := &Reporter{
 		client:     client,
 		distinctID: "anonymous-instance-id",
+		version:    "v-test",
+		commit:     "abc1234",
 		enabled:    true,
 	}
 
 	err := reporter.Capture("daemon_started", map[string]any{
-		"$geoip_disable": false,
-		"distinct_id":    "user-provided",
-		"project":        "secret-project",
-		"project_count":  3,
+		"$process_person_profile": true,
+		"$geoip_disable":          false,
+		"application":             "evil",
+		"distinct_id":             "user-provided",
+		"project":                 "secret-project",
+		"project_count":           3,
+		"source":                  "evil",
+		"version":                 "evil",
 	})
 	require.NoError(t, err)
 
@@ -60,7 +67,15 @@ func TestReporterCaptureUsesAnonymousDistinctID(t *testing.T) {
 	assert.Equal(t, 3, capture.Properties["project_count"])
 	assert.NotContains(t, capture.Properties, "distinct_id")
 	assert.NotContains(t, capture.Properties, "project")
+	assert.False(t, capture.Properties["$process_person_profile"].(bool))
 	assert.True(t, capture.Properties["$geoip_disable"].(bool))
+	assert.Equal(t, "kata", capture.Properties["application"])
+	assert.Equal(t, "v-test", capture.Properties["version"])
+	assert.Equal(t, "abc1234", capture.Properties["commit"])
+	assert.Equal(t, runtime.GOOS, capture.Properties["goos"])
+	assert.Equal(t, runtime.GOARCH, capture.Properties["goarch"])
+	assert.Equal(t, "daemon", capture.Properties["source"])
+	assert.NotContains(t, capture.Properties, "app")
 }
 
 func TestReporterCaptureAllowsDaemonActive(t *testing.T) {
@@ -68,6 +83,8 @@ func TestReporterCaptureAllowsDaemonActive(t *testing.T) {
 	reporter := &Reporter{
 		client:     client,
 		distinctID: "anonymous-instance-id",
+		version:    "v-test",
+		commit:     "abc1234",
 		enabled:    true,
 	}
 
@@ -78,6 +95,15 @@ func TestReporterCaptureAllowsDaemonActive(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "daemon_active", capture.Event)
 	assert.Equal(t, 2, capture.Properties["project_count"])
+	assert.False(t, capture.Properties["$process_person_profile"].(bool))
+	assert.True(t, capture.Properties["$geoip_disable"].(bool))
+	assert.Equal(t, "kata", capture.Properties["application"])
+	assert.Equal(t, "v-test", capture.Properties["version"])
+	assert.Equal(t, "abc1234", capture.Properties["commit"])
+	assert.Equal(t, runtime.GOOS, capture.Properties["goos"])
+	assert.Equal(t, runtime.GOARCH, capture.Properties["goarch"])
+	assert.Equal(t, "daemon", capture.Properties["source"])
+	assert.NotContains(t, capture.Properties, "app")
 }
 
 func TestReporterCaptureRejectsUnsupportedEvents(t *testing.T) {

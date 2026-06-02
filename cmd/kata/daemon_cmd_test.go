@@ -493,7 +493,7 @@ func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
 			defer close(done)
 			runDaemonTelemetryHeartbeat(ctx, func(context.Context) {
 				captures = append(captures, time.Now())
-			}, daemonTelemetryHeartbeatInterval)
+			})
 		}()
 
 		synctest.Wait()

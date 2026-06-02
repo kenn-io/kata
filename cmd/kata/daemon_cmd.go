@@ -414,27 +414,34 @@ func startDaemonTelemetryHeartbeat(ctx context.Context, store db.Storage, report
 	go func() {
 		runDaemonTelemetryHeartbeat(ctx, func(ctx context.Context) {
 			captureDaemonTelemetryEvent(ctx, store, reporter, "daemon_active")
-		}, daemonTelemetryHeartbeatInterval)
+		})
 	}()
 }
 
-func runDaemonTelemetryHeartbeat(ctx context.Context, capture func(context.Context), interval time.Duration) {
+func runDaemonTelemetryHeartbeat(ctx context.Context, capture func(context.Context)) {
 	select {
 	case <-ctx.Done():
 		return
 	default:
 	}
 	capture(ctx)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(durationUntilNextUTCDay(time.Now()))
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			capture(ctx)
+			timer.Reset(durationUntilNextUTCDay(time.Now()))
 		}
 	}
+}
+
+func durationUntilNextUTCDay(now time.Time) time.Duration {
+	utc := now.UTC()
+	next := time.Date(utc.Year(), utc.Month(), utc.Day()+1, 0, 0, 0, 0, time.UTC)
+	return next.Sub(utc)
 }
 
 func captureDaemonTelemetryEvent(ctx context.Context, store db.Storage, reporter telemetry.Client, event string) {
