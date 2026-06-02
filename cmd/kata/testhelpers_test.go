@@ -36,10 +36,8 @@ func setupKataEnv(t *testing.T) string {
 	return tmp
 }
 
-// openMigratedKataDB opens a SQLite store at path and brings it to current
-// via Migrate. Phase 2 moves DDL out of sqlitestore.Open into Migrate, so
-// every cmd/kata test that needs a populated DB calls Open+Migrate explicitly
-// or routes through this helper.
+// openMigratedKataDB opens a SQLite store at path. The helper name is kept for
+// older tests that predate bootstrap-on-Open.
 func openMigratedKataDB(t *testing.T, path string) *sqlitestore.Store {
 	t.Helper()
 	ctx := context.Background()

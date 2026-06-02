@@ -2,7 +2,7 @@
 
 `kata export` writes the local database as JSONL. `kata import` rebuilds a
 database from that file. Use these commands for backups, machine moves, and
-schema migrations.
+schema cutovers.
 
 ## Use JSONL exports
 
@@ -40,8 +40,8 @@ kata import --input backups/kata-20260531.jsonl --target ~/.kata/restored.db
 ```
 
 The target must not exist unless `--force` is set. To use the restored
-database, stop the daemon, point `KATA_DB` at the restored file or move it into
-`KATA_HOME` as `kata.db`, then restart.
+database, stop the daemon, point `KATA_DSN` or `KATA_DB` at the restored file,
+or move it into `KATA_HOME` as `kata.db`, then restart.
 
 `kata import` is not a merge operation. It creates a target database from the
 input snapshot.

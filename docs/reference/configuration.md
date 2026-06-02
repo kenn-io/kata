@@ -8,7 +8,8 @@ bindings, local per-machine overrides, and daemon config.
 | Variable | Meaning |
 | --- | --- |
 | `KATA_HOME` | Data directory. Defaults to `~/.kata`. |
-| `KATA_DB` | Explicit SQLite database path. |
+| `KATA_DSN` | Explicit database DSN. Accepts a bare SQLite path, `sqlite://...`, `postgres://...`, or `postgresql://...`. |
+| `KATA_DB` | Legacy explicit SQLite database path. Used when `KATA_DSN` is unset. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
@@ -17,6 +18,25 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_FEDERATION_PULL_INTERVAL_MS` | Federation runner poll interval for tests or latency-sensitive private deployments. |
 | `PORT` | Hosted-mode listener port when no explicit listener is configured and the daemon is not an auto-start child. |
 | `XDG_RUNTIME_DIR` | Runtime socket parent on Unix when applicable. |
+
+## Database selection
+
+kata resolves its database in this order:
+
+1. `KATA_DSN`
+2. `KATA_DB`
+3. `[storage].dsn` in `<KATA_HOME>/config.toml`
+4. `<KATA_HOME>/kata.db`
+
+Bare paths and `sqlite://` DSNs select SQLite. `postgres://` and
+`postgresql://` DSNs select Postgres. `KATA_DB` stays ahead of `[storage].dsn`
+so existing shells and scripts keep using their explicit database path after the
+config-file key is introduced.
+
+`KATA_DSN` and `[storage].dsn` are shape-validated before use. Unknown schemes
+are rejected, and common Postgres-only query parameters on a bare path or
+`sqlite://` DSN are treated as likely formatting mistakes. Validation is local:
+it does not dial Postgres or stat SQLite paths.
 
 ## Workspace binding
 
@@ -46,10 +66,13 @@ url = "http://100.64.0.5:7777"
 
 ## Daemon config
 
-`<KATA_HOME>/config.toml` can configure listener and auth behavior:
+`<KATA_HOME>/config.toml` can configure storage, listener, and auth behavior:
 
 ```toml
 listen = "100.64.0.5:7777"
+
+[storage]
+dsn = "postgres://kata@db.internal/kata?sslmode=require"
 
 [auth]
 token = "change-me"
@@ -58,6 +81,12 @@ trust_private_network = true
 
 The `kata daemon start --listen <host:port>` flag wins over the config file.
 Auto-started daemons also read the config-file listener value.
+An empty `[storage].dsn` means "no storage override"; env vars or the default
+database path still apply.
+
+Postgres DSNs may carry credentials. Runtime files and log output use a
+credential-free identity derived from the scheme, host, port, and database name;
+userinfo and query parameters are stripped before display or hashing.
 
 ## Token identity mode
 

@@ -28,10 +28,6 @@ func TestOpen_AppliesPragmas(t *testing.T) {
 	assert.Equal(t, "wal", mode)
 }
 
-// TestOpen_OnFreshDBLeavesMetaUnpopulated documents the new Open contract:
-// the handle is a raw SQLite connection with no schema. Migrate is the only
-// path that creates tables; openTestDB calls Migrate after Open, but a direct
-// Open without it leaves the file empty.
 // TestOpen_OnFreshDBBootstrapsSchema confirms the new Open contract: a fresh
 // path returns a handle whose meta table and schema_version row are already
 // in place, courtesy of the bootstrap-on-Open transaction.

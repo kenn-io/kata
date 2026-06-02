@@ -1,7 +1,6 @@
--- Postgres baseline schema at db.BaselineSchemaVersion (12). Semantically
--- equivalent to internal/db/sqlitestore/migrations/0012_baseline.sql per the
--- Phase 3 spec's translation tables. Includes federation tables introduced
--- after Phase 1.
+-- Canonical kata Postgres schema at db.CurrentSchemaVersion(). Semantically
+-- equivalent to internal/db/sqlitestore/schema.sql, with the SQLite-specific
+-- constructs translated to Postgres below.
 --
 -- Translation conventions:
 --   INTEGER PRIMARY KEY AUTOINCREMENT  -> BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY

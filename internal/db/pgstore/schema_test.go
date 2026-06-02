@@ -11,9 +11,9 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// expectedTables enumerates the structural surface 0012_baseline.sql must
-// produce. Full constraint/index name parity with sqlitestore is deferred to
-// the Phase 6 conformance suite; this is the Phase 3 acceptance subset.
+// expectedTables enumerates the structural surface schema.sql must produce.
+// Full constraint/index name parity with sqlitestore belongs in the later
+// conformance suite; this test pins the baseline acceptance subset.
 var expectedTables = []string{
 	"api_tokens",
 	"comments",
@@ -36,7 +36,7 @@ var expectedTables = []string{
 	"recurrences",
 }
 
-// expectedTriggers lists the named triggers that must exist after Migrate.
+// expectedTriggers lists the named triggers that must exist after bootstrap.
 // Counts the SQLite RAISE(ABORT, ...) ports + the FTS sync triggers, omitting
 // the FK CASCADE that replaces SQLite's issue-delete FTS trigger.
 var expectedTriggers = []string{
@@ -57,8 +57,8 @@ var expectedTriggers = []string{
 }
 
 // expectedFKCounts pins the per-table foreign-key counts. The conformance
-// suite (Phase 6) will compare names too; the Phase 3 subset only checks the
-// arity so a missing FK is caught without forcing name parity.
+// suite should compare names too; this subset checks arity so a missing FK is
+// caught without forcing name parity.
 var expectedFKCounts = map[string]int{
 	"project_aliases":        1, // -> projects
 	"recurrences":            1, // -> projects (CASCADE)
@@ -77,10 +77,10 @@ var expectedFKCounts = map[string]int{
 	"import_mappings":        4, // -> projects, issues, comments, links
 }
 
-// TestSchema_BaselineMatchesExpectedSurface drives Migrate against a real PG
-// and asserts the structural surface (tables, named triggers, idempotency
+// TestSchema_BaselineMatchesExpectedSurface opens a real PG and asserts the
+// structural surface (tables, named triggers, idempotency
 // UNIQUE index, FTS GIN index, per-table FK counts) matches the v12 baseline.
-// Phase 6 conformance lifts the bar to byte-level constraint-name parity.
+// The conformance suite should lift the bar to byte-level constraint-name parity.
 func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")

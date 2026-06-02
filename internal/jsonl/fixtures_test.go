@@ -550,9 +550,8 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	t.Helper()
 	ctx := context.Background()
 
-	// Phase 1: bring the DB to current via Open+Migrate so meta is populated
-	// correctly, then close to release the handle before the raw connection
-	// takes over.
+	// First bootstrap the DB so meta is populated correctly, then close to
+	// release the handle before the raw connection takes over.
 	t.Setenv("KATA_HOME", t.TempDir())
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
@@ -566,7 +565,7 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	assertV8V9Shape(t, raw)
 	deleteAutoSystemProject(t, raw)
 
-	// Phase 2: seed the valid baseline via raw SQL. Fixed UIDs keep the
+	// Then seed the valid baseline via raw SQL. Fixed UIDs keep the
 	// fixture deterministic; short_ids satisfy the issues CHECK that
 	// short_id = lower(substr(uid, 27 - length(short_id), length(short_id))).
 	const projectUID = "01HZZZZZZZZZZZZZZZZZZZZZZZ"
@@ -622,7 +621,7 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 		 ('beads', 'lbl-1', 'label', 1, 1, 'bug')`)
 	require.NoError(t, err)
 
-	// Phase 3: orphan injection with FKs disabled, schema_version
+	// Finally inject orphans with FKs disabled, schema_version
 	// rewrite, then FKs re-enabled so PRAGMA foreign_key_check sees
 	// every violation when the cutover preflight runs.
 	_, err = raw.Exec(`PRAGMA foreign_keys = OFF`)

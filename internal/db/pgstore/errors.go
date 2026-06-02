@@ -2,7 +2,7 @@ package pgstore
 
 import "errors"
 
-// ErrNotImplementedPhase3 is returned by every pgstore domain method during
-// Phase 3. Phase 4 replaces each entity group's stubs with real queries;
-// until then any accidental call from a non-Migrate code path fails loudly.
+// ErrNotImplementedPhase3 is returned by pgstore domain-method stubs until
+// each entity group's real Postgres queries land. Any accidental production
+// call into an unimplemented method fails loudly.
 var ErrNotImplementedPhase3 = errors.New("pgstore: not implemented in Phase 3 — see Phase 4 for queries")

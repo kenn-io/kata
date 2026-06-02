@@ -143,3 +143,24 @@ installation, and every event and purge-log row carries its own `uid` plus the
 `origin_instance_uid` that produced it. That provenance is recorded from day one,
 in single-user installs that may never federate, so the audit log is sync-ready
 without a later disruptive migration.
+
+## Storage backends
+
+The durable domain contract lives in `internal/db` as `db.Storage`: domain
+types, parameter/result structs, sentinel errors, and backend-neutral helpers.
+Concrete SQL implementations live beside it (`internal/db/sqlitestore`,
+`internal/db/pgstore`), and production entry points select a backend through
+`internal/db/storeopen` from the resolved DSN.
+
+This boundary is intentionally narrow in production code: daemon and CLI paths
+should hold `db.Storage` after opening. Concrete store types are appropriate
+inside backend packages, SQLite-specific JSONL cutover code, and tests that
+assert SQL details.
+
+Both backends bootstrap fresh databases by applying their canonical
+`schema.sql` inside a transaction and stamping `meta.schema_version` to the
+binary's `db.CurrentSchemaVersion()`. Existing SQLite databases with older
+schema versions are upgraded through the JSONL cutover path described above.
+Postgres has no historical on-disk kata schema, so a Postgres database whose
+`schema_version` disagrees with the binary is refused; operators should restore
+from backup or run an explicit external migration before reopening.

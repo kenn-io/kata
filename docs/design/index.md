@@ -15,5 +15,5 @@ constraints that are too detailed for the main documentation.
 - [Hosted mode technical notes](hosted-mode.md)
 
 These notes are the curated home for kata's design rationale. Earlier planning
-specs and implementation plans were folded into them once the work shipped; the
-superseded drafts remain in version control rather than on the published site.
+specs and implementation plans should be folded into these notes once the work
+ships, then removed so stale drafts do not compete with maintained docs.

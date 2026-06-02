@@ -1,7 +1,7 @@
--- Canonical kata schema at db.BaselineSchemaVersion. Older databases reach
--- this shape via JSONL cutover (internal/jsonl/cutover.go); fresh databases
--- start here when the migration runner (sqlitestore.Store.Migrate) applies
--- this file as the baseline rung of the embedded migrations/*.sql ladder.
+-- Canonical kata SQLite schema at db.CurrentSchemaVersion(). Older databases
+-- reach this shape via JSONL cutover (internal/jsonl/cutover.go); fresh
+-- databases start here when sqlitestore.Open bootstraps schema.sql inside a
+-- transaction.
 
 CREATE TABLE projects (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

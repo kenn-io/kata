@@ -10,12 +10,12 @@ documented.
 | --- | --- |
 | `cmd/kata` | CLI commands and output modes. |
 | `internal/daemon` | HTTP routes, daemon runtime, auth, SSE, federation routes. |
-| `internal/db` | SQLite schema, projections, events, queries, federation state. |
+| `internal/db` | Storage contract, backend implementations, schemas, projections, events, queries, federation state. |
 | `internal/client` | Client discovery, auto-start, remote daemon, bearer handling. |
 | `internal/tui` | Bubble Tea TUI. |
 | `internal/jsonl` | Export/import, cutover, fixture compatibility. |
 | `internal/federation` | Spoke-side federation client and runner. |
-| `docs` | Public Zensical documentation source, design notes, and unpublished historical specs. |
+| `docs` | Public Zensical documentation source and maintained design notes. |
 
 ## Local checks
 
