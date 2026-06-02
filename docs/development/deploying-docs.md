@@ -60,11 +60,12 @@ docs toolchain changes.
 ## CLI deployment
 
 After the Vercel GitHub integration is disconnected, deploy the docs project
-from the command line. Link the local docs directory to the existing Vercel
-project once:
+from the command line. Link the repository root to the existing Vercel project
+once. The Vercel project root directory remains `docs`, so do not link or
+deploy from inside `docs/`:
 
 ```sh
-vercel link --cwd docs
+vercel link
 ```
 
 Then deploy the current workspace to production from the repository root:
@@ -76,7 +77,7 @@ make docs-deploy
 The Make target runs:
 
 ```sh
-vercel deploy --cwd docs --prod
+vercel deploy --prod
 ```
 
 ## Verification

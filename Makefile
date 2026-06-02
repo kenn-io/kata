@@ -36,7 +36,7 @@ docs-check:
 	bash scripts/check-docs.sh
 
 docs-deploy:
-	vercel deploy --cwd docs --prod
+	vercel deploy --prod
 
 lint:
 	golangci-lint run --config .golangci.yml

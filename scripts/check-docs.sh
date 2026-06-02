@@ -85,6 +85,16 @@ require_line() {
   fi
 }
 
+reject_line() {
+  local file="$1"
+  local unexpected="$2"
+
+  if grep -F -- "$unexpected" "$file" >/dev/null; then
+    printf 'stale docs content in %s: %s\n' "$file" "$unexpected" >&2
+    exit 1
+  fi
+}
+
 require_line docs/vercel.json '"framework": null'
 require_line docs/vercel.json '"installCommand": "uv sync --frozen --no-dev"'
 require_line docs/vercel.json '"buildCommand": "uv run --frozen bash ./vercel-build.sh"'
@@ -95,6 +105,8 @@ require_line docs/pyproject.toml '"zensical==0.0.43"'
 require_line docs/pyproject.toml 'package = false'
 require_line docs/zensical-docs.sh '"$docs_root/zensical.toml"'
 require_line docs/zensical-docs.sh "--exclude './.venv'"
+require_line docs/zensical-docs.sh "--exclude './.vercel'"
+require_line docs/zensical-docs.sh "--exclude './.env*.local'"
 require_line docs/zensical-docs.sh "--exclude './site'"
 require_line docs/zensical-docs.sh "--exclude './zensical-public-docs.*'"
 require_line docs/zensical-docs.sh "--exclude './.zensical-build.*'"
@@ -110,11 +122,15 @@ require_line docs/development/deploying-docs.md '| Root directory | `docs` |'
 require_line docs/development/deploying-docs.md 'Vercel should install with `uv sync --frozen --no-dev`'
 require_line docs/development/deploying-docs.md 'Vercel should build with `uv run --frozen bash ./vercel-build.sh`'
 require_line docs/development/deploying-docs.md 'Vercel should publish the generated `site/` directory'
-require_line docs/development/deploying-docs.md 'vercel link --cwd docs'
+require_line docs/development/deploying-docs.md 'vercel deploy --prod'
 require_line docs/development/deploying-docs.md 'make docs-deploy'
 require_line Makefile 'docs-deploy:'
-require_line Makefile 'vercel deploy --cwd docs --prod'
+require_line Makefile 'vercel deploy --prod'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
+
+reject_line docs/development/deploying-docs.md 'vercel link --cwd docs'
+reject_line docs/development/deploying-docs.md 'vercel deploy --cwd docs --prod'
+reject_line Makefile 'vercel deploy --cwd docs --prod'
 
 for stale_reference in Makefile docs/zensical-docs.sh docs/development/deploying-docs.md; do
   if grep -F -- "requirements-docs.txt" "$stale_reference" >/dev/null; then
@@ -125,19 +141,37 @@ done
 
 stale_config="docs/.zensical-build.XXXXXX.toml"
 stale_docs="docs/zensical-public-docs.XXXXXX"
+docs_env_sentinel="docs/.env.docs-check.local"
+vercel_sentinel_dir="docs/.vercel"
+vercel_sentinel="$vercel_sentinel_dir/docs-check-sentinel"
+vercel_dir_preexisting=0
 vercel_docs_root=""
 cleanup_check_docs() {
-  rm -rf "$stale_config" "$stale_docs"
+  rm -rf "$stale_config" "$stale_docs" "$docs_env_sentinel" "$vercel_sentinel"
+  if [[ "$vercel_dir_preexisting" -eq 0 ]]; then
+    rmdir "$vercel_sentinel_dir" 2>/dev/null || true
+  fi
   if [[ -n "$vercel_docs_root" ]]; then
     rm -rf "$vercel_docs_root"
   fi
 }
 trap cleanup_check_docs EXIT
 
+if [[ -e "$docs_env_sentinel" || -e "$vercel_sentinel" ]]; then
+  printf 'docs check sentinel path already exists\n' >&2
+  exit 1
+fi
+if [[ -d "$vercel_sentinel_dir" ]]; then
+  vercel_dir_preexisting=1
+fi
+
 # Guard against macOS mktemp regressions where suffix templates become literal
 # repo-local paths and block repeat docs builds.
 : > "$stale_config"
 mkdir -p "$stale_docs"
+mkdir -p "$vercel_sentinel_dir"
+: > "$docs_env_sentinel"
+: > "$vercel_sentinel"
 
 rm -rf docs/site
 
@@ -156,6 +190,9 @@ mkdir -p "$vercel_docs_root/docs"
 docs/zensical-docs.sh build
 
 for generated in \
+  docs/site/.env.local \
+  docs/site/.env.docs-check.local \
+  docs/site/.vercel \
   docs/site/federation/index.html \
   docs/site/hosted-mode/index.html \
   docs/site/superpowers; do

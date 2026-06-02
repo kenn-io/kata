@@ -57,6 +57,8 @@ tmp_config_base=""
   cd "$docs_root"
   tar \
     --exclude './.venv' \
+    --exclude './.vercel' \
+    --exclude './.env*.local' \
     --exclude './site' \
     --exclude './zensical-public-docs.*' \
     --exclude './.zensical-build.*' \
