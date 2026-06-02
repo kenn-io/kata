@@ -696,11 +696,27 @@ func TestCutover_PreservesStoredShortIDs(t *testing.T) {
 }
 
 // --- v9 → v10 ---
-//
-// The v9 pre-cutover export tests live in cutover_export_v9_internal_test.go
-// (package jsonl) because the unexported exportForCutover (which they need to
-// exercise the legacy projection) is not reachable from package jsonl_test
-// after the backend-neutral Export refactor.
+
+func TestAutoCutoverV9SchemaDB(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	seedV9SchemaDB(t, path)
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+	assertCurrentSchemaVersion(t, path)
+
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = d.Close() })
+
+	var issueCount, eventCount int
+	require.NoError(t, d.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM issues`).Scan(&issueCount))
+	require.NoError(t, d.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM events`).Scan(&eventCount))
+	assert.Equal(t, 3, issueCount, "v9 issues must survive cutover")
+	assert.Equal(t, 1, eventCount, "v9 event must survive cutover")
+}
 
 func trimCurrentDBToV11Shape(t *testing.T, path string) {
 	t.Helper()

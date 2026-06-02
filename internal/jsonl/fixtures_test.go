@@ -679,6 +679,18 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	require.NoError(t, err)
 }
 
+func seedV9SchemaDB(t *testing.T, path string) {
+	t.Helper()
+	seedV8DBWithOrphans(t, path, orphanSpec{})
+
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+
+	_, err = raw.Exec(`UPDATE meta SET value='9' WHERE key='schema_version'`)
+	require.NoError(t, err)
+}
+
 func deleteAutoSystemProject(t *testing.T, raw *sql.DB) {
 	t.Helper()
 	_, err := raw.Exec(`DELETE FROM projects WHERE uid = ? AND name = ?`,
