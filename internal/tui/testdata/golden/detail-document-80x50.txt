@@ -1,50 +1,50 @@
- Project: kata                                                  kata カタ · dev 
+ Project: kata                                                  kata カタ · dev
 
   #42aa  fix login bug on Safari                                          [open]
-  authored by wesm · created Apr 30 10:00 · updated 3h ago                      
-  owner: alice   parent: #c012 workspace polish parent                          
-  priority: none                                                                
-  labels: [bug] [needs-design] [prio-1]                                         
-  children: 1 open / 2 total                                                    
-                                                                                
-  Body                                                                          
-  Reproduces in Safari 17 only.                                                 
-  Click the login button twice.                                                 
-                                                                                
-  Children                                                                      
-    #c043  open      detail hint bars incomplete          alice       1h ago    
-    #c044  closed    new issue form parent field          wesm        2h ago    
-                                                                                
-  Activity   [ Comments (2) ]   Events (2)   Links (1)                          
-  > alice  Apr 30 10:00                                                         
-    I can repro on macOS.                                                       
-                                                                                
-    bob    Apr 30 11:00                                                         
-    Looks like a race in oauth.                                                 
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
- ↑↓ scroll▕ j/k row ▕ ↹ section▕ ↵ open   ▕ pgup/pgdn page▕ e edit              
- c comment▕ + label ▕ - unlabel▕ a owner  ▕ A unassign    ▕ x close             
- r reopen ▕ p parent▕ b block  ▕ l related▕ ! priority    ▕ D daemons           
- N child  ▕ L layout▕ esc back ▕ ? help   ▕ q quit                              
+  authored by wesm · created Apr 30 10:00 · updated 3h ago
+  owner: alice   parent: #c012 workspace polish parent
+  priority: none
+  labels: [bug] [needs-design] [prio-1]
+  children: 1 open / 2 total
+
+  Body
+  Reproduces in Safari 17 only.
+  Click the login button twice.
+
+  Children
+    #c043  open      detail hint bars incomplete          alice       1h ago
+    #c044  closed    new issue form parent field          wesm        2h ago
+
+  Activity   [ Comments (2) ]   Events (2)   Links (1)
+  > alice  Apr 30 10:00
+    I can repro on macOS.
+
+    bob    Apr 30 11:00
+    Looks like a race in oauth.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ↑↓ scroll   ▕ j/k row ▕ ↹ section▕ ↵ open   ▕ pgup/pgdn page▕ e edit
+ c comment   ▕ + label ▕ - unlabel▕ a owner  ▕ A unassign    ▕ x close
+ r reopen    ▕ p parent▕ b block  ▕ l related▕ ! priority    ▕ D daemons
+ F federation▕ N child ▕ L layout ▕ esc back ▕ ? help        ▕ q quit

@@ -267,13 +267,17 @@ func (d *Store) UpsertFederationBinding(ctx context.Context, b db.FederationBind
 	if b.PushEnabled {
 		pushEnabled = 1
 	}
+	actor := strings.TrimSpace(b.Actor)
+	if b.Role == db.FederationRoleSpoke && b.PushEnabled && actor == "" {
+		return db.FederationBinding{}, fmt.Errorf("push-enabled federation spoke binding requires actor")
+	}
 	_, err := d.ExecContext(ctx, `
 		INSERT INTO federation_bindings(
 			project_id, role, hub_url, hub_project_id, hub_project_uid,
 			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
-			push_cursor_event_id, enabled
+			push_cursor_event_id, bound_actor, enabled
 		)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id) DO UPDATE SET
 			role = excluded.role,
 			hub_url = excluded.hub_url,
@@ -283,15 +287,63 @@ func (d *Store) UpsertFederationBinding(ctx context.Context, b db.FederationBind
 			pull_cursor_event_id = excluded.pull_cursor_event_id,
 			push_enabled = excluded.push_enabled,
 			push_cursor_event_id = excluded.push_cursor_event_id,
+			bound_actor = excluded.bound_actor,
 			enabled = excluded.enabled,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		b.ProjectID, string(b.Role), b.HubURL, b.HubProjectID, b.HubProjectUID,
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled, b.PushCursorEventID,
-		enabled)
+		actor, enabled)
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("upsert federation binding: %w", err)
 	}
 	return d.FederationBindingByProject(ctx, b.ProjectID)
+}
+
+func (d *Store) boundFederationActorTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, bool, error) {
+	var actor string
+	err := tx.QueryRowContext(ctx, `
+		SELECT bound_actor
+		  FROM federation_bindings
+		 WHERE project_id = ?
+		   AND role = ?
+		   AND enabled = 1
+		   AND push_enabled = 1`,
+		projectID, string(db.FederationRoleSpoke)).Scan(&actor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("lookup bound federation actor: %w", err)
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return "", false, nil
+	}
+	return actor, true, nil
+}
+
+func (d *Store) effectiveLocalMutationActorTx(ctx context.Context, tx *sql.Tx, projectID int64, requestedActor string) (string, error) {
+	actor, ok, err := d.boundFederationActorTx(ctx, tx, projectID)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return actor, nil
+	}
+	return requestedActor, nil
+}
+
+func (d *Store) effectiveLocalEventActorTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	originInstanceUID string,
+	requestedActor string,
+) (string, error) {
+	if originInstanceUID != d.InstanceUID() {
+		return requestedActor, nil
+	}
+	return d.effectiveLocalMutationActorTx(ctx, tx, projectID, requestedActor)
 }
 
 // AdvanceFederationPullCursor records the highest hub events.id consumed by a
@@ -728,7 +780,7 @@ func ensureFederatedMoveAllowedTx(ctx context.Context, q sqlReader, projectIDs .
 
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
        replay_horizon_event_id, pull_cursor_event_id, push_enabled, push_cursor_event_id,
-       enabled, created_at, updated_at, last_sync_at
+       bound_actor, enabled, created_at, updated_at, last_sync_at
   FROM federation_bindings`
 
 func scanFederationBinding(r rowScanner) (db.FederationBinding, error) {
@@ -741,7 +793,7 @@ func scanFederationBinding(r rowScanner) (db.FederationBinding, error) {
 	)
 	err := r.Scan(&b.ProjectID, &role, &b.HubURL, &b.HubProjectID, &b.HubProjectUID,
 		&b.ReplayHorizonEventID, &b.PullCursorEventID, &pushEnabled,
-		&b.PushCursorEventID, &enabled, &b.CreatedAt, &b.UpdatedAt, &lastSyncAt)
+		&b.PushCursorEventID, &b.Actor, &enabled, &b.CreatedAt, &b.UpdatedAt, &lastSyncAt)
 	if err == nil {
 		b.Role = db.FederationRole(role)
 		b.PushEnabled = pushEnabled == 1
@@ -1659,11 +1711,11 @@ func (d *Store) AdoptProjectIntoFederation(
 		INSERT INTO federation_bindings(
 			project_id, role, hub_url, hub_project_id, hub_project_uid,
 			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
-			push_cursor_event_id, enabled
+			push_cursor_event_id, bound_actor, enabled
 		)
-		VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, 1)`,
+		VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1)`,
 		project.ID, string(db.FederationRoleSpoke), p.HubURL, p.HubProjectID, p.HubProjectUID,
-		p.ReplayHorizonEventID, pullCursor, pushFloor); err != nil {
+		p.ReplayHorizonEventID, pullCursor, pushFloor, actor); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("insert adoption federation binding: %w", err)
 	}
 

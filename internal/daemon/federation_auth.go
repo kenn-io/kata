@@ -14,6 +14,7 @@ type federationPrincipal struct {
 	EnrollmentID     int64
 	SpokeInstanceUID string
 	Capabilities     string
+	Actor            string
 }
 
 func authorizeFederationRequest(
@@ -45,5 +46,6 @@ func authorizeFederationRequest(
 		EnrollmentID:     enrollment.ID,
 		SpokeInstanceUID: enrollment.SpokeInstanceUID,
 		Capabilities:     enrollment.Capabilities,
+		Actor:            enrollment.Actor,
 	}, nil
 }

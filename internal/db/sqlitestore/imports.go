@@ -47,6 +47,10 @@ func (d *Store) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 	if err := ensureProjectWritableTx(ctx, tx, p.ProjectID); err != nil {
 		return db.ImportBatchResult{}, nil, err
 	}
+	p, err = d.normalizeBoundFederationImportActorTx(ctx, tx, p)
+	if err != nil {
+		return db.ImportBatchResult{}, nil, err
+	}
 
 	result := db.ImportBatchResult{Source: p.Source, Items: make([]db.ImportItemResult, 0, len(p.Items)), Errors: []string{}}
 	events := []db.Event{}
@@ -121,6 +125,26 @@ func (d *Store) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 		return db.ImportBatchResult{}, nil, fmt.Errorf("commit import: %w", err)
 	}
 	return result, events, nil
+}
+
+func (d *Store) normalizeBoundFederationImportActorTx(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams) (db.ImportBatchParams, error) {
+	actor, ok, err := d.boundFederationActorTx(ctx, tx, p.ProjectID)
+	if err != nil || !ok {
+		return p, err
+	}
+	p.Actor = actor
+	p.Items = append([]db.ImportItem(nil), p.Items...)
+	for i := range p.Items {
+		p.Items[i].Author = actor
+		if len(p.Items[i].Comments) == 0 {
+			continue
+		}
+		p.Items[i].Comments = append([]db.ImportComment(nil), p.Items[i].Comments...)
+		for j := range p.Items[i].Comments {
+			p.Items[i].Comments[j].Author = actor
+		}
+	}
+	return p, nil
 }
 
 func validateImportBatch(p db.ImportBatchParams) error {

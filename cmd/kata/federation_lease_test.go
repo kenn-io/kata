@@ -138,6 +138,7 @@ func TestClaimForceRelease_EnrollmentBearerCannotForceRelease(t *testing.T) {
 		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4AB",
 		ProjectID:        &project.ID,
 		Capabilities:     "claim",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	t.Setenv("KATA_AUTH_TOKEN", created.Token)
@@ -397,7 +398,7 @@ func enableHubClaims(t *testing.T, env *testenv.Env, pid int64) {
 
 func enableSpokeClaims(t *testing.T, env *testenv.Env, pid int64) {
 	t.Helper()
-	enableSpokeClaimsTo(t, env, pid, "http://127.0.0.1:1", 42)
+	enableSpokeClaimsTo(t, env, pid, fastFailCLIHubURL(t), 42)
 }
 
 func enableSpokeClaimsTo(t *testing.T, env *testenv.Env, pid int64, hubURL string, hubProjectID int64) {
@@ -420,6 +421,24 @@ func enableSpokeClaimsTo(t *testing.T, env *testenv.Env, pid int64, hubURL strin
 		Token:        "claim-token",
 		Capabilities: "claim",
 	}))
+}
+
+func fastFailCLIHubURL(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking unsupported", http.StatusInternalServerError)
+			return
+		}
+		conn, _, err := hijacker.Hijack()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
 }
 
 func fetchClaimStatus(t *testing.T, env *testenv.Env, pid int64, ref string) api.ClaimStatusBody {

@@ -14,6 +14,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
 | `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. |
+| `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
 | `KATA_HTTP_TIMEOUT` | Per-request CLI timeout for non-streaming daemon calls, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. |
 | `KATA_FEDERATION_PULL_INTERVAL_MS` | Federation runner poll interval for tests or latency-sensitive private deployments. |
 | `PORT` | Hosted-mode listener port when no explicit listener is configured and the daemon is not an auto-start child. |
@@ -64,6 +65,17 @@ url = "http://100.64.0.5:7777"
 ```
 
 `KATA_SERVER` wins over the local file.
+
+For trusted private-network hostnames that cannot be represented as literal
+non-public IP addresses, opt in per target:
+
+```toml
+version = 1
+
+[server]
+url = "http://hub.internal:7777"
+allow_insecure = true
+```
 
 ## Daemon config
 

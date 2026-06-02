@@ -30,6 +30,10 @@ func (d *Store) EditIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	if err != nil {
 		return db.EditIssueAtomicResult{}, err
 	}
+	p.Actor, err = d.effectiveLocalMutationActorTx(ctx, tx, issue.ProjectID, p.Actor)
+	if err != nil {
+		return db.EditIssueAtomicResult{}, err
+	}
 
 	var (
 		events    []db.Event

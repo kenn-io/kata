@@ -258,6 +258,14 @@ type projectsLoadedMsg struct {
 	gen      uint64
 }
 
+type federationLoadedMsg struct {
+	connGen  uint64
+	gen      uint64
+	instance InstanceInfo
+	status   FederationStatusBody
+	err      error
+}
+
 // resetRequiredMsg signals sync.reset_required: the daemon's purge
 // gap means the consumer's cursor is too old. The TEA loop drops the
 // cache and refetches from scratch.

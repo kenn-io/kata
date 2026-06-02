@@ -125,6 +125,8 @@ func federationEnrollCmd() *cobra.Command {
 	var hubURL string
 	var capabilities string
 	var token string
+	var actor string
+	var allowInsecure bool
 	cmd := &cobra.Command{
 		Use:   "enroll [project]",
 		Short: "create a hub enrollment for a spoke",
@@ -144,30 +146,31 @@ func federationEnrollCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
+			hubBaseURL := strings.TrimRight(hubURL, "/")
+			hubClient, err := federationEnrollHTTPClient(ctx, hubBaseURL, allowInsecure)
+			if err != nil {
+				return federationEnrollHTTPClientError(err)
+			}
+			project, err := resolveFederationProject(ctx, hubClient, hubBaseURL, args)
 			if err != nil {
 				return err
 			}
-			client, err := httpClientFor(ctx, baseURL)
+			requestActor := strings.TrimSpace(actor)
+			if requestActor == "" {
+				requestActor, _ = resolveActor(ctx, flags.As, nil)
+			}
+			metadata, err := enableAndReadFederationMetadata(ctx, hubClient, hubBaseURL, project.ID, requestActor)
 			if err != nil {
 				return err
 			}
-			project, err := resolveFederationProject(ctx, client, baseURL, args)
-			if err != nil {
-				return err
-			}
-			actor, _ := resolveActor(ctx, flags.As, nil)
-			metadata, err := enableAndReadFederationMetadata(ctx, client, baseURL, project.ID, actor)
-			if err != nil {
-				return err
-			}
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				baseURL+"/api/v1/federation/enrollments",
+			status, bs, err := httpDoJSON(ctx, hubClient, http.MethodPost,
+				hubBaseURL+"/api/v1/federation/enrollments",
 				map[string]any{
 					"spoke_instance_uid": spokeInstance,
 					"project_id":         project.ID,
 					"capabilities":       internalCaps,
 					"token":              token,
+					"actor":              requestActor,
 				})
 			if err != nil {
 				return err
@@ -180,7 +183,7 @@ func federationEnrollCmd() *cobra.Command {
 				return err
 			}
 			bundle := federationJoinBundle{
-				HubURL:                 strings.TrimRight(hubURL, "/"),
+				HubURL:                 hubBaseURL,
 				HubProjectID:           metadata.ProjectID,
 				HubProjectUID:          metadata.ProjectUID,
 				ProjectName:            metadata.ProjectName,
@@ -189,7 +192,12 @@ func federationEnrollCmd() *cobra.Command {
 				Token:                  enrollment.Token,
 				Capabilities:           internalCaps,
 				DisplayCapabilities:    externalCaps,
+				Actor:                  enrollment.Actor,
 				PushEnabled:            federationCapabilitiesContain(internalCaps, "push"),
+				AllowInsecure:          allowInsecure,
+			}
+			if bundle.PushEnabled && federationSpokeProjectExists(ctx, metadata.ProjectName) {
+				bundle.AdoptExisting = true
 			}
 			return printFederationEnrollment(cmd, project.Name, spokeInstance, enrollment, bundle)
 		},
@@ -198,7 +206,41 @@ func federationEnrollCmd() *cobra.Command {
 	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub URL reachable by the spoke")
 	cmd.Flags().StringVar(&capabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease")
 	cmd.Flags().StringVar(&token, "token", "", "explicit enrollment token (default: generated)")
+	cmd.Flags().StringVar(&actor, "actor", "", "actor bound to this spoke enrollment")
+	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow plaintext HTTP hub URL for enrollment and later spoke transport")
 	return cmd
+}
+
+func federationEnrollHTTPClient(ctx context.Context, hubBaseURL string, allowInsecure bool) (*http.Client, error) {
+	return clientpkg.NewHTTPClient(ctx, hubBaseURL, clientpkg.Opts{
+		Timeout:       envHTTPTimeout(defaultHTTPTimeout),
+		AllowInsecure: allowInsecure,
+	})
+}
+
+func federationEnrollHTTPClientError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "refusing to attach bearer token to plaintext non-loopback URL") {
+		return fmt.Errorf("%w; for a trusted private/plain HTTP federation hub, rerun `kata federation enroll` with --allow-insecure", err)
+	}
+	return err
+}
+
+func federationSpokeProjectExists(ctx context.Context, projectName string) bool {
+	spokeURL, err := ensureDaemon(ctx)
+	if err != nil {
+		return false
+	}
+	spokeClient, err := clientpkg.NewHTTPClientForTarget(ctx, spokeURL, clientpkg.TargetAuth{}, clientpkg.Opts{
+		Timeout: envHTTPTimeout(defaultHTTPTimeout),
+	})
+	if err != nil {
+		return false
+	}
+	_, err = resolveProjectSelector(ctx, spokeClient, spokeURL, projectName)
+	return err == nil
 }
 
 func federationEnrollmentsCmd() *cobra.Command {
@@ -284,6 +326,9 @@ func federationJoinCmd() *cobra.Command {
 					ExitCode: ExitValidation,
 				}
 			}
+			if strings.TrimSpace(bundle.Actor) == "" {
+				return &cliError{Message: "--actor is required", Kind: kindValidation, ExitCode: ExitValidation}
+			}
 			internalCaps, _, err := normalizeFederationCapabilities(bundle.DisplayCapabilities)
 			if err != nil {
 				return err
@@ -328,6 +373,8 @@ func federationJoinCmd() *cobra.Command {
 					"baseline_through_event_id": bundle.BaselineThroughEventID,
 					"token":                     bundle.Token,
 					"capabilities":              internalCaps,
+					"actor":                     strings.TrimSpace(bundle.Actor),
+					"allow_insecure":            bundle.AllowInsecure,
 					"push_enabled":              bundle.PushEnabled,
 					"adopt_existing":            bundle.AdoptExisting,
 				})
@@ -350,6 +397,8 @@ func federationJoinCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&bundle.BaselineThroughEventID, "baseline-through", 0, "baseline-through event ID")
 	cmd.Flags().StringVar(&bundle.Token, "token", "", "enrollment token")
 	cmd.Flags().StringVar(&bundle.DisplayCapabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease")
+	cmd.Flags().StringVar(&bundle.Actor, "actor", "", "actor bound to this spoke")
+	cmd.Flags().BoolVar(&bundle.AllowInsecure, "allow-insecure", false, "allow plaintext HTTP hub hostnames for private overlay networks")
 	cmd.Flags().BoolVar(&bundle.PushEnabled, "push", false, "enable spoke push")
 	cmd.Flags().BoolVar(&bundle.AdoptExisting, "adopt-existing", false, "adopt matching existing local data into the federation")
 	return cmd
@@ -408,20 +457,26 @@ type federationJoinBundle struct {
 	Token                  string `json:"token"`
 	Capabilities           string `json:"capabilities,omitempty"`
 	DisplayCapabilities    string `json:"-"`
+	Actor                  string `json:"actor,omitempty"`
+	AllowInsecure          bool   `json:"allow_insecure,omitempty"`
 	PushEnabled            bool   `json:"push_enabled,omitempty"`
 	AdoptExisting          bool   `json:"adopt_existing,omitempty"`
+}
+
+var fetchFederationJoinMetadata = func(ctx context.Context, bundle federationJoinBundle) (api.ProjectFederationBody, error) {
+	client, err := hubclient.NewClient(ctx, bundle.HubURL, bundle.Token,
+		clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout), AllowInsecure: bundle.AllowInsecure})
+	if err != nil {
+		return api.ProjectFederationBody{}, err
+	}
+	return client.ProjectFederation(ctx, bundle.HubProjectID)
 }
 
 func hydrateFederationJoinMetadata(ctx context.Context, bundle *federationJoinBundle) error {
 	if bundle.HubProjectUID != "" && bundle.ReplayHorizonEventID > 0 {
 		return nil
 	}
-	client, err := hubclient.NewClient(ctx, bundle.HubURL, bundle.Token,
-		clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)})
-	if err != nil {
-		return err
-	}
-	metadata, err := client.ProjectFederation(ctx, bundle.HubProjectID)
+	metadata, err := fetchFederationJoinMetadata(ctx, *bundle)
 	if err != nil {
 		return err
 	}
@@ -441,6 +496,9 @@ func resolveFederationProject(ctx context.Context, client *http.Client, baseURL 
 	if len(args) > 0 {
 		return resolveProjectSelector(ctx, client, baseURL, args[0])
 	}
+	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
+		return ensureFederationProjectByName(ctx, client, baseURL, projectName)
+	}
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
 		return projectRef{}, err
@@ -450,6 +508,26 @@ func resolveFederationProject(ctx context.Context, client *http.Client, baseURL 
 		return projectRef{}, err
 	}
 	return projectRef{ID: id, Name: name}, nil
+}
+
+func ensureFederationProjectByName(ctx context.Context, client *http.Client, baseURL, name string) (projectRef, error) {
+	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/projects", map[string]any{"name": name})
+	if err != nil {
+		return projectRef{}, fmt.Errorf("POST /api/v1/projects: %w", err)
+	}
+	if status >= 300 {
+		return projectRef{}, apiErrFromBody(status, bs)
+	}
+	var resp struct {
+		Project struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(bs, &resp); err != nil {
+		return projectRef{}, err
+	}
+	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
 }
 
 func enableAndReadFederationMetadata(ctx context.Context, client *http.Client, baseURL string, projectID int64, actor string) (api.ProjectFederationBody, error) {
@@ -646,47 +724,15 @@ func printFederationJoin(cmd *cobra.Command, bs []byte) error {
 }
 
 func normalizeFederationCapabilities(raw string) (internalCaps, displayCaps string, err error) {
-	if strings.TrimSpace(raw) == "" {
-		raw = "pull,push,lease"
-	}
-	seen := map[string]bool{}
-	for _, part := range strings.Split(raw, ",") {
-		capability := strings.TrimSpace(part)
-		switch capability {
-		case "lease":
-			capability = "claim"
-		case "claim", "pull", "push":
-		default:
-			return "", "", &cliError{
-				Message:  fmt.Sprintf("unknown federation capability %q", strings.TrimSpace(part)),
-				Kind:     kindValidation,
-				ExitCode: ExitValidation,
-			}
-		}
-		seen[capability] = true
-	}
-	order := []string{"claim", "pull", "push"}
-	var internal []string
-	var display []string
-	for _, capability := range order {
-		if !seen[capability] {
-			continue
-		}
-		internal = append(internal, capability)
-		if capability == "claim" {
-			display = append(display, "lease")
-		} else {
-			display = append(display, capability)
-		}
-	}
-	if len(internal) == 0 {
+	capabilities, err := hubclient.NormalizeCapabilities(raw)
+	if err != nil {
 		return "", "", &cliError{
-			Message:  "at least one federation capability is required",
+			Message:  err.Error(),
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
 		}
 	}
-	return strings.Join(internal, ","), strings.Join(display, ","), nil
+	return capabilities.API, capabilities.Display, nil
 }
 
 func federationCapabilitiesContain(capabilities, want string) bool {
@@ -724,9 +770,13 @@ func federationJoinCommand(bundle federationJoinBundle) string {
 		"--hub-project-id", strconv.FormatInt(bundle.HubProjectID, 10),
 		"--token", bundle.Token,
 		"--capabilities", bundle.DisplayCapabilities,
+		"--actor", bundle.Actor,
 	}
 	if bundle.PushEnabled {
 		args = append(args, "--push")
+	}
+	if bundle.AllowInsecure {
+		args = append(args, "--allow-insecure")
 	}
 	if bundle.AdoptExisting {
 		args = append(args, "--adopt-existing")

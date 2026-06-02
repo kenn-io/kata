@@ -88,7 +88,7 @@ func TestIngestClaimViolationBroadcastsAndEnqueuesGeneratedClaimAudit(t *testing
 	require.NoError(t, err)
 
 	ev := claimAuditDeliveryRemoteEvent(t, project, federationTestSpokeUID, issue.UID,
-		"01HZNQ7VFPK1XGD8R5MABCD4ED", "issue.updated", "remote-agent", 101)
+		"01HZNQ7VFPK1XGD8R5MABCD4ED", "issue.updated", "tester", 101)
 	sub := bcast.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer sub.Unsub()
 	resp, raw := doReq(t, ts, http.MethodPost, projectPath(project.ID)+"/federation/events:ingest",
@@ -129,7 +129,7 @@ func TestIngestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *test
 		IssueRef:  issue.ShortID,
 		Principal: db.ClaimPrincipal{
 			HolderInstanceUID: federationTestSpokeUID,
-			Holder:            "remote-agent",
+			Holder:            "tester",
 			ClientKind:        "cli",
 		},
 		ClaimKind: "hard",
@@ -138,7 +138,7 @@ func TestIngestClaimCloseReleaseBroadcastsAndEnqueuesGeneratedClaimAudit(t *test
 	require.NoError(t, err)
 
 	ev := claimAuditDeliveryRemoteEvent(t, project, federationTestSpokeUID, issue.UID,
-		"01HZNQ7VFPK1XGD8R5MABCD4EE", "issue.closed", "remote-agent", 102)
+		"01HZNQ7VFPK1XGD8R5MABCD4EE", "issue.closed", "tester", 102)
 	sub := bcast.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer sub.Unsub()
 	resp, raw := doReq(t, ts, http.MethodPost, projectPath(project.ID)+"/federation/events:ingest",
@@ -168,6 +168,7 @@ func createClaimAuditDeliveryEnrollment(t *testing.T, store *sqlitestore.Store, 
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &projectID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	return created

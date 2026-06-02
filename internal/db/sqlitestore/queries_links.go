@@ -658,6 +658,16 @@ func (d *Store) CreateLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 	if err != nil {
 		return db.Link{}, db.Event{}, err
 	}
+	requestedActor := strings.TrimSpace(ev.Actor)
+	if requestedActor == "" {
+		requestedActor = p.Author
+	}
+	effectiveActor, err := d.effectiveLocalMutationActorTx(ctx, tx, p.ProjectID, requestedActor)
+	if err != nil {
+		return db.Link{}, db.Event{}, err
+	}
+	p.Author = effectiveActor
+	ev.Actor = effectiveActor
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)

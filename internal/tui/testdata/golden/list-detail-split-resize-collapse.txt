@@ -1,4 +1,4 @@
- Project: kata                                                                                                              kata カタ · dev 
+ Project: kata                                                                                                              kata カタ · dev
 ┌──────────────────────────────────────────────────────────────────┐┌──────────────────────────────────────────────────────────────────────┐
 │    #     prio status    title                   kids    updated  ││  #42aa  fix login bug on Safari                                [open]│
 │    #aaa1 P1   open      fix login bug on Safari         3h ago   ││  authored by wesm                                                    │
@@ -30,7 +30,7 @@
 │                                                                  ││                                                                      │
 │                                                                  ││                                                                      │
 │                                                                  ││                                                                      │
-│                                                                  ││                                                                      │
 └──────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘
-                                                                                                                                      [2/3] 
- ↑↓ move▕ ↵ open▕ n new▕ N child▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority▕ D daemons▕ L layout▕ ? help▕ q quit  
+                                                                                                                                      [2/3]
+ ↑↓ move▕ ↵ open▕ n new▕ N child▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority▕ D daemons▕ F federation▕ L layout
+ ? help ▕ q quit

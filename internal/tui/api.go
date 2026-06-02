@@ -15,9 +15,27 @@ import "context"
 type KataAPI interface {
 	listAPI
 	detailAPI
+	federationSpokeAPI
 
-	ListProjects(ctx context.Context) ([]ProjectSummary, error)
 	ListProjectsWithStats(ctx context.Context) ([]ProjectSummaryWithStats, error)
 	ListLabels(ctx context.Context, projectID int64) ([]LabelCount, error)
 	ResolveProject(ctx context.Context, startPath string) (*ResolveResp, error)
+}
+
+type federationSpokeAPI interface {
+	GetInstance(ctx context.Context) (InstanceInfo, error)
+	ListProjects(ctx context.Context) ([]ProjectSummary, error)
+	FederationStatus(ctx context.Context) (FederationStatusBody, error)
+	CreateFederationReplica(ctx context.Context, body CreateFederationReplicaInput) (FederationReplicaResult, error)
+}
+
+type federationHubAdminAPI interface {
+	ListProjects(ctx context.Context) ([]ProjectSummary, error)
+	EnsureProject(ctx context.Context, name string) (ProjectSummary, error)
+	EnableFederation(ctx context.Context, projectID int64, actor string) (ProjectFederationMetadata, error)
+	CreateFederationEnrollment(ctx context.Context, body CreateFederationEnrollmentInput) (FederationEnrollment, error)
+}
+
+type federationEnrollmentAPI interface {
+	ProjectFederation(ctx context.Context, hubProjectID int64) (ProjectFederationMetadata, error)
 }

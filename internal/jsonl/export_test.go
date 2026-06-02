@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -51,6 +52,35 @@ func TestExportReadOnlyLegacySQLiteUsesVersionAwareExporter(t *testing.T) {
 	assertRecordsContain(t, records, "legacy comment")
 }
 
+func TestExportReadOnlyLegacyV12FederationRowsOmitMissingBoundActor(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	writeLegacyV12FederationDB(t, path)
+	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+
+	var out bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &out, jsonl.ExportOptions{IncludeDeleted: true}))
+	records := decodeJSONLLines(t, out.Bytes())
+
+	var sawBinding, sawEnrollment bool
+	for _, rec := range records {
+		data, ok := rec["data"].(map[string]any)
+		require.True(t, ok)
+		switch rec["kind"] {
+		case "federation_binding":
+			sawBinding = true
+			assert.NotContains(t, data, "bound_actor")
+		case "federation_enrollment":
+			sawEnrollment = true
+			assert.NotContains(t, data, "bound_actor")
+		}
+	}
+	assert.True(t, sawBinding, "expected legacy federation binding export")
+	assert.True(t, sawEnrollment, "expected legacy federation enrollment export")
+}
+
 func TestExportEmitsEventPayloadAsJSONObject(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -93,9 +123,9 @@ func TestExportFederationKindOrderPlacesEnrollmentBeforeEvent(t *testing.T) {
 	require.NoError(t, d.RecordFederationSyncPullStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:00.000Z")))
 	require.NoError(t, d.RecordFederationSyncPullSuccess(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:01.000Z")))
 	_, err = d.ExecContext(ctx, `
-		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities)
-		VALUES(?, ?, ?, ?)`,
-		strings.Repeat("a", 64), "01HZZZZZZZZZZZZZZZZZZZZZ01", p.ID, "pull,push")
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities, bound_actor)
+		VALUES(?, ?, ?, ?, ?)`,
+		strings.Repeat("a", 64), "01HZZZZZZZZZZZZZZZZZZZZZ01", p.ID, "pull,push", "tester")
 	require.NoError(t, err)
 	createTesterIssue(ctx, t, d, p.ID, "event after federation records", "")
 
@@ -500,6 +530,104 @@ func openExportTestDB(t *testing.T) *sqlitestore.Store {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d
+}
+
+func writeLegacyV12FederationDB(t *testing.T, path string) {
+	t.Helper()
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	current, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	project, err := current.CreateProject(ctx, "legacy-fed")
+	require.NoError(t, err)
+	_, err = current.ExecContext(ctx, `
+		INSERT INTO federation_bindings(
+			project_id, role, hub_url, hub_project_id, hub_project_uid,
+			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
+			push_cursor_event_id, bound_actor, enabled
+		)
+		VALUES(?, 'spoke', 'http://hub:7373', 42, ?, 7, 6, 1, 5, 'legacy-actor', 1)`,
+		project.ID, project.UID)
+	require.NoError(t, err)
+	_, err = current.ExecContext(ctx, `
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities, bound_actor)
+		VALUES(?, ?, ?, 'pull,push', 'legacy-actor')`,
+		strings.Repeat("a", 64), project.UID, project.ID)
+	require.NoError(t, err)
+	require.NoError(t, current.Close())
+
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+	_, err = raw.Exec(`
+		PRAGMA foreign_keys = OFF;
+
+		DROP INDEX IF EXISTS idx_federation_bindings_role_enabled;
+		ALTER TABLE federation_bindings RENAME TO federation_bindings_current;
+		CREATE TABLE federation_bindings (
+		  project_id              INTEGER PRIMARY KEY REFERENCES projects(id),
+		  role                    TEXT NOT NULL CHECK(role IN ('hub','spoke')),
+		  hub_url                 TEXT NOT NULL DEFAULT '',
+		  hub_project_id          INTEGER NOT NULL DEFAULT 0,
+		  hub_project_uid         TEXT NOT NULL,
+		  replay_horizon_event_id INTEGER NOT NULL DEFAULT 0,
+		  pull_cursor_event_id    INTEGER NOT NULL DEFAULT 0,
+		  push_enabled            INTEGER NOT NULL DEFAULT 0 CHECK(push_enabled IN (0,1)),
+		  push_cursor_event_id    INTEGER NOT NULL DEFAULT 0 CHECK(push_cursor_event_id >= 0),
+		  enabled                 INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+		  created_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  updated_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  last_sync_at            DATETIME,
+		  CHECK (length(hub_project_uid) = 26),
+		  CHECK (role = 'hub' OR length(trim(hub_url)) > 0),
+		  CHECK (role = 'hub' OR hub_project_id > 0),
+		  CHECK (replay_horizon_event_id >= 0),
+		  CHECK (pull_cursor_event_id >= 0)
+		);
+		INSERT INTO federation_bindings(
+		  project_id, role, hub_url, hub_project_id, hub_project_uid,
+		  replay_horizon_event_id, pull_cursor_event_id, push_enabled,
+		  push_cursor_event_id, enabled, created_at, updated_at, last_sync_at
+		)
+		SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
+		       replay_horizon_event_id, pull_cursor_event_id, push_enabled,
+		       push_cursor_event_id, enabled, created_at, updated_at, last_sync_at
+		  FROM federation_bindings_current;
+		DROP TABLE federation_bindings_current;
+		CREATE INDEX idx_federation_bindings_role_enabled
+		  ON federation_bindings(role, enabled);
+
+		DROP INDEX IF EXISTS idx_federation_enrollments_scope;
+		DROP INDEX IF EXISTS idx_federation_enrollments_spoke;
+		ALTER TABLE federation_enrollments RENAME TO federation_enrollments_current;
+		CREATE TABLE federation_enrollments (
+		  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+		  token_hash          TEXT NOT NULL UNIQUE,
+		  spoke_instance_uid  TEXT NOT NULL,
+		  project_id          INTEGER REFERENCES projects(id),
+		  capabilities        TEXT NOT NULL,
+		  created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  updated_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  revoked_at          DATETIME,
+		  CHECK (length(token_hash) = 64),
+		  CHECK (length(spoke_instance_uid) = 26),
+		  CHECK (length(trim(capabilities)) > 0)
+		);
+		INSERT INTO federation_enrollments(
+		  id, token_hash, spoke_instance_uid, project_id, capabilities,
+		  created_at, updated_at, revoked_at
+		)
+		SELECT id, token_hash, spoke_instance_uid, project_id, capabilities,
+		       created_at, updated_at, revoked_at
+		  FROM federation_enrollments_current;
+		DROP TABLE federation_enrollments_current;
+		CREATE INDEX idx_federation_enrollments_scope
+		  ON federation_enrollments(project_id, revoked_at);
+		CREATE INDEX idx_federation_enrollments_spoke
+		  ON federation_enrollments(spoke_instance_uid);
+
+		UPDATE meta SET value = '12' WHERE key = 'schema_version'`)
+	require.NoError(t, err)
 }
 
 // newExportEnv opens a fresh test DB and seeds the canonical "kata" project

@@ -88,6 +88,7 @@ type FederationBinding struct {
 	PullCursorEventID    int64
 	PushEnabled          bool
 	PushCursorEventID    int64
+	Actor                string
 	Enabled              bool
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
@@ -128,6 +129,7 @@ type FederationEnrollment struct {
 	SpokeInstanceUID string
 	ProjectID        *int64
 	Capabilities     string
+	Actor            string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	RevokedAt        *time.Time

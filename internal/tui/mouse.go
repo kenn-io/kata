@@ -29,7 +29,7 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 
 func (m Model) mouseVisibleViewAcceptsInput() bool {
 	switch m.view {
-	case viewList, viewDetail, viewProjects:
+	case viewList, viewDetail, viewProjects, viewFederation:
 		return true
 	}
 	return false
@@ -38,6 +38,10 @@ func (m Model) mouseVisibleViewAcceptsInput() bool {
 func (m Model) mouseWheelAt(delta, x int) (Model, tea.Cmd) {
 	if m.view == viewProjects {
 		m.moveProjectsCursor(delta)
+		return m, nil
+	}
+	if m.view == viewFederation {
+		m.moveFederationCursor(delta)
 		return m, nil
 	}
 	if m.layout == layoutSplit {
@@ -80,6 +84,9 @@ func (m Model) mouseListWheel(delta int) (Model, tea.Cmd) {
 func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
 	if m.view == viewProjects {
 		return m.mouseProjectsClick(y)
+	}
+	if m.view == viewFederation {
+		return m.mouseFederationClick(y)
 	}
 	if m.layout == layoutSplit {
 		if x < splitListPaneWidth(m.width) {

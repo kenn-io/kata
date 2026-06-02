@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -139,6 +140,7 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "hub-token",
 	}, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -150,12 +152,18 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", out.Binding.HubProjectUID)
 	assert.Equal(t, int64(9), out.Binding.ReplayHorizonEventID)
 	assert.Equal(t, int64(8), out.Binding.PullCursorEventID)
+	assert.Equal(t, "wesm", out.Binding.Actor)
+
+	binding, err := env.DB.FederationBindingByProject(context.Background(), out.Project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "wesm", binding.Actor)
 
 	creds, err := config.ReadFederationCredentials()
 	require.NoError(t, err)
 	assert.Equal(t, "hub-token", creds.Projects[out.Project.UID].Token)
 	assert.Equal(t, "http://127.0.0.1:7373", creds.Projects[out.Project.UID].HubURL)
 	assert.Equal(t, int64(42), creds.Projects[out.Project.UID].HubProjectID)
+	assert.Equal(t, "wesm", creds.Projects[out.Project.UID].Actor)
 }
 
 func TestFederationReplicaSetupIsIdempotentAndUsesJSONTags(t *testing.T) {
@@ -166,6 +174,7 @@ func TestFederationReplicaSetupIsIdempotentAndUsesJSONTags(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "tester",
 	}
 	var first api.CreateFederationReplicaBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
@@ -186,6 +195,35 @@ func TestFederationReplicaSetupIsIdempotentAndUsesJSONTags(t *testing.T) {
 	assert.Equal(t, int64(8), binding.PullCursorEventID)
 }
 
+func TestFederationReplicaSetupRejoinWithNewReplayHorizonPreservesExistingBinding(t *testing.T) {
+	env := testenv.New(t)
+	body := map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "hub",
+		"replay_horizon_event_id": 9,
+		"actor":                   "tester",
+		"token":                   "first-token",
+	}
+	var first api.CreateFederationReplicaBody
+	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, env.DB.AdvanceFederationPullCursor(context.Background(), first.Project.ID, 11))
+
+	body["replay_horizon_event_id"] = int64(12)
+	body["token"] = "second-token"
+	var second api.CreateFederationReplicaBody
+	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &second)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, int64(9), second.Binding.ReplayHorizonEventID)
+	assert.Equal(t, int64(11), second.Binding.PullCursorEventID)
+	creds, err := config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, "second-token", creds.Projects[first.Project.UID].Token)
+}
+
 func TestFederationReplicaSetupRejectsIncompatibleRetry(t *testing.T) {
 	env := testenv.New(t)
 	body := map[string]any{
@@ -194,6 +232,7 @@ func TestFederationReplicaSetupRejectsIncompatibleRetry(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "original-token",
 	}
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)
@@ -201,9 +240,10 @@ func TestFederationReplicaSetupRejectsIncompatibleRetry(t *testing.T) {
 	body["hub_project_id"] = int64(43)
 	body["token"] = "wrong-token"
 
-	resp = envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)
 
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	assert.Contains(t, string(raw), "hub_project_id existing=42 requested=43")
 	creds, err := config.ReadFederationCredentials()
 	require.NoError(t, err)
 	assert.Equal(t, "original-token", creds.Projects["01HZNQ7VFPK1XGD8R5MABCD4EX"].Token)
@@ -220,6 +260,7 @@ func TestFederationReplicaSetupPushEnabledWritesCredentialAndEnablesPush(t *test
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -246,6 +287,7 @@ func TestFederationReplicaSetupRejectsPushEnabledWithoutPushCapability(t *testin
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "pull-token",
 		"capabilities":            "pull",
 		"push_enabled":            true,
@@ -272,6 +314,7 @@ func TestFederationReplicaSetupAdoptsExistingProject(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "spoke",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -325,6 +368,7 @@ func TestFederationReplicaSetupAdoptExistingBindsUnboundProjectWithHubUID(t *tes
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "spoke",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -336,7 +380,13 @@ func TestFederationReplicaSetupAdoptExistingBindsUnboundProjectWithHubUID(t *tes
 	assert.Equal(t, int64(1), out.AdoptionSnapshotCount)
 	assert.Equal(t, project.ID, out.Project.ID)
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", out.Binding.HubProjectUID)
+	assert.Equal(t, "wesm", out.Binding.Actor)
 	assert.True(t, out.Binding.PushEnabled)
+	events, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "issue.snapshot", events[0].Type)
+	assert.Equal(t, "wesm", events[0].Actor)
 }
 
 func TestFederationReplicaSetupRejectsInvalidHubProjectUID(t *testing.T) {
@@ -348,6 +398,7 @@ func TestFederationReplicaSetupRejectsInvalidHubProjectUID(t *testing.T) {
 		"hub_project_uid":         "!!!!!!!!!!!!!!!!!!!!!!!!!!",
 		"project_name":            "spoke",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -372,6 +423,7 @@ func TestFederationReplicaSetupAdoptExistingRejectsArchivedProjectWithHubUID(t *
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "spoke",
 		"replay_horizon_event_id": 9,
+		"actor":                   "tester",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -396,6 +448,7 @@ func TestFederationReplicaSetupAdoptExistingRejectsHubUIDBoundToDifferentProject
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    8,
 		PushEnabled:          true,
+		Actor:                "tester",
 		Enabled:              true,
 	})
 	require.NoError(t, err)
@@ -408,6 +461,7 @@ func TestFederationReplicaSetupAdoptExistingRejectsHubUIDBoundToDifferentProject
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "spoke",
 		"replay_horizon_event_id": 9,
+		"actor":                   "tester",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -446,6 +500,7 @@ func TestFederationReplicaSetupAdoptExistingRequiresPullAndPushCapabilities(t *t
 				"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 				"project_name":            "spoke",
 				"replay_horizon_event_id": 9,
+				"actor":                   "wesm",
 				"token":                   "push-token",
 				"capabilities":            tt.capabilities,
 				"push_enabled":            true,
@@ -467,6 +522,7 @@ func TestFederationReplicaSetupAdoptExistingRejectsMissingLocalProject(t *testin
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "typo-spoke",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -488,6 +544,7 @@ func TestFederationReplicaSetupRejectsCredentialDowngradeOnPushBinding(t *testin
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -516,6 +573,7 @@ func TestFederationReplicaSetupPushRetryPreservesHigherCursors(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "push-token",
 		"capabilities":            "pull,push",
 		"push_enabled":            true,
@@ -561,6 +619,7 @@ func TestFederationReplicaSetupPushDisabledRemainsReadOnly(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"push_enabled":            false,
 	}, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -573,6 +632,47 @@ func TestFederationReplicaSetupPushDisabledRemainsReadOnly(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
 }
 
+func TestFederationReplicaSetupCanRepairLegacyBlankActorBinding(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProjectWithUID(ctx, "hub", "01HZNQ7VFPK1XGD8R5MABCD4EX")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		ReplayHorizonEventID: 9,
+		PullCursorEventID:    8,
+		PushEnabled:          false,
+		Actor:                "",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+
+	var out api.CreateFederationReplicaBody
+	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "hub",
+		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
+		"token":                   "push-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+	}, &out)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "wesm", out.Binding.Actor)
+	assert.True(t, out.Binding.PushEnabled)
+	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "wesm", binding.Actor)
+	assert.True(t, binding.PushEnabled)
+}
+
 func TestFederationReplicaSetupCanUpgradePhase1BindingToPush(t *testing.T) {
 	env := testenv.New(t)
 	body := map[string]any{
@@ -581,6 +681,7 @@ func TestFederationReplicaSetupCanUpgradePhase1BindingToPush(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 		"token":                   "push-token",
 	}
 	var first api.CreateFederationReplicaBody
@@ -625,6 +726,7 @@ func TestFederationReplicaSetupRejectsUnboundProjectCollision(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 	}, nil)
 
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
@@ -639,6 +741,7 @@ func TestFederationReplicaSetupValidatesProjectName(t *testing.T) {
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "bad\nname",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 	}, nil)
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -657,6 +760,7 @@ func TestFederationReplicaSetupRejectsNameCollisionWithDifferentUID(t *testing.T
 		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		"project_name":            "spoke",
 		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
 	}, nil)
 
 	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
@@ -705,6 +809,7 @@ func TestFederationAuthConfiguredBearerStillProtectsCRUDAndEnrollmentSetup(t *te
 		"project_id":         nil,
 		"capabilities":       "pull,push",
 		"token":              "setup-token",
+		"actor":              "alice",
 	}
 	resp, raw = envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", body, nil)
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -743,6 +848,7 @@ func TestFederationStatusSpokeIncludesCursorsQueuesAndLastSync(t *testing.T) {
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    12,
 		PushEnabled:          true,
+		Actor:                "tester",
 		PushCursorEventID:    0,
 		Enabled:              true,
 	})
@@ -818,6 +924,107 @@ func TestFederationStatusSpokeIncludesCursorsQueuesAndLastSync(t *testing.T) {
 	assert.LessOrEqual(t, localEvent.ID, status.PendingPushHighWaterEventID)
 }
 
+func TestFederationStatusSpokeIncludesBindingAndCredentialMetadata(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://hub.internal:7777",
+		HubProjectID:         42,
+		HubProjectUID:        "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		ReplayHorizonEventID: 9,
+		Actor:                "wesm",
+		PushEnabled:          true,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+		HubURL:        "http://hub.internal:7777",
+		HubProjectID:  42,
+		Token:         "secret-enrollment-token",
+		Capabilities:  "claim,pull,push",
+		Actor:         "wesm",
+		AllowInsecure: true,
+	}))
+
+	_, raw := envDoRaw(t, env, http.MethodGet, "/api/v1/federation/status", nil, nil)
+	assert.NotContains(t, string(raw), "secret-enrollment-token")
+	assert.NotContains(t, string(raw), "token_hash")
+
+	var got federationStatusBodyForTest
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Len(t, got.Statuses, 1)
+	status := got.Statuses[0]
+	assert.Equal(t, "wesm", status.BoundActor)
+	assert.Equal(t, "http://hub.internal:7777", status.HubURL)
+	assert.Equal(t, int64(42), status.HubProjectID)
+	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", status.HubProjectUID)
+	assert.Equal(t, "claim,pull,push", status.Capabilities)
+	assert.True(t, status.AllowInsecure)
+	assert.Equal(t, "present", status.CredentialStatus)
+}
+
+func TestFederationStatusCredentialMissingDoesNotLookSecure(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://hub.internal:7777",
+		HubProjectID:         42,
+		HubProjectUID:        "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		ReplayHorizonEventID: 9,
+		Actor:                "wesm",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+
+	var got federationStatusBodyForTest
+	envGetJSON(t, env, "/api/v1/federation/status", &got)
+
+	require.Len(t, got.Statuses, 1)
+	status := got.Statuses[0]
+	assert.Equal(t, "missing", status.CredentialStatus)
+	assert.False(t, status.AllowInsecure)
+}
+
+func TestFederationStatusCredentialUnreadableDoesNotExposeDefaults(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://hub.internal:7777",
+		HubProjectID:         42,
+		HubProjectUID:        "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		ReplayHorizonEventID: 9,
+		Actor:                "wesm",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	path, err := config.FederationCredentialsPath()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte("[projects."), 0o600))
+
+	_, raw := envDoRaw(t, env, http.MethodGet, "/api/v1/federation/status", nil, nil)
+	assert.NotContains(t, string(raw), "secret")
+	assert.NotContains(t, string(raw), "token")
+
+	var got federationStatusBodyForTest
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Len(t, got.Statuses, 1)
+	status := got.Statuses[0]
+	assert.Equal(t, "unreadable", status.CredentialStatus)
+	assert.False(t, status.AllowInsecure)
+}
+
 func TestFederationStatusIncludesActiveQuarantine(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -832,6 +1039,7 @@ func TestFederationStatusIncludesActiveQuarantine(t *testing.T) {
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    12,
 		PushEnabled:          true,
+		Actor:                "tester",
 		PushCursorEventID:    0,
 		Enabled:              true,
 	})
@@ -957,6 +1165,7 @@ func TestFederationQuarantineSkipRejectsWrongProjectWithoutMutation(t *testing.T
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    12,
 		PushEnabled:          true,
+		Actor:                "tester",
 		PushCursorEventID:    0,
 		Enabled:              true,
 	})
@@ -1002,6 +1211,7 @@ func TestFederationStatusHubIncludesEnrollmentsClaimsAndViolations(t *testing.T)
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull,push,claim",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	_, err = env.DB.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -1095,6 +1305,7 @@ func TestFederationStatusUsesAdminBearerNotEnrollmentBearer(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -1116,6 +1327,7 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 		"project_id":         nil,
 		"capabilities":       "push,pull",
 		"token":              "explicit-enrollment-token",
+		"actor":              "alice",
 	}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
 	assert.NotContains(t, string(raw), "token_hash")
@@ -1125,6 +1337,7 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 		SpokeInstanceUID string `json:"spoke_instance_uid"`
 		ProjectID        *int64 `json:"project_id"`
 		Capabilities     string `json:"capabilities"`
+		Actor            string `json:"actor"`
 		Token            string `json:"token"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &out))
@@ -1132,20 +1345,69 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 	assert.Equal(t, federationTestSpokeUID, out.SpokeInstanceUID)
 	assert.Nil(t, out.ProjectID)
 	assert.Equal(t, "pull,push", out.Capabilities)
+	assert.Equal(t, "alice", out.Actor)
 	assert.Equal(t, "explicit-enrollment-token", out.Token)
 
 	var (
 		tokenHash    string
 		projectID    sql.NullInt64
 		capabilities string
+		actor        string
 	)
 	require.NoError(t, env.DB.QueryRow(`
-		SELECT token_hash, project_id, capabilities
+		SELECT token_hash, project_id, capabilities, bound_actor
 		  FROM federation_enrollments
-		 WHERE id = ?`, out.ID).Scan(&tokenHash, &projectID, &capabilities))
+		 WHERE id = ?`, out.ID).Scan(&tokenHash, &projectID, &capabilities, &actor))
 	assert.Equal(t, db.FederationTokenHash("explicit-enrollment-token"), tokenHash)
 	assert.False(t, projectID.Valid)
 	assert.Equal(t, "pull,push", capabilities)
+	assert.Equal(t, "alice", actor)
+}
+
+func TestFederationEnrollmentIdentityModeUsesTokenActor(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "alice-token",
+		Actor:          "alice",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+		"spoke_instance_uid": federationTestSpokeUID,
+		"project_id":         nil,
+		"capabilities":       "pull",
+		"token":              "identity-enrollment-token",
+		"actor":              "mallory",
+	}, bearer("alice-token"))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
+
+	var out struct {
+		Actor string `json:"actor"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, "alice", out.Actor)
+
+	var actor string
+	require.NoError(t, env.DB.QueryRow(`
+		SELECT bound_actor
+		  FROM federation_enrollments
+		 WHERE token_hash = ?`, db.FederationTokenHash("identity-enrollment-token")).Scan(&actor))
+	assert.Equal(t, "alice", actor)
+}
+
+func TestFederationEnrollmentIdentityModeRejectsBootstrapToken(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+		"spoke_instance_uid": federationTestSpokeUID,
+		"project_id":         nil,
+		"capabilities":       "pull",
+		"token":              "bootstrap-enrollment-token",
+		"actor":              "alice",
+	}, bearer("bootstrap-token"))
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "bootstrap_token_write_forbidden")
 }
 
 func TestFederationEnrollmentOmittedTokenReturnsGeneratedPlaintextOnce(t *testing.T) {
@@ -1157,6 +1419,7 @@ func TestFederationEnrollmentOmittedTokenReturnsGeneratedPlaintextOnce(t *testin
 		"spoke_instance_uid": federationTestSpokeUID,
 		"project_id":         project.ID,
 		"capabilities":       "pull",
+		"actor":              "alice",
 	}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
 	assert.NotContains(t, string(raw), "token_hash")
@@ -1192,6 +1455,7 @@ func TestFederationEnrollmentNullProjectIDCreatesWildcardGrant(t *testing.T) {
 		"project_id":         nil,
 		"capabilities":       "pull",
 		"token":              "wildcard-token",
+		"actor":              "alice",
 	}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
 
@@ -1218,6 +1482,7 @@ func TestFederationEnrollmentInvalidCapabilitiesReturnsValidation(t *testing.T) 
 		"project_id":         nil,
 		"capabilities":       "pull,admin",
 		"token":              "bad-capability-token",
+		"actor":              "alice",
 	}, nil)
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -1258,6 +1523,7 @@ func TestFederationAuthValidEnrollmentTokenReachesTransportHandlers(t *testing.T
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull,push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -1297,6 +1563,7 @@ func TestFederationTransportPullMatchesProjectPollBody(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -1322,6 +1589,7 @@ func TestFederationTransportRejectsWrongCapability(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	pushOnly, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -1329,6 +1597,7 @@ func TestFederationTransportRejectsWrongCapability(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -1351,6 +1620,7 @@ func TestFederationMetadataTransportUsesEnrollmentPullAuth(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -1380,6 +1650,7 @@ func TestFederationIngestPersistsBroadcastsAndReturnsAck(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
@@ -1432,6 +1703,7 @@ func TestFederationIngestRejectsFutureSchemaVersion(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
@@ -1458,6 +1730,7 @@ func TestFederationIngestRejectsMissingSchemaVersion(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
@@ -1481,6 +1754,7 @@ func TestFederationIngestInvalidBatchReturnsErrorAndDoesNotBroadcast(t *testing.
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
@@ -1510,6 +1784,7 @@ func TestFederationIngestRejectsInvalidSourceCursor(t *testing.T) {
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
@@ -1537,6 +1812,7 @@ func TestFederationAuthProjectScopedTokenRejectsNonFederatedProject(t *testing.T
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull,push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	beforeEvents := countEvents(t, env.DB)
@@ -1563,6 +1839,7 @@ func TestFederationEnrollmentRevokedEnrollmentNoLongerAuthorizesTransport(t *tes
 		SpokeInstanceUID: federationTestSpokeUID,
 		ProjectID:        &project.ID,
 		Capabilities:     "pull,push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	require.NoError(t, env.DB.RevokeFederationEnrollment(ctx, created.Enrollment.ID))
@@ -1598,6 +1875,7 @@ func createPushQuarantineFixture(t *testing.T, env *testenv.Env) (db.Project, db
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    12,
 		PushEnabled:          true,
+		Actor:                "tester",
 		PushCursorEventID:    0,
 		Enabled:              true,
 	})
@@ -1643,7 +1921,7 @@ func federationRemoteIssueCreatedEvent(t *testing.T, project db.Project, spokeUI
 	t.Helper()
 	issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EC"
 	createdAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
-	payload := json.RawMessage(`{"uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","short_id":"cd4ec","title":"spoke work","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	payload := json.RawMessage(`{"uid":"01HZNQ7VFPK1XGD8R5MABCD4EC","short_id":"cd4ec","title":"spoke work","body":"","author":"tester","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 	ev := db.RemoteEvent{
 		EventUID:          "01HZNQ7VFPK1XGD8R5MABCD4EB",
 		OriginInstanceUID: spokeUID,
@@ -1651,7 +1929,7 @@ func federationRemoteIssueCreatedEvent(t *testing.T, project db.Project, spokeUI
 		ProjectName:       project.Name,
 		IssueUID:          &issueUID,
 		Type:              "issue.created",
-		Actor:             "spoke",
+		Actor:             "tester",
 		HLCPhysicalMS:     1,
 		HLCCounter:        0,
 		Payload:           payload,
@@ -1715,6 +1993,13 @@ type federationStatusBodyForTest struct {
 		Role                        string `json:"role"`
 		Enabled                     bool   `json:"enabled"`
 		PushEnabled                 bool   `json:"push_enabled"`
+		BoundActor                  string `json:"bound_actor,omitempty"`
+		HubURL                      string `json:"hub_url,omitempty"`
+		HubProjectID                int64  `json:"hub_project_id,omitempty"`
+		HubProjectUID               string `json:"hub_project_uid,omitempty"`
+		Capabilities                string `json:"capabilities,omitempty"`
+		AllowInsecure               bool   `json:"allow_insecure,omitempty"`
+		CredentialStatus            string `json:"credential_status,omitempty"`
 		PullCursorEventID           int64  `json:"pull_cursor_event_id"`
 		PushCursorEventID           int64  `json:"push_cursor_event_id"`
 		PendingPushCount            int64  `json:"pending_push_count"`
@@ -1783,7 +2068,7 @@ func federationTransportCasesForProjectWithIngestBody(project db.Project) []fede
 			"project_uid":         project.UID,
 			"project_name":        project.Name,
 			"issue_uid":           "01HZNQ7VFPK1XGD8R5MABCD4EC",
-			"actor":               "remote-agent",
+			"actor":               "tester",
 			"hlc_physical_ms":     1,
 			"hlc_counter":         0,
 			"content_hash":        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1792,7 +2077,7 @@ func federationTransportCasesForProjectWithIngestBody(project db.Project) []fede
 				"short_id":   "ABCD4EC",
 				"title":      "remote",
 				"body":       "",
-				"author":     "remote-agent",
+				"author":     "tester",
 				"status":     "open",
 				"metadata":   map[string]any{},
 				"created_at": "2026-05-23T12:00:00.000Z",

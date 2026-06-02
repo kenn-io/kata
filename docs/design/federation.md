@@ -48,19 +48,24 @@ separate:
   `kata tokens ...` when token identity is required. Operator commands such as
   `kata federation enroll`, `kata federation revoke`, `kata federation status`,
   `kata federation quarantine skip`, and hub-local force-release use this normal
-  daemon API auth surface.
+  daemon API auth surface. `kata federation enroll` is special only in target
+  selection: its `--hub-url` flag selects the hub daemon for the enrollment API
+  call while the CLI's default daemon remains the spoke being enrolled.
 - **Federation enrollment tokens** authorize one spoke to call hub federation
   transport routes for an enrolled scope and capability set. They are created by
   `kata federation enroll`, stored hashed on the hub, stored plaintext only in
   the spoke federation credentials file, and used for pull, push, join metadata
-  fetches, and forwarded lease actions. They are not general daemon API tokens.
+  fetches, and forwarded lease actions. Each enrollment is bound to one actor;
+  pushed event actors and forwarded lease holders must match that bound actor.
+  They are not general daemon API tokens.
 
 Lease commands have two hops on a spoke. The CLI first talks to the local spoke
 daemon using the normal daemon API auth rules. The spoke then forwards the lease
 request to the hub with its federation enrollment token; the hub derives
-`holder_instance_uid` from that enrollment. A hub-local lease command has only
-the first hop and uses daemon API auth. When `[auth].require_token_identity =
-true`, local operator and lease commands must use DB-backed API tokens from
+`holder_instance_uid` and holder from that enrollment. A hub-local lease
+command has only the first hop and uses daemon API auth. When
+`[auth].require_token_identity = true`, local operator and lease commands must
+use DB-backed API tokens from
 `kata tokens create`; enrollment tokens still only authenticate spoke-to-hub
 federation transport.
 
@@ -106,8 +111,9 @@ credential reads, or network calls.
 
 On the hub:
 
-1. Create or register the project first. In a workspace that should become the
-   hub project, use the normal project setup command:
+1. Create or register the project first when you want a separate setup step. In
+   a workspace that should become the hub project, use the normal project setup
+   command:
 
    ```bash
    kata init --project fedlab
@@ -121,21 +127,23 @@ On the hub:
 
    This records `project.federation_enabled` and baseline `issue.snapshot`
    events at the replay horizon. This step is optional when the next command is
-   `kata federation enroll`, because enrollment auto-enables the project if it
-   is not already federated.
+   `kata federation enroll`, because enrollment creates the hub project when it
+   does not already exist and auto-enables the project if it is not already
+   federated.
 3. Create one enrollment token per trusted spoke:
 
    ```bash
    kata federation enroll --project fedlab \
      --spoke-instance 01H... \
-     --hub-url http://<private-hub-ip>:7787
+     --hub-url http://<private-hub-ip>:7787 \
+     --actor wesm
    ```
 
    The hub stores only the token hash. The enrollment records the spoke
-   instance UID, optional project scope, and capabilities. The CLI prints a
-   pasteable `kata federation join ...` command using the binary name that
-   invoked `enroll`, and containing the generated token; treat that command as
-   secret-bearing material.
+   instance UID, optional project scope, capabilities, and bound actor. The CLI
+   prints a pasteable `kata federation join ...` command using the binary name
+   that invoked `enroll`, and containing the generated token and actor; treat
+   that command as secret-bearing material.
 
 On each spoke:
 
@@ -152,6 +160,7 @@ On each spoke:
      --hub-url http://<private-hub-ip>:7787 \
      --hub-project-id 1 \
      --token ... \
+     --actor wesm \
      --push
    ```
 
@@ -159,12 +168,12 @@ On each spoke:
    enrollment token, so the hub must be reachable at join time and the token
    must include `pull`. The metadata flags (`--hub-project-uid`,
    `--replay-horizon`, and `--baseline-through`) remain available as explicit
-   overrides for scripts. The command creates a local replica project bound to
+   overrides for scripts. The command creates a spoke replica project bound to
    the hub project UID and replay horizon, stores the hub URL/project/token in
    the local federation credentials file, and enables push only when `--push` is
    present.
 
-   If the spoke already has a non-federated local project that should join the
+   If the spoke already has a non-federated project that should join the
    hub under the same name, opt in explicitly with `--adopt-existing`, which
    requires `--push`:
 
@@ -173,12 +182,13 @@ On each spoke:
      --hub-url http://<private-hub-ip>:7787 \
      --hub-project-id 1 \
      --token ... \
+     --actor wesm \
      --push \
      --adopt-existing
    ```
 
-   Adoption works even when the local project name differs from the hub project
-   name; choose the local project with `--project` and the hub with the hub
+   Adoption works even when the spoke project name differs from the hub project
+   name; choose the spoke project with `--project` and the hub with the hub
    selector:
 
    ```bash
@@ -308,11 +318,12 @@ recent violation summaries.
 ```bash
 kata federation identity
 kata federation enable --project <project>
-kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url>
+kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
+  --actor <actor> [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
-  --token <token> [--push]
+  --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> --hub-project-id <id> \
-  --token <token> --push --adopt-existing
+  --token <token> --actor <actor> --push --adopt-existing
 kata federation enrollments list
 kata federation revoke <enrollment-id>
 kata federation status

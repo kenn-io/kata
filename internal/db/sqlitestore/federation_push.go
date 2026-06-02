@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -171,14 +172,18 @@ func (d *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 	defer func() { _ = tx.Rollback() }()
 
 	var existing sql.NullInt64
+	var actor string
 	err = tx.QueryRowContext(ctx,
-		`SELECT push_cursor_event_id FROM federation_bindings WHERE project_id = ?`,
-		projectID).Scan(&existing)
+		`SELECT push_cursor_event_id, bound_actor FROM federation_bindings WHERE project_id = ?`,
+		projectID).Scan(&existing, &actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.FederationBinding{}, db.ErrNotFound
 	}
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("lookup federation push cursor: %w", err)
+	}
+	if strings.TrimSpace(actor) == "" {
+		return db.FederationBinding{}, fmt.Errorf("enable federation push: bound actor is required")
 	}
 	nextCursor := cursor
 	if existing.Valid && existing.Int64 > nextCursor {

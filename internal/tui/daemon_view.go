@@ -146,6 +146,13 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.projectStats = map[int64]ProjectStatsSummary{}
 	m.projectsCursor = 0
 	m.projectsGen = 0
+	m.federationInstance = InstanceInfo{}
+	m.federationStatuses = nil
+	m.federationCursor = 0
+	m.federationLoading = false
+	m.federationErr = nil
+	m.federationGen = 0
+	m.federationMode = federationModeList
 	m.pendingRefetch = false
 	m.projectsStale = false
 	m.projectsRefetchPending = false

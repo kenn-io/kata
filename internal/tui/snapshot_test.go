@@ -58,6 +58,7 @@ func snapshotInit(t *testing.T) func() {
 // 0o750/0o600 are sufficient for fixtures committed to the repo.
 func assertGolden(t *testing.T, name, got string) {
 	t.Helper()
+	got = normalizeGoldenSnapshot(got)
 	path := filepath.Join("testdata", "golden", name+".txt")
 	if *updateGoldens {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -75,12 +76,20 @@ func assertGolden(t *testing.T, name, got string) {
 				"-update-goldens` to create)", name, err,
 		)
 	}
-	if got != string(want) {
+	if got != normalizeGoldenSnapshot(string(want)) {
 		t.Errorf(
 			"%s golden mismatch:\n--- want ---\n%s\n--- got ---\n%s",
-			name, string(want), got,
+			name, normalizeGoldenSnapshot(string(want)), got,
 		)
 	}
+}
+
+func normalizeGoldenSnapshot(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // snapViewChrome returns the steady-state viewChrome used by every

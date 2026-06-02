@@ -65,7 +65,7 @@ func resolveEnrollmentClaimPrincipal(
 	}
 	return claimPrincipal{ClaimPrincipal: db.ClaimPrincipal{
 		HolderInstanceUID: fed.SpokeInstanceUID,
-		Holder:            strings.TrimSpace(body.Holder),
+		Holder:            fed.Actor,
 		ClientKind:        strings.TrimSpace(body.ClientKind),
 	}}, nil
 }

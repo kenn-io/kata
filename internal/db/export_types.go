@@ -132,6 +132,7 @@ type FederationBindingExport struct {
 	PullCursorEventID    int64   `json:"pull_cursor_event_id"`
 	PushEnabled          bool    `json:"push_enabled"`
 	PushCursorEventID    int64   `json:"push_cursor_event_id"`
+	Actor                string  `json:"bound_actor,omitempty"`
 	Enabled              bool    `json:"enabled"`
 	CreatedAt            string  `json:"created_at"`
 	UpdatedAt            string  `json:"updated_at"`
@@ -172,6 +173,7 @@ type FederationEnrollmentExport struct {
 	SpokeInstanceUID string  `json:"spoke_instance_uid"`
 	ProjectID        *int64  `json:"project_id,omitempty"`
 	Capabilities     string  `json:"capabilities"`
+	Actor            string  `json:"bound_actor,omitempty"`
 	CreatedAt        string  `json:"created_at"`
 	UpdatedAt        string  `json:"updated_at"`
 	RevokedAt        *string `json:"revoked_at,omitempty"`

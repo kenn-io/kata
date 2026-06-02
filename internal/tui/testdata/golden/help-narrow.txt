@@ -5,6 +5,7 @@ Global
 q/ctrl+c  quit
 P         projects
 D         daemons
+F         federation
 L         toggle layout
 
 Graph

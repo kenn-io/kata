@@ -1,30 +1,30 @@
- Project: kata                                                                                          kata カタ · dev 
+ Project: kata                                                                                          kata カタ · dev
 
-  #42aa  fix login bug on Safari                                                            [open]                      
-  authored by wesm                                                                                                      
-  owner: none   parent: none                                                                                            
-  priority: none                                                                                                        
-                                                                                                                        
-  Body                                                                                                                  
-  Reproduces in Safari 17 only.                                                                                         
-  Click the login button twice.                                                                                         
-                                                                                                                        
-  Activity   [ Comments (2) ]   Events (2)   Links (1)                                                                  
-  > alice  Apr 30 10:00                                                                                                 
-    I can repro on macOS.                                                                                               
-                                                                                                                        
-    bob    Apr 30 11:00                                                                                                 
-    Looks like a race in oauth.                                                                                         
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                       ┌──────────────┐ 
-                                                                                                       │alpha (5)     │ 
-                                                                                                       │beta (4)      │ 
-                                                                                                       │gamma (3)     │ 
-                                                                                                       │delta (2)     │ 
-                                                                                                       │epsilon (1)   │ 
-                                                                                                       └──────────────┘ 
- add label to #42aa:                                                                                                    
- enter commit▕ esc cancel                                                                                               
+  #42aa  fix login bug on Safari                                                            [open]
+  authored by wesm
+  owner: none   parent: none
+  priority: none
+
+  Body
+  Reproduces in Safari 17 only.
+  Click the login button twice.
+
+  Activity   [ Comments (2) ]   Events (2)   Links (1)
+  > alice  Apr 30 10:00
+    I can repro on macOS.
+
+    bob    Apr 30 11:00
+    Looks like a race in oauth.
+
+
+
+
+                                                                                                       ┌──────────────┐
+                                                                                                       │alpha (5)     │
+                                                                                                       │beta (4)      │
+                                                                                                       │gamma (3)     │
+                                                                                                       │delta (2)     │
+                                                                                                       │epsilon (1)   │
+                                                                                                       └──────────────┘
+ add label to #42aa:
+ enter commit▕ esc cancel

@@ -1,4 +1,4 @@
- Project: kata                                                                                                                                  kata カタ · dev 
+ Project: kata                                                                                                                                  kata カタ · dev
 ┌──────────────────────────────────────────────────────────────────┐┌──────────────────────────────────────────────────────────────────────────────────────────┐
 │    #     prio status    title                   kids    updated  ││  #42aa  fix login bug on Safari                                                    [open]│
 │    #aaa1 P1   open      fix login bug on Safari         3h ago   ││  authored by wesm                                                                        │
@@ -35,6 +35,6 @@
 │                                                                  ││                                                                                          │
 │                                                                  ││                                                                                          │
 └──────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────┘
-                                                                                                                                                                
- ↑↓ scroll▕ j/k row   ▕ ↹ section▕ ↵ open ▕ pgup/pgdn page▕ e edit  ▕ c comment▕ + label▕ - unlabel▕ a owner▕ A unassign▕ x close▕ r reopen▕ p parent▕ b block  
- l related▕ ! priority▕ D daemons▕ N child▕ L layout      ▕ esc back▕ ? help   ▕ q quit                                                                         
+
+ ↑↓ scroll▕ j/k row  ▕ ↹ section ▕ ↵ open   ▕ pgup/pgdn page▕ e edit ▕ c comment▕ + label ▕ - unlabel▕ a owner▕ A unassign▕ x close▕ r reopen▕ p parent
+ b block  ▕ l related▕ ! priority▕ D daemons▕ F federation  ▕ N child▕ L layout ▕ esc back▕ ? help   ▕ q quit

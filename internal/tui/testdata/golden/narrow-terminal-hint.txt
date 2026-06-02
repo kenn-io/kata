@@ -1,24 +1,23 @@
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-          ┌──────────────────────────────────────┐          
-          │                                      │          
-          │  kata tui needs more space           │          
-          │                                      │          
-          │  >=80 columns wide                   │          
-          │  resize your terminal and try again  │          
-          │                                      │          
-          │  press q to quit                     │          
-          │                                      │          
-          └──────────────────────────────────────┘          
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
-                                                            
+
+
+
+
+
+
+
+          ┌──────────────────────────────────────┐
+          │                                      │
+          │  kata tui needs more space           │
+          │                                      │
+          │  >=80 columns wide                   │
+          │  resize your terminal and try again  │
+          │                                      │
+          │  press q to quit                     │
+          │                                      │
+          └──────────────────────────────────────┘
+
+
+
+
+
+

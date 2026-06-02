@@ -1,21 +1,16 @@
 services:
-  netns:
-    image: debian:bookworm-slim
-    command: ["sleep", "infinity"]
-
   hub:
     build:
       context: ../..
       dockerfile: docker/federation/Dockerfile
-    network_mode: service:netns
-    depends_on:
-      - netns
     volumes:
       - hub-data:/data/kata
     environment:
       KATA_HOME: /data/kata
+      KATA_AUTH_TOKEN: federation-hub-token
+      KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
-    command: ["daemon", "start", "--listen", "127.0.0.1:7373"]
+    command: ["daemon", "start", "--listen", "0.0.0.0:7373"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7373/api/v1/health"]
       interval: 1s
@@ -26,15 +21,14 @@ services:
     build:
       context: ../..
       dockerfile: docker/federation/Dockerfile
-    network_mode: service:netns
-    depends_on:
-      - netns
     volumes:
       - spoke-a-data:/data/kata
     environment:
       KATA_HOME: /data/kata
+      KATA_AUTH_TOKEN: federation-hub-token
+      KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
-    command: ["daemon", "start", "--listen", "127.0.0.1:7374"]
+    command: ["daemon", "start", "--listen", "0.0.0.0:7374"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7374/api/v1/health"]
       interval: 1s
@@ -45,15 +39,14 @@ services:
     build:
       context: ../..
       dockerfile: docker/federation/Dockerfile
-    network_mode: service:netns
-    depends_on:
-      - netns
     volumes:
       - spoke-b-data:/data/kata
     environment:
       KATA_HOME: /data/kata
+      KATA_AUTH_TOKEN: federation-hub-token
+      KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
-    command: ["daemon", "start", "--listen", "127.0.0.1:7375"]
+    command: ["daemon", "start", "--listen", "0.0.0.0:7375"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7375/api/v1/health"]
       interval: 1s
@@ -65,7 +58,6 @@ services:
       context: ../..
       dockerfile: docker/federation/Dockerfile
     entrypoint: ["/usr/local/bin/federation-smoke"]
-    network_mode: service:netns
     depends_on:
       hub:
         condition: service_healthy
@@ -77,6 +69,8 @@ services:
       - runner-data:/data/kata
     environment:
       KATA_HOME: /data/kata
+      KATA_AUTH_TOKEN: federation-hub-token
+      KATA_ALLOW_INSECURE: "1"
       KATA_HTTP_TIMEOUT: 15s
       KATA_FEDERATION_DOCKER_CURL_TIMEOUT: ${KATA_FEDERATION_DOCKER_CURL_TIMEOUT:-15}
 

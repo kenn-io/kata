@@ -531,6 +531,7 @@ type FederationIngestEvent struct {
 type FederationIngestParams struct {
 	ProjectID        int64
 	SpokeInstanceUID string
+	BoundActor       string
 	Events           []FederationIngestEvent
 }
 
@@ -551,6 +552,7 @@ type CreateFederationEnrollmentParams struct {
 	SpokeInstanceUID string
 	ProjectID        *int64
 	Capabilities     string
+	Actor            string
 }
 
 // CreatedFederationEnrollment returns the created row plus the plaintext token

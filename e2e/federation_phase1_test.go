@@ -54,6 +54,7 @@ func TestSmoke_FederationPhase1PullReplication(t *testing.T) {
 		SpokeInstanceUID: spokeDB.InstanceUID(),
 		ProjectID:        &hubProject.ID,
 		Capabilities:     "pull",
+		Actor:            "agent",
 	})
 	require.NoError(t, err)
 
@@ -65,6 +66,7 @@ func TestSmoke_FederationPhase1PullReplication(t *testing.T) {
 		"project_name":            meta.ProjectName,
 		"replay_horizon_event_id": meta.ReplayHorizonEventID,
 		"token":                   created.Token,
+		"actor":                   "agent",
 	}, &replica)
 
 	got := waitForFederatedIssue(t, spokeDB, hubIssue.UID, spokeStderr)

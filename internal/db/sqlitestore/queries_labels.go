@@ -148,6 +148,13 @@ func (d *Store) AddLabelAndEvent(ctx context.Context, issueID int64, ev db.Label
 	if err != nil {
 		return db.IssueLabel{}, db.Event{}, err
 	}
+	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
+		return db.IssueLabel{}, db.Event{}, err
+	}
+	ev.Actor, err = d.effectiveLocalMutationActorTx(ctx, tx, issue.ProjectID, ev.Actor)
+	if err != nil {
+		return db.IssueLabel{}, db.Event{}, err
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO issue_labels(issue_id, label, author) VALUES(?, ?, ?)`,
@@ -209,6 +216,9 @@ func (d *Store) RemoveLabelAndEvent(ctx context.Context, issueID int64, ev db.La
 
 	issue, projectName, err := lookupIssueForEvent(ctx, tx, issueID)
 	if err != nil {
+		return db.Event{}, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
 		return db.Event{}, err
 	}
 

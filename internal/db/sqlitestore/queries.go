@@ -416,6 +416,10 @@ func (d *Store) CreateIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 	if err := ensureProjectWritableTx(ctx, tx, p.ProjectID); err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
+	p.Author, err = d.effectiveLocalMutationActorTx(ctx, tx, p.ProjectID, p.Author)
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
 
 	issueUID := p.UID
 	if issueUID == "" {
@@ -915,6 +919,10 @@ func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db
 		return db.Comment{}, db.Event{}, err
 	}
 	if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
+		return db.Comment{}, db.Event{}, err
+	}
+	p.Author, err = d.effectiveLocalMutationActorTx(ctx, tx, issue.ProjectID, p.Author)
+	if err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
 
@@ -1749,7 +1757,12 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 		return db.Event{}, err
 	}
 	contentHash := in.ContentHash
+	eventActor := in.Actor
 	if contentHash == "" {
+		eventActor, err = d.effectiveLocalEventActorTx(ctx, tx, in.ProjectID, originInstanceUID, eventActor)
+		if err != nil {
+			return db.Event{}, err
+		}
 		contentHash, err = db.EventContentHash(db.EventHashInput{
 			UID:               eventUID,
 			OriginInstanceUID: originInstanceUID,
@@ -1758,7 +1771,7 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 			IssueUID:          issueUID,
 			RelatedIssueUID:   relatedIssueUID,
 			Type:              in.Type,
-			Actor:             in.Actor,
+			Actor:             eventActor,
 			HLCPhysicalMS:     eventHLC.PhysicalMS,
 			HLCCounter:        eventHLC.Counter,
 			CreatedAt:         createdAt,
@@ -1779,7 +1792,7 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 		in.ProjectID, projectName,
 		in.IssueID, stringPtrValue(issueUID),
 		in.RelatedIssueID, stringPtrValue(relatedIssueUID),
-		in.Type, in.Actor, in.Payload,
+		in.Type, eventActor, in.Payload,
 		eventHLC.PhysicalMS, eventHLC.Counter, contentHash, createdAt)
 	if err != nil {
 		return db.Event{}, fmt.Errorf("insert event: %w", err)

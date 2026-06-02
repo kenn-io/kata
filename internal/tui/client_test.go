@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/testfix"
 )
@@ -35,6 +37,165 @@ func respondJSON(t *testing.T, w http.ResponseWriter, body any) {
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		t.Fatalf("encode response: %v", err)
 	}
+}
+
+func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
+	t.Setenv("KATA_AUTH_TOKEN", "global-token")
+	ctx := context.Background()
+	var spokeInstanceAuth, spokeStatusAuth, spokeJoinAuth string
+	var hubListAuth, hubEnsureAuth, hubEnableAuth, hubEnrollmentAuth, hubMetadataAuth string
+	var joinBody CreateFederationReplicaInput
+	hubProjectID := int64(42)
+
+	spokeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/instance":
+			spokeInstanceAuth = r.Header.Get("Authorization")
+			respondJSON(t, w, InstanceInfo{
+				InstanceUID:   "01HZNQ7VFPK1XGD8R5MABCD4EA",
+				Version:       "dev",
+				SchemaVersion: 1,
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/status":
+			spokeStatusAuth = r.Header.Get("Authorization")
+			respondJSON(t, w, api.FederationStatusBody{Statuses: []api.FederationProjectStatus{}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/federation/replicas":
+			spokeJoinAuth = r.Header.Get("Authorization")
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&joinBody))
+			respondJSON(t, w, api.CreateFederationReplicaBody{})
+		default:
+			t.Fatalf("unexpected spoke request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(spokeSrv.Close)
+
+	hubSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects":
+			hubListAuth = r.Header.Get("Authorization")
+			respondJSON(t, w, map[string]any{"projects": []map[string]any{{"id": hubProjectID, "name": "spoke-project"}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects":
+			hubEnsureAuth = r.Header.Get("Authorization")
+			respondJSON(t, w, map[string]any{"project": map[string]any{"id": hubProjectID, "name": "spoke-project"}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/42/federation/enable":
+			hubEnableAuth = r.Header.Get("Authorization")
+			respondJSON(t, w, api.ProjectFederationBody{
+				ProjectID:              hubProjectID,
+				ProjectUID:             "01HZNQ7VFPK1XGD8R5MABCD4EX",
+				ProjectName:            "spoke-project",
+				ReplayHorizonEventID:   9,
+				BaselineThroughEventID: 11,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/federation/enrollments":
+			hubEnrollmentAuth = r.Header.Get("Authorization")
+			respondJSON(t, w, api.FederationEnrollmentOut{
+				ID:               7,
+				SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+				ProjectID:        &hubProjectID,
+				Capabilities:     "claim,pull,push",
+				Actor:            "wesm",
+				Token:            "enrollment-token",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/42/federation/metadata":
+			hubMetadataAuth = r.Header.Get("Authorization")
+			respondJSON(t, w, api.ProjectFederationBody{
+				ProjectID:              hubProjectID,
+				ProjectUID:             "01HZNQ7VFPK1XGD8R5MABCD4EX",
+				ProjectName:            "spoke-project",
+				ReplayHorizonEventID:   9,
+				BaselineThroughEventID: 11,
+			})
+		default:
+			t.Fatalf("unexpected hub request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(hubSrv.Close)
+
+	spokeHTTP, err := clientpkg.NewHTTPClientForTarget(ctx, spokeSrv.URL,
+		clientpkg.TargetAuth{Token: "spoke-token"}, clientpkg.Opts{})
+	require.NoError(t, err)
+	spoke := NewClient(spokeSrv.URL, spokeHTTP)
+	hubAdmin, _, err := newHubAdminClient(ctx, daemonTarget{
+		Name:  "hub",
+		URL:   hubSrv.URL,
+		Token: "hub-admin-token",
+	})
+	require.NoError(t, err)
+
+	_, err = spoke.GetInstance(ctx)
+	require.NoError(t, err)
+	_, err = spoke.FederationStatus(ctx)
+	require.NoError(t, err)
+	_, err = hubAdmin.ListProjects(ctx)
+	require.NoError(t, err)
+	_, err = hubAdmin.EnsureProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, err = hubAdmin.EnableFederation(ctx, hubProjectID, "requested")
+	require.NoError(t, err)
+	enrollment, err := hubAdmin.CreateFederationEnrollment(ctx, CreateFederationEnrollmentInput{
+		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+		ProjectID:        &hubProjectID,
+		Capabilities:     "claim,pull,push",
+		Actor:            "requested",
+	})
+	require.NoError(t, err)
+	hubEnrollment, err := newHubEnrollmentClient(ctx, hubSrv.URL, enrollment.Token, false)
+	require.NoError(t, err)
+	metadata, err := hubEnrollment.ProjectFederation(ctx, hubProjectID)
+	require.NoError(t, err)
+	_, err = spoke.CreateFederationReplica(ctx, CreateFederationReplicaInput{
+		HubURL:                 hubSrv.URL,
+		HubProjectID:           hubProjectID,
+		HubProjectUID:          metadata.ProjectUID,
+		ProjectName:            metadata.ProjectName,
+		ReplayHorizonEventID:   metadata.ReplayHorizonEventID,
+		BaselineThroughEventID: metadata.BaselineThroughEventID,
+		Token:                  enrollment.Token,
+		Capabilities:           "claim,pull,push",
+		Actor:                  enrollment.Actor,
+		PushEnabled:            true,
+		AdoptExisting:          true,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer spoke-token", spokeInstanceAuth)
+	assert.Equal(t, "Bearer spoke-token", spokeStatusAuth)
+	assert.Equal(t, "Bearer spoke-token", spokeJoinAuth)
+	assert.Equal(t, "Bearer hub-admin-token", hubListAuth)
+	assert.Equal(t, "Bearer hub-admin-token", hubEnsureAuth)
+	assert.Equal(t, "Bearer hub-admin-token", hubEnableAuth)
+	assert.Equal(t, "Bearer hub-admin-token", hubEnrollmentAuth)
+	assert.Equal(t, "Bearer enrollment-token", hubMetadataAuth)
+	assert.Equal(t, "enrollment-token", joinBody.Token)
+	assert.Equal(t, "claim,pull,push", joinBody.Capabilities)
+	assert.True(t, joinBody.PushEnabled)
+	assert.True(t, joinBody.AdoptExisting)
+	for _, got := range []string{
+		spokeInstanceAuth, spokeStatusAuth, spokeJoinAuth,
+		hubListAuth, hubEnsureAuth, hubEnableAuth, hubEnrollmentAuth, hubMetadataAuth,
+	} {
+		assert.NotEqual(t, "Bearer global-token", got)
+	}
+}
+
+func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testing.T) {
+	_, _, err := newHubAdminClient(context.Background(), daemonTarget{
+		Name:  "hub",
+		URL:   "http://hub.internal:7777",
+		Token: "hub-admin-token",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "allow_insecure")
+}
+
+func TestTUIHubEnrollmentClientCarriesAllowInsecureForPlainHTTPHostname(t *testing.T) {
+	_, err := newHubEnrollmentClient(context.Background(), "http://hub.internal:7777", "enrollment-token", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "allow_insecure")
+
+	client, err := newHubEnrollmentClient(context.Background(), "http://hub.internal:7777", "enrollment-token", true)
+	require.NoError(t, err)
+	require.NotNil(t, client)
 }
 
 func TestClient_ListIssues_BuildsExpectedURLAndDecodes(t *testing.T) {

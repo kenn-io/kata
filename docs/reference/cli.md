@@ -210,11 +210,12 @@ Identity tokens are used when a remote/shared daemon has
 ```sh
 kata federation identity
 kata federation enable --project <project>
-kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url>
+kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
+  --actor <actor> [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
-  --token <token> [--push]
+  --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> \
-  --hub-project-id <id> --token <token> --push --adopt-existing
+  --hub-project-id <id> --token <token> --actor <actor> --push --adopt-existing
 kata federation status
 kata federation enrollments list
 kata federation revoke <enrollment-id>
@@ -223,7 +224,14 @@ kata federation lease release <issue-ref>
 kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --reason <text>
 ```
 
-`--adopt-existing` is a current-state cutover. It removes the local project's
+`kata federation enroll --project <project> --hub-url <url>` sends the
+enrollment API call to `<url>` using normal daemon API auth
+(`KATA_AUTH_TOKEN` or `[auth].token`). It creates `<project>` on that hub if it
+does not already exist, then enables federation and creates the enrollment. The
+CLI should otherwise remain pointed at the spoke daemon so the printed join
+command can include `--adopt-existing` when the spoke project already exists.
+
+`--adopt-existing` is a current-state cutover. It removes the spoke project's
 pre-adoption event history from the live event stream and queues fresh snapshots
 for federation. Run `kata --project <project> export --output <path>.jsonl`
 first if you need to retain that local event timeline.

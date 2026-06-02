@@ -1,28 +1,29 @@
 kata — keybindings
 
-Global                        Detail                                     Forms                       
+Global                        Detail                                     Forms
 ?         help                tab            next tab                    ctrl+s         save or apply
-q/ctrl+c  quit                shift+tab      prev tab                    esc            cancel       
-P         projects            enter          jump to referenced issue    tab/shift+tab  change field 
-D         daemons             esc/backspace  back                        ctrl+e         open editor  
-L         toggle layout       e              edit body                   ctrl+u         clear prompt 
-                              c              new comment                                             
-Graph                         p              set parent                  Filters                     
-k       up                    b              add blocker                 /       search              
-j       down                  l              add related                 s       cycle status filter 
-up      scroll up             +              add label                   f       filter (form)       
-down    scroll down           -              remove label                c       clear filters       
-pgup    page up               a              assign owner                ctrl+r  reset filter form   
-pgdown  page down             A              clear owner                                             
-g       first                 !              set priority                                            
-G       last                                                                                         
-enter   open detail           Children                                                               
-space   expand/collapse       N      new child                                                       
-right   expand                j/k    move child cursor                                               
-left    collapse              ↑↓     scroll detail viewport                                          
-n       new issue (form)      enter  open child                                                      
-o       toggle graph order                                                                           
-x       close                                                                                        
-r       reopen                                                                                       
+q/ctrl+c  quit                shift+tab      prev tab                    esc            cancel
+P         projects            enter          jump to referenced issue    tab/shift+tab  change field
+D         daemons             esc/backspace  back                        ctrl+e         open editor
+F         federation          e              edit body                   ctrl+u         clear prompt
+L         toggle layout       c              new comment
+                              p              set parent                  Filters
+Graph                         b              add blocker                 /       search
+k       up                    l              add related                 s       cycle status filter
+j       down                  +              add label                   f       filter (form)
+up      scroll up             -              remove label                c       clear filters
+down    scroll down           a              assign owner                ctrl+r  reset filter form
+pgup    page up               A              clear owner
+pgdown  page down             !              set priority
+g       first
+G       last                  Children
+enter   open detail           N      new child
+space   expand/collapse       j/k    move child cursor
+right   expand                ↑↓     scroll detail viewport
+left    collapse              enter  open child
+n       new issue (form)
+o       toggle graph order
+x       close
+r       reopen
 
 press ? to return

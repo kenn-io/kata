@@ -56,6 +56,7 @@ func TestSmoke_FederationPhase2BidirectionalSync(t *testing.T) {
 		SpokeInstanceUID: inst.InstanceUID,
 		ProjectID:        nil,
 		Capabilities:     "pull,push",
+		Actor:            "agent",
 	})
 	require.NoError(t, err)
 
@@ -68,6 +69,7 @@ func TestSmoke_FederationPhase2BidirectionalSync(t *testing.T) {
 		"replay_horizon_event_id": meta.ReplayHorizonEventID,
 		"token":                   created.Token,
 		"capabilities":            "pull,push",
+		"actor":                   "agent",
 		"push_enabled":            true,
 	}, &replica)
 	require.True(t, replica.Binding.PushEnabled)
@@ -114,6 +116,7 @@ func TestFederationPhase2PushWakeLatency(t *testing.T) {
 		SpokeInstanceUID: spokeDB.InstanceUID(),
 		ProjectID:        &hubProject.ID,
 		Capabilities:     "pull,push",
+		Actor:            "agent",
 	})
 	require.NoError(t, err)
 
@@ -125,6 +128,7 @@ func TestFederationPhase2PushWakeLatency(t *testing.T) {
 		"project_name":            meta.ProjectName,
 		"replay_horizon_event_id": meta.ReplayHorizonEventID,
 		"token":                   created.Token,
+		"actor":                   "agent",
 	}, &replica)
 	_, err = spokeDB.EnableFederationPush(ctx, replica.Project.ID, 0)
 	require.NoError(t, err)

@@ -62,6 +62,7 @@ func (d *Store) ingestFederationEventsOnce(
 	result := db.FederationIngestResult{}
 	seenBatch := map[string]string{}
 	freshSnapshotSeen := false
+	boundActor := strings.TrimSpace(p.BoundActor)
 	for _, in := range p.Events {
 		if in.SourceEventID <= 0 {
 			return db.FederationIngestResult{}, fmt.Errorf("%w: source event id must be positive", db.ErrFederationIngestValidation)
@@ -74,6 +75,13 @@ func (d *Store) ingestFederationEventsOnce(
 			ev.Payload = json.RawMessage(`{}`)
 		}
 		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs, batchCreateSnapshotUIDs); err != nil {
+			return db.FederationIngestResult{}, err
+		}
+		if boundActor != "" && ev.Actor != boundActor {
+			return db.FederationIngestResult{}, fmt.Errorf("%w: event %s actor %q does not match bound actor",
+				db.ErrFederationIngestValidation, ev.EventUID, ev.Actor)
+		}
+		if err := validateFederationBoundActorPayload(ev, boundActor); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if err := validateFederationEventHash(ev); err != nil {
@@ -164,6 +172,52 @@ func (d *Store) ingestFederationEventsOnce(
 		return db.FederationIngestResult{}, fmt.Errorf("commit federation ingest: %w", err)
 	}
 	return result, nil
+}
+
+func validateFederationBoundActorPayload(ev db.RemoteEvent, boundActor string) error {
+	boundActor = strings.TrimSpace(boundActor)
+	if boundActor == "" {
+		return nil
+	}
+	switch ev.Type {
+	case "issue.created":
+		if err := validateFederationPayloadAuthor(ev, boundActor); err != nil {
+			return err
+		}
+		return validateFederationPayloadCommentAuthors(ev, boundActor)
+	case "issue.commented":
+		return validateFederationPayloadAuthor(ev, boundActor)
+	}
+	return nil
+}
+
+func validateFederationPayloadAuthor(ev db.RemoteEvent, boundActor string) error {
+	payload := db.PayloadMap(ev.Payload)
+	author, ok := db.StringValue(payload["author"])
+	if !ok || strings.TrimSpace(author) != boundActor {
+		return fmt.Errorf("%w: event %s %s payload author %q does not match bound actor",
+			db.ErrFederationIngestValidation, ev.EventUID, ev.Type, author)
+	}
+	return nil
+}
+
+func validateFederationPayloadCommentAuthors(ev db.RemoteEvent, boundActor string) error {
+	var payload struct {
+		Comments []struct {
+			Author string `json:"author"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+		return fmt.Errorf("%w: event %s %s payload is invalid JSON",
+			db.ErrFederationIngestValidation, ev.EventUID, ev.Type)
+	}
+	for _, comment := range payload.Comments {
+		if strings.TrimSpace(comment.Author) != boundActor {
+			return fmt.Errorf("%w: event %s %s comment payload author %q does not match bound actor",
+				db.ErrFederationIngestValidation, ev.EventUID, ev.Type, comment.Author)
+		}
+	}
+	return nil
 }
 
 func insertFederationEventTx(

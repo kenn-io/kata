@@ -160,6 +160,37 @@ func TestClaimGateHelperSpokeTransportFailureFallsBackToCachedClaim(t *testing.T
 	require.NoError(t, err)
 }
 
+func TestClaimGateHelperPushSpokeUsesBoundActorForGate(t *testing.T) {
+	ctx := context.Background()
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	enableClaimGateHelperSpoke(t, store, project, "http://127.0.0.1:1", 99)
+	require.NoError(t, store.ApplyClaimStatus(ctx, project.ID, issue.UID, db.ClaimStatus{
+		Held: true,
+		Holder: db.ClaimPrincipal{
+			HolderInstanceUID: store.InstanceUID(),
+			Holder:            "agent",
+			ClientKind:        "",
+		},
+		Claim: &db.IssueClaim{
+			ClaimUID:          newClaimGateHelperUID(t),
+			IssueUID:          issue.UID,
+			Holder:            "agent",
+			HolderInstanceUID: store.InstanceUID(),
+			ClientKind:        "",
+			ClaimKind:         "hard",
+			AcquiredAt:        time.Now().Add(-time.Minute).UTC(),
+			Revision:          1,
+			UpdatedAt:         time.Now().UTC(),
+		},
+		HubNow: time.Now().UTC(),
+	}))
+
+	err := requireFederatedIssueClaim(ctx, ServerConfig{DB: store}, project.ID, issue, "client-actor")
+
+	require.NoError(t, err)
+}
+
 func TestClaimGateHelperPullOnlySpokeRejectsEvenWithCachedClaim(t *testing.T) {
 	ctx := context.Background()
 	store := openClaimGateHelperDB(t)
@@ -235,6 +266,7 @@ func enableClaimGateHelperSpokeWithPush(t *testing.T, store *sqlitestore.Store, 
 		HubProjectID:  hubProjectID,
 		HubProjectUID: project.UID,
 		PushEnabled:   pushEnabled,
+		Actor:         "agent",
 		Enabled:       true,
 	})
 	require.NoError(t, err)
@@ -243,6 +275,7 @@ func enableClaimGateHelperSpokeWithPush(t *testing.T, store *sqlitestore.Store, 
 		HubProjectID: hubProjectID,
 		Token:        "claim-helper-token",
 		Capabilities: "claim",
+		Actor:        "agent",
 	}))
 }
 

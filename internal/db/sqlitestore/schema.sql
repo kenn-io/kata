@@ -306,6 +306,7 @@ CREATE TABLE federation_bindings (
   pull_cursor_event_id    INTEGER NOT NULL DEFAULT 0,
   push_enabled            INTEGER NOT NULL DEFAULT 0 CHECK(push_enabled IN (0,1)),
   push_cursor_event_id    INTEGER NOT NULL DEFAULT 0 CHECK(push_cursor_event_id >= 0),
+  bound_actor             TEXT NOT NULL DEFAULT '',
   enabled                 INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
   created_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -355,12 +356,14 @@ CREATE TABLE federation_enrollments (
   spoke_instance_uid  TEXT NOT NULL,
   project_id          INTEGER REFERENCES projects(id),
   capabilities        TEXT NOT NULL,
+  bound_actor         TEXT NOT NULL,
   created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   revoked_at          DATETIME,
   CHECK (length(token_hash) = 64),
   CHECK (length(spoke_instance_uid) = 26),
-  CHECK (length(trim(capabilities)) > 0)
+  CHECK (length(trim(capabilities)) > 0),
+  CHECK (length(trim(bound_actor)) > 0)
 );
 CREATE INDEX idx_federation_enrollments_scope
   ON federation_enrollments(project_id, revoked_at);

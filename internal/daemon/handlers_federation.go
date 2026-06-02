@@ -130,11 +130,16 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if _, err := db.CanonicalFederationCapabilities(in.Body.Capabilities); err != nil {
 			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
 		}
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
+			return nil, err
+		}
 		created, err := cfg.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 			Token:            in.Body.Token,
 			SpokeInstanceUID: in.Body.SpokeInstanceUID,
 			ProjectID:        in.Body.ProjectID,
 			Capabilities:     in.Body.Capabilities,
+			Actor:            actor,
 		})
 		if err != nil {
 			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
@@ -197,6 +202,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.Body.PushEnabled && !federationCapabilitiesContain(capabilities, "push") {
 			return nil, api.NewError(400, "federation_capability_mismatch", "push-enabled federation replica requires push capability", "", nil)
 		}
+		if err := db.ValidateTokenActor(in.Body.Actor); err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
 		if in.Body.AdoptExisting {
 			if !in.Body.PushEnabled {
 				return nil, api.NewError(400, "federation_capability_mismatch", "adopting an existing project requires push to be enabled", "", nil)
@@ -214,10 +222,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if in.Body.Token != "" {
 			if err := config.WriteFederationCredential(project.UID, config.FederationCredential{
-				HubURL:       in.Body.HubURL,
-				HubProjectID: in.Body.HubProjectID,
-				Token:        in.Body.Token,
-				Capabilities: capabilities,
+				HubURL:        in.Body.HubURL,
+				HubProjectID:  in.Body.HubProjectID,
+				Token:         in.Body.Token,
+				Capabilities:  capabilities,
+				Actor:         strings.TrimSpace(in.Body.Actor),
+				AllowInsecure: in.Body.AllowInsecure,
 			}); err != nil {
 				return nil, api.NewError(500, "internal", err.Error(), "", nil)
 			}
@@ -277,6 +287,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID:        in.ProjectID,
 			SpokeInstanceUID: principal.SpokeInstanceUID,
+			BoundActor:       principal.Actor,
 			Events:           federationIngestEventsToDB(in.Body.Events),
 		})
 		if err != nil {
@@ -416,7 +427,7 @@ func adoptExistingReplica(
 					HubProjectID:         in.Body.HubProjectID,
 					HubProjectUID:        in.Body.HubProjectUID,
 					ReplayHorizonEventID: in.Body.ReplayHorizonEventID,
-					Actor:                "federation",
+					Actor:                strings.TrimSpace(in.Body.Actor),
 				})
 				if err != nil {
 					return db.AdoptProjectIntoFederationResult{}, false, api.NewError(500, "internal", err.Error(), "", nil)
@@ -425,9 +436,10 @@ func adoptExistingReplica(
 			}
 			return db.AdoptProjectIntoFederationResult{}, false, api.NewError(500, "internal", bindErr.Error(), "", nil)
 		}
-		if !compatibleReplicaBinding(binding, in) {
+		if details := replicaBindingConflictDetails(binding, in); len(details) > 0 {
 			return db.AdoptProjectIntoFederationResult{}, false,
-				api.NewError(409, "federation_binding_conflict", "existing federation binding is incompatible with the requested hub", "", nil)
+				api.NewError(409, "federation_binding_conflict",
+					"existing federation binding differs from the requested hub: "+strings.Join(details, ", "), "", nil)
 		}
 		if project.Name != projectName {
 			return db.AdoptProjectIntoFederationResult{}, false,
@@ -467,6 +479,7 @@ func adoptExistingReplica(
 		HubProjectID:         in.Body.HubProjectID,
 		HubProjectUID:        in.Body.HubProjectUID,
 		ReplayHorizonEventID: in.Body.ReplayHorizonEventID,
+		Actor:                strings.TrimSpace(in.Body.Actor),
 	})
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, true, api.NewError(500, "internal", err.Error(), "", nil)
@@ -504,7 +517,8 @@ func ensureReplicaBinding(
 		return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision", "a deleted project already has the hub project UID", "", nil)
 	}
 
-	cursor := in.Body.ReplayHorizonEventID - 1
+	replayHorizon := in.Body.ReplayHorizonEventID
+	cursor := replayHorizon - 1
 	if cursor < 0 {
 		cursor = 0
 	}
@@ -512,12 +526,12 @@ func ensureReplicaBinding(
 	pushCursor := int64(0)
 	existing, err := store.FederationBindingByProject(ctx, project.ID)
 	if err == nil {
-		if !compatibleReplicaBinding(existing, in) {
-			return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_binding_conflict", "existing federation binding is incompatible with the requested hub", "", nil)
+		if details := replicaBindingConflictDetails(existing, in); len(details) > 0 {
+			return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_binding_conflict",
+				"existing federation binding differs from the requested hub: "+strings.Join(details, ", "), "", nil)
 		}
-		if existing.PullCursorEventID > cursor {
-			cursor = existing.PullCursorEventID
-		}
+		replayHorizon = existing.ReplayHorizonEventID
+		cursor = existing.PullCursorEventID
 		pushEnabled = existing.PushEnabled
 		pushCursor = existing.PushCursorEventID
 	} else if !errors.Is(err, db.ErrNotFound) {
@@ -532,10 +546,11 @@ func ensureReplicaBinding(
 		HubURL:               in.Body.HubURL,
 		HubProjectID:         in.Body.HubProjectID,
 		HubProjectUID:        in.Body.HubProjectUID,
-		ReplayHorizonEventID: in.Body.ReplayHorizonEventID,
+		ReplayHorizonEventID: replayHorizon,
 		PullCursorEventID:    cursor,
 		PushEnabled:          pushEnabled,
 		PushCursorEventID:    pushCursor,
+		Actor:                strings.TrimSpace(in.Body.Actor),
 		Enabled:              true,
 	})
 	if err != nil {
@@ -560,12 +575,27 @@ func maxLocalOriginEventID(ctx context.Context, store db.Storage, projectID int6
 	return store.MaxLocalOriginEventID(ctx, projectID)
 }
 
-func compatibleReplicaBinding(existing db.FederationBinding, in *api.CreateFederationReplicaRequest) bool {
-	return existing.Role == db.FederationRoleSpoke &&
-		existing.HubURL == in.Body.HubURL &&
-		existing.HubProjectID == in.Body.HubProjectID &&
-		existing.HubProjectUID == in.Body.HubProjectUID &&
-		existing.ReplayHorizonEventID == in.Body.ReplayHorizonEventID
+func replicaBindingConflictDetails(existing db.FederationBinding, in *api.CreateFederationReplicaRequest) []string {
+	existingActor := strings.TrimSpace(existing.Actor)
+	requestedActor := strings.TrimSpace(in.Body.Actor)
+	actorCompatible := existingActor == requestedActor || (existingActor == "" && requestedActor != "")
+	details := make([]string, 0, 5)
+	if existing.Role != db.FederationRoleSpoke {
+		details = append(details, fmt.Sprintf("role existing=%s requested=%s", existing.Role, db.FederationRoleSpoke))
+	}
+	if existing.HubURL != in.Body.HubURL {
+		details = append(details, fmt.Sprintf("hub_url existing=%s requested=%s", existing.HubURL, in.Body.HubURL))
+	}
+	if existing.HubProjectID != in.Body.HubProjectID {
+		details = append(details, fmt.Sprintf("hub_project_id existing=%d requested=%d", existing.HubProjectID, in.Body.HubProjectID))
+	}
+	if existing.HubProjectUID != in.Body.HubProjectUID {
+		details = append(details, fmt.Sprintf("hub_project_uid existing=%s requested=%s", existing.HubProjectUID, in.Body.HubProjectUID))
+	}
+	if !actorCompatible {
+		details = append(details, fmt.Sprintf("actor existing=%s requested=%s", existingActor, requestedActor))
+	}
+	return details
 }
 
 func federationBindingToOut(binding db.FederationBinding) api.FederationBindingOut {
@@ -579,6 +609,7 @@ func federationBindingToOut(binding db.FederationBinding) api.FederationBindingO
 		PullCursorEventID:    binding.PullCursorEventID,
 		PushEnabled:          binding.PushEnabled,
 		PushCursorEventID:    binding.PushCursorEventID,
+		Actor:                binding.Actor,
 		Enabled:              binding.Enabled,
 		CreatedAt:            binding.CreatedAt,
 		UpdatedAt:            binding.UpdatedAt,
@@ -592,6 +623,7 @@ func federationEnrollmentToOut(enrollment db.FederationEnrollment, token string)
 		SpokeInstanceUID: enrollment.SpokeInstanceUID,
 		ProjectID:        enrollment.ProjectID,
 		Capabilities:     enrollment.Capabilities,
+		Actor:            enrollment.Actor,
 		CreatedAt:        enrollment.CreatedAt,
 		UpdatedAt:        enrollment.UpdatedAt,
 		RevokedAt:        enrollment.RevokedAt,
@@ -682,6 +714,10 @@ func federationProjectStatus(ctx context.Context, store db.Storage, binding db.F
 	if err != nil {
 		return api.FederationProjectStatus{}, api.NewError(500, "internal", err.Error(), "", nil)
 	}
+	var credentialMetadata config.FederationCredentialMetadata
+	if binding.Role == db.FederationRoleSpoke {
+		credentialMetadata = config.FederationCredentialMetadataFor(project.UID)
+	}
 	return api.FederationProjectStatus{
 		ProjectID:                   project.ID,
 		ProjectUID:                  project.UID,
@@ -689,6 +725,13 @@ func federationProjectStatus(ctx context.Context, store db.Storage, binding db.F
 		Role:                        string(binding.Role),
 		Enabled:                     binding.Enabled,
 		PushEnabled:                 binding.PushEnabled,
+		BoundActor:                  binding.Actor,
+		HubURL:                      binding.HubURL,
+		HubProjectID:                binding.HubProjectID,
+		HubProjectUID:               binding.HubProjectUID,
+		Capabilities:                credentialMetadata.Capabilities,
+		AllowInsecure:               credentialMetadata.AllowInsecure,
+		CredentialStatus:            credentialMetadata.Status,
 		PullCursorEventID:           binding.PullCursorEventID,
 		PushCursorEventID:           binding.PushCursorEventID,
 		PendingPushCount:            pendingPush,

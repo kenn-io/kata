@@ -28,10 +28,12 @@ func TestWriteFederationCredentialRoundTrips(t *testing.T) {
 
 	require.NoError(t, config.WriteFederationCredential("01HZNQ7VFPK1XGD8R5MABCD4EX",
 		config.FederationCredential{
-			HubURL:       "http://127.0.0.1:7373",
-			HubProjectID: 42,
-			Token:        "secret-token",
-			Capabilities: "pull,push,claim",
+			HubURL:        "http://127.0.0.1:7373",
+			HubProjectID:  42,
+			Token:         "secret-token",
+			Capabilities:  "pull,push,claim",
+			Actor:         "wesm",
+			AllowInsecure: true,
 		}))
 
 	path := filepath.Join(home, "credentials.toml")
@@ -50,6 +52,8 @@ func TestWriteFederationCredentialRoundTrips(t *testing.T) {
 	assert.Equal(t, int64(42), got.HubProjectID)
 	assert.Equal(t, "secret-token", got.Token)
 	assert.Equal(t, "pull,push,claim", got.Capabilities)
+	assert.Equal(t, "wesm", got.Actor)
+	assert.True(t, got.AllowInsecure)
 }
 
 func TestReadFederationCredentialWithoutCapabilitiesDefaultsEmpty(t *testing.T) {
@@ -92,4 +96,47 @@ func TestWriteFederationCredentialTightensExistingFileMode(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestFederationCredentialMetadataForPresentCredentialRedactsToken(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, config.WriteFederationCredential("01HZNQ7VFPK1XGD8R5MABCD4EX",
+		config.FederationCredential{
+			HubURL:        "http://hub.internal:7777",
+			HubProjectID:  42,
+			Token:         "secret-token",
+			Capabilities:  "claim,pull,push",
+			Actor:         "wesm",
+			AllowInsecure: true,
+		}))
+
+	got := config.FederationCredentialMetadataFor("01HZNQ7VFPK1XGD8R5MABCD4EX")
+
+	assert.Equal(t, "present", got.Status)
+	assert.Equal(t, "http://hub.internal:7777", got.HubURL)
+	assert.Equal(t, int64(42), got.HubProjectID)
+	assert.Equal(t, "claim,pull,push", got.Capabilities)
+	assert.Equal(t, "wesm", got.Actor)
+	assert.True(t, got.AllowInsecure)
+}
+
+func TestFederationCredentialMetadataForMissingCredential(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+
+	got := config.FederationCredentialMetadataFor("01HZNQ7VFPK1XGD8R5MABCD4EX")
+
+	assert.Equal(t, "missing", got.Status)
+	assert.False(t, got.AllowInsecure)
+}
+
+func TestFederationCredentialMetadataForUnreadableCredential(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "credentials.toml"), []byte("[projects."), 0o600))
+
+	got := config.FederationCredentialMetadataFor("01HZNQ7VFPK1XGD8R5MABCD4EX")
+
+	assert.Equal(t, "unreadable", got.Status)
+	assert.False(t, got.AllowInsecure)
 }

@@ -198,8 +198,8 @@ func setupFederationClaimE2E(t *testing.T, name string) federationClaimFixture {
 	decodePOST(t, hub.HTTP, hub.URL+"/api/v1/projects/"+strconv.FormatInt(hubProject.ID, 10)+"/federation/enable",
 		map[string]any{"actor": "agent"}, &meta)
 
-	spokeA.replica = enrollFederationClaimSpoke(ctx, t, hub, hubProject, meta, spokeA, name+"-a")
-	spokeB.replica = enrollFederationClaimSpoke(ctx, t, hub, hubProject, meta, spokeB, name+"-b")
+	spokeA.replica = enrollFederationClaimSpoke(ctx, t, hub, hubProject, meta, spokeA, name+"-a", "alice")
+	spokeB.replica = enrollFederationClaimSpoke(ctx, t, hub, hubProject, meta, spokeB, name+"-b", "bob")
 
 	return federationClaimFixture{
 		bin:           bin,
@@ -231,6 +231,7 @@ func enrollFederationClaimSpoke(
 	meta api.ProjectFederationBody,
 	spoke federationClaimSpoke,
 	token string,
+	actor string,
 ) api.CreateFederationReplicaBody {
 	t.Helper()
 	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
@@ -238,6 +239,7 @@ func enrollFederationClaimSpoke(
 		SpokeInstanceUID: spoke.db.InstanceUID(),
 		ProjectID:        &hubProject.ID,
 		Capabilities:     "pull,push,claim",
+		Actor:            actor,
 	})
 	require.NoError(t, err)
 
@@ -250,6 +252,7 @@ func enrollFederationClaimSpoke(
 		"replay_horizon_event_id": meta.ReplayHorizonEventID,
 		"token":                   created.Token,
 		"capabilities":            "pull,push,claim",
+		"actor":                   actor,
 		"push_enabled":            true,
 	}, &replica)
 	require.True(t, replica.Binding.PushEnabled)

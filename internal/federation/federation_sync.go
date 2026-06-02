@@ -72,7 +72,7 @@ func SyncFederationOnceWithPulledEvents(
 			return err
 		}
 	}
-	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsWithDefault(opts))
+	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsForCredential(opts, creds))
 	if err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
@@ -491,7 +491,7 @@ func RetryPendingClaimsOnce(
 	if hubProjectID == 0 {
 		hubProjectID = binding.HubProjectID
 	}
-	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsWithDefault(opts))
+	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsForCredential(opts, creds))
 	if err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
@@ -518,6 +518,14 @@ func recordFederationSyncError(ctx context.Context, store db.Storage, projectID 
 		return errors.Join(syncErr, err)
 	}
 	return syncErr
+}
+
+func clientOptsForCredential(opts clientpkg.Opts, creds config.FederationCredential) clientpkg.Opts {
+	opts = clientOptsWithDefault(opts)
+	if creds.AllowInsecure {
+		opts.AllowInsecure = true
+	}
+	return opts
 }
 
 func retryPendingClaim(

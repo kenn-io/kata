@@ -197,6 +197,7 @@ func TestFederationQuarantineRoundTrip(t *testing.T) {
 		HubProjectUID:        p.UID,
 		ReplayHorizonEventID: 1,
 		PushEnabled:          true,
+		Actor:                "tester",
 		Enabled:              true,
 	})
 	require.NoError(t, err)
@@ -403,6 +404,7 @@ func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
 		PullCursorEventID:    6,
 		PushEnabled:          true,
 		PushCursorEventID:    5,
+		Actor:                "wesm",
 		Enabled:              true,
 	}
 	_, err = srcDB.UpsertFederationBinding(ctx, binding)
@@ -425,6 +427,7 @@ func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
 	require.NotNil(t, bindingPayload)
 	assert.Equal(t, true, bindingPayload["push_enabled"])
 	assert.Equal(t, float64(5), bindingPayload["push_cursor_event_id"])
+	assert.Equal(t, "wesm", bindingPayload["bound_actor"])
 	assert.NotContains(t, bindingPayload, "materialize_after_event_id")
 
 	dstDB := openImportTargetDB(t)
@@ -433,6 +436,7 @@ func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.PushEnabled)
 	assert.Equal(t, int64(5), got.PushCursorEventID)
+	assert.Equal(t, "wesm", got.Actor)
 }
 
 func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
@@ -443,9 +447,9 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 	tokenHash := strings.Repeat("b", 64)
 	plaintextToken := "plaintext-token-never-exported"
 	_, err = srcDB.ExecContext(ctx, `
-		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities)
-		VALUES(?, ?, ?, ?)`,
-		tokenHash, "01HZZZZZZZZZZZZZZZZZZZZZ02", p.ID, "pull,push")
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities, bound_actor)
+		VALUES(?, ?, ?, ?, ?)`,
+		tokenHash, "01HZZZZZZZZZZZZZZZZZZZZZ02", p.ID, "pull,push", "wesm")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -456,15 +460,16 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 	dstDB := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
 
-	var gotHash, gotSpoke, gotCapabilities string
+	var gotHash, gotSpoke, gotCapabilities, gotActor string
 	var gotProjectID int64
 	require.NoError(t, dstDB.QueryRowContext(ctx, `
-		SELECT token_hash, spoke_instance_uid, project_id, capabilities
-		  FROM federation_enrollments`).Scan(&gotHash, &gotSpoke, &gotProjectID, &gotCapabilities))
+		SELECT token_hash, spoke_instance_uid, project_id, capabilities, bound_actor
+		  FROM federation_enrollments`).Scan(&gotHash, &gotSpoke, &gotProjectID, &gotCapabilities, &gotActor))
 	assert.Equal(t, tokenHash, gotHash)
 	assert.Equal(t, "01HZZZZZZZZZZZZZZZZZZZZZ02", gotSpoke)
 	assert.Equal(t, p.ID, gotProjectID)
 	assert.Equal(t, "pull,push", gotCapabilities)
+	assert.Equal(t, "wesm", gotActor)
 }
 
 // TestRoundtrip_IssueEnvelopeCarriesShortID pins spec §8.1: the JSONL issue

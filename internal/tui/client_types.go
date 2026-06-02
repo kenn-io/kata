@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.kenn.io/kata/internal/api"
 )
 
 // Issue is a strict subset of the daemon's wire shape. Labels rides on
@@ -172,6 +174,41 @@ type ResolveResp struct {
 type ProjectSummary struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
+}
+
+type InstanceInfo struct {
+	InstanceUID   string `json:"instance_uid"`
+	Version       string `json:"version"`
+	SchemaVersion int64  `json:"schema_version"`
+}
+
+type FederationStatusBody = api.FederationStatusBody
+type FederationProjectStatus = api.FederationProjectStatus
+type FederationEnrollment = api.FederationEnrollmentOut
+type ProjectFederationMetadata = api.ProjectFederationBody
+type FederationReplicaResult = api.CreateFederationReplicaBody
+
+type CreateFederationReplicaInput struct {
+	HubURL                 string `json:"hub_url"`
+	HubProjectID           int64  `json:"hub_project_id"`
+	HubProjectUID          string `json:"hub_project_uid"`
+	ProjectName            string `json:"project_name"`
+	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id"`
+	BaselineThroughEventID int64  `json:"baseline_through_event_id,omitempty"`
+	Token                  string `json:"token,omitempty"`
+	Capabilities           string `json:"capabilities,omitempty"`
+	Actor                  string `json:"actor,omitempty"`
+	AllowInsecure          bool   `json:"allow_insecure,omitempty"`
+	PushEnabled            bool   `json:"push_enabled,omitempty"`
+	AdoptExisting          bool   `json:"adopt_existing,omitempty"`
+}
+
+type CreateFederationEnrollmentInput struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid"`
+	ProjectID        *int64 `json:"project_id"`
+	Capabilities     string `json:"capabilities"`
+	Token            string `json:"token,omitempty"`
+	Actor            string `json:"actor,omitempty"`
 }
 
 // ProjectStatsSummary is the per-project aggregate carried by

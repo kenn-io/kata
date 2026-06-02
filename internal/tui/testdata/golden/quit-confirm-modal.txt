@@ -1,30 +1,30 @@
- Project: kata                                                                                       kata カタ · v0.1.0 
- open: 1 · closed: 1 · all: 3                                                                                           
-    #     prio status    title                                                           kids    owner         updated  
-    #aaa1 P1   open      fix login bug on Safari                                                 claude-4.7    3h ago   
-▶   #bbb2 —    closed    rebuild search index                                                    wesm          1h ago   
-    #ccc3 —    [deleted] purge stale tokens                                                                    2h ago   
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                          ╭──────────────────────────────────╮                                          
-                                          │                                  │                                          
-                                          │  Quit kata?                      │                                          
-                                          │                                  │                                          
-                                          │  Are you sure you want to quit?  │                                          
-                                          │                                  │                                          
-                                          │  [Y] Yes    [N] No               │                                          
-                                          │                                  │                                          
-                                          ╰──────────────────────────────────╯                                          
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                  [2/3] 
- ↑↓ move ▕ ↵ open▕ n new ▕ N child▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority▕ D daemons      
- L layout▕ ? help▕ q quit                                                                                               
+ Project: kata                                                                                       kata カタ · v0.1.0
+ open: 1 · closed: 1 · all: 3
+    #     prio status    title                                                           kids    owner         updated
+    #aaa1 P1   open      fix login bug on Safari                                                 claude-4.7    3h ago
+▶   #bbb2 —    closed    rebuild search index                                                    wesm          1h ago
+    #ccc3 —    [deleted] purge stale tokens                                                                    2h ago
+
+
+
+
+                                          ╭──────────────────────────────────╮
+                                          │                                  │
+                                          │  Quit kata?                      │
+                                          │                                  │
+                                          │  Are you sure you want to quit?  │
+                                          │                                  │
+                                          │  [Y] Yes    [N] No               │
+                                          │                                  │
+                                          ╰──────────────────────────────────╯
+
+
+
+
+
+
+
+
+                                                                                                                  [2/3]
+ ↑↓ move  ▕ ↵ open      ▕ n new   ▕ N child▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority
+ D daemons▕ F federation▕ L layout▕ ? help ▕ q quit

@@ -188,6 +188,7 @@ func (fx *federationStressFixture) enrollSpoke(t federationStressTB, i int) api.
 		"spoke_instance_uid": inst.InstanceUID,
 		"project_id":         fx.hubProject.ID,
 		"capabilities":       "pull,push,claim",
+		"actor":              "stress",
 	}, &created)
 
 	var replica api.CreateFederationReplicaBody
@@ -200,6 +201,7 @@ func (fx *federationStressFixture) enrollSpoke(t federationStressTB, i int) api.
 		"baseline_through_event_id": fx.meta.BaselineThroughEventID,
 		"token":                     created.Token,
 		"capabilities":              "pull,push,claim",
+		"actor":                     "stress",
 		"push_enabled":              true,
 	}, &replica)
 	require.True(t, replica.Binding.PushEnabled)
@@ -208,6 +210,7 @@ func (fx *federationStressFixture) enrollSpoke(t federationStressTB, i int) api.
 		HubProjectID: fx.hubProject.ID,
 		Token:        created.Token,
 		Capabilities: "claim,pull,push",
+		Actor:        "stress",
 	}
 	return replica
 }

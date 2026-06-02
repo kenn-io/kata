@@ -25,6 +25,10 @@ func (d *Store) CreateFederationEnrollment(
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
+	actor := strings.TrimSpace(p.Actor)
+	if err := db.ValidateTokenActor(actor); err != nil {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf("federation enrollment actor: %w", err)
+	}
 	token := p.Token
 	if token == "" {
 		token, err = generateFederationToken()
@@ -37,9 +41,9 @@ func (d *Store) CreateFederationEnrollment(
 		projectID = *p.ProjectID
 	}
 	res, err := d.ExecContext(ctx, `
-		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities)
-		VALUES(?, ?, ?, ?)`,
-		db.FederationTokenHash(token), p.SpokeInstanceUID, projectID, capabilities)
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities, bound_actor)
+		VALUES(?, ?, ?, ?, ?)`,
+		db.FederationTokenHash(token), p.SpokeInstanceUID, projectID, capabilities, actor)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, fmt.Errorf("create federation enrollment: %w", err)
 	}
@@ -139,7 +143,7 @@ func (d *Store) federationEnrollmentByID(ctx context.Context, id int64) (db.Fede
 }
 
 const federationEnrollmentSelect = `SELECT id, token_hash, spoke_instance_uid, project_id,
-       capabilities, created_at, updated_at, revoked_at
+       capabilities, bound_actor, created_at, updated_at, revoked_at
   FROM federation_enrollments`
 
 func scanFederationEnrollment(r rowScanner) (db.FederationEnrollment, error) {
@@ -149,7 +153,7 @@ func scanFederationEnrollment(r rowScanner) (db.FederationEnrollment, error) {
 		revokedAt sql.NullTime
 	)
 	err := r.Scan(&e.ID, &e.TokenHash, &e.SpokeInstanceUID, &projectID,
-		&e.Capabilities, &e.CreatedAt, &e.UpdatedAt, &revokedAt)
+		&e.Capabilities, &e.Actor, &e.CreatedAt, &e.UpdatedAt, &revokedAt)
 	if err == nil {
 		if projectID.Valid {
 			v := projectID.Int64

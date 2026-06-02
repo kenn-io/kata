@@ -63,6 +63,20 @@ RFC1918, CGNAT, link-local, or ULA. Public IPs and DNS hostnames are rejected
 for plaintext bearer auth. Use HTTPS through a reverse proxy or an SSH tunnel
 for those shapes.
 
+For private overlay hostnames where HTTPS is intentionally not used, clients can
+opt out per target with `KATA_ALLOW_INSECURE=1` or
+`[server].allow_insecure = true`. Federation hub enrollment tokens use their
+own credential store, so spokes opt in with `kata federation join
+--allow-insecure`.
+
+```toml
+version = 1
+
+[server]
+url = "http://hub.internal:7777"
+allow_insecure = true
+```
+
 Unix sockets, loopback HTTP, and HTTPS do not require the same private-network
 trust opt-in.
 
@@ -94,6 +108,13 @@ In identity mode:
 - attributed writes require a DB-backed token;
 - the daemon derives the actor from the token and ignores body-provided actor
   strings for mutations.
+
+The `kata federation enroll` CLI workflow also uses normal direct-client auth
+when it talks to the hub. Run it with a DB-backed personal token; the generated
+enrollment token printed by that command is separate and is only for spoke
+transport. The enrollment is bound to the token actor in identity mode, and
+the hub rejects pushed federation events whose actor differs from that bound
+actor. See [Federation token boundaries](federation.md#token-boundaries).
 
 Token lifecycle events are stored in the event log and preserved by backup,
 restore, and JSONL cutover. Hidden system-project token events are excluded

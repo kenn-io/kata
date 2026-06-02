@@ -135,6 +135,7 @@ func TestPurge_FederatedSpokeRequiresHubAdmin(t *testing.T) {
 		HubProjectUID:        project.UID,
 		ReplayHorizonEventID: 1,
 		PushEnabled:          true,
+		Actor:                "tester",
 		Enabled:              true,
 	})
 	require.NoError(t, err)

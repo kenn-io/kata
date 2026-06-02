@@ -20,7 +20,7 @@ import (
 func TestFederationSchemaVersionAndTable(t *testing.T) {
 	d := openTestDB(t)
 
-	assert.Equal(t, 12, db.CurrentSchemaVersion())
+	assert.Equal(t, 13, db.CurrentSchemaVersion())
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 	assertSchemaObject(t, d, "federation_bindings")
 	assertSchemaObject(t, d, "idx_federation_bindings_role_enabled")
@@ -97,6 +97,7 @@ func TestFederationBindingUpsertRoundTrip(t *testing.T) {
 		PullCursorEventID:    6,
 		PushEnabled:          true,
 		PushCursorEventID:    5,
+		Actor:                "bound-actor",
 		Enabled:              true,
 	}
 	created, err := d.UpsertFederationBinding(ctx, binding)
@@ -113,6 +114,7 @@ func TestFederationBindingUpsertRoundTrip(t *testing.T) {
 	assert.Equal(t, int64(6), got.PullCursorEventID)
 	assert.True(t, got.PushEnabled)
 	assert.Equal(t, int64(5), got.PushCursorEventID)
+	assert.Equal(t, "bound-actor", got.Actor)
 	assert.True(t, got.Enabled)
 
 	require.NoError(t, d.AdvanceFederationPullCursor(ctx, p.ID, 11))
@@ -254,6 +256,7 @@ func TestSkipFederationQuarantineAdvancesPushCursor(t *testing.T) {
 		HubProjectUID:        p.UID,
 		ReplayHorizonEventID: 1,
 		PushEnabled:          true,
+		Actor:                "bound-actor",
 		PushCursorEventID:    3,
 		Enabled:              true,
 	})
@@ -304,6 +307,7 @@ func TestSkipFederationQuarantineRejectsWrongProject(t *testing.T) {
 		HubProjectUID:        p.UID,
 		ReplayHorizonEventID: 1,
 		PushEnabled:          true,
+		Actor:                "bound-actor",
 		PushCursorEventID:    3,
 		Enabled:              true,
 	})
@@ -346,6 +350,7 @@ func TestPendingFederationPushEvents(t *testing.T) {
 		HubProjectUID:        p.UID,
 		ReplayHorizonEventID: 1,
 		PushEnabled:          true,
+		Actor:                "bound-actor",
 		Enabled:              true,
 	})
 	require.NoError(t, err)
@@ -444,6 +449,7 @@ func TestEnableFederationPush(t *testing.T) {
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    8,
 		PushCursorEventID:    4,
+		Actor:                "bound-actor",
 		Enabled:              true,
 	})
 	require.NoError(t, err)
@@ -470,6 +476,7 @@ func TestResetFederatedProjectIfNoPendingPushRejectsPendingLocalEvents(t *testin
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    8,
 		PushEnabled:          true,
+		Actor:                "bound-actor",
 		PushCursorEventID:    0,
 		Enabled:              true,
 	})
@@ -501,6 +508,7 @@ func TestResetFederatedProjectIfNoPendingPushIgnoresUnsupportedLocalEvents(t *te
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    8,
 		PushEnabled:          true,
+		Actor:                "bound-actor",
 		PushCursorEventID:    0,
 		Enabled:              true,
 	})
@@ -537,6 +545,7 @@ func TestResetFederatedProjectIfNoPendingPushRejectsActiveQuarantine(t *testing.
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    8,
 		PushEnabled:          true,
+		Actor:                "bound-actor",
 		PushCursorEventID:    99,
 		Enabled:              true,
 	})
@@ -568,6 +577,7 @@ func TestResetFederatedProjectIfNoPendingPushAllowsAckedLocalEvents(t *testing.T
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    8,
 		PushEnabled:          true,
+		Actor:                "bound-actor",
 		PushCursorEventID:    0,
 		Enabled:              true,
 	})
@@ -633,6 +643,7 @@ func TestResetFederatedProjectIfNoPendingPushClearsClaimProjectionState(t *testi
 		ReplayHorizonEventID: 9,
 		PullCursorEventID:    8,
 		PushEnabled:          true,
+		Actor:                "bound-actor",
 		PushCursorEventID:    0,
 		Enabled:              true,
 	})
@@ -653,6 +664,51 @@ func TestResetFederatedProjectIfNoPendingPushClearsClaimProjectionState(t *testi
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	_, err = d.IssueByUID(ctx, otherIssue.UID, db.IncludeDeletedYes)
 	require.NoError(t, err)
+}
+
+func TestAdoptProjectIntoFederationPreservesSnapshotPayloadAuthors(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "historical issue",
+		Author:    "alice",
+	})
+	require.NoError(t, err)
+	comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID,
+		Author:  "bob",
+		Body:    "historical comment",
+	})
+	require.NoError(t, err)
+	hubProjectUID := newTestUID(t)
+
+	res, err := d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID:            p.ID,
+		HubURL:               "http://hub:7373",
+		HubProjectID:         42,
+		HubProjectUID:        hubProjectUID,
+		ReplayHorizonEventID: 10,
+		Actor:                "bound-actor",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), res.AdoptionSnapshotCount)
+	events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
+	require.NoError(t, err)
+	var snapshot *db.Event
+	for i := range events {
+		if events[i].Type == "issue.snapshot" {
+			snapshot = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, snapshot)
+	assert.Equal(t, "bound-actor", snapshot.Actor)
+	payload := unmarshalPayload[federationSnapshotPayload](t, snapshot.Payload)
+	assert.Equal(t, "alice", payload.Author)
+	require.Len(t, payload.Comments, 1)
+	assert.Equal(t, comment.UID, payload.Comments[0].CommentUID)
+	assert.Equal(t, "bob", payload.Comments[0].Author)
 }
 
 func TestFederationBindingPhase1StyleDefaultsPushState(t *testing.T) {
@@ -746,6 +802,7 @@ func TestFederationEnrollmentCreateStoresOnlyTokenHash(t *testing.T) {
 		SpokeInstanceUID: spokeUID,
 		ProjectID:        &p.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 
 	require.NoError(t, err)
@@ -772,6 +829,49 @@ func TestFederationEnrollmentCreateStoresOnlyTokenHash(t *testing.T) {
 	assert.Equal(t, 0, plaintextRows)
 }
 
+func TestFederationEnrollmentCreateStoresBoundActor(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	upsertTestHubFederationBinding(ctx, t, d, p, true)
+	token := "actor-bound-token"
+	spokeUID := newTestUID(t)
+
+	created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:            token,
+		SpokeInstanceUID: spokeUID,
+		ProjectID:        &p.ID,
+		Capabilities:     "pull,push",
+		Actor:            "wesm",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "wesm", created.Enrollment.Actor)
+
+	authorized, err := d.AuthorizeFederationToken(ctx, token, p.ID, "push")
+	require.NoError(t, err)
+	assert.Equal(t, "wesm", authorized.Actor)
+
+	var stored string
+	require.NoError(t, d.QueryRowContext(ctx,
+		`SELECT bound_actor FROM federation_enrollments WHERE id = ?`,
+		created.Enrollment.ID,
+	).Scan(&stored))
+	assert.Equal(t, "wesm", stored)
+}
+
+func TestFederationEnrollmentCreateRequiresActor(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	_, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:            "missing-actor-token",
+		SpokeInstanceUID: newTestUID(t),
+		Capabilities:     "pull",
+		Actor:            " ",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "actor")
+}
+
 func TestFederationEnrollmentCreateGeneratesTokenOnceAndStoresHash(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
@@ -780,6 +880,7 @@ func TestFederationEnrollmentCreateGeneratesTokenOnceAndStoresHash(t *testing.T)
 	created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		SpokeInstanceUID: spokeUID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 
 	require.NoError(t, err)
@@ -804,6 +905,7 @@ func TestFederationEnrollmentCreateCanonicalizesCapabilities(t *testing.T) {
 		SpokeInstanceUID: newTestUID(t),
 		ProjectID:        &p.ID,
 		Capabilities:     "push,pull,push",
+		Actor:            "tester",
 	})
 
 	require.NoError(t, err)
@@ -827,6 +929,7 @@ func TestFederationEnrollmentAuthorizeReturnsSpokeInstanceUID(t *testing.T) {
 		SpokeInstanceUID: spokeUID,
 		ProjectID:        &p.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -851,6 +954,7 @@ func TestFederationEnrollmentWildcardAuthorizesAnyEnabledHubProject(t *testing.T
 		Token:            token,
 		SpokeInstanceUID: spokeUID,
 		Capabilities:     "pull,push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	require.Nil(t, created.Enrollment.ProjectID)
@@ -880,6 +984,7 @@ func TestFederationEnrollmentWildcardRejectsNonFederatedDisabledAndNonHubProject
 		Token:            token,
 		SpokeInstanceUID: newTestUID(t),
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -902,6 +1007,7 @@ func TestFederationEnrollmentRejectsArchivedHubProject(t *testing.T) {
 		SpokeInstanceUID: newTestUID(t),
 		ProjectID:        &p.ID,
 		Capabilities:     "pull,push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
@@ -926,6 +1032,7 @@ func TestFederationEnrollmentProjectSpecificAuthorizesOnlyThatProject(t *testing
 		SpokeInstanceUID: newTestUID(t),
 		ProjectID:        &allowed.ID,
 		Capabilities:     "push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -955,6 +1062,7 @@ func TestFederationEnrollmentProjectSpecificRejectsNonFederatedDisabledAndNonHub
 				SpokeInstanceUID: newTestUID(t),
 				ProjectID:        &p.ID,
 				Capabilities:     "pull",
+				Actor:            "tester",
 			})
 			require.NoError(t, err)
 
@@ -975,6 +1083,7 @@ func TestFederationEnrollmentRevokedRowsAreRejected(t *testing.T) {
 		SpokeInstanceUID: newTestUID(t),
 		ProjectID:        &p.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	require.NoError(t, d.RevokeFederationEnrollment(ctx, created.Enrollment.ID))
@@ -1000,6 +1109,7 @@ func TestFederationEnrollmentMissingCapabilityIsRejected(t *testing.T) {
 		SpokeInstanceUID: newTestUID(t),
 		ProjectID:        &p.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -1020,6 +1130,7 @@ func TestFederationEnrollmentUnknownTokenIsRejected(t *testing.T) {
 		SpokeInstanceUID: newTestUID(t),
 		ProjectID:        &p.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -1547,6 +1658,127 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 
 		require.Error(t, err)
 		assertIngestedEventCount(ctx, t, d, p.ID, 0)
+	})
+
+	t.Run("rejects bound actor issue.created payload author mismatch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		issueUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.created", 100,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"bad","body":"","author":"mallory","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		ev.Actor = "wesm"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "wesm",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assertIngestedEventCount(ctx, t, d, p.ID, 0)
+	})
+
+	t.Run("rejects bound actor issue.created embedded comment author mismatch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		issueUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.created", 100,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"bad","body":"","author":"wesm","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","comments":[{"comment_uid":"`+newTestUID(t)+`","author":"mallory","body":"spoofed","created_at":"2026-05-23T12:00:00.000Z"}]}`)
+		ev.Actor = "wesm"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "wesm",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assertIngestedEventCount(ctx, t, d, p.ID, 0)
+	})
+
+	t.Run("rejects bound actor issue.commented payload author mismatch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: p.ID,
+			Title:     "known",
+			Author:    "wesm",
+		})
+		require.NoError(t, err)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issue.UID, nil,
+			"issue.commented", 100,
+			`{"issue_uid":"`+issue.UID+`","comment_uid":"`+newTestUID(t)+`","author":"mallory","body":"spoofed","created_at":"2026-05-23T12:00:00.000Z"}`)
+		ev.Actor = "wesm"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "wesm",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		comments, err := d.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		assert.Empty(t, comments)
+	})
+
+	t.Run("allows bound actor issue.snapshot historical payload author", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		issueUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"historical","body":"","author":"mallory","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		ev.Actor = "wesm"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "wesm",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, res.Accepted)
+		issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "mallory", issue.Author)
+	})
+
+	t.Run("allows bound actor issue.snapshot historical comment author", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		issueUID := newTestUID(t)
+		commentUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"historical","body":"","author":"alice","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","comments":[{"comment_uid":"`+commentUID+`","author":"mallory","body":"historical comment","created_at":"2026-05-23T12:00:00.000Z"}]}`)
+		ev.Actor = "wesm"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "wesm",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, res.Accepted)
+		issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		comments, err := d.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		assert.Equal(t, commentUID, comments[0].UID)
+		assert.Equal(t, "mallory", comments[0].Author)
 	})
 
 	t.Run("rejects project metadata payload for different project uid", func(t *testing.T) {
@@ -2306,6 +2538,56 @@ func TestFederatedSpokeRejectsHardPurge(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrFederatedSpokeUnsupported)
 }
 
+func TestBoundFederationActor_OverridesCreateLinkAndEventAuthor(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	upsertTestSpokeFederationBindingWithPushActor(ctx, t, d, p, true, true, "wesm")
+	from, _ := createTesterIssue(ctx, t, d, p.ID, "from")
+	to, _ := createTesterIssue(ctx, t, d, p.ID, "to")
+
+	link, evt, err := d.CreateLinkAndEvent(ctx,
+		db.CreateLinkParams{
+			ProjectID:   p.ID,
+			FromIssueID: from.ID,
+			ToIssueID:   to.ID,
+			Type:        "blocks",
+			Author:      "mallory",
+		},
+		db.LinkEventParams{
+			EventType:    "issue.linked",
+			EventIssueID: from.ID,
+			FromShortID:  from.ShortID,
+			FromUID:      from.UID,
+			ToShortID:    to.ShortID,
+			ToUID:        to.UID,
+			Actor:        "mallory",
+		})
+
+	require.NoError(t, err)
+	assert.Equal(t, "wesm", link.Author)
+	assert.Equal(t, "wesm", evt.Actor)
+}
+
+func TestBoundFederationActor_OverridesEditIssueAtomicLinkAuthor(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	upsertTestSpokeFederationBindingWithPushActor(ctx, t, d, p, true, true, "wesm")
+	subject, _ := createTesterIssue(ctx, t, d, p.ID, "subject")
+	target, _ := createTesterIssue(ctx, t, d, p.ID, "target")
+
+	res, err := d.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID:   subject.ID,
+		Actor:     "mallory",
+		AddBlocks: []int64{target.ID},
+	})
+
+	require.NoError(t, err)
+	link, err := d.LinkByEndpoints(ctx, subject.ID, target.ID, "blocks")
+	require.NoError(t, err)
+	assert.Equal(t, "wesm", link.Author)
+	require.Len(t, res.Events, 1)
+	assert.Equal(t, "issue.links_changed", res.Events[0].Type)
+	assert.Equal(t, "wesm", res.Events[0].Actor)
+}
+
 type federationSnapshotPayload struct {
 	UID          string          `json:"uid"`
 	ShortID      string          `json:"short_id"`
@@ -2363,7 +2645,14 @@ func upsertTestSpokeFederationBindingWithPush(
 	ctx context.Context, t *testing.T, d *sqlitestore.Store, p db.Project, enabled, pushEnabled bool,
 ) {
 	t.Helper()
-	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+	upsertTestSpokeFederationBindingWithPushActor(ctx, t, d, p, enabled, pushEnabled, "tester")
+}
+
+func upsertTestSpokeFederationBindingWithPushActor(
+	ctx context.Context, t *testing.T, d *sqlitestore.Store, p db.Project, enabled, pushEnabled bool, actor string,
+) {
+	t.Helper()
+	binding := db.FederationBinding{
 		ProjectID:            p.ID,
 		Role:                 db.FederationRoleSpoke,
 		HubURL:               "http://127.0.0.1:7373",
@@ -2372,7 +2661,11 @@ func upsertTestSpokeFederationBindingWithPush(
 		ReplayHorizonEventID: 1,
 		PushEnabled:          pushEnabled,
 		Enabled:              enabled,
-	})
+	}
+	if pushEnabled {
+		binding.Actor = actor
+	}
+	_, err := d.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
 }
 
@@ -2605,12 +2898,14 @@ func TestCountActiveFederationEnrollments(t *testing.T) {
 		SpokeInstanceUID: newTestUID(t),
 		ProjectID:        &p.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	_, err = d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "global-token",
 		SpokeInstanceUID: newTestUID(t),
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	revoked, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -2618,6 +2913,7 @@ func TestCountActiveFederationEnrollments(t *testing.T) {
 		SpokeInstanceUID: newTestUID(t),
 		ProjectID:        &p.ID,
 		Capabilities:     "pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	require.NoError(t, d.RevokeFederationEnrollment(ctx, revoked.Enrollment.ID))

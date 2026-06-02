@@ -1,32 +1,32 @@
- Project: kata                                                                                                                                  kata カタ · dev 
+ Project: kata                                                                                                                                  kata カタ · dev
 
-  #aaa1  fix the tui to be less shitty                                                      [open]                                                              
-  authored by anonymous · created May 2 19:15 · updated 21h ago                                                                                                 
-  owner: none   parent: none                                                                                                                                    
-  priority: none                                                                                                                                                
-                                                                                                                                                                
-  Body                                                                                                                                                          
-  enter some stuff here                                                                                                                                         
-                                                                                                                                                                
-  Activity   Comments (0)   [ Events (1) ]   Links (0)                                                                                                          
-  > [issue.created] 2026-05-02 19:16 anonymous — created                                                                                                        
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
-                                                                                                                                                                
- ↑↓ scroll▕ j/k row   ▕ ↹ section▕ ↵ open ▕ pgup/pgdn page▕ e edit  ▕ c comment▕ + label▕ - unlabel▕ a owner▕ A unassign▕ x close▕ r reopen▕ p parent▕ b block  
- l related▕ ! priority▕ D daemons▕ N child▕ L layout      ▕ esc back▕ ? help   ▕ q quit                                                                         
+  #aaa1  fix the tui to be less shitty                                                      [open]
+  authored by anonymous · created May 2 19:15 · updated 21h ago
+  owner: none   parent: none
+  priority: none
+
+  Body
+  enter some stuff here
+
+  Activity   Comments (0)   [ Events (1) ]   Links (0)
+  > [issue.created] 2026-05-02 19:16 anonymous — created
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ↑↓ scroll▕ j/k row  ▕ ↹ section ▕ ↵ open   ▕ pgup/pgdn page▕ e edit ▕ c comment▕ + label ▕ - unlabel▕ a owner▕ A unassign▕ x close▕ r reopen▕ p parent
+ b block  ▕ l related▕ ! priority▕ D daemons▕ F federation  ▕ N child▕ L layout ▕ esc back▕ ? help   ▕ q quit

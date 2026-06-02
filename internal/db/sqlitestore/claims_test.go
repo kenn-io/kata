@@ -34,6 +34,7 @@ func TestAuthorizeFederationTokenRequiresClaimCapability(t *testing.T) {
 		SpokeInstanceUID: spokeUID,
 		ProjectID:        &p.ID,
 		Capabilities:     "pull,push",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 
@@ -46,6 +47,7 @@ func TestAuthorizeFederationTokenRequiresClaimCapability(t *testing.T) {
 		SpokeInstanceUID: spokeUID,
 		ProjectID:        &p.ID,
 		Capabilities:     "claim,pull",
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 

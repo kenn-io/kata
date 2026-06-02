@@ -1,30 +1,30 @@
- Project: —                                                                                                   kata カタ 
+ Project: —                                                                                                   kata カタ
 
-  #42aa  fix login bug on Safari                                                            [open]                      
-  authored by wesm                                                                                                      
-  owner: none   parent: none                                                                                            
-  priority: none                                                                                                        
-                                                                                                                        
-  Body                                                                                                                  
-  Reproduces in Safari 17 only.                                                                                         
-  Click the login button twice.                                                                                         
-                                                                                                                        
-  Activity   [ Comments (30) ]   Events (2)   Links (1)                                                                 
-    actor-1   Apr 30 10:00                                                                                              
-    comment body 1                                                                                                      
-                                                                                                                        
-    actor-2   Apr 30 10:01                                                                                              
-    comment body 2                                                                                                      
-                                                                                                                        
-    actor-3   Apr 30 10:02                                                                                              
-    comment body 3                                                                                                      
-                                                                                                                        
-    actor-4   Apr 30 10:03                                                                                              
-    comment body 4                                                                                                      
-                                                                                                                        
-    actor-5   Apr 30 10:04                                                                                              
-    comment body 5                                                                                                      
-                                                                                                    [lines 1-24 of 100] 
- ↑↓ scroll ▕ j/k row▕ ↹ section▕ ↵ open  ▕ pgup/pgdn page▕ e edit   ▕ c comment ▕ + label  ▕ - unlabel▕ a owner         
- A unassign▕ x close▕ r reopen ▕ p parent▕ b block       ▕ l related▕ ! priority▕ D daemons▕ N child  ▕ L layout        
- esc back  ▕ ? help ▕ q quit                                                                                            
+  #42aa  fix login bug on Safari                                                            [open]
+  authored by wesm
+  owner: none   parent: none
+  priority: none
+
+  Body
+  Reproduces in Safari 17 only.
+  Click the login button twice.
+
+  Activity   [ Comments (30) ]   Events (2)   Links (1)
+    actor-1   Apr 30 10:00
+    comment body 1
+
+    actor-2   Apr 30 10:01
+    comment body 2
+
+    actor-3   Apr 30 10:02
+    comment body 3
+
+    actor-4   Apr 30 10:03
+    comment body 4
+
+    actor-5   Apr 30 10:04
+    comment body 5
+                                                                                                    [lines 1-24 of 100]
+ ↑↓ scroll ▕ j/k row ▕ ↹ section▕ ↵ open  ▕ pgup/pgdn page▕ e edit   ▕ c comment ▕ + label  ▕ - unlabel   ▕ a owner
+ A unassign▕ x close ▕ r reopen ▕ p parent▕ b block       ▕ l related▕ ! priority▕ D daemons▕ F federation▕ N child
+ L layout  ▕ esc back▕ ? help   ▕ q quit

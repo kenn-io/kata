@@ -1,30 +1,30 @@
- Project: kata                                                                                       kata カタ · v0.1.0 
- open: 1 · closed: 0 · all: 1                                                                  status:open  owner:alice 
-    #     prio status    title                                                           kids    owner         updated  
-▶   #aaa1 —    open      narrowed by chips                                                       alice         30m ago  
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                  [1/1] 
- ↑↓ move ▕ ↵ open▕ n new ▕ N child▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority▕ D daemons      
- L layout▕ ? help▕ q quit                                                                                               
+ Project: kata                                                                                       kata カタ · v0.1.0
+ open: 1 · closed: 0 · all: 1                                                                  status:open  owner:alice
+    #     prio status    title                                                           kids    owner         updated
+▶   #aaa1 —    open      narrowed by chips                                                       alice         30m ago
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                  [1/1]
+ ↑↓ move  ▕ ↵ open      ▕ n new   ▕ N child▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority
+ D daemons▕ F federation▕ L layout▕ ? help ▕ q quit

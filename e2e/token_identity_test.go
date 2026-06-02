@@ -20,6 +20,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -138,6 +140,110 @@ func TestTokenIdentity_BootstrapCanResolveButCannotWrite(t *testing.T) {
 	assert.NotContains(t, listOut, "bootstrap should not write")
 }
 
+func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
+	if testing.Short() {
+		t.Skip("e2e")
+	}
+	ctx := context.Background()
+	const projectName = "identity-federation-e2e"
+	const pushedTitle = "spoke issue from token-bound federation"
+
+	bin := buildKataBinary(t)
+	hubAddr, hubHome, stopHub := startIdentityDaemon(t, bin)
+	defer stopHub()
+	hubDB, err := sqlitestore.Open(ctx, filepath.Join(hubHome, "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = hubDB.Close() })
+
+	adminEnv := identityCLIEnv(hubHome, hubAddr, identityBootstrapToken)
+	userToken := createIdentityTokenCLI(t, bin, adminEnv, "wesm")
+	hubClientHome := t.TempDir()
+	hubEnv := identityCLIEnv(hubClientHome, hubAddr, userToken)
+	hubWS := initRepo(t, "https://github.com/wesm/identity-federation-hub.git")
+	runRemoteCmd(t, bin, hubWS, hubEnv, "--project", projectName, "init")
+
+	spokeDirs := newE2EDirs(t)
+	spokeEnv := append(spokeDirs.env(),
+		"KATA_AUTH_TOKEN=",
+		"KATA_FEDERATION_PULL_INTERVAL_MS=25",
+		"KATA_HTTP_TIMEOUT=10s",
+	)
+	spokeStderr := startDaemon(t, bin, spokeEnv)
+	spokeURL, _ := connectDaemon(t, spokeDirs, spokeStderr)
+	spokeIdentityOut := runRemoteCmdOutput(t, bin, spokeDirs.repoDir, spokeEnv,
+		"--json", "federation", "identity")
+	var spokeIdentity struct {
+		InstanceUID string `json:"instance_uid"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(spokeIdentityOut), &spokeIdentity),
+		"spoke identity output: %s", spokeIdentityOut)
+	require.NotEmpty(t, spokeIdentity.InstanceUID)
+
+	bootstrapEnrollEnv := append(spokeDirs.env(),
+		"KATA_SERVER="+spokeURL,
+		"KATA_AUTH_TOKEN="+identityBootstrapToken,
+		"KATA_AUTHOR=e2e-client",
+		"KATA_HTTP_TIMEOUT=10s",
+	)
+	bootstrapOut, bootstrapErr := runRemoteCmdOutputErr(t, bin, spokeDirs.repoDir, bootstrapEnrollEnv,
+		"federation", "enroll", projectName,
+		"--spoke-instance", spokeIdentity.InstanceUID,
+		"--hub-url", "http://"+hubAddr,
+		"--actor", "wesm")
+	require.Error(t, bootstrapErr, "bootstrap token must not create identity-mode federation enrollments")
+	assert.Contains(t, bootstrapOut, "bootstrap token cannot perform attributed writes")
+
+	enrollEnv := append(spokeDirs.env(),
+		"KATA_SERVER="+spokeURL,
+		"KATA_AUTH_TOKEN="+userToken,
+		"KATA_AUTHOR=e2e-client",
+		"KATA_HTTP_TIMEOUT=10s",
+	)
+	enrollOut := runRemoteCmdOutput(t, bin, spokeDirs.repoDir, enrollEnv,
+		"federation", "enroll", projectName,
+		"--spoke-instance", spokeIdentity.InstanceUID,
+		"--hub-url", "http://"+hubAddr,
+		"--capabilities", "pull,push,lease",
+		"--actor", "mallory")
+	joinCommand := extractFederationJoinCommand(t, enrollOut)
+	assert.Contains(t, joinCommand, "--actor wesm")
+	assert.NotContains(t, joinCommand, "mallory")
+
+	spokeShellEnv := append(spokeEnv, "PATH="+filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	joinOut, err := runShellOutput(spokeDirs.repoDir, spokeShellEnv, joinCommand)
+	require.NoErrorf(t, err, "join command %q failed:\n%s", joinCommand, joinOut)
+	assert.Contains(t, joinOut, "joined federation project "+projectName)
+	assert.Contains(t, joinOut, "push-enabled: true")
+
+	runRemoteCmd(t, bin, spokeDirs.repoDir, spokeEnv,
+		"--project", projectName,
+		"--as", "mallory",
+		"create", pushedTitle)
+
+	hubProject, err := hubDB.ProjectByName(ctx, projectName)
+	require.NoError(t, err)
+	pushed := waitForFederatedTitle(t, hubDB, pushedTitle, &safeBuffer{}, 10*time.Second)
+	assert.Equal(t, "wesm", pushed.Author)
+	assert.NotEqual(t, "mallory", pushed.Author)
+
+	events, err := hubDB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: hubProject.ID, Limit: 100})
+	require.NoError(t, err)
+	var createdEvent *db.Event
+	for i := range events {
+		if events[i].Type == "issue.created" && events[i].IssueUID != nil && *events[i].IssueUID == pushed.UID {
+			createdEvent = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, createdEvent, "hub did not receive issue.created for %s", pushed.UID)
+	assert.Equal(t, "wesm", createdEvent.Actor)
+
+	hubList := runRemoteCmdOutput(t, bin, hubWS, hubEnv,
+		"--project", projectName, "list", "--json")
+	assert.Contains(t, hubList, `"author":"wesm"`)
+	assert.NotContains(t, hubList, "mallory")
+}
+
 type rawHTTPResponse struct {
 	status int
 	body   string
@@ -224,6 +330,26 @@ func createIdentityTokenCLI(t *testing.T, bin string, env []string, actor string
 func runRemoteCmdOutputErr(t *testing.T, bin, workdir string, env []string, args ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(bin, args...) //nolint:gosec
+	cmd.Dir = workdir
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func extractFederationJoinCommand(t *testing.T, out string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if cmd, ok := strings.CutPrefix(line, "join: "); ok {
+			require.NotEmpty(t, strings.TrimSpace(cmd), "empty join command in output:\n%s", out)
+			return strings.TrimSpace(cmd)
+		}
+	}
+	t.Fatalf("missing join command in output:\n%s", out)
+	return ""
+}
+
+func runShellOutput(workdir string, env []string, command string) (string, error) {
+	cmd := exec.Command("sh", "-c", command) //nolint:gosec // test executes a kata-generated join command.
 	cmd.Dir = workdir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()

@@ -1,30 +1,30 @@
- Project: kata                                                                                       kata カタ · v0.1.0 
- open: 1 · closed: 1 · all: 3                                                                search:"no-match-anywhere" 
-    #     prio status    title                                                           kids    owner         updated  
-  no issues match. press c to clear filters or n to create one.                                                         
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
-                                                                                                                        
- ↑↓ move▕ ↵ open▕ n new▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority▕ D daemons▕ L layout       
- ? help ▕ q quit                                                                                                        
+ Project: kata                                                                                       kata カタ · v0.1.0
+ open: 1 · closed: 1 · all: 3                                                                search:"no-match-anywhere"
+    #     prio status    title                                                           kids    owner         updated
+  no issues match. press c to clear filters or n to create one.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ↑↓ move ▕ ↵ open▕ n new ▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority▕ D daemons▕ F federation
+ L layout▕ ? help▕ q quit

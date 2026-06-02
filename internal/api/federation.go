@@ -83,6 +83,13 @@ type FederationProjectStatus struct {
 	Role                        string                        `json:"role"`
 	Enabled                     bool                          `json:"enabled"`
 	PushEnabled                 bool                          `json:"push_enabled"`
+	BoundActor                  string                        `json:"bound_actor,omitempty"`
+	HubURL                      string                        `json:"hub_url,omitempty"`
+	HubProjectID                int64                         `json:"hub_project_id,omitempty"`
+	HubProjectUID               string                        `json:"hub_project_uid,omitempty"`
+	Capabilities                string                        `json:"capabilities,omitempty"`
+	AllowInsecure               bool                          `json:"allow_insecure,omitempty"`
+	CredentialStatus            string                        `json:"credential_status,omitempty"`
 	PullCursorEventID           int64                         `json:"pull_cursor_event_id"`
 	PushCursorEventID           int64                         `json:"push_cursor_event_id"`
 	PendingPushCount            int64                         `json:"pending_push_count"`
@@ -147,6 +154,7 @@ type CreateFederationEnrollmentRequest struct {
 		ProjectID        *int64 `json:"project_id"`
 		Capabilities     string `json:"capabilities"`
 		Token            string `json:"token,omitempty"`
+		Actor            string `json:"actor,omitempty"`
 	}
 }
 
@@ -157,6 +165,7 @@ type FederationEnrollmentOut struct {
 	SpokeInstanceUID string     `json:"spoke_instance_uid"`
 	ProjectID        *int64     `json:"project_id"`
 	Capabilities     string     `json:"capabilities"`
+	Actor            string     `json:"actor"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	RevokedAt        *time.Time `json:"revoked_at,omitempty"`
@@ -211,6 +220,8 @@ type CreateFederationReplicaRequest struct {
 		BaselineThroughEventID int64  `json:"baseline_through_event_id,omitempty"`
 		Token                  string `json:"token,omitempty"`
 		Capabilities           string `json:"capabilities,omitempty"`
+		Actor                  string `json:"actor,omitempty"`
+		AllowInsecure          bool   `json:"allow_insecure,omitempty"`
 		PushEnabled            bool   `json:"push_enabled,omitempty"`
 		AdoptExisting          bool   `json:"adopt_existing,omitempty"`
 	}
@@ -360,6 +371,7 @@ type FederationBindingOut struct {
 	PullCursorEventID    int64      `json:"pull_cursor_event_id"`
 	PushEnabled          bool       `json:"push_enabled"`
 	PushCursorEventID    int64      `json:"push_cursor_event_id"`
+	Actor                string     `json:"actor,omitempty"`
 	Enabled              bool       `json:"enabled"`
 	CreatedAt            time.Time  `json:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at"`

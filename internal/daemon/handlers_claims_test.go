@@ -136,7 +136,7 @@ func TestClaimAuthEnrollmentTokenWithClaimCanClaimHubProject(t *testing.T) {
 	assert.True(t, out.Granted)
 	require.NotNil(t, out.Claim)
 	assert.Equal(t, federationTestSpokeUID, out.Holder.HolderInstanceUID)
-	assert.Equal(t, "spoke-cli", out.Holder.Holder)
+	assert.Equal(t, "tester", out.Holder.Holder)
 }
 
 func TestClaimAuthEnrollmentTokenWinsBeforeAuthDisabledLocalFallback(t *testing.T) {
@@ -154,6 +154,7 @@ func TestClaimAuthEnrollmentTokenWinsBeforeAuthDisabledLocalFallback(t *testing.
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.True(t, out.Granted)
 	assert.Equal(t, federationTestSpokeUID, out.Holder.HolderInstanceUID)
+	assert.Equal(t, "tester", out.Holder.Holder)
 	assert.NotEqual(t, env.DB.InstanceUID(), out.Holder.HolderInstanceUID)
 }
 
@@ -172,6 +173,7 @@ func TestClaimAuthInsecureReadonlyEnrollmentTokenCanClaimHubProject(t *testing.T
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.True(t, out.Granted)
 	assert.Equal(t, federationTestSpokeUID, out.Holder.HolderInstanceUID)
+	assert.Equal(t, "tester", out.Holder.Holder)
 }
 
 func TestClaimAuthEnrollmentTokenWithoutClaimIsForbidden(t *testing.T) {
@@ -737,7 +739,7 @@ func TestClaimForwardAcquireAndReleaseUpdatesSpokeCache(t *testing.T) {
 	cached, err := spoke.DB.ClaimStatus(ctx, spokeProject.ID, issue.ShortID, time.Now().UTC())
 	require.NoError(t, err)
 	require.True(t, cached.Held)
-	assert.Equal(t, "spoke-cli", cached.Holder.Holder)
+	assert.Equal(t, "tester", cached.Holder.Holder)
 	assert.Equal(t, spoke.DB.InstanceUID(), cached.Holder.HolderInstanceUID)
 
 	var released claimResponseBody
@@ -869,6 +871,7 @@ func TestClaimForwardCrossOriginRedirectDoesNotReachRedirectTarget(t *testing.T)
 func TestPendingClaimOfflineAcquireEnqueuesAndReleaseDoesNotClearCache(t *testing.T) {
 	ctx := context.Background()
 	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
+	offlineHubURL := fastFailClaimHubURL(t)
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
 		HubURL:       hub.URL,
 		HubProjectID: hubProject.ID,
@@ -886,7 +889,7 @@ func TestPendingClaimOfflineAcquireEnqueuesAndReleaseDoesNotClearCache(t *testin
 	require.True(t, acquired.Granted)
 
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
-		HubURL:       "http://127.0.0.1:1",
+		HubURL:       offlineHubURL,
 		HubProjectID: hubProject.ID,
 		Token:        token,
 		Capabilities: "claim",
@@ -914,15 +917,16 @@ func TestPendingClaimOfflineAcquireEnqueuesAndReleaseDoesNotClearCache(t *testin
 	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM pending_claim_requests
 		 WHERE issue_uid = ? AND holder = ? AND rejected_at IS NULL AND resolved_at IS NULL`,
-		issue.UID, "offline-cli").Scan(&n))
+		issue.UID, "tester").Scan(&n))
 	assert.Equal(t, 1, n)
 }
 
 func TestPendingClaimOfflineAcquireDuplicateReturnsExistingRequest(t *testing.T) {
 	ctx := context.Background()
 	_, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
+	offlineHubURL := fastFailClaimHubURL(t)
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
-		HubURL:       "http://127.0.0.1:1",
+		HubURL:       offlineHubURL,
 		HubProjectID: hubProject.ID,
 		Token:        token,
 		Capabilities: "claim",
@@ -950,7 +954,7 @@ func TestPendingClaimOfflineAcquireDuplicateReturnsExistingRequest(t *testing.T)
 		SELECT COUNT(*) FROM pending_claim_requests
 		 WHERE issue_uid = ? AND holder = ? AND holder_instance_uid = ? AND client_kind = ?
 		   AND rejected_at IS NULL AND resolved_at IS NULL`,
-		issue.UID, "offline-cli", spoke.DB.InstanceUID(), "cli").Scan(&n))
+		issue.UID, "tester", spoke.DB.InstanceUID(), "cli").Scan(&n))
 	assert.Equal(t, 1, n)
 }
 
@@ -979,7 +983,7 @@ func TestPendingClaimUnixHubOfflineAcquireEnqueues(t *testing.T) {
 	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM pending_claim_requests
 		 WHERE issue_uid = ? AND holder = ? AND rejected_at IS NULL AND resolved_at IS NULL`,
-		issue.UID, "offline-cli").Scan(&n))
+		issue.UID, "tester").Scan(&n))
 	assert.Equal(t, 1, n)
 }
 
@@ -1084,6 +1088,7 @@ func createClaimForwardingPair(
 		HubProjectID:         hubProject.ID,
 		HubProjectUID:        hubProject.UID,
 		ReplayHorizonEventID: 1,
+		Actor:                "tester",
 		Enabled:              true,
 	})
 	require.NoError(t, err)
@@ -1104,6 +1109,7 @@ func createClaimEnrollment(
 		SpokeInstanceUID: spokeUID,
 		ProjectID:        &projectID,
 		Capabilities:     capabilities,
+		Actor:            "tester",
 	})
 	require.NoError(t, err)
 	return created
@@ -1132,6 +1138,24 @@ func claimActionPath(projectID int64, ref, action string) string {
 		action = "acquire"
 	}
 	return issuePathRef(projectID, ref, "lease/actions/"+action)
+}
+
+func fastFailClaimHubURL(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijacking unsupported", http.StatusInternalServerError)
+			return
+		}
+		conn, _, err := hijacker.Hijack()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
 }
 
 func claimStatusPath(projectID int64, ref string) string {

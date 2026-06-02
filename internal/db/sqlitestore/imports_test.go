@@ -184,6 +184,70 @@ func TestImportBatch_CreatesIssueCommentsLabelsLinks(t *testing.T) {
 		"import link payload must carry to_uid so SSE consumers key on stable identity")
 }
 
+func TestImportBatch_BoundFederationActorOverridesImportedAuthors(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	upsertTestSpokeFederationBindingWithPushActor(ctx, t, d, p, true, true, "wesm")
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 1, 11, 0, 0, 0, time.UTC)
+
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: p.ID,
+		Source:    "beads",
+		Actor:     "importer",
+		Items: []db.ImportItem{{
+			ExternalID: "external-1",
+			Title:      "Imported",
+			Body:       "body",
+			Author:     "external-author",
+			Status:     "open",
+			CreatedAt:  t1,
+			UpdatedAt:  t1,
+			Comments: []db.ImportComment{{
+				ExternalID: "comment-1",
+				Author:     "external-commenter",
+				Body:       "note",
+				CreatedAt:  t2,
+			}},
+		}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Created)
+	assert.Equal(t, 1, res.Comments)
+	mapping, err := d.ImportMappingBySource(ctx, p.ID, "beads", "issue", "external-1")
+	require.NoError(t, err)
+	require.NotNil(t, mapping.IssueID)
+	issue, err := d.IssueByID(ctx, *mapping.IssueID)
+	require.NoError(t, err)
+	assert.Equal(t, "wesm", issue.Author)
+	comments := commentsForIssue(ctx, t, d, issue.ID)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "wesm", comments[0].Author)
+
+	var createdEvent, commentEvent *db.Event
+	for i := range events {
+		switch events[i].Type {
+		case "issue.created":
+			createdEvent = &events[i]
+		case "issue.commented":
+			commentEvent = &events[i]
+		}
+	}
+	require.NotNil(t, createdEvent)
+	assert.Equal(t, "wesm", createdEvent.Actor)
+	createdPayload := unmarshalPayload[struct {
+		Author string `json:"author"`
+	}](t, createdEvent.Payload)
+	assert.Equal(t, "wesm", createdPayload.Author)
+
+	require.NotNil(t, commentEvent)
+	assert.Equal(t, "wesm", commentEvent.Actor)
+	commentPayload := unmarshalPayload[struct {
+		Author string `json:"author"`
+	}](t, commentEvent.Payload)
+	assert.Equal(t, "wesm", commentPayload.Author)
+}
+
 func TestImportBatch_RelatedLinkEventPayloadKeepsImportDirectionWhenStorageCanonicalizes(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	ts := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)

@@ -32,9 +32,15 @@ func requireFederatedIssueClaim(
 		return federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
 
+	holder := strings.TrimSpace(actor)
+	if binding.Role == db.FederationRoleSpoke && binding.PushEnabled {
+		if bound := strings.TrimSpace(binding.Actor); bound != "" {
+			holder = bound
+		}
+	}
 	principal := db.ClaimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
-		Holder:            strings.TrimSpace(actor),
+		Holder:            holder,
 		ClientKind:        "",
 	}
 

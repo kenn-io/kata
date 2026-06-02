@@ -239,14 +239,15 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 		PullCursorEventID:    6,
 		PushEnabled:          true,
 		PushCursorEventID:    5,
+		Actor:                "tester",
 		Enabled:              true,
 	}
 	_, err = d.UpsertFederationBinding(ctx, binding)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `
-		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities)
-		VALUES(?, ?, ?, ?)`,
-		strings.Repeat("c", 64), "01HZZZZZZZZZZZZZZZZZZZZZ03", p1.ID, "pull,push")
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities, bound_actor)
+		VALUES(?, ?, ?, ?, ?)`,
+		strings.Repeat("c", 64), "01HZZZZZZZZZZZZZZZZZZZZZ03", p1.ID, "pull,push", "tester")
 	require.NoError(t, err)
 
 	addTesterComment(ctx, t, d, login.ID, "watermelon comment text")

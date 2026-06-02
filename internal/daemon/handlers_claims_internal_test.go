@@ -20,11 +20,19 @@ import (
 func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 
-	client, err := newClaimHubClient(context.Background(), "http://100.64.0.5:7787", "enrollment-token")
+	client, err := newClaimHubClient(context.Background(), "http://100.64.0.5:7787", "enrollment-token", false)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
 	assert.Equal(t, "http://100.64.0.5:7787", client.baseURL)
+}
+
+func TestNewClaimHubClientHonorsAllowInsecureHostnameOptIn(t *testing.T) {
+	client, err := newClaimHubClient(context.Background(), "http://tailnet-hub.internal:7787", "enrollment-token", true)
+
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	assert.Equal(t, "http://tailnet-hub.internal:7787", client.baseURL)
 }
 
 func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
@@ -78,7 +86,7 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	client, err := newClaimHubClient(context.Background(), "http://kata.invalid", "enrollment-token")
+	client, err := newClaimHubClient(context.Background(), "http://kata.invalid", "enrollment-token", false)
 	require.NoError(t, err)
 	_, err = client.AcquireClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
 

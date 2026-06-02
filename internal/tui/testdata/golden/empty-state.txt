@@ -1,24 +1,23 @@
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                        no kata projects registered yet                         
-                                                                                
-                   run `kata init` in a repo to get started.                    
-                                press q to quit.                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
-                                                                                
+
+
+
+
+
+
+
+
+
+
+                        no kata projects registered yet
+
+                   run `kata init` in a repo to get started.
+                                press q to quit.
+
+
+
+
+
+
+
+
+

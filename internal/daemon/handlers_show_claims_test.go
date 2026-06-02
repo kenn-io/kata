@@ -228,7 +228,7 @@ func TestShowIssueClaimSpokeFallbackDoesNotExpireCachedTimedClaim(t *testing.T) 
 		},
 		HubNow: cachedAt,
 	}))
-	writeShowClaimSpokeBinding(t, spoke, project, "http://127.0.0.1:1", "claim-token", "claim")
+	writeShowClaimSpokeBinding(t, spoke, project, fastFailClaimHubURL(t), "claim-token", "claim")
 
 	body := getShowIssueClaimBody(t, spoke, project.ID, issue.ShortID)
 
@@ -427,7 +427,7 @@ func TestShowIssueClaimRefreshHubUnreachableFallsBackToCachedClaimAndPending(t *
 		HubNow: cachedAt,
 	}))
 	pending := enqueueShowPendingClaim(t, spoke.DB, project.ID, issue.ShortID, "pending-cli", cachedAt.Add(time.Minute))
-	writeShowClaimSpokeBinding(t, spoke, project, "http://127.0.0.1:1", "claim-token", "claim")
+	writeShowClaimSpokeBinding(t, spoke, project, fastFailClaimHubURL(t), "claim-token", "claim")
 
 	body := getShowIssueClaimBody(t, spoke, project.ID, issue.ShortID)
 	require.NotNil(t, body.Claim)
