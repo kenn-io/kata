@@ -51,6 +51,53 @@ type federationDraft struct {
 	BlockedReason       string
 }
 
+type federationEnrollResult struct {
+	Draft      federationDraft
+	HubURL     string
+	Enrollment FederationEnrollment
+	Metadata   ProjectFederationMetadata
+	Replica    FederationReplicaResult
+	Recovery   federationRecovery
+}
+
+type federationRecovery struct {
+	HubName       string
+	SpokeName     string
+	SpokeEndpoint string
+	Stage         string
+	Token         string
+	Reveal        bool
+	Command       federationRecoveryCommand
+	Err           error
+}
+
+type federationRecoveryCommand struct {
+	HubURL                 string
+	HubProjectID           int64
+	HubProjectUID          string
+	ProjectName            string
+	ReplayHorizonEventID   int64
+	BaselineThroughEventID int64
+	Token                  string
+	Actor                  string
+	Capabilities           string
+	PushEnabled            bool
+	AllowInsecure          bool
+	AdoptExisting          bool
+	SpokeName              string
+	SpokeEndpoint          string
+}
+
+var (
+	newFederationHubAdminClient = func(
+		ctx context.Context,
+		target daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		return newHubAdminClient(ctx, target)
+	}
+	newFederationEnrollmentClient = newHubEnrollmentClient
+)
+
 func (m Model) transitionToFederation() (Model, tea.Cmd) {
 	m.prevView = m.view
 	m.view = viewFederation
@@ -116,6 +163,25 @@ func (m Model) handleFederationHubProjectsLoaded(msg federationHubProjectsLoaded
 	return m
 }
 
+func (m Model) handleFederationEnrollResult(msg federationEnrollResultMsg) (Model, tea.Cmd) {
+	if m.staleConnMsg(msg.connGen) || msg.attempt != m.federationEnrollAttempt {
+		return m, nil
+	}
+	m.federationEnrollRunning = false
+	if msg.err != nil {
+		m.federationRecovery = msg.result.Recovery
+		m.federationRecovery.Err = msg.err
+		m.federationMode = federationModeRecovery
+		return m, nil
+	}
+	m.federationResult = msg.result
+	m.federationMode = federationModeResult
+	m.federationLoading = true
+	m.federationErr = nil
+	m.federationGen++
+	return m, m.fetchFederationStatus()
+}
+
 func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	rows := federationSpokeStatuses(m.federationStatuses)
 	switch m.federationMode {
@@ -129,6 +195,10 @@ func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.routeFederationHubProjectKey(msg)
 	case federationModePreview:
 		return m.routeFederationPreviewKey(msg)
+	case federationModeRecovery:
+		return m.routeFederationRecoveryKey(msg)
+	case federationModeResult:
+		return m.routeFederationResultKey(msg)
 	}
 	if next, ok := m.cursorMoveFederation(msg, rows); ok {
 		return next, nil
@@ -247,6 +317,33 @@ func (m Model) routeFederationPreviewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.federationMode = federationModeSelectHubProject
 		return m, nil
 	case "enter":
+		if m.federationDraft.BlockedReason != "" || m.federationEnrollRunning {
+			return m, nil
+		}
+		m.federationEnrollAttempt++
+		m.federationEnrollRunning = true
+		m.federationEnrollErr = nil
+		return m, m.executeFederationEnrollment(m.federationEnrollAttempt)
+	}
+	return m, nil
+}
+
+func (m Model) routeFederationRecoveryKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "R":
+		m.federationRecovery.Reveal = true
+		return m, nil
+	case "esc":
+		m.federationMode = federationModePreview
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) routeFederationResultKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "enter":
+		m.federationMode = federationModeList
 		return m, nil
 	}
 	return m, nil
@@ -400,7 +497,7 @@ func (m Model) fetchFederationHubProjects(target daemonTarget) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		client, resolved, err := newHubAdminClient(ctx, target)
+		client, resolved, err := newFederationHubAdminClient(ctx, target)
 		if err != nil {
 			return federationHubProjectsLoadedMsg{connGen: connGen, gen: gen, target: target, err: err}
 		}
@@ -415,9 +512,161 @@ func (m Model) fetchFederationHubProjects(target daemonTarget) tea.Cmd {
 	}
 }
 
+func (m Model) executeFederationEnrollment(attempt uint64) tea.Cmd {
+	connGen := m.connGen
+	draft := m.federationDraft
+	instanceUID := m.federationInstance.InstanceUID
+	spoke := m.api
+	active := m.activeDaemon
+	return func() tea.Msg {
+		result, err := runFederationEnrollment(context.Background(), draft, instanceUID, active, spoke)
+		return federationEnrollResultMsg{
+			connGen: connGen,
+			attempt: attempt,
+			result:  result,
+			err:     err,
+		}
+	}
+}
+
+func runFederationEnrollment(
+	parent context.Context,
+	draft federationDraft,
+	instanceUID string,
+	active daemonTarget,
+	spoke federationSpokeAPI,
+) (federationEnrollResult, error) {
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	defer cancel()
+	result := federationEnrollResult{Draft: draft}
+	hubAdmin, resolvedHub, err := newFederationHubAdminClient(ctx, draft.HubTarget)
+	if err != nil {
+		return result, err
+	}
+	draft.HubTarget = resolvedHub
+	result.Draft = draft
+	hubURL := federationDaemonEndpoint(resolvedHub)
+	result.HubURL = hubURL
+	hubProject, err := resolveFederationHubProject(ctx, hubAdmin, draft)
+	if err != nil {
+		return result, err
+	}
+	metadata, err := hubAdmin.EnableFederation(ctx, hubProject.ID, draft.RequestedActor)
+	if err != nil {
+		return result, err
+	}
+	enrollment, err := hubAdmin.CreateFederationEnrollment(ctx, CreateFederationEnrollmentInput{
+		SpokeInstanceUID: instanceUID,
+		ProjectID:        &hubProject.ID,
+		Capabilities:     draft.APICapabilities,
+		Actor:            draft.RequestedActor,
+	})
+	if err != nil {
+		return result, err
+	}
+	result.Enrollment = enrollment
+	result.Metadata = metadata
+	recovery := baseFederationRecovery(draft, active, resolvedHub, hubURL, hubProject, enrollment)
+	enrollmentClient, err := newFederationEnrollmentClient(ctx, hubURL, enrollment.Token, draft.AllowInsecure)
+	if err != nil {
+		recovery.Stage = "metadata"
+		recovery.Err = fmt.Errorf("hub %s: enrollment metadata fetch failed: %w", daemonName(resolvedHub), err)
+		result.Recovery = recovery
+		return result, recovery.Err
+	}
+	metadata, err = enrollmentClient.ProjectFederation(ctx, hubProject.ID)
+	if err != nil {
+		recovery.Stage = "metadata"
+		recovery.Err = fmt.Errorf("hub %s: enrollment metadata fetch failed: %w", daemonName(resolvedHub), err)
+		result.Recovery = recovery
+		return result, recovery.Err
+	}
+	result.Metadata = metadata
+	recovery.Command.HubProjectUID = metadata.ProjectUID
+	recovery.Command.ProjectName = metadata.ProjectName
+	recovery.Command.ReplayHorizonEventID = metadata.ReplayHorizonEventID
+	recovery.Command.BaselineThroughEventID = metadata.BaselineThroughEventID
+	if spoke == nil {
+		recovery.Stage = "join"
+		recovery.Err = errors.New("spoke: join failed: daemon client unavailable")
+		result.Recovery = recovery
+		return result, recovery.Err
+	}
+	replica, err := spoke.CreateFederationReplica(ctx, CreateFederationReplicaInput{
+		HubURL:                 hubURL,
+		HubProjectID:           hubProject.ID,
+		HubProjectUID:          metadata.ProjectUID,
+		ProjectName:            metadata.ProjectName,
+		ReplayHorizonEventID:   metadata.ReplayHorizonEventID,
+		BaselineThroughEventID: metadata.BaselineThroughEventID,
+		Token:                  enrollment.Token,
+		Capabilities:           draft.APICapabilities,
+		Actor:                  enrollment.Actor,
+		AllowInsecure:          draft.AllowInsecure,
+		PushEnabled:            draft.PushEnabled,
+		AdoptExisting:          draft.AdoptExisting,
+	})
+	if err != nil {
+		recovery.Stage = "join"
+		recovery.Err = fmt.Errorf("spoke: join failed: %w", err)
+		result.Recovery = recovery
+		return result, recovery.Err
+	}
+	result.Replica = replica
+	return result, nil
+}
+
+func resolveFederationHubProject(
+	ctx context.Context,
+	hub federationHubAdminAPI,
+	draft federationDraft,
+) (ProjectSummary, error) {
+	if draft.Operation == federationOperationAdoptSameName {
+		if draft.HubProjectID != 0 {
+			return ProjectSummary{ID: draft.HubProjectID, Name: draft.HubProjectName}, nil
+		}
+		return hub.EnsureProject(ctx, draft.SpokeProjectName)
+	}
+	return ProjectSummary{ID: draft.HubProjectID, Name: draft.HubProjectName}, nil
+}
+
+func baseFederationRecovery(
+	draft federationDraft,
+	active daemonTarget,
+	hub daemonTarget,
+	hubURL string,
+	hubProject ProjectSummary,
+	enrollment FederationEnrollment,
+) federationRecovery {
+	projectName := hubProject.Name
+	if projectName == "" {
+		projectName = draft.SpokeProjectName
+	}
+	return federationRecovery{
+		HubName:       daemonName(hub),
+		SpokeName:     daemonName(active),
+		SpokeEndpoint: federationDaemonEndpoint(active),
+		Token:         enrollment.Token,
+		Command: federationRecoveryCommand{
+			HubURL:        hubURL,
+			HubProjectID:  hubProject.ID,
+			ProjectName:   projectName,
+			Token:         enrollment.Token,
+			Actor:         enrollment.Actor,
+			Capabilities:  draft.APICapabilities,
+			PushEnabled:   draft.PushEnabled,
+			AllowInsecure: draft.AllowInsecure,
+			AdoptExisting: draft.AdoptExisting,
+			SpokeName:     daemonName(active),
+			SpokeEndpoint: federationDaemonEndpoint(active),
+		},
+	}
+}
+
 func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 	m.federationEnrollErr = nil
 	draft := m.federationDraft
+	draft.BlockedReason = ""
 	project, hasProject := m.selectedFederationHubProject()
 	if draft.CreateReplica {
 		if !hasProject {
@@ -444,6 +693,21 @@ func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 			draft.Operation = federationOperationAdoptSelectedHub
 			draft.HubProjectID = project.ID
 			draft.HubProjectName = project.Name
+		}
+		if status, ok := localProjectFederationBinding(m, draft.SpokeProjectID, draft.SpokeProjectName); ok {
+			role := status.Role
+			if role == "" {
+				role = "unknown"
+			}
+			projectName := draft.SpokeProjectName
+			if projectName == "" {
+				projectName = status.ProjectName
+			}
+			draft.BlockedReason = fmt.Sprintf(
+				"local project %q already has federation binding as %s",
+				projectName,
+				role,
+			)
 		}
 	}
 	draft.AllowInsecure = draft.HubTarget.AllowInsecure
@@ -489,6 +753,25 @@ func localProjectNameExists(m Model, name string) bool {
 		}
 	}
 	return false
+}
+
+func localProjectFederationBinding(
+	m Model,
+	projectID int64,
+	projectName string,
+) (FederationProjectStatus, bool) {
+	for _, status := range m.federationStatuses {
+		if status.Role == "" {
+			continue
+		}
+		if projectID != 0 && status.ProjectID == projectID {
+			return status, true
+		}
+		if projectName != "" && status.ProjectName == projectName {
+			return status, true
+		}
+	}
+	return FederationProjectStatus{}, false
 }
 
 func nextFederationCursor(msg tea.KeyMsg, cursor, count int) (int, bool) {

@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 )
 
 func TestFederationView_FKeyTransitionsFromList(t *testing.T) {
@@ -213,6 +216,22 @@ func TestFederationEnroll_CreateReplicaBranchPreflightsLocalNameConflict(t *test
 	assert.Contains(t, stripANSI(renderFederation(out)), `Blocked: local project "spoke-project" already exists`)
 }
 
+func TestFederationEnroll_ExistingLocalFederationBindingBlocksBeforeMutation(t *testing.T) {
+	m := setupFederationHubProjectSelection()
+	m.federationStatuses = []FederationProjectStatus{federationStatusFixture("spoke-project", "spoke")}
+	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
+
+	out, cmd := m.previewFederationEnrollment()
+	require.Nil(t, cmd)
+
+	assert.Equal(t, federationModePreview, out.federationMode)
+	assert.Contains(t, stripANSI(renderFederation(out)), "already has federation binding")
+
+	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModePreview, out.federationMode)
+}
+
 func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) {
 	t.Setenv(missingHubAuthEnvName(), "")
 	m := setupFederationView()
@@ -260,6 +279,115 @@ func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testi
 
 	require.Nil(t, cmd)
 	assert.Contains(t, stripANSI(renderFederation(out)), "allow_insecure")
+}
+
+func TestFederationEnroll_EnterCreatesEnrollmentAndJoinsSpoke(t *testing.T) {
+	m, joinBody := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
+
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationEnrollResultMsg)
+	out, refresh := updateModel(out, msg)
+
+	require.NotNil(t, refresh)
+	assert.Equal(t, federationModeResult, out.federationMode)
+	assert.Equal(t, "hub-actor", joinBody.Actor)
+	assert.Equal(t, "claim,pull,push", joinBody.Capabilities)
+	assert.True(t, joinBody.PushEnabled)
+	assert.True(t, joinBody.AdoptExisting)
+	assert.True(t, joinBody.AllowInsecure)
+	assert.Equal(t, enrollmentSecret(), joinBody.Token)
+	assert.NotContains(t, stripANSI(renderFederation(out)), enrollmentSecret())
+}
+
+func TestFederationEnroll_ResultShowsBoundActorAndHubMetadata(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
+
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "actor: hub-actor")
+	assert.Contains(t, rendered, "adopted")
+	assert.Contains(t, rendered, "snapshot count: 5")
+	assert.Contains(t, rendered, "hub URL: ")
+	assert.Contains(t, rendered, "hub project ID: 42")
+	assert.Contains(t, rendered, "hub project UID: 01HZNQ7VFPK1XGD8R5MABCD4EX")
+	assert.NotContains(t, rendered, enrollmentSecret())
+}
+
+func TestFederationEnroll_MetadataFailureShowsHubLabeledRecoveryAndHidesToken(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{metadataStatus: 500})
+
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Equal(t, federationModeRecovery, out.federationMode)
+	assert.Contains(t, rendered, "hub hub: enrollment metadata fetch failed")
+	assert.NotContains(t, rendered, enrollmentSecret())
+}
+
+func TestFederationEnroll_MetadataFailureRecoveryRevealUsesOnlyAvailableFields(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{metadataStatus: 500})
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	out, revealCmd := out.routeFederationViewKey(keyRune('R'))
+	require.Nil(t, revealCmd)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "single-use/secret-bearing")
+	assert.Contains(t, rendered, "spoke target")
+	assert.Contains(t, rendered, "--hub-url")
+	assert.Contains(t, rendered, "--hub-project-id 42")
+	assert.Contains(t, rendered, "--project-name spoke-project")
+	assert.Contains(t, rendered, enrollmentSecret())
+	assert.NotContains(t, rendered, "--hub-project-uid")
+	assert.NotContains(t, rendered, "--replay-horizon-event-id")
+	assert.NotContains(t, rendered, "--baseline-through-event-id")
+}
+
+func TestFederationEnroll_JoinFailureShowsSpokeLabeledRecoveryAndHidesToken(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
+
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Equal(t, federationModeRecovery, out.federationMode)
+	assert.Contains(t, rendered, "hub: enrollment created")
+	assert.Contains(t, rendered, "spoke: join failed")
+	assert.NotContains(t, rendered, enrollmentSecret())
+}
+
+func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	out, revealCmd := out.routeFederationViewKey(keyRune('R'))
+	require.Nil(t, revealCmd)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "single-use/secret-bearing")
+	assert.Contains(t, rendered, "valid and not revoked")
+	assert.Contains(t, rendered, "spoke target")
+	assert.Contains(t, rendered, "--hub-url")
+	assert.Contains(t, rendered, "--hub-project-id 42")
+	assert.Contains(t, rendered, "--hub-project-uid 01HZNQ7VFPK1XGD8R5MABCD4EX")
+	assert.Contains(t, rendered, "--project-name spoke-project")
+	assert.Contains(t, rendered, "--replay-horizon-event-id 9")
+	assert.Contains(t, rendered, "--baseline-through-event-id 11")
+	assert.Contains(t, rendered, enrollmentSecret())
 }
 
 func setupFederationSourceModel() Model {
@@ -349,4 +477,87 @@ func setupFederationHubProjectSelection() Model {
 	m.federationDraft.AllowInsecure = true
 	m.federationDraft.AdoptExisting = true
 	return m
+}
+
+type federationExecutionServerOptions struct {
+	metadataStatus int
+	joinStatus     int
+}
+
+func setupFederationExecutionPreview(
+	t *testing.T,
+	opts federationExecutionServerOptions,
+) (Model, *CreateFederationReplicaInput) {
+	t.Helper()
+	var joinBody CreateFederationReplicaInput
+	spoke := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/federation/replicas": func(w http.ResponseWriter, r *http.Request) {
+			if opts.joinStatus != 0 {
+				w.WriteHeader(opts.joinStatus)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "join failed"}})
+				return
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&joinBody))
+			respondJSON(t, w, api.CreateFederationReplicaBody{
+				Adopted:               true,
+				AdoptionSnapshotCount: 5,
+			})
+		},
+	})
+	hub := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/projects": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				respondJSON(t, w, map[string]any{"project": map[string]any{"id": 42, "name": "spoke-project"}})
+				return
+			}
+			respondJSON(t, w, map[string]any{"projects": []map[string]any{{"id": 42, "name": "spoke-project"}}})
+		},
+		"/api/v1/projects/42/federation/enable": func(w http.ResponseWriter, _ *http.Request) {
+			respondJSON(t, w, federationMetadataBody())
+		},
+		"/api/v1/federation/enrollments": func(w http.ResponseWriter, _ *http.Request) {
+			projectID := int64(42)
+			respondJSON(t, w, api.FederationEnrollmentOut{
+				ID:               7,
+				SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+				ProjectID:        &projectID,
+				Capabilities:     "claim,pull,push",
+				Actor:            "hub-actor",
+				Token:            enrollmentSecret(),
+			})
+		},
+		"/api/v1/projects/42/federation/metadata": func(w http.ResponseWriter, _ *http.Request) {
+			if opts.metadataStatus != 0 {
+				w.WriteHeader(opts.metadataStatus)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "metadata failed"}})
+				return
+			}
+			respondJSON(t, w, federationMetadataBody())
+		},
+	})
+	m := setupFederationHubProjectSelection()
+	m.api = NewClient(spoke.URL, spoke.Client())
+	m.activeDaemon = daemonTarget{Name: "spoke", URL: spoke.URL}
+	m.federationInstance = InstanceInfo{InstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA"}
+	m.federationMode = federationModePreview
+	m.federationDraft.Operation = federationOperationAdoptSameName
+	m.federationDraft.HubProjectID = 42
+	m.federationDraft.HubProjectName = "spoke-project"
+	m.federationDraft.HubTarget = daemonTarget{Name: "hub", URL: hub.URL, AllowInsecure: true}
+	m.federationDraft.AllowInsecure = true
+	return m, &joinBody
+}
+
+func federationMetadataBody() api.ProjectFederationBody {
+	return api.ProjectFederationBody{
+		ProjectID:              42,
+		ProjectUID:             "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		ProjectName:            "spoke-project",
+		ReplayHorizonEventID:   9,
+		BaselineThroughEventID: 11,
+	}
+}
+
+func enrollmentSecret() string {
+	return strings.Join([]string{"enrollment", "secret"}, "-")
 }

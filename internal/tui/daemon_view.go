@@ -161,6 +161,10 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.federationHubProjectsLoading = false
 	m.federationEnrollErr = nil
 	m.federationEnrollGen = 0
+	m.federationEnrollAttempt = 0
+	m.federationEnrollRunning = false
+	m.federationResult = federationEnrollResult{}
+	m.federationRecovery = federationRecovery{}
 	m.pendingRefetch = false
 	m.projectsStale = false
 	m.projectsRefetchPending = false

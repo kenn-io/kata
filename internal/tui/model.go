@@ -152,6 +152,10 @@ type Model struct {
 	federationHubProjectsLoading bool
 	federationEnrollErr          error
 	federationEnrollGen          uint64
+	federationEnrollAttempt      uint64
+	federationEnrollRunning      bool
+	federationResult             federationEnrollResult
+	federationRecovery           federationRecovery
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
@@ -457,6 +461,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if fhp, ok := msg.(federationHubProjectsLoadedMsg); ok {
 		next := m.handleFederationHubProjectsLoaded(fhp)
 		return next, nil
+	}
+	if fer, ok := msg.(federationEnrollResultMsg); ok {
+		next, cmd := m.handleFederationEnrollResult(fer)
+		return next, cmd
 	}
 	if _, ok := msg.(projectsDebounceFireMsg); ok {
 		m.projectsRefetchPending = false

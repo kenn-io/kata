@@ -26,6 +26,10 @@ func renderFederation(m Model) string {
 		return renderFederationSelectHubProject(m)
 	case federationModePreview:
 		return renderFederationPreview(m)
+	case federationModeResult:
+		return renderFederationResult(m)
+	case federationModeRecovery:
+		return renderFederationRecovery(m)
 	}
 	rowBudget := len(rows)
 	if m.height > 0 {
@@ -155,6 +159,52 @@ func renderFederationPreview(m Model) string {
 	return strings.Join(body, "\n")
 }
 
+func renderFederationResult(m Model) string {
+	result := m.federationResult
+	body := federationModeHeader(m, "Enrollment Result")
+	status := "joined"
+	if result.Replica.Adopted {
+		status = "adopted"
+	}
+	body = append(body,
+		"status: "+status,
+		"actor: "+sanitizeForLine(emptyDash(result.Enrollment.Actor)),
+		fmt.Sprintf("snapshot count: %d", result.Replica.AdoptionSnapshotCount),
+		"hub URL: "+sanitizeForLine(result.HubURL),
+		fmt.Sprintf("hub project ID: %d", result.Metadata.ProjectID),
+		"hub project UID: "+sanitizeForLine(emptyDash(result.Metadata.ProjectUID)),
+		"",
+		subtleStyle.Render("[enter] list  [esc] list"),
+	)
+	return strings.Join(body, "\n")
+}
+
+func renderFederationRecovery(m Model) string {
+	recovery := m.federationRecovery
+	body := federationModeHeader(m, "Enrollment Recovery")
+	if recovery.Stage == "metadata" {
+		body = append(body, fmt.Sprintf("hub %s: enrollment metadata fetch failed", sanitizeForLine(recovery.HubName)))
+	} else {
+		body = append(body, "hub: enrollment created", "spoke: join failed")
+	}
+	body = append(body,
+		"token: hidden",
+		"the hub enrollment may be single-use, expired, revoked, or invalidated",
+		"",
+		subtleStyle.Render("[R] reveal recovery command  [esc] back"),
+	)
+	if recovery.Reveal {
+		body = append(body,
+			"",
+			errorStyle.Render("single-use/secret-bearing recovery command"),
+			"works only while the hub enrollment remains valid and not revoked",
+			"spoke target: "+sanitizeForLine(recovery.SpokeName)+" "+sanitizeForLine(recovery.SpokeEndpoint),
+			federationRecoveryCommandString(recovery.Command),
+		)
+	}
+	return strings.Join(body, "\n")
+}
+
 func federationModeHeader(m Model, title string) []string {
 	return []string{
 		titleStyle.Render("kata / federation"),
@@ -222,6 +272,49 @@ func federationHubProjectBehavior(draft federationDraft) string {
 		return draft.HubProjectName
 	}
 	return "-"
+}
+
+func federationRecoveryCommandString(cmd federationRecoveryCommand) string {
+	parts := []string{
+		"kata",
+		"--server", shellWord(cmd.SpokeEndpoint),
+		"federation", "join",
+		"--hub-url", shellWord(cmd.HubURL),
+		"--hub-project-id", fmt.Sprintf("%d", cmd.HubProjectID),
+		"--project-name", shellWord(cmd.ProjectName),
+		"--token", shellWord(cmd.Token),
+		"--actor", shellWord(cmd.Actor),
+		"--capabilities", shellWord(cmd.Capabilities),
+	}
+	if cmd.HubProjectUID != "" {
+		parts = append(parts, "--hub-project-uid", shellWord(cmd.HubProjectUID))
+	}
+	if cmd.ReplayHorizonEventID != 0 {
+		parts = append(parts, "--replay-horizon-event-id", fmt.Sprintf("%d", cmd.ReplayHorizonEventID))
+	}
+	if cmd.BaselineThroughEventID != 0 {
+		parts = append(parts, "--baseline-through-event-id", fmt.Sprintf("%d", cmd.BaselineThroughEventID))
+	}
+	if cmd.PushEnabled {
+		parts = append(parts, "--push")
+	}
+	if cmd.AllowInsecure {
+		parts = append(parts, "--allow-insecure")
+	}
+	if cmd.AdoptExisting {
+		parts = append(parts, "--adopt-existing")
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellWord(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if strings.ContainsAny(s, " \t\n'\"") {
+		return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	}
+	return s
 }
 
 type federationVisibleRow struct {
