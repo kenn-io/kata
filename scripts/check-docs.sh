@@ -141,37 +141,19 @@ done
 
 stale_config="docs/.zensical-build.XXXXXX.toml"
 stale_docs="docs/zensical-public-docs.XXXXXX"
-docs_env_sentinel="docs/.env.docs-check.local"
-vercel_sentinel_dir="docs/.vercel"
-vercel_sentinel="$vercel_sentinel_dir/docs-check-sentinel"
-vercel_dir_preexisting=0
 vercel_docs_root=""
 cleanup_check_docs() {
-  rm -rf "$stale_config" "$stale_docs" "$docs_env_sentinel" "$vercel_sentinel"
-  if [[ "$vercel_dir_preexisting" -eq 0 ]]; then
-    rmdir "$vercel_sentinel_dir" 2>/dev/null || true
-  fi
+  rm -rf "$stale_config" "$stale_docs"
   if [[ -n "$vercel_docs_root" ]]; then
     rm -rf "$vercel_docs_root"
   fi
 }
 trap cleanup_check_docs EXIT
 
-if [[ -e "$docs_env_sentinel" || -e "$vercel_sentinel" ]]; then
-  printf 'docs check sentinel path already exists\n' >&2
-  exit 1
-fi
-if [[ -d "$vercel_sentinel_dir" ]]; then
-  vercel_dir_preexisting=1
-fi
-
 # Guard against macOS mktemp regressions where suffix templates become literal
 # repo-local paths and block repeat docs builds.
 : > "$stale_config"
 mkdir -p "$stale_docs"
-mkdir -p "$vercel_sentinel_dir"
-: > "$docs_env_sentinel"
-: > "$vercel_sentinel"
 
 rm -rf docs/site
 
@@ -191,7 +173,6 @@ docs/zensical-docs.sh build
 
 for generated in \
   docs/site/.env.local \
-  docs/site/.env.docs-check.local \
   docs/site/.vercel \
   docs/site/federation/index.html \
   docs/site/hosted-mode/index.html \
