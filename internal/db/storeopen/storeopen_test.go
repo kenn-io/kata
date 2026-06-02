@@ -44,25 +44,21 @@ func TestOpen_SQLiteSchemeBootstrapsFreshSQLite(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestOpen_PostgresSchemeDispatchesToPgstore proves the dispatcher reaches
-// pgstore (which then surfaces a real connection error against an
-// unreachable host), and that the embedded password is not echoed back in
-// the error path. The unreachable host (TEST-NET-1 RFC 5737) guarantees the
-// connection attempt fails fast without a real PG.
-func TestOpen_PostgresSchemeDispatchesToPgstore(t *testing.T) {
+// TestOpen_PostgresSchemeRejectedUntilDomainMethodsLand proves production
+// store opening does not route normal callers into pgstore while core domain
+// methods are still stubs. The embedded password must not be echoed in the
+// error path.
+func TestOpen_PostgresSchemeRejectedUntilDomainMethodsLand(t *testing.T) {
 	ctx := context.Background()
-	// 192.0.2.1 is reserved for documentation (TEST-NET-1) — guaranteed
-	// non-routable so the pgstore.Open ping fails locally.
-	rawDSN := "postgres://user:SECRET@192.0.2.1:5432/kata?connect_timeout=1&sslmode=disable" //nolint:gosec // fixture
+	rawDSN := "postgres://user:SECRET@127.0.0.1:1/kata?connect_timeout=1&sslmode=disable" //nolint:gosec // fixture
 
 	store, err := storeopen.Open(ctx, rawDSN)
 	assert.Nil(t, store)
 	require.Error(t, err)
 	msg := err.Error()
-	assert.NotContains(t, msg, "not yet available",
-		"postgres backend is wired in; the deferred message must be gone")
+	assert.Contains(t, msg, "not selectable")
 	assert.NotContains(t, msg, "SECRET",
-		"password must not leak into the connection-error message")
+		"password must not leak into the rejection message")
 }
 
 // TestOpen_UnknownSchemeIsUnsupported refuses any non-sqlite/non-postgres
@@ -95,6 +91,22 @@ func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
 	v, err := s.SchemaVersion(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, db.CurrentSchemaVersion(), v)
+}
+
+func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	stageLegacyPreCutoverFixture(t, path, 0)
+
+	s, err := storeopen.Open(ctx, path)
+	assert.Nil(t, s)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "table projects already exists")
+
+	ver, peekErr := sqlitestore.PeekSchemaVersion(ctx, path)
+	require.NoError(t, peekErr)
+	assert.Equal(t, 0, ver, "storeopen must not bootstrap over an existing version-0 DB")
 }
 
 // stageLegacyPreCutoverFixture creates a real kata-shaped SQLite DB at path
@@ -164,14 +176,12 @@ func TestOpenReadOnly_OnCurrentDBSucceeds(t *testing.T) {
 	assert.Equal(t, db.CurrentSchemaVersion(), v)
 }
 
-// TestOpenResolvedFromKataDSNEnvKeepsPasswordOutOfError proves the Phase 8
-// KATA_DSN plumbing reaches storeopen.Open end-to-end and that pgstore's
-// connection-error path never echoes the password embedded in the DSN. The
-// DSN points at TEST-NET-1 (192.0.2.0/24) so the open fails fast without a
-// real PG.
+// TestOpenResolvedFromKataDSNEnvKeepsPasswordOutOfError proves KATA_DSN
+// plumbing reaches storeopen.Open end-to-end and that the Postgres rejection
+// path never echoes the password embedded in the DSN.
 func TestOpenResolvedFromKataDSNEnvKeepsPasswordOutOfError(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	t.Setenv("KATA_DSN", "postgres://user:SECRET@192.0.2.1:5432/kata?connect_timeout=1&sslmode=disable") //nolint:gosec // fixture
+	t.Setenv("KATA_DSN", "postgres://user:SECRET@127.0.0.1:1/kata?connect_timeout=1&sslmode=disable") //nolint:gosec // fixture
 	t.Setenv("KATA_DB", "")
 
 	dsn, err := config.KataDSN(context.Background())
@@ -180,10 +190,9 @@ func TestOpenResolvedFromKataDSNEnvKeepsPasswordOutOfError(t *testing.T) {
 
 	_, err = storeopen.Open(context.Background(), dsn)
 	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "not yet available",
-		"postgres backend is wired in; the deferred message must be gone")
+	assert.Contains(t, err.Error(), "not selectable")
 	assert.NotContains(t, err.Error(), "SECRET",
-		"password must not leak into the connection-error message")
+		"password must not leak into the rejection message")
 }
 
 // TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError mirrors the env case
@@ -193,7 +202,7 @@ func TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError(t *testing.T) {
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DSN", "")
 	t.Setenv("KATA_DB", "")
-	body := "[storage]\ndsn = \"postgres://user:SECRET@192.0.2.1:5432/kata?connect_timeout=1&sslmode=disable\"\n" //nolint:gosec // fixture
+	body := "[storage]\ndsn = \"postgres://user:SECRET@127.0.0.1:1/kata?connect_timeout=1&sslmode=disable\"\n" //nolint:gosec // fixture
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600))
 
 	dsn, err := config.KataDSN(context.Background())
@@ -202,7 +211,7 @@ func TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError(t *testing.T) {
 
 	_, err = storeopen.Open(context.Background(), dsn)
 	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "not yet available")
+	assert.Contains(t, err.Error(), "not selectable")
 	assert.NotContains(t, err.Error(), "SECRET")
 }
 

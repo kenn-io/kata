@@ -60,11 +60,11 @@ func KataDSN(ctx context.Context) (string, error) {
 	return filepath.Join(home, "kata.db"), nil
 }
 
-// validateDSN performs shape-only validation: it rejects unknown schemes and
-// libpq query params on sqlite/bare DSNs, and propagates the ambiguous-
-// credentials probe from CanonicalDSNIdentity for postgres DSNs. It never
-// echoes the DSN itself in errors — credentials would leak through error
-// logs otherwise.
+// validateDSN performs shape-only validation: it rejects unknown schemes,
+// scheme-less libpq keyword DSNs, and libpq query params on sqlite/bare DSNs,
+// and propagates the ambiguous-credentials probe from CanonicalDSNIdentity for
+// postgres DSNs. It never echoes the DSN itself in errors — credentials would
+// leak through error logs otherwise.
 func validateDSN(dsn string) error {
 	scheme, _, hasScheme := splitScheme(dsn)
 	switch {
@@ -78,6 +78,11 @@ func validateDSN(dsn string) error {
 			return err
 		}
 		return nil
+	}
+	if !hasScheme {
+		if param, ok := firstLibpqKeywordParam(dsn); ok {
+			return fmt.Errorf("sqlite path looks like libpq keyword DSN (%q); use postgres:// for Postgres", param)
+		}
 	}
 	// scheme is "sqlite" or absent — reject libpq-only query params.
 	if param, ok := firstPGOnlyQueryParam(dsn); ok {

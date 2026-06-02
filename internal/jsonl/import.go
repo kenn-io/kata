@@ -160,6 +160,9 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		if err := decodeData(env, &rec); err != nil {
 			return db.ImportRecord{}, err
 		}
+		if err := normalizeProjectTimes(&rec.ProjectExport); err != nil {
+			return db.ImportRecord{}, err
+		}
 		if err := fillProjectUID(&rec, exportVersion); err != nil {
 			return db.ImportRecord{}, err
 		}
@@ -170,10 +173,16 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		if err := decodeData(env, &rec); err != nil {
 			return db.ImportRecord{}, err
 		}
+		if err := normalizeAliasTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
 		return db.ImportRecord{Kind: string(KindProjectAlias), Alias: &rec}, nil
 	case KindRecurrence:
 		var rec db.RecurrenceExport
 		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeRecurrenceTimes(&rec); err != nil {
 			return db.ImportRecord{}, err
 		}
 		return db.ImportRecord{Kind: string(KindRecurrence), Recurrence: &rec}, nil
@@ -207,10 +216,16 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		if err := decodeData(env, &rec); err != nil {
 			return db.ImportRecord{}, err
 		}
+		if err := normalizeIssueLabelTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
 		return db.ImportRecord{Kind: string(KindIssueLabel), Label: &rec}, nil
 	case KindLink:
 		var rec db.LinkExport
 		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeLinkTimes(&rec); err != nil {
 			return db.ImportRecord{}, err
 		}
 		return db.ImportRecord{Kind: string(KindLink), Link: &rec}, nil
@@ -219,10 +234,16 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		if err := decodeData(env, &rec); err != nil {
 			return db.ImportRecord{}, err
 		}
+		if err := normalizeImportMappingTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
 		return db.ImportRecord{Kind: string(KindImportMapping), ImportMapping: &rec}, nil
 	case KindFederationBinding:
 		var rec db.FederationBindingExport
 		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeFederationBindingTimes(&rec); err != nil {
 			return db.ImportRecord{}, err
 		}
 		return db.ImportRecord{Kind: string(KindFederationBinding), FederationBinding: &rec}, nil
@@ -231,10 +252,16 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		if err := decodeData(env, &rec); err != nil {
 			return db.ImportRecord{}, err
 		}
+		if err := normalizeFederationSyncStatusTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
 		return db.ImportRecord{Kind: string(KindFederationSyncStatus), FederationSyncStatus: &rec}, nil
 	case KindFederationQuarantine:
 		var rec db.FederationQuarantineExport
 		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeFederationQuarantineTimes(&rec); err != nil {
 			return db.ImportRecord{}, err
 		}
 		return db.ImportRecord{Kind: string(KindFederationQuarantine), FederationQuarantine: &rec}, nil
@@ -243,16 +270,25 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		if err := decodeData(env, &rec); err != nil {
 			return db.ImportRecord{}, err
 		}
+		if err := normalizeFederationEnrollmentTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
 		return db.ImportRecord{Kind: string(KindFederationEnrollment), FederationEnrollment: &rec}, nil
 	case KindIssueClaim:
 		var rec db.IssueClaimExport
 		if err := decodeData(env, &rec); err != nil {
 			return db.ImportRecord{}, err
 		}
+		if err := normalizeIssueClaimTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
 		return db.ImportRecord{Kind: string(KindIssueClaim), IssueClaim: &rec}, nil
 	case KindPendingClaimRequest:
 		var rec db.PendingClaimRequestExport
 		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizePendingClaimRequestTimes(&rec); err != nil {
 			return db.ImportRecord{}, err
 		}
 		return db.ImportRecord{Kind: string(KindPendingClaimRequest), PendingClaimRequest: &rec}, nil
@@ -288,6 +324,9 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		}
 		if rec.ProjectName == "" && rec.LegacyProjectName != "" {
 			rec.ProjectName = rec.LegacyProjectName
+		}
+		if err := normalizePurgeLogTimes(&rec.PurgeLogExport); err != nil {
+			return db.ImportRecord{}, err
 		}
 		if err := fillPurgeLogV3Identity(&rec.PurgeLogExport, exportVersion, localInstanceUID); err != nil {
 			return db.ImportRecord{}, err
@@ -578,6 +617,30 @@ func normalizeImportTime(field string, p *string) error {
 	return nil
 }
 
+func normalizeProjectTimes(rec *db.ProjectExport) error {
+	if err := normalizeImportTime("project.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("project.deleted_at", rec.DeletedAt)
+}
+
+func normalizeAliasTimes(rec *db.AliasExport) error {
+	if err := normalizeImportTime("project_alias.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("project_alias.last_seen_at", &rec.LastSeenAt)
+}
+
+func normalizeRecurrenceTimes(rec *db.RecurrenceExport) error {
+	if err := normalizeImportTime("recurrence.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("recurrence.updated_at", &rec.UpdatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("recurrence.deleted_at", rec.DeletedAt)
+}
+
 func normalizeIssueTimes(rec *db.IssueExport) error {
 	if err := normalizeImportTime("issue.created_at", &rec.CreatedAt); err != nil {
 		return err
@@ -595,6 +658,97 @@ func normalizeCommentTimes(rec *db.CommentExport) error {
 	return normalizeImportTime("comment.created_at", &rec.CreatedAt)
 }
 
+func normalizeIssueLabelTimes(rec *db.IssueLabelExport) error {
+	return normalizeImportTime("issue_label.created_at", &rec.CreatedAt)
+}
+
+func normalizeLinkTimes(rec *db.LinkExport) error {
+	return normalizeImportTime("link.created_at", &rec.CreatedAt)
+}
+
+func normalizeImportMappingTimes(rec *db.ImportMappingExport) error {
+	if err := normalizeImportTime("import_mapping.source_updated_at", rec.SourceUpdatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("import_mapping.imported_at", &rec.ImportedAt)
+}
+
+func normalizeFederationBindingTimes(rec *db.FederationBindingExport) error {
+	if err := normalizeImportTime("federation_binding.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("federation_binding.updated_at", &rec.UpdatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("federation_binding.last_sync_at", rec.LastSyncAt)
+}
+
+func normalizeFederationSyncStatusTimes(rec *db.FederationSyncStatusExport) error {
+	if err := normalizeImportTime("federation_sync_status.last_pull_started_at", rec.LastPullStartedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("federation_sync_status.last_pull_success_at", rec.LastPullSuccessAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("federation_sync_status.last_push_started_at", rec.LastPushStartedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("federation_sync_status.last_push_success_at", rec.LastPushSuccessAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("federation_sync_status.last_error_at", rec.LastErrorAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("federation_sync_status.last_reset_at", rec.LastResetAt)
+}
+
+func normalizeFederationQuarantineTimes(rec *db.FederationQuarantineExport) error {
+	if err := normalizeImportTime("federation_quarantine.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("federation_quarantine.skipped_at", rec.SkippedAt)
+}
+
+func normalizeFederationEnrollmentTimes(rec *db.FederationEnrollmentExport) error {
+	if err := normalizeImportTime("federation_enrollment.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("federation_enrollment.updated_at", &rec.UpdatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("federation_enrollment.revoked_at", rec.RevokedAt)
+}
+
+func normalizeIssueClaimTimes(rec *db.IssueClaimExport) error {
+	if err := normalizeImportTime("issue_claim.acquired_at", &rec.AcquiredAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue_claim.expires_at", rec.ExpiresAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue_claim.released_at", rec.ReleasedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("issue_claim.updated_at", &rec.UpdatedAt)
+}
+
+func normalizePendingClaimRequestTimes(rec *db.PendingClaimRequestExport) error {
+	if err := normalizeImportTime("pending_claim_request.requested_at", &rec.RequestedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("pending_claim_request.last_attempt_at", rec.LastAttemptAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("pending_claim_request.rejected_at", rec.RejectedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("pending_claim_request.resolved_at", rec.ResolvedAt)
+}
+
 func normalizeEventTimes(rec *db.EventExport) error {
 	return normalizeImportTime("event.created_at", &rec.CreatedAt)
+}
+
+func normalizePurgeLogTimes(rec *db.PurgeLogExport) error {
+	return normalizeImportTime("purge_log.purged_at", &rec.PurgedAt)
 }

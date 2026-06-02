@@ -50,15 +50,18 @@ func CanonicalDSNIdentity(dsn string) (string, error) {
 }
 
 // RedactDSN returns dsn with any password removed, safe for errors and logs.
-// A scheme-less input (no "://") is treated as a filesystem path and returned
-// unchanged; libpq key=value DSNs are not supported and should not be passed
-// here. An unparseable or ambiguous DSN returns "" so a malformed string can
-// never echo embedded credentials. The query string is dropped entirely —
-// postgres URLs can carry credentials there too (e.g. ?password=SECRET,
-// ?sslpassword=...), and keeping a maintained allowlist is fragile, so the
-// safer default is to redact the whole query for display.
+// A scheme-less input (no "://") is normally treated as a filesystem path and
+// returned unchanged, but libpq key=value DSNs carrying password fields are
+// replaced with a fixed placeholder. An unparseable or ambiguous DSN returns
+// "" so a malformed string can never echo embedded credentials. The query
+// string is dropped entirely — postgres URLs can carry credentials there too
+// (e.g. ?password=SECRET, ?sslpassword=...), and keeping a maintained allowlist
+// is fragile, so the safer default is to redact the whole query for display.
 func RedactDSN(dsn string) string {
 	if _, _, hasScheme := splitScheme(dsn); !hasScheme {
+		if hasLibpqKeywordCredential(dsn) {
+			return "<redacted libpq keyword dsn>"
+		}
 		return dsn
 	}
 	u, err := url.Parse(dsn)
@@ -125,4 +128,65 @@ func splitScheme(dsn string) (scheme, rest string, hasScheme bool) {
 		return "", dsn, false
 	}
 	return dsn[:i], dsn[i+len("://"):], true
+}
+
+var libpqKeywordParams = map[string]struct{}{
+	"application_name":     {},
+	"connect_timeout":      {},
+	"dbname":               {},
+	"host":                 {},
+	"hostaddr":             {},
+	"keepalives":           {},
+	"keepalives_count":     {},
+	"keepalives_idle":      {},
+	"keepalives_interval":  {},
+	"passfile":             {},
+	"password":             {},
+	"port":                 {},
+	"sslcert":              {},
+	"sslkey":               {},
+	"sslmode":              {},
+	"sslpassword":          {},
+	"sslrootcert":          {},
+	"target_session_attrs": {},
+	"user":                 {},
+}
+
+var libpqCredentialParams = map[string]struct{}{
+	"password":    {},
+	"sslpassword": {},
+}
+
+func firstLibpqKeywordParam(dsn string) (string, bool) {
+	for _, field := range strings.Fields(dsn) {
+		key, ok := libpqKeywordKey(field)
+		if !ok {
+			continue
+		}
+		if _, ok := libpqKeywordParams[key]; ok {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func hasLibpqKeywordCredential(dsn string) bool {
+	for _, field := range strings.Fields(dsn) {
+		key, ok := libpqKeywordKey(field)
+		if !ok {
+			continue
+		}
+		if _, ok := libpqCredentialParams[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func libpqKeywordKey(field string) (string, bool) {
+	i := strings.Index(field, "=")
+	if i <= 0 {
+		return "", false
+	}
+	return strings.ToLower(strings.TrimSpace(field[:i])), true
 }

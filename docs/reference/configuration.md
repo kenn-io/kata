@@ -8,7 +8,7 @@ bindings, local per-machine overrides, and daemon config.
 | Variable | Meaning |
 | --- | --- |
 | `KATA_HOME` | Data directory. Defaults to `~/.kata`. |
-| `KATA_DSN` | Explicit database DSN. Accepts a bare SQLite path, `sqlite://...`, `postgres://...`, or `postgresql://...`. |
+| `KATA_DSN` | Explicit database DSN. Production storage currently accepts a bare SQLite path or `sqlite://...`. Postgres URLs are recognized but rejected by normal store opening until backend domain methods land. |
 | `KATA_DB` | Legacy explicit SQLite database path. Used when `KATA_DSN` is unset. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
@@ -29,9 +29,10 @@ kata resolves its database in this order:
 4. `<KATA_HOME>/kata.db`
 
 Bare paths and `sqlite://` DSNs select SQLite. `postgres://` and
-`postgresql://` DSNs select Postgres. `KATA_DB` stays ahead of `[storage].dsn`
-so existing shells and scripts keep using their explicit database path after the
-config-file key is introduced.
+`postgresql://` DSNs are reserved for the incomplete Postgres backend and are
+not selectable by normal daemon/CLI store opening yet. `KATA_DB` stays ahead of
+`[storage].dsn` so existing shells and scripts keep using their explicit
+database path after the config-file key is introduced.
 
 `KATA_DSN` and `[storage].dsn` are shape-validated before use. Unknown schemes
 are rejected, and common Postgres-only query parameters on a bare path or
@@ -72,7 +73,7 @@ url = "http://100.64.0.5:7777"
 listen = "100.64.0.5:7777"
 
 [storage]
-dsn = "postgres://kata@db.internal/kata?sslmode=require"
+dsn = "/var/lib/kata/kata.db"
 
 [auth]
 token = "change-me"
@@ -84,9 +85,9 @@ Auto-started daemons also read the config-file listener value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
 
-Postgres DSNs may carry credentials. Runtime files and log output use a
-credential-free identity derived from the scheme, host, port, and database name;
-userinfo and query parameters are stripped before display or hashing.
+Postgres DSNs may carry credentials. Although they are not selectable yet,
+runtime redaction handles both URL and libpq keyword forms defensively; userinfo
+and query parameters are stripped before display or hashing.
 
 ## Token identity mode
 

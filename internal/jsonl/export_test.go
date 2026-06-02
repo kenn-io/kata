@@ -33,6 +33,24 @@ func TestExportWritesOrderedRecordsWithSequenceLast(t *testing.T) {
 	assertKindOrder(t, records)
 }
 
+func TestExportReadOnlyLegacySQLiteUsesVersionAwareExporter(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	writeLegacyV1DB(t, path)
+	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+
+	var out bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &out, jsonl.ExportOptions{IncludeDeleted: true}))
+	records := decodeJSONLLines(t, out.Bytes())
+
+	require.NotEmpty(t, records)
+	assert.Equal(t, map[string]any{"key": "export_version", "value": "1"}, records[0]["data"])
+	assertRecordsContain(t, records, "legacy issue")
+	assertRecordsContain(t, records, "legacy comment")
+}
+
 func TestExportEmitsEventPayloadAsJSONObject(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -511,6 +529,18 @@ func assertRecordsDoNotContain(t *testing.T, records []map[string]any, needle st
 		require.NoError(t, err)
 		assert.NotContains(t, string(bs), needle)
 	}
+}
+
+func assertRecordsContain(t *testing.T, records []map[string]any, needle string) {
+	t.Helper()
+	for _, rec := range records {
+		bs, err := json.Marshal(rec)
+		require.NoError(t, err)
+		if strings.Contains(string(bs), needle) {
+			return
+		}
+	}
+	t.Fatalf("expected exported records to contain %q", needle)
 }
 
 func assertProjectIDs(t *testing.T, records []map[string]any, allowed map[int64]bool) {

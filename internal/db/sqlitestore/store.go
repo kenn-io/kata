@@ -177,6 +177,14 @@ func (d *Store) bootstrap(ctx context.Context) error {
 	if current == currentBinary {
 		return nil
 	}
+	hasTables, err := d.hasUserTables(ctx)
+	if err != nil {
+		return err
+	}
+	if hasTables {
+		return fmt.Errorf("%w: existing database has schema_version 0; run JSONL cutover before opening",
+			ErrSchemaCutoverRequired)
+	}
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin schema bootstrap: %w", err)
@@ -323,6 +331,19 @@ func PeekSchemaVersion(ctx context.Context, path string) (int, error) {
 	return d.currentVersion(ctx)
 }
 
+// HasUserTables reports whether an existing SQLite database contains any
+// application/user tables. A zero schema_version plus user tables means
+// "legacy or corrupt existing DB", not "fresh file"; storeopen uses this to
+// avoid bootstrapping schema.sql over existing tables.
+func HasUserTables(ctx context.Context, path string) (bool, error) {
+	d, err := Open(ctx, path, db.ReadOnly())
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = d.Close() }()
+	return d.hasUserTables(ctx)
+}
+
 // SchemaVersion returns the integer stored in meta.schema_version. It errors
 // when the row is absent or unparseable (unlike currentVersion, which treats
 // a missing meta table as version 0 for the bootstrap path). The read routes
@@ -377,4 +398,17 @@ func (d *Store) tableExists(ctx context.Context, name string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func (d *Store) hasUserTables(ctx context.Context) (bool, error) {
+	var n int
+	err := d.QueryRowContext(ctx,
+		`SELECT COUNT(*)
+		   FROM sqlite_master
+		  WHERE type='table'
+		    AND name NOT LIKE 'sqlite_%'`).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }

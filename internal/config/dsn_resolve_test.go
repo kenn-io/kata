@@ -84,6 +84,33 @@ func TestKataDSN_RejectsPGOnlyQueryParamsOnBarePath(t *testing.T) {
 	assert.Contains(t, err.Error(), "pool_max_conns")
 }
 
+func TestKataDSN_RejectsSchemeLessLibpqKeywordDSNFromEnv(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_DSN", "host=db user=kata password=SECRET dbname=kata") //nolint:gosec // fixture verifies credential-free rejection
+	t.Setenv("KATA_DB", "")
+
+	_, err := config.KataDSN(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "libpq keyword")
+	assert.NotContains(t, err.Error(), "SECRET")
+	assert.NotContains(t, err.Error(), "password=SECRET")
+}
+
+func TestKataDSN_RejectsSchemeLessLibpqKeywordDSNFromConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_DB", "")
+	body := "[storage]\ndsn = \"host=db user=kata sslpassword=SECRET dbname=kata\"\n" //nolint:gosec // fixture verifies credential-free rejection
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600))
+
+	_, err := config.KataDSN(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "libpq keyword")
+	assert.NotContains(t, err.Error(), "SECRET")
+	assert.NotContains(t, err.Error(), "sslpassword=SECRET")
+}
+
 func TestKataDSN_RejectsAmbiguousPostgresCredentials(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_DSN", "postgres://user:p://w@host/db")

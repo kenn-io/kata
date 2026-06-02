@@ -1,6 +1,7 @@
 // Package storeopen routes a DSN to the right db.Storage backend. Bare paths
-// and sqlite:// DSNs open the SQLite backend; postgres:// and postgresql://
-// DSNs open the Postgres backend via internal/db/pgstore.
+// and sqlite:// DSNs open the SQLite backend. postgres:// and postgresql://
+// DSNs are recognized but rejected until the Postgres backend implements the
+// core db.Storage domain methods.
 //
 // Open peeks the on-disk schema, runs JSONL cutover for SQLite DBs whose
 // schema_version predates db.CurrentSchemaVersion(), and hands the path to
@@ -17,22 +18,24 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/jsonl"
 )
 
+// ErrPostgresNotSelectable reports that production callers cannot select
+// pgstore through storeopen yet. The pgstore package remains available for
+// schema/bootstrap tests, but its domain methods are still stubs.
+var ErrPostgresNotSelectable = errors.New("postgres backend is not selectable until db.Storage methods are implemented")
+
 // Open selects a storage backend from the DSN and returns a ready-to-use
-// db.Storage. SQLite DSNs at a pre-current schema_version are upgraded
-// through internal/jsonl.AutoCutover before the backend handle is opened;
-// Postgres DSNs at a non-current schema_version error out (PG has no JSONL
-// cutover path).
+// db.Storage. SQLite DSNs at a pre-current schema_version are upgraded through
+// internal/jsonl.AutoCutover before the backend handle is opened.
 func Open(ctx context.Context, dsn string, opts ...db.OpenOption) (db.Storage, error) {
 	cfg := db.ApplyOpenOptions(opts...)
 	scheme, _, hasScheme := splitScheme(dsn)
 	switch {
 	case hasScheme && (scheme == "postgres" || scheme == "postgresql"):
-		return openPostgres(ctx, dsn, cfg, opts)
+		return nil, ErrPostgresNotSelectable
 	case hasScheme && scheme != "sqlite":
 		return nil, fmt.Errorf("unsupported dsn scheme %q", scheme)
 	}
@@ -59,7 +62,16 @@ func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.O
 	case peekErr == nil && ver > db.CurrentSchemaVersion():
 		return nil, fmt.Errorf("schema_version %d at %s is newer than binary schema %d; use a newer kata binary",
 			ver, path, db.CurrentSchemaVersion())
-	case peekErr == nil && ver > 0 && ver < db.CurrentSchemaVersion():
+	case peekErr == nil && ver < db.CurrentSchemaVersion():
+		if ver == 0 {
+			hasTables, err := sqlitestore.HasUserTables(ctx, path)
+			if err != nil {
+				return nil, err
+			}
+			if !hasTables {
+				break
+			}
+		}
 		// Pre-current SQLite gets upgraded through JSONL cutover, which
 		// exports the legacy shape and re-imports it into a fresh
 		// baseline-shaped DB. Re-peek afterwards to confirm the cutover
@@ -75,28 +87,6 @@ func openSQLite(ctx context.Context, path string, cfg db.OpenConfig, opts []db.O
 		return nil, peekErr
 	}
 	return sqlitestore.Open(ctx, path, opts...)
-}
-
-func openPostgres(ctx context.Context, dsn string, cfg db.OpenConfig, opts []db.OpenOption) (db.Storage, error) {
-	if cfg.ReadOnly {
-		return pgstore.Open(ctx, dsn, opts...)
-	}
-	ver, peekErr := pgstore.PeekSchemaVersion(ctx, dsn)
-	switch {
-	case peekErr != nil:
-		// Reachability or auth — pgstore.Open redacts the DSN before
-		// returning so this error chain is credential-free.
-		return nil, peekErr
-	case ver > db.CurrentSchemaVersion():
-		return nil, fmt.Errorf("postgres schema_version %d is newer than binary schema %d; use a newer kata binary",
-			ver, db.CurrentSchemaVersion())
-	case ver > 0 && ver != db.CurrentSchemaVersion():
-		// Postgres has no JSONL cutover path. The operator must restore
-		// a current-schema backup before reopening.
-		return nil, fmt.Errorf("postgres schema_version %d disagrees with binary schema %d; restore from operator backup before reopening",
-			ver, db.CurrentSchemaVersion())
-	}
-	return pgstore.Open(ctx, dsn, opts...)
 }
 
 func isFileNotExist(err error) bool {

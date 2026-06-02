@@ -62,6 +62,22 @@ func TestRedactDSNBarePathUnchanged(t *testing.T) {
 	assert.Equal(t, "/home/u/.kata/kata.db", config.RedactDSN("/home/u/.kata/kata.db"))
 }
 
+func TestRedactDSNRedactsSchemeLessKeywordPassword(t *testing.T) {
+	dsn := "host=db user=kata password=SECRET dbname=kata" //nolint:gosec // fixture proves scheme-less libpq credentials are hidden
+	got := config.RedactDSN(dsn)
+	assert.NotContains(t, got, "SECRET")
+	assert.NotContains(t, got, "password=SECRET")
+	assert.Contains(t, dsn, "SECRET")
+}
+
+func TestRedactDSNRedactsSchemeLessKeywordSSLPassword(t *testing.T) {
+	dsn := "host=db user=kata sslpassword=SECRET dbname=kata" //nolint:gosec // fixture proves scheme-less libpq credentials are hidden
+	got := config.RedactDSN(dsn)
+	assert.NotContains(t, got, "SECRET")
+	assert.NotContains(t, got, "sslpassword=SECRET")
+	assert.Contains(t, dsn, "SECRET")
+}
+
 func TestRedactDSNStripsCredentialsInQueryString(t *testing.T) {
 	// Postgres URLs can carry credentials in the query (libpq accepts
 	// ?password=...&sslpassword=...) — RedactDSN drops the whole query for

@@ -72,6 +72,23 @@ func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
 	assert.Equal(t, uid1, d2.InstanceUID())
 }
 
+func TestOpen_RejectsVersionZeroExistingTables(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `UPDATE meta SET value='0' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	reopened, err := sqlitestore.Open(ctx, path)
+	assert.Nil(t, reopened)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sqlitestore.ErrSchemaCutoverRequired)
+}
+
 func TestSchema_IssuesHasShortIDColumn(t *testing.T) {
 	d := openTestDB(t)
 	var typ string

@@ -2,6 +2,7 @@ package jsonl
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"iter"
 	"strconv"
@@ -17,11 +18,23 @@ type exportSnapshotter interface {
 	BeginExportSnapshot(ctx context.Context) (db.Storage, func() error, error)
 }
 
-// Export writes a deterministic JSONL export of store to w. It is backend-
-// neutral: it routes every read through db.Storage iterator methods and holds
-// no raw SQL. The legacy pre-v10 projections live in exportForCutover and are
-// reachable only via cutover.go.
+// Export writes a deterministic JSONL export of store to w. Current-schema
+// exports are backend-neutral and route reads through db.Storage iterator
+// methods. Pre-current SQLite stores route through the version-aware legacy
+// exporter so read-only backups of old DBs do not depend on current columns.
 func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptions) error {
+	v, err := store.SchemaVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if v < db.CurrentSchemaVersion() {
+		q, ok := store.(exportQuerier)
+		if !ok {
+			return fmt.Errorf("export schema_version %d requires a version-aware SQLite exporter", v)
+		}
+		return exportForCutover(ctx, q, w, opts)
+	}
+
 	if snap, ok := store.(exportSnapshotter); ok {
 		snapshot, release, err := snap.BeginExportSnapshot(ctx)
 		if err != nil {
@@ -38,10 +51,6 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 
 	// export_version mirrors the DB's stored schema_version, matching the
 	// old behavior (which read meta.schema_version directly).
-	v, err := store.SchemaVersion(ctx)
-	if err != nil {
-		return err
-	}
 	if err := writeRecord(enc, KindMeta, metaRecord{Key: "export_version", Value: strconv.Itoa(v)}); err != nil {
 		return err
 	}
