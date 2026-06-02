@@ -230,7 +230,7 @@ func TestDatabaseOpenTerminologyAvoidsMigrationLanguage(t *testing.T) {
 		"openMigrated",
 	}
 	for _, file := range files {
-		body, err := os.ReadFile(filepath.Join(repoRoot, file))
+		body, err := os.ReadFile(filepath.Join(repoRoot, file)) //nolint:gosec // test reads a static allowlist of repository files
 		require.NoError(t, err)
 		text := string(body)
 		for _, phrase := range banned {
