@@ -108,17 +108,14 @@ func exportCutoverSource(ctx context.Context, sourcePath, tmpJSONL string) error
 }
 
 func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string) error {
+	// sqlitestore.Open bootstraps the canonical schema in one transaction
+	// when the file is fresh, so a freshly created tmpDB is ready for the
+	// import to land directly.
 	target, err := sqlitestore.Open(ctx, tmpDB)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = target.Close() }()
-	// sqlitestore.Open no longer bootstraps; Migrate is now the single owner
-	// of the baseline schema, so the cutover target needs an explicit
-	// Migrate before any import row can land.
-	if _, err := target.Migrate(ctx); err != nil {
-		return fmt.Errorf("migrate cutover target: %w", err)
-	}
 	in, err := os.Open(tmpJSONL) //nolint:gosec // temp path is generated from trusted DB path
 	if err != nil {
 		return fmt.Errorf("open cutover jsonl: %w", err)
@@ -127,8 +124,6 @@ func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string) error {
 	if err := Import(ctx, in, target); err != nil {
 		return err
 	}
-	// ImportReplay stamps meta.schema_version inside the import transaction, so
-	// no follow-up write is needed here.
 	return nil
 }
 

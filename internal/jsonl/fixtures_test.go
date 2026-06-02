@@ -91,10 +91,6 @@ func setupClosedTestDB(t *testing.T) (context.Context, string) {
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate closed test db: %v", err)
-	}
 	require.NoError(t, d.Close())
 	return ctx, path
 }
@@ -560,10 +556,6 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate fixture db: %v", err)
-	}
 	require.NoError(t, d.Close())
 
 	raw, err := sql.Open("sqlite", path)

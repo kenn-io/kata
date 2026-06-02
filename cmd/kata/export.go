@@ -46,7 +46,7 @@ func newExportCmd() *cobra.Command {
 			// checkpoint on Close, which fails on a read-only mount and
 			// races a running daemon's writes when --allow-running-daemon
 			// is in play. The read-only handle skips both.
-			d, _, err := storeopen.OpenReadOnly(ctx, dbPath)
+			d, err := storeopen.OpenReadOnly(ctx, dbPath)
 			if err != nil {
 				return err
 			}

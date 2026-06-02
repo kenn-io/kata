@@ -1,17 +1,16 @@
-// Package sqlitestore opens the kata SQLite database and applies its
-// embedded migration ladder. Open returns a raw handle; callers run
-// Storage.Migrate to bring the schema to db.CurrentSchemaVersion() — the
-// production entry path is storeopen.Open with db.ApplyMigrations(), which
-// orchestrates JSONL cutover, Open, and Migrate end-to-end.
+// Package sqlitestore opens the kata SQLite database and bootstraps it from
+// the canonical schema.sql. There is no migration runner: a fresh DB lands at
+// db.CurrentSchemaVersion() in one transaction; an existing DB at the current
+// version opens unchanged; an older DB returns ErrSchemaCutoverRequired so
+// storeopen can drive a JSONL cutover before reopening.
 package sqlitestore
 
 import (
 	"context"
 	"database/sql"
-	"embed"
+	_ "embed"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,18 +20,19 @@ import (
 	_ "modernc.org/sqlite" // pure-Go SQLite driver registered as "sqlite"
 
 	"go.kenn.io/kata/internal/db"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
-//go:embed migrations/*.sql
-var migrationsFS embed.FS
+//go:embed schema.sql
+var schemaSQL string
 
-// migrationsSource is the FS the migration runner reads from. It defaults to
-// the embedded migrationsFS; tests override it via migrate_export_test.go to
-// inject synthetic future-version files without polluting the on-disk
-// migrations directory.
-var migrationsSource fs.FS = migrationsFS
+// ErrSchemaCutoverRequired reports that an existing database is older than
+// the binary's schema and must be upgraded through JSONL cutover before it
+// can be opened. storeopen converts this into a cutover-then-reopen flow.
+var ErrSchemaCutoverRequired = errors.New("schema cutover required")
 
-// Store wraps *sql.DB. Use Open to construct one with PRAGMAs applied.
+// Store wraps *sql.DB. Use Open to construct one with PRAGMAs applied and the
+// schema bootstrapped.
 //
 // readQ is the queryable used by streaming read iterators (Export*). It
 // defaults to the embedded *sql.DB. BeginExportSnapshot returns a *Store
@@ -56,15 +56,15 @@ type readQuerier interface {
 // Compile-time check that *Store satisfies the neutral db.Storage contract.
 var _ db.Storage = (*Store)(nil)
 
-// Open opens the kata SQLite database at path with PRAGMAs applied (foreign
-// keys, WAL journal mode, synchronous=NORMAL, busy_timeout). Open does NOT
-// apply DDL — that responsibility moves to Migrate. The handle returned by a
-// fresh-DB Open has no schema; the caller must run Migrate (typically through
-// storeopen.Open with db.ApplyMigrations()) before issuing any other query.
-//
-// instance_uid is cached opportunistically when meta is already populated.
-// On a fresh DB or any DB whose Migrate hasn't run, the cache stays empty
-// and the next Migrate seeds it.
+// Open opens (and if needed initializes) the kata SQLite database at path.
+// PRAGMAs are applied for every connection via the connection string. Fresh
+// databases are bootstrapped from schema.sql inside a transaction; older
+// databases return ErrSchemaCutoverRequired so the storeopen path can run
+// JSONL cutover before reopening; newer databases are an unrecoverable state
+// for this binary. Open is the single authoritative writer of
+// meta.instance_uid outside an import transaction: after bootstrap, if the
+// row is absent it generates one via uid.New(). The cached value is exposed
+// via InstanceUID for insert paths.
 //
 // Pass db.ReadOnly() to open an existing database without bootstrapping or
 // PRAGMA writes. The cutover and preflight paths use this to inspect an old
@@ -99,7 +99,15 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 	}
 	d := &Store{DB: sdb, path: path}
 	d.readQ = sdb
-	if err := d.cacheInstanceUIDIfPresent(ctx); err != nil {
+	if err := d.bootstrap(ctx); err != nil {
+		_ = sdb.Close()
+		return nil, err
+	}
+	if err := d.ensureInstanceUID(ctx); err != nil {
+		_ = sdb.Close()
+		return nil, err
+	}
+	if err := d.EnsureSystemProject(ctx); err != nil {
 		_ = sdb.Close()
 		return nil, err
 	}
@@ -147,28 +155,80 @@ func (d *Store) RefreshInstanceUID(ctx context.Context) error {
 	return nil
 }
 
-// cacheInstanceUIDIfPresent reads meta.instance_uid into d.instanceUID when
-// the meta table exists and the row is populated. On a fresh DB (no meta
-// table) or a DB whose Migrate has not yet run, the cache stays empty and
-// the handle defers stamping to Migrate.
-func (d *Store) cacheInstanceUIDIfPresent(ctx context.Context) error {
-	exists, err := d.tableExists(ctx, "meta")
+// bootstrap initializes a fresh database from schema.sql or refuses to open
+// an older database. An existing database at the current schema version is
+// left untouched; older databases return ErrSchemaCutoverRequired so the
+// storeopen path can run JSONL cutover; newer databases are an unrecoverable
+// state for this binary.
+func (d *Store) bootstrap(ctx context.Context) error {
+	current, err := d.currentVersion(ctx)
 	if err != nil {
 		return err
 	}
-	if !exists {
+	currentBinary := db.CurrentSchemaVersion()
+	if current > currentBinary {
+		return fmt.Errorf("database schema_version %d is newer than binary schema %d",
+			current, currentBinary)
+	}
+	if current > 0 && current < currentBinary {
+		return fmt.Errorf("%w: database schema_version %d is older than binary schema %d; run JSONL cutover before opening",
+			ErrSchemaCutoverRequired, current, currentBinary)
+	}
+	if current == currentBinary {
 		return nil
 	}
-	var v string
-	err = d.QueryRowContext(ctx,
-		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
+	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin schema bootstrap: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("apply schema: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO meta(key,value) VALUES('schema_version', ?)
+		 ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+		strconv.Itoa(currentBinary)); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("record schema version %d: %w", currentBinary, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schema bootstrap: %w", err)
+	}
+	return nil
+}
+
+// ensureInstanceUID is the single ownership rule for meta.instance_uid: if
+// the row is absent it is inserted with a fresh ULID; if present it is read
+// into d.instanceUID. Idempotent across reboots and every Open caller (tests,
+// import target init, cutover temp DB). Existing DBs take the read-only
+// fast path: a single SELECT, no write.
+func (d *Store) ensureInstanceUID(ctx context.Context) error {
+	var existing string
+	err := d.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&existing)
+	if err == nil {
+		d.instanceUID = existing
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("read instance_uid: %w", err)
 	}
-	d.instanceUID = v
+	fresh, err := katauid.New()
+	if err != nil {
+		return fmt.Errorf("generate instance_uid: %w", err)
+	}
+	if _, err := d.ExecContext(ctx,
+		`INSERT INTO meta(key, value) VALUES('instance_uid', ?)
+		 ON CONFLICT(key) DO NOTHING`, fresh); err != nil {
+		return fmt.Errorf("seed instance_uid: %w", err)
+	}
+	var stored string
+	if err := d.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&stored); err != nil {
+		return fmt.Errorf("read instance_uid after seed: %w", err)
+	}
+	d.instanceUID = stored
 	return nil
 }
 
@@ -252,8 +312,8 @@ func fastSQLiteForTestHarness() bool {
 }
 
 // PeekSchemaVersion reads meta.schema_version without bootstrapping the DB.
-// It returns 0 when the database exists but has no meta table or schema_version
-// row.
+// It returns 0 when the database exists but has no meta table or
+// schema_version row.
 func PeekSchemaVersion(ctx context.Context, path string) (int, error) {
 	d, err := Open(ctx, path, db.ReadOnly())
 	if err != nil {
@@ -264,11 +324,11 @@ func PeekSchemaVersion(ctx context.Context, path string) (int, error) {
 }
 
 // SchemaVersion returns the integer stored in meta.schema_version. It errors
-// when the row is absent or unparseable (unlike currentVersion, which treats a
-// missing meta table as version 0 for the migration runner). The read routes
-// through readQ so jsonl.Export's snapshot-bound store sees this as the first
-// read on its tx, pinning the snapshot here rather than at the iterators that
-// follow.
+// when the row is absent or unparseable (unlike currentVersion, which treats
+// a missing meta table as version 0 for the bootstrap path). The read routes
+// through readQ so jsonl.Export's snapshot-bound store sees this as the
+// first read on its tx, pinning the snapshot here rather than at the
+// iterators that follow.
 func (d *Store) SchemaVersion(ctx context.Context) (int, error) {
 	var v string
 	if err := d.readQ.QueryRowContext(ctx,

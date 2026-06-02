@@ -1,7 +1,7 @@
 // Package pgstore is the Postgres-backed implementation of db.Storage.
 // Open opens via pgx's database/sql wrapper, applies sensible per-connection
-// runtime params, and returns a *Store. Migrate brings the schema up to
-// db.CurrentSchemaVersion() via the embedded migration ladder.
+// runtime params, bootstraps the canonical schema if the DB is fresh, and
+// returns a ready-to-use *Store.
 //
 // Domain methods are stubbed in stubs_gen.go for Phase 3 — queries land in
 // Phase 4. stubs_gen.go is regenerated from internal/db/storage.go's
@@ -45,8 +45,8 @@ func (s *Store) Path() string {
 }
 
 // InstanceUID returns the cached meta.instance_uid value, populated on Open
-// (when the meta table exists) and by Migrate. Empty on a fresh, un-migrated
-// DB.
+// when the meta table exists (fresh DBs are bootstrapped and seeded in the
+// same call). Empty only on a read-only handle that hasn't run cacheInstanceUID.
 func (s *Store) InstanceUID() string { return s.instanceUID }
 
 // RefreshInstanceUID re-reads meta.instance_uid into the cached field. Used
@@ -84,7 +84,7 @@ func (s *Store) RetryTransient(_ context.Context, op func() error) error {
 
 // PeekSchemaVersion opens dsn read-only, reads meta.schema_version (or 0 if
 // the meta table is absent), and closes the handle. Used by storeopen's
-// no-ApplyMigrations PG branch.
+// pre-Open schema-shape check.
 func PeekSchemaVersion(ctx context.Context, dsn string) (int, error) {
 	s, err := openInternal(ctx, dsn, true)
 	if err != nil {

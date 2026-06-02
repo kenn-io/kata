@@ -223,10 +223,6 @@ func writeVersionZeroDB(t *testing.T, path string) {
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate before stamping v0: %v", err)
-	}
 	_, err = d.ExecContext(ctx, `UPDATE meta SET value='0' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, d.Close())

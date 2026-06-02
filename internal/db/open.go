@@ -1,19 +1,13 @@
 package db
 
 // OpenConfig carries the mode flags shared across storage backends. New fields
-// must be safe to default: the zero value is "read-write, create-if-missing,
-// no schema mutation" SQLite behavior.
+// must be safe to default: the zero value is "read-write, create-if-missing"
+// SQLite behavior.
 type OpenConfig struct {
 	// ReadOnly opens an existing database without bootstrapping or PRAGMA
 	// writes. The cutover and preflight paths use this to inspect an old
 	// source DB before the destructive replace.
 	ReadOnly bool
-
-	// ApplyMigrations authorizes the open path to bring the backend's schema
-	// up to db.CurrentSchemaVersion() before the handle is returned. Without
-	// this option a stale database surfaces db.ErrSchemaOutOfDate and a
-	// missing database is refused.
-	ApplyMigrations bool
 }
 
 // OpenOption mutates an OpenConfig. The functional-options style keeps the
@@ -25,13 +19,6 @@ type OpenOption func(*OpenConfig)
 // PRAGMA mutations. Equivalent to the prior OpenReadOnly entry point.
 func ReadOnly() OpenOption {
 	return func(c *OpenConfig) { c.ReadOnly = true }
-}
-
-// ApplyMigrations authorizes the open path to bring the backend's schema up
-// to db.CurrentSchemaVersion() before the handle is returned. Without this
-// option a stale database surfaces db.ErrSchemaOutOfDate.
-func ApplyMigrations() OpenOption {
-	return func(c *OpenConfig) { c.ApplyMigrations = true }
 }
 
 // ApplyOpenOptions folds the variadic options into a fresh OpenConfig. Backends

@@ -9,12 +9,6 @@ import (
 // Sentinel errors exposed by the Storage contract. The daemon and CLI match
 // these with errors.Is; new sentinels live here so impl files stay method-only.
 
-// ErrSchemaOutOfDate is returned by storeopen.Open when the on-disk
-// schema_version is not equal to db.CurrentSchemaVersion() and the caller did
-// not pass db.ApplyMigrations(). The error message names `kata migrate` so the
-// user has a direct next step.
-var ErrSchemaOutOfDate = errors.New("schema out of date")
-
 // Issue/project core sentinels.
 var (
 	// ErrNotFound is returned when a referenced row does not exist (or has

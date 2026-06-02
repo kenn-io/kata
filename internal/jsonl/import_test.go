@@ -452,10 +452,6 @@ func openImportTargetDB(t *testing.T) *sqlitestore.Store {
 	d, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "target.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
-	if _, err := d.Migrate(context.Background()); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate import target db: %v", err)
-	}
 	return d
 }
 

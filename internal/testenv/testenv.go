@@ -89,10 +89,6 @@ func New(t *testing.T, opts ...Option) *Env {
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate testenv db: %v", err)
-	}
 	t.Cleanup(func() { _ = d.Close() })
 
 	url, client, bcast := serveDaemon(t, d, opts...)
@@ -100,17 +96,13 @@ func New(t *testing.T, opts ...Option) *Env {
 }
 
 // NewFromDB launches a daemon backed by an existing SQLite database file. Use
-// this when verifying the contents of a DB produced by import/restore/migration
-// flows. KATA_HOME is not modified — the caller's environment is preserved.
+// this when verifying the contents of a DB produced by import/restore flows.
+// KATA_HOME is not modified — the caller's environment is preserved.
 func NewFromDB(t *testing.T, dbPath string) *Env {
 	t.Helper()
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, dbPath)
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate testenv db: %v", err)
-	}
 	t.Cleanup(func() { _ = d.Close() })
 
 	url, client, bcast := serveDaemon(t, d)

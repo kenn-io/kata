@@ -93,9 +93,6 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
-	_, err = s.Migrate(ctx)
-	require.NoError(t, err)
-
 	// --- tables ---
 	got := queryStrings(t, s, `
 		SELECT table_name

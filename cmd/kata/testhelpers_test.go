@@ -45,10 +45,6 @@ func openMigratedKataDB(t *testing.T, path string) *sqlitestore.Store {
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate cmd/kata test db: %v", err)
-	}
 	return d
 }
 

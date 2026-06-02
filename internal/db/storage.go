@@ -24,11 +24,6 @@ type Storage interface {
 	Path() string
 	Close() error
 	RetryTransient(ctx context.Context, op func() error) error
-	// Migrate brings the backend's schema up to db.CurrentSchemaVersion() by
-	// applying every pending migration file in order. Idempotent: returns
-	// MigrationResult{From: N, To: N, Applied: nil} when already current. On
-	// a backend opened read-only, returns an error.
-	Migrate(ctx context.Context) (MigrationResult, error)
 
 	// projects + aliases
 	CreateProject(ctx context.Context, name string) (Project, error)

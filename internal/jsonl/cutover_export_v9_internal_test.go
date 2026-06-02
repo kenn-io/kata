@@ -147,10 +147,6 @@ func seedV9SchemaDBInternal(t *testing.T, path string) {
 
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate v9 fixture db: %v", err)
-	}
 	require.NoError(t, d.Close())
 
 	raw, err := sql.Open("sqlite", path)
@@ -185,10 +181,6 @@ func openImportTargetDBInternal(t *testing.T) *sqlitestore.Store {
 	d, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "target.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
-	if _, err := d.Migrate(context.Background()); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate import target db: %v", err)
-	}
 	return d
 }
 

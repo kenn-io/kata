@@ -32,7 +32,10 @@ func TestOpen_AppliesPragmas(t *testing.T) {
 // the handle is a raw SQLite connection with no schema. Migrate is the only
 // path that creates tables; openTestDB calls Migrate after Open, but a direct
 // Open without it leaves the file empty.
-func TestOpen_OnFreshDBLeavesMetaUnpopulated(t *testing.T) {
+// TestOpen_OnFreshDBBootstrapsSchema confirms the new Open contract: a fresh
+// path returns a handle whose meta table and schema_version row are already
+// in place, courtesy of the bootstrap-on-Open transaction.
+func TestOpen_OnFreshDBBootstrapsSchema(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -43,20 +46,22 @@ func TestOpen_OnFreshDBLeavesMetaUnpopulated(t *testing.T) {
 	var n int
 	require.NoError(t, d.QueryRow(
 		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='meta'`).Scan(&n))
-	assert.Equal(t, 0, n)
+	assert.Equal(t, 1, n)
+
+	v, err := d.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, db.CurrentSchemaVersion(), v)
 }
 
-// TestOpen_IsIdempotentAfterMigrate confirms that re-opening an
-// already-migrated DB succeeds and reports the same schema_version and
+// TestOpen_IsIdempotentAfterBootstrap confirms that re-opening an
+// already-bootstrapped DB succeeds and reports the same schema_version and
 // instance_uid.
-func TestOpen_IsIdempotentAfterMigrate(t *testing.T) {
+func TestOpen_IsIdempotentAfterBootstrap(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
 	d1, err := sqlitestore.Open(ctx, path)
-	require.NoError(t, err)
-	_, err = d1.Migrate(ctx)
 	require.NoError(t, err)
 	uid1 := d1.InstanceUID()
 	require.NoError(t, d1.Close())
@@ -166,8 +171,6 @@ func TestCheckpointTruncatesWAL(t *testing.T) {
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
-	_, err = d.Migrate(ctx)
-	require.NoError(t, err)
 	d.SetMaxOpenConns(1)
 
 	_, err = d.ExecContext(ctx, `PRAGMA wal_autocheckpoint=0`)

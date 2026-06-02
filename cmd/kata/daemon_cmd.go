@@ -319,7 +319,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	if err != nil {
 		return err
 	}
-	store, _, err := storeopen.Open(ctx, dbPath, db.ApplyMigrations())
+	store, err := storeopen.Open(ctx, dbPath)
 	if err != nil {
 		return err
 	}

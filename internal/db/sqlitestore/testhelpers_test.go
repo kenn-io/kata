@@ -31,10 +31,6 @@ func openTestDBWithPath(t *testing.T) (*sqlitestore.Store, string) {
 	d, err := sqlitestore.Open(context.Background(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
-	if _, err := d.Migrate(context.Background()); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate test db: %v", err)
-	}
 	return d, path
 }
 

@@ -304,10 +304,6 @@ func openAuthTestDB(t *testing.T) *sqlitestore.Store {
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate auth test db: %v", err)
-	}
 	t.Cleanup(func() { _ = d.Close() })
 	return d
 }

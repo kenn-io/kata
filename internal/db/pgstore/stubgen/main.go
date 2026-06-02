@@ -38,7 +38,7 @@ const (
 )
 
 // alreadyImplemented lists Storage methods implemented on *pgstore.Store in
-// store.go and migrate.go, plus Close which is satisfied by the embedded
+// store.go and open.go, plus Close which is satisfied by the embedded
 // *sql.DB. Each Phase 4 method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
@@ -47,7 +47,6 @@ var alreadyImplemented = map[string]bool{
 	"RefreshInstanceUID": true, // store.go
 	"SchemaVersion":      true, // store.go
 	"RetryTransient":     true, // store.go (Phase 4 will swap in real retries)
-	"Migrate":            true, // migrate.go
 	"Close":              true, // inherited from embedded *sql.DB
 }
 

@@ -198,10 +198,6 @@ func openClaimGateHelperDB(t *testing.T) *sqlitestore.Store {
 	ctx := context.Background()
 	store, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
-	if _, err := store.Migrate(ctx); err != nil {
-		_ = store.Close()
-		t.Fatalf("migrate claim-gate helper db: %v", err)
-	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store
 }

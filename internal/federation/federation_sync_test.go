@@ -2307,10 +2307,6 @@ func openDaemonclientTestDB(t *testing.T) (*sqlitestore.Store, string) {
 	path := filepath.Join(t.TempDir(), "kata.db")
 	store, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
-	if _, err := store.Migrate(ctx); err != nil {
-		_ = store.Close()
-		t.Fatalf("migrate federation test db: %v", err)
-	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store, path
 }

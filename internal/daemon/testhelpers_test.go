@@ -199,10 +199,6 @@ func openTestDB(t *testing.T) testDBHandle {
 	ctx := context.Background()
 	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
-	if _, err := d.Migrate(ctx); err != nil {
-		_ = d.Close()
-		t.Fatalf("migrate daemon test db: %v", err)
-	}
 	t.Cleanup(func() { _ = d.Close() })
 	return testDBHandle{db: d, now: time.Now().UTC()}
 }

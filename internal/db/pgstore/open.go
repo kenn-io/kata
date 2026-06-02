@@ -3,7 +3,10 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	_ "embed"
+	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,7 +14,11 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	katauid "go.kenn.io/kata/internal/uid"
 )
+
+//go:embed schema.sql
+var schemaSQL string
 
 // Default connection pool sizing. Conservative for v1 single-daemon
 // deployments. Future phases may expose these through DSN params or
@@ -29,8 +36,11 @@ const (
 // every pooled connection inherits them via the startup packet, rather than
 // a one-shot SET that only touches the connection that ran it.
 //
-// Pings the pool to verify connectivity before returning. Migrate must be
-// called explicitly to apply schema changes.
+// On a writable handle, Open bootstraps the canonical schema in a single
+// transaction when the DB has no meta table, then seeds meta.instance_uid.
+// Existing DBs at the binary's schema version are left untouched; older or
+// newer DBs surface a credential-free error. Read-only handles skip both
+// bootstrap and ensureInstanceUID and just open the pool.
 func Open(ctx context.Context, dsn string, opts ...db.OpenOption) (*Store, error) {
 	cfg := db.ApplyOpenOptions(opts...)
 	return openInternal(ctx, dsn, cfg.ReadOnly)
@@ -85,9 +95,97 @@ func openInternal(ctx context.Context, dsn string, readOnly bool) (*Store, error
 		return nil, fmt.Errorf("ping pgx: %w", err)
 	}
 	s := &Store{DB: sdb, dsn: dsn, readOnly: readOnly}
-	if err := s.cacheInstanceUIDIfPresent(ctx); err != nil {
+	if readOnly {
+		if err := s.cacheInstanceUIDIfPresent(ctx); err != nil {
+			_ = sdb.Close()
+			return nil, err
+		}
+		return s, nil
+	}
+	if err := s.bootstrap(ctx); err != nil {
 		_ = sdb.Close()
 		return nil, err
 	}
+	if err := s.ensureInstanceUID(ctx); err != nil {
+		_ = sdb.Close()
+		return nil, err
+	}
+	// EnsureSystemProject is a Phase 4 stub; the Phase 3 schema is bootstrapped
+	// without seeding the system project so the meta-only acceptance suite can
+	// still drive Open against a fresh container.
 	return s, nil
+}
+
+// bootstrap initializes a fresh database from schema.sql or refuses to open
+// a database whose schema_version disagrees with the binary's. Postgres has
+// no JSONL-cutover path; the operator must restore from backup or migrate
+// externally before reopening.
+func (s *Store) bootstrap(ctx context.Context) error {
+	current, err := s.currentVersion(ctx)
+	if err != nil {
+		return err
+	}
+	currentBinary := db.CurrentSchemaVersion()
+	if current > currentBinary {
+		return fmt.Errorf("postgres schema_version %d is newer than binary schema %d",
+			current, currentBinary)
+	}
+	if current > 0 && current < currentBinary {
+		return fmt.Errorf("postgres schema_version %d is older than binary schema %d; restore from operator backup before reopening",
+			current, currentBinary)
+	}
+	if current == currentBinary {
+		return nil
+	}
+	tx, err := s.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin schema bootstrap: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("apply schema: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO meta(key, value) VALUES ('schema_version', $1)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		strconv.Itoa(currentBinary)); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("record schema version %d: %w", currentBinary, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schema bootstrap: %w", err)
+	}
+	return nil
+}
+
+// ensureInstanceUID is the single ownership rule for meta.instance_uid: if
+// the row is absent it is inserted with a fresh ULID; if present it is read
+// into s.instanceUID. Idempotent across reboots and every Open caller.
+func (s *Store) ensureInstanceUID(ctx context.Context) error {
+	var existing string
+	err := s.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&existing)
+	if err == nil {
+		s.instanceUID = existing
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read instance_uid: %w", err)
+	}
+	fresh, err := katauid.New()
+	if err != nil {
+		return fmt.Errorf("generate instance_uid: %w", err)
+	}
+	if _, err := s.ExecContext(ctx,
+		`INSERT INTO meta(key, value) VALUES ('instance_uid', $1)
+		 ON CONFLICT (key) DO NOTHING`, fresh); err != nil {
+		return fmt.Errorf("seed instance_uid: %w", err)
+	}
+	var stored string
+	if err := s.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&stored); err != nil {
+		return fmt.Errorf("read instance_uid after seed: %w", err)
+	}
+	s.instanceUID = stored
+	return nil
 }
