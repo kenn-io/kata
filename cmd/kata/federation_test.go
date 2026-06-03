@@ -621,9 +621,9 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 		switch r.URL.Path {
 		case "/api/v1/ping":
 			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
-		case "/api/v1/projects/resolve":
+		case "/api/v1/projects":
 			seenAuth = append(seenAuth, r.Header.Get("Authorization"))
-			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"fedlab"}}`))
+			_, _ = w.Write([]byte(`{"projects":[{"id":1,"name":"fedlab"}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -635,6 +635,37 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 	require.True(t, exists)
 	require.NotEmpty(t, seenAuth)
 	assert.Equal(t, []string{""}, seenAuth)
+}
+
+func TestFederationSpokeProjectExistsUsesReadonlyGETProbe(t *testing.T) {
+	spokeUID := "01HZNQ7VFPK1XGD8R5MABCD4EF"
+	var seenMethods []string
+	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenMethods = append(seenMethods, r.Method+" "+r.URL.Path)
+		if r.Method != http.MethodGet {
+			http.Error(w, "readonly", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/ping":
+			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
+		case "/api/v1/instance":
+			_, _ = w.Write([]byte(`{"instance_uid":"` + spokeUID + `"}`))
+		case "/api/v1/projects":
+			_, _ = w.Write([]byte(`{"projects":[{"id":1,"name":"fedlab"},{"id":2,"name":"workspace:other"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(spoke.Close)
+
+	exists := federationSpokeProjectExists(contextWithBaseURL(context.Background(), spoke.URL), "fedlab", spokeUID)
+
+	require.True(t, exists)
+	assert.Equal(t, []string{
+		"GET /api/v1/instance",
+		"GET /api/v1/projects",
+	}, seenMethods)
 }
 
 func TestFederationEnrollCLIRequiresPullCapabilityForJoinCommand(t *testing.T) {

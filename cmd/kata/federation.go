@@ -252,8 +252,7 @@ func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstanc
 			return false
 		}
 	}
-	_, err = resolveFederationProjectByName(ctx, spokeClient, spokeURL, projectName)
-	return err == nil
+	return federationSpokeProjectNameExists(ctx, spokeClient, spokeURL, projectName)
 }
 
 func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseURL string) (string, error) {
@@ -271,6 +270,29 @@ func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseUR
 		return "", err
 	}
 	return strings.TrimSpace(body.InstanceUID), nil
+}
+
+func federationSpokeProjectNameExists(ctx context.Context, client *http.Client, baseURL, projectName string) bool {
+	projectName = strings.TrimSpace(projectName)
+	if projectName == "" {
+		return false
+	}
+	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/projects", nil)
+	if err != nil || status >= 400 {
+		return false
+	}
+	var body struct {
+		Projects []projectRef `json:"projects"`
+	}
+	if err := json.Unmarshal(bs, &body); err != nil {
+		return false
+	}
+	for _, project := range body.Projects {
+		if project.Name == projectName {
+			return true
+		}
+	}
+	return false
 }
 
 func federationEnrollmentsCmd() *cobra.Command {
