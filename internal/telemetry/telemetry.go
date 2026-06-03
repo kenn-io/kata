@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +27,18 @@ const (
 
 // ErrUnsupportedEvent is returned when callers try to capture an event outside the allowlist.
 var ErrUnsupportedEvent = errors.New("unsupported telemetry event")
+
+var disabledForProcess atomic.Bool
+
+func init() {
+	if testing.Testing() {
+		disableForProcess()
+	}
+}
+
+func disableForProcess() {
+	disabledForProcess.Store(true)
+}
 
 type propertyFilter func(any) (any, bool)
 
@@ -68,7 +81,7 @@ type Options struct {
 
 // EnabledFromEnv reports whether anonymous telemetry is enabled by the environment.
 func EnabledFromEnv() bool {
-	if testing.Testing() {
+	if disabledForProcess.Load() {
 		return false
 	}
 	return strings.TrimSpace(os.Getenv(EnabledEnv)) != "0"
