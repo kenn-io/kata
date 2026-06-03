@@ -222,16 +222,28 @@ func allowFederationIngestSnapshotAuthorPreservation(
 	allowExplicit bool,
 	events []db.FederationIngestEvent,
 ) (bool, error) {
-	// Adoption emits an initial issue.snapshot run that preserves historical
-	// issue/comment authors. That exception must be explicitly attached to the
-	// enrollment token and is consumed with the accepted ingest transaction.
+	// Adoption emits an initial baseline: optional project metadata followed by
+	// issue.snapshot events that preserve historical issue/comment authors. That
+	// exception must be explicitly attached to the enrollment token and is
+	// consumed with the accepted ingest transaction.
 	if !allowExplicit || enrollmentID <= 0 {
 		return false, nil
 	}
+	hasSnapshot := false
 	for _, in := range events {
-		if in.Event.Type != "issue.snapshot" {
+		switch in.Event.Type {
+		case "project.metadata_updated":
+			if hasSnapshot {
+				return false, nil
+			}
+		case "issue.snapshot":
+			hasSnapshot = true
+		default:
 			return false, nil
 		}
+	}
+	if !hasSnapshot {
+		return false, nil
 	}
 	prior, err := federationIngestHasPriorEvents(ctx, tx, projectID, spokeInstanceUID)
 	if err != nil {

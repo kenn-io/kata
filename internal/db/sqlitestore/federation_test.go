@@ -1857,6 +1857,57 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, "historical-commenter", comments[0].Author)
 	})
 
+	t.Run("allows adoption project metadata before historical author snapshots", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		markerValue := strings.Join([]string{"snapshot", "adoption", "metadata", "marker"}, "-")
+		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token:                        markerValue,
+			SpokeInstanceUID:             spokeUID,
+			ProjectID:                    &p.ID,
+			Capabilities:                 "push",
+			Actor:                        "bound-agent",
+			AllowAdoptionSnapshotAuthors: true,
+		})
+		require.NoError(t, err)
+		metadata := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, nil, nil,
+			"project.metadata_updated", 100,
+			`{"project_uid":"`+p.UID+`","diff":{"area":{"from":null,"to":"docs"}}}`)
+		metadata.Actor = "bound-agent"
+		metadata.ContentHash = remoteEventHash(t, metadata)
+		issueUID := newTestUID(t)
+		commentUID := newTestUID(t)
+		snapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.snapshot", 101,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"historical","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","comments":[{"comment_uid":"`+commentUID+`","author":"historical-commenter","body":"historical comment","created_at":"2026-05-23T12:00:00.000Z"}]}`)
+		snapshot.Actor = "bound-agent"
+		snapshot.ContentHash = remoteEventHash(t, snapshot)
+
+		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                       p.ID,
+			FederationEnrollmentID:          created.Enrollment.ID,
+			SpokeInstanceUID:                spokeUID,
+			BoundActor:                      "bound-agent",
+			AllowSnapshotAuthorPreservation: true,
+			Events: []db.FederationIngestEvent{
+				{SourceEventID: 1, Event: metadata},
+				{SourceEventID: 2, Event: snapshot},
+			},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, 2, res.Accepted)
+		issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "historical-agent", issue.Author)
+		comments, err := d.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		assert.Equal(t, "historical-commenter", comments[0].Author)
+		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
+		require.NoError(t, err)
+		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
+	})
+
 	t.Run("consumes adoption author marker on first accepted non-snapshot ingest", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		markerValue := strings.Join([]string{"snapshot", "adoption", "normal", "marker"}, "-")
