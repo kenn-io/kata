@@ -382,6 +382,65 @@ func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
 	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
+func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameSpokeProject(t *testing.T) {
+	resetFlags(t)
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	spoke := testenv.New(t)
+	t.Setenv("KATA_SERVER", spoke.URL)
+	ctx := context.Background()
+	_, err := spoke.DB.CreateProject(ctx, "local-project")
+	require.NoError(t, err)
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--project", "hub-project",
+		"federation", "enroll",
+		"--spoke-instance", spoke.DB.InstanceUID(),
+		"--hub-url", hub.URL,
+		"--actor", "wesm",
+		"--adopt-existing",
+	})
+
+	require.NoError(t, cmd.Execute())
+	out := buf.String()
+	assert.Contains(t, out, "--project hub-project")
+	assert.Contains(t, out, "--adopt-existing")
+
+	hubProject, err := hub.DB.ProjectByName(ctx, "hub-project")
+	require.NoError(t, err)
+	enrollments, err := hub.DB.ListFederationEnrollments(ctx)
+	require.NoError(t, err)
+	require.Len(t, enrollments, 1)
+	require.NotNil(t, enrollments[0].ProjectID)
+	assert.Equal(t, hubProject.ID, *enrollments[0].ProjectID)
+	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
+}
+
+func TestFederationEnrollCLIAdoptExistingRequiresPushCapability(t *testing.T) {
+	resetFlags(t)
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	spoke := testenv.New(t)
+	t.Setenv("KATA_SERVER", spoke.URL)
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{
+		"--project", "hub-project",
+		"federation", "enroll",
+		"--spoke-instance", spoke.DB.InstanceUID(),
+		"--hub-url", hub.URL,
+		"--actor", "wesm",
+		"--capabilities", "pull",
+		"--adopt-existing",
+	})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--adopt-existing requires push capability")
+}
+
 func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) {
 	env := testenv.New(t)
 	dir := t.TempDir()

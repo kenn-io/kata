@@ -179,8 +179,9 @@ When a spoke project named `<hub-project>` already exists, the printed command
 includes `--adopt-existing`. If no spoke project with that name exists, the
 printed command omits `--adopt-existing` and `join` creates a new spoke
 replica. If the spoke project name differs from the hub project name, replace
-the printed `--project <hub-project>` with `--project <spoke-project>` and add
-`--adopt-existing`.
+the printed `--project <hub-project>` with `--project <spoke-project>`, and
+create the enrollment with `kata federation enroll --adopt-existing` so the
+token is marked for adoption snapshots.
 
 Step 3: run the printed join command against the spoke daemon:
 
@@ -341,8 +342,9 @@ pull-only and the CLI prints a warning.
 
 ### Adopting an existing project
 
-If a spoke already has a non-federated project that should join the hub,
-add `--adopt-existing`. Adoption requires `--push`:
+If a spoke already has a non-federated project that should join the hub, use an
+enrollment token created with adoption enabled and add `--adopt-existing` to the
+join command. Adoption requires `--push`:
 
 ```sh
 kata federation join --project fedlab \
@@ -354,8 +356,10 @@ kata federation join --project fedlab \
   --adopt-existing
 ```
 
-The spoke and hub project names do not have to match. Select the spoke project
-with `--project` and the hub project with the hub selector.
+The spoke and hub project names do not have to match. For that flow, run
+`kata federation enroll --adopt-existing`, then select the spoke project with
+`--project` in the printed join command and the hub project with the hub
+selector.
 
 Adoption preserves the current state of local issues, including closed and
 soft-deleted issues, comments, labels, metadata, priority, owner, and

@@ -447,8 +447,11 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 	tokenHash := strings.Repeat("b", 64)
 	plaintextToken := "plaintext-token-never-exported"
 	_, err = srcDB.ExecContext(ctx, `
-		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities, bound_actor)
-		VALUES(?, ?, ?, ?, ?)`,
+		INSERT INTO federation_enrollments(
+			token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
+			allow_adoption_snapshot_authors
+		)
+		VALUES(?, ?, ?, ?, ?, 1)`,
 		tokenHash, "01HZZZZZZZZZZZZZZZZZZZZZ02", p.ID, "pull,push", "wesm")
 	require.NoError(t, err)
 
@@ -456,20 +459,24 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 	require.NoError(t, jsonl.Export(ctx, srcDB, &buf, jsonl.ExportOptions{}))
 	assert.Contains(t, buf.String(), tokenHash)
 	assert.NotContains(t, buf.String(), plaintextToken)
+	assert.Contains(t, buf.String(), `"allow_adoption_snapshot_authors":true`)
 
 	dstDB := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
 
 	var gotHash, gotSpoke, gotCapabilities, gotActor string
 	var gotProjectID int64
+	var gotAdoptionMarker int
 	require.NoError(t, dstDB.QueryRowContext(ctx, `
-		SELECT token_hash, spoke_instance_uid, project_id, capabilities, bound_actor
-		  FROM federation_enrollments`).Scan(&gotHash, &gotSpoke, &gotProjectID, &gotCapabilities, &gotActor))
+		SELECT token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
+		       allow_adoption_snapshot_authors
+		  FROM federation_enrollments`).Scan(&gotHash, &gotSpoke, &gotProjectID, &gotCapabilities, &gotActor, &gotAdoptionMarker))
 	assert.Equal(t, tokenHash, gotHash)
 	assert.Equal(t, "01HZZZZZZZZZZZZZZZZZZZZZ02", gotSpoke)
 	assert.Equal(t, p.ID, gotProjectID)
 	assert.Equal(t, "pull,push", gotCapabilities)
 	assert.Equal(t, "wesm", gotActor)
+	assert.Equal(t, 1, gotAdoptionMarker)
 }
 
 // TestRoundtrip_IssueEnvelopeCarriesShortID pins spec §8.1: the JSONL issue

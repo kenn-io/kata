@@ -175,7 +175,9 @@ On each spoke:
 
    If the spoke already has a non-federated project that should join the
    hub under the same name, opt in explicitly with `--adopt-existing`, which
-   requires `--push`:
+   requires `--push`. For differently named spoke projects, create the
+   enrollment with `kata federation enroll --adopt-existing`, then edit the
+   printed join command's `--project` value:
 
    ```bash
    kata federation join --project fedlab \
@@ -189,7 +191,8 @@ On each spoke:
 
    Adoption works even when the spoke project name differs from the hub project
    name; choose the spoke project with `--project` and the hub with the hub
-   selector:
+   selector. The enrollment must have been created with `--adopt-existing` so
+   the hub can accept adoption snapshot authors:
 
    ```bash
    kata federation join --project shared-foo \

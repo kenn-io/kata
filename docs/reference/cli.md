@@ -230,6 +230,8 @@ enrollment API call to `<url>` using normal daemon API auth
 does not already exist, then enables federation and creates the enrollment. The
 CLI should otherwise remain pointed at the spoke daemon so the printed join
 command can include `--adopt-existing` when the spoke project already exists.
+Use `kata federation enroll --adopt-existing` when adopting a differently named
+spoke project, then edit the printed join command's `--project` value.
 
 `--adopt-existing` is a current-state cutover. It removes the spoke project's
 pre-adoption event history from the live event stream and queues fresh snapshots

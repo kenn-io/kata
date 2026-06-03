@@ -127,6 +127,7 @@ func federationEnrollCmd() *cobra.Command {
 	var token string
 	var actor string
 	var allowInsecure bool
+	var adoptExistingFlag bool
 	cmd := &cobra.Command{
 		Use:   "enroll [project]",
 		Short: "create a hub enrollment for a spoke",
@@ -142,7 +143,11 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := validateFederationJoinCapabilities(internalCaps, federationCapabilitiesContain(internalCaps, "push")); err != nil {
+			pushCapable := federationCapabilitiesContain(internalCaps, "push")
+			if adoptExistingFlag && !pushCapable {
+				return &cliError{Message: "--adopt-existing requires push capability", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if err := validateFederationJoinCapabilities(internalCaps, pushCapable); err != nil {
 				return err
 			}
 			ctx := cmd.Context()
@@ -163,8 +168,8 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			adoptExisting := federationCapabilitiesContain(internalCaps, "push") &&
-				federationSpokeProjectExists(ctx, metadata.ProjectName)
+			adoptExisting := adoptExistingFlag || (pushCapable &&
+				federationSpokeProjectExists(ctx, metadata.ProjectName))
 			status, bs, err := httpDoJSON(ctx, hubClient, http.MethodPost,
 				hubBaseURL+"/api/v1/federation/enrollments",
 				map[string]any{
@@ -196,7 +201,7 @@ func federationEnrollCmd() *cobra.Command {
 				Capabilities:           internalCaps,
 				DisplayCapabilities:    externalCaps,
 				Actor:                  enrollment.Actor,
-				PushEnabled:            federationCapabilitiesContain(internalCaps, "push"),
+				PushEnabled:            pushCapable,
 				AllowInsecure:          allowInsecure,
 			}
 			bundle.AdoptExisting = adoptExisting
@@ -209,6 +214,7 @@ func federationEnrollCmd() *cobra.Command {
 	cmd.Flags().StringVar(&token, "token", "", "explicit enrollment token (default: generated)")
 	cmd.Flags().StringVar(&actor, "actor", "", "actor bound to this spoke enrollment")
 	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow plaintext HTTP hub URL for enrollment and later spoke transport")
+	cmd.Flags().BoolVar(&adoptExistingFlag, "adopt-existing", false, "mark enrollment for adopting an existing spoke project")
 	return cmd
 }
 

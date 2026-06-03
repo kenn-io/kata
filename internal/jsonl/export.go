@@ -1035,8 +1035,12 @@ func exportFederationEnrollments(
 	if sourceSchemaVersion >= 13 {
 		actorSelect = `bound_actor`
 	}
+	allowAdoptionSnapshotAuthorsSelect := `0`
+	if sourceSchemaVersion >= 14 {
+		allowAdoptionSnapshotAuthorsSelect = `allow_adoption_snapshot_authors`
+	}
 	query := `SELECT id, token_hash, spoke_instance_uid, project_id, capabilities,
-	                 ` + actorSelect + `,
+	                 ` + actorSelect + `, ` + allowAdoptionSnapshotAuthorsSelect + `,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT)
 	          FROM federation_enrollments`
 	args := []any{}
@@ -1051,8 +1055,11 @@ func exportFederationEnrollments(
 	}
 	return scanRecords(rows, KindFederationEnrollment, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
+		var allowAdoptionSnapshotAuthors int
 		err := rows.Scan(&rec.ID, &rec.TokenHash, &rec.SpokeInstanceUID, &rec.ProjectID,
-			&rec.Capabilities, &rec.Actor, &rec.CreatedAt, &rec.UpdatedAt, &rec.RevokedAt)
+			&rec.Capabilities, &rec.Actor, &allowAdoptionSnapshotAuthors, &rec.CreatedAt,
+			&rec.UpdatedAt, &rec.RevokedAt)
+		rec.AllowAdoptionSnapshotAuthors = allowAdoptionSnapshotAuthors != 0
 		return rec, err
 	})
 }
