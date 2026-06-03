@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -191,6 +193,20 @@ func TestResolvedImplicitRemoteTargetCarriesGlobalAuthToken(t *testing.T) {
 	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
 
 	assert.Equal(t, "global-token", target.Token)
+}
+
+func TestResolvedImplicitRemoteTargetEnvTokenOverridesAuthConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "client-db-token")
+	t.Setenv("KATA_AUTOSTART", "1")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[auth]\ntoken = \"bootstrap-token\"\nrequire_token_identity = true\n"), 0o600))
+
+	endpoint := "http://spoke.internal:7777"
+	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
+
+	assert.Equal(t, "client-db-token", target.Token)
 }
 
 func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {

@@ -207,9 +207,12 @@ func resolvedDaemonTarget(target daemonTarget, endpoint string) daemonTarget {
 
 func effectiveGlobalAuthTokenForTUI() string {
 	envToken := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
+	if envToken != "" {
+		return envToken
+	}
 	auth, err := config.ReadAuthConfig()
 	if err != nil {
-		return envToken
+		return ""
 	}
 	return strings.TrimSpace(auth.Token)
 }
