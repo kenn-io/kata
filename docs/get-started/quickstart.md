@@ -49,6 +49,26 @@ kata init --project product
 Commit `.kata.toml` when multiple agents, clones, or worktrees should resolve
 to the same kata project. The file is intentionally secret-free.
 
+To also drop a short kata briefing where coding agents look for it, pass
+`--with-agents`:
+
+```sh
+kata init --with-agents
+```
+
+This writes a marker-delimited block into `AGENTS.md` in the workspace, pointing
+agents at `kata quickstart` and the close discipline. The block is idempotent:
+re-running refreshes kata's section in place and leaves the rest of the file
+untouched. The flag is off by default, so a plain `kata init` still writes only
+`.kata.toml`.
+
+If `AGENTS.md` (or a real, non-symlinked `CLAUDE.md`) still carries a Beads
+integration block — common when migrating off Beads — kata refuses to edit it in
+place. It leaves the original untouched and writes a `<file>.kata-proposed`
+sidecar with the Beads block removed and kata's block added. Review the sidecar,
+then `mv AGENTS.md.kata-proposed AGENTS.md` to adopt it, or delete it to keep the
+original. kata prints where the sidecar landed.
+
 ## Create and inspect issues
 
 ```sh

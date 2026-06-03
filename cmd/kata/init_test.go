@@ -436,6 +436,207 @@ func TestInit_MachineOutputSuppressesGitignoreWarning(t *testing.T) {
 	}
 }
 
+func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(content), agentsBlockBegin)
+	assert.Contains(t, string(content), agentsBlockEnd)
+	assert.Contains(t, string(content), "kata quickstart")
+}
+
+func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+	require.NoError(t, err)
+
+	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"))
+}
+
+func TestInit_WithAgents_Idempotent(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+	_, err = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	// Exactly one managed block — no duplication on re-run.
+	assert.Equal(t, 1, strings.Count(string(content), agentsBlockBegin))
+	assert.Equal(t, 1, strings.Count(string(content), agentsBlockEnd))
+}
+
+func TestInit_WithAgents_AppendsToExistingFile(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), //nolint:gosec // test fixture under TempDir
+		[]byte("# House rules\n\nRun the linter before committing.\n"), 0o644))
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	// Pre-existing content is preserved and the managed block is appended.
+	assert.Contains(t, string(content), "Run the linter before committing.")
+	assert.Contains(t, string(content), agentsBlockBegin)
+}
+
+func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+	stale := agentsBlockBegin + "\nold kata guidance that should be replaced\n" + agentsBlockEnd + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), //nolint:gosec // test fixture under TempDir
+		[]byte("# House rules\n\n"+stale), 0o644))
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.NotContains(t, string(content), "old kata guidance that should be replaced")
+	assert.Contains(t, string(content), "kata quickstart")
+	assert.Contains(t, string(content), "# House rules", "content outside the markers must survive")
+	assert.Equal(t, 1, strings.Count(string(content), agentsBlockBegin))
+}
+
+// beadsFixtureBlock is a stand-in for the integration block Beads writes into
+// AGENTS.md/CLAUDE.md. kata matches on the begin-marker prefix and the end
+// marker, so the trailing version/profile/hash here is representative.
+const beadsFixtureBlock = "<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:deadbeef -->\n" +
+	"## Beads issue tracker\n\nRun `bd quickstart`.\n" +
+	"<!-- END BEADS INTEGRATION -->\n"
+
+// When AGENTS.md still carries a beads block, kata must not edit it in place.
+// It leaves the original byte-for-byte and writes a .kata-proposed sidecar with
+// the beads block removed and kata's block added, and warns where to find it.
+func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	original := "# Agent guidance\n\nLegacy notes.\n\n" + beadsFixtureBlock
+	agentsPath := filepath.Join(dir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(agentsPath, []byte(original), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	var callErr error
+	stderr := captureProcessStderr(t, func() {
+		_, callErr = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	})
+	require.NoError(t, callErr)
+
+	// Original is untouched.
+	got, err := os.ReadFile(agentsPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, original, string(got), "AGENTS.md with a beads block must be left untouched")
+
+	// Sidecar carries kata's block, drops the beads block, keeps other content.
+	sidecar := agentsPath + agentsProposalSuffix
+	proposed, err := os.ReadFile(sidecar) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(proposed), "Legacy notes.")
+	assert.Contains(t, string(proposed), agentsBlockBegin)
+	assert.Contains(t, string(proposed), "kata quickstart")
+	assert.NotContains(t, string(proposed), beadsBlockBeginPrefix)
+	assert.NotContains(t, string(proposed), beadsBlockEnd)
+
+	// The user is told what to do.
+	assert.Contains(t, stderr, "beads integration block")
+	assert.Contains(t, stderr, filepath.Base(sidecar))
+}
+
+// A real (non-symlink) CLAUDE.md that still carries a beads block gets the same
+// sidecar treatment as AGENTS.md.
+func TestInit_WithAgents_BeadsBlockInClaude_WritesSidecar(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	claude := "# Claude guidance\n\n" + beadsFixtureBlock
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(claudePath, []byte(claude), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	// CLAUDE.md itself is untouched.
+	got, err := os.ReadFile(claudePath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, claude, string(got), "CLAUDE.md with a beads block must be left untouched")
+
+	proposed, err := os.ReadFile(claudePath + agentsProposalSuffix) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(proposed), "# Claude guidance")
+	assert.Contains(t, string(proposed), agentsBlockBegin)
+	assert.NotContains(t, string(proposed), beadsBlockBeginPrefix)
+
+	// AGENTS.md (absent here) still gets kata's block written normally.
+	agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(agents), agentsBlockBegin)
+}
+
+// kata's own convention symlinks CLAUDE.md at AGENTS.md. A symlinked CLAUDE.md
+// must never be rewritten or shadowed by a sidecar, even if it resolves to
+// content with a beads block.
+func TestInit_WithAgents_ClaudeSymlink_Skipped(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	// AGENTS.md holds a beads block; CLAUDE.md points at it.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), //nolint:gosec // test fixture under TempDir
+		[]byte("# Agent guidance\n\n"+beadsFixtureBlock), 0o644))
+	require.NoError(t, os.Symlink("AGENTS.md", filepath.Join(dir, "CLAUDE.md")))
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	// No sidecar for the symlink, and the symlink itself is preserved.
+	assert.NoFileExists(t, filepath.Join(dir, "CLAUDE.md"+agentsProposalSuffix))
+	fi, err := os.Lstat(filepath.Join(dir, "CLAUDE.md"))
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "CLAUDE.md must remain a symlink")
+}
+
 func captureProcessStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr
