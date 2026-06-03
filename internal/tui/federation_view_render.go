@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	federationViewChromeRows = 10
-	federationFirstRowY      = 6
+	federationViewChromeRows = 11
+	federationFirstRowY      = 7
 )
 
 func renderFederation(m Model) string {
@@ -49,6 +49,7 @@ func renderFederation(m Model) string {
 		subtleStyle.Render(fmt.Sprintf("%d spoke federations", len(rows))),
 		"",
 		subtleStyle.Render(federationHeaderLine(m)),
+		subtleStyle.Render(federationSelectedProjectLine(m)),
 		"",
 		renderFederationHeader(m.width),
 	}
@@ -242,6 +243,7 @@ func federationModeHeader(m Model, title string) []string {
 	return []string{
 		titleStyle.Render("kata / federation"),
 		subtleStyle.Render(federationHeaderLine(m)),
+		subtleStyle.Render(federationSelectedProjectLine(m)),
 		"",
 		titleStyle.Render(title),
 		"",
@@ -404,6 +406,32 @@ func federationHeaderLine(m Model) string {
 	)
 }
 
+func federationSelectedProjectLine(m Model) string {
+	return "selected project: " + sanitizeForLine(federationSelectedProjectDisplay(m))
+}
+
+func federationSelectedProjectDisplay(m Model) string {
+	if m.federationDraft.CreateReplica {
+		if m.federationDraft.SpokeProjectName != "" {
+			return m.federationDraft.SpokeProjectName + " (new local replica)"
+		}
+		return "create new local replica from hub project"
+	}
+	if m.federationDraft.SpokeProjectName != "" {
+		return m.federationDraft.SpokeProjectName
+	}
+	if m.federationSelectedProjectSet {
+		if m.federationSelectedProjectName != "" {
+			return m.federationSelectedProjectName
+		}
+		return "none"
+	}
+	if _, projectName, ok := m.currentFederationProject(); ok {
+		return projectName
+	}
+	return "none"
+}
+
 func federationDaemonEndpoint(target daemonTarget) string {
 	if target.Local {
 		return "local"
@@ -510,6 +538,7 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 	body := []string{
 		titleStyle.Render("kata / federation"),
 		subtleStyle.Render(federationHeaderLine(m)),
+		subtleStyle.Render(federationSelectedProjectLine(m)),
 		"",
 	}
 	if cursor < 0 || cursor >= len(rows) {

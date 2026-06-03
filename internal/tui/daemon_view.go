@@ -152,6 +152,9 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.federationLoading = false
 	m.federationErr = nil
 	m.federationGen = 0
+	m.federationSelectedProjectSet = false
+	m.federationSelectedProjectID = 0
+	m.federationSelectedProjectName = ""
 	m.federationMode = federationModeList
 	m.federationDraft = federationDraft{}
 	m.federationLocalProjectCursor = 0

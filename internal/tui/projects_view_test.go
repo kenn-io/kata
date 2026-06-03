@@ -124,13 +124,44 @@ func TestProjectsView_FooterUsesAdaptiveHelpTable(t *testing.T) {
 	assert.NotContains(t, out, "[F] federation")
 }
 
-func TestProjectsView_FTransitionsToFederation(t *testing.T) {
-	m := setupProjectsView(mockProject{ID: 1, Name: "alpha", Ident: "..."})
+func TestProjectsView_FTransitionsToFederationWithHighlightedProjectSelected(t *testing.T) {
+	m := setupProjectsView(
+		mockProject{ID: 11, Name: "alpha-project", Ident: "..."},
+		mockProject{ID: 22, Name: "beta-project", Ident: "..."},
+	)
+	m.scope = homedScope(99, "previous-project")
+	m.projectsCursor = 2
 
 	out, cmd := updateModel(m, keyRune('F'))
 
 	assert.Equal(t, viewFederation, out.view)
 	require.NotNil(t, cmd)
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "selected project: beta-project")
+
+	out, cmd = out.routeFederationViewKey(keyRune('n'))
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeSelectHub, out.federationMode)
+	assert.Equal(t, int64(22), out.federationDraft.SpokeProjectID)
+	assert.Equal(t, "beta-project", out.federationDraft.SpokeProjectName)
+}
+
+func TestProjectsView_FFromAllProjectsHasNoSelectedFederationProject(t *testing.T) {
+	m := setupProjectsView(mockProject{ID: 11, Name: "alpha-project", Ident: "..."})
+	m.scope = homedScope(99, "previous-project")
+	m.projectsCursor = 0
+
+	out, cmd := updateModel(m, keyRune('F'))
+
+	assert.Equal(t, viewFederation, out.view)
+	require.NotNil(t, cmd)
+	assert.Contains(t, stripANSI(renderFederation(out)), "selected project: none")
+
+	out, cmd = out.routeFederationViewKey(keyRune('n'))
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
 }
 
 // TestProjectsView_ViewportClipsRowsToHeight pins that with many

@@ -133,29 +133,32 @@ type Model struct {
 	projectIdentByID map[int64]string
 	// projectsCursor is the highlighted row in viewProjects. Reset when
 	// transitioning into the view; preserved across re-renders.
-	projectsCursor               int
-	activeDaemon                 daemonTarget
-	daemonTargets                []daemonTarget
-	daemonCursor                 int
-	federationInstance           InstanceInfo
-	federationStatuses           []FederationProjectStatus
-	federationCursor             int
-	federationLoading            bool
-	federationErr                error
-	federationGen                uint64
-	federationMode               federationMode
-	federationDraft              federationDraft
-	federationLocalProjectCursor int
-	federationHubCursor          int
-	federationHubProjectCursor   int
-	federationHubProjects        []ProjectSummary
-	federationHubProjectsLoading bool
-	federationEnrollErr          error
-	federationEnrollGen          uint64
-	federationEnrollAttempt      uint64
-	federationEnrollRunning      bool
-	federationResult             federationEnrollResult
-	federationRecovery           federationRecovery
+	projectsCursor                int
+	activeDaemon                  daemonTarget
+	daemonTargets                 []daemonTarget
+	daemonCursor                  int
+	federationInstance            InstanceInfo
+	federationStatuses            []FederationProjectStatus
+	federationCursor              int
+	federationLoading             bool
+	federationErr                 error
+	federationGen                 uint64
+	federationSelectedProjectSet  bool
+	federationSelectedProjectID   int64
+	federationSelectedProjectName string
+	federationMode                federationMode
+	federationDraft               federationDraft
+	federationLocalProjectCursor  int
+	federationHubCursor           int
+	federationHubProjectCursor    int
+	federationHubProjects         []ProjectSummary
+	federationHubProjectsLoading  bool
+	federationEnrollErr           error
+	federationEnrollGen           uint64
+	federationEnrollAttempt       uint64
+	federationEnrollRunning       bool
+	federationResult              federationEnrollResult
+	federationRecovery            federationRecovery
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +

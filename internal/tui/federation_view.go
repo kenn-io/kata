@@ -101,6 +101,7 @@ var (
 )
 
 func (m Model) transitionToFederation() (Model, tea.Cmd) {
+	m = m.captureFederationSelectedProject()
 	m.prevView = m.view
 	m.view = viewFederation
 	m.federationMode = federationModeList
@@ -276,12 +277,18 @@ func (m Model) routeFederationLocalProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.federationDraft.AdoptExisting = false
 			m.federationDraft.SpokeProjectID = 0
 			m.federationDraft.SpokeProjectName = ""
+			m.federationSelectedProjectSet = true
+			m.federationSelectedProjectID = 0
+			m.federationSelectedProjectName = ""
 		} else {
 			m.federationDraft.CreateReplica = false
 			m.federationDraft.SelectedLocalProject = true
 			m.federationDraft.AdoptExisting = true
 			m.federationDraft.SpokeProjectID = row.project.ID
 			m.federationDraft.SpokeProjectName = row.project.Name
+			m.federationSelectedProjectSet = true
+			m.federationSelectedProjectID = row.project.ID
+			m.federationSelectedProjectName = row.project.Name
 		}
 		m.federationMode = federationModeSelectHub
 		m.federationHubCursor = 0
@@ -439,7 +446,7 @@ func (m Model) startFederationEnrollment() (Model, tea.Cmd) {
 	m.federationHubProjects = nil
 	m.federationHubProjectsLoading = false
 	m.federationEnrollErr = nil
-	if projectID, projectName, ok := m.currentFederationProject(); ok {
+	if projectID, projectName, ok := m.defaultFederationProject(); ok {
 		m.federationDraft.SpokeProjectID = projectID
 		m.federationDraft.SpokeProjectName = projectName
 		m.federationDraft.AdoptExisting = true
@@ -448,6 +455,57 @@ func (m Model) startFederationEnrollment() (Model, tea.Cmd) {
 	}
 	m.federationMode = federationModeSelectLocalProject
 	return m, nil
+}
+
+func (m Model) captureFederationSelectedProject() Model {
+	switch m.view {
+	case viewFederation:
+		return m
+	case viewProjects:
+		projectID, projectName, ok := m.selectedProjectsViewProject()
+		m.federationSelectedProjectSet = true
+		if !ok {
+			m.federationSelectedProjectID = 0
+			m.federationSelectedProjectName = ""
+			return m
+		}
+		m.federationSelectedProjectID = projectID
+		m.federationSelectedProjectName = projectName
+		return m
+	default:
+		m.federationSelectedProjectSet = true
+		projectID, projectName, ok := m.currentFederationProject()
+		if !ok {
+			m.federationSelectedProjectID = 0
+			m.federationSelectedProjectName = ""
+			return m
+		}
+		m.federationSelectedProjectID = projectID
+		m.federationSelectedProjectName = projectName
+		return m
+	}
+}
+
+func (m Model) selectedProjectsViewProject() (int64, string, bool) {
+	rows := projectsRows(m.projectsByID, m.projectIdentByID, m.projectStats)
+	if m.projectsCursor < 0 || m.projectsCursor >= len(rows) {
+		return 0, "", false
+	}
+	row := rows[m.projectsCursor]
+	if row.sentinel || row.projectID == 0 || row.name == "" {
+		return 0, "", false
+	}
+	return row.projectID, row.name, true
+}
+
+func (m Model) defaultFederationProject() (int64, string, bool) {
+	if m.federationSelectedProjectSet {
+		if m.federationSelectedProjectID == 0 || m.federationSelectedProjectName == "" {
+			return 0, "", false
+		}
+		return m.federationSelectedProjectID, m.federationSelectedProjectName, true
+	}
+	return m.currentFederationProject()
 }
 
 func newFederationDraft(actor string) federationDraft {
@@ -756,6 +814,9 @@ func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 		draft.HubProjectName = project.Name
 		draft.SpokeProjectName = project.Name
 		draft.AdoptExisting = false
+		m.federationSelectedProjectSet = true
+		m.federationSelectedProjectID = 0
+		m.federationSelectedProjectName = project.Name
 		if localProjectNameExists(m, draft.SpokeProjectName) {
 			draft.BlockedReason = fmt.Sprintf("local project %q already exists", draft.SpokeProjectName)
 		}

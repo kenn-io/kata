@@ -116,7 +116,7 @@ func TestFederationView_MouseClickUsesFederationRowOffset(t *testing.T) {
 		federationStatusFixture("spoke-proj-2", "spoke"),
 	)
 
-	out, cmd := m.mouseFederationClick(6)
+	out, cmd := m.mouseFederationClick(7)
 
 	require.Nil(t, cmd)
 	assert.Equal(t, 0, out.federationCursor)
@@ -282,7 +282,7 @@ func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testin
 	renderedSelection := stripANSI(renderFederation(m))
 	assert.Contains(t, renderedSelection, `use existing hub project "spoke-project"; enable federation if needed`)
 	assert.NotContains(t, renderedSelection, "will be created if missing")
-	assert.Equal(t, 1, strings.Count(renderedSelection, "spoke-project"))
+	assert.NotContains(t, renderedSelection, "\n  spoke-project\n")
 
 	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
 
