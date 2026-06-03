@@ -57,7 +57,7 @@ func renderProjects(m Model) string {
 	}
 	body = append(body, "")
 	body = append(body, subtleStyle.Render(
-		"[↑/↓ k/j] move  [enter] open  [esc] back  [r] refresh  [q] quit  [?] help"))
+		"[↑/↓ k/j] move  [enter] open  [esc] back  [r] refresh  [D] daemons  [F] federation  [q] quit  [?] help"))
 
 	return strings.Join(body, "\n")
 }

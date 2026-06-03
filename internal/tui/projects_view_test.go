@@ -114,6 +114,23 @@ func TestProjectsView_RendersTable(t *testing.T) {
 	}
 }
 
+func TestProjectsView_FooterAdvertisesFederation(t *testing.T) {
+	m := setupProjectsView(mockProject{ID: 1, Name: "alpha", Ident: "..."})
+
+	out := stripANSI(m.View())
+
+	assert.Contains(t, out, "[F] federation")
+}
+
+func TestProjectsView_FTransitionsToFederation(t *testing.T) {
+	m := setupProjectsView(mockProject{ID: 1, Name: "alpha", Ident: "..."})
+
+	out, cmd := updateModel(m, keyRune('F'))
+
+	assert.Equal(t, viewFederation, out.view)
+	require.NotNil(t, cmd)
+}
+
 // TestProjectsView_ViewportClipsRowsToHeight pins that with many
 // projects and a small terminal, the footer + key-hint line stay on
 // screen. Without clipping, every row renders and the chrome falls
