@@ -14,7 +14,10 @@ coverage.out
 /.kata/
 /.venv/
 /docs/.venv/
+/docs/.cache/
 /docs/site/
+/docs/.zensical-build.*.toml
+/docs/zensical-public-docs.*/
 
 # Git worktrees
 /.worktrees/
