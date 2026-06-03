@@ -35,20 +35,21 @@ const (
 )
 
 type federationDraft struct {
-	Operation           federationOperation
-	SpokeProjectID      int64
-	SpokeProjectName    string
-	CreateReplica       bool
-	HubTarget           daemonTarget
-	HubProjectID        int64
-	HubProjectName      string
-	RequestedActor      string
-	APICapabilities     string
-	DisplayCapabilities string
-	PushEnabled         bool
-	AllowInsecure       bool
-	AdoptExisting       bool
-	BlockedReason       string
+	Operation            federationOperation
+	SpokeProjectID       int64
+	SpokeProjectName     string
+	CreateReplica        bool
+	SelectedLocalProject bool
+	HubTarget            daemonTarget
+	HubProjectID         int64
+	HubProjectName       string
+	RequestedActor       string
+	APICapabilities      string
+	DisplayCapabilities  string
+	PushEnabled          bool
+	AllowInsecure        bool
+	AdoptExisting        bool
+	BlockedReason        string
 }
 
 type federationEnrollResult struct {
@@ -86,6 +87,7 @@ type federationRecoveryCommand struct {
 	AdoptExisting          bool
 	SpokeName              string
 	SpokeEndpoint          string
+	SpokeAllowInsecure     bool
 }
 
 var (
@@ -176,6 +178,11 @@ func (m Model) handleFederationEnrollResult(msg federationEnrollResultMsg) (Mode
 	}
 	m.federationEnrollRunning = false
 	if msg.err != nil {
+		if msg.result.Recovery.Token == "" && msg.result.Recovery.Stage == "" {
+			m.federationEnrollErr = msg.err
+			m.federationMode = federationModePreview
+			return m, nil
+		}
 		m.federationRecovery = msg.result.Recovery
 		m.federationRecovery.Err = msg.err
 		m.federationMode = federationModeRecovery
@@ -265,11 +272,13 @@ func (m Model) routeFederationLocalProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		row := rows[clampFederationIndex(m.federationLocalProjectCursor, len(rows), 0)]
 		if row.createReplica {
 			m.federationDraft.CreateReplica = true
+			m.federationDraft.SelectedLocalProject = true
 			m.federationDraft.AdoptExisting = false
 			m.federationDraft.SpokeProjectID = 0
 			m.federationDraft.SpokeProjectName = ""
 		} else {
 			m.federationDraft.CreateReplica = false
+			m.federationDraft.SelectedLocalProject = true
 			m.federationDraft.AdoptExisting = true
 			m.federationDraft.SpokeProjectID = row.project.ID
 			m.federationDraft.SpokeProjectName = row.project.Name
@@ -290,7 +299,7 @@ func (m Model) routeFederationHubKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
-		if m.federationDraft.SpokeProjectID == 0 && !m.federationDraft.CreateReplica {
+		if m.federationDraft.SelectedLocalProject {
 			m.federationMode = federationModeSelectLocalProject
 		} else {
 			m.federationMode = federationModeList
@@ -713,17 +722,18 @@ func baseFederationRecovery(
 		SpokeEndpoint: federationDaemonEndpoint(active),
 		Token:         enrollment.Token,
 		Command: federationRecoveryCommand{
-			HubURL:        hubURL,
-			HubProjectID:  hubProject.ID,
-			ProjectName:   projectName,
-			Token:         enrollment.Token,
-			Actor:         enrollment.Actor,
-			Capabilities:  draft.APICapabilities,
-			PushEnabled:   draft.PushEnabled,
-			AllowInsecure: draft.AllowInsecure,
-			AdoptExisting: draft.AdoptExisting,
-			SpokeName:     daemonName(active),
-			SpokeEndpoint: federationDaemonEndpoint(active),
+			HubURL:             hubURL,
+			HubProjectID:       hubProject.ID,
+			ProjectName:        projectName,
+			Token:              enrollment.Token,
+			Actor:              enrollment.Actor,
+			Capabilities:       draft.APICapabilities,
+			PushEnabled:        draft.PushEnabled,
+			AllowInsecure:      draft.AllowInsecure,
+			AdoptExisting:      draft.AdoptExisting,
+			SpokeName:          daemonName(active),
+			SpokeEndpoint:      federationDaemonEndpoint(active),
+			SpokeAllowInsecure: active.AllowInsecure,
 		},
 	}
 }
@@ -731,6 +741,9 @@ func baseFederationRecovery(
 func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 	m.federationEnrollErr = nil
 	draft := m.federationDraft
+	draft.Operation = ""
+	draft.HubProjectID = 0
+	draft.HubProjectName = ""
 	draft.BlockedReason = ""
 	project, hasProject := m.selectedFederationHubProject()
 	if draft.CreateReplica {
@@ -909,7 +922,7 @@ func (m *Model) moveFederationCursor(delta int) {
 }
 
 func (m Model) mouseFederationClick(y int) (Model, tea.Cmd) {
-	row := y - projectsFirstRowY
+	row := y - federationFirstRowY
 	if row < 0 {
 		return m, nil
 	}

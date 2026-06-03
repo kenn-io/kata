@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -428,6 +429,38 @@ func TestFederationEnrollHTTPClientAllowsExplicitInsecurePlaintext(t *testing.T)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
+}
+
+func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *testing.T) {
+	resetFlags(t)
+	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+	flags.Workspace = t.TempDir()
+	baseURL := "http://hub.internal:7777"
+	called := false
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		called = true
+		assert.Equal(t, http.MethodPost, req.Method)
+		assert.Equal(t, baseURL+"/api/v1/projects/resolve", req.URL.String())
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(
+				`{"project":{"id":42,"name":"spoke-project"},"workspace_root":""}`)),
+			Request: req,
+		}, nil
+	})}
+
+	project, err := resolveFederationProject(context.Background(), client, baseURL, nil)
+
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, projectRef{ID: 42, Name: "spoke-project"}, project)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testing.T) {

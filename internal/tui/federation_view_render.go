@@ -10,7 +10,10 @@ import (
 	hubfederation "go.kenn.io/kata/internal/federation"
 )
 
-const federationViewChromeRows = 9
+const (
+	federationViewChromeRows = 10
+	federationFirstRowY      = 6
+)
 
 func renderFederation(m Model) string {
 	rows := federationSpokeStatuses(m.federationStatuses)
@@ -184,6 +187,7 @@ func renderFederationPreview(m Model) string {
 	if draft.BlockedReason != "" {
 		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
 	}
+	body = appendFederationEnrollErr(body, m)
 	body = append(body, "", subtleStyle.Render("[enter] confirm  [esc] back"))
 	return strings.Join(body, "\n")
 }
@@ -311,6 +315,9 @@ func federationRecoveryCommandString(cmd federationRecoveryCommand) string {
 	parts := []string{}
 	if cmd.SpokeEndpoint != "" && cmd.SpokeEndpoint != "local" {
 		parts = append(parts, "KATA_SERVER="+shellWord(cmd.SpokeEndpoint))
+		if cmd.SpokeAllowInsecure {
+			parts = append(parts, "KATA_ALLOW_INSECURE=1")
+		}
 	}
 	parts = append(parts,
 		"kata",
@@ -347,8 +354,12 @@ func shellWord(s string) string {
 	if s == "" {
 		return "''"
 	}
-	if strings.ContainsAny(s, " \t\n'\"") {
-		return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			strings.ContainsRune("-_./:=,", r) {
+			continue
+		}
+		return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 	}
 	return s
 }
@@ -496,7 +507,7 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 	}
 	if cursor < 0 || cursor >= len(rows) {
 		body = append(body, subtleStyle.Render("no federation selected"))
-		return strings.Join(body, "\n")
+		return strings.Join(fitFederationLines(body, m.height), "\n")
 	}
 	row := rows[cursor]
 	body = append(body,
@@ -526,7 +537,21 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		"",
 		subtleStyle.Render("[esc] back  [r] refresh  [q] quit  [?] help"),
 	)
-	return strings.Join(body, "\n")
+	return strings.Join(fitFederationLines(body, m.height), "\n")
+}
+
+func fitFederationLines(lines []string, height int) []string {
+	if height <= 0 || len(lines) <= height {
+		return lines
+	}
+	if height == 1 {
+		return []string{lines[len(lines)-1]}
+	}
+	out := make([]string, 0, height)
+	out = append(out, lines[:height-2]...)
+	out = append(out, subtleStyle.Render("..."))
+	out = append(out, lines[len(lines)-1])
+	return out
 }
 
 func federationHubDisplay(raw string) string {

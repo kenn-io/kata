@@ -503,7 +503,7 @@ func resolveFederationProject(ctx context.Context, client *http.Client, baseURL 
 	if err != nil {
 		return projectRef{}, err
 	}
-	id, name, err := resolveProjectIDAndName(ctx, baseURL, start)
+	id, name, err := resolveProjectIDAndNameWithClient(ctx, client, baseURL, start)
 	if err != nil {
 		return projectRef{}, err
 	}

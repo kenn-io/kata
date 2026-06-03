@@ -3,7 +3,9 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +80,46 @@ func TestFederationView_ListShowsOnlySpokeBindings(t *testing.T) {
 
 	assert.Contains(t, rendered, "spoke-proj")
 	assert.NotContains(t, rendered, "hub-only")
+}
+
+func TestFederationView_ListFitsTerminalHeight(t *testing.T) {
+	statuses := make([]FederationProjectStatus, 0, 10)
+	for i := range 10 {
+		status := federationStatusFixture("spoke-proj-"+strconv.Itoa(i), "spoke")
+		status.ProjectID = int64(i + 1)
+		statuses = append(statuses, status)
+	}
+	m := setupFederationViewWithStatuses(statuses...)
+	m.height = 12
+
+	rendered := stripANSI(renderFederation(m))
+
+	assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), m.height)
+}
+
+func TestFederationView_DetailFitsTerminalHeight(t *testing.T) {
+	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
+	m.height = 12
+	m.federationMode = federationModeDetail
+
+	rendered := stripANSI(renderFederation(m))
+
+	assert.LessOrEqual(t, len(strings.Split(rendered, "\n")), m.height)
+	assert.Contains(t, rendered, "spoke-proj")
+	assert.Contains(t, rendered, "[esc] back")
+}
+
+func TestFederationView_MouseClickUsesFederationRowOffset(t *testing.T) {
+	m := setupFederationViewWithStatuses(
+		federationStatusFixture("spoke-proj-0", "spoke"),
+		federationStatusFixture("spoke-proj-1", "spoke"),
+		federationStatusFixture("spoke-proj-2", "spoke"),
+	)
+
+	out, cmd := m.mouseFederationClick(6)
+
+	require.Nil(t, cmd)
+	assert.Equal(t, 0, out.federationCursor)
 }
 
 func TestFederationView_HelpAndFooterIncludeFederationBinding(t *testing.T) {
@@ -215,6 +257,24 @@ func TestFederationEnroll_NWithoutProjectStartsLocalProjectSelection(t *testing.
 	assert.Contains(t, rendered, "other-project")
 }
 
+func TestFederationEnroll_EscFromHubSelectionReturnsToLocalProjectSelection(t *testing.T) {
+	m := setupFederationView()
+	m.scope = scope{allProjects: true}
+	injectProjects(&m, mockProject{ID: 7, Name: "spoke-project"})
+
+	out, cmd := m.routeFederationViewKey(keyRune('n'))
+	require.Nil(t, cmd)
+	out.federationLocalProjectCursor = 1
+	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.Nil(t, cmd)
+	require.Equal(t, federationModeSelectHub, out.federationMode)
+
+	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEsc})
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
+}
+
 func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testing.T) {
 	m := setupFederationHubProjectSelection()
 	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
@@ -303,6 +363,21 @@ func TestFederationEnroll_CreateReplicaBranchPreflightsLocalNameConflict(t *test
 	assert.Equal(t, federationModePreview, out.federationMode)
 	assert.False(t, out.federationDraft.AdoptExisting)
 	assert.Contains(t, stripANSI(renderFederation(out)), `Blocked: local project "spoke-project" already exists`)
+}
+
+func TestFederationEnroll_SameNamePreviewClearsStaleSelectedHubProjectID(t *testing.T) {
+	m := setupFederationHubProjectSelection()
+	m.federationDraft.HubProjectID = 42
+	m.federationDraft.HubProjectName = "old-hub-project"
+	m.federationHubProjectCursor = 0
+	m.federationHubProjects = []ProjectSummary{{ID: 77, Name: "different-hub-project"}}
+
+	out, cmd := m.previewFederationEnrollment()
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationOperationAdoptSameName, out.federationDraft.Operation)
+	assert.Equal(t, int64(0), out.federationDraft.HubProjectID)
+	assert.Equal(t, "spoke-project", out.federationDraft.HubProjectName)
 }
 
 func TestFederationEnroll_ExistingLocalFederationBindingBlocksBeforeMutation(t *testing.T) {
@@ -462,6 +537,27 @@ func TestFederationEnroll_JoinFailureShowsSpokeLabeledRecoveryAndHidesToken(t *t
 	assert.NotContains(t, rendered, enrollmentSecret())
 }
 
+func TestFederationEnroll_PreEnrollmentFailureReturnsToPreview(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		_ daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		return nil, daemonTarget{}, errors.New("hub unavailable")
+	})
+
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationEnrollResultMsg)
+	out, nextCmd := updateModel(out, msg)
+
+	require.Nil(t, nextCmd)
+	assert.Equal(t, federationModePreview, out.federationMode)
+	require.Error(t, out.federationEnrollErr)
+	assert.Contains(t, out.federationEnrollErr.Error(), "hub unavailable")
+	assert.Empty(t, out.federationRecovery.Token)
+}
+
 func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t *testing.T) {
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
 	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -487,6 +583,42 @@ func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t 
 	assert.NotContains(t, rendered, "--replay-horizon-event-id")
 	assert.NotContains(t, rendered, "--baseline-through-event-id")
 	assert.NotContains(t, rendered, "--server")
+}
+
+func TestFederationEnroll_RecoveryCommandPreservesSpokeAllowInsecure(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
+	m.activeDaemon.AllowInsecure = true
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	out, revealCmd := out.routeFederationViewKey(keyRune('R'))
+	require.Nil(t, revealCmd)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "KATA_SERVER=")
+	assert.Contains(t, rendered, "KATA_ALLOW_INSECURE=1")
+}
+
+func TestFederationEnroll_RecoveryCommandQuotesShellMetacharacters(t *testing.T) {
+	cmd := federationRecoveryCommand{
+		HubURL:        "http://hub.internal:7777",
+		HubProjectID:  42,
+		ProjectName:   "spoke;project",
+		Token:         "token$(secret)",
+		Actor:         "hub$(actor)",
+		Capabilities:  "claim,pull,push",
+		SpokeEndpoint: "http://spoke.internal:7777",
+	}
+
+	rendered := federationRecoveryCommandString(cmd)
+
+	assert.Contains(t, rendered, "--project 'spoke;project'")
+	assert.Contains(t, rendered, "--token 'token$(secret)'")
+	assert.Contains(t, rendered, "--actor 'hub$(actor)'")
+	assert.NotContains(t, rendered, "--project spoke;project")
+	assert.NotContains(t, rendered, "--token token$(secret)")
+	assert.NotContains(t, rendered, "--actor hub$(actor)")
 }
 
 func setupFederationSourceModel() Model {

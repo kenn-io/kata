@@ -287,11 +287,20 @@ func resolveProjectID(ctx context.Context, baseURL, startPath string) (int64, er
 //     convention from git remotes — resolve never creates).
 //  4. Neither → {start_path}. Legacy local-only fallback.
 func resolveProjectIDAndName(ctx context.Context, baseURL, startPath string) (int64, string, error) {
-	body, repair, err := buildResolveRequest(ctx, startPath)
+	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
 		return 0, "", err
 	}
-	client, err := httpClientFor(ctx, baseURL)
+	return resolveProjectIDAndNameWithClient(ctx, client, baseURL, startPath)
+}
+
+func resolveProjectIDAndNameWithClient(
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+	startPath string,
+) (int64, string, error) {
+	body, repair, err := buildResolveRequest(ctx, startPath)
 	if err != nil {
 		return 0, "", err
 	}
