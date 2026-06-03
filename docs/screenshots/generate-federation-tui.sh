@@ -65,29 +65,33 @@ wait_for_log() {
     exit 1
 }
 
+tmux_cmd() {
+    tmux -L "$SESSION" -f /dev/null "$@"
+}
+
 wait_until() {
     local pattern="$1"
     local timeout="${2:-30}"
     for _ in $(seq 1 "$((timeout * 10))"); do
-        if tmux capture-pane -pt "$SESSION" | grep -q "$pattern"; then
+        if tmux_cmd capture-pane -pt "$SESSION" | grep -q "$pattern"; then
             return 0
         fi
         sleep 0.1
     done
     echo "ERROR: timed out waiting for TUI pattern: $pattern" >&2
-    tmux capture-pane -pt "$SESSION" >&2 || true
+    tmux_cmd capture-pane -pt "$SESSION" >&2 || true
     exit 1
 }
 
 send() {
-    tmux send-keys -t "$SESSION" "$@"
+    tmux_cmd send-keys -t "$SESSION" "$@"
 }
 
 capture() {
     local name="$1"
     local dir="$OUTPUT_DIR/$(dirname "$name")"
     mkdir -p "$dir"
-    tmux capture-pane -pet "$SESSION" | \
+    tmux_cmd capture-pane -pet "$SESSION" | \
         freeze -o "$OUTPUT_DIR/${name}.svg" --language ansi -c "$FREEZE_CFG"
     echo "captured ${name}.svg"
 }
@@ -111,8 +115,8 @@ create_demo_issue() {
 
 cleanup() {
     set +e
-    if tmux has-session -t "$SESSION" 2>/dev/null; then
-        tmux kill-session -t "$SESSION" 2>/dev/null
+    if tmux_cmd has-session -t "$SESSION" 2>/dev/null; then
+        tmux_cmd kill-session -t "$SESSION" 2>/dev/null
     fi
     if [[ -n "${SPOKE_HOME:-}" && -n "${KATA_BIN:-}" ]]; then
         KATA_HOME="$SPOKE_HOME" "$KATA_BIN" daemon stop >/dev/null 2>&1
@@ -224,9 +228,9 @@ KATA_AUTHOR=demo-operator \
     --priority 0 \
     --agent >/dev/null
 
-tmux -f /dev/null new-session -d -s "$SESSION" -x "$WIDTH" -y "$HEIGHT"
-tmux set-option -g default-terminal "tmux-256color"
-tmux set-option -ga terminal-overrides ",*:Tc"
+tmux_cmd new-session -d -s "$SESSION" -x "$WIDTH" -y "$HEIGHT"
+tmux_cmd set-option -g default-terminal "tmux-256color"
+tmux_cmd set-option -ga terminal-overrides ",*:Tc"
 
 RUN_TUI="KATA_HOME=$(shell_quote "$SPOKE_HOME") KATA_AUTHOR=demo-operator KATA_DEMO_HUB_AUTH=$(shell_quote "$DEMO_HUB_AUTH_VALUE") KATA_COLOR_MODE=dark $(shell_quote "$KATA_BIN") --workspace $(shell_quote "$SPOKE_WS") --project demo-spoke-project tui"
 send "$RUN_TUI" Enter

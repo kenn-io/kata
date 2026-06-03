@@ -227,13 +227,27 @@ func TestFederationEnableCLIResolvesExplicitProjectFlag(t *testing.T) {
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
 }
 
+func TestFederationEnableCLIRequiresExactProjectFlagName(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "team/hub-project")
+	require.NoError(t, err)
+
+	_, _, err = runCmdCapture(t, env, "federation", "enable", "--project", "hub-project")
+
+	ce := requireCLIError(t, err, ExitNotFound)
+	assert.Contains(t, ce.Message, "project hub-project is not registered")
+	_, err = env.DB.FederationBindingByProject(ctx, project.ID)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
 func TestFederationEnableCLIDoesNotCreateProjectFromProjectFlag(t *testing.T) {
 	env := testenv.New(t)
 
 	_, _, err := runCmdCapture(t, env, "federation", "enable", "--project", "missing-project")
 
 	ce := requireCLIError(t, err, ExitNotFound)
-	assert.Contains(t, ce.Message, `project selector "missing-project" did not match any project`)
+	assert.Contains(t, ce.Message, "project missing-project is not registered")
 	_, err = env.DB.ProjectByName(context.Background(), "missing-project")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }

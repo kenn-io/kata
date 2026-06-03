@@ -7,8 +7,23 @@ docs_root="$(cd "$script_dir/.." && pwd)"
 repo_root="$(cd "$docs_root/.." && pwd)"
 assets_branch="${KATA_DOCS_ASSETS_BRANCH:-docs-assets}"
 target="$docs_root/assets/screenshots"
+expected_assets=(
+  "tui/hero.svg"
+  "federation-tui/list.svg"
+  "federation-tui/select-hub.svg"
+  "federation-tui/select-hub-project.svg"
+  "federation-tui/preview.svg"
+  "federation-tui/result.svg"
+)
 
-if [[ -d "$target" ]] && find "$target" -name '*.svg' -print -quit | grep -q .; then
+has_expected_assets() {
+  local asset
+  for asset in "${expected_assets[@]}"; do
+    [[ -f "$target/$asset" ]] || return 1
+  done
+}
+
+if has_expected_assets; then
   exit 0
 fi
 
@@ -28,9 +43,13 @@ if ! git -C "$repo_root" rev-parse --verify --quiet "$asset_ref" >/dev/null; the
 fi
 if ! git -C "$repo_root" rev-parse --verify --quiet "$asset_ref" >/dev/null; then
   printf 'docs screenshots not hydrated: %s branch unavailable\n' "$assets_branch" >&2
-  exit 0
+  exit 1
 fi
 
 rm -rf "$target"
 mkdir -p "$target"
 git -C "$repo_root" archive "$asset_ref" | tar -xf - -C "$target"
+if ! has_expected_assets; then
+  printf 'docs screenshots not hydrated: %s is missing expected screenshots\n' "$assets_branch" >&2
+  exit 1
+fi

@@ -504,7 +504,7 @@ func resolveFederationProject(
 	}
 	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
 		if !createMissing {
-			return resolveProjectSelector(ctx, client, baseURL, projectName)
+			return resolveFederationProjectByName(ctx, client, baseURL, projectName)
 		}
 		return ensureFederationProjectByName(ctx, client, baseURL, projectName)
 	}
@@ -517,6 +517,26 @@ func resolveFederationProject(
 		return projectRef{}, err
 	}
 	return projectRef{ID: id, Name: name}, nil
+}
+
+func resolveFederationProjectByName(ctx context.Context, client *http.Client, baseURL, name string) (projectRef, error) {
+	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/projects/resolve", map[string]any{"name": name})
+	if err != nil {
+		return projectRef{}, err
+	}
+	if status >= 400 {
+		return projectRef{}, apiErrFromBody(status, bs)
+	}
+	var resp struct {
+		Project struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(bs, &resp); err != nil {
+		return projectRef{}, err
+	}
+	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
 }
 
 func ensureFederationProjectByName(ctx context.Context, client *http.Client, baseURL, name string) (projectRef, error) {
