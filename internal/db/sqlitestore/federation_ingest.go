@@ -170,6 +170,10 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID); err != nil {
 			return db.FederationIngestResult{}, err
 		}
+		if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
+			p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 	}
 	if err := federationFailpoint("before_federation_ingest_commit"); err != nil {
 		return db.FederationIngestResult{}, err
@@ -224,17 +228,70 @@ func allowFederationIngestSnapshotAuthorPreservation(
 	if !allowExplicit || enrollmentID <= 0 {
 		return false, nil
 	}
-	hasSnapshot := false
 	for _, in := range events {
-		if in.Event.Type == "issue.snapshot" {
-			hasSnapshot = true
-			break
+		if in.Event.Type != "issue.snapshot" {
+			return false, nil
 		}
 	}
-	if !hasSnapshot {
+	prior, err := federationIngestHasPriorEvents(ctx, tx, projectID, spokeInstanceUID)
+	if err != nil {
+		return false, err
+	}
+	if prior {
 		return false, nil
 	}
-	res, err := tx.ExecContext(ctx, `
+	var marker int
+	err = tx.QueryRowContext(ctx, `
+		SELECT allow_adoption_snapshot_authors
+		  FROM federation_enrollments
+		 WHERE id = ?
+		   AND spoke_instance_uid = ?
+		   AND revoked_at IS NULL
+		   AND (project_id = ? OR project_id IS NULL)`,
+		enrollmentID, spokeInstanceUID, projectID).Scan(&marker)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lookup federation adoption snapshot author marker: %w", err)
+	}
+	return marker != 0, nil
+}
+
+func federationIngestHasPriorEvents(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	spokeInstanceUID string,
+) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		 LIMIT 1`,
+		projectID, spokeInstanceUID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lookup prior federation ingest events: %w", err)
+	}
+	return true, nil
+}
+
+func consumeFederationAdoptionSnapshotAuthorMarker(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	enrollmentID int64,
+	spokeInstanceUID string,
+) error {
+	if enrollmentID <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
 		UPDATE federation_enrollments
 		   SET allow_adoption_snapshot_authors = 0,
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -245,13 +302,9 @@ func allowFederationIngestSnapshotAuthorPreservation(
 		   AND allow_adoption_snapshot_authors = 1`,
 		enrollmentID, spokeInstanceUID, projectID)
 	if err != nil {
-		return false, fmt.Errorf("consume federation adoption snapshot author marker: %w", err)
+		return fmt.Errorf("consume federation adoption snapshot author marker: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("consume federation adoption snapshot author marker rows affected: %w", err)
-	}
-	return n > 0, nil
+	return nil
 }
 
 func validateFederationPayloadAuthor(ev db.RemoteEvent, boundActor string) error {

@@ -687,6 +687,10 @@ func runFederationEnrollment(
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
 	result := federationEnrollResult{Draft: draft}
+	instanceUID = strings.TrimSpace(instanceUID)
+	if instanceUID == "" {
+		return result, errors.New("spoke instance UID is not loaded; refresh federation status before enrollment")
+	}
 	hubAdmin, resolvedHub, err := newFederationHubAdminClient(ctx, draft.HubTarget)
 	if err != nil {
 		return result, err

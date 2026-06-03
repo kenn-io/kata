@@ -277,7 +277,7 @@ func TestFederationEnableCLIRejectsSpokeProject(t *testing.T) {
 func TestFederationEnrollCLIPrintsJoinCommand(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	runCLI(t, env, dir, "federation", "enable")
-	spokeUID := "01HZNQ7VFPK1XGD8R5MABCD4EF"
+	spokeUID := env.DB.InstanceUID()
 	savedArgs := os.Args
 	os.Args = []string{"/opt/kata-fedlab"}
 	t.Cleanup(func() { os.Args = savedArgs })
@@ -380,6 +380,40 @@ func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
 	require.NotNil(t, enrollments[0].ProjectID)
 	assert.Equal(t, hubProject.ID, *enrollments[0].ProjectID)
 	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
+}
+
+func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t *testing.T) {
+	resetFlags(t)
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	spoke := testenv.New(t)
+	t.Setenv("KATA_SERVER", spoke.URL)
+	ctx := context.Background()
+	_, err := spoke.DB.CreateProject(ctx, "fedlab")
+	require.NoError(t, err)
+	otherSpokeUID, err := katauid.New()
+	require.NoError(t, err)
+	require.NotEqual(t, spoke.DB.InstanceUID(), otherSpokeUID)
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--project", "fedlab",
+		"federation", "enroll",
+		"--spoke-instance", otherSpokeUID,
+		"--hub-url", hub.URL,
+		"--actor", "operator",
+	})
+
+	require.NoError(t, cmd.Execute())
+	out := buf.String()
+	assert.NotContains(t, out, "--adopt-existing")
+
+	enrollments, err := hub.DB.ListFederationEnrollments(ctx)
+	require.NoError(t, err)
+	require.Len(t, enrollments, 1)
+	assert.False(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
 func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameSpokeProject(t *testing.T) {
@@ -568,7 +602,7 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 	}))
 	t.Cleanup(spoke.Close)
 
-	exists := federationSpokeProjectExists(contextWithBaseURL(context.Background(), spoke.URL), "fedlab")
+	exists := federationSpokeProjectExists(contextWithBaseURL(context.Background(), spoke.URL), "fedlab", "")
 
 	require.True(t, exists)
 	require.NotEmpty(t, seenAuth)

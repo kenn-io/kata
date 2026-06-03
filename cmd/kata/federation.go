@@ -169,7 +169,7 @@ func federationEnrollCmd() *cobra.Command {
 				return err
 			}
 			adoptExisting := adoptExistingFlag || (pushCapable &&
-				federationSpokeProjectExists(ctx, metadata.ProjectName))
+				federationSpokeProjectExists(ctx, metadata.ProjectName, spokeInstance))
 			status, bs, err := httpDoJSON(ctx, hubClient, http.MethodPost,
 				hubBaseURL+"/api/v1/federation/enrollments",
 				map[string]any{
@@ -235,7 +235,7 @@ func federationEnrollHTTPClientError(err error) error {
 	return err
 }
 
-func federationSpokeProjectExists(ctx context.Context, projectName string) bool {
+func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstance string) bool {
 	spokeURL, err := ensureDaemon(ctx)
 	if err != nil {
 		return false
@@ -246,8 +246,31 @@ func federationSpokeProjectExists(ctx context.Context, projectName string) bool 
 	if err != nil {
 		return false
 	}
+	if strings.TrimSpace(spokeInstance) != "" {
+		uid, err := federationSpokeInstanceUID(ctx, spokeClient, spokeURL)
+		if err != nil || uid != strings.TrimSpace(spokeInstance) {
+			return false
+		}
+	}
 	_, err = resolveProjectSelector(ctx, spokeClient, spokeURL, projectName)
 	return err == nil
+}
+
+func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseURL string) (string, error) {
+	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/instance", nil)
+	if err != nil {
+		return "", err
+	}
+	if status >= 400 {
+		return "", apiErrFromBody(status, bs)
+	}
+	var body struct {
+		InstanceUID string `json:"instance_uid"`
+	}
+	if err := json.Unmarshal(bs, &body); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(body.InstanceUID), nil
 }
 
 func federationEnrollmentsCmd() *cobra.Command {

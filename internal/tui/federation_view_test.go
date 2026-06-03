@@ -703,6 +703,31 @@ func TestFederationEnroll_PreEnrollmentFailureReturnsToPreview(t *testing.T) {
 	assert.Empty(t, out.federationRecovery.Token)
 }
 
+func TestFederationEnroll_MissingSpokeInstanceBlocksBeforeHubMutation(t *testing.T) {
+	m := setupFederationHubProjectSelection()
+	var hubCalled bool
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		_ daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		hubCalled = true
+		return &recordingFederationHubAdmin{}, daemonTarget{}, nil
+	})
+
+	result, err := runFederationEnrollment(
+		context.Background(),
+		m.federationDraft,
+		"",
+		m.activeDaemon,
+		m.api,
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spoke instance UID")
+	assert.False(t, hubCalled)
+	assert.Empty(t, result.Enrollment.Token)
+}
+
 func TestFederationEnroll_JoinFailureRecoveryRevealIsExplicitAndSecretBearing(t *testing.T) {
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
 	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
