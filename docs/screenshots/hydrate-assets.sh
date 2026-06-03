@@ -28,8 +28,8 @@ if has_expected_assets; then
 fi
 
 if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  printf 'docs screenshots not hydrated: no git worktree found\n' >&2
-  exit 0
+  printf 'docs screenshots not hydrated: no git worktree found and expected screenshots are missing\n' >&2
+  exit 1
 fi
 
 if ! git -C "$repo_root" rev-parse --verify --quiet "$assets_branch" >/dev/null; then

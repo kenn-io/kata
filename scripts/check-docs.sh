@@ -142,10 +142,14 @@ done
 stale_config="docs/.zensical-build.XXXXXX.toml"
 stale_docs="docs/zensical-public-docs.XXXXXX"
 vercel_docs_root=""
+missing_assets_docs_root=""
 cleanup_check_docs() {
   rm -rf "$stale_config" "$stale_docs"
   if [[ -n "$vercel_docs_root" ]]; then
     rm -rf "$vercel_docs_root"
+  fi
+  if [[ -n "$missing_assets_docs_root" ]]; then
+    rm -rf "$missing_assets_docs_root"
   fi
 }
 trap cleanup_check_docs EXIT
@@ -156,6 +160,28 @@ trap cleanup_check_docs EXIT
 mkdir -p "$stale_docs"
 
 rm -rf docs/site
+
+missing_assets_docs_root="$(mktemp -d)"
+mkdir -p "$missing_assets_docs_root/docs"
+(
+  cd docs
+  tar \
+    --exclude './assets/screenshots' \
+    --exclude './site' \
+    --exclude './.ruff_cache' \
+    --exclude './.mypy_cache' \
+    -cf - .
+) | (cd "$missing_assets_docs_root/docs" && tar -xf -)
+missing_assets_log="$missing_assets_docs_root/vercel-build.log"
+if (cd "$missing_assets_docs_root/docs" && bash ./vercel-build.sh >"$missing_assets_log" 2>&1); then
+  printf 'docs Vercel build without hydrated screenshots should fail\n' >&2
+  exit 1
+fi
+if ! grep -F -- "docs screenshots not hydrated" "$missing_assets_log" >/dev/null; then
+  printf 'missing screenshot failure did not mention hydration\n' >&2
+  cat "$missing_assets_log" >&2
+  exit 1
+fi
 
 vercel_docs_root="$(mktemp -d)"
 mkdir -p "$vercel_docs_root/docs"
