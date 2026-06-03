@@ -55,9 +55,13 @@ var (
 		kind clientOptsKind,
 	) (*http.Client, error) {
 		opts := optsForKind(kind)
-		if (target.Local || target.Implicit) && target.Token == "" {
+		if target.Local || target.Implicit {
 			if target.Implicit {
-				opts.AllowInsecure = client.RemoteAllowInsecureForBaseURL(endpoint, "")
+				opts.AllowInsecure = target.AllowInsecure ||
+					client.RemoteAllowInsecureForBaseURL(endpoint, "")
+			}
+			if target.Token != "" {
+				return client.NewHTTPClientWithBearer(ctx, endpoint, target.Token, opts)
 			}
 			return client.NewHTTPClient(ctx, endpoint, opts)
 		}

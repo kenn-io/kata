@@ -245,6 +245,20 @@ func TestConnectResolvedImplicitRemoteUsesEnvTokenForHTTPClient(t *testing.T) {
 	assert.Equal(t, "client-db-token", conn.target.Token)
 }
 
+func TestNewHTTPClientForTUIResolvedImplicitRemoteHonorsTrustPrivateNetwork(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_AUTH_TOKEN", "global-token")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
+	endpoint := "http://100.64.0.5:7777"
+	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
+	require.Equal(t, "global-token", target.Token)
+	require.False(t, target.AllowInsecure)
+
+	_, err := newHTTPClientForTUI(t.Context(), endpoint, target, clientOptsNormal)
+
+	require.NoError(t, err)
+}
+
 func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	var gotAuth string
