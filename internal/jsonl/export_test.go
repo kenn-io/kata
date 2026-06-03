@@ -81,6 +81,48 @@ func TestExportReadOnlyLegacyV12FederationRowsOmitMissingBoundActor(t *testing.T
 	assert.True(t, sawEnrollment, "expected legacy federation enrollment export")
 }
 
+func TestExportReadOnlyLegacyV13FederationRowsPreserveBoundActor(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	writeLegacyV13FederationDB(t, path)
+	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+
+	var out bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &out, jsonl.ExportOptions{IncludeDeleted: true}))
+	records := decodeJSONLLines(t, out.Bytes())
+
+	var sawBinding, sawEnrollment bool
+	for _, rec := range records {
+		data, ok := rec["data"].(map[string]any)
+		require.True(t, ok)
+		switch rec["kind"] {
+		case "federation_binding":
+			sawBinding = true
+			assert.Equal(t, "legacy-actor", data["bound_actor"])
+		case "federation_enrollment":
+			sawEnrollment = true
+			assert.Equal(t, "legacy-actor", data["bound_actor"])
+			assert.NotContains(t, data, "allow_adoption_snapshot_authors")
+		}
+	}
+	assert.True(t, sawBinding, "expected legacy federation binding export")
+	assert.True(t, sawEnrollment, "expected legacy federation enrollment export")
+
+	target := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(out.Bytes()), target))
+	importedProject, err := target.ProjectByName(ctx, "legacy-fed")
+	require.NoError(t, err)
+	binding, err := target.FederationBindingByProject(ctx, importedProject.ID)
+	require.NoError(t, err)
+	assert.True(t, binding.PushEnabled)
+	assert.Equal(t, "legacy-actor", binding.Actor)
+	var enrollmentCount int
+	require.NoError(t, target.QueryRow(`SELECT COUNT(*) FROM federation_enrollments WHERE bound_actor = 'legacy-actor'`).Scan(&enrollmentCount))
+	assert.Equal(t, 1, enrollmentCount)
+}
+
 func TestExportEmitsEventPayloadAsJSONObject(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -628,6 +670,33 @@ func writeLegacyV12FederationDB(t *testing.T, path string) {
 
 		UPDATE meta SET value = '12' WHERE key = 'schema_version'`)
 	require.NoError(t, err)
+}
+
+func writeLegacyV13FederationDB(t *testing.T, path string) {
+	t.Helper()
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	current, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	project, err := current.CreateProject(ctx, "legacy-fed")
+	require.NoError(t, err)
+	_, err = current.ExecContext(ctx, `
+		INSERT INTO federation_bindings(
+			project_id, role, hub_url, hub_project_id, hub_project_uid,
+			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
+			push_cursor_event_id, bound_actor, enabled
+		)
+		VALUES(?, 'spoke', 'http://hub:7373', 42, ?, 7, 6, 1, 5, 'legacy-actor', 1)`,
+		project.ID, project.UID)
+	require.NoError(t, err)
+	_, err = current.ExecContext(ctx, `
+		INSERT INTO federation_enrollments(token_hash, spoke_instance_uid, project_id, capabilities, bound_actor)
+		VALUES(?, ?, ?, 'pull,push', 'legacy-actor')`,
+		strings.Repeat("b", 64), project.UID, project.ID)
+	require.NoError(t, err)
+	_, err = current.ExecContext(ctx, `UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, current.Close())
 }
 
 // newExportEnv opens a fresh test DB and seeds the canonical "kata" project
