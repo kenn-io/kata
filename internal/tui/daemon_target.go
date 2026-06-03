@@ -155,6 +155,7 @@ func resolveDaemonTargetToken(target daemonTarget) (daemonTarget, error) {
 }
 
 func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpoint string) (daemonConnection, error) {
+	target = resolvedDaemonTarget(target, endpoint)
 	hc, err := newHTTPClientForTUI(ctx, endpoint, target, clientOptsNormal)
 	if err != nil {
 		return daemonConnection{}, err
@@ -173,7 +174,7 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 		api:      c,
 		sseHC:    sseHC,
 		endpoint: endpoint,
-		target:   resolvedDaemonTarget(target, endpoint),
+		target:   target,
 		init:     bi,
 	}, nil
 }
