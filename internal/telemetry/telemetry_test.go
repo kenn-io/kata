@@ -20,6 +20,12 @@ func (f *fakePostHogClient) Enqueue(message posthog.Message) error {
 
 func (f *fakePostHogClient) Close() error { return nil }
 
+func TestEnabledFromEnvDisabledDuringGoTests(t *testing.T) {
+	t.Setenv(EnabledEnv, "1")
+
+	assert.False(t, EnabledFromEnv())
+}
+
 func TestNewReporterDisabledByEnvDoesNotRequireDistinctID(t *testing.T) {
 	t.Setenv(EnabledEnv, "0")
 
@@ -29,10 +35,8 @@ func TestNewReporterDisabledByEnvDoesNotRequireDistinctID(t *testing.T) {
 	assert.False(t, reporter.Enabled())
 }
 
-func TestNewReporterRequiresAnonymousDistinctID(t *testing.T) {
-	t.Setenv(EnabledEnv, "")
-
-	_, err := NewReporter(Options{})
+func TestNewReporterRequiresAnonymousDistinctIDWhenEnabled(t *testing.T) {
+	_, err := newReporter(Options{}, true)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "distinct id")

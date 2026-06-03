@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/posthog/posthog-go"
@@ -67,6 +68,9 @@ type Options struct {
 
 // EnabledFromEnv reports whether anonymous telemetry is enabled by the environment.
 func EnabledFromEnv() bool {
+	if testing.Testing() {
+		return false
+	}
 	return strings.TrimSpace(os.Getenv(EnabledEnv)) != "0"
 }
 
@@ -102,7 +106,11 @@ func SanitizeProperties(event string, properties map[string]any) (map[string]any
 
 // NewReporter builds an enabled reporter or returns a disabled reporter when opted out.
 func NewReporter(opts Options) (*Reporter, error) {
-	if !EnabledFromEnv() {
+	return newReporter(opts, EnabledFromEnv())
+}
+
+func newReporter(opts Options, enabled bool) (*Reporter, error) {
+	if !enabled {
 		return DisabledReporter(), nil
 	}
 	distinctID := strings.TrimSpace(opts.DistinctID)
