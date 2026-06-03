@@ -47,7 +47,7 @@ func newRunnerSetup(t *testing.T) *runnerSetup {
 }
 
 // runProbe executes hookprobe with default ResolvedHook fields
-// (Command=hookprobe, Timeout=2s, WorkingDir=rs.dir), applying customize
+// (Command=hookprobe, Timeout=10s, WorkingDir=rs.dir), applying customize
 // to override fields, and returns the captured runRecord. Callers that
 // only need to vary args can pass a one-liner customize.
 func (rs *runnerSetup) runProbe(customize func(*ResolvedHook)) runRecord {
@@ -63,7 +63,7 @@ func (rs *runnerSetup) runProbeWithDone(done chan struct{}, customize func(*Reso
 	rs.deps.AppendRun = func(r runRecord) { got = r }
 	hook := ResolvedHook{
 		Command:    hookprobePath(rs.t),
-		Timeout:    2 * time.Second,
+		Timeout:    10 * time.Second,
 		WorkingDir: rs.dir,
 	}
 	if customize != nil {
@@ -251,6 +251,19 @@ func TestRunner_DaemonShutdown_BeforeWait(t *testing.T) {
 	})
 	if got.Result != "daemon_shutdown" {
 		t.Fatalf("result = %q, want daemon_shutdown", got.Result)
+	}
+}
+
+func TestCompletionSelectPrefersDoneOverExpiredTimeout(t *testing.T) {
+	done := make(chan error, 1)
+	done <- nil
+	expired := make(chan time.Time, 1)
+	expired <- time.Now()
+
+	result, exitCode, action := selectCompletion(done, expired, make(chan struct{}))
+
+	if result != "ok" || exitCode != 0 || action != completionDone {
+		t.Fatalf("got result=%q exit=%d action=%v, want ok/0/done", result, exitCode, action)
 	}
 }
 

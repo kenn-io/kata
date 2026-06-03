@@ -186,6 +186,14 @@ func classifyWorkingDir(path string) (result, spawnErr string) {
 // the 3-way select between normal exit, timeout, and daemon shutdown.
 // On timeout/shutdown branches it kills the process group with grace
 // and drains doneCh so the wait goroutine exits cleanly.
+type completionAction int
+
+const (
+	completionDone completionAction = iota
+	completionTimeout
+	completionShutdown
+)
+
 func waitForCompletion(cmd *exec.Cmd, timeout time.Duration, shutdown <-chan struct{}, deps runDeps) (result string, exitCode int) {
 	doneCh := make(chan error, 1)
 	go func() { doneCh <- cmd.Wait() }()
@@ -193,17 +201,53 @@ func waitForCompletion(cmd *exec.Cmd, timeout time.Duration, shutdown <-chan str
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
-	select {
-	case e := <-doneCh:
-		return "ok", exitCodeOf(e)
-	case <-timer.C:
+	result, exitCode, action := selectCompletion(doneCh, timer.C, shutdown)
+	switch action {
+	case completionDone:
+		return result, exitCode
+	case completionTimeout:
 		killTreeWithGrace(cmd, deps.GraceWindow, deps.DaemonLog)
 		w := <-doneCh
 		return "timed_out", exitCodeOf(w)
-	case <-shutdown:
+	case completionShutdown:
 		killTreeWithGrace(cmd, deps.GraceWindow, deps.DaemonLog)
 		w := <-doneCh
 		return "daemon_shutdown", exitCodeOf(w)
+	default:
+		panic("unknown hook completion action")
+	}
+}
+
+func selectCompletion(
+	doneCh <-chan error,
+	timeout <-chan time.Time,
+	shutdown <-chan struct{},
+) (result string, exitCode int, action completionAction) {
+	if result, exitCode, ok := pollCompletion(doneCh); ok {
+		return result, exitCode, completionDone
+	}
+	select {
+	case e := <-doneCh:
+		return "ok", exitCodeOf(e), completionDone
+	case <-timeout:
+		if result, exitCode, ok := pollCompletion(doneCh); ok {
+			return result, exitCode, completionDone
+		}
+		return "timed_out", -1, completionTimeout
+	case <-shutdown:
+		if result, exitCode, ok := pollCompletion(doneCh); ok {
+			return result, exitCode, completionDone
+		}
+		return "daemon_shutdown", -1, completionShutdown
+	}
+}
+
+func pollCompletion(doneCh <-chan error) (result string, exitCode int, ok bool) {
+	select {
+	case e := <-doneCh:
+		return "ok", exitCodeOf(e), true
+	default:
+		return "", 0, false
 	}
 }
 
