@@ -105,7 +105,7 @@ func federationEnableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			project, err := resolveFederationProject(ctx, client, baseURL, args)
+			project, err := resolveFederationProject(ctx, client, baseURL, args, false)
 			if err != nil {
 				return err
 			}
@@ -151,7 +151,7 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return federationEnrollHTTPClientError(err)
 			}
-			project, err := resolveFederationProject(ctx, hubClient, hubBaseURL, args)
+			project, err := resolveFederationProject(ctx, hubClient, hubBaseURL, args, true)
 			if err != nil {
 				return err
 			}
@@ -492,11 +492,20 @@ func hydrateFederationJoinMetadata(ctx context.Context, bundle *federationJoinBu
 	return nil
 }
 
-func resolveFederationProject(ctx context.Context, client *http.Client, baseURL string, args []string) (projectRef, error) {
+func resolveFederationProject(
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+	args []string,
+	createMissing bool,
+) (projectRef, error) {
 	if len(args) > 0 {
 		return resolveProjectSelector(ctx, client, baseURL, args[0])
 	}
 	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
+		if !createMissing {
+			return resolveProjectSelector(ctx, client, baseURL, projectName)
+		}
 		return ensureFederationProjectByName(ctx, client, baseURL, projectName)
 	}
 	start, err := resolveStartPath(flags.Workspace)

@@ -459,6 +459,9 @@ func federationAuthDisplay(target daemonTarget, auth AuthInfo) string {
 		return base + " actor " + actor
 	}
 	kind := strings.TrimSpace(auth.Kind)
+	if kind == "trusted_proxy_absent" {
+		return "trusted-proxy missing actor"
+	}
 	if base != "token" || kind == "" || kind == "none" {
 		return base
 	}
@@ -467,8 +470,6 @@ func federationAuthDisplay(target daemonTarget, auth AuthInfo) string {
 		return base + " static"
 	case "bootstrap":
 		return base + " bootstrap"
-	case "trusted_proxy_absent":
-		return base + " trusted-proxy missing actor"
 	default:
 		return base + " " + kind
 	}

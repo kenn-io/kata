@@ -227,6 +227,17 @@ func TestFederationEnableCLIResolvesExplicitProjectFlag(t *testing.T) {
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
 }
 
+func TestFederationEnableCLIDoesNotCreateProjectFromProjectFlag(t *testing.T) {
+	env := testenv.New(t)
+
+	_, _, err := runCmdCapture(t, env, "federation", "enable", "--project", "missing-project")
+
+	ce := requireCLIError(t, err, ExitNotFound)
+	assert.Contains(t, ce.Message, `project selector "missing-project" did not match any project`)
+	_, err = env.DB.ProjectByName(context.Background(), "missing-project")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
 func TestFederationEnableCLIRejectsSpokeProject(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
@@ -450,7 +461,7 @@ func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *tes
 		}, nil
 	})}
 
-	project, err := resolveFederationProject(context.Background(), client, baseURL, nil)
+	project, err := resolveFederationProject(context.Background(), client, baseURL, nil, false)
 
 	require.NoError(t, err)
 	assert.True(t, called)

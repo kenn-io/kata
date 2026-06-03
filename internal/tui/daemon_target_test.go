@@ -182,6 +182,17 @@ func TestResolvedImplicitRemoteTargetCarriesEnvAllowInsecure(t *testing.T) {
 	assert.True(t, target.AllowInsecure)
 }
 
+func TestResolvedImplicitRemoteTargetCarriesGlobalAuthToken(t *testing.T) {
+	endpoint := "http://spoke.internal:7777"
+	t.Setenv("KATA_SERVER", endpoint)
+	t.Setenv("KATA_ALLOW_INSECURE", "1")
+	t.Setenv("KATA_AUTH_TOKEN", "global-token")
+
+	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
+
+	assert.Equal(t, "global-token", target.Token)
+}
+
 func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	var gotAuth string

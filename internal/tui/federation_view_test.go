@@ -725,6 +725,12 @@ func TestFederationEnroll_RecoveryCommandPreservesSpokeAuthOnlyAfterReveal(t *te
 	assert.Contains(t, rendered, "KATA_AUTH_TOKEN="+spokeToken)
 }
 
+func TestFederationAuthDisplayShowsTrustedProxyMissingActor(t *testing.T) {
+	got := federationAuthDisplay(daemonTarget{Name: "hub"}, AuthInfo{Kind: "trusted_proxy_absent"})
+
+	assert.Equal(t, "trusted-proxy missing actor", got)
+}
+
 func TestFederationEnroll_RecoveryCommandQuotesShellMetacharacters(t *testing.T) {
 	cmd := federationRecoveryCommand{
 		HubURL:        "http://hub.internal:7777",

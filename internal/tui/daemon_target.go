@@ -199,7 +199,19 @@ func resolvedDaemonTarget(target daemonTarget, endpoint string) daemonTarget {
 	} else if target.Implicit {
 		target.AllowInsecure = client.RemoteAllowInsecureForBaseURL(endpoint, "")
 	}
+	if (target.Local || target.Implicit) && target.Token == "" {
+		target.Token = effectiveGlobalAuthTokenForTUI()
+	}
 	return target
+}
+
+func effectiveGlobalAuthTokenForTUI() string {
+	envToken := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
+	auth, err := config.ReadAuthConfig()
+	if err != nil {
+		return envToken
+	}
+	return strings.TrimSpace(auth.Token)
 }
 
 func implicitDaemonTarget(endpoint string) daemonTarget {
