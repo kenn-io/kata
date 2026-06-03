@@ -151,7 +151,7 @@ func TestImportLegacyFederationBindingWithoutActorDisablesPush(t *testing.T) {
 	assert.Empty(t, got.Actor)
 }
 
-func TestImportLegacyFederationEnrollmentWithoutActorIsSkipped(t *testing.T) {
+func TestImportLegacyFederationEnrollmentWithoutActorKeepsPullOnlyAccess(t *testing.T) {
 	ctx := context.Background()
 	target := openImportTargetDB(t)
 	require.NoError(t, importJSONL(ctx, target,
@@ -162,9 +162,13 @@ func TestImportLegacyFederationEnrollmentWithoutActorIsSkipped(t *testing.T) {
 		`{"kind":"federation_enrollment","data":{"id":1,"token_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","spoke_instance_uid":"01HZZZZZZZZZZZZZZZZZZZZZ02","project_id":1,"capabilities":"pull,push","created_at":"2026-05-23T00:00:01.000Z","updated_at":"2026-05-23T00:00:02.000Z"}}`,
 	))
 
-	var count int64
-	require.NoError(t, target.QueryRow(`SELECT COUNT(*) FROM federation_enrollments`).Scan(&count))
-	assert.Equal(t, int64(0), count)
+	var capabilities, actor string
+	require.NoError(t, target.QueryRow(`
+		SELECT capabilities, bound_actor
+		  FROM federation_enrollments
+		 WHERE id = 1`).Scan(&capabilities, &actor))
+	assert.Equal(t, "pull", capabilities)
+	assert.Equal(t, "legacy-federation", actor)
 }
 
 func TestImportV1FillsUIDsDeterministically(t *testing.T) {

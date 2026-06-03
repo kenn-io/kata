@@ -341,7 +341,8 @@ func importFederationQuarantine(ctx context.Context, tx *sql.Tx, q *db.Federatio
 func importFederationEnrollment(ctx context.Context, tx *sql.Tx, e *db.FederationEnrollmentExport) error {
 	actor := strings.TrimSpace(e.Actor)
 	if actor == "" {
-		return nil
+		actor = "legacy-federation"
+		e.Capabilities = "pull"
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO federation_enrollments(

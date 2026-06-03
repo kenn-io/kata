@@ -252,7 +252,7 @@ func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstanc
 			return false
 		}
 	}
-	_, err = resolveProjectSelector(ctx, spokeClient, spokeURL, projectName)
+	_, err = resolveFederationProjectByName(ctx, spokeClient, spokeURL, projectName)
 	return err == nil
 }
 

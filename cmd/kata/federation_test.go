@@ -416,6 +416,37 @@ func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t 
 	assert.False(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
+func TestFederationEnrollCLIAutoAdoptionRequiresExactSpokeProjectName(t *testing.T) {
+	resetFlags(t)
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	spoke := testenv.New(t)
+	t.Setenv("KATA_SERVER", spoke.URL)
+	ctx := context.Background()
+	_, err := spoke.DB.CreateProject(ctx, "workspace:fedlab")
+	require.NoError(t, err)
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--project", "fedlab",
+		"federation", "enroll",
+		"--spoke-instance", spoke.DB.InstanceUID(),
+		"--hub-url", hub.URL,
+		"--actor", "operator",
+	})
+
+	require.NoError(t, cmd.Execute())
+	out := buf.String()
+	assert.NotContains(t, out, "--adopt-existing")
+
+	enrollments, err := hub.DB.ListFederationEnrollments(ctx)
+	require.NoError(t, err)
+	require.Len(t, enrollments, 1)
+	assert.False(t, enrollments[0].AllowAdoptionSnapshotAuthors)
+}
+
 func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameSpokeProject(t *testing.T) {
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
@@ -590,12 +621,9 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 		switch r.URL.Path {
 		case "/api/v1/ping":
 			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
-		case "/api/v1/projects":
+		case "/api/v1/projects/resolve":
 			seenAuth = append(seenAuth, r.Header.Get("Authorization"))
-			_, _ = w.Write([]byte(`{"projects":[{"id":1,"name":"fedlab"}]}`))
-		case "/api/v1/projects/1":
-			seenAuth = append(seenAuth, r.Header.Get("Authorization"))
-			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"fedlab"},"aliases":[]}`))
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"fedlab"}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -606,7 +634,7 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 
 	require.True(t, exists)
 	require.NotEmpty(t, seenAuth)
-	assert.Equal(t, []string{"", ""}, seenAuth)
+	assert.Equal(t, []string{""}, seenAuth)
 }
 
 func TestFederationEnrollCLIRequiresPullCapabilityForJoinCommand(t *testing.T) {
