@@ -232,7 +232,7 @@ tmux_cmd new-session -d -s "$SESSION" -x "$WIDTH" -y "$HEIGHT"
 tmux_cmd set-option -g default-terminal "tmux-256color"
 tmux_cmd set-option -ga terminal-overrides ",*:Tc"
 
-RUN_TUI="KATA_HOME=$(shell_quote "$SPOKE_HOME") KATA_AUTHOR=demo-operator KATA_DEMO_HUB_AUTH=$(shell_quote "$DEMO_HUB_AUTH_VALUE") KATA_COLOR_MODE=dark $(shell_quote "$KATA_BIN") --workspace $(shell_quote "$SPOKE_WS") --project demo-spoke-project tui"
+RUN_TUI="env -u NO_COLOR KATA_HOME=$(shell_quote "$SPOKE_HOME") KATA_AUTHOR=demo-operator KATA_DEMO_HUB_AUTH=$(shell_quote "$DEMO_HUB_AUTH_VALUE") KATA_COLOR_MODE=dark $(shell_quote "$KATA_BIN") --workspace $(shell_quote "$SPOKE_WS") --project demo-spoke-project tui"
 send "$RUN_TUI" Enter
 wait_until "demo-spoke-project"
 send "j"
