@@ -1323,11 +1323,12 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 	env := testenv.New(t)
 
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
-		"spoke_instance_uid": federationTestSpokeUID,
-		"project_id":         nil,
-		"capabilities":       "push,pull",
-		"token":              "explicit-enrollment-token",
-		"actor":              "alice",
+		"spoke_instance_uid":              federationTestSpokeUID,
+		"project_id":                      nil,
+		"capabilities":                    "push,pull",
+		"token":                           "explicit-enrollment-token",
+		"actor":                           "alice",
+		"allow_adoption_snapshot_authors": true,
 	}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
 	assert.NotContains(t, string(raw), "token_hash")
@@ -1353,15 +1354,17 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 		projectID    sql.NullInt64
 		capabilities string
 		actor        string
+		allowMarker  int
 	)
 	require.NoError(t, env.DB.QueryRow(`
-		SELECT token_hash, project_id, capabilities, bound_actor
+		SELECT token_hash, project_id, capabilities, bound_actor, allow_adoption_snapshot_authors
 		  FROM federation_enrollments
-		 WHERE id = ?`, out.ID).Scan(&tokenHash, &projectID, &capabilities, &actor))
+		 WHERE id = ?`, out.ID).Scan(&tokenHash, &projectID, &capabilities, &actor, &allowMarker))
 	assert.Equal(t, db.FederationTokenHash("explicit-enrollment-token"), tokenHash)
 	assert.False(t, projectID.Valid)
 	assert.Equal(t, "pull,push", capabilities)
 	assert.Equal(t, "alice", actor)
+	assert.Equal(t, 1, allowMarker)
 }
 
 func TestFederationEnrollmentIdentityModeUsesTokenActor(t *testing.T) {
@@ -1548,6 +1551,30 @@ func TestFederationAuthValidEnrollmentTokenReachesTransportHandlers(t *testing.T
 	assert.Equal(t, int64(0), out.Duplicates)
 	assert.Equal(t, int64(0), out.PushCursorEventID)
 	assert.NotContains(t, string(raw), "spoke_instance_uid")
+}
+
+func TestFederationIngestRejectsSnapshotHistoricalAuthorWithoutAdoptionIntent(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project := createFederatedHubProject(t, env, "hub")
+	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:            "snapshot-transport-token",
+		SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID:        &project.ID,
+		Capabilities:     "push",
+		Actor:            "tester",
+	})
+	require.NoError(t, err)
+	ev := federationRemoteIssueSnapshotEvent(t, project, federationTestSpokeUID, "forged-author")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/events:ingest",
+		federationIngestBody(federationIngestEnvelope(t, int64(17), ev)),
+		bearer(created.Token))
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "ingest response: %s", raw)
+	assert.Contains(t, string(raw), "validation")
+	assertFederationEventCount(t, env.DB, "issue.snapshot", 0)
 }
 
 func TestFederationTransportPullMatchesProjectPollBody(t *testing.T) {
@@ -1931,6 +1958,48 @@ func federationRemoteIssueCreatedEvent(t *testing.T, project db.Project, spokeUI
 		ProjectName:       project.Name,
 		IssueUID:          &issueUID,
 		Type:              "issue.created",
+		Actor:             "tester",
+		HLCPhysicalMS:     1,
+		HLCCounter:        0,
+		Payload:           payload,
+		CreatedAt:         createdAt,
+	}
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID:               ev.EventUID,
+		OriginInstanceUID: ev.OriginInstanceUID,
+		ProjectUID:        ev.ProjectUID,
+		ProjectName:       ev.ProjectName,
+		IssueUID:          ev.IssueUID,
+		RelatedIssueUID:   ev.RelatedIssueUID,
+		Type:              ev.Type,
+		Actor:             ev.Actor,
+		HLCPhysicalMS:     ev.HLCPhysicalMS,
+		HLCCounter:        ev.HLCCounter,
+		CreatedAt:         ev.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		Payload:           ev.Payload,
+	})
+	require.NoError(t, err)
+	ev.ContentHash = hash
+	return ev
+}
+
+func federationRemoteIssueSnapshotEvent(
+	t *testing.T,
+	project db.Project,
+	spokeUID string,
+	payloadAuthor string,
+) db.RemoteEvent {
+	t.Helper()
+	issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EE"
+	createdAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	payload := json.RawMessage(`{"uid":"` + issueUID + `","short_id":"cd4ee","title":"spoke snapshot","body":"","author":"` + payloadAuthor + `","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+	ev := db.RemoteEvent{
+		EventUID:          "01HZNQ7VFPK1XGD8R5MABCD4ED",
+		OriginInstanceUID: spokeUID,
+		ProjectUID:        project.UID,
+		ProjectName:       project.Name,
+		IssueUID:          &issueUID,
+		Type:              "issue.snapshot",
 		Actor:             "tester",
 		HLCPhysicalMS:     1,
 		HLCCounter:        0,

@@ -163,14 +163,17 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			adoptExisting := federationCapabilitiesContain(internalCaps, "push") &&
+				federationSpokeProjectExists(ctx, metadata.ProjectName)
 			status, bs, err := httpDoJSON(ctx, hubClient, http.MethodPost,
 				hubBaseURL+"/api/v1/federation/enrollments",
 				map[string]any{
-					"spoke_instance_uid": spokeInstance,
-					"project_id":         project.ID,
-					"capabilities":       internalCaps,
-					"token":              token,
-					"actor":              requestActor,
+					"spoke_instance_uid":              spokeInstance,
+					"project_id":                      project.ID,
+					"capabilities":                    internalCaps,
+					"token":                           token,
+					"actor":                           requestActor,
+					"allow_adoption_snapshot_authors": adoptExisting,
 				})
 			if err != nil {
 				return err
@@ -196,9 +199,7 @@ func federationEnrollCmd() *cobra.Command {
 				PushEnabled:            federationCapabilitiesContain(internalCaps, "push"),
 				AllowInsecure:          allowInsecure,
 			}
-			if bundle.PushEnabled && federationSpokeProjectExists(ctx, metadata.ProjectName) {
-				bundle.AdoptExisting = true
-			}
+			bundle.AdoptExisting = adoptExisting
 			return printFederationEnrollment(cmd, project.Name, spokeInstance, enrollment, bundle)
 		},
 	}

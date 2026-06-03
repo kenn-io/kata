@@ -1382,11 +1382,12 @@ func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
 
 	hubProject := createFederatedHubForPush(t, hub)
 	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
-		Token:            "adopt-token",
-		SpokeInstanceUID: spoke.DB.InstanceUID(),
-		ProjectID:        &hubProject.ID,
-		Capabilities:     "pull,push",
-		Actor:            "tester",
+		Token:                        "adopt-token",
+		SpokeInstanceUID:             spoke.DB.InstanceUID(),
+		ProjectID:                    &hubProject.ID,
+		Capabilities:                 "pull,push",
+		Actor:                        "tester",
+		AllowAdoptionSnapshotAuthors: true,
 	})
 	require.NoError(t, err)
 	hubBinding, err := hub.DB.FederationBindingByProject(ctx, hubProject.ID)

@@ -135,11 +135,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		created, err := cfg.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
-			Token:            in.Body.Token,
-			SpokeInstanceUID: in.Body.SpokeInstanceUID,
-			ProjectID:        in.Body.ProjectID,
-			Capabilities:     in.Body.Capabilities,
-			Actor:            actor,
+			Token:                        in.Body.Token,
+			SpokeInstanceUID:             in.Body.SpokeInstanceUID,
+			ProjectID:                    in.Body.ProjectID,
+			Capabilities:                 in.Body.Capabilities,
+			Actor:                        actor,
+			AllowAdoptionSnapshotAuthors: in.Body.AllowAdoptionSnapshotAuthors,
 		})
 		if err != nil {
 			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
@@ -285,10 +286,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
-			ProjectID:        in.ProjectID,
-			SpokeInstanceUID: principal.SpokeInstanceUID,
-			BoundActor:       principal.Actor,
-			Events:           federationIngestEventsToDB(in.Body.Events),
+			ProjectID:                       in.ProjectID,
+			FederationEnrollmentID:          principal.EnrollmentID,
+			SpokeInstanceUID:                principal.SpokeInstanceUID,
+			BoundActor:                      principal.Actor,
+			AllowSnapshotAuthorPreservation: principal.AllowAdoptionSnapshotAuthors,
+			Events:                          federationIngestEventsToDB(in.Body.Events),
 		})
 		if err != nil {
 			return nil, federationIngestError(err)

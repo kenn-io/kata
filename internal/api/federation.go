@@ -150,11 +150,12 @@ type FederationViolationSummary struct {
 // credential for one spoke.
 type CreateFederationEnrollmentRequest struct {
 	Body struct {
-		SpokeInstanceUID string `json:"spoke_instance_uid"`
-		ProjectID        *int64 `json:"project_id"`
-		Capabilities     string `json:"capabilities"`
-		Token            string `json:"token,omitempty"`
-		Actor            string `json:"actor,omitempty"`
+		SpokeInstanceUID             string `json:"spoke_instance_uid"`
+		ProjectID                    *int64 `json:"project_id"`
+		Capabilities                 string `json:"capabilities"`
+		Token                        string `json:"token,omitempty"`
+		Actor                        string `json:"actor,omitempty"`
+		AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty"`
 	}
 }
 

@@ -414,12 +414,15 @@ CREATE TABLE federation_enrollments (
   spoke_instance_uid  TEXT NOT NULL,
   project_id          BIGINT REFERENCES projects(id),
   capabilities        TEXT NOT NULL,
+  bound_actor         TEXT NOT NULL,
+  allow_adoption_snapshot_authors INTEGER NOT NULL DEFAULT 0 CHECK(allow_adoption_snapshot_authors IN (0,1)),
   created_at          TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   updated_at          TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   revoked_at          TEXT,
   CHECK (length(token_hash) = 64),
   CHECK (length(spoke_instance_uid) = 26),
-  CHECK (length(trim(capabilities)) > 0)
+  CHECK (length(trim(capabilities)) > 0),
+  CHECK (length(trim(bound_actor)) > 0)
 );
 CREATE INDEX idx_federation_enrollments_scope
   ON federation_enrollments(project_id, revoked_at);

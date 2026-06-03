@@ -357,6 +357,7 @@ CREATE TABLE federation_enrollments (
   project_id          INTEGER REFERENCES projects(id),
   capabilities        TEXT NOT NULL,
   bound_actor         TEXT NOT NULL,
+  allow_adoption_snapshot_authors INTEGER NOT NULL DEFAULT 0 CHECK(allow_adoption_snapshot_authors IN (0,1)),
   created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   revoked_at          DATETIME,

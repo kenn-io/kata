@@ -11,10 +11,11 @@ import (
 )
 
 type federationPrincipal struct {
-	EnrollmentID     int64
-	SpokeInstanceUID string
-	Capabilities     string
-	Actor            string
+	EnrollmentID                 int64
+	SpokeInstanceUID             string
+	Capabilities                 string
+	Actor                        string
+	AllowAdoptionSnapshotAuthors bool
 }
 
 func authorizeFederationRequest(
@@ -43,9 +44,10 @@ func authorizeFederationRequest(
 		return federationPrincipal{}, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 	}
 	return federationPrincipal{
-		EnrollmentID:     enrollment.ID,
-		SpokeInstanceUID: enrollment.SpokeInstanceUID,
-		Capabilities:     enrollment.Capabilities,
-		Actor:            enrollment.Actor,
+		EnrollmentID:                 enrollment.ID,
+		SpokeInstanceUID:             enrollment.SpokeInstanceUID,
+		Capabilities:                 enrollment.Capabilities,
+		Actor:                        enrollment.Actor,
+		AllowAdoptionSnapshotAuthors: enrollment.AllowAdoptionSnapshotAuthors,
 	}, nil
 }

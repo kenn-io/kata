@@ -59,7 +59,8 @@ func (d *Store) ingestFederationEventsOnce(
 		return db.FederationIngestResult{}, err
 	}
 	allowSnapshotAuthorPreservation, err := allowFederationIngestSnapshotAuthorPreservation(ctx, tx,
-		p.ProjectID, p.SpokeInstanceUID, p.Events)
+		p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID,
+		p.AllowSnapshotAuthorPreservation, p.Events)
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
@@ -212,12 +213,17 @@ func allowFederationIngestSnapshotAuthorPreservation(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
+	enrollmentID int64,
 	spokeInstanceUID string,
+	allowExplicit bool,
 	events []db.FederationIngestEvent,
 ) (bool, error) {
 	// Adoption emits an initial issue.snapshot run that preserves historical
-	// issue/comment authors. After the hub has accepted any event from this
-	// spoke, fresh snapshots are normal live ingest and must match boundActor.
+	// issue/comment authors. That exception must be explicitly attached to the
+	// enrollment token and is consumed with the accepted ingest transaction.
+	if !allowExplicit || enrollmentID <= 0 {
+		return false, nil
+	}
 	hasSnapshot := false
 	for _, in := range events {
 		if in.Event.Type == "issue.snapshot" {
@@ -228,20 +234,24 @@ func allowFederationIngestSnapshotAuthorPreservation(
 	if !hasSnapshot {
 		return false, nil
 	}
-	var existingEventID int64
-	err := tx.QueryRowContext(ctx, `
-		SELECT id
-		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?
-		 LIMIT 1`, projectID, spokeInstanceUID).Scan(&existingEventID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
-	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE federation_enrollments
+		   SET allow_adoption_snapshot_authors = 0,
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE id = ?
+		   AND spoke_instance_uid = ?
+		   AND revoked_at IS NULL
+		   AND (project_id = ? OR project_id IS NULL)
+		   AND allow_adoption_snapshot_authors = 1`,
+		enrollmentID, spokeInstanceUID, projectID)
 	if err != nil {
-		return false, fmt.Errorf("lookup prior federation ingest event: %w", err)
+		return false, fmt.Errorf("consume federation adoption snapshot author marker: %w", err)
 	}
-	return false, nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("consume federation adoption snapshot author marker rows affected: %w", err)
+	}
+	return n > 0, nil
 }
 
 func validateFederationPayloadAuthor(ev db.RemoteEvent, boundActor string) error {

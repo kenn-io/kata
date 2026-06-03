@@ -220,11 +220,12 @@ type CreateFederationReplicaInput struct {
 
 // CreateFederationEnrollmentInput is the hub enrollment creation request body.
 type CreateFederationEnrollmentInput struct {
-	SpokeInstanceUID string `json:"spoke_instance_uid"`
-	ProjectID        *int64 `json:"project_id"`
-	Capabilities     string `json:"capabilities"`
-	Token            string `json:"token,omitempty"`
-	Actor            string `json:"actor,omitempty"`
+	SpokeInstanceUID             string `json:"spoke_instance_uid"`
+	ProjectID                    *int64 `json:"project_id"`
+	Capabilities                 string `json:"capabilities"`
+	Token                        string `json:"token,omitempty"`
+	Actor                        string `json:"actor,omitempty"`
+	AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty"`
 }
 
 // ProjectStatsSummary is the per-project aggregate carried by

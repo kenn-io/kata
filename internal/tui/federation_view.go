@@ -704,10 +704,11 @@ func runFederationEnrollment(
 		return result, err
 	}
 	enrollment, err := hubAdmin.CreateFederationEnrollment(ctx, CreateFederationEnrollmentInput{
-		SpokeInstanceUID: instanceUID,
-		ProjectID:        &hubProject.ID,
-		Capabilities:     draft.APICapabilities,
-		Actor:            draft.RequestedActor,
+		SpokeInstanceUID:             instanceUID,
+		ProjectID:                    &hubProject.ID,
+		Capabilities:                 draft.APICapabilities,
+		Actor:                        draft.RequestedActor,
+		AllowAdoptionSnapshotAuthors: draft.AdoptExisting,
 	})
 	if err != nil {
 		return result, err
@@ -731,7 +732,8 @@ func runFederationEnrollment(
 	}
 	result.Metadata = metadata
 	recovery.Command.HubProjectUID = metadata.ProjectUID
-	recovery.Command.ProjectName = metadata.ProjectName
+	replicaProjectName := federationReplicaProjectName(draft, metadata.ProjectName)
+	recovery.Command.ProjectName = replicaProjectName
 	recovery.Command.ReplayHorizonEventID = metadata.ReplayHorizonEventID
 	recovery.Command.BaselineThroughEventID = metadata.BaselineThroughEventID
 	if spoke == nil {
@@ -744,7 +746,7 @@ func runFederationEnrollment(
 		HubURL:                 hubURL,
 		HubProjectID:           hubProject.ID,
 		HubProjectUID:          metadata.ProjectUID,
-		ProjectName:            metadata.ProjectName,
+		ProjectName:            replicaProjectName,
 		ReplayHorizonEventID:   metadata.ReplayHorizonEventID,
 		BaselineThroughEventID: metadata.BaselineThroughEventID,
 		Token:                  enrollment.Token,
@@ -778,6 +780,13 @@ func resolveFederationHubProject(
 	return ProjectSummary{ID: draft.HubProjectID, Name: draft.HubProjectName}, nil
 }
 
+func federationReplicaProjectName(draft federationDraft, hubProjectName string) string {
+	if draft.AdoptExisting && strings.TrimSpace(draft.SpokeProjectName) != "" {
+		return draft.SpokeProjectName
+	}
+	return hubProjectName
+}
+
 func baseFederationRecovery(
 	draft federationDraft,
 	active daemonTarget,
@@ -786,10 +795,7 @@ func baseFederationRecovery(
 	hubProject ProjectSummary,
 	enrollment FederationEnrollment,
 ) federationRecovery {
-	projectName := hubProject.Name
-	if projectName == "" {
-		projectName = draft.SpokeProjectName
-	}
+	projectName := federationReplicaProjectName(draft, hubProject.Name)
 	return federationRecovery{
 		HubName:       daemonName(hub),
 		SpokeName:     daemonName(active),

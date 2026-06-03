@@ -340,6 +340,7 @@ func TestFederationEnrollCLIUsesHubURLForEnrollmentAndDefaultDaemonForAdoption(t
 	require.Len(t, enrollments, 1)
 	require.NotNil(t, enrollments[0].ProjectID)
 	assert.Equal(t, hubProject.ID, *enrollments[0].ProjectID)
+	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 
 	_, err = spoke.DB.FederationBindingByProject(ctx, spokeProject.ID)
 	assert.ErrorIs(t, err, db.ErrNotFound)
@@ -378,6 +379,7 @@ func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
 	require.Len(t, enrollments, 1)
 	require.NotNil(t, enrollments[0].ProjectID)
 	assert.Equal(t, hubProject.ID, *enrollments[0].ProjectID)
+	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
 func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) {

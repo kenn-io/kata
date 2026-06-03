@@ -183,6 +183,8 @@ if ! grep -F -- "docs screenshots not hydrated" "$missing_assets_log" >/dev/null
   exit 1
 fi
 
+bash docs/screenshots/hydrate-assets.sh
+
 vercel_docs_root="$(mktemp -d)"
 mkdir -p "$vercel_docs_root/docs"
 (

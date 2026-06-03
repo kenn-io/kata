@@ -571,6 +571,44 @@ func TestFederationEnroll_EnterCreatesEnrollmentAndJoinsSpoke(t *testing.T) {
 	assert.NotContains(t, stripANSI(renderFederation(out)), enrollmentSecret())
 }
 
+func TestFederationEnroll_AdoptSelectedHubJoinsSelectedLocalProjectName(t *testing.T) {
+	m, joinBody := setupFederationExecutionPreview(t, federationExecutionServerOptions{hubProjectName: "hub-project"})
+	m.federationDraft.Operation = federationOperationAdoptSelectedHub
+	m.federationDraft.SpokeProjectName = "local-spoke-project"
+	m.federationDraft.HubProjectName = "hub-project"
+
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	assert.Equal(t, federationModeResult, out.federationMode)
+	assert.Equal(t, "local-spoke-project", joinBody.ProjectName)
+	assert.Equal(t, "hub-project", out.federationResult.Metadata.ProjectName)
+	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", joinBody.HubProjectUID)
+}
+
+func TestFederationEnroll_AdoptSelectedHubRecoveryUsesSelectedLocalProjectName(t *testing.T) {
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{
+		hubProjectName: "hub-project",
+		joinStatus:     http.StatusInternalServerError,
+	})
+	m.federationDraft.Operation = federationOperationAdoptSelectedHub
+	m.federationDraft.SpokeProjectName = "local-spoke-project"
+	m.federationDraft.HubProjectName = "hub-project"
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	out, revealCmd := out.routeFederationViewKey(keyRune('R'))
+	require.Nil(t, revealCmd)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "--project local-spoke-project")
+	assert.NotContains(t, rendered, "--project hub-project")
+}
+
 func TestFederationEnroll_ResultShowsBoundActorAndHubMetadata(t *testing.T) {
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
 
@@ -844,6 +882,7 @@ func setupFederationHubProjectSelection() Model {
 type federationExecutionServerOptions struct {
 	metadataStatus int
 	joinStatus     int
+	hubProjectName string
 }
 
 func setupFederationExecutionPreview(
@@ -851,6 +890,10 @@ func setupFederationExecutionPreview(
 	opts federationExecutionServerOptions,
 ) (Model, *CreateFederationReplicaInput) {
 	t.Helper()
+	hubProjectName := opts.hubProjectName
+	if hubProjectName == "" {
+		hubProjectName = "spoke-project"
+	}
 	var joinBody CreateFederationReplicaInput
 	spoke := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/federation/replicas": func(w http.ResponseWriter, r *http.Request) {
@@ -869,13 +912,13 @@ func setupFederationExecutionPreview(
 	hub := mockDaemon(t, map[string]http.HandlerFunc{
 		"/api/v1/projects": func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost {
-				respondJSON(t, w, map[string]any{"project": map[string]any{"id": 42, "name": "spoke-project"}})
+				respondJSON(t, w, map[string]any{"project": map[string]any{"id": 42, "name": hubProjectName}})
 				return
 			}
-			respondJSON(t, w, map[string]any{"projects": []map[string]any{{"id": 42, "name": "spoke-project"}}})
+			respondJSON(t, w, map[string]any{"projects": []map[string]any{{"id": 42, "name": hubProjectName}}})
 		},
 		"/api/v1/projects/42/federation/enable": func(w http.ResponseWriter, _ *http.Request) {
-			respondJSON(t, w, federationMetadataBody())
+			respondJSON(t, w, federationMetadataBody(hubProjectName))
 		},
 		"/api/v1/federation/enrollments": func(w http.ResponseWriter, _ *http.Request) {
 			projectID := int64(42)
@@ -894,7 +937,7 @@ func setupFederationExecutionPreview(
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "metadata failed"}})
 				return
 			}
-			respondJSON(t, w, federationMetadataBody())
+			respondJSON(t, w, federationMetadataBody(hubProjectName))
 		},
 	})
 	m := setupFederationHubProjectSelection()
@@ -904,17 +947,17 @@ func setupFederationExecutionPreview(
 	m.federationMode = federationModePreview
 	m.federationDraft.Operation = federationOperationAdoptSameName
 	m.federationDraft.HubProjectID = 42
-	m.federationDraft.HubProjectName = "spoke-project"
+	m.federationDraft.HubProjectName = hubProjectName
 	m.federationDraft.HubTarget = daemonTarget{Name: "hub", URL: hub.URL, AllowInsecure: true}
 	m.federationDraft.AllowInsecure = true
 	return m, &joinBody
 }
 
-func federationMetadataBody() api.ProjectFederationBody {
+func federationMetadataBody(projectName string) api.ProjectFederationBody {
 	return api.ProjectFederationBody{
 		ProjectID:              42,
 		ProjectUID:             "01HZNQ7VFPK1XGD8R5MABCD4EX",
-		ProjectName:            "spoke-project",
+		ProjectName:            projectName,
 		ReplayHorizonEventID:   9,
 		BaselineThroughEventID: 11,
 	}
