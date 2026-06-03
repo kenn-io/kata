@@ -28,20 +28,21 @@ const (
 // ErrUnsupportedEvent is returned when callers try to capture an event outside the allowlist.
 var ErrUnsupportedEvent = errors.New("unsupported telemetry event")
 
-var postHogTelemetryEnabled = func() *atomic.Bool {
-	enabled := &atomic.Bool{}
-	enabled.Store(true)
-	return enabled
-}()
+var postHogTelemetryEnabledState atomic.Bool
 
 func init() {
+	postHogTelemetryEnabledState.Store(true)
 	if testing.Testing() {
 		disablePostHogTelemetry()
 	}
 }
 
+func postHogTelemetryEnabled() bool {
+	return postHogTelemetryEnabledState.Load()
+}
+
 func disablePostHogTelemetry() {
-	postHogTelemetryEnabled.Store(false)
+	postHogTelemetryEnabledState.Store(false)
 }
 
 type propertyFilter func(any) (any, bool)
@@ -85,7 +86,7 @@ type Options struct {
 
 // EnabledFromEnv reports whether anonymous telemetry is enabled by the environment.
 func EnabledFromEnv() bool {
-	if !postHogTelemetryEnabled.Load() {
+	if !postHogTelemetryEnabled() {
 		return false
 	}
 	return strings.TrimSpace(os.Getenv(EnabledEnv)) != "0"
