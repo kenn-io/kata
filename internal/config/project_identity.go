@@ -116,7 +116,6 @@ type DiscoveredPaths struct {
 type AliasInfo struct {
 	Identity string // git remote (normalized) or "local://<abs path>"
 	Kind     string // "git" | "local"
-	RootPath string // GitRoot when present, else WorkspaceRoot
 }
 
 // DiscoverPaths walks upward from startPath looking for .kata.toml (W) and
@@ -196,19 +195,17 @@ func ComputeAliasIdentity(ctx context.Context, d DiscoveredPaths) (AliasInfo, er
 			if err != nil {
 				return AliasInfo{}, err
 			}
-			return AliasInfo{Identity: id, Kind: "git", RootPath: d.GitRoot}, nil
+			return AliasInfo{Identity: id, Kind: "git"}, nil
 		}
 		return AliasInfo{
 			Identity: "local://" + d.GitRoot,
 			Kind:     "local",
-			RootPath: d.GitRoot,
 		}, nil
 	}
 	if d.WorkspaceRoot != "" {
 		return AliasInfo{
 			Identity: "local://" + d.WorkspaceRoot,
 			Kind:     "local",
-			RootPath: d.WorkspaceRoot,
 		}, nil
 	}
 	return AliasInfo{}, fmt.Errorf("no workspace or git root discovered")
@@ -311,8 +308,6 @@ func stripLocalScheme(id string) string {
 // spaces and other characters real filesystems use.
 //
 //   - kind: "git" or "local".
-//   - root_path: non-empty (an alias with no anchor is meaningless
-//     and would block path-anchored operations later).
 //   - identity (kind=git): apply ValidateIdentity, since a git alias
 //     is a normalized remote URL and obeys the same rules as project
 //     identity.
@@ -322,9 +317,6 @@ func stripLocalScheme(id string) string {
 func ValidateAliasInfo(info AliasInfo) error {
 	if info.Kind != "git" && info.Kind != "local" {
 		return fmt.Errorf("alias.kind must be \"git\" or \"local\", got %q", info.Kind)
-	}
-	if strings.TrimSpace(info.RootPath) == "" {
-		return fmt.Errorf("alias.root_path must be non-empty")
 	}
 	if info.Identity == "" {
 		return fmt.Errorf("alias.identity must be non-empty")

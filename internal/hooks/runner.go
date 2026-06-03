@@ -330,7 +330,6 @@ func buildEnv(userEnv []string, evt db.Event, asnap AliasSnapshot, hasAlias bool
 	if hasAlias {
 		env = append(env,
 			"KATA_ALIAS_IDENTITY="+asnap.Identity,
-			"KATA_ROOT_PATH="+asnap.RootPath,
 		)
 	}
 	return env

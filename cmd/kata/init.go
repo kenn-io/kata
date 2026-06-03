@@ -265,9 +265,8 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	}
 	if in.Alias != nil {
 		reqBody["alias"] = map[string]any{
-			"identity":  in.Alias.Identity,
-			"kind":      in.Alias.Kind,
-			"root_path": in.Alias.RootPath,
+			"identity": in.Alias.Identity,
+			"kind":     in.Alias.Kind,
 		}
 	}
 	bs, err := postProjects(ctx, baseURL, reqBody)

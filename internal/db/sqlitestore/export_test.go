@@ -163,14 +163,13 @@ func TestExportSequences(t *testing.T) {
 
 func TestExportProjectAliases(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
-	a, err := d.AttachAlias(ctx, p.ID, "alias-x", "git", "/tmp/x")
+	a, err := d.AttachAlias(ctx, p.ID, "alias-x", "git")
 	require.NoError(t, err)
 
 	got := collectExport(t, d.ExportProjectAliases(ctx, db.ExportFilter{ProjectID: &p.ID}))
 	require.Len(t, got, 1)
 	require.Equal(t, a.ID, got[0].ID)
 	require.Equal(t, p.ID, got[0].ProjectID)
-	require.Equal(t, "/tmp/x", got[0].RootPath)
 	require.Equal(t, "git", got[0].AliasKind)
 }
 

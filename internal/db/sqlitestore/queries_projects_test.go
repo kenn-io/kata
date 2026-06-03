@@ -96,7 +96,7 @@ func TestAttachAlias_AndLookup(t *testing.T) {
 	ctx := context.Background()
 	p := createKataProject(ctx, t, d)
 
-	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/kata", "git", "/tmp/x")
+	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/kata", "git")
 	require.NoError(t, err)
 	assert.Equal(t, p.ID, a.ProjectID)
 	assert.Equal(t, "git", a.AliasKind)
@@ -109,25 +109,6 @@ func TestAttachAlias_AndLookup(t *testing.T) {
 func TestAliasByIdentity_NotFound(t *testing.T) {
 	d := openTestDB(t)
 	_, err := d.AliasByIdentity(context.Background(), "missing")
-	assert.ErrorIs(t, err, db.ErrNotFound)
-}
-
-func TestTouchAlias_UpdatesLastSeen(t *testing.T) {
-	d := openTestDB(t)
-	ctx := context.Background()
-	p := createProject(ctx, t, d, "x")
-	a := attachAlias(ctx, t, d, p.ID, "x", "/tmp/x")
-
-	require.NoError(t, d.TouchAlias(ctx, a.ID, "/tmp/y"))
-	got, err := d.AliasByIdentity(ctx, "x")
-	require.NoError(t, err)
-	assert.Equal(t, "/tmp/y", got.RootPath)
-	assert.True(t, !got.LastSeenAt.Before(a.LastSeenAt))
-}
-
-func TestTouchAlias_MissingAliasReturnsErrNotFound(t *testing.T) {
-	d := openTestDB(t)
-	err := d.TouchAlias(context.Background(), 9999, "/tmp/x")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
@@ -770,13 +751,12 @@ func TestReassignAlias(t *testing.T) {
 	require.NoError(t, err)
 	dst, err := d.CreateProject(ctx, "dst")
 	require.NoError(t, err)
-	alias, err := d.AttachAlias(ctx, src.ID, "git:example.com/repo", "git", "/old/root")
+	alias, err := d.AttachAlias(ctx, src.ID, "git:example.com/repo", "git")
 	require.NoError(t, err)
 
-	require.NoError(t, d.ReassignAlias(ctx, alias.ID, dst.ID, "/new/root"))
+	require.NoError(t, d.ReassignAlias(ctx, alias.ID, dst.ID))
 
 	got, err := d.AliasByIdentity(ctx, "git:example.com/repo")
 	require.NoError(t, err)
 	require.Equal(t, dst.ID, got.ProjectID)
-	require.Equal(t, "/new/root", got.RootPath)
 }

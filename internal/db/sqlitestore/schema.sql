@@ -23,11 +23,8 @@ CREATE TABLE project_aliases (
   project_id      INTEGER NOT NULL REFERENCES projects(id),
   alias_identity  TEXT UNIQUE NOT NULL,    -- normalized git remote, or 'local://<abs path>'
   alias_kind      TEXT NOT NULL CHECK(alias_kind IN ('git','local')),
-  root_path       TEXT NOT NULL,           -- last seen absolute workspace root for this alias
   created_at      DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  last_seen_at    DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  CHECK (length(trim(alias_identity)) > 0),
-  CHECK (length(trim(root_path)) > 0)
+  CHECK (length(trim(alias_identity)) > 0)
 );
 CREATE INDEX idx_project_aliases_project ON project_aliases(project_id);
 

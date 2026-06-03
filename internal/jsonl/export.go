@@ -362,12 +362,10 @@ func exportProjectAliases(ctx context.Context, d exportQuerier, enc *Encoder, op
 		ProjectID     int64  `json:"project_id"`
 		AliasIdentity string `json:"alias_identity"`
 		AliasKind     string `json:"alias_kind"`
-		RootPath      string `json:"root_path"`
 		CreatedAt     string `json:"created_at"`
-		LastSeenAt    string `json:"last_seen_at"`
 	}
-	query := `SELECT id, project_id, alias_identity, alias_kind, root_path,
-	                 CAST(created_at AS TEXT), CAST(last_seen_at AS TEXT)
+	query := `SELECT id, project_id, alias_identity, alias_kind,
+	                 CAST(created_at AS TEXT)
 	          FROM project_aliases`
 	args := []any{}
 	if opts.ProjectID > 0 {
@@ -382,7 +380,7 @@ func exportProjectAliases(ctx context.Context, d exportQuerier, enc *Encoder, op
 	return scanRecords(rows, KindProjectAlias, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
 		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.AliasIdentity, &rec.AliasKind,
-			&rec.RootPath, &rec.CreatedAt, &rec.LastSeenAt)
+			&rec.CreatedAt)
 		return rec, err
 	})
 }

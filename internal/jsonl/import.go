@@ -629,10 +629,7 @@ func normalizeProjectTimes(rec *db.ProjectExport) error {
 }
 
 func normalizeAliasTimes(rec *db.AliasExport) error {
-	if err := normalizeImportTime("project_alias.created_at", &rec.CreatedAt); err != nil {
-		return err
-	}
-	return normalizeImportTime("project_alias.last_seen_at", &rec.LastSeenAt)
+	return normalizeImportTime("project_alias.created_at", &rec.CreatedAt)
 }
 
 func normalizeRecurrenceTimes(rec *db.RecurrenceExport) error {

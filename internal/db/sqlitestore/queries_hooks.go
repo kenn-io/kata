@@ -17,16 +17,16 @@ func (d *Store) CommentBodyByID(ctx context.Context, id int64) (string, error) {
 	return body, err
 }
 
-// LatestAliasForProject returns the most-recently-seen alias for the
+// LatestAliasForProject returns the most-recently-created alias for the
 // project, if any. ok=false means the project has no aliases (the hook
 // payload omits the alias block in that case).
 func (d *Store) LatestAliasForProject(ctx context.Context, projectID int64) (db.AliasRow, bool, error) {
 	var a db.AliasRow
 	err := d.QueryRowContext(ctx,
-		`SELECT alias_identity, alias_kind, root_path
+		`SELECT alias_identity, alias_kind
 		 FROM project_aliases WHERE project_id = ?
-		 ORDER BY last_seen_at DESC LIMIT 1`, projectID).
-		Scan(&a.Identity, &a.Kind, &a.RootPath)
+		 ORDER BY id DESC LIMIT 1`, projectID).
+		Scan(&a.Identity, &a.Kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.AliasRow{}, false, nil
 	}

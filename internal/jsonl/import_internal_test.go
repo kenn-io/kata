@@ -42,7 +42,6 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			assert: func(t *testing.T, rec db.ImportRecord) {
 				require.NotNil(t, rec.Alias)
 				assert.Equal(t, canonical, rec.Alias.CreatedAt)
-				assert.Equal(t, canonical, rec.Alias.LastSeenAt)
 			},
 		},
 		{

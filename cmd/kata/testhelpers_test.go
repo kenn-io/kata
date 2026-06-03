@@ -313,9 +313,9 @@ func setupMergeProjects(t *testing.T, env *testenv.Env) (alpha, beta db.Project)
 	require.NoError(t, err)
 	beta, err = env.DB.CreateProject(ctx, "beta")
 	require.NoError(t, err)
-	_, err = env.DB.AttachAlias(ctx, alpha.ID, "github.com/wesm/alpha", "git", "/tmp/alpha")
+	_, err = env.DB.AttachAlias(ctx, alpha.ID, "github.com/wesm/alpha", "git")
 	require.NoError(t, err)
-	_, err = env.DB.AttachAlias(ctx, beta.ID, "github.com/wesm/beta", "git", "/tmp/beta")
+	_, err = env.DB.AttachAlias(ctx, beta.ID, "github.com/wesm/beta", "git")
 	require.NoError(t, err)
 	return alpha, beta
 }

@@ -103,7 +103,6 @@ type ProjectSnapshot struct {
 type AliasSnapshot struct {
 	Identity string // marshalled as alias_identity
 	Kind     string // marshalled as alias_kind ("git" | "local")
-	RootPath string // marshalled as root_path
 }
 
 // rawHookFile mirrors the on-disk schema. Strict TOML unmarshalling

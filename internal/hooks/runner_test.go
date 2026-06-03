@@ -145,7 +145,7 @@ func TestRunner_AliasResolverInvokedOnce(t *testing.T) {
 	var calls int32
 	rs.deps.Alias = func(_ context.Context, _ db.Event) (AliasSnapshot, bool, error) {
 		atomic.AddInt32(&calls, 1)
-		return AliasSnapshot{Identity: "github.com/wesm/kata", Kind: "git", RootPath: rs.dir}, true, nil
+		return AliasSnapshot{Identity: "github.com/wesm/kata", Kind: "git"}, true, nil
 	}
 	rs.runProbe(func(h *ResolvedHook) { h.Args = []string{"exit", "0"} })
 	if got := atomic.LoadInt32(&calls); got != 1 {
@@ -160,7 +160,7 @@ func TestRunner_AliasResolverInvokedOnce(t *testing.T) {
 func TestRunner_AliasResolverErr_NoEnvLeak(t *testing.T) {
 	rs := newRunnerSetup(t)
 	rs.deps.Alias = func(_ context.Context, _ db.Event) (AliasSnapshot, bool, error) {
-		return AliasSnapshot{Identity: "github.com/wesm/kata", Kind: "git", RootPath: rs.dir},
+		return AliasSnapshot{Identity: "github.com/wesm/kata", Kind: "git"},
 			true, errors.New("resolver boom")
 	}
 	got := rs.runProbe(func(h *ResolvedHook) { h.Args = []string{"env", "KATA_ALIAS_IDENTITY"} })

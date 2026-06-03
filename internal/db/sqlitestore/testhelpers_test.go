@@ -204,9 +204,9 @@ func makeLink(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID
 // attachAlias attaches a "git" alias to projectID, asserting no error. Used by
 // tests that need an alias as setup but aren't asserting on AttachAlias's
 // behavior.
-func attachAlias(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID int64, identity, path string) db.ProjectAlias {
+func attachAlias(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID int64, identity, _ string) db.ProjectAlias {
 	t.Helper()
-	a, err := d.AttachAlias(ctx, projectID, identity, "git", path)
+	a, err := d.AttachAlias(ctx, projectID, identity, "git")
 	require.NoError(t, err)
 	return a
 }

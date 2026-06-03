@@ -287,7 +287,6 @@ func TestInit_RemoteClient_SendsAliasInfo(t *testing.T) {
 	require.True(t, ok, "request must include alias metadata when client has a git workspace; got: %v", req)
 	assert.Equal(t, "github.com/wesm/kata", alias["identity"])
 	assert.Equal(t, "git", alias["kind"])
-	assert.Equal(t, dir, alias["root_path"])
 }
 
 func TestInit_GitignoreAppendsToExisting(t *testing.T) {

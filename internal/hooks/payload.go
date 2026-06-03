@@ -88,7 +88,6 @@ func buildAliasBlock(ctx context.Context, evt db.Event, ra aliasResolver, log lo
 	return map[string]any{
 		"alias_identity": asnap.Identity,
 		"alias_kind":     asnap.Kind,
-		"root_path":      asnap.RootPath,
 	}
 }
 

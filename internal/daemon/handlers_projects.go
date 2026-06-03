@@ -416,9 +416,9 @@ func resolveProject(ctx context.Context, store db.Storage, alias *api.AliasInput
 
 // resolveByAliasInput handles the alias-aware path-free resolve flow.
 // The daemon never touches the client filesystem: alias.identity is the
-// canonical key; alias.root_path is stored as opaque metadata. When the
-// alias is unknown but a name is supplied, the daemon falls back to
-// name lookup and attaches the alias on first-seen — so a remote client
+// canonical key. When the alias is unknown but a name is supplied, the
+// daemon falls back to name lookup and attaches the alias on first-seen
+// so a remote client
 // resolving against a daemon that was previously only reachable from a
 // different host upgrades to the alias-first path on the next call.
 // Resolve never creates projects: an unknown alias with an unknown (or
@@ -427,7 +427,6 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	info := config.AliasInfo{
 		Identity: in.Identity,
 		Kind:     in.Kind,
-		RootPath: in.RootPath,
 	}
 	if err := config.ValidateAliasInfo(info); err != nil {
 		return nil, api.NewError(400, "validation", err.Error(), "", nil)
@@ -435,11 +434,6 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	alias, err := store.AliasByIdentity(ctx, info.Identity)
 	switch {
 	case err == nil:
-		// Fetch the project before touching the alias so an alias
-		// pointing at an archived row (theoretically possible via
-		// import or direct DB edits — RemoveProject normally hard-
-		// deletes aliases atomically) doesn't bump last_seen_at on the
-		// stale binding.
 		project, err := store.ProjectByID(ctx, alias.ProjectID)
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
@@ -449,16 +443,9 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 				"alias "+info.Identity+" points at an archived project",
 				`run "kata init" to bind this workspace to an active project`, nil)
 		}
-		if err := store.TouchAlias(ctx, alias.ID, info.RootPath); err != nil && !errors.Is(err, db.ErrNotFound) {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
-		}
-		if refreshed, err := store.AliasByIdentity(ctx, info.Identity); err == nil {
-			alias = refreshed
-		}
 		return &api.ProjectResolveBody{
-			Project:       dbProjectToOut(project),
-			Alias:         alias,
-			WorkspaceRoot: info.RootPath,
+			Project: dbProjectToOut(project),
+			Alias:   alias,
 		}, nil
 	case !errors.Is(err, db.ErrNotFound):
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
@@ -494,9 +481,8 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 		return nil, err
 	}
 	return &api.ProjectResolveBody{
-		Project:       dbProjectToOut(project),
-		Alias:         attached,
-		WorkspaceRoot: info.RootPath,
+		Project: dbProjectToOut(project),
+		Alias:   attached,
 	}, nil
 }
 
@@ -582,12 +568,6 @@ func resolveByAliasIfAvailable(ctx context.Context, store db.Storage, disc confi
 	if err != nil {
 		return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
 	}
-	if err := store.TouchAlias(ctx, alias.ID, info.RootPath); err != nil && !errors.Is(err, db.ErrNotFound) {
-		return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
-	}
-	if refreshed, err := store.AliasByIdentity(ctx, info.Identity); err == nil {
-		alias = refreshed
-	}
 	project, err := store.ProjectByID(ctx, alias.ProjectID)
 	if err != nil {
 		return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
@@ -595,7 +575,7 @@ func resolveByAliasIfAvailable(ctx context.Context, store db.Storage, disc confi
 	return &api.ProjectResolveBody{
 		Project:       dbProjectToOut(project),
 		Alias:         alias,
-		WorkspaceRoot: info.RootPath,
+		WorkspaceRoot: aliasWorkspaceRoot(disc),
 	}, true, nil
 }
 
@@ -615,14 +595,6 @@ func resolveByAlias(ctx context.Context, store db.Storage, disc config.Discovere
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
-	if err := store.TouchAlias(ctx, alias.ID, info.RootPath); err != nil && !errors.Is(err, db.ErrNotFound) {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
-	}
-	// Refetch the alias so the response carries the updated last_seen_at and
-	// root_path, not the pre-touch snapshot.
-	if refreshed, err := store.AliasByIdentity(ctx, info.Identity); err == nil {
-		alias = refreshed
-	}
 	project, err := store.ProjectByID(ctx, alias.ProjectID)
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
@@ -630,8 +602,15 @@ func resolveByAlias(ctx context.Context, store db.Storage, disc config.Discovere
 	return &api.ProjectResolveBody{
 		Project:       dbProjectToOut(project),
 		Alias:         alias,
-		WorkspaceRoot: info.RootPath,
+		WorkspaceRoot: aliasWorkspaceRoot(disc),
 	}, nil
+}
+
+func aliasWorkspaceRoot(disc config.DiscoveredPaths) string {
+	if disc.GitRoot != "" {
+		return disc.GitRoot
+	}
+	return disc.WorkspaceRoot
 }
 
 func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequest) (*api.ProjectResolveBody, bool, error) {
@@ -737,14 +716,11 @@ func initByName(ctx context.Context, store db.Storage, req *api.InitProjectReque
 		info := config.AliasInfo{
 			Identity: req.Body.Alias.Identity,
 			Kind:     req.Body.Alias.Kind,
-			RootPath: req.Body.Alias.RootPath,
 		}
 		// ValidateAliasInfo applies kind-aware rules: git aliases get
-		// the project-identity charset check; local aliases (which
-		// carry workspace paths) only need a non-empty path. Without
-		// this, workspaces like "/Users/me/My Project" — perfectly
-		// valid for path-based init — would be rejected here on the
-		// whitespace check.
+		// the project-identity charset check; local aliases are
+		// already normalized local:// identities and can contain
+		// filesystem path characters.
 		if err := config.ValidateAliasInfo(info); err != nil {
 			return nil, false, api.NewError(400, "validation", err.Error(), "", nil)
 		}
@@ -859,7 +835,7 @@ func attachAlias(ctx context.Context, store db.Storage, projectID int64, info co
 	if !errors.Is(err, db.ErrNotFound) {
 		return db.ProjectAlias{}, api.NewError(500, "internal", err.Error(), "", nil)
 	}
-	a, err := store.AttachAlias(ctx, projectID, info.Identity, info.Kind, info.RootPath)
+	a, err := store.AttachAlias(ctx, projectID, info.Identity, info.Kind)
 	if err != nil {
 		// A UNIQUE constraint failure on alias_identity means a concurrent init
 		// beat us to the insert. Refetch the now-existing alias and apply the
@@ -879,16 +855,12 @@ func attachAlias(ctx context.Context, store db.Storage, projectID int64, info co
 }
 
 // applyExistingAlias handles the case where an alias row already exists.
-// If the alias belongs to projectID it is touched (last_seen updated) and
-// returned — enabling idempotent concurrent inits. Otherwise the alias is
-// either moved (reassign=true) or a 409 is returned.
+// If the alias belongs to projectID it is returned, enabling idempotent
+// concurrent inits. Otherwise the alias is either moved (reassign=true) or a
+// 409 is returned.
 func applyExistingAlias(ctx context.Context, store db.Storage, projectID int64, info config.AliasInfo, existing db.ProjectAlias, reassign bool) (db.ProjectAlias, error) {
 	if existing.ProjectID == projectID {
-		if err := store.TouchAlias(ctx, existing.ID, info.RootPath); err != nil && !errors.Is(err, db.ErrNotFound) {
-			return db.ProjectAlias{}, api.NewError(500, "internal", err.Error(), "", nil)
-		}
-		refreshed, _ := store.AliasByIdentity(ctx, info.Identity)
-		return refreshed, nil
+		return existing, nil
 	}
 	if !reassign {
 		return db.ProjectAlias{}, api.NewError(http.StatusConflict, "project_alias_conflict",
@@ -898,7 +870,7 @@ func applyExistingAlias(ctx context.Context, store db.Storage, projectID int64, 
 				"existing_project_id": existing.ProjectID,
 			})
 	}
-	if execErr := store.ReassignAlias(ctx, existing.ID, projectID, info.RootPath); execErr != nil {
+	if execErr := store.ReassignAlias(ctx, existing.ID, projectID); execErr != nil {
 		return db.ProjectAlias{}, api.NewError(500, "internal", execErr.Error(), "", nil)
 	}
 	refreshed, _ := store.AliasByIdentity(ctx, info.Identity)

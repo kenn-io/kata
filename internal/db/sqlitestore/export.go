@@ -234,8 +234,8 @@ func (d *Store) ExportLinks(ctx context.Context, f db.ExportFilter) iter.Seq2[db
 // ExportProjectAliases streams aliases ordered by id, scoped to f.ProjectID
 // when set. There is no soft-delete clause.
 func (d *Store) ExportProjectAliases(ctx context.Context, f db.ExportFilter) iter.Seq2[db.AliasExport, error] {
-	query := `SELECT id, project_id, alias_identity, alias_kind, root_path,
-	                 CAST(created_at AS TEXT), CAST(last_seen_at AS TEXT)
+	query := `SELECT id, project_id, alias_identity, alias_kind,
+	                 CAST(created_at AS TEXT)
 	          FROM project_aliases`
 	query, args := withProjectIDFilter(query, f, "project_id")
 	query += ` ORDER BY id ASC`
@@ -243,7 +243,7 @@ func (d *Store) ExportProjectAliases(ctx context.Context, f db.ExportFilter) ite
 		func(rows *sql.Rows) (db.AliasExport, error) {
 			var rec db.AliasExport
 			if err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.AliasIdentity, &rec.AliasKind,
-				&rec.RootPath, &rec.CreatedAt, &rec.LastSeenAt); err != nil {
+				&rec.CreatedAt); err != nil {
 				return db.AliasExport{}, scanError("project_alias", err)
 			}
 			return rec, nil

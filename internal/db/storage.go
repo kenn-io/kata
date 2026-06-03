@@ -44,10 +44,9 @@ type Storage interface {
 	BatchProjectStats(ctx context.Context) (map[int64]ProjectStats, error)
 	AliasByID(ctx context.Context, id int64) (ProjectAlias, error)
 	AliasByIdentity(ctx context.Context, identity string) (ProjectAlias, error)
-	AttachAlias(ctx context.Context, projectID int64, identity, kind, rootPath string) (ProjectAlias, error)
-	ReassignAlias(ctx context.Context, aliasID, projectID int64, rootPath string) error
+	AttachAlias(ctx context.Context, projectID int64, identity, kind string) (ProjectAlias, error)
+	ReassignAlias(ctx context.Context, aliasID, projectID int64) error
 	DetachProjectAlias(ctx context.Context, p DetachAliasParams) (ProjectAlias, *Event, error)
-	TouchAlias(ctx context.Context, aliasID int64, rootPath string) error
 	ProjectAliases(ctx context.Context, projectID int64) ([]ProjectAlias, error)
 	LatestAliasForProject(ctx context.Context, projectID int64) (AliasRow, bool, error)
 

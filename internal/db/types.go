@@ -284,9 +284,7 @@ type ProjectAlias struct {
 	ProjectID     int64     `json:"project_id"`
 	AliasIdentity string    `json:"alias_identity"`
 	AliasKind     string    `json:"alias_kind"`
-	RootPath      string    `json:"root_path"`
 	CreatedAt     time.Time `json:"created_at"`
-	LastSeenAt    time.Time `json:"last_seen_at"`
 }
 
 // Issue mirrors a row in issues. Priority is 0..4 with 0 = highest priority

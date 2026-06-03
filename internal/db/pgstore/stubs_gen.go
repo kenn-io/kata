@@ -78,7 +78,7 @@ func (s *Store) ApplyClaimStatus(_ context.Context, _ int64, _ string, _ db.Clai
 	return ErrNotImplementedPhase3
 }
 
-func (s *Store) AttachAlias(_ context.Context, _ int64, _ string, _ string, _ string) (db.ProjectAlias, error) {
+func (s *Store) AttachAlias(_ context.Context, _ int64, _ string, _ string) (db.ProjectAlias, error) {
 	return db.ProjectAlias{}, ErrNotImplementedPhase3
 }
 
@@ -622,7 +622,7 @@ func (s *Store) ReadyIssuesGlobal(_ context.Context, _ int) ([]db.ReadyGlobalIss
 	return nil, ErrNotImplementedPhase3
 }
 
-func (s *Store) ReassignAlias(_ context.Context, _ int64, _ int64, _ string) error {
+func (s *Store) ReassignAlias(_ context.Context, _ int64, _ int64) error {
 	return ErrNotImplementedPhase3
 }
 
@@ -760,10 +760,6 @@ func (s *Store) SoftDeleteRecurrence(_ context.Context, _ int64, _ string) error
 
 func (s *Store) SystemProject(_ context.Context) (db.Project, error) {
 	return db.Project{}, ErrNotImplementedPhase3
-}
-
-func (s *Store) TouchAlias(_ context.Context, _ int64, _ string) error {
-	return ErrNotImplementedPhase3
 }
 
 func (s *Store) UnresolvedClaimViolationsForIssue(_ context.Context, _ int64, _ string, _ int) ([]db.ClaimViolationSummary, int64, error) {

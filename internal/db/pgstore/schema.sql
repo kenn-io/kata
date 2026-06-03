@@ -60,11 +60,8 @@ CREATE TABLE project_aliases (
   project_id      BIGINT NOT NULL REFERENCES projects(id),
   alias_identity  TEXT UNIQUE NOT NULL,
   alias_kind      TEXT NOT NULL CHECK(alias_kind IN ('git','local')),
-  root_path       TEXT NOT NULL,
   created_at      TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  last_seen_at    TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  CHECK (length(trim(alias_identity)) > 0),
-  CHECK (length(trim(root_path)) > 0)
+  CHECK (length(trim(alias_identity)) > 0)
 );
 CREATE INDEX idx_project_aliases_project ON project_aliases(project_id);
 

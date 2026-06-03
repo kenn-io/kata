@@ -23,7 +23,6 @@ type projectAliasRef struct {
 	ProjectID     int64  `json:"project_id"`
 	AliasIdentity string `json:"alias_identity"`
 	AliasKind     string `json:"alias_kind"`
-	RootPath      string `json:"root_path"`
 }
 
 type projectRef struct {

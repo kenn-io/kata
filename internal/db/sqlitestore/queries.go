@@ -245,10 +245,10 @@ func parseSQLiteTimestamp(s string) (time.Time, error) {
 }
 
 // AttachAlias inserts a project_aliases row.
-func (d *Store) AttachAlias(ctx context.Context, projectID int64, identity, kind, rootPath string) (db.ProjectAlias, error) {
+func (d *Store) AttachAlias(ctx context.Context, projectID int64, identity, kind string) (db.ProjectAlias, error) {
 	res, err := d.ExecContext(ctx,
-		`INSERT INTO project_aliases(project_id, alias_identity, alias_kind, root_path)
-		 VALUES(?, ?, ?, ?)`, projectID, identity, kind, rootPath)
+		`INSERT INTO project_aliases(project_id, alias_identity, alias_kind)
+		 VALUES(?, ?, ?)`, projectID, identity, kind)
 	if err != nil {
 		return db.ProjectAlias{}, fmt.Errorf("insert alias: %w", err)
 	}
@@ -271,37 +271,14 @@ func (d *Store) AliasByID(ctx context.Context, id int64) (db.ProjectAlias, error
 	return scanAlias(row)
 }
 
-// ReassignAlias moves an existing alias row to a different project and updates
-// its root_path and last_seen_at. Used by the reassign=true branch of alias
-// attach.
-func (d *Store) ReassignAlias(ctx context.Context, aliasID, projectID int64, rootPath string) error {
+// ReassignAlias moves an existing alias row to a different project.
+func (d *Store) ReassignAlias(ctx context.Context, aliasID, projectID int64) error {
 	_, err := d.ExecContext(ctx,
 		`UPDATE project_aliases
-		 SET project_id = ?, root_path = ?, last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 SET project_id = ?
 		 WHERE id = ?`,
-		projectID, rootPath, aliasID)
+		projectID, aliasID)
 	return err
-}
-
-// TouchAlias updates last_seen_at to now and rewrites root_path. Returns
-// ErrNotFound when no alias has the given id.
-func (d *Store) TouchAlias(ctx context.Context, aliasID int64, rootPath string) error {
-	res, err := d.ExecContext(ctx,
-		`UPDATE project_aliases
-		 SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-		     root_path    = ?
-		 WHERE id = ?`, rootPath, aliasID)
-	if err != nil {
-		return fmt.Errorf("touch alias: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("touch alias rows affected: %w", err)
-	}
-	if n == 0 {
-		return db.ErrNotFound
-	}
-	return nil
 }
 
 // ProjectAliases returns every alias attached to a project ordered by id ASC.
@@ -343,11 +320,11 @@ func scanProject(r rowScanner) (db.Project, error) {
 }
 
 // aliasSelect is the canonical SELECT list for project_aliases rows.
-const aliasSelect = `SELECT id, project_id, alias_identity, alias_kind, root_path, created_at, last_seen_at FROM project_aliases`
+const aliasSelect = `SELECT id, project_id, alias_identity, alias_kind, created_at FROM project_aliases`
 
 func scanAlias(r rowScanner) (db.ProjectAlias, error) {
 	var a db.ProjectAlias
-	err := r.Scan(&a.ID, &a.ProjectID, &a.AliasIdentity, &a.AliasKind, &a.RootPath, &a.CreatedAt, &a.LastSeenAt)
+	err := r.Scan(&a.ID, &a.ProjectID, &a.AliasIdentity, &a.AliasKind, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.ProjectAlias{}, db.ErrNotFound
 	}

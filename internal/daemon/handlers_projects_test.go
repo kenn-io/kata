@@ -124,9 +124,8 @@ func TestResolveProject_IdentityModeBootstrapCannotMutateAliases(t *testing.T) {
 		map[string]any{
 			"name": "target",
 			"alias": map[string]any{
-				"identity":  "github.com/wesm/target",
-				"kind":      "git",
-				"root_path": "/client/target",
+				"identity": "github.com/wesm/target",
+				"kind":     "git",
 			},
 		},
 		map[string]string{"Authorization": "Bearer bootstrap-token"})
@@ -234,18 +233,16 @@ func TestResolve_ByAliasInput_PathFree(t *testing.T) {
 	_, _ = postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "kata",
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/kata",
+			"kind":     "git",
 		},
 	})
 
 	// Resolve by alias only — no name, no start_path.
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/kata",
+			"kind":     "git",
 		},
 	})
 	require.Equal(t, 200, resp.StatusCode, string(bs))
@@ -260,9 +257,8 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/never-seen",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/never-seen",
+			"kind":     "git",
 		},
 	})
 	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
@@ -359,9 +355,8 @@ func TestResolve_AliasMissNameHit_FirstSeenAttach(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"name": "kata",
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/kata",
+			"kind":     "git",
 		},
 	})
 	require.Equal(t, 200, resp.StatusCode, string(bs))
@@ -372,9 +367,8 @@ func TestResolve_AliasMissNameHit_FirstSeenAttach(t *testing.T) {
 	// Second resolve, alias-only, must succeed against the attached alias.
 	resp2, bs2 := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/kata",
+			"kind":     "git",
 		},
 	})
 	require.Equal(t, 200, resp2.StatusCode, string(bs2))
@@ -392,9 +386,8 @@ func TestResolve_AliasHitReturnsCanonicalName(t *testing.T) {
 	_, bs := postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "old-name",
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/kata",
+			"kind":     "git",
 		},
 	})
 	var initBody struct {
@@ -415,9 +408,8 @@ func TestResolve_AliasHitReturnsCanonicalName(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"name": "old-name",
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/kata",
+			"kind":     "git",
 		},
 	})
 	require.Equal(t, 200, resp.StatusCode, string(bs))
@@ -437,9 +429,8 @@ func TestResolve_ByAliasInput_RejectsArchivedProject(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "kata",
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/kata",
+			"kind":     "git",
 		},
 	})
 	require.Equal(t, 200, resp.StatusCode, string(bs))
@@ -461,9 +452,8 @@ func TestResolve_ByAliasInput_RejectsArchivedProject(t *testing.T) {
 
 	resp2, bs2 := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/kata",
+			"kind":     "git",
 		},
 	})
 	assertAPIError(t, resp2.StatusCode, bs2, http.StatusNotFound, "project_not_initialized")
@@ -478,9 +468,8 @@ func TestResolve_AliasInput_RejectsInvalidKind(t *testing.T) {
 
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/kata",
-			"kind":      "bogus",
-			"root_path": "/work",
+			"identity": "github.com/wesm/kata",
+			"kind":     "bogus",
 		},
 	})
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(bs))
@@ -672,9 +661,8 @@ func TestInit_ByName_AttachesAliasWhenSupplied(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "foo",
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/foo",
-			"kind":      "git",
-			"root_path": "/client/workspace",
+			"identity": "github.com/wesm/foo",
+			"kind":     "git",
 		},
 	})
 	require.Equal(t, 200, resp.StatusCode, string(bs))
@@ -683,13 +671,11 @@ func TestInit_ByName_AttachesAliasWhenSupplied(t *testing.T) {
 		Alias struct {
 			AliasIdentity string `json:"alias_identity"`
 			AliasKind     string `json:"alias_kind"`
-			RootPath      string `json:"root_path"`
 		} `json:"alias"`
 	}
 	require.NoError(t, json.Unmarshal(bs, &body))
 	assert.Equal(t, "github.com/wesm/foo", body.Alias.AliasIdentity)
 	assert.Equal(t, "git", body.Alias.AliasKind)
-	assert.Equal(t, "/client/workspace", body.Alias.RootPath)
 }
 
 // TestInit_ByName_AliasConflictWithoutReassign returns
@@ -702,18 +688,16 @@ func TestInit_ByName_AliasConflictWithoutReassign(t *testing.T) {
 	_, _ = postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "a",
 		"alias": map[string]any{
-			"identity":  "shared",
-			"kind":      "git",
-			"root_path": "/work",
+			"identity": "shared",
+			"kind":     "git",
 		},
 	})
 
 	resp, bs := postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "b",
 		"alias": map[string]any{
-			"identity":  "shared",
-			"kind":      "git",
-			"root_path": "/work",
+			"identity": "shared",
+			"kind":     "git",
 		},
 	})
 	require.Equal(t, http.StatusConflict, resp.StatusCode, string(bs))
@@ -730,9 +714,8 @@ func TestInit_ByName_ReassignMovesAlias(t *testing.T) {
 	_, _ = postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "old",
 		"alias": map[string]any{
-			"identity":  "shared",
-			"kind":      "git",
-			"root_path": "/work",
+			"identity": "shared",
+			"kind":     "git",
 		},
 	})
 
@@ -740,9 +723,8 @@ func TestInit_ByName_ReassignMovesAlias(t *testing.T) {
 		"name":     "new",
 		"reassign": true,
 		"alias": map[string]any{
-			"identity":  "shared",
-			"kind":      "git",
-			"root_path": "/work",
+			"identity": "shared",
+			"kind":     "git",
 		},
 	})
 	require.Equal(t, 200, resp.StatusCode, string(bs))
@@ -788,9 +770,8 @@ func TestInit_ByName_AcceptsLocalAliasWithSpaces(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "foo",
 		"alias": map[string]any{
-			"identity":  "local:///Users/me/My Project",
-			"kind":      "local",
-			"root_path": "/Users/me/My Project",
+			"identity": "local:///Users/me/My Project",
+			"kind":     "local",
 		},
 	})
 	require.Equal(t, 200, resp.StatusCode, string(bs))
@@ -799,13 +780,11 @@ func TestInit_ByName_AcceptsLocalAliasWithSpaces(t *testing.T) {
 		Alias struct {
 			AliasIdentity string `json:"alias_identity"`
 			AliasKind     string `json:"alias_kind"`
-			RootPath      string `json:"root_path"`
 		} `json:"alias"`
 	}
 	require.NoError(t, json.Unmarshal(bs, &body))
 	assert.Equal(t, "local:///Users/me/My Project", body.Alias.AliasIdentity)
 	assert.Equal(t, "local", body.Alias.AliasKind)
-	assert.Equal(t, "/Users/me/My Project", body.Alias.RootPath)
 }
 
 // TestInit_ByName_RejectsInvalidAliasKind ensures the daemon
@@ -817,31 +796,12 @@ func TestInit_ByName_RejectsInvalidAliasKind(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects", map[string]any{
 		"name": "foo",
 		"alias": map[string]any{
-			"identity":  "github.com/wesm/foo",
-			"kind":      "bogus",
-			"root_path": "/work",
+			"identity": "github.com/wesm/foo",
+			"kind":     "bogus",
 		},
 	})
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(bs))
 	assert.Contains(t, string(bs), "kind")
-}
-
-// TestInit_ByName_RejectsEmptyAliasRootPath enforces that an
-// alias attach has somewhere to root: empty root_path makes future
-// path-anchored operations meaningless.
-func TestInit_ByName_RejectsEmptyAliasRootPath(t *testing.T) {
-	ts := newTestServer(t)
-
-	resp, bs := postJSON(t, ts, "/api/v1/projects", map[string]any{
-		"name": "foo",
-		"alias": map[string]any{
-			"identity":  "github.com/wesm/foo",
-			"kind":      "git",
-			"root_path": "",
-		},
-	})
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(bs))
-	assert.Contains(t, string(bs), "root_path")
 }
 
 // TestInit_ByName_DefaultsName verifies the daemon falls back to
@@ -1023,9 +983,9 @@ func TestMergeProject_SourceMovesIntoSurvivingTarget(t *testing.T) {
 	require.NoError(t, err)
 	beta, err := store.CreateProject(ctx, "beta")
 	require.NoError(t, err)
-	_, err = store.AttachAlias(ctx, alpha.ID, "github.com/wesm/alpha", "git", "/tmp/alpha")
+	_, err = store.AttachAlias(ctx, alpha.ID, "github.com/wesm/alpha", "git")
 	require.NoError(t, err)
-	_, err = store.AttachAlias(ctx, beta.ID, "github.com/wesm/beta", "git", "/tmp/beta")
+	_, err = store.AttachAlias(ctx, beta.ID, "github.com/wesm/beta", "git")
 	require.NoError(t, err)
 	created, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: alpha.ID, Title: "existing work", Author: "tester",
@@ -1077,7 +1037,7 @@ func TestRemoveProject_ArchivesAndDropsAliases(t *testing.T) {
 	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "proj-rm")
 	require.NoError(t, err)
-	_, err = store.AttachAlias(ctx, p.ID, "github.com/wesm/proj-rm", "git", h.dir)
+	_, err = store.AttachAlias(ctx, p.ID, "github.com/wesm/proj-rm", "git")
 	require.NoError(t, err)
 
 	resp, bs := doReq(t, ts, http.MethodDelete,
@@ -1149,9 +1109,9 @@ func TestDetachProjectAlias_DropsOneAndEmitsEvent(t *testing.T) {
 	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "proj-alias-http")
 	require.NoError(t, err)
-	a1, err := store.AttachAlias(ctx, p.ID, "github.com/wesm/proj-alias-http", "git", h.dir)
+	a1, err := store.AttachAlias(ctx, p.ID, "github.com/wesm/proj-alias-http", "git")
 	require.NoError(t, err)
-	a2, err := store.AttachAlias(ctx, p.ID, "local:///tmp/aliased", "local", "/tmp/aliased")
+	a2, err := store.AttachAlias(ctx, p.ID, "local:///tmp/aliased", "local")
 	require.NoError(t, err)
 
 	resp, bs := doReq(t, ts, http.MethodDelete,
@@ -1186,7 +1146,7 @@ func TestDetachProjectAlias_LastRefuses(t *testing.T) {
 	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "proj-only-http")
 	require.NoError(t, err)
-	a, err := store.AttachAlias(ctx, p.ID, "github.com/wesm/proj-only-http", "git", h.dir)
+	a, err := store.AttachAlias(ctx, p.ID, "github.com/wesm/proj-only-http", "git")
 	require.NoError(t, err)
 
 	resp, bs := doReq(t, ts, http.MethodDelete,
@@ -1207,9 +1167,9 @@ func TestDetachProjectAlias_RejectsCrossProject(t *testing.T) {
 	require.NoError(t, err)
 	p2, err := store.CreateProject(ctx, "p2")
 	require.NoError(t, err)
-	_, err = store.AttachAlias(ctx, p1.ID, "github.com/wesm/p1", "git", h.dir)
+	_, err = store.AttachAlias(ctx, p1.ID, "github.com/wesm/p1", "git")
 	require.NoError(t, err)
-	a2, err := store.AttachAlias(ctx, p2.ID, "github.com/wesm/p2", "git", h.dir)
+	a2, err := store.AttachAlias(ctx, p2.ID, "github.com/wesm/p2", "git")
 	require.NoError(t, err)
 
 	resp, bs := doReq(t, ts, http.MethodDelete,
@@ -1374,9 +1334,9 @@ func TestInit_MergedKataTomlNameResolvesToSurvivingProject(t *testing.T) {
 	require.NoError(t, err)
 	beta, err := store.CreateProject(ctx, "beta")
 	require.NoError(t, err)
-	_, err = store.AttachAlias(ctx, alpha.ID, "github.com/wesm/alpha", "git", h.dir)
+	_, err = store.AttachAlias(ctx, alpha.ID, "github.com/wesm/alpha", "git")
 	require.NoError(t, err)
-	_, err = store.AttachAlias(ctx, beta.ID, "github.com/wesm/beta", "git", h.dir)
+	_, err = store.AttachAlias(ctx, beta.ID, "github.com/wesm/beta", "git")
 	require.NoError(t, err)
 	_, err = store.MergeProjects(ctx, db.MergeProjectsParams{
 		SourceProjectID: alpha.ID,

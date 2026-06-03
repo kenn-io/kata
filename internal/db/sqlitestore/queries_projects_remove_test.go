@@ -19,7 +19,7 @@ func TestRemoveProject_ArchivesAndDropsAliases(t *testing.T) {
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "archive-me")
 	require.NoError(t, err)
-	_, err = d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-archive", "git", "/tmp/archive")
+	_, err = d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-archive", "git")
 	require.NoError(t, err)
 
 	got, evt, err := d.RemoveProject(ctx, db.RemoveProjectParams{
@@ -168,9 +168,9 @@ func TestDetachProjectAlias_RemovesOneAndEmitsEvent(t *testing.T) {
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "detach")
 	require.NoError(t, err)
-	a1, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-detach", "git", "/tmp/a")
+	a1, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-detach", "git")
 	require.NoError(t, err)
-	a2, err := d.AttachAlias(ctx, p.ID, "local:///tmp/elsewhere", "local", "/tmp/elsewhere")
+	a2, err := d.AttachAlias(ctx, p.ID, "local:///tmp/elsewhere", "local")
 	require.NoError(t, err)
 
 	got, evt, err := d.DetachProjectAlias(ctx, db.DetachAliasParams{
@@ -200,7 +200,7 @@ func TestDetachProjectAlias_RefusesWhenLast(t *testing.T) {
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "only")
 	require.NoError(t, err)
-	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-only", "git", "/tmp/only")
+	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-only", "git")
 	require.NoError(t, err)
 
 	_, _, err = d.DetachProjectAlias(ctx, db.DetachAliasParams{
@@ -218,7 +218,7 @@ func TestDetachProjectAlias_ForceDropsLast(t *testing.T) {
 	ctx := context.Background()
 	p, err := d.CreateProject(ctx, "force-last")
 	require.NoError(t, err)
-	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-force-last", "git", "/tmp/force-last")
+	a, err := d.AttachAlias(ctx, p.ID, "github.com/wesm/proj-force-last", "git")
 	require.NoError(t, err)
 
 	_, evt, err := d.DetachProjectAlias(ctx, db.DetachAliasParams{
@@ -246,9 +246,9 @@ func TestDetachProjectAlias_RejectsCrossProject(t *testing.T) {
 	require.NoError(t, err)
 	// Two aliases on B so detaching one doesn't trip the last-alias gate
 	// (we want the cross-project check to be the only refusal path).
-	_, err = d.AttachAlias(ctx, pB.ID, "github.com/wesm/proj-b", "git", "/tmp/b-primary")
+	_, err = d.AttachAlias(ctx, pB.ID, "github.com/wesm/proj-b", "git")
 	require.NoError(t, err)
-	aB, err := d.AttachAlias(ctx, pB.ID, "local:///tmp/b-extra", "local", "/tmp/b-extra")
+	aB, err := d.AttachAlias(ctx, pB.ID, "local:///tmp/b-extra", "local")
 	require.NoError(t, err)
 
 	_, _, err = d.DetachProjectAlias(ctx, db.DetachAliasParams{

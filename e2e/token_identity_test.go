@@ -118,9 +118,8 @@ func TestTokenIdentity_BootstrapCanResolveButCannotWrite(t *testing.T) {
 		map[string]any{
 			"name": "bootstrap-boundary",
 			"alias": map[string]any{
-				"identity":  "example.invalid/team/bootstrap-boundary",
-				"kind":      "git",
-				"root_path": clientWS,
+				"identity": "example.invalid/team/bootstrap-boundary",
+				"kind":     "git",
 			},
 		})
 	require.Equal(t, http.StatusForbidden, resolveWithAlias.status, resolveWithAlias.body)

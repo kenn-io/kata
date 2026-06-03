@@ -84,7 +84,6 @@ func makeAliasResolver(store db.Storage) func(context.Context, db.Event) (hooks.
 		return hooks.AliasSnapshot{
 			Identity: alias.Identity,
 			Kind:     alias.Kind,
-			RootPath: alias.RootPath,
 		}, true, nil
 	}
 }

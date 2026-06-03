@@ -47,7 +47,7 @@ func okProject(_ context.Context, _ int64) (ProjectSnapshot, error) {
 }
 
 func okAlias(_ context.Context, _ db.Event) (AliasSnapshot, bool, error) {
-	return AliasSnapshot{Identity: "github.com/wesm/kata", Kind: "git", RootPath: "/Users/wesm/code/kata"}, true, nil
+	return AliasSnapshot{Identity: "github.com/wesm/kata", Kind: "git"}, true, nil
 }
 
 // buildOpts captures the resolver/logger inputs to buildStdinJSON; tests

@@ -123,6 +123,27 @@ func TestExportReadOnlyLegacyV13FederationRowsPreserveBoundActor(t *testing.T) {
 	assert.Equal(t, 1, enrollmentCount)
 }
 
+func TestExportProjectAliasesOmitPathTelemetry(t *testing.T) {
+	ctx, d, p := newExportEnv(t)
+	attachAlias(ctx, t, d, p.ID, "github.com/example/project", "git", "/tmp/project")
+
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{IncludeDeleted: true})
+
+	var found bool
+	for _, rec := range records {
+		if rec["kind"] != "project_alias" {
+			continue
+		}
+		found = true
+		data, ok := rec["data"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "github.com/example/project", data["alias_identity"])
+		assert.NotContains(t, data, "root_path")
+		assert.NotContains(t, data, "last_seen_at")
+	}
+	assert.True(t, found, "expected project_alias export record")
+}
+
 func TestExportEmitsEventPayloadAsJSONObject(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{

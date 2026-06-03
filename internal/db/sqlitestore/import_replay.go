@@ -175,9 +175,9 @@ func importProject(ctx context.Context, tx *sql.Tx, p *db.ProjectExport) error {
 
 func importAlias(ctx context.Context, tx *sql.Tx, a *db.AliasExport) error {
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO project_aliases(id, project_id, alias_identity, alias_kind, root_path, created_at, last_seen_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.ProjectID, a.AliasIdentity, a.AliasKind, a.RootPath, a.CreatedAt, a.LastSeenAt)
+		`INSERT INTO project_aliases(id, project_id, alias_identity, alias_kind, created_at)
+		 VALUES(?, ?, ?, ?, ?)`,
+		a.ID, a.ProjectID, a.AliasIdentity, a.AliasKind, a.CreatedAt)
 	return wrapImportErr(db.ImportKindProjectAlias, err)
 }
 

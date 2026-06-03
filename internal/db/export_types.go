@@ -83,9 +83,7 @@ type AliasExport struct {
 	ProjectID     int64  `json:"project_id"`
 	AliasIdentity string `json:"alias_identity"`
 	AliasKind     string `json:"alias_kind"`
-	RootPath      string `json:"root_path"`
 	CreatedAt     string `json:"created_at"`
-	LastSeenAt    string `json:"last_seen_at"`
 }
 
 // CommentExport is one comment row in export shape.

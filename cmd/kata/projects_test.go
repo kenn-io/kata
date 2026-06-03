@@ -123,7 +123,7 @@ func TestProjects_RestoreArchivedProjectByName(t *testing.T) {
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "retry-import")
 	require.NoError(t, err)
-	_, err = env.DB.AttachAlias(ctx, p.ID, "github.com/wesm/retry-import", "git", "/tmp/retry-import")
+	_, err = env.DB.AttachAlias(ctx, p.ID, "github.com/wesm/retry-import", "git")
 	require.NoError(t, err)
 	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
 	require.NoError(t, err)

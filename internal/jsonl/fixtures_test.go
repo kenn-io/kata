@@ -205,9 +205,9 @@ func addTesterComment(ctx context.Context, t *testing.T, d *sqlitestore.Store, i
 
 // attachAlias attaches an alias to projectID, asserting no error. The kind
 // argument lets callers choose "git", "local", etc.
-func attachAlias(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID int64, identity, kind, path string) {
+func attachAlias(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID int64, identity, kind, _ string) {
 	t.Helper()
-	_, err := d.AttachAlias(ctx, projectID, identity, kind, path)
+	_, err := d.AttachAlias(ctx, projectID, identity, kind)
 	require.NoError(t, err)
 }
 
@@ -669,8 +669,8 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 		require.NoError(t, err)
 	}
 	if spec.OrphanProjectAlias {
-		_, err = raw.Exec(`INSERT INTO project_aliases(project_id, alias_identity, alias_kind, root_path)
-			VALUES (777, 'github.com/wesm/missing', 'git', '/tmp/missing')`)
+		_, err = raw.Exec(`INSERT INTO project_aliases(project_id, alias_identity, alias_kind)
+			VALUES (777, 'github.com/wesm/missing', 'git')`)
 		require.NoError(t, err)
 	}
 

@@ -74,6 +74,28 @@ func TestProjectsMetadataRejectsNonObjectShapes(t *testing.T) {
 	}
 }
 
+func TestProjectAliasesDoNotPersistPathTelemetry(t *testing.T) {
+	d := openTestDB(t)
+
+	rows, err := d.Query(`PRAGMA table_info(project_aliases)`)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue any
+		var primaryKey int
+		require.NoError(t, rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey))
+		columns[name] = true
+	}
+	require.NoError(t, rows.Err())
+	assert.False(t, columns["root_path"], "alias root paths are local checkout telemetry, not durable project state")
+	assert.False(t, columns["last_seen_at"], "alias touch timestamps churn shared backups without changing project identity")
+}
+
 // TestRecurrencesTemplateMetadataRejectsNonObjectShapes pins the json_type
 // CHECK on recurrences.template_metadata — same rationale as the issue /
 // project checks.

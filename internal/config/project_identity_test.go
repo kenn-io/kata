@@ -93,7 +93,6 @@ func TestComputeAliasIdentity_GitWithRemote(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "github.com/wesm/kata", a.Identity)
 	assert.Equal(t, "git", a.Kind)
-	assert.Equal(t, dir, a.RootPath)
 }
 
 func TestComputeAliasIdentity_RespectsCanceledContext(t *testing.T) {
@@ -122,7 +121,6 @@ func TestComputeAliasIdentity_NonGitWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "local://"+ws, a.Identity)
 	assert.Equal(t, "local", a.Kind)
-	assert.Equal(t, ws, a.RootPath)
 }
 
 func TestComputeAliasIdentity_Neither(t *testing.T) {
@@ -240,58 +238,52 @@ func TestValidateAliasInfo(t *testing.T) {
 	}{
 		{
 			name: "git alias passes ValidateIdentity rules",
-			info: config.AliasInfo{Identity: "github.com/wesm/kata", Kind: "git", RootPath: "/repo"},
+			info: config.AliasInfo{Identity: "github.com/wesm/kata", Kind: "git"},
 			ok:   true,
 		},
 		{
 			name: "local alias with spaces in path is allowed",
-			info: config.AliasInfo{Identity: "local:///Users/me/My Project", Kind: "local", RootPath: "/Users/me/My Project"},
+			info: config.AliasInfo{Identity: "local:///Users/me/My Project", Kind: "local"},
 			ok:   true,
 		},
 		{
 			name: "local alias with unicode is allowed",
-			info: config.AliasInfo{Identity: "local:///私の/プロジェクト", Kind: "local", RootPath: "/私の/プロジェクト"},
+			info: config.AliasInfo{Identity: "local:///私の/プロジェクト", Kind: "local"},
 			ok:   true,
 		},
 		{
 			name: "git alias with whitespace is rejected",
-			info: config.AliasInfo{Identity: "has space", Kind: "git", RootPath: "/repo"},
+			info: config.AliasInfo{Identity: "has space", Kind: "git"},
 			ok:   false,
 			hint: "whitespace",
 		},
 		{
 			name: "unknown kind is rejected",
-			info: config.AliasInfo{Identity: "github.com/wesm/kata", Kind: "bogus", RootPath: "/repo"},
+			info: config.AliasInfo{Identity: "github.com/wesm/kata", Kind: "bogus"},
 			ok:   false,
 			hint: "kind",
 		},
 		{
 			name: "empty kind is rejected",
-			info: config.AliasInfo{Identity: "github.com/wesm/kata", Kind: "", RootPath: "/repo"},
+			info: config.AliasInfo{Identity: "github.com/wesm/kata", Kind: ""},
 			ok:   false,
 			hint: "kind",
 		},
 		{
-			name: "empty root_path is rejected",
-			info: config.AliasInfo{Identity: "github.com/wesm/kata", Kind: "git", RootPath: ""},
-			ok:   false,
-			hint: "root_path",
-		},
-		{
 			name: "empty identity is rejected",
-			info: config.AliasInfo{Identity: "", Kind: "git", RootPath: "/repo"},
+			info: config.AliasInfo{Identity: "", Kind: "git"},
 			ok:   false,
 			hint: "identity",
 		},
 		{
 			name: "local alias missing prefix is rejected",
-			info: config.AliasInfo{Identity: "/Users/me/proj", Kind: "local", RootPath: "/Users/me/proj"},
+			info: config.AliasInfo{Identity: "/Users/me/proj", Kind: "local"},
 			ok:   false,
 			hint: "local://",
 		},
 		{
 			name: "local alias bare prefix is rejected",
-			info: config.AliasInfo{Identity: "local://", Kind: "local", RootPath: "/Users/me/proj"},
+			info: config.AliasInfo{Identity: "local://", Kind: "local"},
 			ok:   false,
 			hint: "local://",
 		},

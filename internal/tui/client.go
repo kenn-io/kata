@@ -297,9 +297,8 @@ func buildResolveRequest(ctx context.Context, startPath string) (map[string]any,
 // this file).
 func aliasInputBody(info config.AliasInfo) map[string]any {
 	return map[string]any{
-		"identity":  info.Identity,
-		"kind":      info.Kind,
-		"root_path": info.RootPath,
+		"identity": info.Identity,
+		"kind":     info.Kind,
 	}
 }
 

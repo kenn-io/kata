@@ -88,8 +88,8 @@ same project, and two repositories that ship together can share one project by
 committing the same project name. Because alias identity is unique per git
 origin, one git repository attaches to exactly one project; genuine multi-project
 monorepos are out of scope rather than silently approximated. Workspace paths are
-recorded only as last-seen diagnostic metadata, never as durable identity, which
-is what lets the same model serve a daemon that cannot see the caller's checkout.
+not stored as project alias state, which keeps shared daemons and federated hubs
+from churning on host-specific checkout locations the daemon cannot see or trust.
 
 ## Trust boundaries
 

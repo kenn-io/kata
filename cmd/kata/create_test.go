@@ -270,7 +270,6 @@ func TestResolveProjectID_SendsNameAndAliasForWorkspaceConfig(t *testing.T) {
 	require.True(t, ok, "alias must be sent alongside name so daemon can do alias-first repair")
 	assert.NotEmpty(t, alias["identity"])
 	assert.NotEmpty(t, alias["kind"])
-	assert.NotEmpty(t, alias["root_path"])
 	_, hasStartPath := got["start_path"]
 	assert.False(t, hasStartPath, "request must be path-free so remote daemons can resolve without stat'ing client paths")
 }

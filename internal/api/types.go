@@ -206,7 +206,6 @@ type ResolveProjectResponse struct {
 type AliasInput struct {
 	Identity string `json:"identity" doc:"alias identity (normalized git remote or local://<abs>)"`
 	Kind     string `json:"kind" doc:"\"git\" or \"local\""`
-	RootPath string `json:"root_path" doc:"client-side path the alias roots at; daemon stores but never stats"`
 }
 
 // InitProjectRequest is POST /api/v1/projects (used by `kata init`).

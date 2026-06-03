@@ -273,7 +273,6 @@ type LabelEventParams struct {
 type AliasRow struct {
 	Identity string
 	Kind     string
-	RootPath string
 }
 
 // EventsAfterParams selects events with id strictly greater than AfterID,
