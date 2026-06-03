@@ -270,18 +270,22 @@ func appendFederationEnrollErr(body []string, m Model) []string {
 func federationHubProjectLabels(m Model) []string {
 	labels := []string{}
 	if !m.federationDraft.CreateReplica {
-		labels = append(labels, fmt.Sprintf(
-			"hub project %q will be created if missing or enabled if present",
-			m.federationDraft.SpokeProjectName,
-		))
+		labels = append(labels, federationDefaultHubProjectLabel(m.federationDraft, m.federationHubProjects))
 	}
-	for _, project := range m.federationHubProjects {
+	for _, project := range federationSelectableHubProjects(m) {
 		labels = append(labels, project.Name)
 	}
 	if len(labels) == 0 {
 		return []string{"no hub projects"}
 	}
 	return labels
+}
+
+func federationDefaultHubProjectLabel(draft federationDraft, hubProjects []ProjectSummary) string {
+	if _, ok := hubProjectByName(hubProjects, draft.SpokeProjectName); ok {
+		return fmt.Sprintf("use existing hub project %q; enable federation if needed", draft.SpokeProjectName)
+	}
+	return fmt.Sprintf("create hub project %q and enable federation", draft.SpokeProjectName)
 }
 
 func federationBrowseHubProjectLabel(project ProjectSummary) string {
@@ -303,7 +307,10 @@ func federationOperationLabel(operation federationOperation) string {
 
 func federationHubProjectBehavior(draft federationDraft) string {
 	if draft.Operation == federationOperationAdoptSameName {
-		return fmt.Sprintf("hub project %q will be created if missing or enabled if present", draft.SpokeProjectName)
+		if draft.HubProjectID != 0 {
+			return fmt.Sprintf("use existing hub project %q; enable federation if needed", draft.HubProjectName)
+		}
+		return fmt.Sprintf("create hub project %q and enable federation", draft.SpokeProjectName)
 	}
 	if draft.HubProjectName != "" {
 		return draft.HubProjectName

@@ -798,21 +798,33 @@ func federationHubProjectRowCount(m Model) int {
 	if m.federationDraft.CreateReplica {
 		return len(m.federationHubProjects)
 	}
-	return len(m.federationHubProjects) + 1
+	return len(federationSelectableHubProjects(m)) + 1
 }
 
 func (m Model) selectedFederationHubProject() (ProjectSummary, bool) {
-	if len(m.federationHubProjects) == 0 {
-		return ProjectSummary{}, false
-	}
+	projects := federationSelectableHubProjects(m)
 	idx := m.federationHubProjectCursor
 	if !m.federationDraft.CreateReplica {
 		idx--
 	}
-	if idx < 0 || idx >= len(m.federationHubProjects) {
+	if idx < 0 || idx >= len(projects) {
 		return ProjectSummary{}, false
 	}
-	return m.federationHubProjects[idx], true
+	return projects[idx], true
+}
+
+func federationSelectableHubProjects(m Model) []ProjectSummary {
+	if m.federationDraft.CreateReplica {
+		return m.federationHubProjects
+	}
+	projects := make([]ProjectSummary, 0, len(m.federationHubProjects))
+	for _, project := range m.federationHubProjects {
+		if project.Name == m.federationDraft.SpokeProjectName {
+			continue
+		}
+		projects = append(projects, project)
+	}
+	return projects
 }
 
 func hubProjectByName(projects []ProjectSummary, name string) (ProjectSummary, bool) {

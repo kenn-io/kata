@@ -279,19 +279,44 @@ func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testin
 	m := setupFederationHubProjectSelection()
 	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
 
+	renderedSelection := stripANSI(renderFederation(m))
+	assert.Contains(t, renderedSelection, `use existing hub project "spoke-project"; enable federation if needed`)
+	assert.NotContains(t, renderedSelection, "will be created if missing")
+	assert.Equal(t, 1, strings.Count(renderedSelection, "spoke-project"))
+
 	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModePreview, out.federationMode)
 	assert.Equal(t, federationOperationAdoptSameName, out.federationDraft.Operation)
+	assert.Equal(t, int64(42), out.federationDraft.HubProjectID)
 	assert.Equal(t, "claim,pull,push", out.federationDraft.APICapabilities)
 	assert.Equal(t, "pull,push,lease", out.federationDraft.DisplayCapabilities)
 	assert.True(t, out.federationDraft.AdoptExisting)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "Operation: adopt existing local project")
-	assert.Contains(t, rendered, `hub project "spoke-project" will be created if missing or enabled if present`)
+	assert.Contains(t, rendered, `use existing hub project "spoke-project"; enable federation if needed`)
 	assert.Contains(t, rendered, "allow_insecure: true")
 	assert.Contains(t, rendered, "pre-adoption event history is replaced by snapshot events for federation")
+}
+
+func TestFederationEnroll_SelectDifferentHubProjectSkipsSameNameDuplicate(t *testing.T) {
+	m := setupFederationHubProjectSelection()
+	m.federationHubProjects = []ProjectSummary{
+		{ID: 42, Name: "spoke-project"},
+		{ID: 77, Name: "team-hub-project"},
+	}
+	m.federationHubProjectCursor = 1
+
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModePreview, out.federationMode)
+	assert.Equal(t, federationOperationAdoptSelectedHub, out.federationDraft.Operation)
+	assert.Equal(t, int64(77), out.federationDraft.HubProjectID)
+	assert.Equal(t, "team-hub-project", out.federationDraft.HubProjectName)
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "team-hub-project")
 }
 
 func TestFederationEnroll_SelectDifferentExistingHubProjectStillAdoptsLocalProject(t *testing.T) {
