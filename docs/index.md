@@ -19,6 +19,11 @@ The public shape is intentionally small:
 kata is in early public preview. The CLI, daemon, and TUI are usable, but
 command contracts and UI details can still change before a stable release.
 
+![kata TUI showing a simulated issue hierarchy](/assets/screenshots/tui/hero.svg)
+
+The image above is generated from disposable simulated data by the docs
+screenshot workflow.
+
 ## Why kata exists
 
 Coding agents need more than a chat thread. They need a place to discover

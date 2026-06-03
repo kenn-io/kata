@@ -53,24 +53,6 @@ go build -o kata.exe ./cmd/kata
 
 Move `kata.exe` to a directory on `PATH`.
 
-## Development install
-
-The main checks are:
-
-```sh
-make test
-make lint
-make vet
-make nilaway
-```
-
-Federation has additional coverage:
-
-```sh
-make test-stress
-make test-federation-docker
-```
-
 ## Documentation tooling
 
 This site is built with Zensical. Install the docs toolchain into a local

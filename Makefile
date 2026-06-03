@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy
+.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -36,6 +36,12 @@ docs-serve:
 
 docs-check:
 	bash scripts/check-docs.sh
+
+docs-screenshots:
+	bash docs/screenshots/generate-federation-tui.sh
+
+docs-assets-branch:
+	bash docs/screenshots/update-assets-branch.sh
 
 docs-deploy:
 	vercel deploy --prod

@@ -80,24 +80,6 @@ The Make target runs:
 vercel deploy --prod
 ```
 
-## Verification
-
-Before changing the Vercel project or merging deployment config, verify the
-same build path locally:
-
-```sh
-cd docs
-uv sync --frozen --no-dev
-uv run --frozen bash ./vercel-build.sh
-```
-
-The build should finish with generated static files under `docs/site/`. The
-normal repository docs check remains:
-
-```sh
-make docs-check
-```
-
 Useful Vercel references:
 
 - [Project configuration with `vercel.json`](https://vercel.com/docs/project-configuration/vercel-json)

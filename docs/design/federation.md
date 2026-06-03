@@ -589,48 +589,6 @@ identity model belong to shared-daemon or later hardening work.
 Use a shared daemon when different human users require centrally enforced roles
 on the same project.
 
-## Verification
-
-Routine checks:
-
-```bash
-make test
-make vet
-make lint
-make nilaway
-```
-
-Federation-specific checks:
-
-```bash
-make test-stress
-make test-federation-docker
-```
-
-`make test-stress` runs Go-based randomized and failpoint tests. When Rapid
-prints a failing seed, reproduce it with:
-
-```bash
-RAPID_SEED=<seed> go test -tags federation_stress ./e2e -run TestFederationStressRandomizedWorkload -count=1 -timeout 2m
-```
-
-`make test-federation-docker` builds the current checkout into Docker images,
-starts one hub daemon and two spoke daemons in separate containers, and drives a
-lease-gated convergence scenario across real process and network boundaries.
-
-For manual Docker debugging:
-
-```bash
-docker compose -f docker/federation/docker-compose.yml -p kata-federation-smoke up --build
-docker compose -f docker/federation/docker-compose.yml -p kata-federation-smoke down --volumes --remove-orphans
-```
-
-Use an isolated project name for parallel runs:
-
-```bash
-KATA_FEDERATION_DOCKER_PROJECT=kata-federation-smoke-$USER make test-federation-docker
-```
-
 ## Historical Design Context
 
 This file is the canonical description of implemented federation behavior, its

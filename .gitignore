@@ -21,6 +21,7 @@ coverage.out
 
 # Local planning/work artifacts
 /.superpowers/
+/docs/assets/screenshots/
 
 # Claude Code per-machine settings (shared .claude/ content can still be tracked)
 /.claude/settings.local.json

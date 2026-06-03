@@ -60,6 +60,58 @@ client-supplied actor strings such as `--actor`, `--as`, or `KATA_AUTHOR`.
 If you only have the bootstrap token, first mint a personal token as described
 in [Identity tokens](remote-daemon.md#identity-tokens).
 
+## TUI enrollment workflow
+
+The TUI federation view is scoped to the active daemon. Press `F` from the
+queue or project selector to open federation for that daemon, then press `n` to
+enroll a spoke project into a hub from the daemon catalog. The hub browser uses
+catalog entries without switching the active daemon, so spoke and hub auth stay
+separate.
+
+The screenshots in this section are generated from disposable simulated
+daemons, hosts, actors, and projects. Generate local preview assets with:
+
+```sh
+make docs-screenshots
+```
+
+Regenerate the SVGs and update the local single-commit `docs-assets` branch
+with:
+
+```sh
+make docs-assets-branch
+```
+
+The first screen identifies the active spoke daemon and the selected local
+project before enrollment starts:
+
+![Federation list for a simulated active spoke daemon](/assets/screenshots/federation-tui/list.svg)
+
+The enrollment flow starts by selecting a hub daemon from the catalog. The
+active spoke is shown but blocked as a hub target; the catalog hub keeps its own
+URL, auth, and `allow_insecure` setting:
+
+![Selecting a simulated catalog hub daemon](/assets/screenshots/federation-tui/select-hub.svg)
+
+After the hub daemon is selected, choose the hub project behavior. The default
+row creates or enables the hub project that matches the local spoke project; an
+existing hub project can be selected when the local project should adopt into a
+different hub project:
+
+![Selecting a simulated hub project for enrollment](/assets/screenshots/federation-tui/select-hub-project.svg)
+
+The preview is the mutation boundary. Confirm the operation type, local spoke
+project, hub daemon, hub auth state, requested actor, capabilities, push
+setting, and `allow_insecure` value before pressing Enter:
+
+![Previewing a simulated federation enrollment](/assets/screenshots/federation-tui/preview.svg)
+
+On success, the TUI shows the actor returned by the hub, adoption status,
+snapshot count, and hub project metadata, then refreshes the spoke federation
+list:
+
+![Result of a simulated federation enrollment](/assets/screenshots/federation-tui/result.svg)
+
 ## Worked example: direct token-auth hub
 
 Use this runbook when a central hub is already available through ordinary
@@ -465,28 +517,3 @@ disabled, so those spokes must re-run `kata federation join --actor <actor> --pu
 before local-origin work can sync to the hub again.
 
 Use a shared daemon when those trade-offs are unacceptable.
-
-## Verification
-
-Routine checks:
-
-```sh
-make test
-make vet
-make lint
-make nilaway
-```
-
-Federation-specific checks:
-
-```sh
-make test-stress
-make test-federation-docker
-```
-
-For manual Docker debugging:
-
-```sh
-docker compose -f docker/federation/docker-compose.yml -p kata-federation-smoke up --build
-docker compose -f docker/federation/docker-compose.yml -p kata-federation-smoke down --volumes --remove-orphans
-```
