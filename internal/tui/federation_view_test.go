@@ -453,6 +453,29 @@ func TestFederationEnroll_ActiveDaemonAsHubBlocked(t *testing.T) {
 	assert.Contains(t, stripANSI(renderFederation(out)), "active daemon cannot be selected as hub")
 }
 
+func TestFederationEnroll_LocalHubTargetBlocksBeforeMutation(t *testing.T) {
+	m := setupFederationView()
+	m.scope = homedScope(7, "spoke-project")
+	m.federationMode = federationModeSelectHub
+	m.federationDraft = newFederationDraft("operator")
+	m.federationDraft.SpokeProjectID = 7
+	m.federationDraft.SpokeProjectName = "spoke-project"
+	m.activeDaemon = daemonTarget{Name: "spoke", URL: "https://spoke.example"}
+	m.daemonTargets = []daemonTarget{
+		m.activeDaemon,
+		{Name: "local-hub", Local: true},
+	}
+	m.federationHubCursor = 1
+
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	require.Nil(t, cmd)
+	assert.Equal(t, federationModeSelectHub, out.federationMode)
+	assert.Empty(t, out.federationDraft.HubTarget.Name)
+	require.Error(t, out.federationEnrollErr)
+	assert.Contains(t, out.federationEnrollErr.Error(), "local hub")
+}
+
 func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testing.T) {
 	m := setupFederationView()
 	m.scope = homedScope(7, "spoke-project")
@@ -623,6 +646,24 @@ func TestFederationEnroll_RecoveryCommandPreservesSpokeAllowInsecure(t *testing.
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "KATA_SERVER=")
 	assert.Contains(t, rendered, "KATA_ALLOW_INSECURE=1")
+}
+
+func TestFederationEnroll_RecoveryCommandPreservesSpokeAuthOnlyAfterReveal(t *testing.T) {
+	spokeToken := spokeAuthSecret()
+	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{joinStatus: 500})
+	m.activeDaemon.Token = spokeToken
+	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	msg := cmd().(federationEnrollResultMsg)
+	out, _ = updateModel(out, msg)
+
+	rendered := stripANSI(renderFederation(out))
+	assert.NotContains(t, rendered, spokeToken)
+
+	out, revealCmd := out.routeFederationViewKey(keyRune('R'))
+	require.Nil(t, revealCmd)
+
+	rendered = stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "KATA_AUTH_TOKEN="+spokeToken)
 }
 
 func TestFederationEnroll_RecoveryCommandQuotesShellMetacharacters(t *testing.T) {
@@ -816,6 +857,10 @@ func federationMetadataBody() api.ProjectFederationBody {
 
 func enrollmentSecret() string {
 	return strings.Join([]string{"enrollment", "secret"}, "-")
+}
+
+func spokeAuthSecret() string {
+	return strings.Join([]string{"spoke", "auth"}, "-")
 }
 
 type recordingFederationHubAdmin struct {

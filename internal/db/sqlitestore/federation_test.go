@@ -1730,19 +1730,19 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Empty(t, comments)
 	})
 
-	t.Run("allows bound actor issue.snapshot historical payload author", func(t *testing.T) {
+	t.Run("allows bound actor issue.snapshot bootstrap historical payload author", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		issueUID := newTestUID(t)
 		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
 			"issue.snapshot", 100,
-			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"historical","body":"","author":"mallory","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
-		ev.Actor = "wesm"
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"historical","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		ev.Actor = "bound-agent"
 		ev.ContentHash = remoteEventHash(t, ev)
 
 		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID:        p.ID,
 			SpokeInstanceUID: spokeUID,
-			BoundActor:       "wesm",
+			BoundActor:       "bound-agent",
 			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
 		})
 
@@ -1750,23 +1750,23 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, 1, res.Accepted)
 		issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
-		assert.Equal(t, "mallory", issue.Author)
+		assert.Equal(t, "historical-agent", issue.Author)
 	})
 
-	t.Run("allows bound actor issue.snapshot historical comment author", func(t *testing.T) {
+	t.Run("allows bound actor issue.snapshot bootstrap historical comment author", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		issueUID := newTestUID(t)
 		commentUID := newTestUID(t)
 		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
 			"issue.snapshot", 100,
-			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"historical","body":"","author":"alice","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","comments":[{"comment_uid":"`+commentUID+`","author":"mallory","body":"historical comment","created_at":"2026-05-23T12:00:00.000Z"}]}`)
-		ev.Actor = "wesm"
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"historical","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","comments":[{"comment_uid":"`+commentUID+`","author":"historical-commenter","body":"historical comment","created_at":"2026-05-23T12:00:00.000Z"}]}`)
+		ev.Actor = "bound-agent"
 		ev.ContentHash = remoteEventHash(t, ev)
 
 		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
 			ProjectID:        p.ID,
 			SpokeInstanceUID: spokeUID,
-			BoundActor:       "wesm",
+			BoundActor:       "bound-agent",
 			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
 		})
 
@@ -1778,7 +1778,74 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, comments, 1)
 		assert.Equal(t, commentUID, comments[0].UID)
-		assert.Equal(t, "mallory", comments[0].Author)
+		assert.Equal(t, "historical-commenter", comments[0].Author)
+	})
+
+	t.Run("rejects later bound actor issue.snapshot payload author mismatch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		firstIssueUID := newTestUID(t)
+		first := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, firstIssueUID, 100)
+		first.Actor = "bound-agent"
+		first.Payload = json.RawMessage(`{"uid":"` + firstIssueUID + `","short_id":"` + shortID(firstIssueUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		first.ContentHash = remoteEventHash(t, first)
+		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "bound-agent",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: first}},
+		})
+		require.NoError(t, err)
+		issueUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.snapshot", 101,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"forged","body":"","author":"spoofed-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		ev.Actor = "bound-agent"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "bound-agent",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 2, Event: ev}},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assertIngestedEventCount(ctx, t, d, p.ID, 1)
+	})
+
+	t.Run("rejects later bound actor issue.snapshot embedded comment author mismatch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		firstIssueUID := newTestUID(t)
+		first := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, firstIssueUID, 100)
+		first.Actor = "bound-agent"
+		first.Payload = json.RawMessage(`{"uid":"` + firstIssueUID + `","short_id":"` + shortID(firstIssueUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		first.ContentHash = remoteEventHash(t, first)
+		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "bound-agent",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: first}},
+		})
+		require.NoError(t, err)
+		issueUID := newTestUID(t)
+		commentUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.snapshot", 101,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"forged","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","comments":[{"comment_uid":"`+commentUID+`","author":"spoofed-agent","body":"forged comment","created_at":"2026-05-23T12:00:00.000Z"}]}`)
+		ev.Actor = "bound-agent"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "bound-agent",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 2, Event: ev}},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
 
 	t.Run("rejects project metadata payload for different project uid", func(t *testing.T) {

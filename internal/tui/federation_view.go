@@ -88,6 +88,7 @@ type federationRecoveryCommand struct {
 	SpokeName              string
 	SpokeEndpoint          string
 	SpokeAllowInsecure     bool
+	SpokeToken             string
 }
 
 var (
@@ -105,6 +106,7 @@ func (m Model) transitionToFederation() (Model, tea.Cmd) {
 	m.prevView = m.view
 	m.view = viewFederation
 	m.federationMode = federationModeList
+	m.federationDraft = federationDraft{}
 	m.federationLoading = true
 	m.federationErr = nil
 	m.federationGen++
@@ -602,6 +604,10 @@ func (m Model) selectFederationHub(target daemonTarget) (Model, tea.Cmd) {
 		m.federationEnrollErr = errors.New("active daemon cannot be selected as hub")
 		return m, nil
 	}
+	if target.Local {
+		m.federationEnrollErr = errors.New("local hub targets cannot be used for federation enrollment; select a hub daemon with a spoke-reachable URL")
+		return m, nil
+	}
 	resolved, err := resolveDaemonTargetToken(target)
 	if err != nil {
 		m.federationEnrollErr = err
@@ -792,6 +798,7 @@ func baseFederationRecovery(
 			SpokeName:          daemonName(active),
 			SpokeEndpoint:      federationDaemonEndpoint(active),
 			SpokeAllowInsecure: active.AllowInsecure,
+			SpokeToken:         active.Token,
 		},
 	}
 }

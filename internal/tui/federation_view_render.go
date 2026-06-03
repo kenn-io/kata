@@ -327,6 +327,9 @@ func federationRecoveryCommandString(cmd federationRecoveryCommand) string {
 		if cmd.SpokeAllowInsecure {
 			parts = append(parts, "KATA_ALLOW_INSECURE=1")
 		}
+		if cmd.SpokeToken != "" {
+			parts = append(parts, "KATA_AUTH_TOKEN="+shellWord(cmd.SpokeToken))
+		}
 	}
 	parts = append(parts,
 		"kata",

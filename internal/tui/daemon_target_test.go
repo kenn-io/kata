@@ -172,6 +172,16 @@ func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testin
 	assert.Equal(t, "100.64.0.5:7777", daemonTargetDisplay(conn.target))
 }
 
+func TestResolvedImplicitRemoteTargetCarriesEnvAllowInsecure(t *testing.T) {
+	endpoint := "http://spoke.internal:7777"
+	t.Setenv("KATA_SERVER", endpoint)
+	t.Setenv("KATA_ALLOW_INSECURE", "1")
+
+	target := resolvedDaemonTarget(implicitDaemonTarget(endpoint), endpoint)
+
+	assert.True(t, target.AllowInsecure)
+}
+
 func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	var gotAuth string

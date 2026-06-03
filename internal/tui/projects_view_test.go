@@ -147,6 +147,23 @@ func TestProjectsView_FTransitionsToFederationWithHighlightedProjectSelected(t *
 	assert.Equal(t, "beta-project", out.federationDraft.SpokeProjectName)
 }
 
+func TestProjectsView_FTransitionSelectedProjectIgnoresStaleFederationDraft(t *testing.T) {
+	m := setupProjectsView(
+		mockProject{ID: 11, Name: "alpha-project", Ident: "..."},
+		mockProject{ID: 22, Name: "beta-project", Ident: "..."},
+	)
+	m.projectsCursor = 2
+	m.federationDraft.SpokeProjectName = "stale-project"
+
+	out, cmd := updateModel(m, keyRune('F'))
+
+	assert.Equal(t, viewFederation, out.view)
+	require.NotNil(t, cmd)
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "selected project: beta-project")
+	assert.NotContains(t, rendered, "selected project: stale-project")
+}
+
 func TestProjectsView_FFromAllProjectsHasNoSelectedFederationProject(t *testing.T) {
 	m := setupProjectsView(mockProject{ID: 11, Name: "alpha-project", Ident: "..."})
 	m.scope = homedScope(99, "previous-project")

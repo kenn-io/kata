@@ -196,6 +196,8 @@ func resolvedDaemonTarget(target daemonTarget, endpoint string) daemonTarget {
 	target.URL = endpoint
 	if target.Local {
 		target.URL = ""
+	} else if target.Implicit {
+		target.AllowInsecure = client.RemoteAllowInsecureForBaseURL(endpoint, "")
 	}
 	return target
 }
