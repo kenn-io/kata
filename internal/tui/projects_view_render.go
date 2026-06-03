@@ -10,12 +10,6 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// projectsViewChromeRows is the line budget reserved for non-row chrome
-// in renderProjects: title + count + blank + header (above) + blank +
-// footer + blank + key-hint (below) = 8 lines. Subtract from m.height
-// to get the row budget.
-const projectsViewChromeRows = 8
-
 // renderProjects draws the projects-view body: a 5-column table
 // (Project / Open / Closed / Total / Updated), an All-projects sentinel
 // pinned at row 0, and a 1-line footer for the highlighted row. Spec §5.
@@ -31,10 +25,12 @@ func renderProjects(m Model) string {
 	if cursor < 0 {
 		cursor = 0
 	}
+	helpRows := projectsHelpRows()
+	footerLines := helpLines(helpRows, m.width)
 
 	rowBudget := len(rows)
 	if m.height > 0 {
-		rowBudget = m.height - projectsViewChromeRows
+		rowBudget = m.height - projectsViewChromeRows(footerLines)
 		if rowBudget < 1 {
 			rowBudget = 1
 		}
@@ -56,10 +52,26 @@ func renderProjects(m Model) string {
 		body = append(body, subtleStyle.Render(footerForRow(rows[cursor], m.width)))
 	}
 	body = append(body, "")
-	body = append(body, subtleStyle.Render(
-		"[↑/↓ k/j] move  [enter] open  [esc] back  [r] refresh  [D] daemons  [F] federation  [q] quit  [?] help"))
+	body = append(body, renderFooterHelpTable(helpRows, m.width))
 
 	return strings.Join(body, "\n")
+}
+
+func projectsViewChromeRows(footerLines int) int {
+	return 7 + footerLines
+}
+
+func projectsHelpRows() [][]helpItem {
+	return [][]helpItem{{
+		{key: "↑↓", desc: "move"},
+		{key: "↵", desc: "open"},
+		{key: "esc", desc: "back"},
+		{key: "r", desc: "refresh"},
+		{key: "D", desc: "daemons"},
+		{key: "F", desc: "federation"},
+		{key: "?", desc: "help"},
+		{key: "q", desc: "quit"},
+	}}
 }
 
 // projectsVisibleRow pairs a row with its index in the unclipped

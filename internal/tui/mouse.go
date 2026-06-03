@@ -158,7 +158,8 @@ func (m Model) mouseProjectsClick(y int) (Model, tea.Cmd) {
 	rows := projectsRows(m.projectsByID, m.projectIdentByID, m.projectStats)
 	budget := len(rows)
 	if m.height > 0 {
-		budget = m.height - projectsViewChromeRows
+		footerLines := helpLines(projectsHelpRows(), m.width)
+		budget = m.height - projectsViewChromeRows(footerLines)
 		if budget < 1 {
 			budget = 1
 		}

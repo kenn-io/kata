@@ -114,12 +114,14 @@ func TestProjectsView_RendersTable(t *testing.T) {
 	}
 }
 
-func TestProjectsView_FooterAdvertisesFederation(t *testing.T) {
+func TestProjectsView_FooterUsesAdaptiveHelpTable(t *testing.T) {
 	m := setupProjectsView(mockProject{ID: 1, Name: "alpha", Ident: "..."})
 
 	out := stripANSI(m.View())
 
-	assert.Contains(t, out, "[F] federation")
+	assert.Contains(t, out, "▕")
+	assert.Contains(t, out, "F federation")
+	assert.NotContains(t, out, "[F] federation")
 }
 
 func TestProjectsView_FTransitionsToFederation(t *testing.T) {
@@ -150,7 +152,8 @@ func TestProjectsView_ViewportClipsRowsToHeight(t *testing.T) {
 	out := m.View()
 	lines := strings.Split(out, "\n")
 	assert.LessOrEqual(t, len(lines), m.height, "render must fit within m.height")
-	assert.Contains(t, out, "[↑/↓ k/j] move", "key-hint must remain visible")
+	assert.Contains(t, out, "F federation", "footer help table must remain visible")
+	assert.Contains(t, out, "▕", "footer help table must use adaptive separators")
 	assert.Contains(t, out, "All projects", "sentinel must remain visible")
 }
 
