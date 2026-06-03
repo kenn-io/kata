@@ -51,6 +51,7 @@ func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
 
 func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
+	m.federationInstance.Auth = AuthInfo{Kind: "db_token", Actor: "operator"}
 	rendered := stripANSI(renderFederation(m))
 
 	assert.Contains(t, rendered, "kata / federation")
@@ -58,7 +59,7 @@ func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 	assert.Contains(t, rendered, "spoke-daemon")
 	assert.Contains(t, rendered, "http://spoke.internal:7777")
 	assert.Contains(t, rendered, "instance 01HZNQ7VFPK1XGD8R5MABCD4EA")
-	assert.Contains(t, rendered, "auth token")
+	assert.Contains(t, rendered, "auth token actor operator")
 	assert.Contains(t, rendered, "spoke-proj")
 	assert.Contains(t, rendered, "hub.internal:7777")
 	assert.Contains(t, rendered, "operator")
@@ -68,6 +69,17 @@ func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 	assert.Contains(t, rendered, "quarantine")
 	assert.Contains(t, rendered, "reset")
 	assert.Contains(t, rendered, "violations")
+}
+
+func TestFederationView_ActiveLocalGlobalAuthDisplaysTokenActor(t *testing.T) {
+	m := setupFederationViewWithStatuses()
+	m.activeDaemon = daemonTarget{Name: "local", Local: true}
+	m.federationInstance.Auth = AuthInfo{Kind: "db_token", Actor: "operator"}
+
+	rendered := stripANSI(renderFederation(m))
+
+	assert.Contains(t, rendered, "auth token actor operator")
+	assert.NotContains(t, rendered, "auth no token actor operator")
 }
 
 func TestFederationView_ListShowsOnlySpokeBindings(t *testing.T) {
@@ -220,7 +232,10 @@ func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
 }
 
 func TestFederationEnroll_NWithCurrentProjectStartsHubSelection(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "")
+	t.Setenv("USER", "operator")
 	m := setupFederationView()
+	m.list.actor = resolveTUIActor()
 	m.scope = homedScope(7, "spoke-project")
 	m.daemonTargets = []daemonTarget{
 		{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"},
@@ -235,7 +250,10 @@ func TestFederationEnroll_NWithCurrentProjectStartsHubSelection(t *testing.T) {
 	assert.Equal(t, int64(7), out.federationDraft.SpokeProjectID)
 	assert.Equal(t, "spoke-project", out.federationDraft.SpokeProjectName)
 	assert.True(t, out.federationDraft.AdoptExisting)
-	assert.Contains(t, stripANSI(renderFederation(out)), "Select hub daemon")
+	rendered := stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "Select hub daemon")
+	assert.Contains(t, rendered, "hub https://hub.example auth token")
+	assert.Equal(t, "operator", out.federationDraft.RequestedActor)
 }
 
 func TestFederationEnroll_NWithoutProjectStartsLocalProjectSelection(t *testing.T) {
@@ -277,9 +295,11 @@ func TestFederationEnroll_EscFromHubSelectionReturnsToLocalProjectSelection(t *t
 
 func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testing.T) {
 	m := setupFederationHubProjectSelection()
+	m.federationDraft.HubInstance = InstanceInfo{Auth: AuthInfo{Kind: "db_token", Actor: "hub-operator"}}
 	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
 
 	renderedSelection := stripANSI(renderFederation(m))
+	assert.Contains(t, renderedSelection, "hub auth: token actor hub-operator")
 	assert.Contains(t, renderedSelection, `use existing hub project "spoke-project"; enable federation if needed`)
 	assert.NotContains(t, renderedSelection, "will be created if missing")
 	assert.NotContains(t, renderedSelection, "\n  spoke-project\n")
@@ -295,9 +315,48 @@ func TestFederationEnroll_SelectHubThenSelectSameNameHubProjectPreview(t *testin
 	assert.True(t, out.federationDraft.AdoptExisting)
 	rendered := stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "Operation: adopt existing local project")
+	assert.Contains(t, rendered, "hub auth: token actor hub-operator")
 	assert.Contains(t, rendered, `use existing hub project "spoke-project"; enable federation if needed`)
 	assert.Contains(t, rendered, "allow_insecure: true")
 	assert.Contains(t, rendered, "pre-adoption event history is replaced by snapshot events for federation")
+}
+
+func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) {
+	hub := &recordingFederationHubAdmin{
+		instance: InstanceInfo{Auth: AuthInfo{Kind: "db_token", Actor: "hub-operator"}},
+		projects: []ProjectSummary{
+			{ID: 42, Name: "spoke-project"},
+		},
+	}
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		target daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		return hub, target, nil
+	})
+	m := setupFederationView()
+	m.scope = homedScope(7, "spoke-project")
+	m.daemonTargets = []daemonTarget{
+		{Name: "spoke", URL: "https://spoke.example", Token: "spoke-auth"},
+		{Name: "hub", URL: "https://hub.example", Token: "hub-auth"},
+	}
+	m.activeDaemon = m.daemonTargets[0]
+
+	out, _ := m.routeFederationViewKey(keyRune('n'))
+	out.federationHubCursor = 1
+	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	out = out.handleFederationHubProjectsLoaded(cmd().(federationHubProjectsLoadedMsg))
+
+	rendered := stripANSI(renderFederation(out))
+	assert.Equal(t, "hub-operator", out.federationDraft.HubInstance.Auth.Actor)
+	assert.Contains(t, rendered, "hub auth: token actor hub-operator")
+
+	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.Nil(t, cmd)
+	rendered = stripANSI(renderFederation(out))
+	assert.Contains(t, rendered, "requested actor: hub-operator")
+	assert.NotContains(t, rendered, "requested actor: anonymous")
 }
 
 func TestFederationEnroll_SelectDifferentHubProjectSkipsSameNameDuplicate(t *testing.T) {
@@ -864,11 +923,18 @@ func spokeAuthSecret() string {
 }
 
 type recordingFederationHubAdmin struct {
+	instance              InstanceInfo
 	projects              []ProjectSummary
+	getInstanceCalls      int
 	listProjectsCalls     int
 	ensureProjectCalls    int
 	enableFederationCalls int
 	createEnrollmentCalls int
+}
+
+func (h *recordingFederationHubAdmin) GetInstance(_ context.Context) (InstanceInfo, error) {
+	h.getInstanceCalls++
+	return h.instance, nil
 }
 
 func (h *recordingFederationHubAdmin) ListProjects(_ context.Context) ([]ProjectSummary, error) {

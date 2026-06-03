@@ -36,6 +36,18 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.InstanceUID = uid
 		out.Body.Version = version.Version
 		out.Body.SchemaVersion = sv
+		out.Body.Auth = instanceAuthInfo(ctx)
 		return out, nil
 	})
+}
+
+func instanceAuthInfo(ctx context.Context) api.AuthInfoOut {
+	principal, ok := PrincipalFromContext(ctx)
+	if !ok {
+		return api.AuthInfoOut{Kind: "none"}
+	}
+	return api.AuthInfoOut{
+		Kind:  string(principal.Kind),
+		Actor: principal.Actor,
+	}
 }

@@ -102,7 +102,8 @@ func renderFederationSelectHub(m Model) string {
 	}
 	body = append(body, "")
 	for i, row := range rows {
-		label := daemonName(row.target) + " " + federationDaemonEndpoint(row.target)
+		label := daemonName(row.target) + " " + federationDaemonEndpoint(row.target) +
+			" auth " + daemonAuth(row.target)
 		if row.target.AllowInsecure {
 			label += " allow_insecure"
 		}
@@ -121,6 +122,10 @@ func renderFederationSelectHubProject(m Model) string {
 	body = append(body,
 		"hub daemon: "+sanitizeForLine(daemonName(m.federationDraft.HubTarget))+
 			" "+sanitizeForLine(federationDaemonEndpoint(m.federationDraft.HubTarget)),
+		"hub auth: "+sanitizeForLine(federationAuthDisplay(
+			m.federationDraft.HubTarget,
+			m.federationDraft.HubInstance.Auth,
+		)),
 		fmt.Sprintf("allow_insecure: %t", m.federationDraft.HubTarget.AllowInsecure),
 		"",
 	)
@@ -144,6 +149,7 @@ func renderFederationBrowseHubs(m Model) string {
 	body = append(body,
 		"catalog hub: "+sanitizeForLine(daemonName(target))+
 			" "+sanitizeForLine(federationDaemonEndpoint(target)),
+		"hub auth: "+sanitizeForLine(federationAuthDisplay(target, m.federationDraft.HubInstance.Auth)),
 		fmt.Sprintf("allow_insecure: %t", target.AllowInsecure),
 		"mode: read-only",
 		"",
@@ -173,6 +179,7 @@ func renderFederationPreview(m Model) string {
 		"local spoke project: "+sanitizeForLine(emptyDash(draft.SpokeProjectName)),
 		"hub daemon: "+sanitizeForLine(daemonName(draft.HubTarget))+
 			" "+sanitizeForLine(federationDaemonEndpoint(draft.HubTarget)),
+		"hub auth: "+sanitizeForLine(federationAuthDisplay(draft.HubTarget, draft.HubInstance.Auth)),
 		"hub project: "+sanitizeForLine(federationHubProjectBehavior(draft)),
 		"requested actor: "+sanitizeForLine(emptyDash(draft.RequestedActor)),
 		"capabilities: "+sanitizeForLine(draft.DisplayCapabilities),
@@ -405,7 +412,7 @@ func federationHeaderLine(m Model) string {
 		sanitizeForLine(daemonName(m.activeDaemon)),
 		sanitizeForLine(federationDaemonEndpoint(m.activeDaemon)),
 		sanitizeForLine(emptyDash(m.federationInstance.InstanceUID)),
-		daemonAuth(m.activeDaemon),
+		sanitizeForLine(federationAuthDisplay(m.activeDaemon, m.federationInstance.Auth)),
 	)
 }
 
@@ -443,6 +450,40 @@ func federationDaemonEndpoint(target daemonTarget) string {
 		return target.URL
 	}
 	return daemonEndpoint(target)
+}
+
+func federationAuthDisplay(target daemonTarget, auth AuthInfo) string {
+	base := federationAuthBase(target, auth)
+	actor := strings.TrimSpace(auth.Actor)
+	if actor != "" {
+		return base + " actor " + actor
+	}
+	kind := strings.TrimSpace(auth.Kind)
+	if base != "token" || kind == "" || kind == "none" {
+		return base
+	}
+	switch kind {
+	case "static_token":
+		return base + " static"
+	case "bootstrap":
+		return base + " bootstrap"
+	case "trusted_proxy_absent":
+		return base + " trusted-proxy missing actor"
+	default:
+		return base + " " + kind
+	}
+}
+
+func federationAuthBase(target daemonTarget, auth AuthInfo) string {
+	kind := strings.TrimSpace(auth.Kind)
+	switch kind {
+	case "db_token", "static_token", "bootstrap":
+		return "token"
+	case "trusted_proxy", "trusted_proxy_absent":
+		return "trusted-proxy"
+	default:
+		return daemonAuth(target)
+	}
 }
 
 func renderFederationHeader(width int) string {

@@ -270,6 +270,7 @@ type federationHubProjectsLoadedMsg struct {
 	connGen  uint64
 	gen      uint64
 	target   daemonTarget
+	instance InstanceInfo
 	projects []ProjectSummary
 	err      error
 }

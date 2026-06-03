@@ -226,12 +226,13 @@ func initialModel(opts Options) Model {
 	}
 }
 
-// resolveTUIActor mirrors cmd/kata's actor precedence (env → fallback)
-// minus the --as flag and git fallback: the TUI has no flag plumbing
-// here and we keep the dependency surface small. Tasks 9/10 re-evaluate
-// once the broader mutation path lands and may add a git fallback.
+// resolveTUIActor mirrors cmd/kata's actor precedence without --as or the
+// final git lookup: KATA_AUTHOR > USER > anonymous.
 func resolveTUIActor() string {
 	if v := os.Getenv("KATA_AUTHOR"); v != "" {
+		return v
+	}
+	if v := os.Getenv("USER"); v != "" {
 		return v
 	}
 	return "anonymous"

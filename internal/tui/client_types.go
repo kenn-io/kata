@@ -178,10 +178,14 @@ type ProjectSummary struct {
 
 // InstanceInfo is the daemon instance identity returned by /api/v1/instance.
 type InstanceInfo struct {
-	InstanceUID   string `json:"instance_uid"`
-	Version       string `json:"version"`
-	SchemaVersion int64  `json:"schema_version"`
+	InstanceUID   string   `json:"instance_uid"`
+	Version       string   `json:"version"`
+	SchemaVersion int64    `json:"schema_version"`
+	Auth          AuthInfo `json:"auth"`
 }
+
+// AuthInfo is redacted request-auth metadata returned by the daemon.
+type AuthInfo = api.AuthInfoOut
 
 // FederationStatusBody is the daemon federation status response.
 type FederationStatusBody = api.FederationStatusBody

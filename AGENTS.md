@@ -6,6 +6,11 @@
 - Never Squash or Amend: Do not squash commits, amend commits, or otherwise rewrite git history unless the user explicitly asks for that history rewrite.
 - Do not commit rejected experiments. Revert them or ask before preserving them.
 - Test First: Write a failing test before the implementation, then make it pass, then refactor (red, green, refactor). Don't add production code without a failing test that requires it.
+- No Private Project Data: Do not use private project, workspace, customer,
+  host, or repository names in tests, docs, examples, PR text, or generated
+  fixtures. Use neutral placeholders such as `spoke-project`, `hub-project`,
+  `example-workspace`, or `daemon.example` unless the user explicitly asks
+  to preserve a real name in a user-facing operational command.
 - No Testing/Verification Sections in PRs: Do not include a testing plan, test plan, verification,
   or verified section in pull request descriptions.
 

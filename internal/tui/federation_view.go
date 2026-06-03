@@ -41,6 +41,7 @@ type federationDraft struct {
 	CreateReplica        bool
 	SelectedLocalProject bool
 	HubTarget            daemonTarget
+	HubInstance          InstanceInfo
 	HubProjectID         int64
 	HubProjectName       string
 	RequestedActor       string
@@ -166,6 +167,10 @@ func (m Model) handleFederationHubProjectsLoaded(msg federationHubProjectsLoaded
 		return m
 	}
 	m.federationDraft.HubTarget = msg.target
+	m.federationDraft.HubInstance = msg.instance
+	if actor := strings.TrimSpace(msg.instance.Auth.Actor); actor != "" {
+		m.federationDraft.RequestedActor = actor
+	}
 	m.federationHubProjects = msg.projects
 	count := federationHubProjectRowCount(m)
 	if m.federationMode == federationModeBrowseHubs {
@@ -639,11 +644,16 @@ func (m Model) fetchFederationHubProjects(target daemonTarget) tea.Cmd {
 		if err != nil {
 			return federationHubProjectsLoadedMsg{connGen: connGen, gen: gen, target: target, err: err}
 		}
+		instance, err := client.GetInstance(ctx)
+		if err != nil {
+			return federationHubProjectsLoadedMsg{connGen: connGen, gen: gen, target: resolved, err: err}
+		}
 		projects, err := client.ListProjects(ctx)
 		return federationHubProjectsLoadedMsg{
 			connGen:  connGen,
 			gen:      gen,
 			target:   resolved,
+			instance: instance,
 			projects: projects,
 			err:      err,
 		}

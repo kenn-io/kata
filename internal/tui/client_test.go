@@ -178,6 +178,26 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 	}
 }
 
+func TestClientGetInstanceDecodesAuthPrincipal(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondJSON(t, w, map[string]any{
+			"instance_uid":   "01HZNQ7VFPK1XGD8R5MABCD4EA",
+			"version":        "dev",
+			"schema_version": 1,
+			"auth": map[string]any{
+				"kind":  "db_token",
+				"actor": "operator",
+			},
+		})
+	})
+
+	instance, err := c.GetInstance(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "db_token", instance.Auth.Kind)
+	assert.Equal(t, "operator", instance.Auth.Actor)
+}
+
 func TestTUIHubAdminClientRejectsPlainHTTPHostnameWithoutAllowInsecure(t *testing.T) {
 	_, _, err := newHubAdminClient(context.Background(), daemonTarget{
 		Name:  "hub",

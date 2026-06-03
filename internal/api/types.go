@@ -37,10 +37,18 @@ type HealthResponse struct {
 // further calls.
 type InstanceResponse struct {
 	Body struct {
-		InstanceUID   string `json:"instance_uid"`
-		Version       string `json:"version"`
-		SchemaVersion int64  `json:"schema_version"`
+		InstanceUID   string      `json:"instance_uid"`
+		Version       string      `json:"version"`
+		SchemaVersion int64       `json:"schema_version"`
+		Auth          AuthInfoOut `json:"auth"`
 	}
+}
+
+// AuthInfoOut is redacted request-auth metadata for the current request.
+// It never includes bearer token plaintext or token hashes.
+type AuthInfoOut struct {
+	Kind  string `json:"kind"`
+	Actor string `json:"actor,omitempty"`
 }
 
 // CreateTokenRequest is POST /api/v1/tokens.

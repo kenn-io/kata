@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,4 +83,31 @@ func TestInstanceEndpointReturnsVersionAndSchemaVersion(t *testing.T) {
 	assert.NotEmpty(t, out.Version,
 		"version.Version must be populated even in dev builds")
 	assert.Equal(t, int64(db.CurrentSchemaVersion()), out.SchemaVersion)
+}
+
+func TestInstanceEndpointIncludesDBTokenActor(t *testing.T) {
+	ctx := context.Background()
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	plaintext := strings.Join([]string{"operator", "bearer"}, "-")
+	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
+		PlaintextToken: plaintext,
+		Actor:          "operator",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	resp, bs := envDoRaw(t, env, http.MethodGet, "/api/v1/instance", nil,
+		map[string]string{"Authorization": "Bearer " + plaintext})
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+
+	var out struct {
+		Auth struct {
+			Kind  string `json:"kind"`
+			Actor string `json:"actor"`
+		} `json:"auth"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	assert.Equal(t, "db_token", out.Auth.Kind)
+	assert.Equal(t, "operator", out.Auth.Actor)
+	assert.NotContains(t, string(bs), plaintext)
 }
