@@ -376,20 +376,47 @@ func warnAgentsUpdate(err error) {
 	fmt.Fprintf(os.Stderr, "kata: warning: could not update AGENTS.md: %v\n", err)
 }
 
-// warnBeadsConflict tells the user kata declined to edit file in place because
-// it still carries a beads integration block, and points at the sidecar
+// warnBeadsConflict tells the user kata declined to edit a file in place
+// because it still carries a beads integration block, and points at the sidecar
 // proposal kata wrote instead. Suppressed in machine-output modes, matching
 // warnGitignoreUpdate.
-func warnBeadsConflict(file, sidecar string) {
+func warnBeadsConflict(originalPath, sidecarPath string) {
 	if currentOutputMode() != outputHuman {
 		return
 	}
-	base := filepath.Base(sidecar)
-	fmt.Fprintf(os.Stderr,
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = ""
+	}
+	fmt.Fprint(os.Stderr, beadsConflictMessage(cwd, originalPath, sidecarPath))
+}
+
+// beadsConflictMessage builds the human hint for a declined in-place edit.
+// Paths are rendered relative to cwd when they sit under it, else absolute, so
+// the `mv` command is copy-pasteable no matter which directory init was invoked
+// from — the write destination is the workspace root, which need not be cwd.
+func beadsConflictMessage(cwd, originalPath, sidecarPath string) string {
+	label := filepath.Base(originalPath)
+	sidecar := displayPath(cwd, sidecarPath)
+	original := displayPath(cwd, originalPath)
+	return fmt.Sprintf(
 		"kata: %s still contains a beads integration block; left it untouched.\n"+
 			"      Wrote a migrated copy to %s (beads block removed, kata guidance added).\n"+
 			"      Review it, then `mv %s %s` to adopt — or delete it to keep the original.\n",
-		file, base, base, file)
+		label, sidecar, sidecar, original)
+}
+
+// displayPath renders abs for a shell hint: relative to cwd when abs sits under
+// it, else abs unchanged. An empty or unusable cwd yields the absolute path.
+func displayPath(cwd, abs string) string {
+	if cwd == "" {
+		return abs
+	}
+	rel, err := filepath.Rel(cwd, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return abs
+	}
+	return rel
 }
 
 // postProjects POSTs the request and returns the raw response body on
@@ -598,7 +625,7 @@ func applyAgentGuidance(dir string) (bool, error) {
 		if err != nil {
 			return changed, err
 		}
-		warnBeadsConflict("AGENTS.md", sidecar)
+		warnBeadsConflict(agentsPath, sidecar)
 		changed = true
 	} else {
 		c, err := ensureAgentsBlock(agentsPath, content, exists)
@@ -614,7 +641,7 @@ func applyAgentGuidance(dir string) (bool, error) {
 		if err != nil {
 			return changed, err
 		}
-		warnBeadsConflict("CLAUDE.md", sidecar)
+		warnBeadsConflict(claudePath, sidecar)
 		changed = true
 	}
 

@@ -581,6 +581,24 @@ func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
 	assert.Contains(t, stderr, filepath.Base(sidecar))
 }
 
+// The adopt hint must name paths that resolve from the caller's working
+// directory. Run from the workspace root, paths collapse to clean base names;
+// run from a subdirectory (or with --workspace pointing elsewhere), a bare base
+// name would target the wrong directory, so the hint spells out absolute paths.
+func TestBeadsConflictMessage_PathsResolveFromCwd(t *testing.T) {
+	sidecar := "/repo/AGENTS.md" + agentsProposalSuffix
+
+	fromRoot := beadsConflictMessage("/repo", "/repo/AGENTS.md", sidecar)
+	assert.Contains(t, fromRoot, "AGENTS.md still contains a beads integration block")
+	assert.Contains(t, fromRoot, "mv AGENTS.md"+agentsProposalSuffix+" AGENTS.md",
+		"from the workspace root the mv command uses base names")
+
+	fromSubdir := beadsConflictMessage("/repo/cmd/kata", "/repo/AGENTS.md", sidecar)
+	assert.Contains(t, fromSubdir, "mv "+sidecar+" /repo/AGENTS.md",
+		"outside the workspace root the mv command must use resolvable absolute paths")
+	assert.NotContains(t, fromSubdir, "mv AGENTS.md"+agentsProposalSuffix+" AGENTS.md")
+}
+
 // A real (non-symlink) CLAUDE.md that still carries a beads block gets the same
 // sidecar treatment as AGENTS.md.
 func TestInit_WithAgents_BeadsBlockInClaude_WritesSidecar(t *testing.T) {
