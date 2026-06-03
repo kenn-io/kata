@@ -599,6 +599,17 @@ func TestBeadsConflictMessage_PathsResolveFromCwd(t *testing.T) {
 	assert.NotContains(t, fromSubdir, "mv AGENTS.md"+agentsProposalSuffix+" AGENTS.md")
 }
 
+// A workspace path with spaces would, unquoted, parse as extra mv operands, so
+// the adopt command must shell-quote both paths to stay copy-pasteable.
+func TestBeadsConflictMessage_ShellQuotesMvOperands(t *testing.T) {
+	original := "/Users/me/My Projects/app/AGENTS.md"
+	sidecar := original + agentsProposalSuffix
+
+	msg := beadsConflictMessage("/elsewhere", original, sidecar)
+	assert.Contains(t, msg, "mv '"+sidecar+"' '"+original+"'",
+		"mv operands must be single-quoted when the path contains spaces")
+}
+
 // A real (non-symlink) CLAUDE.md that still carries a beads block gets the same
 // sidecar treatment as AGENTS.md.
 func TestInit_WithAgents_BeadsBlockInClaude_WritesSidecar(t *testing.T) {

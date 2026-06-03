@@ -403,7 +403,7 @@ func beadsConflictMessage(cwd, originalPath, sidecarPath string) string {
 		"kata: %s still contains a beads integration block; left it untouched.\n"+
 			"      Wrote a migrated copy to %s (beads block removed, kata guidance added).\n"+
 			"      Review it, then `mv %s %s` to adopt — or delete it to keep the original.\n",
-		label, sidecar, sidecar, original)
+		label, sidecar, shellQuote(sidecar), shellQuote(original))
 }
 
 // displayPath renders abs for a shell hint: relative to cwd when abs sits under
