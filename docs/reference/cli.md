@@ -15,6 +15,30 @@ current flag list in your installed binary.
 | `--format human|json|agent` | Select output mode explicitly. |
 | `--quiet` | Suppress non-essential output. |
 
+## Workspace initialization
+
+```sh
+kata init [--project <name>] [--with-agents]
+kata init [--replace | --reassign]
+```
+
+`kata init` writes the secret-free `.kata.toml` binding for the current
+workspace. Pass `--project` to choose the project name explicitly instead of
+deriving it from the git remote.
+
+Pass `--with-agents` to add or refresh kata's marker-delimited guidance block
+in `AGENTS.md`. The block points coding agents at `kata quickstart` and the
+close discipline; re-running the command updates only kata's block and leaves
+other content untouched.
+
+When migrating from Beads, an existing `AGENTS.md` or real `CLAUDE.md` may still
+carry a Beads integration block. kata leaves that file untouched and writes a
+`<file>.kata-proposed` sidecar with the Beads block removed and kata guidance
+added. Review the sidecar before replacing the original.
+
+A symlinked `AGENTS.md` is refused before it is read; replace it with a regular
+file before using `--with-agents`.
+
 ## Issue lifecycle
 
 Create:

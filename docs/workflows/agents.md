@@ -27,7 +27,9 @@ To make a workspace self-documenting for agents that read `AGENTS.md`, run
 `AGENTS.md` that points back at `kata quickstart`; re-running refreshes only
 kata's block. If the file still carries a Beads integration block, kata leaves
 it untouched and writes a `<file>.kata-proposed` sidecar to adopt or discard —
-see [`--with-agents`](../get-started/quickstart.md#initialize-a-workspace).
+see [`--with-agents`](../get-started/quickstart.md#initialize-a-workspace). If
+`AGENTS.md` is a symlink, kata refuses to manage it before reading the target;
+replace it with a regular file before using `--with-agents`.
 
 ## Search before creating
 

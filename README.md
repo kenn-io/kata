@@ -32,6 +32,10 @@ kata tui                                     # browse and triage interactively
 `kata create` returns each issue's short_id; use it in later commands. Press `?`
 inside `kata tui` for keybindings.
 
+For agent-heavy workspaces, use `kata init --with-agents` to also write a
+managed kata briefing into `AGENTS.md`; re-running it refreshes kata's block
+without overwriting the rest of the file.
+
 ## What kata does
 
 - Track issues per project, with short IDs derived from each issue's ULID

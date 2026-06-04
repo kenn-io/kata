@@ -67,7 +67,9 @@ integration block — common when migrating off Beads — kata refuses to edit i
 place. It leaves the original untouched and writes a `<file>.kata-proposed`
 sidecar with the Beads block removed and kata's block added. Review the sidecar,
 then `mv AGENTS.md.kata-proposed AGENTS.md` to adopt it, or delete it to keep the
-original. kata prints where the sidecar landed.
+original. kata prints where the sidecar landed. For safety, a symlinked
+`AGENTS.md` is refused before it is read; replace it with a regular file before
+using `--with-agents`.
 
 ## Create and inspect issues
 
