@@ -101,6 +101,21 @@ reject_line() {
   fi
 }
 
+require_line_before() {
+  local file="$1"
+  local first="$2"
+  local second="$3"
+  local first_line
+  local second_line
+
+  first_line="$(grep -n -F -- "$first" "$file" | head -n 1 | cut -d: -f1)"
+  second_line="$(grep -n -F -- "$second" "$file" | head -n 1 | cut -d: -f1)"
+  if [[ -z "$first_line" || -z "$second_line" || "$first_line" -ge "$second_line" ]]; then
+    printf 'missing required order in %s: %s before %s\n' "$file" "$first" "$second" >&2
+    exit 1
+  fi
+}
+
 require_line docs/vercel.json '"framework": null'
 require_line docs/vercel.json '"installCommand": "uv sync --frozen --no-dev"'
 require_line docs/vercel.json '"buildCommand": "uv run --frozen bash ./vercel-build.sh"'
@@ -134,6 +149,7 @@ require_line docs/development/deploying-docs.md 'scripts/update-docs.sh'
 require_line Makefile 'docs-deploy:'
 require_line Makefile 'vercel deploy --prod'
 require_line scripts/update-docs.sh 'bash docs/screenshots/update-assets-branch.sh --push'
+require_line scripts/update-docs.sh 'rm -rf docs/assets/screenshots'
 require_line scripts/update-docs.sh 'bash docs/screenshots/hydrate-assets.sh'
 require_line scripts/update-docs.sh 'make docs-build'
 require_line scripts/update-docs.sh 'make docs-check'
@@ -143,6 +159,9 @@ require_line README.md 'kata close abc4 --done --message "Fixed the login race a
 require_line README.md 'kata init --with-agents'
 require_line docs/reference/cli.md 'kata init [--project <name>] [--with-agents]'
 require_line docs/reference/cli.md 'A symlinked `AGENTS.md` is refused before it is read'
+require_line_before scripts/update-docs.sh \
+  'rm -rf docs/assets/screenshots' \
+  'bash docs/screenshots/hydrate-assets.sh'
 
 reject_line docs/development/deploying-docs.md 'vercel link --cwd docs'
 reject_line docs/development/deploying-docs.md 'vercel deploy --cwd docs --prod'

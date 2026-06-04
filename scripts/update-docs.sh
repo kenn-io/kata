@@ -73,6 +73,9 @@ fi
 
 run make docs-install
 run bash docs/screenshots/update-assets-branch.sh --push
+# hydrate-assets.sh exits early when screenshots exist, so clear local ignored
+# assets before hydrating from the newly pushed docs-assets branch.
+run rm -rf docs/assets/screenshots
 run bash docs/screenshots/hydrate-assets.sh
 run make docs-build
 run make docs-check
