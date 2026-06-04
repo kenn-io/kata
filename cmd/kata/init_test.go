@@ -666,6 +666,51 @@ func TestInit_WithAgents_ClaudeSymlink_Skipped(t *testing.T) {
 	assert.NotZero(t, fi.Mode()&os.ModeSymlink, "CLAUDE.md must remain a symlink")
 }
 
+// A hostile repo must not redirect kata's sidecar write through a pre-planted
+// symlink to clobber a file outside the workspace.
+func TestInit_WithAgents_SidecarSymlinkNotFollowed(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	victim := filepath.Join(t.TempDir(), "victim.txt")
+	require.NoError(t, os.WriteFile(victim, []byte("precious\n"), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	agentsPath := filepath.Join(dir, "AGENTS.md")
+	require.NoError(t, os.WriteFile(agentsPath, //nolint:gosec // test fixture under TempDir
+		[]byte("# Agent guidance\n\n"+beadsFixtureBlock), 0o644))
+	// Attacker pre-plants the sidecar path as a symlink at the victim file.
+	require.NoError(t, os.Symlink(victim, agentsPath+agentsProposalSuffix))
+
+	_, _ = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+
+	got, err := os.ReadFile(victim) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "precious\n", string(got),
+		"kata must not write through a pre-planted sidecar symlink")
+}
+
+// kata must not write through a symlinked AGENTS.md, which a hostile repo could
+// point at a victim file to have init overwrite it.
+func TestInit_WithAgents_AgentsSymlinkNotFollowed(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	victim := filepath.Join(t.TempDir(), "victim.txt")
+	require.NoError(t, os.WriteFile(victim, []byte("precious\n"), 0o644)) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, os.Symlink(victim, filepath.Join(dir, "AGENTS.md")))
+
+	_, _ = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+
+	got, err := os.ReadFile(victim) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "precious\n", string(got),
+		"kata must not write through a symlinked AGENTS.md")
+}
+
 func captureProcessStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr

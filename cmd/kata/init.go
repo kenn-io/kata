@@ -661,7 +661,11 @@ func ensureAgentsBlock(path, content string, exists bool) (bool, error) {
 	if exists && updated == content {
 		return false, nil
 	}
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil { //nolint:gosec
+	if exists {
+		if err := rewriteGuidanceFile(path, []byte(updated)); err != nil {
+			return false, err
+		}
+	} else if err := writeNewGuidanceFile(path, []byte(updated)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -704,10 +708,39 @@ func writeMigrationProposal(path, content string) (string, error) {
 		return "", err
 	}
 	sidecar := path + agentsProposalSuffix
-	if err := os.WriteFile(sidecar, []byte(proposed), 0o644); err != nil { //nolint:gosec
+	if err := writeNewGuidanceFile(sidecar, []byte(proposed)); err != nil {
 		return "", err
 	}
 	return sidecar, nil
+}
+
+// writeNewGuidanceFile creates path with data, refusing to follow a symlink a
+// hostile repo may have planted there. O_EXCL fails (EEXIST) when anything —
+// regular file or symlink — already occupies the path, so kata never redirects
+// its write onto a victim file the path merely points at.
+func writeNewGuidanceFile(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
+}
+
+// rewriteGuidanceFile overwrites an existing regular file, refusing to write
+// through a symlink so kata never rewrites a file the path merely points at.
+func rewriteGuidanceFile(path string, data []byte) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write through symlinked %s", path)
+	}
+	return os.WriteFile(path, data, 0o644) //nolint:gosec
 }
 
 // hasBeadsBlock reports whether content carries a complete beads integration
