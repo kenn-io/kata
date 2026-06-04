@@ -616,6 +616,13 @@ func applyAgentGuidance(dir string) (bool, error) {
 	changed := false
 
 	agentsPath := filepath.Join(dir, "AGENTS.md")
+	// Refuse a symlinked AGENTS.md before reading it. Following the link would
+	// let a hostile repo copy an outside file's content into the workspace via
+	// the migration sidecar, or rewrite the link target. CLAUDE.md gets the same
+	// treatment through regularFileWithBeads.
+	if fi, lerr := os.Lstat(agentsPath); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return changed, fmt.Errorf("refusing to manage symlinked %s", agentsPath)
+	}
 	content, exists, err := readIfExists(agentsPath)
 	if err != nil {
 		return changed, err

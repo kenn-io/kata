@@ -711,6 +711,31 @@ func TestInit_WithAgents_AgentsSymlinkNotFollowed(t *testing.T) {
 		"kata must not write through a symlinked AGENTS.md")
 }
 
+// A symlinked AGENTS.md whose target carries a beads block must not be migrated:
+// following it would copy the outside file's content into AGENTS.md.kata-proposed
+// inside the repo.
+func TestInit_WithAgents_AgentsBeadsSymlinkNotMigrated(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	// An outside file that happens to carry a beads block; a hostile repo points
+	// AGENTS.md at it to coax kata into copying its content into the workspace.
+	secret := filepath.Join(t.TempDir(), "secret.md")
+	body := "# secrets\n\n" + beadsFixtureBlock
+	require.NoError(t, os.WriteFile(secret, []byte(body), 0o644)) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, os.Symlink(secret, filepath.Join(dir, "AGENTS.md")))
+
+	_, _ = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+
+	// kata must not copy the outside file into a sidecar in the repo.
+	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"+agentsProposalSuffix))
+	got, err := os.ReadFile(secret) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, body, string(got), "the symlink target must be left untouched")
+}
+
 func captureProcessStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr
