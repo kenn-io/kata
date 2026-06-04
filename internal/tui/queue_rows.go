@@ -16,6 +16,20 @@ func (m childSortMode) label() string {
 	return "topological"
 }
 
+type issueListViewMode int
+
+const (
+	issueListViewNested issueListViewMode = iota
+	issueListViewFlat
+)
+
+func (m issueListViewMode) label() string {
+	if m == issueListViewFlat {
+		return "flat"
+	}
+	return "nested"
+}
+
 // issueKey is the (project_id, short_id) tuple used as a map key for
 // queue rendering and expansion state. short_id is the project-scoped
 // display ref; the daemon guarantees uniqueness within a project so
@@ -44,6 +58,19 @@ func buildQueueRows(issues []Issue, filter ListFilter, expanded expansionSet) []
 func buildQueueRowsWithSort(
 	issues []Issue, filter ListFilter, expanded expansionSet, childSort childSortMode,
 ) []queueRow {
+	return buildQueueRowsWithView(issues, filter, expanded, childSort, issueListViewNested)
+}
+
+func buildQueueRowsWithView(
+	issues []Issue,
+	filter ListFilter,
+	expanded expansionSet,
+	childSort childSortMode,
+	viewMode issueListViewMode,
+) []queueRow {
+	if viewMode == issueListViewFlat {
+		return buildFlatQueueRows(issues, filter)
+	}
 	state := newQueueBuildState(issues, filter, expanded, childSort)
 	for _, key := range state.order {
 		iss := state.byKey[key]
@@ -62,6 +89,19 @@ func buildQueueRowsWithSort(
 		state.appendNode(key, 0, false, nil)
 	}
 	return state.rows
+}
+
+func buildFlatQueueRows(issues []Issue, filter ListFilter) []queueRow {
+	filterActive := hasActiveQueueFilter(filter)
+	rows := make([]queueRow, 0, len(issues))
+	for _, iss := range issues {
+		if filterActive && !matchesFilter(iss, filter) {
+			continue
+		}
+		key := issueKey{projectID: iss.ProjectID, shortID: iss.ShortID}
+		rows = append(rows, queueRow{issue: iss, key: key})
+	}
+	return rows
 }
 
 type queueBuildState struct {

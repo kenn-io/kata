@@ -26,5 +26,5 @@
 
 
 
- ↑↓ move ▕ ↵ open▕ n new ▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority▕ D daemons▕ F federation
- L layout▕ ? help▕ q quit
+ ↑↓ move     ▕ ↵ open  ▕ n new ▕ / search▕ f filter▕ s status▕ v view▕ o order▕ c clear▕ x close▕ ! priority▕ D daemons
+ F federation▕ L layout▕ ? help▕ q quit

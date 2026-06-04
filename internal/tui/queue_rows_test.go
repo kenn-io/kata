@@ -69,6 +69,29 @@ func TestBuildQueueRows_TemporalChildSortPreservesFetchOrder(t *testing.T) {
 	assertQueueShortIDs(t, rows, []string{"aaa1", "bbb2", "ccc3", "ddd4"})
 }
 
+func TestBuildQueueRows_FlatModePreservesFetchOrder(t *testing.T) {
+	issues := []Issue{
+		testIssue("aaa1", withCounts(1, 1)),
+		testIssue("bbb2", withParent("aaa1")),
+		testIssue("ccc3"),
+	}
+
+	rows := buildQueueRowsWithView(
+		issues,
+		ListFilter{},
+		expansionSet{{projectID: 7, shortID: "aaa1"}: true},
+		childSortTopological,
+		issueListViewFlat,
+	)
+
+	assertQueueShortIDs(t, rows, []string{"aaa1", "bbb2", "ccc3"})
+	for i, row := range rows {
+		if row.depth != 0 || row.hasChildren || row.expanded || row.context {
+			t.Fatalf("flat row %d = %+v, want peer row with no tree state", i, row)
+		}
+	}
+}
+
 func TestBuildQueueRows_FilteredChildAutoShowsAncestorContext(t *testing.T) {
 	issues := []Issue{
 		testIssue("aaa1"),

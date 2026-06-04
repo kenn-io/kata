@@ -12,6 +12,7 @@ type keymap struct {
 	Up, Down, PageUp, PageDown, Home, End          key
 	ScrollUp, ScrollDown                           key
 	Open, NewIssue, NewChild, Search               key
+	ToggleIssueView                                key
 	ExpandCollapse, Expand, Collapse               key
 	SortChildren                                   key
 	FilterStatus, FilterForm, ClearFilters         key
@@ -45,17 +46,20 @@ func newKeymap() keymap {
 		// in the detail view they slide the whole detail document one
 		// line at a time. The list view binds both pairs to the same
 		// cursor handler so existing j/k + arrow ergonomics survive.
-		Up:             key{Keys: []string{"k"}, Help: "up"},
-		Down:           key{Keys: []string{"j"}, Help: "down"},
-		ScrollUp:       key{Keys: []string{"up"}, Help: "scroll up"},
-		ScrollDown:     key{Keys: []string{"down"}, Help: "scroll down"},
-		PageUp:         key{Keys: []string{"pgup"}, Help: "page up"},
-		PageDown:       key{Keys: []string{"pgdown"}, Help: "page down"},
-		Home:           key{Keys: []string{"g"}, Help: "first"},
-		End:            key{Keys: []string{"G"}, Help: "last"},
-		Open:           key{Keys: []string{"enter"}, Help: "open detail"},
-		NewIssue:       key{Keys: []string{"n"}, Help: "new issue (form)"},
-		NewChild:       key{Keys: []string{"N"}, Help: "new child"},
+		Up:         key{Keys: []string{"k"}, Help: "up"},
+		Down:       key{Keys: []string{"j"}, Help: "down"},
+		ScrollUp:   key{Keys: []string{"up"}, Help: "scroll up"},
+		ScrollDown: key{Keys: []string{"down"}, Help: "scroll down"},
+		PageUp:     key{Keys: []string{"pgup"}, Help: "page up"},
+		PageDown:   key{Keys: []string{"pgdown"}, Help: "page down"},
+		Home:       key{Keys: []string{"g"}, Help: "first"},
+		End:        key{Keys: []string{"G"}, Help: "last"},
+		Open:       key{Keys: []string{"enter"}, Help: "open detail"},
+		NewIssue:   key{Keys: []string{"n"}, Help: "new issue (form)"},
+		NewChild:   key{Keys: []string{"N"}, Help: "new child"},
+		ToggleIssueView: key{
+			Keys: []string{"v"}, Help: "toggle flat/nested view",
+		},
 		ExpandCollapse: key{Keys: []string{" "}, Help: "expand/collapse"},
 		Expand:         key{Keys: []string{"right"}, Help: "expand"},
 		Collapse:       key{Keys: []string{"left"}, Help: "collapse"},

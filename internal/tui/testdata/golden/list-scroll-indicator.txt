@@ -26,5 +26,5 @@
     #s040 —    open      issue s040                                                                            1d ago
     #s041 —    open      issue s041                                                                            1d ago
                                                                                                           [18-41 of 50]
- ↑↓ move  ▕ ↵ open      ▕ n new   ▕ N child▕ / search▕ f filter▕ s status▕ o order▕ c clear▕ x close▕ ! priority
- D daemons▕ F federation▕ L layout▕ ? help ▕ q quit
+ ↑↓ move   ▕ ↵ open   ▕ n new       ▕ N child ▕ / search▕ f filter▕ s status▕ v view▕ o order▕ c clear▕ x close
+ ! priority▕ D daemons▕ F federation▕ L layout▕ ? help  ▕ q quit

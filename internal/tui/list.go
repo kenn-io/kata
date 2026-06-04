@@ -58,6 +58,7 @@ type listModel struct {
 	err               error
 	loading           bool
 	truncated         bool
+	viewMode          issueListViewMode
 	childSort         childSortMode
 	// pendingPriority arms the next keystroke to set/clear the priority
 	// of the highlighted row. Set when the user presses `!`; consumed
@@ -129,6 +130,9 @@ func (lm listModel) applyNavKey(
 		}
 	}
 	if next, ok := lm.applyCursorKey(msg, km); ok {
+		return next, nil
+	}
+	if next, ok := lm.applyViewModeKey(msg, km); ok {
 		return next, nil
 	}
 	if next, ok := lm.applyExpandKey(msg, km); ok {
@@ -280,7 +284,7 @@ func (lm listModel) targetQueueRow() (queueRow, bool) {
 }
 
 func (lm listModel) visibleRows() []queueRow {
-	return buildQueueRowsWithSort(lm.issues, lm.filter, lm.expanded, lm.childSort)
+	return buildQueueRowsWithView(lm.issues, lm.filter, lm.expanded, lm.childSort, lm.viewMode)
 }
 
 // projectIDForRow picks the right project_id for the row's mutation.
@@ -404,6 +408,9 @@ func (lm listModel) applyCursorKey(msg tea.KeyMsg, km keymap) (listModel, bool) 
 }
 
 func (lm listModel) applyExpandKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
+	if lm.viewMode == issueListViewFlat {
+		return lm, false
+	}
 	switch {
 	case km.ExpandCollapse.matches(msg):
 		return lm.toggleExpanded(), true
@@ -447,9 +454,26 @@ func (lm listModel) setExpansion(row queueRow, want bool) listModel {
 	return lm
 }
 
+func (lm listModel) applyViewModeKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
+	if !km.ToggleIssueView.matches(msg) {
+		return lm, false
+	}
+	lm = lm.syncSelection(lm.visibleRows())
+	if lm.viewMode == issueListViewFlat {
+		lm.viewMode = issueListViewNested
+	} else {
+		lm.viewMode = issueListViewFlat
+	}
+	lm.status = "view: " + lm.viewMode.label()
+	return lm.restoreCursorToSelection(), true
+}
+
 func (lm listModel) applyChildSortKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
 	if !km.SortChildren.matches(msg) {
 		return lm, false
+	}
+	if lm.viewMode == issueListViewFlat {
+		return lm, true
 	}
 	lm = lm.syncSelection(lm.visibleRows())
 	if lm.childSort == childSortTemporal {

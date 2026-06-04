@@ -522,6 +522,40 @@ func TestList_ArrowExpandCollapse_LeafNoOp(t *testing.T) {
 	}
 }
 
+func TestList_ViewToggleShowsFlatPeersAndPreservesSelection(t *testing.T) {
+	api, km, sc := newListEnv()
+	parentSID := "p001"
+	lm := listModel{
+		issues: []Issue{
+			testIssue("aaa1"),
+			testIssue("p001", withCounts(1, 1)),
+			testIssue("c002", withParent(parentSID)),
+		},
+		cursor: 1,
+	}
+
+	lm, cmd := lm.Update(runeKey('v'), km, api, sc)
+	if cmd != nil {
+		t.Fatalf("view toggle should not dispatch a command, got %T", cmd)
+	}
+	if lm.viewMode != issueListViewFlat {
+		t.Fatalf("viewMode = %v, want flat", lm.viewMode)
+	}
+	assertQueueShortIDs(t, lm.visibleRows(), []string{"aaa1", "p001", "c002"})
+	if lm.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 on selected parent", lm.cursor)
+	}
+
+	lm, _ = lm.Update(runeKey('v'), km, api, sc)
+	if lm.viewMode != issueListViewNested {
+		t.Fatalf("viewMode = %v, want nested", lm.viewMode)
+	}
+	assertQueueShortIDs(t, lm.visibleRows(), []string{"aaa1", "p001"})
+	if lm.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 after returning to nested", lm.cursor)
+	}
+}
+
 func TestList_SelectionPreservedAcrossRefetchWithParentInsertion(t *testing.T) {
 	parentSID := "p001"
 	lm := listModel{

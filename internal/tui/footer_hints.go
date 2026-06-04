@@ -130,6 +130,7 @@ func (lm listModel) queueHelpRows() [][]helpItem {
 		helpItem{key: "/", desc: "search"},
 		helpItem{key: "f", desc: "filter"},
 		helpItem{key: "s", desc: "status"},
+		helpItem{key: "v", desc: "view"},
 		helpItem{key: "o", desc: "order"},
 		helpItem{key: "c", desc: "clear"},
 		helpItem{key: "x", desc: "close"},
