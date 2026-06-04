@@ -39,7 +39,12 @@ all parents collapsed.
 In nested view, `space` or right arrow expands the selected parent, left arrow
 collapses it, and `E` toggles every parent in the current list: it expands all
 when any parent is collapsed, then collapses all when every parent is already
-expanded. Press `?` inside the TUI for the full keybinding list.
+expanded.
+
+Use `PgUp` and `PgDn` to move by the visible list window. Paging preserves the
+cursor's screen row when it lands on the first or final page, then jumps to the
+first or last issue only when no further page movement is possible. Press `?`
+inside the TUI for the full keybinding list.
 
 ## Initialize a workspace
 

@@ -211,6 +211,10 @@ the selected parent, left arrow collapses it, and `E` toggles every parent in
 the current list. `E` expands all when any parent is collapsed, then collapses
 all when every parent is already expanded.
 
+`PgUp` and `PgDn` page by the visible issue-list window. When a page lands on
+the first or final page, the cursor keeps its screen row; pressing the same page
+key again at that boundary jumps to the first or last issue.
+
 The TUI appends local daemon transport diagnostics to
 `<KATA_HOME>/runtime/<dbhash>/tui.log`, including retried stale-socket failures
 and request paths. Use that file when an interactive fetch reports a local
