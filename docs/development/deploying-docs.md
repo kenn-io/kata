@@ -77,7 +77,8 @@ scripts/update-docs.sh
 
 The helper regenerates and pushes the `docs-assets` screenshot branch, hydrates
 local screenshots, builds the docs, runs the docs checks, and deploys with
-Vercel. It does not commit source changes; commit docs edits before running it.
+Vercel. It does not commit source changes; commit or stash non-ignored docs
+edits before running it.
 
 If you need to run only the Vercel deploy step:
 

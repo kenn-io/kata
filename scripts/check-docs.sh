@@ -138,12 +138,14 @@ require_line scripts/update-docs.sh 'bash docs/screenshots/hydrate-assets.sh'
 require_line scripts/update-docs.sh 'make docs-build'
 require_line scripts/update-docs.sh 'make docs-check'
 require_line scripts/update-docs.sh 'make docs-deploy'
+require_line scripts/update-docs.sh '--untracked-files=all'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
 
 reject_line docs/development/deploying-docs.md 'vercel link --cwd docs'
 reject_line docs/development/deploying-docs.md 'vercel deploy --cwd docs --prod'
 reject_line Makefile 'vercel deploy --cwd docs --prod'
 reject_line scripts/update-docs.sh 'git commit'
+reject_line scripts/update-docs.sh '--untracked-files=no'
 
 for stale_reference in Makefile docs/zensical-docs.sh docs/development/deploying-docs.md; do
   if grep -F -- "requirements-docs.txt" "$stale_reference" >/dev/null; then
