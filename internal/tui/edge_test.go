@@ -195,8 +195,11 @@ func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) {
 	assertViewContains(t, nm, "[23-46 of 50]")
 
 	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgDown})
-	assertSelection(t, nm, 49, "01TEST-r050")
+	assertSelection(t, nm, 31, "01TEST-r032")
 	assertViewContains(t, nm, "[27-50 of 50]")
+
+	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgDown})
+	assertSelection(t, nm, 49, "01TEST-r050")
 
 	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
 	if nm.list.cursor >= 49 {
@@ -204,8 +207,44 @@ func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) {
 	}
 
 	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
+	assertSelection(t, nm, 23, "01TEST-r024")
+	assertViewContains(t, nm, "[1-24 of 50]")
+
+	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
 	assertSelection(t, nm, 0, "01TEST-r001")
 	assertViewContains(t, nm, "[1-24 of 50]")
+}
+
+func TestEdge_PageDownToFinalPagePreservesScreenRow(t *testing.T) {
+	m := initialModel(Options{})
+	m.list.loading = false
+	m.list.issues = makeTestIssues(88)
+	m.list.cursor = 0
+	mm, _ := updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 80})
+	m = mm
+
+	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyPgDown})
+	assertSelection(t, nm, 14, "01TEST-r015")
+	assertViewContains(t, nm, "[15-88 of 88]")
+
+	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgDown})
+	assertSelection(t, nm, 87, "01TEST-r088")
+}
+
+func TestEdge_PageUpToFirstPagePreservesScreenRow(t *testing.T) {
+	m := initialModel(Options{})
+	m.list.loading = false
+	m.list.issues = makeTestIssues(88)
+	m.list.cursor = 87
+	mm, _ := updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 80})
+	m = mm
+
+	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyPgUp})
+	assertSelection(t, nm, 73, "01TEST-r074")
+	assertViewContains(t, nm, "[1-74 of 88]")
+
+	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
+	assertSelection(t, nm, 0, "01TEST-r001")
 }
 
 // TestEdge_PageDown_ClampsAtEnd: pgdown near the end clamps to the
