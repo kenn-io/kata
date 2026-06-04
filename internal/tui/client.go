@@ -9,8 +9,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
+	"time"
 
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 )
 
@@ -19,11 +24,29 @@ import (
 type Client struct {
 	base string
 	hc   *http.Client
+	mu   sync.RWMutex
 }
 
 // NewClient wraps a pre-built *http.Client with a typed daemon adapter.
 // base is the daemon URL — "http://kata.invalid" for unix-socket transport.
 func NewClient(base string, hc *http.Client) *Client { return &Client{base: base, hc: hc} }
+
+var (
+	refreshLocalHTTPClientForTUI = func(ctx context.Context) (*http.Client, error) {
+		endpoint, err := clientpkg.EnsureLocalRunning(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return clientpkg.NewHTTPClient(ctx, endpoint, clientpkg.Opts{Timeout: defaultHTTPTimeout})
+	}
+	tuiClientLogPathForTUI = func() (string, error) {
+		dir, err := config.RuntimeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(dir, "tui.log"), nil
+	}
+)
 
 // GetInstance returns the daemon instance identity and schema version.
 func (c *Client) GetInstance(ctx context.Context) (InstanceInfo, error) {
@@ -515,9 +538,16 @@ func (c *Client) doWithHeaders(
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := c.hc.Do(req) //nolint:gosec // G704: c.base built from our own daemon discovery
+	hc := c.httpClient()
+	if hc == nil {
+		return fmt.Errorf("%s %s: daemon client is not initialized", method, path)
+	}
+	resp, err := hc.Do(req) //nolint:gosec // G704: c.base built from our own daemon discovery
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, path, err)
+		resp, err = c.retryLocalTransportFailure(ctx, method, path, body, headers, err)
+		if err != nil {
+			return err
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
@@ -527,6 +557,106 @@ func (c *Client) doWithHeaders(
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func (c *Client) httpClient() *http.Client {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.hc
+}
+
+func (c *Client) setHTTPClient(hc *http.Client) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hc = hc
+}
+
+func (c *Client) retryLocalTransportFailure(
+	ctx context.Context,
+	method, path string,
+	body any,
+	headers map[string]string,
+	err error,
+) (*http.Response, error) {
+	phase := "request failed"
+	if c.base == clientpkg.UnixBase && ctx.Err() == nil {
+		phase = "request failed; retrying local daemon"
+	}
+	logTUIClientTransport(phase, method, path, c.base, err)
+	if c.base != clientpkg.UnixBase || ctx.Err() != nil {
+		return nil, transportError(method, path, c.base, err)
+	}
+	hc, refreshErr := refreshLocalHTTPClientForTUI(ctx)
+	if refreshErr != nil {
+		logTUIClientTransport("retry refresh failed", method, path, c.base, refreshErr)
+		return nil, transportError(method, path, c.base, err)
+	}
+	c.setHTTPClient(hc)
+	req, reqErr := buildRequest(ctx, method, c.base+path, body)
+	if reqErr != nil {
+		return nil, reqErr
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, retryErr := hc.Do(req) //nolint:gosec // G704: c.base built from our own daemon discovery
+	if retryErr != nil {
+		logTUIClientTransport("retry failed", method, path, c.base, retryErr)
+		return nil, transportError(method, path, c.base, retryErr)
+	}
+	logTUIClientTransport("retry succeeded", method, path, c.base, nil)
+	return resp, nil
+}
+
+func transportError(method, path, base string, err error) error {
+	if base == clientpkg.UnixBase {
+		return fmt.Errorf("%s %s: local kata daemon connection failed: %s",
+			method, path, sanitizeLocalDaemonError(err))
+	}
+	return fmt.Errorf("%s %s: %w", method, path, err)
+}
+
+func sanitizeLocalDaemonError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.ReplaceAll(err.Error(), clientpkg.UnixBase, "local daemon")
+}
+
+func logTUIClientTransport(phase, method, path, base string, err error) {
+	logPath, pathErr := tuiClientLogPathForTUI()
+	if pathErr != nil || logPath == "" {
+		return
+	}
+	if mkErr := os.MkdirAll(filepath.Dir(logPath), 0o700); mkErr != nil {
+		return
+	}
+	f, openErr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if openErr != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	errText := ""
+	if err != nil {
+		errText = err.Error()
+	}
+	_, _ = fmt.Fprintf(f, "%s phase=%q method=%q path=%q base=%q error=%q\n",
+		time.Now().UTC().Format(time.RFC3339Nano),
+		phase,
+		method,
+		path,
+		redactURLUserinfo(base),
+		errText,
+	)
+}
+
+func redactURLUserinfo(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = url.User("***")
+	return u.String()
 }
 
 func buildRequest(ctx context.Context, method, fullURL string, body any) (*http.Request, error) {
