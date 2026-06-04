@@ -610,6 +610,10 @@ func (lm listModel) pageCursor(direction, totalRows int) listModel {
 		nextStart = maxStart
 	}
 	lm.windowStart = nextStart
+	if direction > 0 && nextStart == maxStart {
+		lm.cursor = totalRows - 1
+		return lm
+	}
 	lm.cursor = nextStart + screenRow
 	if lm.cursor >= totalRows {
 		lm.cursor = totalRows - 1
