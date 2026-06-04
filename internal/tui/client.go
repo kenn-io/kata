@@ -631,6 +631,7 @@ func logTUIClientTransport(phase, method, path, base string, err error) {
 	if mkErr := os.MkdirAll(filepath.Dir(logPath), 0o700); mkErr != nil {
 		return
 	}
+	//nolint:gosec // logPath is the fixed tui.log under config.RuntimeDir().
 	f, openErr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if openErr != nil {
 		return

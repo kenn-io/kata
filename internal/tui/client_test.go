@@ -327,6 +327,7 @@ func TestClient_LocalUnixTransportFailureLogsAndHidesSyntheticHost(t *testing.T)
 	assert.Contains(t, err.Error(), "local kata daemon connection failed")
 	assert.NotContains(t, err.Error(), "kata.invalid")
 
+	//nolint:gosec // logPath is a test-controlled file under t.TempDir().
 	bs, readErr := os.ReadFile(logPath)
 	require.NoError(t, readErr)
 	logged := string(bs)
