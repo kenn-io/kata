@@ -122,6 +122,9 @@ func (lm listModel) queueHelpRows() [][]helpItem {
 	if ok && row.hasChildren {
 		items = append(items, helpItem{key: "space", desc: "expand"})
 	}
+	if lm.viewMode != issueListViewFlat && len(lm.expandableKeys()) > 0 {
+		items = append(items, helpItem{key: "E", desc: "all"})
+	}
 	items = append(items, helpItem{key: "n", desc: "new"})
 	if ok {
 		items = append(items, helpItem{key: "N", desc: "child"})

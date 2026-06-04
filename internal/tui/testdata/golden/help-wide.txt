@@ -21,6 +21,7 @@ enter   open detail                N      new child
 space   expand/collapse            j/k    move child cursor
 right   expand                     ↑↓     scroll detail viewport
 left    collapse                   enter  open child
+E       expand/collapse all
 n       new issue (form)
 v       toggle flat/nested view
 o       toggle graph order

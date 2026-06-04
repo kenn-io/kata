@@ -135,6 +135,9 @@ func (lm listModel) applyNavKey(
 	if next, ok := lm.applyViewModeKey(msg, km); ok {
 		return next, nil
 	}
+	if next, ok := lm.applyExpandAllKey(msg, km); ok {
+		return next, nil
+	}
 	if next, ok := lm.applyExpandKey(msg, km); ok {
 		return next, nil
 	}
@@ -422,6 +425,40 @@ func (lm listModel) applyExpandKey(msg tea.KeyMsg, km keymap) (listModel, bool) 
 	return lm, false
 }
 
+func (lm listModel) applyExpandAllKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
+	if !km.ExpandAll.matches(msg) {
+		return lm, false
+	}
+	if lm.viewMode == issueListViewFlat {
+		return lm, true
+	}
+	lm = lm.syncSelection(lm.visibleRows())
+	keys := lm.expandableKeys()
+	if lm.allExpandableKeysExpanded(keys) {
+		lm.expanded = expansionSet{}
+		lm.status = "collapsed all"
+		return lm.restoreCursorToSelection(), true
+	}
+	lm.expanded = make(expansionSet, len(keys))
+	for _, key := range keys {
+		lm.expanded[key] = true
+	}
+	lm.status = "expanded all"
+	return lm.restoreCursorToSelection(), true
+}
+
+func (lm listModel) allExpandableKeysExpanded(keys []issueKey) bool {
+	if len(keys) == 0 {
+		return false
+	}
+	for _, key := range keys {
+		if !lm.expanded[key] {
+			return false
+		}
+	}
+	return true
+}
+
 func (lm listModel) toggleExpanded() listModel {
 	row, ok := lm.targetQueueRow()
 	if !ok || !row.hasChildren {
@@ -461,6 +498,7 @@ func (lm listModel) applyViewModeKey(msg tea.KeyMsg, km keymap) (listModel, bool
 	lm = lm.syncSelection(lm.visibleRows())
 	if lm.viewMode == issueListViewFlat {
 		lm.viewMode = issueListViewNested
+		lm.expanded = expansionSet{}
 	} else {
 		lm.viewMode = issueListViewFlat
 	}
@@ -487,7 +525,7 @@ func (lm listModel) applyChildSortKey(msg tea.KeyMsg, km keymap) (listModel, boo
 
 func (lm listModel) restoreCursorToSelection() listModel {
 	if lm.selectedUID == "" {
-		return lm
+		return lm.clampCursorToVisibleRows()
 	}
 	for i, row := range lm.visibleRows() {
 		if row.issue.UID == lm.selectedUID &&
@@ -496,6 +534,46 @@ func (lm listModel) restoreCursorToSelection() listModel {
 			return lm
 		}
 	}
+	return lm.clampCursorToVisibleRows()
+}
+
+func (lm listModel) expandableKeys() []issueKey {
+	present := make(map[issueKey]bool, len(lm.issues))
+	for _, iss := range lm.issues {
+		present[issueKey{projectID: iss.ProjectID, shortID: iss.ShortID}] = true
+	}
+	seen := map[issueKey]bool{}
+	keys := []issueKey{}
+	for _, iss := range lm.issues {
+		if iss.ParentShortID == nil {
+			continue
+		}
+		parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
+		if !present[parentKey] || seen[parentKey] {
+			continue
+		}
+		seen[parentKey] = true
+		keys = append(keys, parentKey)
+	}
+	return keys
+}
+
+func (lm listModel) clampCursorToVisibleRows() listModel {
+	rows := lm.visibleRows()
+	if len(rows) == 0 {
+		lm.cursor = 0
+		lm.selectedUID = ""
+		lm.selectedProjectID = 0
+		return lm
+	}
+	if lm.cursor >= len(rows) {
+		lm.cursor = len(rows) - 1
+	}
+	if lm.cursor < 0 {
+		lm.cursor = 0
+	}
+	lm.selectedUID = rows[lm.cursor].issue.UID
+	lm.selectedProjectID = rows[lm.cursor].issue.ProjectID
 	return lm
 }
 

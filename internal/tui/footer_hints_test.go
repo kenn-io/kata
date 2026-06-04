@@ -11,6 +11,7 @@ func TestQueueHelpRows_ConditionalItems(t *testing.T) {
 	withChildren := Model{list: listModel{issues: hierarchyIssues()}}
 	assertHelpItemsPresent(t, withChildren.queueHelpRows(),
 		helpItem{key: "space", desc: "expand"},
+		helpItem{key: "E", desc: "all"},
 		helpItem{key: "N", desc: "child"},
 		helpItem{key: "o", desc: "order"})
 
@@ -19,8 +20,15 @@ func TestQueueHelpRows_ConditionalItems(t *testing.T) {
 	}}}
 	assertHelpItemAbsent(t, flattenHelpRows(leaf.queueHelpRows()),
 		helpItem{key: "space", desc: "expand"})
+	assertHelpItemAbsent(t, flattenHelpRows(leaf.queueHelpRows()),
+		helpItem{key: "E", desc: "all"})
 	assertHelpItemPresent(t, flattenHelpRows(leaf.queueHelpRows()),
 		helpItem{key: "N", desc: "child"})
+
+	flat := withChildren
+	flat.list.viewMode = issueListViewFlat
+	assertHelpItemAbsent(t, flattenHelpRows(flat.queueHelpRows()),
+		helpItem{key: "E", desc: "all"})
 
 	empty := Model{}
 	assertHelpItemAbsent(t, flattenHelpRows(empty.queueHelpRows()),

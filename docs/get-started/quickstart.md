@@ -30,7 +30,16 @@ Open the TUI when a human wants to browse or triage:
 kata tui
 ```
 
-Press `?` inside the TUI for keybindings.
+In the issue list, press `v` to switch between nested and flat views. Nested
+view groups children under parents; flat view shows matching issues as peers in
+list order, which is useful when recently updated child issues should not be
+hidden under a collapsed parent. Switching from flat back to nested starts with
+all parents collapsed.
+
+In nested view, `space` or right arrow expands the selected parent, left arrow
+collapses it, and `E` toggles every parent in the current list: it expands all
+when any parent is collapsed, then collapses all when every parent is already
+expanded. Press `?` inside the TUI for the full keybinding list.
 
 ## Initialize a workspace
 

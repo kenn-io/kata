@@ -29,8 +29,10 @@ kata close abc4 --done --message "Fixed the login race and verified the relevant
 kata tui                                     # browse and triage interactively
 ```
 
-`kata create` returns each issue's short_id; use it in later commands. Press `?`
-inside `kata tui` for keybindings.
+`kata create` returns each issue's short_id; use it in later commands. In
+`kata tui`, press `v` to switch between nested and flat issue lists, `E` to
+expand or collapse all parents in nested view, and `?` for the full keybinding
+list.
 
 For agent-heavy workspaces, use `kata init --with-agents` to also write a
 managed kata briefing into `AGENTS.md`; re-running it refreshes kata's block
