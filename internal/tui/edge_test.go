@@ -202,6 +202,10 @@ func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) {
 	if nm.list.cursor >= 49 {
 		t.Fatalf("after pgup from end, cursor = %d, want movement off the last row", nm.list.cursor)
 	}
+
+	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
+	assertSelection(t, nm, 0, "01TEST-r001")
+	assertViewContains(t, nm, "[1-24 of 50]")
 }
 
 // TestEdge_PageDown_ClampsAtEnd: pgdown near the end clamps to the
