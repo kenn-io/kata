@@ -24,6 +24,7 @@ required_files=(
   "docs/vercel.json"
   "docs/vercel-build.sh"
   "docs/zensical-docs.sh"
+  "scripts/update-docs.sh"
   "docs/pyproject.toml"
   "docs/uv.lock"
   "docs/design/index.md"
@@ -70,6 +71,11 @@ for file in "${required_files[@]}"; do
     missing=1
   fi
 done
+
+if [[ -f "scripts/update-docs.sh" && ! -x "scripts/update-docs.sh" ]]; then
+  printf 'docs deploy helper must be executable: scripts/update-docs.sh\n' >&2
+  missing=1
+fi
 
 if [[ "$missing" -ne 0 ]]; then
   exit 1
@@ -124,13 +130,20 @@ require_line docs/development/deploying-docs.md 'Vercel should build with `uv ru
 require_line docs/development/deploying-docs.md 'Vercel should publish the generated `site/` directory'
 require_line docs/development/deploying-docs.md 'vercel deploy --prod'
 require_line docs/development/deploying-docs.md 'make docs-deploy'
+require_line docs/development/deploying-docs.md 'scripts/update-docs.sh'
 require_line Makefile 'docs-deploy:'
 require_line Makefile 'vercel deploy --prod'
+require_line scripts/update-docs.sh 'bash docs/screenshots/update-assets-branch.sh --push'
+require_line scripts/update-docs.sh 'bash docs/screenshots/hydrate-assets.sh'
+require_line scripts/update-docs.sh 'make docs-build'
+require_line scripts/update-docs.sh 'make docs-check'
+require_line scripts/update-docs.sh 'make docs-deploy'
 require_line README.md 'kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>'
 
 reject_line docs/development/deploying-docs.md 'vercel link --cwd docs'
 reject_line docs/development/deploying-docs.md 'vercel deploy --cwd docs --prod'
 reject_line Makefile 'vercel deploy --cwd docs --prod'
+reject_line scripts/update-docs.sh 'git commit'
 
 for stale_reference in Makefile docs/zensical-docs.sh docs/development/deploying-docs.md; do
   if grep -F -- "requirements-docs.txt" "$stale_reference" >/dev/null; then
