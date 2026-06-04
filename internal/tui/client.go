@@ -580,10 +580,17 @@ func (c *Client) retryLocalTransportFailure(
 ) (*http.Response, error) {
 	phase := "request failed"
 	if c.base == clientpkg.UnixBase && ctx.Err() == nil {
-		phase = "request failed; retrying local daemon"
+		if canRetryLocalTransport(method, headers) {
+			phase = "request failed; retrying local daemon"
+		} else {
+			phase = "request failed; retry skipped for non-idempotent request"
+		}
 	}
 	logTUIClientTransport(phase, method, path, c.base, err)
 	if c.base != clientpkg.UnixBase || ctx.Err() != nil {
+		return nil, transportError(method, path, c.base, err)
+	}
+	if !canRetryLocalTransport(method, headers) {
 		return nil, transportError(method, path, c.base, err)
 	}
 	hc, refreshErr := refreshLocalHTTPClientForTUI(ctx)
@@ -608,6 +615,19 @@ func (c *Client) retryLocalTransportFailure(
 	return resp, nil
 }
 
+func canRetryLocalTransport(method string, headers map[string]string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	for k, v := range headers {
+		if strings.EqualFold(k, "Idempotency-Key") && strings.TrimSpace(v) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func transportError(method, path, base string, err error) error {
 	if base == clientpkg.UnixBase {
 		return fmt.Errorf("%s %s: local kata daemon connection failed: %s",
@@ -621,6 +641,15 @@ func sanitizeLocalDaemonError(err error) string {
 		return ""
 	}
 	return strings.ReplaceAll(err.Error(), clientpkg.UnixBase, "local daemon")
+}
+
+type tuiClientTransportLogEntry struct {
+	Time   string `json:"time"`
+	Phase  string `json:"phase"`
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Base   string `json:"base"`
+	Error  string `json:"error,omitempty"`
 }
 
 func logTUIClientTransport(phase, method, path, base string, err error) {
@@ -641,14 +670,14 @@ func logTUIClientTransport(phase, method, path, base string, err error) {
 	if err != nil {
 		errText = err.Error()
 	}
-	_, _ = fmt.Fprintf(f, "%s phase=%q method=%q path=%q base=%q error=%q\n",
-		time.Now().UTC().Format(time.RFC3339Nano),
-		phase,
-		method,
-		path,
-		redactURLUserinfo(base),
-		errText,
-	)
+	_ = json.NewEncoder(f).Encode(tuiClientTransportLogEntry{
+		Time:   time.Now().UTC().Format(time.RFC3339Nano),
+		Phase:  phase,
+		Method: method,
+		Path:   path,
+		Base:   redactURLUserinfo(base),
+		Error:  errText,
+	})
 }
 
 func redactURLUserinfo(raw string) string {

@@ -304,6 +304,60 @@ func TestClient_LocalUnixTransportFailureRetriesWithRefreshedClient(t *testing.T
 	assert.Equal(t, "aaa1", got[0].ShortID)
 }
 
+func TestClient_LocalUnixTransportFailureDoesNotRetryMutationWithoutIdempotencyKey(t *testing.T) {
+	oldRefresh := refreshLocalHTTPClientForTUI
+	t.Cleanup(func() { refreshLocalHTTPClientForTUI = oldRefresh })
+	var refreshed atomic.Bool
+	refreshLocalHTTPClientForTUI = func(context.Context) (*http.Client, error) {
+		refreshed.Store(true)
+		return &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("non-idempotent mutation should not be retried")
+			return nil, nil
+		})}, nil
+	}
+
+	c := NewClient(clientpkg.UnixBase, &http.Client{Transport: roundTripFunc(
+		func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("read unix /tmp/kata.sock: connection reset by peer")
+		},
+	)})
+
+	_, err := c.AddComment(context.Background(), 7, "abc4", "note", "alice")
+	require.Error(t, err)
+	require.False(t, refreshed.Load(), "non-idempotent mutation should not refresh and retry")
+	assert.Contains(t, err.Error(), "local kata daemon connection failed")
+}
+
+func TestClient_LocalUnixTransportFailureRetriesMutationWithIdempotencyKey(t *testing.T) {
+	oldRefresh := refreshLocalHTTPClientForTUI
+	t.Cleanup(func() { refreshLocalHTTPClientForTUI = oldRefresh })
+	var refreshed atomic.Bool
+	var gotKey string
+	refreshLocalHTTPClientForTUI = func(context.Context) (*http.Client, error) {
+		refreshed.Store(true)
+		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			gotKey = r.Header.Get("Idempotency-Key")
+			return jsonResponse(t, map[string]any{
+				"issue":   map[string]any{"short_id": "aaa1", "title": "created", "status": "open"},
+				"changed": true,
+			}), nil
+		})}, nil
+	}
+
+	c := NewClient(clientpkg.UnixBase, &http.Client{Transport: roundTripFunc(
+		func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("read unix /tmp/kata.sock: connection reset by peer")
+		},
+	)})
+
+	_, err := c.CreateIssue(context.Background(), 7, CreateIssueBody{
+		Title: "created", Actor: "alice", IdempotencyKey: "create-issue-key",
+	})
+	require.NoError(t, err)
+	require.True(t, refreshed.Load(), "idempotent mutation should refresh and retry")
+	assert.Equal(t, "create-issue-key", gotKey)
+}
+
 func TestClient_LocalUnixTransportFailureLogsAndHidesSyntheticHost(t *testing.T) {
 	oldRefresh := refreshLocalHTTPClientForTUI
 	oldLogPath := tuiClientLogPathForTUI
