@@ -60,6 +60,7 @@ type listModel struct {
 	truncated         bool
 	viewMode          issueListViewMode
 	childSort         childSortMode
+	pageStep          int
 	// pendingPriority arms the next keystroke to set/clear the priority
 	// of the highlighted row. Set when the user presses `!`; consumed
 	// when the next key is 0..4 (set) or `-` (clear); reset by any other
@@ -385,12 +386,12 @@ func (lm listModel) applyCursorKey(msg tea.KeyMsg, km keymap) (listModel, bool) 
 			lm.cursor++
 		}
 	case km.PageUp.matches(msg):
-		lm.cursor -= pageStep(n)
+		lm.cursor -= lm.cursorPageStep(n)
 		if lm.cursor < 0 {
 			lm.cursor = 0
 		}
 	case km.PageDown.matches(msg):
-		lm.cursor += pageStep(n)
+		lm.cursor += lm.cursorPageStep(n)
 		if lm.cursor > n-1 {
 			lm.cursor = n - 1
 		}
@@ -577,19 +578,29 @@ func (lm listModel) clampCursorToVisibleRows() listModel {
 	return lm
 }
 
-// pageStepRows is the row delta for pgup/pgdown. We don't have access
-// to the rendered viewport height here, so we use a constant matching
-// roughly half a screen on a typical terminal — large enough to feel
-// like a page, small enough to keep context. The cap prevents an
-// outright jump-to-end on small lists where pgdown is functionally
-// equivalent to End.
-const pageStepRows = 10
+const listFallbackPageStep = 10
+const listPageOverlap = 2
 
-func pageStep(n int) int {
-	if pageStepRows > n {
-		return n
+func listPageStepForRows(visibleRows int) int {
+	if visibleRows <= 0 {
+		return listFallbackPageStep
 	}
-	return pageStepRows
+	step := visibleRows - listPageOverlap
+	if step < 1 {
+		return 1
+	}
+	return step
+}
+
+func (lm listModel) cursorPageStep(totalRows int) int {
+	step := lm.pageStep
+	if step <= 0 {
+		step = listFallbackPageStep
+	}
+	if step > totalRows {
+		return totalRows
+	}
+	return step
 }
 
 // syncSelection records the issue.UID under the cursor so a later

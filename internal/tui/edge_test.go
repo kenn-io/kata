@@ -177,20 +177,20 @@ func TestEdge_IdentitySelection_FallsBackWhenIssueDisappears(t *testing.T) {
 	assertSelection(t, nm, 1, "01TEST-ccc3")
 }
 
-// TestEdge_PageUpPageDown_MovesCursorInChunks: pgup/pgdown shift the
-// cursor by pageStep rows so navigating long lists doesn't require
-// hundreds of j/k presses.
-func TestEdge_PageUpPageDown_MovesCursorInChunks(t *testing.T) {
+// TestEdge_PageUpPageDown_UsesViewportStep: pgup/pgdown shift the
+// cursor by roughly one rendered page, not the historical fixed 10-row
+// fallback, so tall terminals can skim long lists efficiently.
+func TestEdge_PageUpPageDown_UsesViewportStep(t *testing.T) {
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = makeTestIssues(50)
 	m.list.cursor = 5
+	mm, _ := updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 30})
+	m = mm
 
-	// pgdown advances by pageStep (10).
 	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyPgDown})
-	assertSelection(t, nm, 15, "01TEST-r016")
+	assertSelection(t, nm, 27, "01TEST-r028")
 
-	// pgup walks back by pageStep.
 	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
 	if nm.list.cursor != 5 {
 		t.Fatalf("after pgup, cursor = %d, want 5", nm.list.cursor)

@@ -676,9 +676,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if prevLayout != m.layout {
 			m, flipCmd = m.handleLayoutFlip(prevLayout)
 		}
-		// Cache the terminal/detail viewport so PgDn can clamp body
-		// scroll against the same dimensions the renderer will use.
+		// Cache viewport dimensions so PgDn/PgUp use the same page
+		// sizes the renderer draws.
 		m.detail = m.applyDetailViewportCache(m.detail)
+		m = m.applyListViewportCache()
 		return m, flipCmd, true
 	case tea.KeyMsg:
 		// Modal owns input when active. Enter the modal-specific
@@ -749,6 +750,30 @@ func (m Model) applyDetailViewportCache(dm detailModel) detailModel {
 	dm.lastTermWidth = m.width
 	dm.lastTermHeight = m.height
 	return m.cacheDetailViewport(dm)
+}
+
+func (m Model) applyListViewportCache() Model {
+	m.list.pageStep = listPageStepForRows(m.listRenderedDataRows())
+	return m
+}
+
+func (m Model) listRenderedDataRows() int {
+	if m.width <= 0 || m.height <= 0 {
+		return 0
+	}
+	if m.layout == layoutSplit {
+		innerH := splitBodyHeight(m) - 2
+		if innerH < 2 {
+			innerH = 2
+		}
+		return max(1, innerH-1)
+	}
+	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
+	bodyRows := m.height - 2 - 1 - footerLines
+	if bodyRows < listBodyFloor {
+		bodyRows = listBodyFloor
+	}
+	return max(1, bodyRows-1)
 }
 
 func (m Model) cacheDetailViewport(dm detailModel) detailModel {
@@ -2340,6 +2365,7 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.view {
 	case viewList:
 		var cmd tea.Cmd
+		m = m.applyListViewportCache()
 		m.list, cmd = m.list.Update(msg, m.keymap, m.api, m.scope)
 		return m, withConnGen(cmd, m.connGen)
 	case viewDetail:
@@ -2374,6 +2400,7 @@ func (m Model) dispatchToSplitPane(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// list mutations / list refetches land where the user is looking.
 	if m.focus == focusList {
 		var cmd tea.Cmd
+		m = m.applyListViewportCache()
 		m.list, cmd = m.list.Update(msg, m.keymap, m.api, m.scope)
 		return m, withConnGen(cmd, m.connGen)
 	}
@@ -2399,6 +2426,7 @@ func (m Model) dispatchToSplitPane(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) dispatchListKey(msg tea.Msg) (Model, tea.Cmd) {
 	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 	var cmd tea.Cmd
+	m = m.applyListViewportCache()
 	m.list, cmd = m.list.Update(msg, m.keymap, m.api, m.scope)
 	newPID, newUID, newHas := highlightedIdentity(m.list)
 	if prevHas == newHas && prevPID == newPID && prevUID == newUID {
