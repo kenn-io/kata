@@ -177,10 +177,12 @@ func TestEdge_IdentitySelection_FallsBackWhenIssueDisappears(t *testing.T) {
 	assertSelection(t, nm, 1, "01TEST-ccc3")
 }
 
-// TestEdge_PageUpPageDown_UsesViewportStep: pgup/pgdown shift the
-// cursor by roughly one rendered page, not the historical fixed 10-row
-// fallback, so tall terminals can skim long lists efficiently.
-func TestEdge_PageUpPageDown_UsesViewportStep(t *testing.T) {
+// TestEdge_PageUpPageDown_PagesVisibleWindow: pgup/pgdown move the
+// rendered window by roughly one page and keep the cursor on the same
+// screen row when possible. This feels like paging the viewport,
+// unlike the old cursor-only jump that re-centered the list around
+// the new row.
+func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) {
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = makeTestIssues(50)
@@ -190,11 +192,13 @@ func TestEdge_PageUpPageDown_UsesViewportStep(t *testing.T) {
 
 	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyPgDown})
 	assertSelection(t, nm, 27, "01TEST-r028")
+	assertViewContains(t, nm, "[23-46 of 50]")
 
 	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
 	if nm.list.cursor != 5 {
 		t.Fatalf("after pgup, cursor = %d, want 5", nm.list.cursor)
 	}
+	assertViewContains(t, nm, "[1-24 of 50]")
 }
 
 // TestEdge_PageDown_ClampsAtEnd: pgdown near the end clamps to the

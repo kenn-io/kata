@@ -60,7 +60,8 @@ type listModel struct {
 	truncated         bool
 	viewMode          issueListViewMode
 	childSort         childSortMode
-	pageStep          int
+	pageRows          int
+	windowStart       int
 	// pendingPriority arms the next keystroke to set/clear the priority
 	// of the highlighted row. Set when the user presses `!`; consumed
 	// when the next key is 0..4 (set) or `-` (clear); reset by any other
@@ -386,20 +387,12 @@ func (lm listModel) applyCursorKey(msg tea.KeyMsg, km keymap) (listModel, bool) 
 			lm.cursor++
 		}
 	case km.PageUp.matches(msg):
-		lm.cursor -= lm.cursorPageStep(n)
-		if lm.cursor < 0 {
-			lm.cursor = 0
-		}
+		lm = lm.pageCursor(-1, n)
 	case km.PageDown.matches(msg):
-		lm.cursor += lm.cursorPageStep(n)
-		if lm.cursor > n-1 {
-			lm.cursor = n - 1
-		}
-		if lm.cursor < 0 {
-			lm.cursor = 0
-		}
+		lm = lm.pageCursor(1, n)
 	case km.Home.matches(msg):
 		lm.cursor = 0
+		lm.windowStart = 0
 	case km.End.matches(msg):
 		if n > 0 {
 			lm.cursor = n - 1
@@ -407,6 +400,7 @@ func (lm listModel) applyCursorKey(msg tea.KeyMsg, km keymap) (listModel, bool) 
 	default:
 		return lm, false
 	}
+	lm = lm.ensureCursorVisible(n)
 	lm = lm.syncSelection(rows)
 	return lm, true
 }
@@ -528,11 +522,12 @@ func (lm listModel) restoreCursorToSelection() listModel {
 	if lm.selectedUID == "" {
 		return lm.clampCursorToVisibleRows()
 	}
-	for i, row := range lm.visibleRows() {
+	rows := lm.visibleRows()
+	for i, row := range rows {
 		if row.issue.UID == lm.selectedUID &&
 			(lm.selectedProjectID == 0 || row.issue.ProjectID == lm.selectedProjectID) {
 			lm.cursor = i
-			return lm
+			return lm.ensureCursorVisible(len(rows))
 		}
 	}
 	return lm.clampCursorToVisibleRows()
@@ -563,6 +558,7 @@ func (lm listModel) clampCursorToVisibleRows() listModel {
 	rows := lm.visibleRows()
 	if len(rows) == 0 {
 		lm.cursor = 0
+		lm.windowStart = 0
 		lm.selectedUID = ""
 		lm.selectedProjectID = 0
 		return lm
@@ -573,6 +569,7 @@ func (lm listModel) clampCursorToVisibleRows() listModel {
 	if lm.cursor < 0 {
 		lm.cursor = 0
 	}
+	lm = lm.ensureCursorVisible(len(rows))
 	lm.selectedUID = rows[lm.cursor].issue.UID
 	lm.selectedProjectID = rows[lm.cursor].issue.ProjectID
 	return lm
@@ -592,15 +589,71 @@ func listPageStepForRows(visibleRows int) int {
 	return step
 }
 
-func (lm listModel) cursorPageStep(totalRows int) int {
-	step := lm.pageStep
-	if step <= 0 {
-		step = listFallbackPageStep
+func (lm listModel) pageCursor(direction, totalRows int) listModel {
+	if totalRows == 0 {
+		lm.cursor = 0
+		lm.windowStart = 0
+		return lm
 	}
-	if step > totalRows {
-		return totalRows
+	if lm.pageRows <= 0 {
+		lm.cursor += direction * listFallbackPageStep
+		return lm.ensureCursorVisible(totalRows)
 	}
-	return step
+	start, _ := lm.windowBounds(totalRows, lm.pageRows)
+	screenRow := lm.cursor - start
+	maxStart := max(0, totalRows-lm.pageRows)
+	nextStart := start + direction*listPageStepForRows(lm.pageRows)
+	if nextStart < 0 {
+		nextStart = 0
+	}
+	if nextStart > maxStart {
+		nextStart = maxStart
+	}
+	lm.windowStart = nextStart
+	lm.cursor = nextStart + screenRow
+	if lm.cursor >= totalRows {
+		lm.cursor = totalRows - 1
+	}
+	if lm.cursor < 0 {
+		lm.cursor = 0
+	}
+	return lm
+}
+
+func (lm listModel) ensureCursorVisible(totalRows int) listModel {
+	if totalRows == 0 {
+		lm.cursor = 0
+		lm.windowStart = 0
+		return lm
+	}
+	if lm.cursor < 0 {
+		lm.cursor = 0
+	}
+	if lm.cursor >= totalRows {
+		lm.cursor = totalRows - 1
+	}
+	if lm.pageRows <= 0 || totalRows <= lm.pageRows {
+		lm.windowStart = 0
+		return lm
+	}
+	if lm.windowStart < 0 {
+		lm.windowStart = 0
+	}
+	maxStart := totalRows - lm.pageRows
+	if lm.windowStart > maxStart {
+		lm.windowStart = maxStart
+	}
+	if lm.cursor < lm.windowStart {
+		lm.windowStart = lm.cursor
+	}
+	if lm.cursor >= lm.windowStart+lm.pageRows {
+		lm.windowStart = lm.cursor - lm.pageRows + 1
+	}
+	return lm
+}
+
+func (lm listModel) windowBounds(totalRows, budget int) (int, int) {
+	return windowBoundsFromStart(totalRows, lm.cursor, budget, lm.windowStart)
 }
 
 // syncSelection records the issue.UID under the cursor so a later
@@ -641,12 +694,14 @@ func (lm listModel) applyFilterKey(msg tea.KeyMsg, km keymap) (listModel, tea.Cm
 	case km.FilterStatus.matches(msg):
 		lm.filter.Status = nextStatus(lm.filter.Status)
 		lm.cursor = 0
+		lm.windowStart = 0
 		lm.selectedUID = ""
 		lm.status = ""
 		return lm, nil, true
 	case km.ClearFilters.matches(msg):
 		lm.filter = ListFilter{}
 		lm.cursor = 0
+		lm.windowStart = 0
 		lm.selectedUID = ""
 		lm.status = ""
 		return lm, nil, true
@@ -718,12 +773,13 @@ func (lm listModel) clampCursorToFilter() listModel {
 	visible := len(lm.visibleRows())
 	if visible == 0 {
 		lm.cursor = 0
+		lm.windowStart = 0
 		return lm
 	}
 	if lm.cursor >= visible {
 		lm.cursor = visible - 1
 	}
-	return lm
+	return lm.ensureCursorVisible(visible)
 }
 
 func (lm listModel) expandAncestorsOfSelection() listModel {
@@ -805,6 +861,7 @@ func (lm listModel) applyFetched(msg tea.Msg) listModel {
 	rows := lm.visibleRows()
 	if len(rows) == 0 {
 		lm.cursor = 0
+		lm.windowStart = 0
 		lm.selectedUID = ""
 		lm.selectedProjectID = 0
 		return lm
@@ -814,7 +871,7 @@ func (lm listModel) applyFetched(msg tea.Msg) listModel {
 			if row.issue.UID == lm.selectedUID &&
 				(lm.selectedProjectID == 0 || row.issue.ProjectID == lm.selectedProjectID) {
 				lm.cursor = i
-				return lm
+				return lm.ensureCursorVisible(len(rows))
 			}
 		}
 	}
@@ -827,6 +884,7 @@ func (lm listModel) applyFetched(msg tea.Msg) listModel {
 	if lm.cursor < 0 {
 		lm.cursor = 0
 	}
+	lm = lm.ensureCursorVisible(len(rows))
 	lm.selectedUID = rows[lm.cursor].issue.UID
 	lm.selectedProjectID = rows[lm.cursor].issue.ProjectID
 	return lm

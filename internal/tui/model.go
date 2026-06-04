@@ -753,7 +753,7 @@ func (m Model) applyDetailViewportCache(dm detailModel) detailModel {
 }
 
 func (m Model) applyListViewportCache() Model {
-	m.list.pageStep = listPageStepForRows(m.listRenderedDataRows())
+	m.list.pageRows = m.listRenderedDataRows()
 	return m
 }
 

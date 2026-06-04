@@ -276,7 +276,7 @@ func renderListInfoLine(width int, chrome viewChrome, lm listModel, dataBudget i
 	default:
 		visible := lm.visibleRows()
 		if n := len(visible); n > 0 && dataBudget > 0 && n > dataBudget {
-			start, end := windowBounds(n, lm.cursor, dataBudget)
+			start, end := lm.windowBounds(n, dataBudget)
 			body = rightAlignInside(
 				fmt.Sprintf("[%d-%d of %d]", start+1, end, n),
 				titleBarInnerWidth(width),
@@ -446,7 +446,9 @@ func (lm listModel) renderBody(width, height int, chrome viewChrome) string {
 	if displayCursor < 0 {
 		displayCursor = 0
 	}
-	visible, vCursor, windowStart := windowQueueRows(queueRows, displayCursor, height)
+	visible, vCursor, windowStart := windowQueueRows(
+		queueRows, displayCursor, height, lm.windowStart,
+	)
 	cols := listColumnWidths(width, narrow)
 	rows := buildRows(visible, vCursor, cols.title, narrow, chrome)
 	headers := listTableHeaders(narrow)
@@ -602,13 +604,46 @@ func listColumnWidths(termWidth int, narrow bool) listColWidths {
 // returned slice (vCursor) is the local position so the table renderer
 // can highlight the right row. The returned start index lets callers
 // slice any row-aligned metadata computed from the full queue.
-func windowQueueRows(rows []queueRow, cursor, budget int) ([]queueRow, int, int) {
+func windowQueueRows(rows []queueRow, cursor, budget, windowStart int) ([]queueRow, int, int) {
 	n := len(rows)
 	if n == 0 {
 		return rows, 0, 0
 	}
-	start, end := windowBounds(n, cursor, budget)
+	start, end := windowBoundsFromStart(n, cursor, budget, windowStart)
 	return rows[start:end], cursor - start, start
+}
+
+func windowBoundsFromStart(n, cursor, budget, windowStart int) (int, int) {
+	if n == 0 {
+		return 0, 0
+	}
+	if budget < 1 {
+		budget = 1
+	}
+	if n <= budget {
+		return 0, n
+	}
+	start := windowStart
+	if start < 0 {
+		start = 0
+	}
+	maxStart := n - budget
+	if start > maxStart {
+		start = maxStart
+	}
+	if cursor < start {
+		start = cursor
+	}
+	if cursor >= start+budget {
+		start = cursor - budget + 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start > maxStart {
+		start = maxStart
+	}
+	return start, start + budget
 }
 
 // windowBounds returns the [start, end) slice indices of the visible

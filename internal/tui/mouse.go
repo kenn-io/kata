@@ -74,6 +74,8 @@ func (m Model) mouseListWheel(delta int) (Model, tea.Cmd) {
 	if delta > 0 && m.list.cursor < len(m.list.visibleRows())-1 {
 		m.list.cursor++
 	}
+	m = m.applyListViewportCache()
+	m.list = m.list.ensureCursorVisible(len(m.list.visibleRows()))
 	m.list = m.list.syncSelection(m.list.visibleRows())
 	if m.layout == layoutSplit {
 		return m.scheduleDetailFollow()
@@ -116,7 +118,7 @@ func (m Model) mouseListClick(row int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	budget := m.listDataBudget()
-	start, end := windowBounds(len(rows), m.list.cursor, budget)
+	start, end := m.list.windowBounds(len(rows), budget)
 	idx := start + row
 	if idx < start || idx >= end || idx >= len(rows) {
 		return m, nil

@@ -381,7 +381,7 @@ func TestGroupBanding_ParentChildShareBand(t *testing.T) {
 		t.Fatalf("root C and its child should share band; got %v / %v", bands[4], bands[5])
 	}
 
-	_, _, windowStart := windowQueueRows(visible, 3, 3)
+	_, _, windowStart := windowQueueRows(visible, 3, 3, 2)
 	windowBands := bands[windowStart : windowStart+3]
 	if windowStart != 2 {
 		t.Fatalf("windowStart = %d, want 2", windowStart)

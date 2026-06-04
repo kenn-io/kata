@@ -1,6 +1,21 @@
  Project: kata                                                                                       kata カタ · v0.1.0
  open: 50 · closed: 0 · all: 50
     #     prio status    title                                                           kids    owner         updated
+    #s003 —    open      issue s003                                                                            3h ago
+    #s004 —    open      issue s004                                                                            4h ago
+    #s005 —    open      issue s005                                                                            5h ago
+    #s006 —    open      issue s006                                                                            6h ago
+    #s007 —    open      issue s007                                                                            7h ago
+    #s008 —    open      issue s008                                                                            8h ago
+    #s009 —    open      issue s009                                                                            9h ago
+    #s010 —    open      issue s010                                                                            10h ago
+    #s011 —    open      issue s011                                                                            11h ago
+    #s012 —    open      issue s012                                                                            12h ago
+    #s013 —    open      issue s013                                                                            13h ago
+    #s014 —    open      issue s014                                                                            14h ago
+    #s015 —    open      issue s015                                                                            15h ago
+    #s016 —    open      issue s016                                                                            16h ago
+    #s017 —    open      issue s017                                                                            17h ago
     #s018 —    open      issue s018                                                                            18h ago
     #s019 —    open      issue s019                                                                            19h ago
     #s020 —    open      issue s020                                                                            20h ago
@@ -10,21 +25,6 @@
     #s024 —    open      issue s024                                                                            1d ago
     #s025 —    open      issue s025                                                                            1d ago
 ▶   #s026 —    open      issue s026                                                                            1d ago
-    #s027 —    open      issue s027                                                                            1d ago
-    #s028 —    open      issue s028                                                                            1d ago
-    #s029 —    open      issue s029                                                                            1d ago
-    #s030 —    open      issue s030                                                                            1d ago
-    #s031 —    open      issue s031                                                                            1d ago
-    #s032 —    open      issue s032                                                                            1d ago
-    #s033 —    open      issue s033                                                                            1d ago
-    #s034 —    open      issue s034                                                                            1d ago
-    #s035 —    open      issue s035                                                                            1d ago
-    #s036 —    open      issue s036                                                                            1d ago
-    #s037 —    open      issue s037                                                                            1d ago
-    #s038 —    open      issue s038                                                                            1d ago
-    #s039 —    open      issue s039                                                                            1d ago
-    #s040 —    open      issue s040                                                                            1d ago
-    #s041 —    open      issue s041                                                                            1d ago
-                                                                                                          [18-41 of 50]
+                                                                                                           [3-26 of 50]
  ↑↓ move   ▕ ↵ open   ▕ n new       ▕ N child ▕ / search▕ f filter▕ s status▕ v view▕ o order▕ c clear▕ x close
  ! priority▕ D daemons▕ F federation▕ L layout▕ ? help  ▕ q quit
