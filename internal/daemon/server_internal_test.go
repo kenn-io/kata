@@ -45,3 +45,17 @@ func TestServerServesOpenAPIYAML(t *testing.T) {
 		t.Fatal("GET /openapi.yaml did not return the daemon OpenAPI YAML")
 	}
 }
+
+func TestServerDoesNotServeDefaultOpenAPIJSON(t *testing.T) {
+	srv := NewServer(ServerConfig{})
+	t.Cleanup(func() { _ = srv.Close() })
+
+	for _, path := range []string{"/openapi", "/openapi.json", "/docs"} {
+		rr := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status = %d, want %d", path, rr.Code, http.StatusNotFound)
+		}
+	}
+}
