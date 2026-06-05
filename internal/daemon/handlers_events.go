@@ -254,20 +254,13 @@ func registerEventsStream(humaAPI huma.API, cfg ServerConfig) {
 }
 
 func registerEventsStreamMethodGuards(mux *http.ServeMux) {
-	for _, method := range []string{
-		http.MethodHead,
-		http.MethodPost,
-		http.MethodPut,
-		http.MethodPatch,
-		http.MethodDelete,
-		http.MethodOptions,
-	} {
-		mux.HandleFunc(method+" /api/v1/events/stream", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Allow", http.MethodGet)
-			api.WriteEnvelope(w, http.StatusMethodNotAllowed, "method_not_allowed",
-				"events stream only accepts GET")
-		})
+	guard := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", http.MethodGet)
+		api.WriteEnvelope(w, http.StatusMethodNotAllowed, "method_not_allowed",
+			"events stream only accepts GET")
 	}
+	mux.HandleFunc(http.MethodHead+" /api/v1/events/stream", guard)
+	mux.HandleFunc("/api/v1/events/stream", guard)
 }
 
 // runSSEStream implements the streaming body for GET /api/v1/events/stream.

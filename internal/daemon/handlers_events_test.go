@@ -483,7 +483,14 @@ func TestSSE_CursorConflictPresenceBased(t *testing.T) {
 // so a misrouted client can recover without scraping the message.
 func TestSSE_NonGETReturnsAllowHeader(t *testing.T) {
 	env := testenv.New(t)
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+	for _, method := range []string{
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodDelete,
+		http.MethodConnect,
+		http.MethodTrace,
+		"BREW",
+	} {
 		resp, _ := envDoRaw(t, env, method, "/api/v1/events/stream", nil, nil)
 		assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode, "method=%s", method)
 		assert.Equal(t, http.MethodGet, resp.Header.Get("Allow"), "method=%s", method)
