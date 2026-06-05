@@ -18,11 +18,10 @@ test:
 
 # Regenerate the committed OpenAPI schema and generated Go client.
 # Drift tests fail if the OpenAPI artifacts or generated client differ from this output.
-# go.mod replaces github.com/deepmap/oapi-codegen with DoorDash's oapi-codegen-dd fork.
 api-generate:
 	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; go run ./cmd/kata openapi > "$$tmp"; if [ -f api/openapi.yaml ] && cmp -s "$$tmp" api/openapi.yaml; then rm "$$tmp"; else mv "$$tmp" api/openapi.yaml; fi; trap - EXIT
 	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; go run ./cmd/kata openapi --version 3.0 --format yaml > "$$tmp"; if [ -f pkg/client/openapi.yaml ] && cmp -s "$$tmp" pkg/client/openapi.yaml; then rm "$$tmp"; else mv "$$tmp" pkg/client/openapi.yaml; fi; trap - EXIT
-	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; go tool oapi-codegen --config pkg/client/generated/config.yaml -o "$$tmp" pkg/client/openapi.yaml; if [ -f pkg/client/generated/client.gen.go ] && cmp -s "$$tmp" pkg/client/generated/client.gen.go; then rm "$$tmp"; else mv "$$tmp" pkg/client/generated/client.gen.go; fi; trap - EXIT
+	cd pkg/client/generated && find . -maxdepth 1 -type f -name '*.go' ! -name 'generate.go' -delete && go run github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.75.5 -config config.yaml ../openapi.yaml
 
 openapi: api-generate
 

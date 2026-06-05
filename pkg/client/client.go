@@ -7,16 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+
 	internalclient "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
 // Client is a typed kata daemon API client generated from the Huma OpenAPI
 // contract.
-type Client = generated.ClientWithResponses
+type Client = generated.Client
 
 // RequestEditorFn mutates generated requests before they are sent.
-type RequestEditorFn = generated.RequestEditorFn
+type RequestEditorFn = runtime.RequestEditorFn
 
 // TargetAuth is explicit per-target bearer configuration for clients that
 // switch between multiple daemon endpoints in one process.
@@ -36,7 +38,7 @@ type TransportOptions struct {
 type options struct {
 	httpClient     *http.Client
 	transport      TransportOptions
-	requestEditors []generated.RequestEditorFn
+	requestEditors []runtime.RequestEditorFn
 }
 
 // Option customizes a typed kata client.
@@ -59,7 +61,7 @@ func WithTransportOptions(transport TransportOptions) Option {
 }
 
 // WithRequestEditor appends a generated request editor.
-func WithRequestEditor(fn generated.RequestEditorFn) Option {
+func WithRequestEditor(fn runtime.RequestEditorFn) Option {
 	return func(opts *options) {
 		if fn != nil {
 			opts.requestEditors = append(opts.requestEditors, fn)
@@ -148,11 +150,11 @@ func newGeneratedClient(baseURL string, opts options) (*Client, error) {
 	if opts.httpClient == nil {
 		opts.httpClient = http.DefaultClient
 	}
-	generatedOpts := []generated.ClientOption{generated.WithHTTPClient(opts.httpClient)}
+	generatedOpts := []runtime.APIClientOption{runtime.WithHTTPClient(contextDoer{client: opts.httpClient})}
 	for _, editor := range opts.requestEditors {
-		generatedOpts = append(generatedOpts, generated.WithRequestEditorFn(editor))
+		generatedOpts = append(generatedOpts, runtime.WithRequestEditorFn(editor))
 	}
-	return generated.NewClientWithResponses(strings.TrimRight(baseURL, "/"), generatedOpts...)
+	return generated.NewDefaultClient(strings.TrimRight(baseURL, "/"), generatedOpts...)
 }
 
 func internalOpts(opts TransportOptions) internalclient.Opts {
@@ -161,4 +163,16 @@ func internalOpts(opts TransportOptions) internalclient.Opts {
 		ResponseHeaderTimeout: opts.ResponseHeaderTimeout,
 		AllowInsecure:         opts.AllowInsecure,
 	}
+}
+
+type contextDoer struct {
+	client *http.Client
+}
+
+func (d contextDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	client := d.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return client.Do(req.WithContext(ctx))
 }

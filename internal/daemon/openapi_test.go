@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -14,7 +15,7 @@ import (
 // A const (not a var) keeps gosec G304 quiet: the path is fixed, not caller-supplied.
 const artifactPath = "../../api/openapi.yaml"
 const clientSpecArtifactPath = "../../pkg/client/openapi.yaml"
-const clientArtifactPath = "../../pkg/client/generated/client.gen.go"
+const clientGeneratedDir = "../../pkg/client/generated"
 
 // TestOpenAPIArtifactUpToDate fails if the committed api/openapi.yaml no longer
 // matches the schema generated from the current routes. Regenerate with
@@ -48,25 +49,79 @@ func TestOpenAPIClientSpecArtifactUpToDate(t *testing.T) {
 }
 
 func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
-	repoRoot := filepath.Clean("../..")
-	tmp := filepath.Join(t.TempDir(), "client.gen.go")
-	cmd := exec.Command("go", "tool", "oapi-codegen", "--config", "pkg/client/generated/config.yaml", "-o", tmp, "pkg/client/openapi.yaml")
-	cmd.Dir = repoRoot
+	tmpRoot := t.TempDir()
+	tmpGenerated := filepath.Join(tmpRoot, "generated")
+	if err := os.Mkdir(tmpGenerated, 0o755); err != nil {
+		t.Fatalf("mkdir generated temp dir: %v", err)
+	}
+	config, err := os.ReadFile(filepath.Join(clientGeneratedDir, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	tmpConfig := filepath.Join(tmpGenerated, "config.yaml")
+	if err := os.WriteFile(tmpConfig, config, 0o644); err != nil {
+		t.Fatalf("write generated config: %v", err)
+	}
+	tmpSpec := filepath.Join(tmpRoot, "openapi.yaml")
+	spec, err := os.ReadFile(clientSpecArtifactPath)
+	if err != nil {
+		t.Fatalf("read %s: %v (run `make api-generate` to generate it)", clientSpecArtifactPath, err)
+	}
+	if err := os.WriteFile(tmpSpec, spec, 0o644); err != nil {
+		t.Fatalf("write generated spec: %v", err)
+	}
+
+	cmd := exec.Command("go", "run", "github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.75.5", "-config", "config.yaml", "../openapi.yaml")
+	cmd.Dir = tmpGenerated
+	cmd.Env = append(os.Environ(), "GOWORK=off")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("generate client: %v\n%s", err, out)
 	}
-	got, err := os.ReadFile(tmp)
+
+	gotFiles, err := generatedGoFiles(tmpGenerated)
 	if err != nil {
-		t.Fatalf("read generated client: %v", err)
+		t.Fatalf("list generated temp files: %v", err)
 	}
-	want, err := os.ReadFile(clientArtifactPath)
+	wantFiles, err := generatedGoFiles(clientGeneratedDir)
 	if err != nil {
-		t.Fatalf("read %s: %v (run `make api-generate` to generate it)", clientArtifactPath, err)
+		t.Fatalf("list %s: %v (run `make api-generate` to generate it)", clientGeneratedDir, err)
 	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("%s is stale; run `make api-generate` to regenerate", clientArtifactPath)
+	if len(gotFiles) != len(wantFiles) {
+		t.Fatalf("%s is stale; generated %d Go files, want %d", clientGeneratedDir, len(gotFiles), len(wantFiles))
 	}
+	for i := range wantFiles {
+		if gotFiles[i] != wantFiles[i] {
+			t.Fatalf("%s is stale; generated file %q, want %q", clientGeneratedDir, gotFiles[i], wantFiles[i])
+		}
+		got, err := os.ReadFile(filepath.Join(tmpGenerated, gotFiles[i]))
+		if err != nil {
+			t.Fatalf("read generated temp file %s: %v", gotFiles[i], err)
+		}
+		want, err := os.ReadFile(filepath.Join(clientGeneratedDir, wantFiles[i]))
+		if err != nil {
+			t.Fatalf("read %s: %v (run `make api-generate` to regenerate)", filepath.Join(clientGeneratedDir, wantFiles[i]), err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("%s is stale; run `make api-generate` to regenerate", filepath.Join(clientGeneratedDir, wantFiles[i]))
+		}
+	}
+}
+
+func generatedGoFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".go" || entry.Name() == "generate.go" {
+			continue
+		}
+		files = append(files, entry.Name())
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 // TestOpenAPIYAMLDeterministic guards against map-ordering nondeterminism that

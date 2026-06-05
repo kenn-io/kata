@@ -24,7 +24,7 @@ func TestNewWithHTTPClientNormalizesBaseURL(t *testing.T) {
 	resp, err := api.PingWithResponse(t.Context())
 	require.NoError(t, err)
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode())
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "/api/v1/ping", gotPath)
 }
 

@@ -1,8 +1,9 @@
-# go.mod replaces github.com/deepmap/oapi-codegen with DoorDash's
-# github.com/doordash-oss/oapi-codegen-dd fork.
 package: generated
+skip-prune: true
+output:
+  use-single-file: false
+  directory: ..
 generate:
   client: true
+  client-with-response: true
   models: true
-output-options:
-  skip-prune: true

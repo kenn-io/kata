@@ -1,4 +1,4 @@
 package generated
 
-// The oapi-codegen tool is DoorDash's oapi-codegen-dd fork via go.mod replace.
-//go:generate go tool oapi-codegen --config config.yaml -o client.gen.go ../openapi.yaml
+//go:generate sh -c "go run ../../../cmd/kata openapi --version 3.0 --format yaml > ../openapi.yaml"
+//go:generate go run github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.75.5 -config config.yaml ../openapi.yaml
