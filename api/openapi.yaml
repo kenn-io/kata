@@ -1,0 +1,5218 @@
+components:
+  schemas:
+    ActionRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        dry_run:
+          type: boolean
+        evidence:
+          items:
+            $ref: "#/components/schemas/Evidence"
+          type:
+            - array
+            - "null"
+        message:
+          type: string
+        reason:
+          enum:
+            - done
+            - wontfix
+            - duplicate
+            - superseded
+            - audit-no-change
+            - ""
+          type: string
+        source:
+          enum:
+            - tui
+            - ""
+          type: string
+      required:
+        - actor
+      type: object
+    AddLabelRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        label:
+          type: string
+      required:
+        - actor
+        - label
+      type: object
+    AddLabelResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+        issue:
+          $ref: "#/components/schemas/Issue"
+        label:
+          $ref: "#/components/schemas/IssueLabel"
+      required:
+        - issue
+        - label
+        - event
+        - changed
+      type: object
+    AliasInput:
+      additionalProperties: false
+      properties:
+        identity:
+          description: alias identity (normalized git remote or local://<abs>)
+          type: string
+        kind:
+          description: "\"git\" or \"local\""
+          type: string
+      required:
+        - identity
+        - kind
+      type: object
+    AssignRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        owner:
+          type: string
+      required:
+        - actor
+        - owner
+      type: object
+    AuditCloseRow:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        evidence_types:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        flags:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        issue:
+          type: string
+        message:
+          type: string
+        parent:
+          type: string
+        reason:
+          type: string
+        time:
+          type: string
+      required:
+        - time
+        - actor
+        - issue
+        - reason
+      type: object
+    AuditClosesResponseBody:
+      additionalProperties: false
+      properties:
+        rows:
+          items:
+            $ref: "#/components/schemas/AuditCloseRow"
+          type:
+            - array
+            - "null"
+      required:
+        - rows
+      type: object
+    AuthInfoOut:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        kind:
+          type: string
+      required:
+        - kind
+      type: object
+    ChildCounts:
+      additionalProperties: false
+      properties:
+        open:
+          format: int64
+          type: integer
+        total:
+          format: int64
+          type: integer
+      required:
+        - open
+        - total
+      type: object
+    ClaimActionBody:
+      additionalProperties: true
+      properties:
+        actor:
+          type: string
+        claim_kind:
+          type: string
+        client_kind:
+          type: string
+        holder:
+          type: string
+        purpose:
+          type: string
+        reason:
+          type: string
+        ttl_seconds:
+          format: int64
+          type: integer
+      type: object
+    ClaimActionResponseBody:
+      additionalProperties: false
+      properties:
+        claim:
+          $ref: "#/components/schemas/IssueClaimOut"
+        event:
+          $ref: "#/components/schemas/Event"
+        granted:
+          type: boolean
+        holder:
+          $ref: "#/components/schemas/ClaimPrincipalOut"
+        lease:
+          $ref: "#/components/schemas/IssueClaimOut"
+        pending:
+          type: boolean
+        request_uid:
+          type: string
+      required:
+        - granted
+        - holder
+      type: object
+    ClaimPrincipalOut:
+      additionalProperties: false
+      properties:
+        client_kind:
+          type: string
+        holder:
+          type: string
+        holder_instance_uid:
+          type: string
+      required:
+        - holder_instance_uid
+        - holder
+        - client_kind
+      type: object
+    ClaimRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        force:
+          type: boolean
+      required:
+        - actor
+      type: object
+    ClaimResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+        issue:
+          $ref: "#/components/schemas/Issue"
+        previous_owner:
+          type: string
+      required:
+        - issue
+        - changed
+      type: object
+    ClaimStatusBody:
+      additionalProperties: false
+      properties:
+        claim:
+          $ref: "#/components/schemas/IssueClaimOut"
+        held:
+          type: boolean
+        holder:
+          $ref: "#/components/schemas/ClaimPrincipalOut"
+        hub_now:
+          format: date-time
+          type: string
+        lease:
+          $ref: "#/components/schemas/IssueClaimOut"
+      required:
+        - held
+        - holder
+        - hub_now
+      type: object
+    ClaimViolationOut:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        at:
+          format: date-time
+          type: string
+        event_id:
+          format: int64
+          type: integer
+        event_uid:
+          type: string
+        issue_uid:
+          type: string
+        offending_event_type:
+          type: string
+        offending_event_uid:
+          type: string
+        offending_origin_instance_uid:
+          type: string
+        reason:
+          type: string
+        short_id:
+          type: string
+      required:
+        - event_id
+        - event_uid
+        - issue_uid
+        - at
+      type: object
+    Comment:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        issue_id:
+          format: int64
+          type: integer
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - issue_id
+        - author
+        - body
+        - created_at
+      type: object
+    CommentRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        body:
+          type: string
+      required:
+        - actor
+        - body
+      type: object
+    CommentResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        comment:
+          $ref: "#/components/schemas/Comment"
+        event:
+          $ref: "#/components/schemas/Event"
+        issue:
+          $ref: "#/components/schemas/Issue"
+      required:
+        - issue
+        - comment
+        - event
+        - changed
+      type: object
+    CreateFederationEnrollmentRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        allow_adoption_snapshot_authors:
+          type: boolean
+        capabilities:
+          type: string
+        project_id:
+          format: int64
+          type:
+            - integer
+            - "null"
+        spoke_instance_uid:
+          type: string
+        token:
+          type: string
+      required:
+        - spoke_instance_uid
+        - project_id
+        - capabilities
+      type: object
+    CreateFederationReplicaBody:
+      additionalProperties: false
+      properties:
+        adopted:
+          type: boolean
+        adoption_snapshot_count:
+          format: int64
+          type: integer
+        binding:
+          $ref: "#/components/schemas/FederationBindingOut"
+        project:
+          $ref: "#/components/schemas/ProjectOut"
+      required:
+        - project
+        - binding
+      type: object
+    CreateFederationReplicaRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        adopt_existing:
+          type: boolean
+        allow_insecure:
+          type: boolean
+        baseline_through_event_id:
+          format: int64
+          type: integer
+        capabilities:
+          type: string
+        hub_project_id:
+          format: int64
+          type: integer
+        hub_project_uid:
+          type: string
+        hub_url:
+          type: string
+        project_name:
+          type: string
+        push_enabled:
+          type: boolean
+        replay_horizon_event_id:
+          format: int64
+          type: integer
+        token:
+          type: string
+      required:
+        - hub_url
+        - hub_project_id
+        - hub_project_uid
+        - project_name
+        - replay_horizon_event_id
+      type: object
+    CreateInitialLinkBody:
+      additionalProperties: false
+      properties:
+        incoming:
+          type: boolean
+        to_ref:
+          type: string
+        type:
+          enum:
+            - parent
+            - blocks
+            - related
+          type: string
+      required:
+        - type
+        - to_ref
+      type: object
+    CreateIssueRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        body:
+          type: string
+        force_new:
+          type: boolean
+        labels:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        links:
+          items:
+            $ref: "#/components/schemas/CreateInitialLinkBody"
+          type:
+            - array
+            - "null"
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        title:
+          type: string
+      required:
+        - actor
+        - title
+      type: object
+    CreateLinkRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        replace:
+          type: boolean
+        to_ref:
+          type: string
+        type:
+          enum:
+            - parent
+            - blocks
+            - related
+          type: string
+      required:
+        - actor
+        - type
+        - to_ref
+      type: object
+    CreateLinkResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+        issue:
+          $ref: "#/components/schemas/Issue"
+        link:
+          $ref: "#/components/schemas/LinkOut"
+      required:
+        - issue
+        - link
+        - event
+        - changed
+      type: object
+    CreateRecurrenceRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        dtstart:
+          type: string
+        rrule:
+          type: string
+        template:
+          $ref: "#/components/schemas/RecurrenceTemplateInput"
+        timezone:
+          type: string
+      required:
+        - actor
+        - rrule
+        - dtstart
+        - timezone
+        - template
+      type: object
+    CreateRecurrenceResponseBody:
+      additionalProperties: false
+      properties:
+        recurrence:
+          $ref: "#/components/schemas/Recurrence"
+      required:
+        - recurrence
+      type: object
+    CreateTokenRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        name:
+          type: string
+      required:
+        - actor
+      type: object
+    CreateTokenResponseBody:
+      additionalProperties: false
+      properties:
+        plaintext:
+          type: string
+        token:
+          $ref: "#/components/schemas/TokenOut"
+      required:
+        - token
+        - plaintext
+      type: object
+    DestructiveActionRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        reason:
+          type: string
+      required:
+        - actor
+      type: object
+    DetachProjectAliasResponseBody:
+      additionalProperties: false
+      properties:
+        alias:
+          $ref: "#/components/schemas/ProjectAlias"
+        event:
+          $ref: "#/components/schemas/Event"
+      required:
+        - alias
+        - event
+      type: object
+    DigestActorEntry:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        issues:
+          items:
+            $ref: "#/components/schemas/DigestIssueActions"
+          type:
+            - array
+            - "null"
+        totals:
+          $ref: "#/components/schemas/DigestTotals"
+      required:
+        - actor
+        - totals
+        - issues
+      type: object
+    DigestIssueActions:
+      additionalProperties: false
+      properties:
+        actions:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        issue_short_id:
+          type: string
+        issue_uid:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+      required:
+        - project_id
+        - project_name
+        - issue_uid
+        - issue_short_id
+        - actions
+      type: object
+    DigestResponseBody:
+      additionalProperties: false
+      properties:
+        actors:
+          items:
+            $ref: "#/components/schemas/DigestActorEntry"
+          type:
+            - array
+            - "null"
+        event_count:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        since:
+          format: date-time
+          type: string
+        totals:
+          $ref: "#/components/schemas/DigestTotals"
+        until:
+          format: date-time
+          type: string
+      required:
+        - since
+        - until
+        - project_id
+        - event_count
+        - totals
+        - actors
+      type: object
+    DigestTotals:
+      additionalProperties: false
+      properties:
+        assigned:
+          format: int64
+          type: integer
+        closed:
+          format: int64
+          type: integer
+        commented:
+          format: int64
+          type: integer
+        created:
+          format: int64
+          type: integer
+        deleted:
+          format: int64
+          type: integer
+        edited:
+          format: int64
+          type: integer
+        labeled:
+          format: int64
+          type: integer
+        linked:
+          format: int64
+          type: integer
+        other:
+          format: int64
+          type: integer
+        priority_cleared:
+          format: int64
+          type: integer
+        priority_set:
+          format: int64
+          type: integer
+        reopened:
+          format: int64
+          type: integer
+        restored:
+          format: int64
+          type: integer
+        unassigned:
+          format: int64
+          type: integer
+        unblocked:
+          format: int64
+          type: integer
+        unlabeled:
+          format: int64
+          type: integer
+        unlinked:
+          format: int64
+          type: integer
+      required:
+        - created
+        - closed
+        - reopened
+        - commented
+        - edited
+        - assigned
+        - unassigned
+        - priority_set
+        - priority_cleared
+        - labeled
+        - unlabeled
+        - linked
+        - unlinked
+        - unblocked
+        - deleted
+        - restored
+        - other
+      type: object
+    EditIssueRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        body:
+          type: string
+        clear_priority:
+          type: boolean
+        links_delta:
+          $ref: "#/components/schemas/LinksDelta"
+        owner:
+          type: string
+        set_priority:
+          format: int64
+          type: integer
+        title:
+          type: string
+      required:
+        - actor
+      type: object
+    EditIssueResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        changes:
+          $ref: "#/components/schemas/LinkChanges"
+        event:
+          $ref: "#/components/schemas/Event"
+        events:
+          items:
+            $ref: "#/components/schemas/Event"
+          type:
+            - array
+            - "null"
+        issue:
+          $ref: "#/components/schemas/Issue"
+      required:
+        - issue
+        - event
+        - changed
+      type: object
+    EnableProjectFederationRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+      type: object
+    ErrorBody:
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+        data:
+          additionalProperties: {}
+          type: object
+        hint:
+          type: string
+        message:
+          type: string
+      required:
+        - code
+        - message
+      type: object
+    ErrorEnvelope:
+      additionalProperties: false
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+        status:
+          format: int64
+          type: integer
+      required:
+        - status
+        - error
+      type: object
+    Event:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        content_hash:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        hlc_counter:
+          format: int64
+          type: integer
+        hlc_physical_ms:
+          format: int64
+          type: integer
+        id:
+          format: int64
+          type: integer
+        issue_id:
+          format: int64
+          type: integer
+        issue_short_id:
+          type: string
+        issue_uid:
+          type: string
+        origin_instance_uid:
+          type: string
+        payload:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        related_issue_id:
+          format: int64
+          type: integer
+        related_issue_short_id:
+          type: string
+        related_issue_uid:
+          type: string
+        type:
+          type: string
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - origin_instance_uid
+        - project_id
+        - project_uid
+        - project_name
+        - type
+        - actor
+        - payload
+        - hlc_physical_ms
+        - hlc_counter
+        - content_hash
+        - created_at
+      type: object
+    EventEnvelope:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        content_hash:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        event_id:
+          format: int64
+          type: integer
+        event_uid:
+          type: string
+        hlc_counter:
+          format: int64
+          type: integer
+        hlc_physical_ms:
+          format: int64
+          type: integer
+        issue_id:
+          format: int64
+          type: integer
+        issue_short_id:
+          type: string
+        issue_uid:
+          type: string
+        origin_instance_uid:
+          type: string
+        payload: {}
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        related_issue_id:
+          format: int64
+          type: integer
+        related_issue_short_id:
+          type: string
+        related_issue_uid:
+          type: string
+        type:
+          type: string
+      required:
+        - event_id
+        - event_uid
+        - origin_instance_uid
+        - type
+        - project_id
+        - project_uid
+        - project_name
+        - actor
+        - hlc_physical_ms
+        - hlc_counter
+        - content_hash
+        - created_at
+      type: object
+    Evidence:
+      additionalProperties: false
+      properties:
+        command:
+          type: string
+        issue_ref:
+          type: string
+        paths:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        rationale:
+          type: string
+        sha:
+          type: string
+        type:
+          type: string
+        url:
+          type: string
+      required:
+        - type
+      type: object
+    FederationBindingOut:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        enabled:
+          type: boolean
+        hub_project_id:
+          format: int64
+          type: integer
+        hub_project_uid:
+          type: string
+        hub_url:
+          type: string
+        last_sync_at:
+          format: date-time
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        pull_cursor_event_id:
+          format: int64
+          type: integer
+        push_cursor_event_id:
+          format: int64
+          type: integer
+        push_enabled:
+          type: boolean
+        replay_horizon_event_id:
+          format: int64
+          type: integer
+        role:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - project_id
+        - role
+        - hub_url
+        - hub_project_id
+        - hub_project_uid
+        - replay_horizon_event_id
+        - pull_cursor_event_id
+        - push_enabled
+        - push_cursor_event_id
+        - enabled
+        - created_at
+        - updated_at
+      type: object
+    FederationEnrollmentOut:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        capabilities:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type:
+            - integer
+            - "null"
+        revoked_at:
+          format: date-time
+          type: string
+        spoke_instance_uid:
+          type: string
+        token:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - id
+        - spoke_instance_uid
+        - project_id
+        - capabilities
+        - actor
+        - created_at
+        - updated_at
+      type: object
+    FederationIngestEventEnvelope:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        content_hash:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        event_id:
+          format: int64
+          type: integer
+        event_uid:
+          type: string
+        hlc_counter:
+          format: int64
+          type: integer
+        hlc_physical_ms:
+          format: int64
+          type: integer
+        issue_uid:
+          type: string
+        origin_instance_uid:
+          type: string
+        payload: {}
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        related_issue_uid:
+          type: string
+        type:
+          type: string
+      required:
+        - event_id
+        - event_uid
+        - origin_instance_uid
+        - project_uid
+        - project_name
+        - type
+        - actor
+        - hlc_physical_ms
+        - hlc_counter
+        - content_hash
+        - created_at
+      type: object
+    FederationIngestEventsBody:
+      additionalProperties: false
+      properties:
+        accepted:
+          format: int64
+          type: integer
+        duplicates:
+          format: int64
+          type: integer
+        push_cursor_event_id:
+          format: int64
+          type: integer
+      required:
+        - accepted
+        - duplicates
+        - push_cursor_event_id
+      type: object
+    FederationIngestEventsRequestBody:
+      additionalProperties: false
+      properties:
+        events:
+          items:
+            $ref: "#/components/schemas/FederationIngestEventEnvelope"
+          type:
+            - array
+            - "null"
+        schema_version:
+          format: int64
+          type: integer
+      required:
+        - schema_version
+      type: object
+    FederationProjectStatus:
+      additionalProperties: false
+      properties:
+        active_quarantine_count:
+          format: int64
+          type: integer
+        active_quarantines:
+          items:
+            $ref: "#/components/schemas/FederationQuarantineSummary"
+          type:
+            - array
+            - "null"
+        allow_insecure:
+          type: boolean
+        bound_actor:
+          type: string
+        capabilities:
+          type: string
+        credential_status:
+          type: string
+        enabled:
+          type: boolean
+        enrollment_count:
+          format: int64
+          type: integer
+        hub_project_id:
+          format: int64
+          type: integer
+        hub_project_uid:
+          type: string
+        hub_url:
+          type: string
+        last_error:
+          type: string
+        last_error_at:
+          format: date-time
+          type: string
+        last_pull_started_at:
+          format: date-time
+          type: string
+        last_pull_success_at:
+          format: date-time
+          type: string
+        last_push_started_at:
+          format: date-time
+          type: string
+        last_push_success_at:
+          format: date-time
+          type: string
+        last_reset_at:
+          format: date-time
+          type: string
+        last_successful_sync_at:
+          format: date-time
+          type: string
+        last_sync_at:
+          format: date-time
+          type: string
+        live_claim_count:
+          format: int64
+          type: integer
+        pending_claim_count:
+          format: int64
+          type: integer
+        pending_push_count:
+          format: int64
+          type: integer
+        pending_push_high_water_event_id:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        pull_cursor_event_id:
+          format: int64
+          type: integer
+        push_cursor_event_id:
+          format: int64
+          type: integer
+        push_enabled:
+          type: boolean
+        recent_violation_count:
+          format: int64
+          type: integer
+        recent_violations:
+          items:
+            $ref: "#/components/schemas/FederationViolationSummary"
+          type:
+            - array
+            - "null"
+        reset_blocker:
+          type: string
+        role:
+          type: string
+        unresolved_violation_count:
+          format: int64
+          type: integer
+      required:
+        - project_id
+        - project_uid
+        - project_name
+        - role
+        - enabled
+        - push_enabled
+        - pull_cursor_event_id
+        - push_cursor_event_id
+        - pending_push_count
+        - pending_push_high_water_event_id
+        - enrollment_count
+        - live_claim_count
+        - pending_claim_count
+        - active_quarantine_count
+        - active_quarantines
+        - unresolved_violation_count
+        - recent_violation_count
+        - recent_violations
+      type: object
+    FederationQuarantineSummary:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        direction:
+          type: string
+        error:
+          type: string
+        event_uids:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        first_event_id:
+          format: int64
+          type: integer
+        id:
+          format: int64
+          type: integer
+        last_event_id:
+          format: int64
+          type: integer
+      required:
+        - id
+        - direction
+        - first_event_id
+        - last_event_id
+        - event_uids
+        - error
+        - created_at
+      type: object
+    FederationStatusBody:
+      additionalProperties: false
+      properties:
+        statuses:
+          items:
+            $ref: "#/components/schemas/FederationProjectStatus"
+          type:
+            - array
+            - "null"
+      required:
+        - statuses
+      type: object
+    FederationViolationSummary:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        at:
+          format: date-time
+          type: string
+        event_id:
+          format: int64
+          type: integer
+        event_uid:
+          type: string
+        issue_uid:
+          type: string
+        offending_event_type:
+          type: string
+        offending_event_uid:
+          type: string
+        offending_origin_instance_uid:
+          type: string
+        reason:
+          type: string
+        short_id:
+          type: string
+      required:
+        - event_id
+        - event_uid
+        - issue_uid
+        - at
+      type: object
+    HealthResponseBody:
+      additionalProperties: false
+      properties:
+        db_path:
+          type: string
+        ok:
+          type: boolean
+        schema_version:
+          format: int64
+          type: integer
+        started_at:
+          format: date-time
+          type: string
+        uptime:
+          type: string
+        version:
+          type: string
+      required:
+        - ok
+        - db_path
+        - schema_version
+        - version
+        - uptime
+        - started_at
+      type: object
+    ImportBatchResult:
+      additionalProperties: false
+      properties:
+        comments:
+          format: int64
+          type: integer
+        created:
+          format: int64
+          type: integer
+        errors:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        items:
+          items:
+            $ref: "#/components/schemas/ImportItemResult"
+          type:
+            - array
+            - "null"
+        links:
+          format: int64
+          type: integer
+        source:
+          type: string
+        unchanged:
+          format: int64
+          type: integer
+        updated:
+          format: int64
+          type: integer
+      required:
+        - source
+        - created
+        - updated
+        - unchanged
+        - comments
+        - links
+        - items
+        - errors
+      type: object
+    ImportCommentInput:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        external_id:
+          type: string
+      required:
+        - external_id
+        - author
+        - body
+        - created_at
+      type: object
+    ImportIssueInput:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        closed_reason:
+          enum:
+            - done
+            - wontfix
+            - duplicate
+            - superseded
+            - audit-no-change
+            - ""
+          type: string
+        comments:
+          items:
+            $ref: "#/components/schemas/ImportCommentInput"
+          type:
+            - array
+            - "null"
+        created_at:
+          format: date-time
+          type: string
+        external_id:
+          type: string
+        labels:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        links:
+          items:
+            $ref: "#/components/schemas/ImportLinkInput"
+          type:
+            - array
+            - "null"
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        status:
+          enum:
+            - open
+            - closed
+          type: string
+        title:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - external_id
+        - title
+        - author
+        - status
+        - created_at
+        - updated_at
+      type: object
+    ImportItemResult:
+      additionalProperties: false
+      properties:
+        external_id:
+          type: string
+        issue_short_id:
+          type: string
+        reason:
+          type: string
+        status:
+          type: string
+      required:
+        - external_id
+        - issue_short_id
+        - status
+      type: object
+    ImportLinkInput:
+      additionalProperties: false
+      properties:
+        target_external_id:
+          type: string
+        type:
+          enum:
+            - parent
+            - blocks
+            - related
+          type: string
+      required:
+        - type
+        - target_external_id
+      type: object
+    ImportRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        items:
+          items:
+            $ref: "#/components/schemas/ImportIssueInput"
+          type:
+            - array
+            - "null"
+        source:
+          type: string
+      required:
+        - actor
+        - source
+        - items
+      type: object
+    InitProjectRequestBody:
+      additionalProperties: false
+      properties:
+        alias:
+          $ref: "#/components/schemas/AliasInput"
+          description: client-derived alias metadata; only honored when start_path is empty
+        name:
+          description: project name; required when start_path is empty
+          type: string
+        reassign:
+          type: boolean
+        replace:
+          type: boolean
+        start_path:
+          description: absolute path on the daemon's filesystem; omit for path-free init
+          type: string
+      type: object
+    InitProjectResponseBody:
+      additionalProperties: false
+      properties:
+        alias:
+          $ref: "#/components/schemas/ProjectAlias"
+        created:
+          type: boolean
+        project:
+          $ref: "#/components/schemas/ProjectOut"
+        workspace_root:
+          type: string
+      required:
+        - created
+        - project
+        - alias
+      type: object
+    InstanceResponseBody:
+      additionalProperties: false
+      properties:
+        auth:
+          $ref: "#/components/schemas/AuthInfoOut"
+        instance_uid:
+          type: string
+        schema_version:
+          format: int64
+          type: integer
+        version:
+          type: string
+      required:
+        - instance_uid
+        - version
+        - schema_version
+        - auth
+      type: object
+    Issue:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        closed_reason:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        metadata:
+          type: string
+        occurrence_key:
+          type: string
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_uid:
+          type: string
+        recurrence_id:
+          format: int64
+          type: integer
+        revision:
+          format: int64
+          type: integer
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - id
+        - uid
+        - project_id
+        - short_id
+        - title
+        - body
+        - status
+        - author
+        - metadata
+        - revision
+        - created_at
+        - updated_at
+      type: object
+    IssueClaimOut:
+      additionalProperties: false
+      properties:
+        acquired_at:
+          format: date-time
+          type: string
+        claim_kind:
+          type: string
+        claim_uid:
+          type: string
+        client_kind:
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        holder:
+          type: string
+        holder_instance_uid:
+          type: string
+        issue_uid:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        purpose:
+          type: string
+        release_reason:
+          type: string
+        released_at:
+          format: date-time
+          type: string
+        revision:
+          format: int64
+          type: integer
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - claim_uid
+        - project_id
+        - issue_uid
+        - holder
+        - holder_instance_uid
+        - client_kind
+        - purpose
+        - claim_kind
+        - acquired_at
+        - revision
+        - updated_at
+      type: object
+    IssueLabel:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        issue_id:
+          format: int64
+          type: integer
+        label:
+          type: string
+      required:
+        - issue_id
+        - label
+        - author
+        - created_at
+      type: object
+    IssueOut:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        blocked_by:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+        blocks:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+        body:
+          type: string
+        child_counts:
+          $ref: "#/components/schemas/ChildCounts"
+        closed_at:
+          format: date-time
+          type: string
+        closed_reason:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        labels:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        metadata:
+          type: string
+        occurrence_key:
+          type: string
+        owner:
+          type: string
+        parent_short_id:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_uid:
+          type: string
+        qualified_id:
+          type: string
+        recurrence_id:
+          format: int64
+          type: integer
+        related:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+        revision:
+          format: int64
+          type: integer
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - qualified_id
+        - id
+        - uid
+        - project_id
+        - short_id
+        - title
+        - body
+        - status
+        - author
+        - metadata
+        - revision
+        - created_at
+        - updated_at
+      type: object
+    IssueRef:
+      additionalProperties: false
+      properties:
+        qualified_id:
+          type: string
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - short_id
+        - qualified_id
+        - title
+        - status
+      type: object
+    LabelCount:
+      additionalProperties: false
+      properties:
+        count:
+          format: int64
+          type: integer
+        label:
+          type: string
+      required:
+        - label
+        - count
+      type: object
+    LabelsListResponseBody:
+      additionalProperties: false
+      properties:
+        labels:
+          items:
+            $ref: "#/components/schemas/LabelCount"
+          type:
+            - array
+            - "null"
+      required:
+        - labels
+      type: object
+    LinkChanges:
+      additionalProperties: false
+      properties:
+        blocked_by_added:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+        blocked_by_removed:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+        blocks_added:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+        blocks_removed:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+        parent_removed:
+          $ref: "#/components/schemas/LinkPeer"
+        parent_set:
+          $ref: "#/components/schemas/LinkPeer"
+        related_added:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+        related_removed:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          type:
+            - array
+            - "null"
+      type: object
+    LinkOut:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        from:
+          $ref: "#/components/schemas/LinkPeer"
+        id:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        to:
+          $ref: "#/components/schemas/LinkPeer"
+        type:
+          type: string
+      required:
+        - id
+        - project_id
+        - from
+        - to
+        - type
+        - author
+        - created_at
+      type: object
+    LinkPeer:
+      additionalProperties: false
+      properties:
+        short_id:
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - short_id
+      type: object
+    LinksDelta:
+      additionalProperties: false
+      properties:
+        add_blocked_by:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        add_blocks:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        add_related:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        remove_blocked_by:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        remove_blocks:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        remove_parent:
+          type: string
+        remove_related:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        set_parent:
+          type: string
+      type: object
+    ListFederationEnrollmentsBody:
+      additionalProperties: false
+      properties:
+        enrollments:
+          items:
+            $ref: "#/components/schemas/FederationEnrollmentOut"
+          type:
+            - array
+            - "null"
+      required:
+        - enrollments
+      type: object
+    ListIssuesResponseBody:
+      additionalProperties: false
+      properties:
+        issues:
+          items:
+            $ref: "#/components/schemas/IssueOut"
+          type:
+            - array
+            - "null"
+      required:
+        - issues
+      type: object
+    ListProjectsResponseBody:
+      additionalProperties: false
+      properties:
+        projects:
+          items:
+            $ref: "#/components/schemas/ProjectOut"
+          type:
+            - array
+            - "null"
+      required:
+        - projects
+      type: object
+    ListRecurrencesResponseBody:
+      additionalProperties: false
+      properties:
+        recurrences:
+          items:
+            $ref: "#/components/schemas/Recurrence"
+          type:
+            - array
+            - "null"
+      required:
+        - recurrences
+      type: object
+    ListTokensResponseBody:
+      additionalProperties: false
+      properties:
+        tokens:
+          items:
+            $ref: "#/components/schemas/TokenOut"
+          type:
+            - array
+            - "null"
+      required:
+        - tokens
+      type: object
+    MergeProjectRequestBody:
+      additionalProperties: false
+      properties:
+        source_project_id:
+          format: int64
+          type: integer
+        target_name:
+          type: string
+      required:
+        - source_project_id
+      type: object
+    MergeProjectResultOut:
+      additionalProperties: false
+      properties:
+        aliases_moved:
+          format: int64
+          type: integer
+        events_moved:
+          format: int64
+          type: integer
+        issues_moved:
+          format: int64
+          type: integer
+        purge_logs_moved:
+          format: int64
+          type: integer
+        short_id_extensions:
+          items:
+            $ref: "#/components/schemas/MergeShortIDExtension"
+          type:
+            - array
+            - "null"
+        source:
+          $ref: "#/components/schemas/ProjectOut"
+        target:
+          $ref: "#/components/schemas/ProjectOut"
+      required:
+        - source
+        - target
+        - issues_moved
+        - aliases_moved
+        - events_moved
+        - purge_logs_moved
+      type: object
+    MergeShortIDExtension:
+      additionalProperties: false
+      properties:
+        post_merge_short_id:
+          type: string
+        pre_merge_short_id:
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - pre_merge_short_id
+        - post_merge_short_id
+      type: object
+    MoveIssueRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        to_project_uid:
+          type: string
+      required:
+        - actor
+        - to_project_uid
+      type: object
+    MoveIssueResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        event_id:
+          format: int64
+          type: integer
+        issue:
+          $ref: "#/components/schemas/Issue"
+        new_short_id:
+          type: string
+      required:
+        - issue
+        - event_id
+        - new_short_id
+        - changed
+      type: object
+    MutationResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+        issue:
+          $ref: "#/components/schemas/Issue"
+        original_event:
+          $ref: "#/components/schemas/Event"
+        reused:
+          type: boolean
+      required:
+        - issue
+        - event
+        - changed
+      type: object
+    PatchIssueMetadataRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        patch:
+          additionalProperties: {}
+          type: object
+      required:
+        - actor
+        - patch
+      type: object
+    PatchIssueMetadataResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+        issue:
+          $ref: "#/components/schemas/Issue"
+      required:
+        - issue
+        - changed
+      type: object
+    PatchProjectMetadataRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        patch:
+          additionalProperties: {}
+          type: object
+      required:
+        - actor
+        - patch
+      type: object
+    PatchProjectMetadataResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+        project:
+          $ref: "#/components/schemas/Project"
+      required:
+        - project
+        - changed
+      type: object
+    PatchRecurrenceRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        dtstart:
+          type: string
+        rrule:
+          type: string
+        template:
+          $ref: "#/components/schemas/RecurrenceTemplateUpdateInput"
+        timezone:
+          type: string
+      required:
+        - actor
+      type: object
+    PatchRecurrenceResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        recurrence:
+          $ref: "#/components/schemas/Recurrence"
+      required:
+        - recurrence
+        - changed
+      type: object
+    PendingClaimOut:
+      additionalProperties: false
+      properties:
+        claim_kind:
+          type: string
+        client_kind:
+          type: string
+        holder:
+          type: string
+        holder_instance_uid:
+          type: string
+        last_attempt_at:
+          format: date-time
+          type: string
+        last_error:
+          type: string
+        purpose:
+          type: string
+        request_uid:
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        ttl_seconds:
+          format: int64
+          type: integer
+      required:
+        - request_uid
+        - holder
+        - holder_instance_uid
+        - client_kind
+        - claim_kind
+        - requested_at
+      type: object
+    PingResponseBody:
+      additionalProperties: false
+      properties:
+        ok:
+          type: boolean
+        pid:
+          format: int64
+          type: integer
+        service:
+          type: string
+        version:
+          type: string
+      required:
+        - ok
+        - service
+        - version
+      type: object
+    PollEventsBody:
+      additionalProperties: false
+      properties:
+        events:
+          items:
+            $ref: "#/components/schemas/EventEnvelope"
+          type:
+            - array
+            - "null"
+        next_after_id:
+          format: int64
+          type: integer
+        reset_after_id:
+          format: int64
+          type: integer
+        reset_required:
+          type: boolean
+      required:
+        - reset_required
+        - events
+        - next_after_id
+      type: object
+    PriorityRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        priority:
+          format: int64
+          type: integer
+      required:
+        - actor
+      type: object
+    Project:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        metadata:
+          type: string
+        name:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - name
+        - metadata
+        - revision
+        - created_at
+      type: object
+    ProjectAlias:
+      additionalProperties: false
+      properties:
+        alias_identity:
+          type: string
+        alias_kind:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+      required:
+        - id
+        - project_id
+        - alias_identity
+        - alias_kind
+        - created_at
+      type: object
+    ProjectFederationBody:
+      additionalProperties: false
+      properties:
+        baseline_through_event_id:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        replay_horizon_event_id:
+          format: int64
+          type: integer
+      required:
+        - project_id
+        - project_uid
+        - project_name
+        - replay_horizon_event_id
+        - baseline_through_event_id
+      type: object
+    ProjectOut:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        metadata:
+          type: string
+        name:
+          type: string
+        revision:
+          format: int64
+          type: integer
+        stats:
+          $ref: "#/components/schemas/ProjectStatsOut"
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - name
+        - metadata
+        - revision
+        - created_at
+      type: object
+    ProjectResolveBody:
+      additionalProperties: false
+      properties:
+        alias:
+          $ref: "#/components/schemas/ProjectAlias"
+        project:
+          $ref: "#/components/schemas/ProjectOut"
+        workspace_root:
+          type: string
+      required:
+        - project
+        - alias
+      type: object
+    ProjectStatsOut:
+      additionalProperties: false
+      properties:
+        closed:
+          format: int64
+          type: integer
+        last_event_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        open:
+          format: int64
+          type: integer
+      required:
+        - open
+        - closed
+        - last_event_at
+      type: object
+    PurgeLog:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        comment_count:
+          format: int64
+          type: integer
+        event_count:
+          format: int64
+          type: integer
+        events_deleted_max_id:
+          format: int64
+          type: integer
+        events_deleted_min_id:
+          format: int64
+          type: integer
+        id:
+          format: int64
+          type: integer
+        issue_author:
+          type: string
+        issue_title:
+          type: string
+        issue_uid:
+          type: string
+        label_count:
+          format: int64
+          type: integer
+        link_count:
+          format: int64
+          type: integer
+        origin_instance_uid:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        purge_reset_after_event_id:
+          format: int64
+          type: integer
+        purged_at:
+          format: date-time
+          type: string
+        purged_issue_id:
+          format: int64
+          type: integer
+        reason:
+          type: string
+        short_id:
+          type: string
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - origin_instance_uid
+        - project_id
+        - purged_issue_id
+        - project_name
+        - issue_title
+        - issue_author
+        - comment_count
+        - link_count
+        - label_count
+        - event_count
+        - actor
+        - purged_at
+      type: object
+    PurgeResponseBody:
+      additionalProperties: false
+      properties:
+        purge_log:
+          $ref: "#/components/schemas/PurgeLog"
+      required:
+        - purge_log
+      type: object
+    ReadyGlobalIssue:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        closed_reason:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        metadata:
+          type: string
+        occurrence_key:
+          type: string
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        recurrence_id:
+          format: int64
+          type: integer
+        revision:
+          format: int64
+          type: integer
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - project_name
+        - id
+        - uid
+        - project_id
+        - short_id
+        - title
+        - body
+        - status
+        - author
+        - metadata
+        - revision
+        - created_at
+        - updated_at
+      type: object
+    ReadyGlobalResponseBody:
+      additionalProperties: false
+      properties:
+        issues:
+          items:
+            $ref: "#/components/schemas/ReadyGlobalIssue"
+          type:
+            - array
+            - "null"
+      required:
+        - issues
+      type: object
+    ReadyResponseBody:
+      additionalProperties: false
+      properties:
+        issues:
+          items:
+            $ref: "#/components/schemas/Issue"
+          type:
+            - array
+            - "null"
+      required:
+        - issues
+      type: object
+    Recurrence:
+      additionalProperties: false
+      properties:
+        author:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        dtstart:
+          type: string
+        id:
+          format: int64
+          type: integer
+        last_materialized_uid:
+          type: string
+        next_occurrence_key:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        revision:
+          format: int64
+          type: integer
+        rrule:
+          type: string
+        template_body:
+          type: string
+        template_labels:
+          type: string
+        template_metadata:
+          type: string
+        template_owner:
+          type: string
+        template_priority:
+          format: int64
+          type: integer
+        template_title:
+          type: string
+        timezone:
+          type: string
+        uid:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - id
+        - uid
+        - project_id
+        - rrule
+        - dtstart
+        - timezone
+        - template_title
+        - template_body
+        - template_labels
+        - template_metadata
+        - author
+        - revision
+        - created_at
+        - updated_at
+      type: object
+    RecurrenceTemplateInput:
+      additionalProperties: false
+      properties:
+        body:
+          type: string
+        labels:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        metadata: {}
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        title:
+          type: string
+      required:
+        - title
+      type: object
+    RecurrenceTemplateUpdateInput:
+      additionalProperties: false
+      properties:
+        body:
+          type: string
+        labels:
+          items:
+            type: string
+          type: array
+        metadata: {}
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        title:
+          type: string
+      type: object
+    RemoveProjectResponseBody:
+      additionalProperties: false
+      properties:
+        event:
+          $ref: "#/components/schemas/Event"
+        project:
+          $ref: "#/components/schemas/ProjectOut"
+      required:
+        - project
+        - event
+      type: object
+    RenameProjectRequestBody:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+      required:
+        - name
+      type: object
+    ResolveProjectRequestBody:
+      additionalProperties: false
+      properties:
+        alias:
+          $ref: "#/components/schemas/AliasInput"
+          description: client-derived alias metadata; daemon resolves alias first, then falls back to name
+        name:
+          description: project name; required for first-seen alias attach
+          type: string
+        start_path:
+          description: absolute path to resolve from (daemon-side filesystem); legacy local-only fallback
+          type: string
+      type: object
+    RestoreProjectResponseBody:
+      additionalProperties: false
+      properties:
+        changed:
+          type: boolean
+        event:
+          $ref: "#/components/schemas/Event"
+        project:
+          $ref: "#/components/schemas/ProjectOut"
+      required:
+        - project
+        - event
+        - changed
+      type: object
+    RestoreRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+      required:
+        - actor
+      type: object
+    RevokeFederationEnrollmentBody:
+      additionalProperties: false
+      properties:
+        id:
+          format: int64
+          type: integer
+        revoked:
+          type: boolean
+      required:
+        - id
+        - revoked
+      type: object
+    RevokeTokenResponseBody:
+      additionalProperties: false
+      properties:
+        event:
+          $ref: "#/components/schemas/Event"
+        token:
+          $ref: "#/components/schemas/TokenOut"
+      required:
+        - token
+        - event
+      type: object
+    SearchHit:
+      additionalProperties: false
+      properties:
+        issue:
+          $ref: "#/components/schemas/Issue"
+        matched_in:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        score:
+          format: double
+          type: number
+      required:
+        - issue
+        - score
+        - matched_in
+      type: object
+    SearchResponseBody:
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+        results:
+          items:
+            $ref: "#/components/schemas/SearchHit"
+          type:
+            - array
+            - "null"
+      required:
+        - query
+        - results
+      type: object
+    ShowIssueResponseBody:
+      additionalProperties: false
+      properties:
+        children:
+          items:
+            $ref: "#/components/schemas/IssueOut"
+          type:
+            - array
+            - "null"
+        claim:
+          $ref: "#/components/schemas/IssueClaimOut"
+        claim_hub_now:
+          format: date-time
+          type: string
+        claim_violation_count:
+          format: int64
+          type: integer
+        claim_violations:
+          items:
+            $ref: "#/components/schemas/ClaimViolationOut"
+          type:
+            - array
+            - "null"
+        comments:
+          items:
+            $ref: "#/components/schemas/Comment"
+          type:
+            - array
+            - "null"
+        issue:
+          $ref: "#/components/schemas/Issue"
+        labels:
+          items:
+            $ref: "#/components/schemas/IssueLabel"
+          type:
+            - array
+            - "null"
+        lease:
+          $ref: "#/components/schemas/IssueClaimOut"
+        lease_hub_now:
+          format: date-time
+          type: string
+        lease_violation_count:
+          format: int64
+          type: integer
+        lease_violations:
+          items:
+            $ref: "#/components/schemas/ClaimViolationOut"
+          type:
+            - array
+            - "null"
+        links:
+          items:
+            $ref: "#/components/schemas/LinkOut"
+          type:
+            - array
+            - "null"
+        parent:
+          $ref: "#/components/schemas/IssueRef"
+        pending_claims:
+          items:
+            $ref: "#/components/schemas/PendingClaimOut"
+          type:
+            - array
+            - "null"
+        pending_leases:
+          items:
+            $ref: "#/components/schemas/PendingClaimOut"
+          type:
+            - array
+            - "null"
+      required:
+        - issue
+        - comments
+        - links
+        - labels
+      type: object
+    ShowProjectResponseBody:
+      additionalProperties: false
+      properties:
+        aliases:
+          items:
+            $ref: "#/components/schemas/ProjectAlias"
+          type:
+            - array
+            - "null"
+        project:
+          $ref: "#/components/schemas/ProjectOut"
+      required:
+        - project
+        - aliases
+      type: object
+    ShowRecurrenceResponseBody:
+      additionalProperties: false
+      properties:
+        recurrence:
+          $ref: "#/components/schemas/Recurrence"
+      required:
+        - recurrence
+      type: object
+    SkipFederationQuarantineRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        reason:
+          type: string
+      required:
+        - actor
+      type: object
+    TokenOut:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        last_used_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        name:
+          type:
+            - string
+            - "null"
+        revoked_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - actor
+        - name
+        - created_at
+        - last_used_at
+        - revoked_at
+      type: object
+    UnassignRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+      required:
+        - actor
+      type: object
+info:
+  title: kata
+  version: 0.1.0
+openapi: 3.1.0
+paths:
+  /api/v1/audit/closes:
+    get:
+      operationId: auditCloses
+      parameters:
+        - explode: false
+          in: query
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - description: "RFC3339 timestamp (default: zero time)"
+          explode: false
+          in: query
+          name: since
+          schema:
+            description: "RFC3339 timestamp (default: zero time)"
+            type: string
+        - description: "RFC3339 timestamp (default: now)"
+          explode: false
+          in: query
+          name: until
+          schema:
+            description: "RFC3339 timestamp (default: now)"
+            type: string
+        - explode: false
+          in: query
+          name: actor
+          schema:
+            type: string
+        - description: filter to closes of children of parent <ref>
+          explode: false
+          in: query
+          name: parent
+          schema:
+            description: filter to closes of children of parent <ref>
+            type: string
+        - explode: false
+          in: query
+          name: reason
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: no_evidence
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditClosesResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/digest:
+    get:
+      operationId: digestGlobal
+      parameters:
+        - explode: false
+          in: query
+          name: since
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: until
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: actor
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DigestResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/events:
+    get:
+      operationId: pollEvents
+      parameters:
+        - explode: false
+          in: query
+          name: after_id
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PollEventsBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/federation/enrollments:
+    get:
+      operationId: listFederationEnrollments
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListFederationEnrollmentsBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    post:
+      operationId: createFederationEnrollment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFederationEnrollmentRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationEnrollmentOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/federation/enrollments/{enrollment_id}/revoke:
+    post:
+      operationId: revokeFederationEnrollment
+      parameters:
+        - in: path
+          name: enrollment_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeFederationEnrollmentBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/federation/replicas:
+    post:
+      operationId: createFederationReplica
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFederationReplicaRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateFederationReplicaBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/federation/status:
+    get:
+      operationId: getFederationStatus
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationStatusBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/instance:
+    get:
+      operationId: instance
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/issues:
+    get:
+      operationId: listAllIssues
+      parameters:
+        - explode: false
+          in: query
+          name: project_id
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - closed
+              - ""
+            type: string
+        - description: exact priority filter (0..4); empty = no filter
+          explode: false
+          in: query
+          name: priority
+          schema:
+            description: exact priority filter (0..4); empty = no filter
+            type: string
+        - description: include only priority <= this value (0..4); empty = no filter
+          explode: false
+          in: query
+          name: max_priority
+          schema:
+            description: include only priority <= this value (0..4); empty = no filter
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListIssuesResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/issues/{uid}:
+    get:
+      operationId: showIssueByUID
+      parameters:
+        - in: path
+          name: uid
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: include_deleted
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShowIssueResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/ping:
+    get:
+      operationId: ping
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PingResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects:
+    get:
+      operationId: listProjects
+      parameters:
+        - explode: false
+          in: query
+          name: include
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListProjectsResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    post:
+      operationId: initProject
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitProjectRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitProjectResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/resolve:
+    post:
+      operationId: resolveProject
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveProjectRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectResolveBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}:
+    delete:
+      operationId: removeProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: actor
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: force
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoveProjectResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    get:
+      operationId: showProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShowProjectResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    patch:
+      operationId: renameProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameProjectRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShowProjectResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/aliases/{alias_id}:
+    delete:
+      operationId: detachProjectAlias
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: alias_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: actor
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: force
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetachProjectAliasResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/digest:
+    get:
+      operationId: digestProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: since
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: until
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: actor
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DigestResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/events:
+    get:
+      operationId: pollProjectEvents
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: after_id
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PollEventsBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation:
+    get:
+      operationId: getProjectFederation
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFederationBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/enable:
+    post:
+      operationId: enableProjectFederation
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnableProjectFederationRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFederationBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/events:
+    get:
+      operationId: pollFederationProjectEvents
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: after_id
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PollEventsBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/events:ingest:
+    post:
+      operationId: ingestFederationProjectEvents
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FederationIngestEventsRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationIngestEventsBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/metadata:
+    get:
+      operationId: getFederationProjectMetadata
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFederationBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/quarantine/{quarantine_id}/skip:
+    post:
+      operationId: skipFederationQuarantine
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: quarantine_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: X-Kata-Confirm
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkipFederationQuarantineRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationQuarantineSummary"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/status:
+    get:
+      operationId: getProjectFederationStatus
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationStatusBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/imports:
+    post:
+      operationId: importIssues
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportBatchResult"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues:
+    get:
+      operationId: listIssues
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - closed
+              - ""
+            type: string
+        - description: exact priority filter (0..4); empty = no filter
+          explode: false
+          in: query
+          name: priority
+          schema:
+            description: exact priority filter (0..4); empty = no filter
+            type: string
+        - description: include only priority <= this value (0..4); empty = no filter
+          explode: false
+          in: query
+          name: max_priority
+          schema:
+            description: include only priority <= this value (0..4); empty = no filter
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: unowned
+          schema:
+            type: boolean
+        - explode: false
+          in: query
+          name: owner
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: false
+          in: query
+          name: exclude_label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListIssuesResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    post:
+      operationId: createIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIssueRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}:
+    get:
+      operationId: showIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: include_deleted
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShowIssueResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    patch:
+      operationId: editIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditIssueRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditIssueResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/assign:
+    post:
+      operationId: assignIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/claim:
+    post:
+      operationId: claimIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/close:
+    post:
+      operationId: closeIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/delete:
+    post:
+      operationId: deleteIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Confirm
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestructiveActionRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/move:
+    post:
+      operationId: moveIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveIssueRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoveIssueResponseBody"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/priority:
+    post:
+      operationId: setIssuePriority
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriorityRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/purge:
+    post:
+      operationId: purgeIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Kata-Confirm
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestructiveActionRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurgeResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/reopen:
+    post:
+      operationId: reopenIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/restore:
+    post:
+      operationId: restoreIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestoreRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/actions/unassign:
+    post:
+      operationId: unassignIssue
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnassignRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/comments:
+    post:
+      operationId: createComment
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/labels:
+    post:
+      operationId: addLabel
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddLabelRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddLabelResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/labels/{label}:
+    delete:
+      operationId: removeLabel
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: label
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: actor
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/lease:
+    get:
+      operationId: getIssueLeaseStatus
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimStatusBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/lease/actions/acquire:
+    post:
+      operationId: acquireIssueLease
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimActionBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimActionResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/lease/actions/force_release:
+    post:
+      operationId: forceReleaseIssueLease
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimActionBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimActionResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/lease/actions/release:
+    post:
+      operationId: releaseIssueLease
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimActionBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimActionResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/lease/actions/renew:
+    post:
+      operationId: renewIssueLease
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimActionBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimActionResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/links:
+    post:
+      operationId: createLink
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLinkRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateLinkResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/links/{link_id}:
+    delete:
+      operationId: deleteLink
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: link_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: actor
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MutationResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/metadata:
+    post:
+      operationId: patchIssueMetadata
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchIssueMetadataRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatchIssueMetadataResponseBody"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/labels:
+    get:
+      operationId: listLabels
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelsListResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/merge:
+    post:
+      operationId: mergeProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergeProjectRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeProjectResultOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/metadata:
+    post:
+      operationId: patchProjectMetadata
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchProjectMetadataRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatchProjectMetadataResponseBody"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/ready:
+    get:
+      operationId: readyIssues
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: unowned
+          schema:
+            type: boolean
+        - explode: false
+          in: query
+          name: owner
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: false
+          in: query
+          name: exclude_label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/recurrences:
+    get:
+      operationId: listRecurrences
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRecurrencesResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    post:
+      operationId: createRecurrence
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRecurrenceRequestBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateRecurrenceResponseBody"
+          description: Created
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/recurrences/{recurrence_uid}:
+    delete:
+      operationId: deleteRecurrence
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: recurrence_uid
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: actor
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    get:
+      operationId: showRecurrence
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: recurrence_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShowRecurrenceResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    patch:
+      operationId: patchRecurrence
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: recurrence_uid
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchRecurrenceRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatchRecurrenceResponseBody"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/restore:
+    post:
+      operationId: restoreProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: actor
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestoreProjectResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/search:
+    get:
+      operationId: searchIssues
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: q
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: include_deleted
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/ready:
+    get:
+      operationId: readyIssuesGlobal
+      parameters:
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyGlobalResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/tokens:
+    get:
+      operationId: listTokens
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTokensResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    post:
+      operationId: createToken
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTokenRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateTokenResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/tokens/{id}/actions/revoke:
+    post:
+      operationId: revokeToken
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeTokenResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error

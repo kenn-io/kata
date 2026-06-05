@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -69,6 +70,16 @@ func (e *APIError) Envelope() ErrorEnvelope {
 // our wire shape rather than the framework default.
 func (e *APIError) MarshalJSON() ([]byte, error) {
 	return json.Marshal(e.Envelope())
+}
+
+// Schema implements huma.SchemaProvider so the generated OpenAPI document
+// describes error responses with the true wire shape (ErrorEnvelope) rather
+// than APIError's raw Go fields. Because APIError serializes via MarshalJSON,
+// Huma's struct reflection would otherwise publish the flat, exported-name
+// layout instead of the {status, error:{code,message,...}} envelope clients
+// actually receive — a schema that lies about every error response.
+func (e *APIError) Schema(r huma.Registry) *huma.Schema {
+	return r.Schema(reflect.TypeOf(ErrorEnvelope{}), true, "ErrorEnvelope")
 }
 
 // InstallErrorFormatter wires Huma so non-API-typed errors (panics, validation

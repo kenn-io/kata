@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch
+.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -15,6 +15,11 @@ install:
 
 test:
 	go test $(GOFLAGS_TEST) ./...
+
+# Regenerate the committed OpenAPI schema artifact from the daemon's routes.
+# The TestOpenAPIArtifactUpToDate test fails if api/openapi.yaml drifts from this.
+openapi:
+	go run ./cmd/kata openapi > api/openapi.yaml
 
 test-short:
 	go test -short $(GOFLAGS_TEST) ./...
