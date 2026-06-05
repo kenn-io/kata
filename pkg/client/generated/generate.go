@@ -1,4 +1,3 @@
-// Package generated contains the generated kata daemon API client.
 package generated
 
 //go:generate sh -c "go run ../../../cmd/kata openapi --version 3.0 --format yaml > ../openapi.yaml"

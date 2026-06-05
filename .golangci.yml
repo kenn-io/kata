@@ -12,7 +12,16 @@ linters:
     - misspell
     - revive
     - gosec
+  exclusions:
+    generated: lax
+    rules:
+      - path: pkg/client/generated/generate.go
+        linters:
+          - revive
+        text: "package-comments:"
 formatters:
   enable:
     - gofmt
     - goimports
+  exclusions:
+    generated: lax
