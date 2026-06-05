@@ -51,7 +51,7 @@ func TestOpenAPIClientSpecArtifactUpToDate(t *testing.T) {
 func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 	tmpRoot := t.TempDir()
 	tmpGenerated := filepath.Join(tmpRoot, "generated")
-	if err := os.Mkdir(tmpGenerated, 0o755); err != nil {
+	if err := os.Mkdir(tmpGenerated, 0o700); err != nil {
 		t.Fatalf("mkdir generated temp dir: %v", err)
 	}
 	config, err := os.ReadFile(filepath.Join(clientGeneratedDir, "config.yaml"))
@@ -59,7 +59,7 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 		t.Fatalf("read generated config: %v", err)
 	}
 	tmpConfig := filepath.Join(tmpGenerated, "config.yaml")
-	if err := os.WriteFile(tmpConfig, config, 0o644); err != nil {
+	if err := os.WriteFile(tmpConfig, config, 0o600); err != nil { //nolint:gosec // test-controlled path under t.TempDir
 		t.Fatalf("write generated config: %v", err)
 	}
 	tmpSpec := filepath.Join(tmpRoot, "openapi.yaml")
@@ -67,7 +67,7 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v (run `make api-generate` to generate it)", clientSpecArtifactPath, err)
 	}
-	if err := os.WriteFile(tmpSpec, spec, 0o644); err != nil {
+	if err := os.WriteFile(tmpSpec, spec, 0o600); err != nil { //nolint:gosec // test-controlled path under t.TempDir
 		t.Fatalf("write generated spec: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 		if gotFiles[i] != wantFiles[i] {
 			t.Fatalf("%s is stale; generated file %q, want %q", clientGeneratedDir, gotFiles[i], wantFiles[i])
 		}
-		got, err := os.ReadFile(filepath.Join(tmpGenerated, gotFiles[i]))
+		got, err := os.ReadFile(filepath.Join(tmpGenerated, gotFiles[i])) //nolint:gosec // generated filename is enumerated from t.TempDir output
 		if err != nil {
 			t.Fatalf("read generated temp file %s: %v", gotFiles[i], err)
 		}

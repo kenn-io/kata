@@ -1,3 +1,5 @@
+// Package client exposes the generated kata daemon API client with constructors
+// that match kata's existing daemon transport and authentication modes.
 package client
 
 import (
@@ -174,5 +176,5 @@ func (d contextDoer) Do(ctx context.Context, req *http.Request) (*http.Response,
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return client.Do(req.WithContext(ctx))
+	return client.Do(req.WithContext(ctx)) //nolint:gosec // request URL is built by the generated client from the caller-selected base URL
 }

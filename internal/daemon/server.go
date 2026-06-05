@@ -123,7 +123,7 @@ func (s *Server) API() huma.API { return s.api }
 func (s *Server) Close() error { return nil }
 
 func registerOpenAPIYAML(mux *http.ServeMux) {
-	mux.HandleFunc(http.MethodGet+" /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(http.MethodGet+" /openapi.yaml", func(w http.ResponseWriter, _ *http.Request) {
 		out, err := OpenAPIYAML()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
