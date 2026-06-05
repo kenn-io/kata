@@ -192,8 +192,8 @@ func isMutation(method string) bool {
 // registerRoutes installs the per-resource handler groups onto humaAPI. Each
 // group lives in its own file (handlers_health.go, handlers_projects.go, etc.)
 // and replaces the matching stub below as it lands. The events handler also
-// receives mux so it can register the SSE endpoint as a raw http.HandlerFunc
-// (Huma doesn't model streaming responses).
+// receives mux so it can preserve the SSE endpoint's method-not-allowed
+// contract around the Huma streaming route.
 func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerHealth(humaAPI, cfg)
 	registerInstanceHandlers(humaAPI, cfg)

@@ -56,3 +56,18 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 		t.Error("no paths registered in document")
 	}
 }
+
+func TestOpenAPIDocumentIncludesEventsStream(t *testing.T) {
+	doc := OpenAPIDocument()
+	path := doc.Paths["/api/v1/events/stream"]
+	if path == nil || path.Get == nil {
+		t.Fatal("missing GET /api/v1/events/stream")
+	}
+	resp := path.Get.Responses["200"]
+	if resp == nil {
+		t.Fatal("missing 200 response for GET /api/v1/events/stream")
+	}
+	if resp.Content["text/event-stream"] == nil {
+		t.Fatal("missing text/event-stream response content")
+	}
+}

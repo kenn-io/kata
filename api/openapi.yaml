@@ -3094,6 +3094,41 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/events/stream:
+    get:
+      description: Streams durable events as Server-Sent Events. Clients may resume with Last-Event-ID or after_id, but not both.
+      operationId: streamEvents
+      parameters:
+        - description: Exclusive event cursor. Mutually exclusive with Last-Event-ID.
+          in: query
+          name: after_id
+          schema:
+            type: integer
+        - description: Optional project ID filter. Omit to stream all visible project events.
+          in: query
+          name: project_id
+          schema:
+            type: integer
+        - description: Exclusive resume cursor from the last received SSE id. Mutually exclusive with after_id.
+          in: header
+          name: Last-Event-ID
+          schema:
+            type: integer
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                description: UTF-8 Server-Sent Events frames containing event envelopes or sync.reset_required reset payloads.
+                type: string
+          description: Server-Sent Events stream.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Stream events
   /api/v1/federation/enrollments:
     get:
       operationId: listFederationEnrollments
