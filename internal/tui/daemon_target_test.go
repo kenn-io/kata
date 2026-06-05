@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 )
 
@@ -377,6 +379,58 @@ func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
 	assert.Equal(t, "secret-from-env", gotNormal.Token)
 	assert.Equal(t, "secret-from-env", gotSSE.Token)
 	assert.Equal(t, "secret-from-env", conn.target.Token)
+}
+
+func TestConnectResolvedLocalTargetRetryRefreshPreservesTargetToken(t *testing.T) {
+	oldEnsureLocal := ensureLocalRunningForTUI
+	oldNewClient := newHTTPClientForTUI
+	oldBootScope := bootResolveScopeForTUI
+	oldRefresh := refreshLocalHTTPClientForTUI
+	t.Cleanup(func() {
+		ensureLocalRunningForTUI = oldEnsureLocal
+		newHTTPClientForTUI = oldNewClient
+		bootResolveScopeForTUI = oldBootScope
+		refreshLocalHTTPClientForTUI = oldRefresh
+	})
+
+	ensureLocalRunningForTUI = func(context.Context) (string, error) {
+		return clientpkg.UnixBase, nil
+	}
+	refreshLocalHTTPClientForTUI = func(context.Context) (*http.Client, error) {
+		t.Fatal("local retry should refresh through the resolved daemon target")
+		return nil, nil
+	}
+	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
+	}
+	var normalCalls int
+	var retryTarget daemonTarget
+	newHTTPClientForTUI = func(
+		_ context.Context, _ string, target daemonTarget, kind clientOptsKind,
+	) (*http.Client, error) {
+		if kind == clientOptsSSE {
+			return &http.Client{}, nil
+		}
+		normalCalls++
+		if normalCalls == 1 {
+			return &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("dial unix /tmp/missing.sock: connect: no such file or directory")
+			})}, nil
+		}
+		retryTarget = target
+		return &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return jsonResponse(t, map[string]any{"issues": []map[string]any{}}), nil
+		})}, nil
+	}
+
+	conn, err := connectResolvedDaemonTarget(t.Context(),
+		daemonTarget{Name: "local-secure", Local: true, Token: "target-token"},
+		clientpkg.UnixBase)
+	require.NoError(t, err)
+
+	_, err = conn.api.ListIssues(t.Context(), 7, ListFilter{Limit: 2001})
+	require.NoError(t, err)
+	assert.Equal(t, "target-token", retryTarget.Token)
 }
 
 func TestConnectDaemonTargetRemoteRejectsUnsetTokenEnvOnUse(t *testing.T) {

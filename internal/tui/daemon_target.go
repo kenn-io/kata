@@ -169,6 +169,9 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 		return daemonConnection{}, err
 	}
 	c := NewClient(endpoint, hc)
+	if endpoint == client.UnixBase {
+		c.setLocalHTTPClientRefresh(localHTTPClientRefreshForTarget(endpoint, target))
+	}
 	cwd, _ := os.Getwd()
 	bi, err := bootResolveScopeForTUI(ctx, c, cwd)
 	if err != nil {
@@ -181,6 +184,23 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 		target:   target,
 		init:     bi,
 	}, nil
+}
+
+func localHTTPClientRefreshForTarget(
+	endpoint string, target daemonTarget,
+) func(context.Context) (*http.Client, error) {
+	return func(ctx context.Context) (*http.Client, error) {
+		refreshedEndpoint := endpoint
+		if target.Local || endpoint == client.UnixBase {
+			var err error
+			refreshedEndpoint, err = ensureLocalRunningForTUI(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		refreshedTarget := resolvedDaemonTarget(target, refreshedEndpoint)
+		return newHTTPClientForTUI(ctx, refreshedEndpoint, refreshedTarget, clientOptsNormal)
+	}
 }
 
 func resolveDaemonEndpoint(ctx context.Context, target daemonTarget) (string, error) {

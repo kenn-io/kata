@@ -577,6 +577,36 @@ func TestList_ExpandAllCollapsesWhenEverythingIsExpanded(t *testing.T) {
 	}
 }
 
+func TestList_ExpandAllCollapseRestoresHiddenChildToNearestVisibleParent(t *testing.T) {
+	api, km, sc := newListEnv()
+	parentSID := "p001"
+	childSID := "c002"
+	lm := listModel{
+		issues: []Issue{
+			testIssue("aaa1"),
+			testIssue(parentSID, withCounts(1, 1)),
+			testIssue(childSID, withParent(parentSID)),
+			testIssue("solo"),
+		},
+		expanded: expansionSet{
+			{projectID: testIssueProjectID, shortID: parentSID}: true,
+		},
+		cursor: 2,
+	}
+
+	lm, cmd := lm.Update(runeKey('E'), km, api, sc)
+	if cmd != nil {
+		t.Fatalf("collapse all should not dispatch a command, got %T", cmd)
+	}
+	assertQueueShortIDs(t, lm.visibleRows(), []string{"aaa1", parentSID, "solo"})
+	if lm.cursor != 1 {
+		t.Fatalf("cursor = %d, want selected child restored to visible parent", lm.cursor)
+	}
+	if lm.selectedUID != "01TEST-"+parentSID {
+		t.Fatalf("selectedUID = %q, want parent UID", lm.selectedUID)
+	}
+}
+
 func TestList_ViewToggleShowsFlatPeersAndPreservesSelection(t *testing.T) {
 	api, km, sc := newListEnv()
 	parentSID := "p001"
@@ -635,6 +665,37 @@ func TestList_ViewToggleFromFlatCollapsesNestedView(t *testing.T) {
 		t.Fatalf("expanded = %+v, want collapsed after returning to nested", lm.expanded)
 	}
 	assertQueueShortIDs(t, lm.visibleRows(), []string{parentSID, "solo"})
+}
+
+func TestList_ViewToggleFromFlatRestoresHiddenChildToNearestVisibleParent(t *testing.T) {
+	api, km, sc := newListEnv()
+	parentSID := "p001"
+	childSID := "c002"
+	lm := listModel{
+		issues: []Issue{
+			testIssue("aaa1"),
+			testIssue(parentSID, withCounts(1, 1)),
+			testIssue(childSID, withParent(parentSID)),
+			testIssue("solo"),
+		},
+		viewMode: issueListViewFlat,
+		cursor:   2,
+	}
+
+	lm, cmd := lm.Update(runeKey('v'), km, api, sc)
+	if cmd != nil {
+		t.Fatalf("view toggle should not dispatch a command, got %T", cmd)
+	}
+	if lm.viewMode != issueListViewNested {
+		t.Fatalf("viewMode = %v, want nested", lm.viewMode)
+	}
+	assertQueueShortIDs(t, lm.visibleRows(), []string{"aaa1", parentSID, "solo"})
+	if lm.cursor != 1 {
+		t.Fatalf("cursor = %d, want selected child restored to visible parent", lm.cursor)
+	}
+	if lm.selectedUID != "01TEST-"+parentSID {
+		t.Fatalf("selectedUID = %q, want parent UID", lm.selectedUID)
+	}
 }
 
 func TestList_SelectionPreservedAcrossRefetchWithParentInsertion(t *testing.T) {

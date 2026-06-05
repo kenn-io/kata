@@ -324,7 +324,7 @@ func TestClient_LocalUnixTransportFailureDoesNotRetryMutationWithoutIdempotencyK
 
 	_, err := c.AddComment(context.Background(), 7, "abc4", "note", "alice")
 	require.Error(t, err)
-	require.False(t, refreshed.Load(), "non-idempotent mutation should not refresh and retry")
+	require.True(t, refreshed.Load(), "non-idempotent mutation should refresh the stale client")
 	assert.Contains(t, err.Error(), "local kata daemon connection failed")
 }
 

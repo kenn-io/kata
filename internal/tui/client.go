@@ -22,14 +22,21 @@ import (
 // Client is the typed adapter the TUI uses to talk to the daemon. Errors
 // include the request method+path so toast messages stay actionable.
 type Client struct {
-	base string
-	hc   *http.Client
-	mu   sync.RWMutex
+	base                   string
+	hc                     *http.Client
+	refreshLocalHTTPClient func(context.Context) (*http.Client, error)
+	mu                     sync.RWMutex
 }
 
 // NewClient wraps a pre-built *http.Client with a typed daemon adapter.
 // base is the daemon URL — "http://kata.invalid" for unix-socket transport.
-func NewClient(base string, hc *http.Client) *Client { return &Client{base: base, hc: hc} }
+func NewClient(base string, hc *http.Client) *Client {
+	return &Client{
+		base:                   base,
+		hc:                     hc,
+		refreshLocalHTTPClient: refreshLocalHTTPClientForTUI,
+	}
+}
 
 var (
 	refreshLocalHTTPClientForTUI = func(ctx context.Context) (*http.Client, error) {
@@ -571,6 +578,21 @@ func (c *Client) setHTTPClient(hc *http.Client) {
 	c.hc = hc
 }
 
+func (c *Client) setLocalHTTPClientRefresh(fn func(context.Context) (*http.Client, error)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.refreshLocalHTTPClient = fn
+}
+
+func (c *Client) localHTTPClientRefresh() func(context.Context) (*http.Client, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.refreshLocalHTTPClient == nil {
+		return refreshLocalHTTPClientForTUI
+	}
+	return c.refreshLocalHTTPClient
+}
+
 func (c *Client) retryLocalTransportFailure(
 	ctx context.Context,
 	method, path string,
@@ -578,9 +600,10 @@ func (c *Client) retryLocalTransportFailure(
 	headers map[string]string,
 	err error,
 ) (*http.Response, error) {
+	canReplay := canRetryLocalTransport(method, headers)
 	phase := "request failed"
 	if c.base == clientpkg.UnixBase && ctx.Err() == nil {
-		if canRetryLocalTransport(method, headers) {
+		if canReplay {
 			phase = "request failed; retrying local daemon"
 		} else {
 			phase = "request failed; retry skipped for non-idempotent request"
@@ -590,15 +613,15 @@ func (c *Client) retryLocalTransportFailure(
 	if c.base != clientpkg.UnixBase || ctx.Err() != nil {
 		return nil, transportError(method, path, c.base, err)
 	}
-	if !canRetryLocalTransport(method, headers) {
-		return nil, transportError(method, path, c.base, err)
-	}
-	hc, refreshErr := refreshLocalHTTPClientForTUI(ctx)
+	hc, refreshErr := c.localHTTPClientRefresh()(ctx)
 	if refreshErr != nil {
 		logTUIClientTransport("retry refresh failed", method, path, c.base, refreshErr)
 		return nil, transportError(method, path, c.base, err)
 	}
 	c.setHTTPClient(hc)
+	if !canReplay {
+		return nil, transportError(method, path, c.base, err)
+	}
 	req, reqErr := buildRequest(ctx, method, c.base+path, body)
 	if reqErr != nil {
 		return nil, reqErr

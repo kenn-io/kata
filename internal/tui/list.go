@@ -519,18 +519,70 @@ func (lm listModel) applyChildSortKey(msg tea.KeyMsg, km keymap) (listModel, boo
 }
 
 func (lm listModel) restoreCursorToSelection() listModel {
+	rows := lm.visibleRows()
 	if lm.selectedUID == "" {
 		return lm.clampCursorToVisibleRows()
 	}
-	rows := lm.visibleRows()
 	for i, row := range rows {
 		if row.issue.UID == lm.selectedUID &&
 			(lm.selectedProjectID == 0 || row.issue.ProjectID == lm.selectedProjectID) {
-			lm.cursor = i
-			return lm.ensureCursorVisible(len(rows))
+			return lm.selectVisibleRow(rows, i)
 		}
 	}
+	if i, ok := lm.nearestVisibleAncestorIndex(rows); ok {
+		return lm.selectVisibleRow(rows, i)
+	}
 	return lm.clampCursorToVisibleRows()
+}
+
+func (lm listModel) selectVisibleRow(rows []queueRow, idx int) listModel {
+	lm.cursor = idx
+	if idx >= 0 && idx < len(rows) {
+		lm.selectedUID = rows[idx].issue.UID
+		lm.selectedProjectID = rows[idx].issue.ProjectID
+	}
+	return lm.ensureCursorVisible(len(rows))
+}
+
+func (lm listModel) nearestVisibleAncestorIndex(rows []queueRow) (int, bool) {
+	selectedKey, ok := lm.selectedIssueKey()
+	if !ok {
+		return 0, false
+	}
+	visibleByKey := make(map[issueKey]int, len(rows))
+	for i, row := range rows {
+		visibleByKey[row.key] = i
+	}
+	issuesByKey := make(map[issueKey]Issue, len(lm.issues))
+	for _, iss := range lm.issues {
+		issuesByKey[issueKey{projectID: iss.ProjectID, shortID: iss.ShortID}] = iss
+	}
+	seen := map[issueKey]bool{selectedKey: true}
+	for key := selectedKey; ; {
+		iss, ok := issuesByKey[key]
+		if !ok || iss.ParentShortID == nil {
+			return 0, false
+		}
+		parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
+		if idx, ok := visibleByKey[parentKey]; ok {
+			return idx, true
+		}
+		if seen[parentKey] {
+			return 0, false
+		}
+		seen[parentKey] = true
+		key = parentKey
+	}
+}
+
+func (lm listModel) selectedIssueKey() (issueKey, bool) {
+	for _, iss := range lm.issues {
+		if iss.UID == lm.selectedUID &&
+			(lm.selectedProjectID == 0 || iss.ProjectID == lm.selectedProjectID) {
+			return issueKey{projectID: iss.ProjectID, shortID: iss.ShortID}, true
+		}
+	}
+	return issueKey{}, false
 }
 
 func (lm listModel) expandableKeys() []issueKey {
