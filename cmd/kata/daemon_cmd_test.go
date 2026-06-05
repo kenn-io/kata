@@ -217,7 +217,7 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 		return err == nil
 	}, 3*time.Second, 10*time.Millisecond)
 
-	body, err := os.ReadFile(runtimePath)
+	body, err := os.ReadFile(runtimePath) //nolint:gosec // G304: runtimePath is generated from test-owned KATA_HOME via RuntimeStore.Path.
 	require.NoError(t, err)
 	var got daemonRuntimeRecordJSON
 	require.NoError(t, json.Unmarshal(body, &got))
