@@ -2704,7 +2704,9 @@ components:
           type: array
         metadata:
           additionalProperties: true
-          type: object
+          type:
+            - object
+            - "null"
         owner:
           type: string
         priority:

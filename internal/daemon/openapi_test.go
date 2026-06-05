@@ -81,10 +81,15 @@ func TestOpenAPIDocumentJSONBlobShapes(t *testing.T) {
 	assertSchemaPropertyType(t, doc, "ReadyGlobalIssue", "metadata", huma.TypeObject)
 	assertSchemaPropertyType(t, doc, "Recurrence", "template_labels", huma.TypeArray)
 	assertSchemaPropertyType(t, doc, "Recurrence", "template_metadata", huma.TypeObject)
+	assertSchemaPropertyType(t, doc, "RecurrenceTemplateUpdateInput", "metadata", huma.TypeObject)
 
 	labels := doc.Components.Schemas.Map()["Recurrence"].Properties["template_labels"]
 	if labels.Items == nil || labels.Items.Type != huma.TypeString {
 		t.Fatalf("Recurrence.template_labels items = %+v, want string items", labels.Items)
+	}
+	updateMetadata := doc.Components.Schemas.Map()["RecurrenceTemplateUpdateInput"].Properties["metadata"]
+	if !updateMetadata.Nullable {
+		t.Fatal("RecurrenceTemplateUpdateInput.metadata must allow null")
 	}
 }
 

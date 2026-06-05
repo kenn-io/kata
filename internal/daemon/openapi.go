@@ -30,12 +30,12 @@ func applyJSONBlobSchemaOverrides(doc *huma.OpenAPI) {
 	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
 		return
 	}
-	for _, schema := range doc.Components.Schemas.Map() {
-		applyJSONBlobSchemaOverridesTo(schema, map[*huma.Schema]struct{}{})
+	for name, schema := range doc.Components.Schemas.Map() {
+		applyJSONBlobSchemaOverridesTo(name, schema, map[*huma.Schema]struct{}{})
 	}
 }
 
-func applyJSONBlobSchemaOverridesTo(schema *huma.Schema, seen map[*huma.Schema]struct{}) {
+func applyJSONBlobSchemaOverridesTo(componentName string, schema *huma.Schema, seen map[*huma.Schema]struct{}) {
 	if schema == nil {
 		return
 	}
@@ -46,25 +46,31 @@ func applyJSONBlobSchemaOverridesTo(schema *huma.Schema, seen map[*huma.Schema]s
 
 	for name, prop := range schema.Properties {
 		switch name {
-		case "metadata", "template_metadata":
+		case "metadata":
+			if componentName == "RecurrenceTemplateUpdateInput" {
+				schema.Properties[name] = jsonNullableObjectSchema()
+				continue
+			}
+			schema.Properties[name] = jsonObjectSchema()
+		case "template_metadata":
 			schema.Properties[name] = jsonObjectSchema()
 		case "template_labels":
 			schema.Properties[name] = jsonStringArraySchema()
 		default:
-			applyJSONBlobSchemaOverridesTo(prop, seen)
+			applyJSONBlobSchemaOverridesTo("", prop, seen)
 		}
 	}
-	applyJSONBlobSchemaOverridesTo(schema.Items, seen)
+	applyJSONBlobSchemaOverridesTo("", schema.Items, seen)
 	for _, child := range schema.OneOf {
-		applyJSONBlobSchemaOverridesTo(child, seen)
+		applyJSONBlobSchemaOverridesTo("", child, seen)
 	}
 	for _, child := range schema.AnyOf {
-		applyJSONBlobSchemaOverridesTo(child, seen)
+		applyJSONBlobSchemaOverridesTo("", child, seen)
 	}
 	for _, child := range schema.AllOf {
-		applyJSONBlobSchemaOverridesTo(child, seen)
+		applyJSONBlobSchemaOverridesTo("", child, seen)
 	}
-	applyJSONBlobSchemaOverridesTo(schema.Not, seen)
+	applyJSONBlobSchemaOverridesTo("", schema.Not, seen)
 }
 
 func jsonObjectSchema() *huma.Schema {
@@ -72,6 +78,12 @@ func jsonObjectSchema() *huma.Schema {
 		Type:                 huma.TypeObject,
 		AdditionalProperties: true,
 	}
+}
+
+func jsonNullableObjectSchema() *huma.Schema {
+	schema := jsonObjectSchema()
+	schema.Nullable = true
+	return schema
 }
 
 func jsonStringArraySchema() *huma.Schema {
