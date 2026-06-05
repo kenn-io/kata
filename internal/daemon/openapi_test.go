@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"testing"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
 // artifactPath is the committed OpenAPI schema, relative to this package dir.
@@ -69,5 +71,34 @@ func TestOpenAPIDocumentIncludesEventsStream(t *testing.T) {
 	}
 	if resp.Content["text/event-stream"] == nil {
 		t.Fatal("missing text/event-stream response content")
+	}
+}
+
+func TestOpenAPIDocumentJSONBlobShapes(t *testing.T) {
+	doc := OpenAPIDocument()
+	assertSchemaPropertyType(t, doc, "Issue", "metadata", huma.TypeObject)
+	assertSchemaPropertyType(t, doc, "ProjectOut", "metadata", huma.TypeObject)
+	assertSchemaPropertyType(t, doc, "ReadyGlobalIssue", "metadata", huma.TypeObject)
+	assertSchemaPropertyType(t, doc, "Recurrence", "template_labels", huma.TypeArray)
+	assertSchemaPropertyType(t, doc, "Recurrence", "template_metadata", huma.TypeObject)
+
+	labels := doc.Components.Schemas.Map()["Recurrence"].Properties["template_labels"]
+	if labels.Items == nil || labels.Items.Type != huma.TypeString {
+		t.Fatalf("Recurrence.template_labels items = %+v, want string items", labels.Items)
+	}
+}
+
+func assertSchemaPropertyType(t *testing.T, doc *huma.OpenAPI, schemaName, propertyName, want string) {
+	t.Helper()
+	schema := doc.Components.Schemas.Map()[schemaName]
+	if schema == nil {
+		t.Fatalf("missing schema %s", schemaName)
+	}
+	prop := schema.Properties[propertyName]
+	if prop == nil {
+		t.Fatalf("missing %s.%s schema property", schemaName, propertyName)
+	}
+	if prop.Type != want {
+		t.Fatalf("%s.%s type = %q, want %q", schemaName, propertyName, prop.Type, want)
 	}
 }

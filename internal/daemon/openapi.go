@@ -16,10 +16,67 @@ const APISchemaVersion = "0.1.0"
 // configuration — notably the disabled SchemaLinkTransformer — so the schema
 // matches the daemon's actual wire shapes.
 func OpenAPIDocument() *huma.OpenAPI {
-	return NewServer(ServerConfig{}).API().OpenAPI()
+	doc := NewServer(ServerConfig{}).API().OpenAPI()
+	applyJSONBlobSchemaOverrides(doc)
+	return doc
 }
 
 // OpenAPIYAML renders the OpenAPI document (OpenAPI 3.1) as YAML.
 func OpenAPIYAML() ([]byte, error) {
 	return OpenAPIDocument().YAML()
+}
+
+func applyJSONBlobSchemaOverrides(doc *huma.OpenAPI) {
+	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
+		return
+	}
+	for _, schema := range doc.Components.Schemas.Map() {
+		applyJSONBlobSchemaOverridesTo(schema, map[*huma.Schema]struct{}{})
+	}
+}
+
+func applyJSONBlobSchemaOverridesTo(schema *huma.Schema, seen map[*huma.Schema]struct{}) {
+	if schema == nil {
+		return
+	}
+	if _, ok := seen[schema]; ok {
+		return
+	}
+	seen[schema] = struct{}{}
+
+	for name, prop := range schema.Properties {
+		switch name {
+		case "metadata", "template_metadata":
+			schema.Properties[name] = jsonObjectSchema()
+		case "template_labels":
+			schema.Properties[name] = jsonStringArraySchema()
+		default:
+			applyJSONBlobSchemaOverridesTo(prop, seen)
+		}
+	}
+	applyJSONBlobSchemaOverridesTo(schema.Items, seen)
+	for _, child := range schema.OneOf {
+		applyJSONBlobSchemaOverridesTo(child, seen)
+	}
+	for _, child := range schema.AnyOf {
+		applyJSONBlobSchemaOverridesTo(child, seen)
+	}
+	for _, child := range schema.AllOf {
+		applyJSONBlobSchemaOverridesTo(child, seen)
+	}
+	applyJSONBlobSchemaOverridesTo(schema.Not, seen)
+}
+
+func jsonObjectSchema() *huma.Schema {
+	return &huma.Schema{
+		Type:                 huma.TypeObject,
+		AdditionalProperties: true,
+	}
+}
+
+func jsonStringArraySchema() *huma.Schema {
+	return &huma.Schema{
+		Type:  huma.TypeArray,
+		Items: &huma.Schema{Type: huma.TypeString},
+	}
 }

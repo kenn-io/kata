@@ -1578,7 +1578,8 @@ components:
           format: int64
           type: integer
         metadata:
-          type: string
+          additionalProperties: true
+          type: object
         occurrence_key:
           type: string
         owner:
@@ -1733,7 +1734,8 @@ components:
             - array
             - "null"
         metadata:
-          type: string
+          additionalProperties: true
+          type: object
         occurrence_key:
           type: string
         owner:
@@ -2299,7 +2301,8 @@ components:
           format: int64
           type: integer
         metadata:
-          type: string
+          additionalProperties: true
+          type: object
         name:
           type: string
         revision:
@@ -2374,7 +2377,8 @@ components:
           format: int64
           type: integer
         metadata:
-          type: string
+          additionalProperties: true
+          type: object
         name:
           type: string
         revision:
@@ -2526,7 +2530,8 @@ components:
           format: int64
           type: integer
         metadata:
-          type: string
+          additionalProperties: true
+          type: object
         occurrence_key:
           type: string
         owner:
@@ -2628,9 +2633,12 @@ components:
         template_body:
           type: string
         template_labels:
-          type: string
+          items:
+            type: string
+          type: array
         template_metadata:
-          type: string
+          additionalProperties: true
+          type: object
         template_owner:
           type: string
         template_priority:
@@ -2672,7 +2680,9 @@ components:
           type:
             - array
             - "null"
-        metadata: {}
+        metadata:
+          additionalProperties: true
+          type: object
         owner:
           type: string
         priority:
@@ -2692,7 +2702,9 @@ components:
           items:
             type: string
           type: array
-        metadata: {}
+        metadata:
+          additionalProperties: true
+          type: object
         owner:
           type: string
         priority:
