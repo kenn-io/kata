@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -151,6 +152,76 @@ func TestRuntimeRecordPassesThroughSQLiteSchemeDSN(t *testing.T) {
 	// the round-trip is identity.
 	got := redactRuntimeDSN("sqlite:///var/lib/kata/kata.db")
 	assert.Equal(t, "sqlite:///var/lib/kata/kata.db", got)
+}
+
+func TestDaemonStart_RuntimeRecordSerializesUnixAddressAsURL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("default daemon endpoint is TCP on Windows")
+	}
+	ns, got := readRuntimeRecordFromStartedDaemon(t, "")
+
+	assert.Equal(t, "unix", got.Network)
+	assert.Equal(t, "unix://"+filepath.Join(ns.SocketDir, "daemon.sock"), got.Address)
+}
+
+func TestDaemonStart_RuntimeRecordSerializesTCPAddressAsHostPort(t *testing.T) {
+	_, got := readRuntimeRecordFromStartedDaemon(t, "127.0.0.1:0")
+
+	host, port, err := net.SplitHostPort(got.Address)
+	require.NoError(t, err)
+	assert.Equal(t, "tcp", got.Network)
+	assert.Equal(t, "127.0.0.1", host)
+	assert.NotEqual(t, "0", port)
+	assert.NotContains(t, got.Address, "://")
+}
+
+type daemonRuntimeRecordJSON struct {
+	Network string `json:"network"`
+	Address string `json:"address"`
+}
+
+func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Namespace, daemonRuntimeRecordJSON) {
+	t.Helper()
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+
+	orig := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = orig })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runDaemonWithListen(ctx, listen, false)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			assert.NoError(t, err)
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after context cancellation")
+		}
+	})
+
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(runtimePath)
+		return err == nil
+	}, 3*time.Second, 10*time.Millisecond)
+
+	body, err := os.ReadFile(runtimePath)
+	require.NoError(t, err)
+	var got daemonRuntimeRecordJSON
+	require.NoError(t, json.Unmarshal(body, &got))
+	return ns, got
 }
 
 func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) {

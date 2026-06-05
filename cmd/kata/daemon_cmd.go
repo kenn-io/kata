@@ -380,7 +380,9 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	}
 	defer func() { _ = listener.Close() }()
 
-	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpointForListener(endpoint, listener))
+	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
+	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpoint)
+	rec.Address = runtimeEndpoint.ConfigAddress()
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
 	if _, err := runtimeStore.Write(rec); err != nil {
 		return err
