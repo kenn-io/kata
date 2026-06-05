@@ -26,6 +26,7 @@ coverage.out
 /.superpowers/
 /docs/assets/screenshots/
 /.pi/*.json
+/pkg/client/openapi.json
 
 # Claude Code per-machine settings (shared .claude/ content can still be tracked)
 /.claude/settings.local.json

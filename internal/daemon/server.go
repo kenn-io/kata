@@ -94,7 +94,8 @@ func NewServer(cfg ServerConfig) *Server {
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)
-	humaConfig.OpenAPIPath = "" // Plan 1: no /openapi.json served at runtime; see `kata openapi` + OpenAPIDocument
+	humaConfig.OpenAPIPath = "/openapi"
+	humaConfig.DocsPath = ""
 	// Drop DefaultConfig's SchemaLinkTransformer: it rebuilds response structs
 	// via reflection (adding a $schema field), which silently bypasses any
 	// MarshalJSON. Our APIError relies on MarshalJSON to emit the wire-spec
@@ -104,6 +105,7 @@ func NewServer(cfg ServerConfig) *Server {
 
 	s := &Server{cfg: cfg, api: humaAPI}
 	registerRoutes(humaAPI, mux, cfg)
+	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 
 	s.handler = withCSRFGuards(requireBearer(cfg.authPolicy(), cfg.DB)(withTrustedProxyActor(cfg)(mux)))
 	return s

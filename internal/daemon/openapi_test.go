@@ -3,6 +3,8 @@ package daemon
 import (
 	"bytes"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -11,6 +13,8 @@ import (
 // artifactPath is the committed OpenAPI schema, relative to this package dir.
 // A const (not a var) keeps gosec G304 quiet: the path is fixed, not caller-supplied.
 const artifactPath = "../../api/openapi.yaml"
+const clientSpecArtifactPath = "../../pkg/client/openapi.yaml"
+const clientArtifactPath = "../../pkg/client/generated/client.gen.go"
 
 // TestOpenAPIArtifactUpToDate fails if the committed api/openapi.yaml no longer
 // matches the schema generated from the current routes. Regenerate with
@@ -25,7 +29,43 @@ func TestOpenAPIArtifactUpToDate(t *testing.T) {
 		t.Fatalf("read %s: %v (run `make openapi` to generate it)", artifactPath, err)
 	}
 	if !bytes.Equal(got, want) {
-		t.Fatalf("%s is stale; run `make openapi` to regenerate", artifactPath)
+		t.Fatalf("%s is stale; run `make api-generate` to regenerate", artifactPath)
+	}
+}
+
+func TestOpenAPIClientSpecArtifactUpToDate(t *testing.T) {
+	got, err := OpenAPIYAMLVersion("3.0")
+	if err != nil {
+		t.Fatalf("OpenAPIYAMLVersion(3.0): %v", err)
+	}
+	want, err := os.ReadFile(clientSpecArtifactPath)
+	if err != nil {
+		t.Fatalf("read %s: %v (run `make api-generate` to generate it)", clientSpecArtifactPath, err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s is stale; run `make api-generate` to regenerate", clientSpecArtifactPath)
+	}
+}
+
+func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
+	repoRoot := filepath.Clean("../..")
+	tmp := filepath.Join(t.TempDir(), "client.gen.go")
+	cmd := exec.Command("go", "tool", "oapi-codegen", "--config", "pkg/client/generated/config.yaml", "-o", tmp, "pkg/client/openapi.yaml")
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generate client: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read generated client: %v", err)
+	}
+	want, err := os.ReadFile(clientArtifactPath)
+	if err != nil {
+		t.Fatalf("read %s: %v (run `make api-generate` to generate it)", clientArtifactPath, err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s is stale; run `make api-generate` to regenerate", clientArtifactPath)
 	}
 }
 

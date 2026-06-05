@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch
+.PHONY: build install test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -16,10 +16,14 @@ install:
 test:
 	go test $(GOFLAGS_TEST) ./...
 
-# Regenerate the committed OpenAPI schema artifact from the daemon's routes.
-# The TestOpenAPIArtifactUpToDate test fails if api/openapi.yaml drifts from this.
-openapi:
-	go run ./cmd/kata openapi > api/openapi.yaml
+# Regenerate the committed OpenAPI schema and generated Go client.
+# Drift tests fail if the OpenAPI artifacts or generated client differ from this output.
+api-generate:
+	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; go run ./cmd/kata openapi > "$$tmp"; if [ -f api/openapi.yaml ] && cmp -s "$$tmp" api/openapi.yaml; then rm "$$tmp"; else mv "$$tmp" api/openapi.yaml; fi; trap - EXIT
+	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; go run ./cmd/kata openapi --version 3.0 --format yaml > "$$tmp"; if [ -f pkg/client/openapi.yaml ] && cmp -s "$$tmp" pkg/client/openapi.yaml; then rm "$$tmp"; else mv "$$tmp" pkg/client/openapi.yaml; fi; trap - EXIT
+	set -e; tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; go tool oapi-codegen --config pkg/client/generated/config.yaml -o "$$tmp" pkg/client/openapi.yaml; if [ -f pkg/client/generated/client.gen.go ] && cmp -s "$$tmp" pkg/client/generated/client.gen.go; then rm "$$tmp"; else mv "$$tmp" pkg/client/generated/client.gen.go; fi; trap - EXIT
+
+openapi: api-generate
 
 test-short:
 	go test -short $(GOFLAGS_TEST) ./...

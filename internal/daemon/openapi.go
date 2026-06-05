@@ -1,6 +1,12 @@
 package daemon
 
-import "github.com/danielgtaylor/huma/v2"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+
+	"github.com/danielgtaylor/huma/v2"
+)
 
 // APISchemaVersion is the version stamped into the daemon's OpenAPI document
 // (info.version). It tracks the HTTP API contract, not the build version, so
@@ -23,7 +29,48 @@ func OpenAPIDocument() *huma.OpenAPI {
 
 // OpenAPIYAML renders the OpenAPI document (OpenAPI 3.1) as YAML.
 func OpenAPIYAML() ([]byte, error) {
-	return OpenAPIDocument().YAML()
+	return OpenAPIYAMLVersion("3.1")
+}
+
+// OpenAPIYAMLVersion renders the OpenAPI document as YAML for a supported
+// OpenAPI version. Version 3.0 is used by code generators that do not yet
+// consume OpenAPI 3.1's JSON Schema dialect.
+func OpenAPIYAMLVersion(version string) ([]byte, error) {
+	doc := OpenAPIDocument()
+	switch version {
+	case "3.1":
+		return doc.YAML()
+	case "3.0":
+		return doc.DowngradeYAML()
+	default:
+		return nil, fmt.Errorf("unsupported openapi version %q", version)
+	}
+}
+
+// OpenAPIJSONVersion renders the OpenAPI document as pretty JSON.
+func OpenAPIJSONVersion(version string) ([]byte, error) {
+	doc := OpenAPIDocument()
+	var (
+		raw []byte
+		err error
+	)
+	switch version {
+	case "3.1":
+		raw, err = doc.MarshalJSON()
+	case "3.0":
+		raw, err = doc.Downgrade()
+	default:
+		return nil, fmt.Errorf("unsupported openapi version %q", version)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, raw, "", "  "); err != nil {
+		return nil, err
+	}
+	pretty.WriteByte('\n')
+	return pretty.Bytes(), nil
 }
 
 func applyJSONBlobSchemaOverrides(doc *huma.OpenAPI) {
