@@ -2,7 +2,9 @@ package sqlitestore_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -212,6 +214,41 @@ func TestResolveAPITokenReturnsTokenWhenLastUsedUpdateFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, tok.ID, got.ID)
 	assert.Nil(t, got.LastUsedAt)
+}
+
+func TestResolveAPITokenDoesNotRetryBestEffortLastUsedUpdate(t *testing.T) {
+	d, path := openTestDBWithPath(t)
+	ctx := context.Background()
+	d.SetMaxOpenConns(1)
+	d.SetMaxIdleConns(1)
+	_, err := d.ExecContext(ctx, `PRAGMA busy_timeout=1`)
+	require.NoError(t, err)
+
+	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		PlaintextToken: "secret-token",
+		Actor:          "wesm",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+
+	lockDB, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(1)")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lockDB.Close() })
+	conn, err := lockDB.Conn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	_, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE TRANSACTION")
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = conn.ExecContext(context.Background(), "COMMIT") })
+
+	deadlineCtx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	got, err := d.ResolveAPIToken(deadlineCtx, "secret-token")
+	elapsed := time.Since(started)
+	require.NoError(t, err)
+	assert.Equal(t, tok.ID, got.ID)
+	assert.Less(t, elapsed, 250*time.Millisecond)
 }
 
 func TestResolveAPITokenRejectsRevokedToken(t *testing.T) {

@@ -356,21 +356,40 @@ func scanAlias(r rowScanner) (db.ProjectAlias, error) {
 	return a, nil
 }
 
+// readCreatedIssue is a package-local test seam for post-commit readback
+// failures; production uses IssueByID directly through this function.
+var readCreatedIssue = func(ctx context.Context, d *Store, issueID int64) (db.Issue, error) {
+	return d.IssueByID(ctx, issueID)
+}
+
 // CreateIssue inserts an issue, applies optional initial labels/links/owner,
 // and appends a single issue.created event whose payload describes the initial
-// state. All steps run in one TX.
+// state. All mutation steps run in one TX.
 func (d *Store) CreateIssue(ctx context.Context, p db.CreateIssueParams) (db.Issue, db.Event, error) {
-	var issue db.Issue
+	var issueID int64
 	var evt db.Event
 	err := d.RetryTransient(ctx, func() error {
 		var err error
-		issue, evt, err = d.createIssue(ctx, p)
+		issueID, evt, err = d.createIssue(ctx, p)
 		return err
 	})
-	return issue, evt, err
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
+
+	var issue db.Issue
+	err = d.RetryTransient(ctx, func() error {
+		var err error
+		issue, err = readCreatedIssue(ctx, d, issueID)
+		return err
+	})
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
+	return issue, evt, nil
 }
 
-func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Issue, db.Event, error) {
+func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64, db.Event, error) {
 	// Normalize: a non-nil pointer to "" is treated as no owner. The payload
 	// already drops empty owner via omitempty; making the DB column NULL keeps
 	// the two views consistent and matches the unassigned semantic.
@@ -397,17 +416,17 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 				// is filed from the child's POV via type=parent. Reject the
 				// nonsensical "this issue is the parent of N" form rather
 				// than silently swap directions.
-				return db.Issue{}, db.Event{}, db.ErrInitialLinkInvalidType
+				return 0, db.Event{}, db.ErrInitialLinkInvalidType
 			}
 		case "blocks", "related":
 		default:
-			return db.Issue{}, db.Event{}, db.ErrInitialLinkInvalidType
+			return 0, db.Event{}, db.ErrInitialLinkInvalidType
 		}
 	}
 
 	tx, err := d.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return db.Issue{}, db.Event{}, fmt.Errorf("begin: %w", err)
+		return 0, db.Event{}, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -419,31 +438,31 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 		`SELECT name, uid FROM projects WHERE id = ? AND deleted_at IS NULL`, p.ProjectID).
 		Scan(&projectName, &projectUID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return db.Issue{}, db.Event{}, db.ErrNotFound
+			return 0, db.Event{}, db.ErrNotFound
 		}
-		return db.Issue{}, db.Event{}, fmt.Errorf("lookup project for create: %w", err)
+		return 0, db.Event{}, fmt.Errorf("lookup project for create: %w", err)
 	}
 	if err := ensureProjectWritableTx(ctx, tx, p.ProjectID); err != nil {
-		return db.Issue{}, db.Event{}, err
+		return 0, db.Event{}, err
 	}
 	p.Author, err = d.effectiveLocalMutationActorTx(ctx, tx, p.ProjectID, p.Author)
 	if err != nil {
-		return db.Issue{}, db.Event{}, err
+		return 0, db.Event{}, err
 	}
 
 	issueUID := p.UID
 	if issueUID == "" {
 		issueUID, err = katauid.New()
 		if err != nil {
-			return db.Issue{}, db.Event{}, fmt.Errorf("generate issue uid: %w", err)
+			return 0, db.Event{}, fmt.Errorf("generate issue uid: %w", err)
 		}
 	} else if !katauid.Valid(issueUID) {
-		return db.Issue{}, db.Event{}, fmt.Errorf("invalid issue uid %q", issueUID)
+		return 0, db.Event{}, fmt.Errorf("invalid issue uid %q", issueUID)
 	}
 
 	shortID, err := resolveShortID(ctx, tx, p.ProjectID, issueUID, p.ShortIDOverride)
 	if err != nil {
-		return db.Issue{}, db.Event{}, err
+		return 0, db.Event{}, err
 	}
 	createdAt := time.Now().UTC().Format(sqliteTimeFormat)
 
@@ -453,11 +472,11 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		issueUID, p.ProjectID, shortID, p.Title, p.Body, p.Author, owner, p.Priority, createdAt, createdAt)
 	if err != nil {
-		return db.Issue{}, db.Event{}, fmt.Errorf("insert issue: %w", err)
+		return 0, db.Event{}, fmt.Errorf("insert issue: %w", err)
 	}
 	issueID, err := res.LastInsertId()
 	if err != nil {
-		return db.Issue{}, db.Event{}, err
+		return 0, db.Event{}, err
 	}
 
 	// Initial labels — dedupe (preserve first occurrence), then alphabetize
@@ -468,7 +487,7 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO issue_labels(issue_id, label, author) VALUES(?, ?, ?)`,
 			issueID, label, p.Author); err != nil {
-			return db.Issue{}, db.Event{}, classifyLabelInsertError(err)
+			return 0, db.Event{}, classifyLabelInsertError(err)
 		}
 	}
 
@@ -494,10 +513,10 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 			 WHERE project_id = ? AND id = ? AND deleted_at IS NULL`,
 			p.ProjectID, l.ToNumber).Scan(&toIssueID, &toIssueUID, &toIssueShortID)
 		if errors.Is(err, sql.ErrNoRows) {
-			return db.Issue{}, db.Event{}, db.ErrInitialLinkTargetNotFound
+			return 0, db.Event{}, db.ErrInitialLinkTargetNotFound
 		}
 		if err != nil {
-			return db.Issue{}, db.Event{}, fmt.Errorf("resolve initial link target: %w", err)
+			return 0, db.Event{}, fmt.Errorf("resolve initial link target: %w", err)
 		}
 		resolvedTargets = append(resolvedTargets, createdLinkTarget{UID: toIssueUID, ShortID: toIssueShortID})
 		// Canonical ordering is a storage concern: the payload reports the
@@ -514,7 +533,7 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 			`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 			 VALUES(?, ?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
 			p.ProjectID, fromID, toID, fromID, toID, l.Type, p.Author); err != nil {
-			return db.Issue{}, db.Event{}, classifyLinkInsertError(err)
+			return 0, db.Event{}, classifyLinkInsertError(err)
 		}
 	}
 
@@ -535,7 +554,7 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 		IdempotencyFingerprint: p.IdempotencyFingerprint,
 	})
 	if err != nil {
-		return db.Issue{}, db.Event{}, err
+		return 0, db.Event{}, err
 	}
 
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
@@ -549,18 +568,13 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Iss
 		Payload:     payload,
 	})
 	if err != nil {
-		return db.Issue{}, db.Event{}, err
+		return 0, db.Event{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return db.Issue{}, db.Event{}, fmt.Errorf("commit: %w", err)
+		return 0, db.Event{}, fmt.Errorf("commit: %w", err)
 	}
-
-	issue, err := d.IssueByID(ctx, issueID)
-	if err != nil {
-		return db.Issue{}, db.Event{}, err
-	}
-	return issue, evt, nil
+	return issueID, evt, nil
 }
 
 // createdLinkTarget captures the (uid, short_id) pair for one resolved

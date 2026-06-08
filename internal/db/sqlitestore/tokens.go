@@ -223,21 +223,19 @@ func (d *Store) ResolveAPIToken(ctx context.Context, plaintext string) (db.APITo
 	if err != nil {
 		return db.APIToken{}, err
 	}
-	rowsAffected, err := retryWrite1(ctx, d, func() (int64, error) {
-		res, execErr := d.ExecContext(ctx, `
-			UPDATE api_tokens
-			   SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-			 WHERE token_hash = ?
-			   AND revoked_at IS NULL
-			   AND (
-			     last_used_at IS NULL OR
-			     last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
-			   )`, hash)
-		if execErr != nil {
-			return 0, execErr
-		}
-		return res.RowsAffected()
-	})
+	res, err := d.ExecContext(ctx, `
+		UPDATE api_tokens
+		   SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE token_hash = ?
+		   AND revoked_at IS NULL
+		   AND (
+		     last_used_at IS NULL OR
+		     last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
+		   )`, hash)
+	if err != nil {
+		return tok, nil
+	}
+	rowsAffected, err := res.RowsAffected()
 	if err != nil {
 		return tok, nil
 	}
