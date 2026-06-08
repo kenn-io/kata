@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -62,6 +63,9 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 	if err := os.WriteFile(tmpConfig, config, 0o600); err != nil { //nolint:gosec // test-controlled path under t.TempDir
 		t.Fatalf("write generated config: %v", err)
 	}
+	if err := copyGeneratedTemplates(filepath.Join(clientGeneratedDir, "templates"), filepath.Join(tmpGenerated, "templates")); err != nil {
+		t.Fatalf("copy generated templates: %v", err)
+	}
 	tmpSpec := filepath.Join(tmpRoot, "openapi.yaml")
 	spec, err := os.ReadFile(clientSpecArtifactPath)
 	if err != nil {
@@ -106,6 +110,33 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 			t.Fatalf("%s is stale; run `make api-generate` to regenerate", filepath.Join(clientGeneratedDir, wantFiles[i]))
 		}
 	}
+}
+
+func copyGeneratedTemplates(src, dst string) error {
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		data, err := os.ReadFile(path) //nolint:gosec // generated template filename is enumerated from a fixed test fixture dir
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o600) //nolint:gosec // test-controlled copy under t.TempDir
+	})
 }
 
 func generatedGoFiles(dir string) ([]string, error) {

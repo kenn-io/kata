@@ -237,6 +237,26 @@ func TestStreamEventsRawSetsAcceptAndDoesNotBuffer(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestStreamEventsGeneratedMethodsSetAccept(t *testing.T) {
+	var gotAccept []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = append(gotAccept, r.Header.Get("Accept"))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: ping\ndata: {}\n\n"))
+	}))
+	defer server.Close()
+
+	api, err := NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+
+	_, err = api.StreamEvents(t.Context(), nil)
+	require.NoError(t, err)
+	_, err = api.StreamEventsWithResponse(t.Context(), nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"text/event-stream", "text/event-stream"}, gotAccept)
+}
+
 func TestStreamEventsRawClosesBodyOnError(t *testing.T) {
 	body := &closeTrackingBody{}
 	api, err := NewWithHTTPClient("http://daemon.example", &http.Client{
@@ -257,6 +277,26 @@ func TestStreamEventsRawClosesBodyOnError(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, resp)
 	assert.True(t, body.closed)
+}
+
+func TestGeneratedErrorEnvelopeIncludesDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"status":400,"error":{"code":"validation","message":"bad input"}}`))
+	}))
+	defer server.Close()
+
+	api, err := NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+
+	_, err = api.Ping(t.Context())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "400")
+	assert.Contains(t, err.Error(), "validation")
+	assert.Contains(t, err.Error(), "bad input")
+	assert.NotContains(t, err.Error(), "unmapped client error")
 }
 
 func mustParseQuery(t *testing.T, raw string) map[string][]string {

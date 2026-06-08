@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 
@@ -201,8 +202,25 @@ type pathEscapingAPIClient struct {
 }
 
 func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
-	params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
+	if isNilRequestOptions(params.Options) {
+		params.Options = nil
+	} else {
+		params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
+	}
 	return c.APIClient.CreateRequest(ctx, params, reqEditors...)
+}
+
+func isNilRequestOptions(options runtime.RequestOptions) bool {
+	if options == nil {
+		return true
+	}
+	value := reflect.ValueOf(options)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 type pathEscapingRequestOptions struct {
@@ -249,6 +267,24 @@ func (o pathEscapingRequestOptions) GetHeader() (map[string]string, error) {
 	return o.RequestOptions.GetHeader()
 }
 
+// StreamEvents calls the generated buffered stream method with the daemon's
+// required SSE Accept header. Prefer StreamEventsRaw for live streams.
+func (c *Client) StreamEvents(ctx context.Context, options *generated.StreamEventsRequestOptions, reqEditors ...RequestEditorFn) (*generated.StreamEventsResponse, error) {
+	if c == nil || c.Client == nil {
+		return nil, fmt.Errorf("client is not initialized")
+	}
+	return c.Client.StreamEvents(ctx, options, withSSEAccept(reqEditors)...)
+}
+
+// StreamEventsWithResponse calls the generated buffered stream method with the
+// daemon's required SSE Accept header. Prefer StreamEventsRaw for live streams.
+func (c *Client) StreamEventsWithResponse(ctx context.Context, options *generated.StreamEventsRequestOptions, reqEditors ...RequestEditorFn) (*generated.StreamEventsResp, error) {
+	if c == nil || c.Client == nil {
+		return nil, fmt.Errorf("client is not initialized")
+	}
+	return c.Client.StreamEventsWithResponse(ctx, options, withSSEAccept(reqEditors)...)
+}
+
 // StreamEventsRaw opens the long-lived Server-Sent Events stream without
 // buffering the response body. The generated StreamEvents method is still
 // available for finite responses, but live streams need callers to consume the
@@ -281,4 +317,14 @@ func (c *Client) StreamEventsRaw(ctx context.Context, options *generated.StreamE
 		return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
 	}
 	return resp, nil
+}
+
+func withSSEAccept(reqEditors []RequestEditorFn) []RequestEditorFn {
+	editors := make([]RequestEditorFn, 0, len(reqEditors)+1)
+	editors = append(editors, reqEditors...)
+	editors = append(editors, func(_ context.Context, req *http.Request) error {
+		req.Header.Set("Accept", "text/event-stream")
+		return nil
+	})
+	return editors
 }

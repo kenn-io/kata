@@ -979,7 +979,7 @@ func (e ErrorEnvelope) Validate() error {
 }
 
 func (s ErrorEnvelope) Error() string {
-	return "unmapped client error"
+	return fmt.Sprintf("%d %s: %s", s.Status, s.ErrorData.Code, s.ErrorData.Message)
 }
 
 type Event struct {

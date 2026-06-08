@@ -1,0 +1,168 @@
+{{- define "typeDef" -}}
+{{ $td := .type }}
+{{ $config := .config }}
+{{ $loc := .specLocation }}
+{{ $typeSchemaMap := .typeSchemaMap }}
+{{ $typeTracker := .typeTracker }}
+{{ $isParam := or (eq $loc "path") (eq $loc "query") (eq $loc "header") (eq $loc "body") (eq $loc "schema") (eq $loc "union") }}
+{{ $isResponse := eq $loc "response" }}
+{{ $skipValidation := $config.Generate.Validation.Skip }}
+{{ $shouldValidate := and (not $skipValidation) (or $isParam (and $isResponse $config.Generate.Validation.Response)) }}
+{{ $alias := .alias }}
+{{ if not $alias}}{{ $alias = $td.Name | fst | lower }}{{ end }}
+{{ $validatorVar := "typesValidator" }}
+{{ $forceSimple := $config.Generate.Validation.Simple }}
+
+    {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
+    type {{$td.Name}} {{if $td.IsAlias}}={{end}} {{$td.Schema.TypeDecl}}
+
+    {{ if $shouldValidate }}
+    {{ if and (not $td.IsAlias) (not $td.Schema.UnionElements) (not $td.Schema.IsAnyType) $td.Schema.NeedsValidation }}
+    func ({{$alias}} {{$td.Name}}) Validate() error {
+        {{ $td.Schema.ValidateDeclWithOptions $alias $validatorVar $forceSimple }}
+    }
+    {{ end }}
+    {{ end -}}
+
+    {{/* Error() method and constructor - TypeTracker handles alias resolution and any-type filtering */}}
+    {{ if and $typeTracker ($typeTracker.NeedsErrorMethod $td.Name) }}
+    {{ $errAlias := $loc | fst | lower }}
+    func ({{$errAlias}} {{$td.Name}}) Error() string {
+        {{- if eq $td.Name "ErrorEnvelope" }}
+        return fmt.Sprintf("%d %s: %s", {{$errAlias}}.Status, {{$errAlias}}.ErrorData.Code, {{$errAlias}}.ErrorData.Message)
+        {{- else if index $config.ErrorMapping $td.Name}}
+        {{ $td.GetErrorResponse $config.ErrorMapping $errAlias $typeSchemaMap }}
+        {{ else }}
+        return "unmapped client error"
+        {{ end -}}
+    }
+
+    {{/* Only generate constructor when error-mapping is configured - empty constructors aren't useful */}}
+    {{ if index $config.ErrorMapping $td.Name }}
+    {{ $td.GetErrorConstructor $config.ErrorMapping $typeSchemaMap }}
+    {{ end }}
+    {{ end }}
+
+    {{ if and $td.Schema.HasAdditionalProperties (not $td.IsAlias) }}
+        {{ template "additionalProperties" (dict "typeDef" $td "alias" $alias "typeSchemaMap" $typeSchemaMap) }}
+    {{ end }}
+
+    {{/* Masked method and LogValue for types with sensitive data */}}
+    {{ if and $td.HasSensitiveData (not $td.IsAlias) }}
+    {{- $hasMaskedField := false }}
+    {{- range $td.Schema.Properties }}{{ if eq .GoName "Masked" }}{{ $hasMaskedField = true }}{{ end }}{{ end }}
+    {{- $maskedMethodName := "Masked" }}{{ if $hasMaskedField }}{{ $maskedMethodName = "WithMaskedFields" }}{{ end }}
+
+    // {{ $maskedMethodName }} returns a copy of the struct with sensitive fields masked.
+    func ({{$alias}} {{$td.Name}}) {{ $maskedMethodName }}() {{$td.Name}} {
+        masked := {{$alias}}
+        {{- range $td.Schema.Properties }}
+        {{- if .SensitiveData }}
+        {{- if .IsPointerType }}
+        if masked.{{ .GoName }} != nil {
+            v := runtime.MaskSensitiveString(*masked.{{ .GoName }}, runtime.SensitiveDataConfig{
+                Type: runtime.MaskType{{ .SensitiveData.Mask | ucFirst }},
+                Pattern: "{{ .SensitiveData.EscapedPattern }}",
+                Algorithm: "{{escapeGoString .SensitiveData.Algorithm}}",
+                KeepPrefix: {{ .SensitiveData.KeepPrefix }},
+                KeepSuffix: {{ .SensitiveData.KeepSuffix }},
+            })
+            masked.{{ .GoName }} = &v
+        }
+        {{- else }}
+        masked.{{ .GoName }} = runtime.MaskSensitiveString({{$alias}}.{{ .GoName }}, runtime.SensitiveDataConfig{
+            Type: runtime.MaskType{{ .SensitiveData.Mask | ucFirst }},
+            Pattern: "{{ .SensitiveData.EscapedPattern }}",
+            Algorithm: "{{escapeGoString .SensitiveData.Algorithm}}",
+            KeepPrefix: {{ .SensitiveData.KeepPrefix }},
+            KeepSuffix: {{ .SensitiveData.KeepSuffix }},
+        })
+        {{- end }}
+        {{- end }}
+        {{- end }}
+        return masked
+    }
+
+    // LogValue implements slog.LogValuer interface for structured logging.
+    func ({{$alias}} {{$td.Name}}) LogValue() slog.Value {
+        type plain {{$td.Name}}
+        return slog.AnyValue(plain({{$alias}}.{{ $maskedMethodName }}()))
+    }
+    {{ end }}
+
+    {{ if and $td.NeedsMarshaler (not $td.IsAlias) (not $td.Schema.HasAdditionalProperties) (not $td.Schema.ArrayType) }}
+    {{- $hasNamed := false }}
+    {{- range $td.Schema.Properties }}{{ if ne .JsonFieldName "" }}{{ $hasNamed = true }}{{ end }}{{ end }}
+    func ({{$alias}} {{$td.Name}}) MarshalJSON() ([]byte, error) {
+        var parts []json.RawMessage
+
+        {{/*1. Marshal the full struct via type alias (avoids recursion)*/}}
+        {{ if $hasNamed }}
+            type _Alias_{{$td.Name}} {{$td.Name}}
+            baseJSON, err := json.Marshal((_Alias_{{$td.Name}})({{$alias}}))
+            if err != nil {
+                return nil, err
+            }
+            parts = append(parts, baseJSON)
+        {{ end }}
+
+        {{/*2. Collect inline/union parts (those WITHOUT a JSON field name)*/}}
+        {{- range $td.Schema.Properties }}
+            {{ if eq .JsonFieldName "" }}
+            {
+                b, err := runtime.MarshalJSON({{$alias}}.{{ .GoName }})
+                if err != nil {
+                    return nil, fmt.Errorf("{{ .GoName }} marshal: %w", err)
+                }
+                parts = append(parts, b)
+            }
+            {{ end }}
+        {{- end }}
+
+        return runtime.CoalesceOrMerge(parts...)
+    }
+
+    func ({{$alias}} *{{$td.Name}}) UnmarshalJSON(data []byte) error {
+        trim := bytes.TrimSpace(data)
+        if bytes.Equal(trim, []byte("null")) {
+            return nil
+        }
+        if len(trim) == 0 {
+            return fmt.Errorf("empty JSON input")
+        }
+
+        {{ if $hasNamed }}
+        {{/*// 1. Decode the named JSON fields via a type alias.*/}}
+        {{/*//    Union fields are tagged json:"-" so they are ignored by this step.*/}}
+            if len(trim) > 0 {
+                type _Alias_{{$td.Name}} {{$td.Name}}
+                var tmp _Alias_{{$td.Name}}
+                if err := json.Unmarshal(data, &tmp); err != nil {
+                    return err
+                }
+                *{{$alias}} = {{$td.Name}}(tmp)
+            }
+        {{ end }}
+
+        {{- range $td.Schema.Properties }}
+            {{/* Only generate runtime.UnmarshalJSON for allOf embedded fields (no JSON field name) */}}
+            {{/* Regular fields with JSON names are already handled by the type alias unmarshal above */}}
+            {{ if and .Schema.RefType (eq .JsonFieldName "")}}
+                {{/* Initialize pointer types for struct-based RefTypes (unions, allOf, named structs) */}}
+                {{/* Skip initialization only for enums (have EnumValues) */}}
+                {{/* Struct types can always be initialized with composite literals */}}
+                {{ if and .IsPointerType (eq (len .Schema.EnumValues) 0) }}
+                    if {{$alias}}.{{ .GoName }} == nil {
+                        {{$alias}}.{{ .GoName }} = &{{ .Schema.RefType }}{}
+                    }
+                {{ end }}
+
+                if err := runtime.UnmarshalJSON(data, {{ if not .IsPointerType }}&{{ end }}{{$alias}}.{{ .GoName }}); err != nil {
+                    return fmt.Errorf("{{ .GoName }} unmarshal: %w", err)
+                }
+            {{ end }}
+        {{- end }}
+        return nil
+    }
+    {{ end }}
+{{ end }}

@@ -1,5 +1,7 @@
 package: generated
 skip-prune: true
+user-templates:
+  typeDef: templates/type_def.tmpl
 output:
   use-single-file: false
   directory: ..
