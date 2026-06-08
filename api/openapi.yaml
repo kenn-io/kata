@@ -769,7 +769,7 @@ components:
         code:
           type: string
         data:
-          additionalProperties: {}
+          additionalProperties: true
           type: object
         hint:
           type: string
@@ -2133,7 +2133,7 @@ components:
         actor:
           type: string
         patch:
-          additionalProperties: {}
+          additionalProperties: true
           type: object
       required:
         - actor
@@ -2158,7 +2158,7 @@ components:
         actor:
           type: string
         patch:
-          additionalProperties: {}
+          additionalProperties: true
           type: object
       required:
         - actor

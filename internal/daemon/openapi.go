@@ -93,6 +93,18 @@ func applyJSONBlobSchemaOverridesTo(componentName string, schema *huma.Schema, s
 
 	for name, prop := range schema.Properties {
 		switch name {
+		case "data":
+			if componentName == "ErrorBody" {
+				schema.Properties[name] = jsonObjectSchema()
+				continue
+			}
+			applyJSONBlobSchemaOverridesTo("", prop, seen)
+		case "patch":
+			if componentName == "PatchIssueMetadataRequestBody" || componentName == "PatchProjectMetadataRequestBody" {
+				schema.Properties[name] = jsonObjectSchema()
+				continue
+			}
+			applyJSONBlobSchemaOverridesTo("", prop, seen)
 		case "metadata":
 			if componentName == "RecurrenceTemplateUpdateInput" {
 				schema.Properties[name] = jsonNullableObjectSchema()

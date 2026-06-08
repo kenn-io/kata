@@ -950,10 +950,10 @@ type EnableProjectFederationRequestBody struct {
 }
 
 type ErrorBody struct {
-	Code    string              `json:"code" validate:"required"`
-	Data    map[string]struct{} `json:"data,omitempty"`
-	Hint    *string             `json:"hint,omitempty"`
-	Message string              `json:"message" validate:"required"`
+	Code    string         `json:"code" validate:"required"`
+	Data    map[string]any `json:"data,omitempty"`
+	Hint    *string        `json:"hint,omitempty"`
+	Message string         `json:"message" validate:"required"`
 }
 
 func (e ErrorBody) Validate() error {
@@ -2045,8 +2045,8 @@ func (m MutationResponseBody) Validate() error {
 }
 
 type PatchIssueMetadataRequestBody struct {
-	Actor string              `json:"actor" validate:"required"`
-	Patch map[string]struct{} `json:"patch"`
+	Actor string         `json:"actor" validate:"required"`
+	Patch map[string]any `json:"patch"`
 }
 
 func (p PatchIssueMetadataRequestBody) Validate() error {
@@ -2080,8 +2080,8 @@ func (p PatchIssueMetadataResponseBody) Validate() error {
 }
 
 type PatchProjectMetadataRequestBody struct {
-	Actor string              `json:"actor" validate:"required"`
-	Patch map[string]struct{} `json:"patch"`
+	Actor string         `json:"actor" validate:"required"`
+	Patch map[string]any `json:"patch"`
 }
 
 func (p PatchProjectMetadataRequestBody) Validate() error {

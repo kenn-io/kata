@@ -17,7 +17,12 @@ import (
 
 // Client is a typed kata daemon API client generated from the Huma OpenAPI
 // contract.
-type Client = generated.Client
+type Client struct {
+	*generated.Client
+
+	apiClient  runtime.APIClient
+	httpClient *http.Client
+}
 
 // RequestEditorFn mutates generated requests before they are sent.
 type RequestEditorFn = runtime.RequestEditorFn
@@ -73,12 +78,13 @@ func WithRequestEditor(fn runtime.RequestEditorFn) Option {
 
 // WithTrustedActor adds a trusted-proxy actor header to outgoing requests.
 func WithTrustedActor(header, actor string) Option {
+	header = strings.TrimSpace(header)
+	actor = strings.TrimSpace(actor)
 	return WithRequestEditor(func(_ context.Context, req *http.Request) error {
-		header = strings.TrimSpace(header)
 		if header == "" {
 			return fmt.Errorf("trusted actor header is required")
 		}
-		req.Header.Set(header, strings.TrimSpace(actor))
+		req.Header.Set(header, actor)
 		return nil
 	})
 }
@@ -152,11 +158,20 @@ func newGeneratedClient(baseURL string, opts options) (*Client, error) {
 	if opts.httpClient == nil {
 		opts.httpClient = http.DefaultClient
 	}
+	normalizedBaseURL := strings.TrimRight(baseURL, "/")
 	generatedOpts := []runtime.APIClientOption{runtime.WithHTTPClient(contextDoer{client: opts.httpClient})}
 	for _, editor := range opts.requestEditors {
 		generatedOpts = append(generatedOpts, runtime.WithRequestEditorFn(editor))
 	}
-	return generated.NewDefaultClient(strings.TrimRight(baseURL, "/"), generatedOpts...)
+	apiClient, err := runtime.NewAPIClient(normalizedBaseURL, generatedOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{
+		Client:     generated.NewClient(apiClient),
+		apiClient:  apiClient,
+		httpClient: opts.httpClient,
+	}, nil
 }
 
 func internalOpts(opts TransportOptions) internalclient.Opts {
@@ -177,4 +192,35 @@ func (d contextDoer) Do(ctx context.Context, req *http.Request) (*http.Response,
 		client = http.DefaultClient
 	}
 	return client.Do(req.WithContext(ctx)) //nolint:gosec // request URL is built by the generated client from the caller-selected base URL
+}
+
+// StreamEventsRaw opens the long-lived Server-Sent Events stream without
+// buffering the response body. The generated StreamEvents method is still
+// available for finite responses, but live streams need callers to consume the
+// body incrementally and close it when done.
+func (c *Client) StreamEventsRaw(ctx context.Context, options *generated.StreamEventsRequestOptions, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	if c == nil || c.apiClient == nil {
+		return nil, fmt.Errorf("client is not initialized")
+	}
+	if options == nil {
+		options = &generated.StreamEventsRequestOptions{}
+	}
+	req, err := c.apiClient.CreateRequest(ctx, runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/events/stream",
+		Method:     http.MethodGet,
+		Options:    options,
+	}, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.httpClient.Do(req.WithContext(ctx)) //nolint:gosec // request URL is built by the generated client from the caller-selected base URL
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return resp, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+	return resp, nil
 }
