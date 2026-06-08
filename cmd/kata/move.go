@@ -36,12 +36,6 @@ type moveIssueWire struct {
 	Revision  int64  `json:"revision"`
 }
 
-type moveProjectWire struct {
-	ID   int64  `json:"id"`
-	UID  string `json:"uid"`
-	Name string `json:"name"`
-}
-
 type moveResponseWire struct {
 	Issue      moveIssueWire `json:"issue"`
 	EventID    int64         `json:"event_id"`
