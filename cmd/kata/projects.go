@@ -27,6 +27,7 @@ type projectAliasRef struct {
 
 type projectRef struct {
 	ID        int64             `json:"id"`
+	UID       string            `json:"uid"`
 	Name      string            `json:"name"`
 	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
 	Aliases   []projectAliasRef `json:"aliases,omitempty"`

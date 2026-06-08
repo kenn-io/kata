@@ -85,6 +85,19 @@ kata edit <issue-ref> \
   [--comment TEXT]
 ```
 
+Move between projects:
+
+```sh
+kata move <issue-ref> <project> [--dry-run] [--comment TEXT]
+```
+
+`move` keeps the issue UID and history, then assigns the issue to the target
+project. The target project is resolved the same way as `kata projects show`.
+The issue's target `short_id` is assigned by the daemon during the move, so it
+may differ from the source `short_id` if the target project already has a
+collision. `--dry-run` is a client-side preview: it resolves the source issue
+and target project without mutating anything.
+
 Comment:
 
 ```sh
