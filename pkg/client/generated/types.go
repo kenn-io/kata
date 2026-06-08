@@ -1009,25 +1009,25 @@ func (e Event) Validate() error {
 }
 
 type EventEnvelope struct {
-	Actor               string    `json:"actor" validate:"required"`
-	ContentHash         string    `json:"content_hash" validate:"required"`
-	CreatedAt           time.Time `json:"created_at" validate:"required"`
-	EventID             int64     `json:"event_id"`
-	EventUID            string    `json:"event_uid" validate:"required"`
-	HlcCounter          int64     `json:"hlc_counter"`
-	HlcPhysicalMs       int64     `json:"hlc_physical_ms"`
-	IssueID             *int64    `json:"issue_id,omitempty"`
-	IssueShortID        *string   `json:"issue_short_id,omitempty"`
-	IssueUID            *string   `json:"issue_uid,omitempty"`
-	OriginInstanceUID   string    `json:"origin_instance_uid" validate:"required"`
-	Payload             *struct{} `json:"payload,omitempty"`
-	ProjectID           int64     `json:"project_id"`
-	ProjectName         string    `json:"project_name" validate:"required"`
-	ProjectUID          string    `json:"project_uid" validate:"required"`
-	RelatedIssueID      *int64    `json:"related_issue_id,omitempty"`
-	RelatedIssueShortID *string   `json:"related_issue_short_id,omitempty"`
-	RelatedIssueUID     *string   `json:"related_issue_uid,omitempty"`
-	Type                string    `json:"type" validate:"required"`
+	Actor               string          `json:"actor" validate:"required"`
+	ContentHash         string          `json:"content_hash" validate:"required"`
+	CreatedAt           time.Time       `json:"created_at" validate:"required"`
+	EventID             int64           `json:"event_id"`
+	EventUID            string          `json:"event_uid" validate:"required"`
+	HlcCounter          int64           `json:"hlc_counter"`
+	HlcPhysicalMs       int64           `json:"hlc_physical_ms"`
+	IssueID             *int64          `json:"issue_id,omitempty"`
+	IssueShortID        *string         `json:"issue_short_id,omitempty"`
+	IssueUID            *string         `json:"issue_uid,omitempty"`
+	OriginInstanceUID   string          `json:"origin_instance_uid" validate:"required"`
+	Payload             json.RawMessage `json:"payload,omitempty"`
+	ProjectID           int64           `json:"project_id"`
+	ProjectName         string          `json:"project_name" validate:"required"`
+	ProjectUID          string          `json:"project_uid" validate:"required"`
+	RelatedIssueID      *int64          `json:"related_issue_id,omitempty"`
+	RelatedIssueShortID *string         `json:"related_issue_short_id,omitempty"`
+	RelatedIssueUID     *string         `json:"related_issue_uid,omitempty"`
+	Type                string          `json:"type" validate:"required"`
 }
 
 func (e EventEnvelope) Validate() error {
@@ -1086,20 +1086,20 @@ func (f FederationEnrollmentOut) Validate() error {
 }
 
 type FederationIngestEventEnvelope struct {
-	Actor             string    `json:"actor" validate:"required"`
-	ContentHash       string    `json:"content_hash" validate:"required"`
-	CreatedAt         time.Time `json:"created_at" validate:"required"`
-	EventID           int64     `json:"event_id"`
-	EventUID          string    `json:"event_uid" validate:"required"`
-	HlcCounter        int64     `json:"hlc_counter"`
-	HlcPhysicalMs     int64     `json:"hlc_physical_ms"`
-	IssueUID          *string   `json:"issue_uid,omitempty"`
-	OriginInstanceUID string    `json:"origin_instance_uid" validate:"required"`
-	Payload           *struct{} `json:"payload,omitempty"`
-	ProjectName       string    `json:"project_name" validate:"required"`
-	ProjectUID        string    `json:"project_uid" validate:"required"`
-	RelatedIssueUID   *string   `json:"related_issue_uid,omitempty"`
-	Type              string    `json:"type" validate:"required"`
+	Actor             string          `json:"actor" validate:"required"`
+	ContentHash       string          `json:"content_hash" validate:"required"`
+	CreatedAt         time.Time       `json:"created_at" validate:"required"`
+	EventID           int64           `json:"event_id"`
+	EventUID          string          `json:"event_uid" validate:"required"`
+	HlcCounter        int64           `json:"hlc_counter"`
+	HlcPhysicalMs     int64           `json:"hlc_physical_ms"`
+	IssueUID          *string         `json:"issue_uid,omitempty"`
+	OriginInstanceUID string          `json:"origin_instance_uid" validate:"required"`
+	Payload           json.RawMessage `json:"payload,omitempty"`
+	ProjectName       string          `json:"project_name" validate:"required"`
+	ProjectUID        string          `json:"project_uid" validate:"required"`
+	RelatedIssueUID   *string         `json:"related_issue_uid,omitempty"`
+	Type              string          `json:"type" validate:"required"`
 }
 
 func (f FederationIngestEventEnvelope) Validate() error {

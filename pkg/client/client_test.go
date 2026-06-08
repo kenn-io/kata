@@ -316,6 +316,58 @@ func TestGeneratedRecurrenceTemplateUpdateMarshalsEmptyPatchValues(t *testing.T)
 	assert.JSONEq(t, `{"actor":"tester","template":{"labels":[],"metadata":{}}}`, string(raw))
 }
 
+func TestGeneratedPollEventsPreservesPayload(t *testing.T) {
+	raw := []byte(`{
+		"events": [{
+			"actor": "tester",
+			"content_hash": "hash",
+			"created_at": "2026-01-01T00:00:00Z",
+			"event_id": 7,
+			"event_uid": "evt_01",
+			"origin_instance_uid": "origin_01",
+			"payload": {"labels":["bug"],"nested":{"ok":true}},
+			"project_id": 1,
+			"project_name": "spoke-project",
+			"project_uid": "proj_01",
+			"type": "issue.updated"
+		}],
+		"next_after_id": 7,
+		"reset_required": false
+	}`)
+	var body generated.PollEventsBody
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Len(t, body.Events, 1)
+
+	assert.JSONEq(t, `{"labels":["bug"],"nested":{"ok":true}}`, string(body.Events[0].Payload))
+}
+
+func TestGeneratedFederationIngestEventPreservesPayload(t *testing.T) {
+	payload := json.RawMessage(`{"items":[{"id":1}],"source":"hub-project"}`)
+	event := generated.FederationIngestEventEnvelope{
+		Actor:             "tester",
+		ContentHash:       "hash",
+		CreatedAt:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		EventID:           7,
+		EventUID:          "evt_01",
+		HlcPhysicalMs:     1,
+		OriginInstanceUID: "origin_01",
+		Payload:           payload,
+		ProjectName:       "spoke-project",
+		ProjectUID:        "proj_01",
+		Type:              "issue.updated",
+	}
+
+	raw, err := json.Marshal(event)
+	require.NoError(t, err)
+	var encoded map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &encoded))
+	assert.JSONEq(t, string(payload), string(encoded["payload"]))
+
+	var decoded generated.FederationIngestEventEnvelope
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	assert.JSONEq(t, string(payload), string(decoded.Payload))
+}
+
 func mustParseQuery(t *testing.T, raw string) map[string][]string {
 	t.Helper()
 	values, err := url.ParseQuery(raw)
