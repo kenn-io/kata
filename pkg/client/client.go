@@ -275,7 +275,10 @@ func (c *Client) StreamEventsRaw(ctx context.Context, options *generated.StreamE
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return resp, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
 	}
 	return resp, nil
 }

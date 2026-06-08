@@ -237,11 +237,52 @@ func TestStreamEventsRawSetsAcceptAndDoesNotBuffer(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestStreamEventsRawClosesBodyOnError(t *testing.T) {
+	body := &closeTrackingBody{}
+	api, err := NewWithHTTPClient("http://daemon.example", &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			assert.Equal(t, "text/event-stream", req.Header.Get("Accept"))
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Header:     make(http.Header),
+				Body:       body,
+				Request:    req,
+			}, nil
+		}),
+	})
+	require.NoError(t, err)
+
+	resp, err := api.StreamEventsRaw(t.Context(), nil)
+
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.True(t, body.closed)
+}
+
 func mustParseQuery(t *testing.T, raw string) map[string][]string {
 	t.Helper()
 	values, err := url.ParseQuery(raw)
 	require.NoError(t, err)
 	return values
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type closeTrackingBody struct {
+	closed bool
+}
+
+func (b *closeTrackingBody) Read([]byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (b *closeTrackingBody) Close() error {
+	b.closed = true
+	return nil
 }
 
 const testStreamTimeout = 2 * time.Second
