@@ -3057,7 +3057,7 @@ paths:
           name: until
           schema:
             type: string
-        - explode: false
+        - explode: true
           in: query
           name: actor
           schema:
@@ -3578,7 +3578,7 @@ paths:
           name: until
           schema:
             type: string
-        - explode: false
+        - explode: true
           in: query
           name: actor
           schema:
@@ -3926,7 +3926,7 @@ paths:
           name: owner
           schema:
             type: string
-        - explode: false
+        - explode: true
           in: query
           name: label
           schema:
@@ -3935,7 +3935,7 @@ paths:
             type:
               - array
               - "null"
-        - explode: false
+        - explode: true
           in: query
           name: exclude_label
           schema:
@@ -4933,7 +4933,7 @@ paths:
           name: owner
           schema:
             type: string
-        - explode: false
+        - explode: true
           in: query
           name: label
           schema:
@@ -4942,7 +4942,7 @@ paths:
             type:
               - array
               - "null"
-        - explode: false
+        - explode: true
           in: query
           name: exclude_label
           schema:

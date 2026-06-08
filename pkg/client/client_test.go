@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -151,6 +152,57 @@ func TestGeneratedArbitraryJSONMapsRoundTrip(t *testing.T) {
 	assert.JSONEq(t, `{"actor":"tester","patch":{"area":"work","remove":null}}`, string(raw))
 }
 
+func TestGeneratedClientEscapesPathParams(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"deleted":true,"events":[]}`))
+	}))
+	defer server.Close()
+
+	api, err := NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+
+	_, err = api.DeleteIssue(t.Context(), &generated.DeleteIssueRequestOptions{
+		PathParams: &generated.DeleteIssuePath{
+			ProjectID: 7,
+			Ref:       "victim/actions/purge?x=#fragment",
+		},
+		Body: &generated.DeleteIssueBody{
+			Actor: "tester",
+		},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "/api/v1/projects/7/issues/victim%2Factions%2Fpurge%3Fx=%23fragment/actions/delete", gotPath)
+}
+
+func TestGeneratedClientUsesRepeatedQueryKeysForArrayParams(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"actors":[],"events":[],"range":{"since":"2026-01-01T00:00:00Z","until":"2026-01-02T00:00:00Z"}}`))
+	}))
+	defer server.Close()
+
+	api, err := NewWithHTTPClient(server.URL, server.Client())
+	require.NoError(t, err)
+
+	_, err = api.DigestGlobal(t.Context(), &generated.DigestGlobalRequestOptions{
+		Query: &generated.DigestGlobalQuery{
+			Since: "2026-01-01T00:00:00Z",
+			Actor: []string{"alice", "bob"},
+		},
+	})
+	require.NoError(t, err)
+
+	values := mustParseQuery(t, gotQuery)
+	assert.Equal(t, []string{"alice", "bob"}, values["actor"])
+	assert.NotContains(t, gotQuery, "alice%2Cbob")
+}
+
 func TestStreamEventsRawSetsAcceptAndDoesNotBuffer(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
@@ -183,6 +235,13 @@ func TestStreamEventsRawSetsAcceptAndDoesNotBuffer(t *testing.T) {
 	assert.Equal(t, "text/event-stream", gotAccept)
 	_, err = io.ReadAll(io.LimitReader(resp.Body, 0))
 	require.NoError(t, err)
+}
+
+func mustParseQuery(t *testing.T, raw string) map[string][]string {
+	t.Helper()
+	values, err := url.ParseQuery(raw)
+	require.NoError(t, err)
+	return values
 }
 
 const testStreamTimeout = 2 * time.Second

@@ -188,6 +188,30 @@ func TestOpenAPIDocumentJSONBlobShapes(t *testing.T) {
 	}
 }
 
+func TestOpenAPIDocumentArrayQueryParamsExplode(t *testing.T) {
+	doc := OpenAPIDocument()
+	op := doc.Paths["/api/v1/digest"].Get
+	if op == nil {
+		t.Fatal("missing GET /api/v1/digest")
+	}
+	var actor *huma.Param
+	for _, param := range op.Parameters {
+		if param.Name == "actor" && param.In == "query" {
+			actor = param
+			break
+		}
+	}
+	if actor == nil {
+		t.Fatal("missing digest actor query parameter")
+	}
+	if actor.Schema == nil || actor.Schema.Type != huma.TypeArray {
+		t.Fatalf("digest actor schema = %+v, want array", actor.Schema)
+	}
+	if actor.Explode == nil || !*actor.Explode {
+		t.Fatalf("digest actor explode = %v, want true", actor.Explode)
+	}
+}
+
 func assertSchemaPropertyType(t *testing.T, doc *huma.OpenAPI, schemaName, propertyName, want string) {
 	t.Helper()
 	schema := doc.Components.Schemas.Map()[schemaName]

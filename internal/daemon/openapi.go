@@ -24,6 +24,7 @@ const APISchemaVersion = "0.1.0"
 func OpenAPIDocument() *huma.OpenAPI {
 	doc := NewServer(ServerConfig{}).API().OpenAPI()
 	applyJSONBlobSchemaOverrides(doc)
+	applyArrayQueryParamEncoding(doc)
 	return doc
 }
 
@@ -130,6 +131,42 @@ func applyJSONBlobSchemaOverridesTo(componentName string, schema *huma.Schema, s
 		applyJSONBlobSchemaOverridesTo("", child, seen)
 	}
 	applyJSONBlobSchemaOverridesTo("", schema.Not, seen)
+}
+
+func applyArrayQueryParamEncoding(doc *huma.OpenAPI) {
+	if doc == nil {
+		return
+	}
+	for _, path := range doc.Paths {
+		if path == nil {
+			continue
+		}
+		applyArrayQueryParamEncodingTo(path.Parameters)
+		for _, op := range []*huma.Operation{
+			path.Get,
+			path.Put,
+			path.Post,
+			path.Delete,
+			path.Options,
+			path.Head,
+			path.Patch,
+			path.Trace,
+		} {
+			if op != nil {
+				applyArrayQueryParamEncodingTo(op.Parameters)
+			}
+		}
+	}
+}
+
+func applyArrayQueryParamEncodingTo(params []*huma.Param) {
+	for _, param := range params {
+		if param == nil || param.In != "query" || param.Schema == nil || param.Schema.Type != huma.TypeArray {
+			continue
+		}
+		explode := true
+		param.Explode = &explode
+	}
 }
 
 func jsonObjectSchema() *huma.Schema {

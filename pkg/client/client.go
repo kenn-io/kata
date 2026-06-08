@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -167,9 +168,10 @@ func newGeneratedClient(baseURL string, opts options) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	escapedAPIClient := pathEscapingAPIClient{APIClient: apiClient}
 	return &Client{
-		Client:     generated.NewClient(apiClient),
-		apiClient:  apiClient,
+		Client:     generated.NewClient(escapedAPIClient),
+		apiClient:  escapedAPIClient,
 		httpClient: opts.httpClient,
 	}, nil
 }
@@ -192,6 +194,59 @@ func (d contextDoer) Do(ctx context.Context, req *http.Request) (*http.Response,
 		client = http.DefaultClient
 	}
 	return client.Do(req.WithContext(ctx)) //nolint:gosec // request URL is built by the generated client from the caller-selected base URL
+}
+
+type pathEscapingAPIClient struct {
+	runtime.APIClient
+}
+
+func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
+	params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
+	return c.APIClient.CreateRequest(ctx, params, reqEditors...)
+}
+
+type pathEscapingRequestOptions struct {
+	runtime.RequestOptions
+}
+
+func (o pathEscapingRequestOptions) GetPathParams() (map[string]any, error) {
+	if o.RequestOptions == nil {
+		return nil, nil
+	}
+	params, err := o.RequestOptions.GetPathParams()
+	if err != nil || len(params) == 0 {
+		return params, err
+	}
+	escaped := make(map[string]any, len(params))
+	for key, value := range params {
+		if raw, ok := value.(string); ok {
+			escaped[key] = url.PathEscape(raw)
+			continue
+		}
+		escaped[key] = value
+	}
+	return escaped, nil
+}
+
+func (o pathEscapingRequestOptions) GetQuery() (map[string]any, error) {
+	if o.RequestOptions == nil {
+		return nil, nil
+	}
+	return o.RequestOptions.GetQuery()
+}
+
+func (o pathEscapingRequestOptions) GetBody() any {
+	if o.RequestOptions == nil {
+		return nil
+	}
+	return o.RequestOptions.GetBody()
+}
+
+func (o pathEscapingRequestOptions) GetHeader() (map[string]string, error) {
+	if o.RequestOptions == nil {
+		return nil, nil
+	}
+	return o.RequestOptions.GetHeader()
 }
 
 // StreamEventsRaw opens the long-lived Server-Sent Events stream without

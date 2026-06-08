@@ -323,7 +323,6 @@ func (c *Client) DigestGlobal(ctx context.Context, options *DigestGlobalRequestO
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"actor": {Style: "form", Explode: &[]bool{false}[0]},
 		"since": {Style: "form", Explode: &[]bool{false}[0]},
 		"until": {Style: "form", Explode: &[]bool{false}[0]},
 	}
@@ -1594,7 +1593,6 @@ func (c *Client) DigestProject(ctx context.Context, options *DigestProjectReques
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"actor": {Style: "form", Explode: &[]bool{false}[0]},
 		"since": {Style: "form", Explode: &[]bool{false}[0]},
 		"until": {Style: "form", Explode: &[]bool{false}[0]},
 	}
@@ -2237,14 +2235,12 @@ func (c *Client) ListIssues(ctx context.Context, options *ListIssuesRequestOptio
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"exclude_label": {Style: "form", Explode: &[]bool{false}[0]},
-		"label":         {Style: "form", Explode: &[]bool{false}[0]},
-		"limit":         {Style: "form", Explode: &[]bool{false}[0]},
-		"max_priority":  {Style: "form", Explode: &[]bool{false}[0]},
-		"owner":         {Style: "form", Explode: &[]bool{false}[0]},
-		"priority":      {Style: "form", Explode: &[]bool{false}[0]},
-		"status":        {Style: "form", Explode: &[]bool{false}[0]},
-		"unowned":       {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":        {Style: "form", Explode: &[]bool{false}[0]},
+		"max_priority": {Style: "form", Explode: &[]bool{false}[0]},
+		"owner":        {Style: "form", Explode: &[]bool{false}[0]},
+		"priority":     {Style: "form", Explode: &[]bool{false}[0]},
+		"status":       {Style: "form", Explode: &[]bool{false}[0]},
+		"unowned":      {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues",
@@ -4022,11 +4018,9 @@ func (c *Client) ReadyIssues(ctx context.Context, options *ReadyIssuesRequestOpt
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"exclude_label": {Style: "form", Explode: &[]bool{false}[0]},
-		"label":         {Style: "form", Explode: &[]bool{false}[0]},
-		"limit":         {Style: "form", Explode: &[]bool{false}[0]},
-		"owner":         {Style: "form", Explode: &[]bool{false}[0]},
-		"unowned":       {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":   {Style: "form", Explode: &[]bool{false}[0]},
+		"owner":   {Style: "form", Explode: &[]bool{false}[0]},
+		"unowned": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/ready",
