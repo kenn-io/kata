@@ -65,15 +65,15 @@ func TestWriteMethods_RetryTransientSQLiteBusy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			path, run := tt.run(ctx, t)
-			lockConn := holdSQLiteWriteLock(t, ctx, path)
-			releaseSQLiteWriteLockAfter(t, ctx, lockConn, 6*time.Second)
+			lockConn := holdSQLiteWriteLock(ctx, t, path)
+			releaseSQLiteWriteLockAfter(ctx, t, lockConn, 6*time.Second)
 
 			run(ctx, t)
 		})
 	}
 }
 
-func holdSQLiteWriteLock(t *testing.T, ctx context.Context, path string) *sql.Conn {
+func holdSQLiteWriteLock(ctx context.Context, t *testing.T, path string) *sql.Conn {
 	t.Helper()
 	lockDB, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
 	require.NoError(t, err)
@@ -86,7 +86,7 @@ func holdSQLiteWriteLock(t *testing.T, ctx context.Context, path string) *sql.Co
 	return conn
 }
 
-func releaseSQLiteWriteLockAfter(t *testing.T, ctx context.Context, conn *sql.Conn, delay time.Duration) {
+func releaseSQLiteWriteLockAfter(ctx context.Context, t *testing.T, conn *sql.Conn, delay time.Duration) {
 	t.Helper()
 	var releaseOnce sync.Once
 	release := func() {

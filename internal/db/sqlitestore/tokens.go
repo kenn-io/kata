@@ -223,10 +223,8 @@ func (d *Store) ResolveAPIToken(ctx context.Context, plaintext string) (db.APITo
 	if err != nil {
 		return db.APIToken{}, err
 	}
-	var res sql.Result
-	err = d.RetryTransient(ctx, func() error {
-		var execErr error
-		res, execErr = d.ExecContext(ctx, `
+	rowsAffected, err := retryWrite1(ctx, d, func() (int64, error) {
+		res, execErr := d.ExecContext(ctx, `
 			UPDATE api_tokens
 			   SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 			 WHERE token_hash = ?
@@ -235,16 +233,15 @@ func (d *Store) ResolveAPIToken(ctx context.Context, plaintext string) (db.APITo
 			     last_used_at IS NULL OR
 			     last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
 			   )`, hash)
-		return execErr
+		if execErr != nil {
+			return 0, execErr
+		}
+		return res.RowsAffected()
 	})
 	if err != nil {
 		return tok, nil
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return tok, nil
-	}
-	if n > 0 {
+	if rowsAffected > 0 {
 		tok, err = scanAPIToken(d.QueryRowContext(ctx, apiTokenSelect+` WHERE id = ?`, tok.ID))
 		if err != nil {
 			return tok, nil
