@@ -8,14 +8,57 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
+
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/uid"
 )
+
+type busyOnceCreateStore struct {
+	db.Storage
+	attempts atomic.Int32
+}
+
+func (s *busyOnceCreateStore) CreateIssue(ctx context.Context, p db.CreateIssueParams) (db.Issue, db.Event, error) {
+	if s.attempts.Add(1) == 1 {
+		return db.Issue{}, db.Event{}, createIssueBusyError{}
+	}
+	return s.Storage.CreateIssue(ctx, p)
+}
+
+type createIssueBusyError struct{}
+
+func (createIssueBusyError) Error() string { return "database is locked" }
+func (createIssueBusyError) Code() int     { return sqlite3.SQLITE_BUSY }
+
+func TestCreateIssue_RetriesTransientStorageError(t *testing.T) {
+	var wrapped *busyOnceCreateStore
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		wrapped = &busyOnceCreateStore{Storage: cfg.DB}
+		cfg.DB = wrapped
+	})
+	projectID := mkProject(t, env, "github.com/test/retry", "retry-create")
+
+	resp, bs := envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues",
+		map[string]string{"actor": "tester", "title": "retry after busy"}, nil)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", string(bs))
+	assert.Equal(t, int32(2), wrapped.attempts.Load())
+
+	var out struct {
+		Issue struct {
+			Title string `json:"title"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	assert.Equal(t, "retry after busy", out.Issue.Title)
+}
 
 func TestCreateIssue_IdentityModeOverridesBodyActor(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
