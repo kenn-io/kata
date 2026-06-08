@@ -1,0 +1,103 @@
+package sqlitestore_test
+
+import (
+	"context"
+	"database/sql"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+)
+
+func TestWriteMethods_RetryTransientSQLiteBusy(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(context.Context, *testing.T) (string, func(context.Context, *testing.T))
+	}{
+		{
+			name: "direct write",
+			run: func(ctx context.Context, t *testing.T) (string, func(context.Context, *testing.T)) {
+				d, path := openTestDBWithPath(t)
+				p := createProject(ctx, t, d, "direct-write")
+				return path, func(ctx context.Context, t *testing.T) {
+					renamed, err := d.RenameProject(ctx, p.ID, "direct-write-renamed")
+					require.NoError(t, err)
+					assert.Equal(t, "direct-write-renamed", renamed.Name)
+				}
+			},
+		},
+		{
+			name: "transaction write",
+			run: func(ctx context.Context, t *testing.T) (string, func(context.Context, *testing.T)) {
+				d, path := openTestDBWithPath(t)
+				p := createProject(ctx, t, d, "transaction-write")
+				issue := makeIssue(t, ctx, d, p.ID, "needs comment", "tester")
+				return path, func(ctx context.Context, t *testing.T) {
+					comment, evt, err := d.CreateComment(ctx, db.CreateCommentParams{
+						IssueID: issue.ID,
+						Author:  "tester",
+						Body:    "retry this comment",
+					})
+					require.NoError(t, err)
+					assert.Equal(t, "retry this comment", comment.Body)
+					assert.Equal(t, "issue.commented", evt.Type)
+				}
+			},
+		},
+		{
+			name: "claim status refresh error write",
+			run: func(ctx context.Context, t *testing.T) (string, func(context.Context, *testing.T)) {
+				d, path := openTestDBWithPath(t)
+				p := createProject(ctx, t, d, "claim-status-write")
+				issue := makeIssue(t, ctx, d, p.ID, "claimed", "tester")
+				return path, func(ctx context.Context, t *testing.T) {
+					err := d.MarkClaimStatusRefreshError(ctx, p.ID, issue.UID, 503, "remote busy", time.Now().UTC())
+					require.NoError(t, err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			path, run := tt.run(ctx, t)
+			lockConn := holdSQLiteWriteLock(t, ctx, path)
+			releaseSQLiteWriteLockAfter(t, ctx, lockConn, 6*time.Second)
+
+			run(ctx, t)
+		})
+	}
+}
+
+func holdSQLiteWriteLock(t *testing.T, ctx context.Context, path string) *sql.Conn {
+	t.Helper()
+	lockDB, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lockDB.Close() })
+	conn, err := lockDB.Conn(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	_, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE TRANSACTION")
+	require.NoError(t, err)
+	return conn
+}
+
+func releaseSQLiteWriteLockAfter(t *testing.T, ctx context.Context, conn *sql.Conn, delay time.Duration) {
+	t.Helper()
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			_, _ = conn.ExecContext(ctx, "COMMIT")
+		})
+	}
+	timer := time.AfterFunc(delay, release)
+	t.Cleanup(func() {
+		if timer.Stop() {
+			release()
+		}
+	})
+}

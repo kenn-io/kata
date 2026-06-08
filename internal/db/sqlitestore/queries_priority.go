@@ -20,6 +20,12 @@ import (
 //     emitted only when there was a prior value to clear; clearing an
 //     already-null priority is a no-op (changed=false, no event).
 func (d *Store) UpdatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (db.Issue, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
+		return d.updatePriority(ctx, issueID, newPriority, actor)
+	})
+}
+
+func (d *Store) updatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (db.Issue, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Issue{}, nil, false, err

@@ -139,32 +139,40 @@ func federationPushEventTypeCondition(column string) string {
 // AdvanceFederationPushCursor records the highest local events.id accepted by
 // the hub for a spoke binding.
 func (d *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, nextCursor int64) error {
-	res, err := d.ExecContext(ctx, `
-		UPDATE federation_bindings
-		   SET push_cursor_event_id = CASE
-		         WHEN push_cursor_event_id < ? THEN ?
-		         ELSE push_cursor_event_id
-		       END,
-		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE project_id = ?`,
-		nextCursor, nextCursor, projectID)
-	if err != nil {
-		return fmt.Errorf("advance federation push cursor: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("advance federation push cursor rows affected: %w", err)
-	}
-	if n == 0 {
-		return db.ErrNotFound
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		res, err := d.ExecContext(ctx, `
+			UPDATE federation_bindings
+			   SET push_cursor_event_id = CASE
+			         WHEN push_cursor_event_id < ? THEN ?
+			         ELSE push_cursor_event_id
+			       END,
+			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 WHERE project_id = ?`,
+			nextCursor, nextCursor, projectID)
+		if err != nil {
+			return fmt.Errorf("advance federation push cursor: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("advance federation push cursor rows affected: %w", err)
+		}
+		if n == 0 {
+			return db.ErrNotFound
+		}
+		return nil
+	})
 }
 
 // EnableFederationPush marks an existing spoke binding push-enabled and keeps
 // the cursor monotonic across idempotent setup retries.
 func (d *Store) EnableFederationPush(ctx context.Context, projectID int64, cursor int64) (db.FederationBinding, error) {
+	return retryWrite1(ctx, d, func() (db.FederationBinding, error) {
+		return d.enableFederationPush(ctx, projectID, cursor)
+	})
+}
+
+func (d *Store) enableFederationPush(ctx context.Context, projectID int64, cursor int64) (db.FederationBinding, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("begin enable federation push: %w", err)
@@ -217,6 +225,17 @@ func (d *Store) EnableFederationPush(ctx context.Context, projectID int64, curso
 // write lock before projection/event deletion, so a concurrent local write
 // cannot slip between the pending check and reset cleanup.
 func (d *Store) ResetFederatedProjectIfNoPendingPush(
+	ctx context.Context,
+	projectID, replayHorizonEventID, pullCursorEventID int64,
+	originInstanceUID string,
+	pushCursorEventID int64,
+) error {
+	return d.RetryTransient(ctx, func() error {
+		return d.resetFederatedProjectIfNoPendingPush(ctx, projectID, replayHorizonEventID, pullCursorEventID, originInstanceUID, pushCursorEventID)
+	})
+}
+
+func (d *Store) resetFederatedProjectIfNoPendingPush(
 	ctx context.Context,
 	projectID, replayHorizonEventID, pullCursorEventID int64,
 	originInstanceUID string,

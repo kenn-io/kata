@@ -636,14 +636,16 @@ func (d *Store) MarkClaimStatusRefreshError(
 	if err != nil {
 		return fmt.Errorf("encode claim status refresh error: %w", err)
 	}
-	_, err = d.ExecContext(ctx, `
-		INSERT INTO meta(key, value) VALUES(?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		key, string(raw))
-	if err != nil {
-		return fmt.Errorf("mark claim status refresh error: %w", err)
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `
+			INSERT INTO meta(key, value) VALUES(?, ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+			key, string(raw))
+		if err != nil {
+			return fmt.Errorf("mark claim status refresh error: %w", err)
+		}
+		return nil
+	})
 }
 
 // ClearClaimStatusRefreshError removes a show claim-status refresh failure marker.
@@ -652,11 +654,13 @@ func (d *Store) ClearClaimStatusRefreshError(ctx context.Context, projectID int6
 	if key == "" {
 		return db.ErrNotFound
 	}
-	_, err := d.ExecContext(ctx, `DELETE FROM meta WHERE key = ?`, key)
-	if err != nil {
-		return fmt.Errorf("clear claim status refresh error: %w", err)
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `DELETE FROM meta WHERE key = ?`, key)
+		if err != nil {
+			return fmt.Errorf("clear claim status refresh error: %w", err)
+		}
+		return nil
+	})
 }
 
 func claimStatusRefreshErrorKey(projectID int64, issueUID string) string {

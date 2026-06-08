@@ -30,6 +30,12 @@ func (d *Store) CreateProject(ctx context.Context, name string) (db.Project, err
 // Live local callers should use CreateProject; federation replica setup uses
 // this to make the local spoke project carry the hub project UID.
 func (d *Store) CreateProjectWithUID(ctx context.Context, name, projectUID string) (db.Project, error) {
+	return retryWrite1(ctx, d, func() (db.Project, error) {
+		return d.createProjectWithUID(ctx, name, projectUID)
+	})
+}
+
+func (d *Store) createProjectWithUID(ctx context.Context, name, projectUID string) (db.Project, error) {
 	if !katauid.Valid(projectUID) {
 		return db.Project{}, fmt.Errorf("invalid project uid %q", projectUID)
 	}
@@ -85,13 +91,21 @@ func (d *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error
 // init-race orphan-cleanup path (a freshly created project whose alias attach
 // then failed); it is NOT the user-facing archival path (see RemoveProject).
 func (d *Store) HardDeleteProject(ctx context.Context, id int64) error {
-	_, err := d.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
-	return err
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+		return err
+	})
 }
 
 // RenameProject updates a project's canonical name without changing aliases or
 // issue numbering.
 func (d *Store) RenameProject(ctx context.Context, id int64, name string) (db.Project, error) {
+	return retryWrite1(ctx, d, func() (db.Project, error) {
+		return d.renameProject(ctx, id, name)
+	})
+}
+
+func (d *Store) renameProject(ctx context.Context, id int64, name string) (db.Project, error) {
 	res, err := d.ExecContext(ctx, `UPDATE projects SET name = ? WHERE id = ?`, name, id)
 	if err != nil {
 		return db.Project{}, fmt.Errorf("rename project: %w", err)
@@ -246,6 +260,12 @@ func parseSQLiteTimestamp(s string) (time.Time, error) {
 
 // AttachAlias inserts a project_aliases row.
 func (d *Store) AttachAlias(ctx context.Context, projectID int64, identity, kind string) (db.ProjectAlias, error) {
+	return retryWrite1(ctx, d, func() (db.ProjectAlias, error) {
+		return d.attachAlias(ctx, projectID, identity, kind)
+	})
+}
+
+func (d *Store) attachAlias(ctx context.Context, projectID int64, identity, kind string) (db.ProjectAlias, error) {
 	res, err := d.ExecContext(ctx,
 		`INSERT INTO project_aliases(project_id, alias_identity, alias_kind)
 		 VALUES(?, ?, ?)`, projectID, identity, kind)
@@ -273,12 +293,14 @@ func (d *Store) AliasByID(ctx context.Context, id int64) (db.ProjectAlias, error
 
 // ReassignAlias moves an existing alias row to a different project.
 func (d *Store) ReassignAlias(ctx context.Context, aliasID, projectID int64) error {
-	_, err := d.ExecContext(ctx,
-		`UPDATE project_aliases
-		 SET project_id = ?
-		 WHERE id = ?`,
-		projectID, aliasID)
-	return err
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx,
+			`UPDATE project_aliases
+			 SET project_id = ?
+			 WHERE id = ?`,
+			projectID, aliasID)
+		return err
+	})
 }
 
 // ProjectAliases returns every alias attached to a project ordered by id ASC.
@@ -896,6 +918,12 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 // CreateComment appends a comment + issue.commented event in one tx, bumping
 // issues.updated_at.
 func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db.Comment, db.Event, error) {
+	return retryWrite2(ctx, d, func() (db.Comment, db.Event, error) {
+		return d.createComment(ctx, p)
+	})
+}
+
+func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (db.Comment, db.Event, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Comment{}, db.Event{}, err
@@ -1027,6 +1055,17 @@ func (d *Store) CloseIssueWithEvents(
 	reason, actor, message string,
 	evidence []db.Evidence,
 ) (db.Issue, []db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Issue, []db.Event, bool, error) {
+		return d.closeIssueWithEvents(ctx, issueID, reason, actor, message, evidence)
+	})
+}
+
+func (d *Store) closeIssueWithEvents(
+	ctx context.Context,
+	issueID int64,
+	reason, actor, message string,
+	evidence []db.Evidence,
+) (db.Issue, []db.Event, bool, error) {
 	if reason == "" {
 		return db.Issue{}, nil, false, fmt.Errorf("close: reason is required")
 	}
@@ -1147,6 +1186,14 @@ func (d *Store) CloseIssueWithEvents(
 func (d *Store) InsertCloseThrottledEvent(
 	ctx context.Context, issueID int64, actor string, payload db.CloseThrottledPayload,
 ) (db.Event, error) {
+	return retryWrite1(ctx, d, func() (db.Event, error) {
+		return d.insertCloseThrottledEvent(ctx, issueID, actor, payload)
+	})
+}
+
+func (d *Store) insertCloseThrottledEvent(
+	ctx context.Context, issueID int64, actor string, payload db.CloseThrottledPayload,
+) (db.Event, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Event{}, err
@@ -1182,6 +1229,14 @@ func (d *Store) InsertCloseThrottledEvent(
 
 // ReopenIssue clears status=closed unless already open.
 func (d *Store) ReopenIssue(
+	ctx context.Context, issueID int64, actor string,
+) (db.Issue, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
+		return d.reopenIssue(ctx, issueID, actor)
+	})
+}
+
+func (d *Store) reopenIssue(
 	ctx context.Context, issueID int64, actor string,
 ) (db.Issue, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
@@ -1240,6 +1295,12 @@ func (d *Store) ReopenIssue(
 
 // EditIssue mutates title/body/owner. ErrNoFields if none are set.
 func (d *Store) EditIssue(ctx context.Context, p db.EditIssueParams) (db.Issue, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
+		return d.editIssue(ctx, p)
+	})
+}
+
+func (d *Store) editIssue(ctx context.Context, p db.EditIssueParams) (db.Issue, *db.Event, bool, error) {
 	if p.Title == nil && p.Body == nil && p.Owner == nil {
 		return db.Issue{}, nil, false, db.ErrNoFields
 	}
@@ -1427,6 +1488,12 @@ type eventInsert struct {
 // assigned/unassigned event. newOwner == nil means unassign. No-op when the
 // new value matches the current value (returns nil event, changed=false).
 func (d *Store) UpdateOwner(ctx context.Context, issueID int64, newOwner *string, actor string) (db.Issue, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
+		return d.updateOwner(ctx, issueID, newOwner, actor)
+	})
+}
+
+func (d *Store) updateOwner(ctx context.Context, issueID int64, newOwner *string, actor string) (db.Issue, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Issue{}, nil, false, err
@@ -1507,6 +1574,12 @@ func ownerEqual(a, b *string) bool {
 // Returns ErrAlreadyClaimed if the issue is already owned by a different actor
 // and force is false. The ClaimResult.CurrentOwner field is set in this case.
 func (d *Store) ClaimOwner(ctx context.Context, issueID int64, actor string, force bool) (db.ClaimResult, error) {
+	return retryWrite1(ctx, d, func() (db.ClaimResult, error) {
+		return d.claimOwner(ctx, issueID, actor, force)
+	})
+}
+
+func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, force bool) (db.ClaimResult, error) {
 	actor = strings.TrimSpace(actor)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {

@@ -27,6 +27,16 @@ import (
 //  5. refresh the cached instance UID — default mode overwrites it with the
 //     source's.
 func (d *Store) ImportReplay(ctx context.Context, recs []db.ImportRecord, opts db.ImportOptions) error {
+	err := d.RetryTransient(ctx, func() error {
+		return d.importReplay(ctx, recs, opts)
+	})
+	if err != nil {
+		return err
+	}
+	return d.RefreshInstanceUID(ctx)
+}
+
+func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts db.ImportOptions) error {
 	for i, r := range recs {
 		if err := r.Validate(); err != nil {
 			return fmt.Errorf("import record %d: %w", i, err)
@@ -68,7 +78,7 @@ func (d *Store) ImportReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit import: %w", err)
 	}
-	return d.RefreshInstanceUID(ctx)
+	return nil
 }
 
 func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.ImportOptions) error {

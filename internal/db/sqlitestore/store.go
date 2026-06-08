@@ -161,6 +161,12 @@ func (d *Store) RefreshInstanceUID(ctx context.Context) error {
 // storeopen path can run JSONL cutover; newer databases are an unrecoverable
 // state for this binary.
 func (d *Store) bootstrap(ctx context.Context) error {
+	return d.RetryTransient(ctx, func() error {
+		return d.bootstrapOnce(ctx)
+	})
+}
+
+func (d *Store) bootstrapOnce(ctx context.Context) error {
 	current, err := d.currentVersion(ctx)
 	if err != nil {
 		return err
@@ -212,6 +218,12 @@ func (d *Store) bootstrap(ctx context.Context) error {
 // import target init, cutover temp DB). Existing DBs take the read-only
 // fast path: a single SELECT, no write.
 func (d *Store) ensureInstanceUID(ctx context.Context) error {
+	return d.RetryTransient(ctx, func() error {
+		return d.ensureInstanceUIDOnce(ctx)
+	})
+}
+
+func (d *Store) ensureInstanceUIDOnce(ctx context.Context) error {
 	var existing string
 	err := d.QueryRowContext(ctx,
 		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&existing)
@@ -271,16 +283,18 @@ func (d *Store) Checkpoint(ctx context.Context) error {
 	if d.readOnly {
 		return nil
 	}
-	var busy, logFrames, checkpointedFrames int
-	if err := d.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).
-		Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
-		return fmt.Errorf("checkpoint WAL: %w", err)
-	}
-	if busy != 0 {
-		return fmt.Errorf("checkpoint WAL: busy=%d log=%d checkpointed=%d",
-			busy, logFrames, checkpointedFrames)
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		var busy, logFrames, checkpointedFrames int
+		if err := d.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).
+			Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
+			return fmt.Errorf("checkpoint WAL: %w", err)
+		}
+		if busy != 0 {
+			return fmt.Errorf("checkpoint WAL: busy=%d log=%d checkpointed=%d",
+				busy, logFrames, checkpointedFrames)
+		}
+		return nil
+	})
 }
 
 // Close checkpoints writable WAL databases before closing the connection pool.
@@ -302,6 +316,42 @@ func (d *Store) Close() error {
 // RetryTransient retries op while it returns a SQLite lock-contention error.
 func (d *Store) RetryTransient(ctx context.Context, op func() error) error {
 	return db.RetryTransient(ctx, IsTransient, op)
+}
+
+func retryWrite1[T any](ctx context.Context, d *Store, op func() (T, error)) (T, error) {
+	var out T
+	err := d.RetryTransient(ctx, func() error {
+		next, err := op()
+		out = next
+		return err
+	})
+	return out, err
+}
+
+func retryWrite2[A, B any](ctx context.Context, d *Store, op func() (A, B, error)) (A, B, error) {
+	var a A
+	var b B
+	err := d.RetryTransient(ctx, func() error {
+		nextA, nextB, err := op()
+		a = nextA
+		b = nextB
+		return err
+	})
+	return a, b, err
+}
+
+func retryWrite3[A, B, C any](ctx context.Context, d *Store, op func() (A, B, C, error)) (A, B, C, error) {
+	var a A
+	var b B
+	var c C
+	err := d.RetryTransient(ctx, func() error {
+		nextA, nextB, nextC, err := op()
+		a = nextA
+		b = nextB
+		c = nextC
+		return err
+	})
+	return a, b, c, err
 }
 
 // testFastSQLiteEnv opts test binaries into reduced-durability PRAGMAs

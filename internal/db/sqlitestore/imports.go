@@ -25,6 +25,12 @@ type importIssueState struct {
 // reconciled only when the source issue version is newer than kata's row (or the
 // issue is newly created).
 func (d *Store) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
+	return retryWrite2(ctx, d, func() (db.ImportBatchResult, []db.Event, error) {
+		return d.importBatch(ctx, p)
+	})
+}
+
+func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
 	if err := validateImportBatch(p); err != nil {
 		return db.ImportBatchResult{}, nil, err
 	}

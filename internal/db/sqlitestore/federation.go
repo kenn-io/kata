@@ -83,38 +83,51 @@ func (d *Store) RecordFederationSyncError(ctx context.Context, projectID int64, 
 	if syncErr != nil {
 		msg = syncErr.Error()
 	}
-	_, err := d.ExecContext(ctx, `
-		INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
-		VALUES(?, ?, ?)
-		ON CONFLICT(project_id) DO UPDATE SET
-			last_error_at = excluded.last_error_at,
-			last_error = excluded.last_error`,
-		projectID, at.UTC().Format(sqliteTimeFormat), msg)
-	if err != nil {
-		return fmt.Errorf("record federation sync error: %w", err)
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `
+			INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
+			VALUES(?, ?, ?)
+			ON CONFLICT(project_id) DO UPDATE SET
+				last_error_at = excluded.last_error_at,
+				last_error = excluded.last_error`,
+			projectID, at.UTC().Format(sqliteTimeFormat), msg)
+		if err != nil {
+			return fmt.Errorf("record federation sync error: %w", err)
+		}
+		return nil
+	})
 }
 
 // ClearFederationSyncError clears the project-level sync error after the whole
 // per-binding runner pass succeeds.
 func (d *Store) ClearFederationSyncError(ctx context.Context, projectID int64) error {
-	_, err := d.ExecContext(ctx, `
-		INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
-		VALUES(?, NULL, NULL)
-		ON CONFLICT(project_id) DO UPDATE SET
-			last_error_at = NULL,
-			last_error = NULL`, projectID)
-	if err != nil {
-		return fmt.Errorf("clear federation sync error: %w", err)
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `
+			INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
+			VALUES(?, NULL, NULL)
+			ON CONFLICT(project_id) DO UPDATE SET
+				last_error_at = NULL,
+				last_error = NULL`, projectID)
+		if err != nil {
+			return fmt.Errorf("clear federation sync error: %w", err)
+		}
+		return nil
+	})
 }
 
 // RecordFederationQuarantine creates or returns the active quarantine for one
 // project/direction. A second failure while a quarantine is active preserves
 // the original poisoned batch so status and skip stay stable.
 func (d *Store) RecordFederationQuarantine(
+	ctx context.Context,
+	p db.RecordFederationQuarantineParams,
+) (db.FederationQuarantine, error) {
+	return retryWrite1(ctx, d, func() (db.FederationQuarantine, error) {
+		return d.recordFederationQuarantine(ctx, p)
+	})
+}
+
+func (d *Store) recordFederationQuarantine(
 	ctx context.Context,
 	p db.RecordFederationQuarantineParams,
 ) (db.FederationQuarantine, error) {
@@ -185,6 +198,12 @@ func (d *Store) CountActiveFederationEnrollments(ctx context.Context, projectID 
 // cursor. Push quarantine skip never deletes local events; it only records that
 // the operator intentionally moved the outbound cursor past them.
 func (d *Store) SkipFederationQuarantine(ctx context.Context, p db.SkipFederationQuarantineParams) (db.FederationQuarantine, error) {
+	return retryWrite1(ctx, d, func() (db.FederationQuarantine, error) {
+		return d.skipFederationQuarantine(ctx, p)
+	})
+}
+
+func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederationQuarantineParams) (db.FederationQuarantine, error) {
 	actor := strings.TrimSpace(p.Actor)
 	if actor == "" {
 		return db.FederationQuarantine{}, fmt.Errorf("skip federation quarantine: actor is required")
@@ -245,20 +264,28 @@ func (d *Store) upsertFederationSyncTime(ctx context.Context, projectID int64, c
 	default:
 		return fmt.Errorf("unsupported federation sync status column %q", column)
 	}
-	_, err := d.ExecContext(ctx, fmt.Sprintf(`
-		INSERT INTO federation_sync_status(project_id, %s)
-		VALUES(?, ?)
-		ON CONFLICT(project_id) DO UPDATE SET
-			%s = excluded.%s`, column, column, column),
-		projectID, at.UTC().Format(sqliteTimeFormat))
-	if err != nil {
-		return fmt.Errorf("record federation sync %s: %w", column, err)
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, fmt.Sprintf(`
+			INSERT INTO federation_sync_status(project_id, %s)
+			VALUES(?, ?)
+			ON CONFLICT(project_id) DO UPDATE SET
+				%s = excluded.%s`, column, column, column),
+			projectID, at.UTC().Format(sqliteTimeFormat))
+		if err != nil {
+			return fmt.Errorf("record federation sync %s: %w", column, err)
+		}
+		return nil
+	})
 }
 
 // UpsertFederationBinding inserts or replaces one local federation binding.
 func (d *Store) UpsertFederationBinding(ctx context.Context, b db.FederationBinding) (db.FederationBinding, error) {
+	return retryWrite1(ctx, d, func() (db.FederationBinding, error) {
+		return d.upsertFederationBinding(ctx, b)
+	})
+}
+
+func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBinding) (db.FederationBinding, error) {
 	enabled := 0
 	if b.Enabled {
 		enabled = 1
@@ -349,29 +376,37 @@ func (d *Store) effectiveLocalEventActorTx(
 // AdvanceFederationPullCursor records the highest hub events.id consumed by a
 // spoke binding.
 func (d *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error {
-	res, err := d.ExecContext(ctx, `
-		UPDATE federation_bindings
-		   SET pull_cursor_event_id = ?,
-		       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
-		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE project_id = ?`,
-		nextCursor, projectID)
-	if err != nil {
-		return fmt.Errorf("advance federation pull cursor: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("advance federation pull cursor rows affected: %w", err)
-	}
-	if n == 0 {
-		return db.ErrNotFound
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		res, err := d.ExecContext(ctx, `
+			UPDATE federation_bindings
+			   SET pull_cursor_event_id = ?,
+			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 WHERE project_id = ?`,
+			nextCursor, projectID)
+		if err != nil {
+			return fmt.Errorf("advance federation pull cursor: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("advance federation pull cursor rows affected: %w", err)
+		}
+		if n == 0 {
+			return db.ErrNotFound
+		}
+		return nil
+	})
 }
 
 // InsertRemoteEvent appends a hub event to the local log while preserving every
 // portable field. Only the local events.id is assigned by the spoke database.
 func (d *Store) InsertRemoteEvent(ctx context.Context, projectID int64, ev db.RemoteEvent) (bool, error) {
+	return retryWrite1(ctx, d, func() (bool, error) {
+		return d.insertRemoteEvent(ctx, projectID, ev)
+	})
+}
+
+func (d *Store) insertRemoteEvent(ctx context.Context, projectID int64, ev db.RemoteEvent) (bool, error) {
 	payload := ev.Payload
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{}`)
@@ -448,6 +483,12 @@ func (d *Store) InsertRemoteEvent(ctx context.Context, projectID int64, ev db.Re
 // replay baseline. The project.federation_enabled event is the replay horizon;
 // issue.snapshot events immediately after it carry the current issue state.
 func (d *Store) EnableProjectFederation(ctx context.Context, projectID int64, actor string) (db.FederationBinding, error) {
+	return retryWrite1(ctx, d, func() (db.FederationBinding, error) {
+		return d.enableProjectFederation(ctx, projectID, actor)
+	})
+}
+
+func (d *Store) enableProjectFederation(ctx context.Context, projectID int64, actor string) (db.FederationBinding, error) {
 	tx, err := d.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("begin federation enable: %w", err)
@@ -508,6 +549,16 @@ func (d *Store) EnableProjectFederation(ctx context.Context, projectID int64, ac
 // already-enabled hub project. It is used after hub-side purge reset boundaries
 // so spokes that re-bootstrap do not lose still-live pre-purge issues.
 func (d *Store) RefreshProjectFederationBaseline(
+	ctx context.Context,
+	projectID int64,
+	actor string,
+) (db.FederationBinding, bool, error) {
+	return retryWrite2(ctx, d, func() (db.FederationBinding, bool, error) {
+		return d.refreshProjectFederationBaseline(ctx, projectID, actor)
+	})
+}
+
+func (d *Store) refreshProjectFederationBaseline(
 	ctx context.Context,
 	projectID int64,
 	actor string,
@@ -631,6 +682,12 @@ func (d *Store) insertFederationBaselineEventsTx(
 // MaterializeFederatedProject rebuilds the local read model for a spoke project
 // from its stored remote events. Event rows are retained.
 func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
+	return d.RetryTransient(ctx, func() error {
+		return d.materializeFederatedProject(ctx, projectID)
+	})
+}
+
+func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64) error {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin federated materialization: %w", err)
@@ -689,6 +746,12 @@ func (d *Store) materializeFederatedProjectTx(ctx context.Context, tx *sql.Tx, p
 // ResetFederatedProject clears a spoke project's pulled event/projection state
 // and rewinds its binding to the supplied hub horizon cursor.
 func (d *Store) ResetFederatedProject(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64) error {
+	return d.RetryTransient(ctx, func() error {
+		return d.resetFederatedProject(ctx, projectID, replayHorizonEventID, pullCursorEventID)
+	})
+}
+
+func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHorizonEventID, pullCursorEventID int64) error {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin federated reset: %w", err)
@@ -1632,6 +1695,15 @@ func optionalStringValue(s *string) any {
 // AdoptProjectIntoFederation adopts an existing local project into a hub federation,
 // rewriting its UID, emitting a synthetic baseline snapshot, and clearing claim state.
 func (d *Store) AdoptProjectIntoFederation(
+	ctx context.Context,
+	p db.AdoptProjectIntoFederationParams,
+) (db.AdoptProjectIntoFederationResult, error) {
+	return retryWrite1(ctx, d, func() (db.AdoptProjectIntoFederationResult, error) {
+		return d.adoptProjectIntoFederation(ctx, p)
+	})
+}
+
+func (d *Store) adoptProjectIntoFederation(
 	ctx context.Context,
 	p db.AdoptProjectIntoFederationParams,
 ) (db.AdoptProjectIntoFederationResult, error) {

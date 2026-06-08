@@ -16,6 +16,12 @@ import (
 // valid FK target; subsequent ListProjects / ProjectByName calls exclude
 // it from the active surface.
 func (d *Store) RemoveProject(ctx context.Context, p db.RemoveProjectParams) (db.Project, *db.Event, error) {
+	return retryWrite2(ctx, d, func() (db.Project, *db.Event, error) {
+		return d.removeProject(ctx, p)
+	})
+}
+
+func (d *Store) removeProject(ctx context.Context, p db.RemoveProjectParams) (db.Project, *db.Event, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Project{}, nil, fmt.Errorf("begin remove project: %w", err)
@@ -85,6 +91,12 @@ func (d *Store) RemoveProject(ctx context.Context, p db.RemoveProjectParams) (db
 // event. Active projects return a retry-safe no-op envelope: the project row,
 // nil event, and changed=false. Unknown projects return ErrNotFound.
 func (d *Store) RestoreProject(ctx context.Context, projectID int64, actor string) (db.Project, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Project, *db.Event, bool, error) {
+		return d.restoreProject(ctx, projectID, actor)
+	})
+}
+
+func (d *Store) restoreProject(ctx context.Context, projectID int64, actor string) (db.Project, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Project{}, nil, false, fmt.Errorf("begin restore project: %w", err)
@@ -156,6 +168,12 @@ func (d *Store) RestoreProject(ctx context.Context, projectID int64, actor strin
 // reassignment between handler preflight and this call cannot drop an
 // alias from a different project than the request named.
 func (d *Store) DetachProjectAlias(ctx context.Context, p db.DetachAliasParams) (db.ProjectAlias, *db.Event, error) {
+	return retryWrite2(ctx, d, func() (db.ProjectAlias, *db.Event, error) {
+		return d.detachProjectAlias(ctx, p)
+	})
+}
+
+func (d *Store) detachProjectAlias(ctx context.Context, p db.DetachAliasParams) (db.ProjectAlias, *db.Event, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.ProjectAlias{}, nil, fmt.Errorf("begin detach alias: %w", err)

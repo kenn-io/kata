@@ -101,6 +101,12 @@ func dedupeNormalizeLabels(in []string) ([]string, error) {
 // CreateRecurrence inserts a new recurrence row, emits a recurrence.created
 // event, and returns the freshly-read row.
 func (d *Store) CreateRecurrence(ctx context.Context, in db.CreateRecurrenceIn) (db.Recurrence, error) {
+	return retryWrite1(ctx, d, func() (db.Recurrence, error) {
+		return d.createRecurrence(ctx, in)
+	})
+}
+
+func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) (db.Recurrence, error) {
 	var rec db.Recurrence
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -224,6 +230,12 @@ func (d *Store) CreateRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 // A patch where no fields change is a no-op: no event is emitted and revision
 // is not bumped.
 func (d *Store) PatchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (db.PatchRecurrenceOut, error) {
+	return retryWrite1(ctx, d, func() (db.PatchRecurrenceOut, error) {
+		return d.patchRecurrence(ctx, in)
+	})
+}
+
+func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (db.PatchRecurrenceOut, error) {
 	var out db.PatchRecurrenceOut
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -438,6 +450,12 @@ func (d *Store) PatchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 // recurrence.deleted event. Returns an error if the row is already deleted
 // or does not exist.
 func (d *Store) SoftDeleteRecurrence(ctx context.Context, id int64, actor string) error {
+	return d.RetryTransient(ctx, func() error {
+		return d.softDeleteRecurrence(ctx, id, actor)
+	})
+}
+
+func (d *Store) softDeleteRecurrence(ctx context.Context, id int64, actor string) error {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -569,6 +587,14 @@ func (d *Store) ListRecurrencesByProject(ctx context.Context, projectID int64) (
 // materializeNextTx helper instead so the close and the materialization commit
 // atomically in one transaction.
 func (d *Store) MaterializeNext(
+	ctx context.Context, recurrenceID int64, afterKey, actor string,
+) (db.MaterializeNextOut, error) {
+	return retryWrite1(ctx, d, func() (db.MaterializeNextOut, error) {
+		return d.materializeNext(ctx, recurrenceID, afterKey, actor)
+	})
+}
+
+func (d *Store) materializeNext(
 	ctx context.Context, recurrenceID int64, afterKey, actor string,
 ) (db.MaterializeNextOut, error) {
 	tx, err := d.BeginTx(ctx, nil)

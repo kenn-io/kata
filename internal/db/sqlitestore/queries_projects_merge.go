@@ -14,6 +14,12 @@ import (
 // ULID-ascending order (spec §5.2); existing target short_ids stay put. The
 // returned ShortIDExtensions list reports each shifted issue's pre/post values.
 func (d *Store) MergeProjects(ctx context.Context, p db.MergeProjectsParams) (db.ProjectMergeResult, error) {
+	return retryWrite1(ctx, d, func() (db.ProjectMergeResult, error) {
+		return d.mergeProjects(ctx, p)
+	})
+}
+
+func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db.ProjectMergeResult, error) {
 	if p.SourceProjectID == p.TargetProjectID {
 		return db.ProjectMergeResult{}, db.ErrProjectMergeSameProject
 	}

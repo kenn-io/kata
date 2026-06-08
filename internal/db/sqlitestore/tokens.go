@@ -17,23 +17,25 @@ import (
 // token lifecycle events. It is idempotent so every Open can call it after the
 // normal schema bootstrap path.
 func (d *Store) EnsureSystemProject(ctx context.Context) error {
-	_, err := d.ExecContext(ctx, `
-		INSERT INTO projects(uid, name)
-		VALUES(?, ?)
-		ON CONFLICT(name) DO NOTHING
-	`, db.SystemProjectUID, db.SystemProjectName)
-	if err != nil {
-		return fmt.Errorf("ensure system project: %w", err)
-	}
-	sys, err := d.SystemProject(ctx)
-	if err != nil {
-		return fmt.Errorf("ensure system project: %w", err)
-	}
-	if sys.UID != db.SystemProjectUID {
-		return fmt.Errorf("ensure system project: %s has uid %q, want %q",
-			db.SystemProjectName, sys.UID, db.SystemProjectUID)
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		_, err := d.ExecContext(ctx, `
+			INSERT INTO projects(uid, name)
+			VALUES(?, ?)
+			ON CONFLICT(name) DO NOTHING
+		`, db.SystemProjectUID, db.SystemProjectName)
+		if err != nil {
+			return fmt.Errorf("ensure system project: %w", err)
+		}
+		sys, err := d.SystemProject(ctx)
+		if err != nil {
+			return fmt.Errorf("ensure system project: %w", err)
+		}
+		if sys.UID != db.SystemProjectUID {
+			return fmt.Errorf("ensure system project: %s has uid %q, want %q",
+				db.SystemProjectName, sys.UID, db.SystemProjectUID)
+		}
+		return nil
+	})
 }
 
 // SystemProject returns the hidden project row for internal token-event code.
@@ -77,6 +79,12 @@ func HashTokenForTest(token string) string {
 
 // CreateAPIToken stores a hashed API token and appends its token.created event.
 func (d *Store) CreateAPIToken(ctx context.Context, p db.CreateAPITokenParams) (db.APIToken, db.Event, error) {
+	return retryWrite2(ctx, d, func() (db.APIToken, db.Event, error) {
+		return d.createAPIToken(ctx, p)
+	})
+}
+
+func (d *Store) createAPIToken(ctx context.Context, p db.CreateAPITokenParams) (db.APIToken, db.Event, error) {
 	if strings.TrimSpace(p.PlaintextToken) == "" {
 		return db.APIToken{}, db.Event{}, fmt.Errorf("token must be non-empty")
 	}
@@ -145,6 +153,12 @@ func (d *Store) CreateAPIToken(ctx context.Context, p db.CreateAPITokenParams) (
 
 // RevokeAPIToken revokes an active API token and appends its token.revoked event.
 func (d *Store) RevokeAPIToken(ctx context.Context, id int64, adminActor string) (db.APIToken, db.Event, error) {
+	return retryWrite2(ctx, d, func() (db.APIToken, db.Event, error) {
+		return d.revokeAPIToken(ctx, id, adminActor)
+	})
+}
+
+func (d *Store) revokeAPIToken(ctx context.Context, id int64, adminActor string) (db.APIToken, db.Event, error) {
 	if strings.TrimSpace(adminActor) == "" {
 		return db.APIToken{}, db.Event{}, fmt.Errorf("admin actor must be non-empty")
 	}
@@ -209,15 +223,20 @@ func (d *Store) ResolveAPIToken(ctx context.Context, plaintext string) (db.APITo
 	if err != nil {
 		return db.APIToken{}, err
 	}
-	res, err := d.ExecContext(ctx, `
-		UPDATE api_tokens
-		   SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE token_hash = ?
-		   AND revoked_at IS NULL
-		   AND (
-		     last_used_at IS NULL OR
-		     last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
-		   )`, hash)
+	var res sql.Result
+	err = d.RetryTransient(ctx, func() error {
+		var execErr error
+		res, execErr = d.ExecContext(ctx, `
+			UPDATE api_tokens
+			   SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 WHERE token_hash = ?
+			   AND revoked_at IS NULL
+			   AND (
+			     last_used_at IS NULL OR
+			     last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 hour')
+			   )`, hash)
+		return execErr
+	})
 	if err != nil {
 		return tok, nil
 	}

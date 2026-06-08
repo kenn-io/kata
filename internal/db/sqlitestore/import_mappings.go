@@ -11,7 +11,9 @@ import (
 
 // UpsertImportMapping inserts or updates a source identity mapping.
 func (d *Store) UpsertImportMapping(ctx context.Context, p db.ImportMappingParams) (db.ImportMapping, error) {
-	return upsertImportMapping(ctx, d.DB, p)
+	return retryWrite1(ctx, d, func() (db.ImportMapping, error) {
+		return upsertImportMapping(ctx, d.DB, p)
+	})
 }
 
 func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingParams) (db.ImportMapping, error) {

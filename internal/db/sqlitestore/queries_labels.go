@@ -13,6 +13,12 @@ import (
 
 // AddLabel attaches a label to an issue.
 func (d *Store) AddLabel(ctx context.Context, issueID int64, label, author string) (db.IssueLabel, error) {
+	return retryWrite1(ctx, d, func() (db.IssueLabel, error) {
+		return d.addLabel(ctx, issueID, label, author)
+	})
+}
+
+func (d *Store) addLabel(ctx context.Context, issueID int64, label, author string) (db.IssueLabel, error) {
 	if _, err := d.ExecContext(ctx,
 		`INSERT INTO issue_labels(issue_id, label, author) VALUES(?, ?, ?)`,
 		issueID, label, author); err != nil {
@@ -46,20 +52,22 @@ func classifyLabelInsertError(err error) error {
 // RemoveLabel detaches a label from an issue. Returns ErrNotFound when the row
 // doesn't exist (idempotent unlink semantics live in the handler).
 func (d *Store) RemoveLabel(ctx context.Context, issueID int64, label string) error {
-	res, err := d.ExecContext(ctx,
-		`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
-		issueID, label)
-	if err != nil {
-		return fmt.Errorf("delete label: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("delete label rows affected: %w", err)
-	}
-	if n == 0 {
-		return db.ErrNotFound
-	}
-	return nil
+	return d.RetryTransient(ctx, func() error {
+		res, err := d.ExecContext(ctx,
+			`DELETE FROM issue_labels WHERE issue_id = ? AND label = ?`,
+			issueID, label)
+		if err != nil {
+			return fmt.Errorf("delete label: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("delete label rows affected: %w", err)
+		}
+		if n == 0 {
+			return db.ErrNotFound
+		}
+		return nil
+	})
 }
 
 // HasLabel reports whether (issueID, label) exists.
@@ -138,6 +146,12 @@ func (d *Store) LabelCounts(ctx context.Context, projectID int64) ([]db.LabelCou
 // Used by the daemon's POST /labels handler so the label insert and its event
 // are atomic — there's no window where the row exists without an event.
 func (d *Store) AddLabelAndEvent(ctx context.Context, issueID int64, ev db.LabelEventParams) (db.IssueLabel, db.Event, error) {
+	return retryWrite2(ctx, d, func() (db.IssueLabel, db.Event, error) {
+		return d.addLabelAndEvent(ctx, issueID, ev)
+	})
+}
+
+func (d *Store) addLabelAndEvent(ctx context.Context, issueID int64, ev db.LabelEventParams) (db.IssueLabel, db.Event, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.IssueLabel{}, db.Event{}, fmt.Errorf("begin: %w", err)
@@ -208,6 +222,12 @@ func (d *Store) AddLabelAndEvent(ctx context.Context, issueID int64, ev db.Label
 // event in one TX. Returns ErrNotFound when the label was never attached —
 // caller maps to 200 no-op envelope per spec §4.5.
 func (d *Store) RemoveLabelAndEvent(ctx context.Context, issueID int64, ev db.LabelEventParams) (db.Event, error) {
+	return retryWrite1(ctx, d, func() (db.Event, error) {
+		return d.removeLabelAndEvent(ctx, issueID, ev)
+	})
+}
+
+func (d *Store) removeLabelAndEvent(ctx context.Context, issueID int64, ev db.LabelEventParams) (db.Event, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.Event{}, fmt.Errorf("begin: %w", err)

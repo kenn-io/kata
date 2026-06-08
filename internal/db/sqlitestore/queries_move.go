@@ -19,6 +19,12 @@ import (
 //   - the issue belongs to a recurrence series (RecurrencePinnedError)
 //   - any link is anchored on the issue (CrossProjectLinksError)
 func (d *Store) MoveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
+	return retryWrite1(ctx, d, func() (db.MoveIssueProjectOut, error) {
+		return d.moveIssueProject(ctx, in)
+	})
+}
+
+func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
 	var out db.MoveIssueProjectOut
 	if in.FromProjectID == in.ToProjectID {
 		return out, fmt.Errorf("source and target projects are the same")
