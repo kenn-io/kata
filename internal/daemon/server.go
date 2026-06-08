@@ -91,9 +91,6 @@ func NewServer(cfg ServerConfig) *Server {
 	if cfg.Hooks == nil {
 		cfg.Hooks = hooks.NewNoop()
 	}
-	if cfg.DB != nil {
-		cfg.DB = retryDaemonWrites(cfg.DB)
-	}
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)

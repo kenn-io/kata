@@ -338,6 +338,17 @@ func scanAlias(r rowScanner) (db.ProjectAlias, error) {
 // and appends a single issue.created event whose payload describes the initial
 // state. All steps run in one TX.
 func (d *Store) CreateIssue(ctx context.Context, p db.CreateIssueParams) (db.Issue, db.Event, error) {
+	var issue db.Issue
+	var evt db.Event
+	err := d.RetryTransient(ctx, func() error {
+		var err error
+		issue, evt, err = d.createIssue(ctx, p)
+		return err
+	})
+	return issue, evt, err
+}
+
+func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (db.Issue, db.Event, error) {
 	// Normalize: a non-nil pointer to "" is treated as no owner. The payload
 	// already drops empty owner via omitempty; making the DB column NULL keeps
 	// the two views consistent and matches the unassigned semantic.
