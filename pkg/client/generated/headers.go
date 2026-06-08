@@ -4,7 +4,7 @@ package generated
 
 type StreamEventsHeaders struct {
 	// LastEventID Exclusive resume cursor from the last received SSE id. Mutually exclusive with after_id.
-	LastEventID *int `json:"Last-Event-ID,omitempty"`
+	LastEventID *int64 `json:"Last-Event-ID,omitempty"`
 }
 
 type PollFederationProjectEventsHeaders struct {

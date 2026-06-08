@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -176,6 +177,50 @@ func TestGeneratedClientEscapesPathParams(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "/api/v1/projects/7/issues/victim%2Factions%2Fpurge%3Fx=%23fragment/actions/delete", gotPath)
+}
+
+func TestRawGeneratedClientEscapesPathParams(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"deleted":true,"events":[]}`))
+	}))
+	defer server.Close()
+
+	api, err := generated.NewDefaultClient(server.URL, runtime.WithHTTPClient(contextDoer{client: server.Client()}))
+	require.NoError(t, err)
+
+	_, err = api.DeleteIssue(t.Context(), &generated.DeleteIssueRequestOptions{
+		PathParams: &generated.DeleteIssuePath{
+			ProjectID: 7,
+			Ref:       "victim/actions/purge?x=#fragment",
+		},
+		Body: &generated.DeleteIssueBody{
+			Actor: "tester",
+		},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "/api/v1/projects/7/issues/victim%2Factions%2Fpurge%3Fx=%23fragment/actions/delete", gotPath)
+}
+
+func TestGeneratedStreamEventsUsesInt64Cursors(t *testing.T) {
+	afterID := int64(1 << 40)
+	projectID := int64(1 << 41)
+	lastEventID := int64(1 << 42)
+
+	query := generated.StreamEventsQuery{
+		AfterID:   &afterID,
+		ProjectID: &projectID,
+	}
+	headers := generated.StreamEventsHeaders{
+		LastEventID: &lastEventID,
+	}
+
+	assert.Equal(t, afterID, *query.AfterID)
+	assert.Equal(t, projectID, *query.ProjectID)
+	assert.Equal(t, lastEventID, *headers.LastEventID)
 }
 
 func TestGeneratedClientUsesRepeatedQueryKeysForArrayParams(t *testing.T) {

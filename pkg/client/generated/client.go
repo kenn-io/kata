@@ -6,6 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+
+	"reflect"
 
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
@@ -15,9 +19,91 @@ type Client struct {
 	apiClient runtime.APIClient
 }
 
+// NewPathEscapingAPIClient wraps apiClient so string path params are URL path
+// escaped before request construction. Wrapping is idempotent.
+func NewPathEscapingAPIClient(apiClient runtime.APIClient) runtime.APIClient {
+	if apiClient == nil {
+		return nil
+	}
+	if _, ok := apiClient.(pathEscapingAPIClient); ok {
+		return apiClient
+	}
+	return pathEscapingAPIClient{APIClient: apiClient}
+}
+
+type pathEscapingAPIClient struct {
+	runtime.APIClient
+}
+
+func (c pathEscapingAPIClient) CreateRequest(ctx context.Context, params runtime.RequestOptionsParameters, reqEditors ...runtime.RequestEditorFn) (*http.Request, error) {
+	if isNilRequestOptions(params.Options) {
+		params.Options = nil
+	} else {
+		params.Options = pathEscapingRequestOptions{RequestOptions: params.Options}
+	}
+	return c.APIClient.CreateRequest(ctx, params, reqEditors...)
+}
+
+func isNilRequestOptions(options runtime.RequestOptions) bool {
+	if options == nil {
+		return true
+	}
+	value := reflect.ValueOf(options)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+type pathEscapingRequestOptions struct {
+	runtime.RequestOptions
+}
+
+func (o pathEscapingRequestOptions) GetPathParams() (map[string]any, error) {
+	if o.RequestOptions == nil {
+		return nil, nil
+	}
+	params, err := o.RequestOptions.GetPathParams()
+	if err != nil || len(params) == 0 {
+		return params, err
+	}
+	escaped := make(map[string]any, len(params))
+	for key, value := range params {
+		if raw, ok := value.(string); ok {
+			escaped[key] = url.PathEscape(raw)
+			continue
+		}
+		escaped[key] = value
+	}
+	return escaped, nil
+}
+
+func (o pathEscapingRequestOptions) GetQuery() (map[string]any, error) {
+	if o.RequestOptions == nil {
+		return nil, nil
+	}
+	return o.RequestOptions.GetQuery()
+}
+
+func (o pathEscapingRequestOptions) GetBody() any {
+	if o.RequestOptions == nil {
+		return nil
+	}
+	return o.RequestOptions.GetBody()
+}
+
+func (o pathEscapingRequestOptions) GetHeader() (map[string]string, error) {
+	if o.RequestOptions == nil {
+		return nil, nil
+	}
+	return o.RequestOptions.GetHeader()
+}
+
 // NewClient creates a new instance of the Client client.
 func NewClient(apiClient runtime.APIClient) *Client {
-	return &Client{apiClient: apiClient}
+	return &Client{apiClient: NewPathEscapingAPIClient(apiClient)}
 }
 
 // NewDefaultClient creates a new instance of the Client client with default api client.
@@ -26,7 +112,7 @@ func NewDefaultClient(baseURL string, opts ...runtime.APIClientOption) (*Client,
 	if err != nil {
 		return nil, fmt.Errorf("error creating API client: %w", err)
 	}
-	return &Client{apiClient: apiClient}, nil
+	return &Client{apiClient: NewPathEscapingAPIClient(apiClient)}, nil
 }
 
 // ClientInterface is the interface for the API client.

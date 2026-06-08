@@ -3049,16 +3049,19 @@ paths:
           in: query
           name: after_id
           schema:
+            format: int64
             type: integer
         - description: Optional project ID filter. Omit to stream all visible project events.
           in: query
           name: project_id
           schema:
+            format: int64
             type: integer
         - description: Exclusive resume cursor from the last received SSE id. Mutually exclusive with after_id.
           in: header
           name: Last-Event-ID
           schema:
+            format: int64
             type: integer
       responses:
         "200":

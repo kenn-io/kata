@@ -39,10 +39,10 @@ type PollEventsQuery struct {
 
 type StreamEventsQuery struct {
 	// AfterID Exclusive event cursor. Mutually exclusive with Last-Event-ID.
-	AfterID *int `json:"after_id,omitempty"`
+	AfterID *int64 `json:"after_id,omitempty"`
 
 	// ProjectID Optional project ID filter. Omit to stream all visible project events.
-	ProjectID *int `json:"project_id,omitempty"`
+	ProjectID *int64 `json:"project_id,omitempty"`
 }
 
 type ListAllIssuesQuery struct {

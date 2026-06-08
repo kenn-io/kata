@@ -203,19 +203,19 @@ func registerEventsStream(humaAPI huma.API, cfg ServerConfig) {
 				Name:        "after_id",
 				In:          "query",
 				Description: "Exclusive event cursor. Mutually exclusive with Last-Event-ID.",
-				Schema:      &huma.Schema{Type: huma.TypeInteger},
+				Schema:      &huma.Schema{Type: huma.TypeInteger, Format: "int64"},
 			},
 			{
 				Name:        "project_id",
 				In:          "query",
 				Description: "Optional project ID filter. Omit to stream all visible project events.",
-				Schema:      &huma.Schema{Type: huma.TypeInteger},
+				Schema:      &huma.Schema{Type: huma.TypeInteger, Format: "int64"},
 			},
 			{
 				Name:        "Last-Event-ID",
 				In:          "header",
 				Description: "Exclusive resume cursor from the last received SSE id. Mutually exclusive with after_id.",
-				Schema:      &huma.Schema{Type: huma.TypeInteger},
+				Schema:      &huma.Schema{Type: huma.TypeInteger, Format: "int64"},
 			},
 		},
 		Responses: map[string]*huma.Response{
