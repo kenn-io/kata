@@ -299,6 +299,23 @@ func TestGeneratedErrorEnvelopeIncludesDetails(t *testing.T) {
 	assert.NotContains(t, err.Error(), "unmapped client error")
 }
 
+func TestGeneratedRecurrenceTemplateUpdateMarshalsEmptyPatchValues(t *testing.T) {
+	labels := []string{}
+	metadata := map[string]any{}
+	body := generated.PatchRecurrenceRequestBody{
+		Actor: "tester",
+		Template: &generated.RecurrenceTemplateUpdateInput{
+			Labels:   &labels,
+			Metadata: &metadata,
+		},
+	}
+
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"actor":"tester","template":{"labels":[],"metadata":{}}}`, string(raw))
+}
+
 func mustParseQuery(t *testing.T, raw string) map[string][]string {
 	t.Helper()
 	values, err := url.ParseQuery(raw)

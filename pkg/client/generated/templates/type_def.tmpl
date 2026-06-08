@@ -13,6 +13,17 @@
 {{ $validatorVar := "typesValidator" }}
 {{ $forceSimple := $config.Generate.Validation.Simple }}
 
+    {{ if eq $td.Name "RecurrenceTemplateUpdateInput" }}
+    {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
+    type RecurrenceTemplateUpdateInput struct {
+        Body     *string         `json:"body,omitempty"`
+        Labels   *[]string       `json:"labels,omitempty"`
+        Metadata *map[string]any `json:"metadata,omitempty"`
+        Owner    *string         `json:"owner,omitempty"`
+        Priority *int64          `json:"priority,omitempty"`
+        Title    *string         `json:"title,omitempty"`
+    }
+    {{ else }}
     {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
     type {{$td.Name}} {{if $td.IsAlias}}={{end}} {{$td.Schema.TypeDecl}}
 
@@ -164,5 +175,6 @@
         {{- end }}
         return nil
     }
+    {{ end }}
     {{ end }}
 {{ end }}

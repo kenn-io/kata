@@ -2475,12 +2475,12 @@ func (r RecurrenceTemplateInput) Validate() error {
 }
 
 type RecurrenceTemplateUpdateInput struct {
-	Body     *string        `json:"body,omitempty"`
-	Labels   []string       `json:"labels,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-	Owner    *string        `json:"owner,omitempty"`
-	Priority *int64         `json:"priority,omitempty"`
-	Title    *string        `json:"title,omitempty"`
+	Body     *string         `json:"body,omitempty"`
+	Labels   *[]string       `json:"labels,omitempty"`
+	Metadata *map[string]any `json:"metadata,omitempty"`
+	Owner    *string         `json:"owner,omitempty"`
+	Priority *int64          `json:"priority,omitempty"`
+	Title    *string         `json:"title,omitempty"`
 }
 
 type RemoveProjectResponseBody struct {
