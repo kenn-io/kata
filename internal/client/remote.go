@@ -25,15 +25,23 @@ const remoteServerEnvVar = "KATA_SERVER"
 // equivalent there is `[server].allow_insecure = true`.
 const allowInsecureEnvVar = "KATA_ALLOW_INSECURE"
 
+type activeRemoteTarget struct {
+	Name          string
+	BaseURL       string
+	Token         string
+	TokenEnv      string
+	AllowInsecure bool
+}
+
 // ErrRemoteUnavailable wraps probe failures against an explicitly
-// configured remote URL (env or .kata.local.toml). Callers translate
+// configured remote URL. Callers translate
 // this into a daemon-unavailable CLI error; we keep the package free
 // of CLI-layer types so this package stays importable from the TUI.
 var ErrRemoteUnavailable = errors.New("kata server not responding")
 
 // ResolveRemote is the exported view of resolveRemote so callers
 // outside client (e.g. cmd/kata health) can honor the same
-// KATA_SERVER / .kata.local.toml resolution rules without
+// KATA_SERVER / .kata.local.toml / active_daemon resolution rules without
 // auto-starting a local daemon.
 func ResolveRemote(ctx context.Context, workspaceStart string) (string, bool, error) {
 	return resolveRemote(ctx, workspaceStart)
@@ -42,7 +50,7 @@ func ResolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 // NormalizeRemoteURL exposes kata's remote URL validation/canonicalization
 // for TUI daemon-catalog entries. It returns scheme://host[:port] with path
 // and query stripped, and applies the same allow_insecure semantics used by
-// KATA_SERVER and .kata.local.toml.
+// KATA_SERVER, .kata.local.toml, and active daemon-catalog entries.
 func NormalizeRemoteURL(v string, allowInsecure bool) (string, error) {
 	return normalizeRemoteURL(v, allowInsecure)
 }
@@ -53,11 +61,13 @@ func RemoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 	return remoteAllowInsecureForBaseURL(baseURL, workspaceStart)
 }
 
-// resolveRemote checks the two opt-in remote sources, in order:
+// resolveRemote checks the opt-in remote sources, in order:
 //
 //  1. KATA_SERVER env (highest precedence)
 //  2. .kata.local.toml [server].url walked up from workspaceStart
 //     (CWD when workspaceStart is empty)
+//  3. active_daemon in <KATA_HOME>/config.toml when it names a remote
+//     catalog entry
 //
 // If neither is set, returns ("", false, nil) and the caller falls
 // through to local Discover/auto-start. If a URL is configured, the
@@ -82,7 +92,7 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 	}
 	root, path, ok := findLocalConfig(workspaceStart)
 	if !ok {
-		return "", false, nil
+		return resolveActiveRemote(ctx)
 	}
 	cfg, err := config.ReadLocalConfig(root)
 	if err != nil {
@@ -92,7 +102,7 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 		return "", false, fmt.Errorf("read %s: %w", path, err)
 	}
 	if cfg.Server.URL == "" {
-		return "", false, nil
+		return resolveActiveRemote(ctx)
 	}
 	u, err := normalizeRemoteURL(cfg.Server.URL, cfg.Server.AllowInsecure)
 	if err != nil {
@@ -102,6 +112,99 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 		return "", false, fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, u, path)
 	}
 	return u, true, nil
+}
+
+func resolveActiveRemote(ctx context.Context) (string, bool, error) {
+	target, ok, err := activeRemoteFromConfig()
+	if err != nil || !ok {
+		return "", false, err
+	}
+	if _, err := resolveActiveRemoteTargetToken(target); err != nil {
+		return "", false, err
+	}
+	if !probeRemote(ctx, target.BaseURL) {
+		return "", false, fmt.Errorf("%w: %s (%s active_daemon %q)",
+			ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), target.Name)
+	}
+	return target.BaseURL, true, nil
+}
+
+func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {
+	cfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return activeRemoteTarget{}, false, err
+	}
+	if cfg.ActiveDaemon == "" {
+		return activeRemoteTarget{}, false, nil
+	}
+	for _, daemon := range cfg.Daemons {
+		if daemon.Name != cfg.ActiveDaemon {
+			continue
+		}
+		if daemon.Local {
+			return activeRemoteTarget{}, false, nil
+		}
+		baseURL, err := normalizeRemoteURL(daemon.URL, daemon.AllowInsecure)
+		if err != nil {
+			return activeRemoteTarget{}, false,
+				fmt.Errorf("%s daemon %q url %q: %w",
+					daemonConfigSource(), daemon.Name, daemon.URL, err)
+		}
+		return activeRemoteTarget{
+			Name:          daemon.Name,
+			BaseURL:       baseURL,
+			Token:         daemon.Token,
+			TokenEnv:      daemon.TokenEnv,
+			AllowInsecure: daemon.AllowInsecure,
+		}, true, nil
+	}
+	return activeRemoteTarget{}, false, nil
+}
+
+func resolveActiveRemoteTargetToken(target activeRemoteTarget) (string, error) {
+	if target.TokenEnv == "" {
+		return target.Token, nil
+	}
+	token := strings.TrimSpace(os.Getenv(target.TokenEnv))
+	if token == "" {
+		return "", fmt.Errorf("daemon %q: token_env %q is unset or empty",
+			target.Name, target.TokenEnv)
+	}
+	return token, nil
+}
+
+func activeRemoteTargetAuthForBaseURL(baseURL string) (TargetAuth, bool, error) {
+	if strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")) != "" {
+		return TargetAuth{}, false, nil
+	}
+	target, ok, err := activeRemoteFromConfig()
+	if err != nil || !ok {
+		return TargetAuth{}, false, err
+	}
+	if target.BaseURL != strings.TrimRight(baseURL, "/") {
+		return TargetAuth{}, false, nil
+	}
+	token, err := resolveActiveRemoteTargetToken(target)
+	if err != nil {
+		return TargetAuth{}, false, err
+	}
+	return TargetAuth{
+		Token:         token,
+		AllowInsecure: target.AllowInsecure,
+	}, true, nil
+}
+
+func activeRemoteAllowInsecureForBaseURL(baseURL string) bool {
+	target, ok, err := activeRemoteFromConfig()
+	return err == nil && ok && target.BaseURL == baseURL && target.AllowInsecure
+}
+
+func daemonConfigSource() string {
+	path, err := config.DaemonConfigPath()
+	if err != nil {
+		return "<KATA_HOME>/config.toml"
+	}
+	return path
 }
 
 // envAllowInsecure reports whether KATA_ALLOW_INSECURE is set to a
@@ -120,14 +223,20 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 	}
 	root, _, ok := findLocalConfig(workspaceStart)
 	if !ok {
-		return false
+		return activeRemoteAllowInsecureForBaseURL(baseURL)
 	}
 	cfg, err := config.ReadLocalConfig(root)
-	if err != nil || cfg.Server.URL == "" || !cfg.Server.AllowInsecure {
+	if err != nil {
 		return false
 	}
-	u, err := normalizeRemoteURL(cfg.Server.URL, true)
-	return err == nil && u == baseURL
+	if cfg.Server.URL != "" {
+		if !cfg.Server.AllowInsecure {
+			return false
+		}
+		u, err := normalizeRemoteURL(cfg.Server.URL, true)
+		return err == nil && u == baseURL
+	}
+	return activeRemoteAllowInsecureForBaseURL(baseURL)
 }
 
 // findLocalConfig walks upward from start looking for .kata.local.toml,

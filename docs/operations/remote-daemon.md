@@ -50,6 +50,9 @@ url = "http://100.64.0.5:7777"
 ```
 
 `KATA_SERVER` wins over `.kata.local.toml`.
+If neither is set, clients next honor `active_daemon` in
+`<KATA_HOME>/config.toml`; otherwise they use local daemon discovery or
+auto-start.
 
 ## Plain HTTP guardrails
 

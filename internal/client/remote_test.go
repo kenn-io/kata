@@ -123,6 +123,29 @@ url = ""
 	assert.Empty(t, url)
 }
 
+func TestResolveRemote_ActiveDaemonFromHomeConfigWhenNoEnvOrLocal(t *testing.T) {
+	srv := pingingServer(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeWorkspaceMarker(t, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+active_daemon = "shared"
+
+[[daemon]]
+name = "shared"
+url = "`+srv.URL+`"
+`), 0o600))
+
+	url, ok, err := resolveRemote(context.Background(), "")
+
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, srv.URL, url)
+}
+
 func TestResolveRemote_FileUnreachableErrors(t *testing.T) {
 	t.Setenv("KATA_SERVER", "")
 	dir := t.TempDir()

@@ -67,6 +67,16 @@ url = "http://100.64.0.5:7777"
 
 `KATA_SERVER` wins over the local file.
 
+Daemon target resolution order is:
+
+1. `KATA_SERVER`
+2. `.kata.local.toml` `[server].url`
+3. `active_daemon` in `<KATA_HOME>/config.toml`
+4. local daemon discovery or auto-start
+
+Committed `.kata.toml` files bind the project name only; do not put daemon
+routing or tokens there.
+
 For trusted private-network hostnames that cannot be represented as literal
 non-public IP addresses, opt in per target:
 
@@ -80,10 +90,17 @@ allow_insecure = true
 
 ## Daemon config
 
-`<KATA_HOME>/config.toml` can configure storage, listener, and auth behavior:
+`<KATA_HOME>/config.toml` can configure storage, listener, auth behavior, and
+named daemon targets:
 
 ```toml
 listen = "100.64.0.5:7777"
+active_daemon = "shared"
+
+[[daemon]]
+name = "shared"
+url = "http://100.64.0.5:7777"
+token_env = "KATA_SHARED_TOKEN"
 
 [storage]
 dsn = "/var/lib/kata/kata.db"

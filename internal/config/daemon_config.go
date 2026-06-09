@@ -13,8 +13,9 @@ import (
 // file is optional; an absent file yields a zero-value DaemonConfig and
 // no error so callers can use this unconditionally at daemon start.
 //
-// Only daemon-side fields belong here. Client-side overrides
-// (KATA_SERVER, .kata.local.toml) live in their own resolution path.
+// This file holds daemon-side settings plus user-level client defaults such as
+// TUI preferences and the named daemon catalog. Workspace-local remote
+// overrides (KATA_SERVER, .kata.local.toml) live in their own resolution path.
 type DaemonConfig struct {
 	// Listen is the bind address used by `kata daemon start` when no
 	// --listen flag is supplied. Same syntax as the flag (host:port).

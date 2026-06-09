@@ -156,6 +156,11 @@ type TargetAuth struct {
 // from the first-party CLI/TUI without callers having to plumb the header
 // through every request site.
 func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client, error) {
+	if auth, ok, err := activeRemoteTargetAuthForBaseURL(baseURL); err != nil {
+		return nil, err
+	} else if ok {
+		return NewHTTPClientForTarget(ctx, baseURL, auth, opts)
+	}
 	auth := resolveAuthConfig()
 	return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
 }

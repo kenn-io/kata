@@ -189,6 +189,42 @@ func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
 	assert.Equal(t, "Bearer explicit-token", got)
 }
 
+func TestNewHTTPClientUsesActiveDaemonTargetToken(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `
+active_daemon = "shared"
+
+[auth]
+token = "global-token"
+
+[[daemon]]
+name = "shared"
+url = "`+srv.URL+`"
+token = "target-token"
+`))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		srv.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer target-token", got)
+}
+
 func TestNewHTTPClientForTargetAttachesExplicitTokenOverGlobal(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
