@@ -176,8 +176,8 @@ func resolveActiveRemoteTargetToken(target activeRemoteTarget) (string, error) {
 	return token, nil
 }
 
-func activeRemoteTargetAuthForBaseURL(baseURL string) (TargetAuth, bool, error) {
-	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceMatchesBaseURL(baseURL, "") {
+func activeRemoteTargetAuthForBaseURL(baseURL, workspaceStart string) (TargetAuth, bool, error) {
+	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart) {
 		return TargetAuth{}, false, nil
 	}
 	target, ok, err := activeRemoteFromConfig()
