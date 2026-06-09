@@ -19,16 +19,25 @@ func (d *Store) AddLabel(ctx context.Context, issueID int64, label, author strin
 }
 
 func (d *Store) addLabel(ctx context.Context, issueID int64, label, author string) (db.IssueLabel, error) {
-	if _, err := d.ExecContext(ctx,
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.IssueLabel{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO issue_labels(issue_id, label, author) VALUES(?, ?, ?)`,
 		issueID, label, author); err != nil {
 		return db.IssueLabel{}, classifyLabelInsertError(err)
 	}
-	row := d.QueryRowContext(ctx,
+	row := tx.QueryRowContext(ctx,
 		labelSelect+` WHERE issue_id = ? AND label = ?`, issueID, label)
 	out, err := scanLabel(row)
 	if err != nil {
 		return db.IssueLabel{}, fmt.Errorf("re-fetch label: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return db.IssueLabel{}, err
 	}
 	return out, nil
 }

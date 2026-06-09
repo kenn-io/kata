@@ -12,7 +12,20 @@ import (
 // UpsertImportMapping inserts or updates a source identity mapping.
 func (d *Store) UpsertImportMapping(ctx context.Context, p db.ImportMappingParams) (db.ImportMapping, error) {
 	return retryWrite1(ctx, d, func() (db.ImportMapping, error) {
-		return upsertImportMapping(ctx, d.DB, p)
+		tx, err := d.BeginTx(ctx, nil)
+		if err != nil {
+			return db.ImportMapping{}, err
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		mapping, err := upsertImportMapping(ctx, tx, p)
+		if err != nil {
+			return db.ImportMapping{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return db.ImportMapping{}, err
+		}
+		return mapping, nil
 	})
 }
 

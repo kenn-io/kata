@@ -20,7 +20,13 @@ func (d *Store) CreateLink(ctx context.Context, p db.CreateLinkParams) (db.Link,
 }
 
 func (d *Store) createLink(ctx context.Context, p db.CreateLinkParams) (db.Link, error) {
-	res, err := d.ExecContext(ctx,
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.Link{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES(?, ?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
 		p.ProjectID, p.FromIssueID, p.ToIssueID, p.FromIssueID, p.ToIssueID, p.Type, p.Author)
@@ -32,7 +38,7 @@ func (d *Store) createLink(ctx context.Context, p db.CreateLinkParams) (db.Link,
 		// caller-facing semantic is "already linked" (200 no-op), not
 		// "different parent set" (409 conflict). Disambiguate by re-querying.
 		if errors.Is(classified, db.ErrParentAlreadySet) && p.Type == "parent" {
-			if _, lookupErr := d.LinkByEndpoints(ctx, p.FromIssueID, p.ToIssueID, "parent"); lookupErr == nil {
+			if _, lookupErr := linkByEndpoints(ctx, tx, p.FromIssueID, p.ToIssueID, "parent"); lookupErr == nil {
 				return db.Link{}, db.ErrLinkExists
 			}
 		}
@@ -42,7 +48,14 @@ func (d *Store) createLink(ctx context.Context, p db.CreateLinkParams) (db.Link,
 	if err != nil {
 		return db.Link{}, fmt.Errorf("last insert id: %w", err)
 	}
-	return d.LinkByID(ctx, id)
+	link, err := linkByID(ctx, tx, id)
+	if err != nil {
+		return db.Link{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.Link{}, err
+	}
+	return link, nil
 }
 
 // classifyLinkInsertError maps SQLite constraint failures to typed errors so
@@ -73,13 +86,21 @@ func classifyLinkInsertError(err error) error {
 
 // LinkByID fetches a link by rowid.
 func (d *Store) LinkByID(ctx context.Context, id int64) (db.Link, error) {
-	row := d.QueryRowContext(ctx, linkSelect+` WHERE id = ?`, id)
-	return scanLink(row)
+	return linkByID(ctx, d, id)
 }
 
 // LinkByEndpoints fetches the link for a (from, to, type) triple.
 func (d *Store) LinkByEndpoints(ctx context.Context, fromIssueID, toIssueID int64, linkType string) (db.Link, error) {
-	row := d.QueryRowContext(ctx,
+	return linkByEndpoints(ctx, d, fromIssueID, toIssueID, linkType)
+}
+
+func linkByID(ctx context.Context, q sqlReader, id int64) (db.Link, error) {
+	row := q.QueryRowContext(ctx, linkSelect+` WHERE id = ?`, id)
+	return scanLink(row)
+}
+
+func linkByEndpoints(ctx context.Context, q sqlReader, fromIssueID, toIssueID int64, linkType string) (db.Link, error) {
+	row := q.QueryRowContext(ctx,
 		linkSelect+` WHERE from_issue_id = ? AND to_issue_id = ? AND type = ?`,
 		fromIssueID, toIssueID, linkType)
 	return scanLink(row)

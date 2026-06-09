@@ -37,8 +37,7 @@ func (d *Store) ListFederationBindings(ctx context.Context) ([]db.FederationBind
 
 // FederationBindingByProject returns the binding for one local project.
 func (d *Store) FederationBindingByProject(ctx context.Context, projectID int64) (db.FederationBinding, error) {
-	return scanFederationBinding(d.QueryRowContext(ctx,
-		federationBindingSelect+` WHERE project_id = ?`, projectID))
+	return federationBindingByProject(ctx, d, projectID)
 }
 
 // FederationSyncStatusByProject returns the stored sync status for one local
@@ -138,7 +137,13 @@ func (d *Store) recordFederationQuarantine(
 	if err != nil {
 		return db.FederationQuarantine{}, fmt.Errorf("encode federation quarantine event uids: %w", err)
 	}
-	_, err = d.ExecContext(ctx, `
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.FederationQuarantine{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO federation_quarantine(
 			project_id, direction, first_event_id, last_event_id, event_uids, error, created_at
 		)
@@ -149,7 +154,14 @@ func (d *Store) recordFederationQuarantine(
 	if err != nil {
 		return db.FederationQuarantine{}, fmt.Errorf("record federation quarantine: %w", err)
 	}
-	return d.ActiveFederationQuarantine(ctx, p.ProjectID, p.Direction)
+	quarantine, err := activeFederationQuarantine(ctx, tx, p.ProjectID, p.Direction)
+	if err != nil {
+		return db.FederationQuarantine{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.FederationQuarantine{}, err
+	}
+	return quarantine, nil
 }
 
 // ActiveFederationQuarantine returns the unresolved quarantine for one
@@ -159,7 +171,16 @@ func (d *Store) ActiveFederationQuarantine(
 	projectID int64,
 	direction db.FederationQuarantineDirection,
 ) (db.FederationQuarantine, error) {
-	return scanFederationQuarantine(d.QueryRowContext(ctx,
+	return activeFederationQuarantine(ctx, d, projectID, direction)
+}
+
+func activeFederationQuarantine(
+	ctx context.Context,
+	q sqlReader,
+	projectID int64,
+	direction db.FederationQuarantineDirection,
+) (db.FederationQuarantine, error) {
+	return scanFederationQuarantine(q.QueryRowContext(ctx,
 		federationQuarantineSelect+` WHERE project_id = ? AND direction = ? AND skipped_at IS NULL`,
 		projectID, string(direction)))
 }
@@ -302,7 +323,13 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if b.Role == db.FederationRoleSpoke && b.PushEnabled && actor == "" {
 		return db.FederationBinding{}, fmt.Errorf("push-enabled federation spoke binding requires actor")
 	}
-	_, err := d.ExecContext(ctx, `
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO federation_bindings(
 			project_id, role, hub_url, hub_project_id, hub_project_uid,
 			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
@@ -327,7 +354,14 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("upsert federation binding: %w", err)
 	}
-	return d.FederationBindingByProject(ctx, b.ProjectID)
+	binding, err := federationBindingByProject(ctx, tx, b.ProjectID)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.FederationBinding{}, err
+	}
+	return binding, nil
 }
 
 func (d *Store) boundFederationActorTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, bool, error) {
@@ -849,6 +883,11 @@ const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_i
        replay_horizon_event_id, pull_cursor_event_id, push_enabled, push_cursor_event_id,
        bound_actor, enabled, created_at, updated_at, last_sync_at
   FROM federation_bindings`
+
+func federationBindingByProject(ctx context.Context, q sqlReader, projectID int64) (db.FederationBinding, error) {
+	return scanFederationBinding(q.QueryRowContext(ctx,
+		federationBindingSelect+` WHERE project_id = ?`, projectID))
+}
 
 func scanFederationBinding(r rowScanner) (db.FederationBinding, error) {
 	var (

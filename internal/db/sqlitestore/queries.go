@@ -39,7 +39,13 @@ func (d *Store) createProjectWithUID(ctx context.Context, name, projectUID strin
 	if !katauid.Valid(projectUID) {
 		return db.Project{}, fmt.Errorf("invalid project uid %q", projectUID)
 	}
-	res, err := d.ExecContext(ctx,
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.Project{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO projects(uid, name) VALUES(?, ?)`, projectUID, name)
 	if err != nil {
 		return db.Project{}, fmt.Errorf("insert project: %w", err)
@@ -48,7 +54,14 @@ func (d *Store) createProjectWithUID(ctx context.Context, name, projectUID strin
 	if err != nil {
 		return db.Project{}, fmt.Errorf("last id: %w", err)
 	}
-	return d.ProjectByID(ctx, id)
+	project, err := projectByIDTx(ctx, tx, id)
+	if err != nil {
+		return db.Project{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.Project{}, err
+	}
+	return project, nil
 }
 
 // ProjectByID fetches one project by its rowid. Archived (deleted_at != NULL)
@@ -111,7 +124,13 @@ func (d *Store) RenameProject(ctx context.Context, id int64, name string) (db.Pr
 }
 
 func (d *Store) renameProject(ctx context.Context, id int64, name string) (db.Project, error) {
-	res, err := d.ExecContext(ctx, `UPDATE projects SET name = ? WHERE id = ?`, name, id)
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.Project{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `UPDATE projects SET name = ? WHERE id = ?`, name, id)
 	if err != nil {
 		return db.Project{}, fmt.Errorf("rename project: %w", err)
 	}
@@ -122,7 +141,14 @@ func (d *Store) renameProject(ctx context.Context, id int64, name string) (db.Pr
 	if n == 0 {
 		return db.Project{}, db.ErrNotFound
 	}
-	return d.ProjectByID(ctx, id)
+	project, err := projectByIDTx(ctx, tx, id)
+	if err != nil {
+		return db.Project{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.Project{}, err
+	}
+	return project, nil
 }
 
 // ListProjects returns every active project ordered by id ASC. Archived
@@ -271,7 +297,13 @@ func (d *Store) AttachAlias(ctx context.Context, projectID int64, identity, kind
 }
 
 func (d *Store) attachAlias(ctx context.Context, projectID int64, identity, kind string) (db.ProjectAlias, error) {
-	res, err := d.ExecContext(ctx,
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.ProjectAlias{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO project_aliases(project_id, alias_identity, alias_kind)
 		 VALUES(?, ?, ?)`, projectID, identity, kind)
 	if err != nil {
@@ -281,7 +313,14 @@ func (d *Store) attachAlias(ctx context.Context, projectID int64, identity, kind
 	if err != nil {
 		return db.ProjectAlias{}, err
 	}
-	return d.AliasByID(ctx, id)
+	alias, err := aliasByIDTx(ctx, tx, id)
+	if err != nil {
+		return db.ProjectAlias{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.ProjectAlias{}, err
+	}
+	return alias, nil
 }
 
 // AliasByIdentity returns the alias for a given alias_identity.
@@ -293,6 +332,11 @@ func (d *Store) AliasByIdentity(ctx context.Context, identity string) (db.Projec
 // AliasByID returns the project_aliases row with the given id.
 func (d *Store) AliasByID(ctx context.Context, id int64) (db.ProjectAlias, error) {
 	row := d.QueryRowContext(ctx, aliasSelect+` WHERE id = ?`, id)
+	return scanAlias(row)
+}
+
+func aliasByIDTx(ctx context.Context, tx *sql.Tx, id int64) (db.ProjectAlias, error) {
+	row := tx.QueryRowContext(ctx, aliasSelect+` WHERE id = ?`, id)
 	return scanAlias(row)
 }
 

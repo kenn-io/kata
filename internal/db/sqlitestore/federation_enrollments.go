@@ -49,7 +49,13 @@ func (d *Store) createFederationEnrollment(
 	if p.ProjectID != nil {
 		projectID = *p.ProjectID
 	}
-	res, err := d.ExecContext(ctx, `
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO federation_enrollments(
 		  token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
 		  allow_adoption_snapshot_authors
@@ -64,8 +70,11 @@ func (d *Store) createFederationEnrollment(
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, fmt.Errorf("federation enrollment last id: %w", err)
 	}
-	enrollment, err := d.federationEnrollmentByID(ctx, id)
+	enrollment, err := federationEnrollmentByIDTx(ctx, tx, id)
 	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
 	return db.CreatedFederationEnrollment{Enrollment: enrollment, Token: p.Token}, nil
@@ -152,8 +161,8 @@ func generateFederationToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
-func (d *Store) federationEnrollmentByID(ctx context.Context, id int64) (db.FederationEnrollment, error) {
-	return scanFederationEnrollment(d.QueryRowContext(ctx,
+func federationEnrollmentByIDTx(ctx context.Context, tx *sql.Tx, id int64) (db.FederationEnrollment, error) {
+	return scanFederationEnrollment(tx.QueryRowContext(ctx,
 		federationEnrollmentSelect+` WHERE id = ?`, id))
 }
 
