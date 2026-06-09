@@ -2,9 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"sync"
 	"testing"
 	"time"
 
@@ -43,28 +41,10 @@ func TestCreateIssue_RetriesTransientSQLiteBusy(t *testing.T) {
 	d, path := openTestDBWithPath(t)
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "busy-create")
+	useFastSQLiteBusyTimeout(ctx, t, d)
 
-	lockDB, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = lockDB.Close() })
-	conn, err := lockDB.Conn(ctx)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-	_, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE TRANSACTION")
-	require.NoError(t, err)
-
-	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() {
-			_, _ = conn.ExecContext(context.Background(), "COMMIT")
-		})
-	}
-	timer := time.AfterFunc(6*time.Second, release)
-	defer func() {
-		if timer.Stop() {
-			release()
-		}
-	}()
+	lockConn := holdSQLiteWriteLock(ctx, t, path)
+	releaseSQLiteWriteLockAfter(ctx, t, lockConn, 50*time.Millisecond)
 
 	issue, evt, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
