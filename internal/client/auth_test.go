@@ -30,6 +30,256 @@ func TestResolveAuthTokenFallsBackToTOML(t *testing.T) {
 	assert.Equal(t, "from-toml", resolveAuthToken())
 }
 
+func TestNewHTTPClientUsesSelectedNamedDaemonTokenEnv(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_WORK_TOKEN", "named-token")
+	require.NoError(t, writeRawConfig(home, `[auth]
+token = "global-token"
+
+[[daemon]]
+name = "work"
+url = "`+srv.URL+`"
+token_env = "KATA_WORK_TOKEN"
+`))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer named-token", got)
+}
+
+func TestNewHTTPClientUsesSelectedNamedDaemonTokenEnvWhenConfigNameTomlExists(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_WORK_TOKEN", "named-token")
+	require.NoError(t, writeRawConfig(home, `[[daemon]]
+name = "work"
+url = "`+srv.URL+`"
+token_env = "KATA_WORK_TOKEN"
+`))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.work.toml"), []byte(`listen = "`+srv.Listener.Addr().String()+`"
+
+[auth]
+token = "wrong-token"
+`), 0o600))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer named-token", got)
+}
+
+func TestNewHTTPClientSelectedNamedDaemonDoesNotUseGlobalAuthToken(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `[auth]
+token = "global-token"
+
+[[daemon]]
+name = "work"
+url = "`+srv.URL+`"
+`))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Empty(t, got)
+}
+
+func TestNewHTTPClientKATAServerIgnoresWorkspaceNamedDaemon(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", srv.URL)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeAuthConfig(home, "global-token"))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "missing"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer global-token", got)
+}
+
+func TestNewHTTPClientEnvTokenWinsOverSelectedNamedDaemonToken(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "env-token")
+	require.NoError(t, writeRawConfig(home, `[[daemon]]
+name = "work"
+url = "`+srv.URL+`"
+token = "named-token"
+`))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer env-token", got)
+}
+
+func TestNewHTTPClientEnvTokenSkipsSelectedNamedDaemonTokenEnv(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "env-token")
+	t.Setenv("KATA_WORK_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `[[daemon]]
+name = "work"
+url = "`+srv.URL+`"
+token_env = "KATA_WORK_TOKEN"
+`))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer env-token", got)
+}
+
+func TestNewHTTPClientUsesSelectedNamedDaemonAllowInsecure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `[[daemon]]
+name = "work"
+url = "http://tailscale-host:7777"
+token = "named-token"
+allow_insecure = true
+`))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), "http://tailscale-host:7777", Opts{})
+	require.NoError(t, err)
+	assert.NotNil(t, c)
+}
+
 func TestResolveAuthTokenIgnoresUnresolvedCatalogTokenEnv(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("KATA_HOME", tmp)
@@ -179,6 +429,82 @@ func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
 	c, err := NewHTTPClientWithBearer(context.Background(), srv.URL, "explicit-token", Opts{})
 	require.NoError(t, err)
 
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		srv.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer explicit-token", got)
+}
+
+func TestNewHTTPClientWithBearerSkipsSelectedNamedDaemonTokenEnv(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	t.Setenv("KATA_WORK_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `[[daemon]]
+name = "work"
+url = "`+srv.URL+`"
+token_env = "KATA_WORK_TOKEN"
+`))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	c, err := NewHTTPClientWithBearer(context.Background(), srv.URL, "explicit-token", Opts{})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		srv.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer explicit-token", got)
+}
+
+func TestNewHTTPClientWithBearerIgnoresConfigNameToml(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `[[daemon]]
+name = "work"
+url = "`+srv.URL+`"
+`))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.work.toml"),
+		[]byte(`listen = "127.0.0.1:7777"`+"\n"), 0o600))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"), []byte(`version = 1
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	c, err := NewHTTPClientWithBearer(context.Background(), srv.URL, "explicit-token", Opts{})
+	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)

@@ -27,6 +27,21 @@ The CLI flag wins over config. Auto-started daemons also read the config-file
 listener, so a host that should always use one TCP address only needs the config
 set once.
 
+For a named local daemon, define the daemon in `<KATA_HOME>/config.toml` and
+start it by name:
+
+```toml
+[[daemon]]
+name = "work"
+local = true
+token_env = "KATA_WORK_TOKEN"
+```
+
+```sh
+export KATA_WORK_TOKEN=change-me
+kata daemon start --name work
+```
+
 Run the daemon under a process manager such as launchd, systemd, or a container
 runtime on the host that owns the SQLite database.
 
@@ -40,16 +55,28 @@ export KATA_AUTH_TOKEN=change-me
 kata list
 ```
 
-For a per-workspace, gitignored setting:
+For a per-workspace, gitignored setting, prefer a named daemon:
 
 ```toml
 version = 1
 
 [server]
-url = "http://100.64.0.5:7777"
+daemon = "work"
 ```
 
-`KATA_SERVER` wins over `.kata.local.toml`.
+Define that daemon in the user's global config without putting secrets in the
+workspace file:
+
+```toml
+[[daemon]]
+name = "work"
+url = "http://100.64.0.5:7777"
+token_env = "KATA_WORK_TOKEN"
+```
+
+`KATA_SERVER` wins over `.kata.local.toml`. Do not put `[auth]` or tokens in
+`.kata.toml` or `.kata.local.toml`; they are daemon selectors, not secret
+stores.
 
 ## Plain HTTP guardrails
 

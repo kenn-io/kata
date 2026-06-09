@@ -156,6 +156,20 @@ url = "http://127.0.0.1:7777"
 	assert.Equal(t, "http://127.0.0.1:7777", cfg.Server.URL)
 }
 
+func TestReadProjectConfig_AcceptsNamedServerDaemon(t *testing.T) {
+	dir := setupKataProjectDir(t, `version = 1
+
+[project]
+name = "kata"
+
+[server]
+daemon = "work"
+`)
+	cfg, err := config.ReadProjectConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "work", cfg.Server.Daemon)
+}
+
 func TestReadProjectConfig_NoServerBlockYieldsZeroValue(t *testing.T) {
 	dir := setupKataProjectDir(t, `version = 1
 

@@ -28,6 +28,7 @@ const (
 var (
 	currentVersionForEnsure     = func() string { return version.Version }
 	startDaemonForEnsure        = autoStart
+	startNamedDaemonForEnsure   = autoStartNamed
 	stopRunningDaemonsForEnsure = stopRunningDaemons
 	signalDaemonStopForEnsure   = daemon.SignalDaemonStop
 )
@@ -93,6 +94,27 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 		return startDaemonForEnsure(ctx, ns.DataDir)
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
+}
+
+func ensureLocalRunningForName(ctx context.Context, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ensureLocalRunning(ctx)
+	}
+	ns, err := daemon.NewNamespaceForName(name)
+	if err != nil {
+		return "", err
+	}
+	if url, compatible, ok := discoverForEnsure(ctx, ns.DataDir); ok {
+		if compatible {
+			return url, nil
+		}
+		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
+			return "", err
+		}
+		return startNamedDaemonForEnsure(ctx, name, ns.DataDir)
+	}
+	return startNamedDaemonForEnsure(ctx, name, ns.DataDir)
 }
 
 func discoverForEnsure(ctx context.Context, dataDir string) (string, bool, bool) {
@@ -167,6 +189,14 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 }
 
 func autoStart(ctx context.Context, dataDir string) (string, error) {
+	return autoStartDaemon(ctx, "", dataDir)
+}
+
+func autoStartNamed(ctx context.Context, name, dataDir string) (string, error) {
+	return autoStartDaemon(ctx, name, dataDir)
+}
+
+func autoStartDaemon(ctx context.Context, name, dataDir string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -174,8 +204,12 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 	if shouldRefuseAutoStartDaemon(exe) {
 		return "", fmt.Errorf("refusing to auto-start daemon from ephemeral binary %s", filepath.Base(exe))
 	}
+	args := []string{"daemon", "start"}
+	if name != "" {
+		args = append(args, "--name", name)
+	}
 	//nolint:gosec // G204: exe is os.Executable()
-	cmd := exec.Command(exe, "daemon", "start")
+	cmd := exec.Command(exe, args...)
 	// The auto-started daemon outlives this process, so it must not inherit
 	// our stdio. Inheriting the caller's stderr keeps that handle open after
 	// the daemon detaches, which hangs any parent that captures our output

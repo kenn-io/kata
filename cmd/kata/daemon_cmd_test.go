@@ -19,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
@@ -466,6 +467,24 @@ func TestDaemonStart_PortEnvBindsWildcard(t *testing.T) {
 	assert.Contains(t, err.Error(), "0.0.0.0:8081")
 }
 
+func TestDaemonListenForNamedStartIgnoresPortEnv(t *testing.T) {
+	t.Setenv(daemon.AutoStartMarkerEnv, "")
+	t.Setenv("PORT", "8081")
+
+	listen := daemonListenForStart("work", "", &config.DaemonConfig{})
+
+	assert.Empty(t, listen)
+}
+
+func TestDaemonListenForDefaultStartHonorsPortEnv(t *testing.T) {
+	t.Setenv(daemon.AutoStartMarkerEnv, "")
+	t.Setenv("PORT", "8081")
+
+	listen := daemonListenForStart("", "", &config.DaemonConfig{})
+
+	assert.Equal(t, "0.0.0.0:8081", listen)
+}
+
 // TestDaemonStart_ConfigFileListenIsHonored verifies that
 // <KATA_HOME>/config.toml's `listen = ...` value is picked up when the
 // --listen flag is absent. We use an obviously-public address so the
@@ -514,6 +533,49 @@ func TestDaemonStart_FlagWinsOverConfigFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "8.8.8.8")
 	assert.NotContains(t, err.Error(), "1.1.1.1",
 		"config.toml value must NOT win when --listen is set")
+}
+
+func TestDaemonConfigForNamedStartUsesSelectedTokenEnvInsteadOfGlobalAuth(t *testing.T) {
+	t.Setenv("KATA_WORK_AUTH", "work-auth")
+	cfg := &config.DaemonConfig{
+		Auth: config.AuthConfig{Token: "global-token"},
+		Daemons: []config.CatalogDaemonConfig{{ //nolint:gosec // Env var name fixture, not secret material.
+			Name:     "work",
+			Local:    true,
+			TokenEnv: "KATA_WORK_AUTH",
+		}},
+	}
+
+	got, err := daemonConfigForNamedStart(cfg, "work")
+	require.NoError(t, err)
+	assert.Equal(t, "work-auth", got.Auth.Token)
+}
+
+func TestDaemonConfigForNamedStartDoesNotInheritDefaultListen(t *testing.T) {
+	cfg := &config.DaemonConfig{
+		Listen: "100.64.0.5:7777",
+		Daemons: []config.CatalogDaemonConfig{{
+			Name:  "work",
+			Local: true,
+		}},
+	}
+
+	got, err := daemonConfigForNamedStart(cfg, "work")
+	require.NoError(t, err)
+	assert.Empty(t, got.Listen)
+}
+
+func TestDaemonConfigForNamedStartRejectsRemoteCatalogEntry(t *testing.T) {
+	cfg := &config.DaemonConfig{
+		Daemons: []config.CatalogDaemonConfig{{
+			Name: "work",
+			URL:  "https://daemon.example",
+		}},
+	}
+
+	_, err := daemonConfigForNamedStart(cfg, "work")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `daemon "work" is not local`)
 }
 
 func TestNewDaemonTelemetryReporterUsesInstanceUID(t *testing.T) {

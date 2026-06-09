@@ -42,6 +42,7 @@ func daemonStartCmd() *cobra.Command {
 	var (
 		listen           string
 		insecureReadonly bool
+		name             string
 	)
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -56,9 +57,11 @@ func daemonStartCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
-			return runDaemonWithListen(ctx, listen, insecureReadonly)
+			return runDaemonNamedWithListen(ctx, name, listen, insecureReadonly)
 		},
 	}
+	cmd.Flags().StringVar(&name, "name", "",
+		"start the named local daemon from $KATA_HOME/config.toml's daemon catalog")
 	cmd.Flags().StringVar(&listen, "listen", "",
 		"bind TCP at host:port (admin-only; non-public addresses only). "+
 			"Falls back to $KATA_HOME/config.toml's `listen` value when "+
@@ -282,18 +285,23 @@ func redactRuntimeDSN(dsn string) string {
 // config value is used. CLI flag always wins over config.
 // insecureReadonly is the dev escape hatch from --insecure-readonly.
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bool) error {
+	return runDaemonNamedWithListen(ctx, "", listen, insecureReadonly)
+}
+
+func runDaemonNamedWithListen(ctx context.Context, name, listen string, insecureReadonly bool) error {
+	name = strings.TrimSpace(name)
 	dcfg, err := config.ReadDaemonConfig()
 	if err != nil {
 		return err
 	}
-	if listen == "" {
-		if listen = dcfg.Listen; listen == "" {
-			if addr, ok := listenFromPortEnv(); ok {
-				listen = addr
-			}
+	if name != "" {
+		dcfg, err = daemonConfigForNamedStart(dcfg, name)
+		if err != nil {
+			return err
 		}
 	}
-	ns, err := daemon.NewNamespace()
+	listen = daemonListenForStart(name, listen, dcfg)
+	ns, err := daemon.NewNamespaceForName(name)
 	if err != nil {
 		return err
 	}
@@ -324,7 +332,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	stopCleanup := installStopWatcher(ns.DBHash, cancel)
 	defer stopCleanup()
 
-	dbPath, err := config.KataDSN(ctx)
+	dbPath, err := config.KataDSNForName(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -395,6 +403,59 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	}
 
 	return srv.Serve(ctx, listener)
+}
+
+func daemonListenForStart(name, listen string, cfg *config.DaemonConfig) string {
+	if listen != "" {
+		return listen
+	}
+	if cfg != nil && cfg.Listen != "" {
+		return cfg.Listen
+	}
+	if name == "" {
+		if addr, ok := listenFromPortEnv(); ok {
+			return addr
+		}
+	}
+	return ""
+}
+
+func daemonConfigForNamedStart(cfg *config.DaemonConfig, name string) (*config.DaemonConfig, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return cfg, nil
+	}
+	for _, target := range cfg.Daemons {
+		if target.Name != name {
+			continue
+		}
+		if !target.Local {
+			return nil, fmt.Errorf("daemon %q is not local; only local catalog entries can be started by name", name)
+		}
+		token, err := namedStartToken(target)
+		if err != nil {
+			return nil, err
+		}
+		next := *cfg
+		next.Listen = ""
+		next.Auth = config.AuthConfig{
+			Token:               token,
+			TrustPrivateNetwork: cfg.Auth.TrustPrivateNetwork,
+		}
+		return &next, nil
+	}
+	return nil, fmt.Errorf("daemon %q is not configured in the daemon catalog", name)
+}
+
+func namedStartToken(target config.CatalogDaemonConfig) (string, error) {
+	if target.TokenEnv == "" {
+		return strings.TrimSpace(target.Token), nil
+	}
+	token := strings.TrimSpace(os.Getenv(target.TokenEnv))
+	if token == "" {
+		return "", fmt.Errorf("daemon %q: token_env %q is unset or empty", target.Name, target.TokenEnv)
+	}
+	return token, nil
 }
 
 func newDaemonTelemetryReporter(store db.Storage) telemetry.Client {

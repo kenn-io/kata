@@ -40,6 +40,7 @@ type TransportOptions struct {
 	Timeout               time.Duration
 	ResponseHeaderTimeout time.Duration
 	AllowInsecure         bool
+	WorkspaceStart        string
 }
 
 type options struct {
@@ -180,6 +181,7 @@ func internalOpts(opts TransportOptions) internalclient.Opts {
 		Timeout:               opts.Timeout,
 		ResponseHeaderTimeout: opts.ResponseHeaderTimeout,
 		AllowInsecure:         opts.AllowInsecure,
+		WorkspaceStart:        opts.WorkspaceStart,
 	}
 }
 

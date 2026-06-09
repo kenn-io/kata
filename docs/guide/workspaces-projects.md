@@ -18,7 +18,7 @@ kata init --project product
 ```
 
 `kata init` writes `.kata.toml` and ensures `.kata.local.toml` is ignored. The
-local file is for per-machine settings such as a remote daemon URL.
+local file is for per-machine, non-secret daemon routing.
 
 ## Bind many workspaces to one project
 
@@ -100,10 +100,34 @@ name = "product"
 
 Do not put tokens or host-specific daemon URLs in `.kata.toml`.
 
+If every checkout of the repository should use the same daemon, commit the
+daemon name only:
+
+```toml
+version = 1
+
+[project]
+name = "product"
+
+[server]
+daemon = "work"
+```
+
+Each developer's `KATA_HOME` resolves `work` through their daemon config.
+
 ## `.kata.local.toml`
 
 The local override file is ignored by git. A common use is routing one
-workspace to a remote daemon:
+workspace to a named daemon on this machine:
+
+```toml
+version = 1
+
+[server]
+daemon = "work"
+```
+
+For a local-only literal URL:
 
 ```toml
 version = 1
@@ -113,6 +137,10 @@ url = "http://100.64.0.5:7777"
 ```
 
 `KATA_SERVER` wins over `.kata.local.toml` when both are set.
+
+Do not put `[auth]`, bearer tokens, or token environment values in
+`.kata.toml` or `.kata.local.toml`. Use environment variables or
+`<KATA_HOME>/config.toml` for auth.
 
 ## Non-git workspaces
 

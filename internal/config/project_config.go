@@ -34,10 +34,10 @@ type ProjectBindings struct {
 }
 
 // ServerConfig carries the [server] block. Optional in both committed
-// and local config files. URL is the daemon base URL (e.g.
-// http://100.64.0.5:7777). When set on .kata.local.toml it directs
-// the client to a remote daemon; ignored if it appears in committed
-// .kata.toml in v1, but parsed without error.
+// and local config files. Daemon is a non-secret named daemon selector.
+// URL is the daemon base URL (e.g. http://100.64.0.5:7777). When set
+// on .kata.local.toml it directs the client to a remote daemon; ignored
+// if it appears in committed .kata.toml in v1, but parsed without error.
 //
 // AllowInsecure opts out of the client-side scheme guard that rejects
 // plain http to a non-private host. Required when URL uses a hostname
@@ -45,6 +45,7 @@ type ProjectBindings struct {
 // over plain http. Has no effect on https URLs.
 type ServerConfig struct {
 	URL           string `toml:"url,omitempty"`
+	Daemon        string `toml:"daemon,omitempty"`
 	AllowInsecure bool   `toml:"allow_insecure,omitempty"`
 }
 
@@ -75,6 +76,7 @@ func ReadProjectConfig(workspaceRoot string) (*ProjectConfig, error) {
 	if err := ValidateProjectName(cfg.Project.Name); err != nil {
 		return nil, fmt.Errorf("project.name: %w", err)
 	}
+	cfg.Server.Daemon = strings.TrimSpace(cfg.Server.Daemon)
 	return &cfg, nil
 }
 

@@ -46,6 +46,7 @@ func ReadLocalConfig(workspaceRoot string) (*ProjectConfig, error) {
 		}
 	}
 	cfg.Server.URL = strings.TrimSpace(cfg.Server.URL)
+	cfg.Server.Daemon = strings.TrimSpace(cfg.Server.Daemon)
 	return &cfg, nil
 }
 
@@ -69,6 +70,11 @@ func MergeLocalWithStderr(base, local *ProjectConfig, stderr io.Writer) *Project
 	}
 	if local.Server.URL != "" {
 		merged.Server.URL = local.Server.URL
+		merged.Server.Daemon = ""
+	}
+	if local.Server.Daemon != "" {
+		merged.Server.Daemon = local.Server.Daemon
+		merged.Server.URL = ""
 	}
 	return &merged
 }

@@ -200,7 +200,7 @@ kata projects detach <alias-identity>
 ## Daemon and diagnostics
 
 ```sh
-kata daemon start [--listen <host:port>] [--insecure-readonly]
+kata daemon start [--name <daemon>] [--listen <host:port>] [--insecure-readonly]
 kata daemon status
 kata daemon stop
 kata daemon reload
@@ -213,8 +213,9 @@ kata tui
 ```
 
 Local commands auto-start the daemon when appropriate. `daemon start` runs in
-the foreground and is used for explicit service setups. `kata agent-instructions`
-is an alias for `kata quickstart`.
+the foreground and is used for explicit service setups. `--name <daemon>`
+starts a named local daemon from `<KATA_HOME>/config.toml`'s daemon catalog.
+`kata agent-instructions` is an alias for `kata quickstart`.
 
 `kata tui` opens the interactive issue browser. In the issue list, `v` toggles
 between nested and flat views: nested groups children under parents, while flat

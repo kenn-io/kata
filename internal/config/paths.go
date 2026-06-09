@@ -104,6 +104,20 @@ func DaemonConfigPath() (string, error) {
 	return filepath.Join(home, "config.toml"), nil
 }
 
+func validateNamedDaemonName(name string) error {
+	if name == "." || name == ".." || strings.HasPrefix(name, ".") {
+		return fmt.Errorf("daemon name %q is not valid in a filename", name)
+	}
+	for _, r := range name {
+		isLetter := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+		isDigit := r >= '0' && r <= '9'
+		if !isLetter && !isDigit && r != '-' && r != '_' && r != '.' {
+			return fmt.Errorf("daemon name %q is not valid in a filename", name)
+		}
+	}
+	return nil
+}
+
 // FederationCredentialsPath returns <KataHome>/credentials.toml. It stores
 // local secrets such as federation bearer tokens and must not be committed to a
 // workspace.

@@ -115,9 +115,8 @@ Writes a committed .kata.toml that binds the workspace to a project
 name. The daemon derives the name from a git remote when one is present;
 pass --project to choose the project name explicitly.
 
-Also adds .kata.local.toml to .gitignore so a developer's per-machine
-overrides (e.g., a remote daemon URL via [server] url = "...") never
-get committed.`,
+Also adds .kata.local.toml to .gitignore so a developer's per-machine,
+non-secret overrides (e.g., [server] daemon = "work") never get committed.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			baseURL, err := ensureDaemon(cmd.Context())
 			if err != nil {

@@ -36,6 +36,18 @@ url = "http://100.64.0.5:7777"
 	assert.Equal(t, "http://100.64.0.5:7777", cfg.Server.URL)
 }
 
+func TestReadLocalConfig_NamedServerDaemonOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeKataLocal(t, dir, `version = 1
+
+[server]
+daemon = "work"
+`)
+	cfg, err := config.ReadLocalConfig(dir)
+	require.NoError(t, err)
+	assert.Equal(t, "work", cfg.Server.Daemon)
+}
+
 func TestReadLocalConfig_RejectsBadVersion(t *testing.T) {
 	dir := t.TempDir()
 	writeKataLocal(t, dir, `version = 2
@@ -85,6 +97,7 @@ func TestMergeLocal_LocalServerWins(t *testing.T) {
 	base := &config.ProjectConfig{
 		Version: 1,
 		Project: config.ProjectBindings{Name: "kata"},
+		Server:  config.ServerConfig{Daemon: "work"},
 	}
 	local := &config.ProjectConfig{
 		Version: 1,
@@ -95,6 +108,20 @@ func TestMergeLocal_LocalServerWins(t *testing.T) {
 	assert.Equal(t, "kata", got.Project.Name)
 	assert.Equal(t, "http://100.64.0.5:7777", got.Server.URL)
 	assert.Empty(t, stderr.String())
+}
+
+func TestMergeLocal_LocalDaemonOverridesBase(t *testing.T) {
+	base := &config.ProjectConfig{
+		Version: 1,
+		Project: config.ProjectBindings{Name: "kata"},
+		Server:  config.ServerConfig{Daemon: "work"},
+	}
+	local := &config.ProjectConfig{
+		Version: 1,
+		Server:  config.ServerConfig{Daemon: "personal"},
+	}
+	got := config.MergeLocal(base, local)
+	assert.Equal(t, "personal", got.Server.Daemon)
 }
 
 func TestMergeLocal_LocalNameOverridesBase(t *testing.T) {

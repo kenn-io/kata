@@ -80,28 +80,106 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 		}
 		return u, true, nil
 	}
-	root, path, ok := findLocalConfig(workspaceStart)
+	server, path, ok, err := workspaceServerSelection(workspaceStart)
+	if err != nil {
+		return "", false, err
+	}
 	if !ok {
 		return "", false, nil
 	}
-	cfg, err := config.ReadLocalConfig(root)
-	if err != nil {
-		if errors.Is(err, config.ErrLocalConfigMissing) {
-			return "", false, nil
+	if server.URL != "" {
+		u, err := normalizeRemoteURL(server.URL, server.AllowInsecure)
+		if err != nil {
+			return "", false, fmt.Errorf("%s server.url %q: %w", path, server.URL, err)
 		}
-		return "", false, fmt.Errorf("read %s: %w", path, err)
+		if !probeRemote(ctx, u) {
+			return "", false, fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, u, path)
+		}
+		return u, true, nil
 	}
-	if cfg.Server.URL == "" {
-		return "", false, nil
+	if server.Daemon != "" {
+		u, err := resolveNamedRemote(ctx, server.Daemon, path)
+		if err != nil {
+			return "", false, err
+		}
+		return u, true, nil
 	}
-	u, err := normalizeRemoteURL(cfg.Server.URL, cfg.Server.AllowInsecure)
+	return "", false, nil
+}
+
+func workspaceServerSelection(workspaceStart string) (config.ServerConfig, string, bool, error) {
+	start := workspaceStart
+	if start == "" {
+		var err error
+		start, err = os.Getwd()
+		if err != nil {
+			return config.ServerConfig{}, "", false, nil
+		}
+	}
+
+	if root, path, ok := findLocalConfig(start); ok {
+		cfg, err := config.ReadLocalConfig(root)
+		if err != nil {
+			if errors.Is(err, config.ErrLocalConfigMissing) {
+				return config.ServerConfig{}, "", false, nil
+			}
+			return config.ServerConfig{}, "", false, fmt.Errorf("read %s: %w", path, err)
+		}
+		if err := validateServerSelection(cfg.Server, path); err != nil {
+			return config.ServerConfig{}, "", false, err
+		}
+		if cfg.Server.URL != "" || cfg.Server.Daemon != "" {
+			return cfg.Server, path, true, nil
+		}
+	}
+
+	cfg, root, err := config.FindProjectConfig(start)
 	if err != nil {
-		return "", false, fmt.Errorf("%s server.url %q: %w", path, cfg.Server.URL, err)
+		if errors.Is(err, config.ErrProjectConfigMissing) {
+			return config.ServerConfig{}, "", false, nil
+		}
+		return config.ServerConfig{}, "", false, err
+	}
+	path := filepath.Join(root, config.ProjectConfigFilename)
+	if err := validateServerSelection(cfg.Server, path); err != nil {
+		return config.ServerConfig{}, "", false, err
+	}
+	if cfg.Server.Daemon == "" {
+		return config.ServerConfig{}, "", false, nil
+	}
+	return config.ServerConfig{Daemon: cfg.Server.Daemon}, path, true, nil
+}
+
+func validateServerSelection(server config.ServerConfig, path string) error {
+	if server.URL != "" && server.Daemon != "" {
+		return fmt.Errorf("%s [server]: exactly one of url or daemon is allowed", path)
+	}
+	return nil
+}
+
+func resolveNamedRemote(ctx context.Context, name, sourcePath string) (string, error) {
+	target, ok, err := lookupNamedDaemonTarget(name)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%s server.daemon: daemon %q is not configured", sourcePath, name)
+	}
+	if target.Catalog.Local {
+		u, err := ensureLocalRunningForName(ctx, name)
+		if err != nil {
+			return "", err
+		}
+		return u, nil
+	}
+	u, err := normalizeRemoteURL(target.Catalog.URL, target.Catalog.AllowInsecure)
+	if err != nil {
+		return "", fmt.Errorf("daemon %q url %q: %w", name, target.Catalog.URL, err)
 	}
 	if !probeRemote(ctx, u) {
-		return "", false, fmt.Errorf("%w: %s (%s)", ErrRemoteUnavailable, u, path)
+		return "", fmt.Errorf("%w: %s (daemon %q from %s)", ErrRemoteUnavailable, u, name, sourcePath)
 	}
-	return u, true, nil
+	return u, nil
 }
 
 // envAllowInsecure reports whether KATA_ALLOW_INSECURE is set to a
@@ -118,16 +196,26 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 		u, err := normalizeRemoteURL(v, allow)
 		return err == nil && u == baseURL && allow
 	}
-	root, _, ok := findLocalConfig(workspaceStart)
-	if !ok {
+	server, _, ok, err := workspaceServerSelection(workspaceStart)
+	if err != nil || !ok {
 		return false
 	}
-	cfg, err := config.ReadLocalConfig(root)
-	if err != nil || cfg.Server.URL == "" || !cfg.Server.AllowInsecure {
-		return false
+	if server.URL != "" {
+		if !server.AllowInsecure {
+			return false
+		}
+		u, err := normalizeRemoteURL(server.URL, true)
+		return err == nil && u == baseURL
 	}
-	u, err := normalizeRemoteURL(cfg.Server.URL, true)
-	return err == nil && u == baseURL
+	if server.Daemon != "" {
+		target, ok, err := selectedNamedDaemonTarget(workspaceStart)
+		if err != nil || !ok || !target.Catalog.AllowInsecure || target.Catalog.Local {
+			return false
+		}
+		u, err := normalizeRemoteURL(target.Catalog.URL, true)
+		return err == nil && u == baseURL
+	}
+	return false
 }
 
 // findLocalConfig walks upward from start looking for .kata.local.toml,

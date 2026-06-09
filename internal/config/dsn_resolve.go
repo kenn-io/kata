@@ -60,6 +60,39 @@ func KataDSN(ctx context.Context) (string, error) {
 	return filepath.Join(home, "kata.db"), nil
 }
 
+// KataDSNForName returns the effective database DSN for a named local daemon.
+// The empty name preserves KataDSN. Non-empty names still honor KATA_DSN and
+// KATA_DB first, then default to <KATA_HOME>/kata.<name>.db. Named daemons do
+// not read <KATA_HOME>/config.toml [storage] because that belongs to the
+// default daemon.
+func KataDSNForName(ctx context.Context, name string) (string, error) {
+	_ = ctx
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return KataDSN(ctx)
+	}
+	if err := validateNamedDaemonName(name); err != nil {
+		return "", err
+	}
+	if v := strings.TrimSpace(os.Getenv("KATA_DSN")); v != "" {
+		if err := validateDSN(v); err != nil {
+			return "", err
+		}
+		return v, nil
+	}
+	if v := strings.TrimSpace(os.Getenv("KATA_DB")); v != "" {
+		if err := validateDSN(v); err != nil {
+			return "", err
+		}
+		return v, nil
+	}
+	home, err := KataHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "kata."+name+".db"), nil
+}
+
 // validateDSN performs shape-only validation: it rejects unknown schemes,
 // scheme-less libpq keyword DSNs, and libpq query params on sqlite/bare DSNs,
 // and propagates the ambiguous-credentials probe from CanonicalDSNIdentity for

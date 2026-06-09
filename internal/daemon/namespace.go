@@ -30,18 +30,30 @@ func NewNamespace() (*Namespace, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve kata DSN: %w", err)
 	}
-	dataRoot, err := config.RuntimeDir()
+	return namespaceForDSN(dbPath)
+}
+
+// NewNamespaceForName resolves directories for a named local daemon. Named
+// daemons use their own default DB path, so their runtime records and sockets
+// do not collide with the default daemon.
+func NewNamespaceForName(name string) (*Namespace, error) {
+	dbPath, err := config.KataDSNForName(context.Background(), name)
 	if err != nil {
-		return nil, fmt.Errorf("resolve runtime dir: %w", err)
+		return nil, fmt.Errorf("resolve kata DSN: %w", err)
+	}
+	return namespaceForDSN(dbPath)
+}
+
+func namespaceForDSN(dbPath string) (*Namespace, error) {
+	home, err := config.KataHome()
+	if err != nil {
+		return nil, fmt.Errorf("resolve kata home: %w", err)
 	}
 	hash := config.DBHash(dbPath)
-
-	socketDir := socketParent(hash)
-
 	return &Namespace{
 		DBHash:    hash,
-		DataDir:   dataRoot,
-		SocketDir: socketDir,
+		DataDir:   filepath.Join(home, "runtime", hash),
+		SocketDir: socketParent(hash),
 	}, nil
 }
 

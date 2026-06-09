@@ -30,6 +30,10 @@ kata resolves its database in this order:
 3. `[storage].dsn` in `<KATA_HOME>/config.toml`
 4. `<KATA_HOME>/kata.db`
 
+For named local daemons, `KATA_DSN` and `KATA_DB` still win first. Otherwise
+the named daemon defaults to `<KATA_HOME>/kata.<name>.db`. Named daemons do not
+read `[storage].dsn` from the default daemon config.
+
 Bare paths and `sqlite://` DSNs select SQLite. `postgres://` and
 `postgresql://` DSNs are reserved for the incomplete Postgres backend and are
 not selectable by normal daemon/CLI store opening yet. `KATA_DB` stays ahead of
@@ -52,11 +56,35 @@ version = 1
 name = "product"
 ```
 
-It should stay secret-free.
+It should stay secret-free. To make every checkout of a repository use the same
+named daemon, commit only the daemon name:
+
+```toml
+version = 1
+
+[project]
+name = "product"
+
+[server]
+daemon = "work"
+```
+
+The name resolves through the user's daemon config, not through repository
+secrets. A committed `.kata.toml` intentionally does not use `[server].url`.
 
 ## Local override
 
-`.kata.local.toml` is gitignored. Use it for machine-specific daemon routing:
+`.kata.local.toml` is gitignored. Use it for machine-specific, non-secret
+daemon routing. Prefer a daemon name when the target has auth or storage config:
+
+```toml
+version = 1
+
+[server]
+daemon = "work"
+```
+
+For a one-off local URL with no repository sharing:
 
 ```toml
 version = 1
@@ -66,6 +94,10 @@ url = "http://100.64.0.5:7777"
 ```
 
 `KATA_SERVER` wins over the local file.
+
+Do not put `[auth]`, bearer tokens, or token environment values in
+`.kata.toml` or `.kata.local.toml`. Workspace files are only selectors; daemon
+auth belongs in environment variables or `<KATA_HOME>/config.toml`.
 
 For trusted private-network hostnames that cannot be represented as literal
 non-public IP addresses, opt in per target:
@@ -80,7 +112,8 @@ allow_insecure = true
 
 ## Daemon config
 
-`<KATA_HOME>/config.toml` can configure storage, listener, and auth behavior:
+`<KATA_HOME>/config.toml` can configure the default daemon's storage,
+listener, and auth behavior:
 
 ```toml
 listen = "100.64.0.5:7777"
@@ -97,6 +130,34 @@ The `kata daemon start --listen <host:port>` flag wins over the config file.
 Auto-started daemons also read the config-file listener value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
+
+The global config can also hold a daemon catalog. Use `token_env` instead of
+inline `token` when the value should stay out of the file:
+
+```toml
+[[daemon]]
+name = "work"
+url = "http://100.64.0.5:7777"
+token_env = "KATA_WORK_TOKEN"
+```
+
+For a named local daemon, set `local = true` in the catalog and start it by
+name. The daemon reads token material from that catalog entry, not from the
+default `[auth].token`:
+
+```toml
+[[daemon]]
+name = "work"
+local = true
+token_env = "KATA_WORK_TOKEN"
+```
+
+```sh
+kata daemon start --name work
+```
+
+Pass `--listen <host:port>` when a named local daemon should bind TCP. The
+default named DB path is `<KATA_HOME>/kata.<name>.db`.
 
 Postgres DSNs may carry credentials. Although they are not selectable yet,
 runtime redaction handles both URL and libpq keyword forms defensively; userinfo

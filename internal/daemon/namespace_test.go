@@ -32,6 +32,17 @@ func TestNamespace_DataDirIsKataHomeRuntime(t *testing.T) {
 	assert.Equal(t, hash, ns.DBHash)
 }
 
+func TestNamespaceForName_DataDirUsesNamedDSN(t *testing.T) {
+	tmp := setupMockEnv(t)
+	t.Setenv("KATA_DB", "")
+
+	ns, err := daemon.NewNamespaceForName("work")
+	require.NoError(t, err)
+	hash := config.DBHash(filepath.Join(tmp, "kata.work.db"))
+	assert.Equal(t, filepath.Join(tmp, "runtime", hash), ns.DataDir)
+	assert.Equal(t, hash, ns.DBHash)
+}
+
 func TestNamespace_SocketDirHonorsXDGRuntimeDir(t *testing.T) {
 	setupMockEnv(t)
 	xdg := t.TempDir()

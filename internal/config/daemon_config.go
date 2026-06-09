@@ -127,6 +127,10 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readDaemonConfigFile(path, true)
+}
+
+func readDaemonConfigFile(path string, missingOK bool) (*DaemonConfig, error) {
 	var cfg DaemonConfig
 	data, err := os.ReadFile(path) //nolint:gosec // path is derived from KATA_HOME, not user input
 	switch {
@@ -148,6 +152,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Storage.DSN = strings.TrimSpace(cfg.Storage.DSN)
 		trimDaemonCatalog(&cfg)
 	case errors.Is(err, os.ErrNotExist):
+		if !missingOK {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
 		// Absent file: fall through with zero-value cfg. Env merge and
 		// validation below still apply so an env-only misconfig is
 		// caught the same way a TOML-only one is.

@@ -132,6 +132,7 @@ type Opts struct {
 	Timeout               time.Duration
 	ResponseHeaderTimeout time.Duration
 	AllowInsecure         bool
+	WorkspaceStart        string
 }
 
 // TargetAuth is explicit per-target bearer configuration. It is used by
@@ -156,7 +157,10 @@ type TargetAuth struct {
 // from the first-party CLI/TUI without callers having to plumb the header
 // through every request site.
 func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client, error) {
-	auth := resolveAuthConfig()
+	auth, err := resolveAuthConfigForBaseURL(baseURL, opts.WorkspaceStart)
+	if err != nil {
+		return nil, err
+	}
 	return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
 }
 
@@ -166,8 +170,10 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 // federation callers honour the operator opt-in even when supplying their
 // own token.
 func NewHTTPClientWithBearer(ctx context.Context, baseURL, token string, opts Opts) (*http.Client, error) {
-	auth := resolveAuthConfig()
-	auth.Token = token
+	auth, err := resolveAuthConfigForExplicitBearer(baseURL, opts.WorkspaceStart, token)
+	if err != nil {
+		return nil, err
+	}
 	return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
 }
 
@@ -193,7 +199,7 @@ func newHTTPClientWithAuth(ctx context.Context, baseURL string, auth config.Auth
 	if err != nil {
 		return nil, err
 	}
-	allowInsecure := opts.AllowInsecure || remoteAllowInsecureForBaseURL(baseURL, "")
+	allowInsecure := opts.AllowInsecure || remoteAllowInsecureForBaseURL(baseURL, opts.WorkspaceStart)
 	rt, err := authBearerTransport(c.Transport, auth.Token, baseURL, auth.TrustPrivateNetwork, allowInsecure)
 	if err != nil {
 		return nil, err

@@ -89,9 +89,12 @@ A daemon can serve clients on other hosts over a private network:
   `kata daemon start --listen 100.64.0.5:7777`. Set
   `listen = "100.64.0.5:7777"` in `<KATA_HOME>/config.toml` so every
   daemon (including the auto-started one) binds TCP.
-- Client: `export KATA_SERVER=http://100.64.0.5:7777` or commit a
-  gitignored `.kata.local.toml` with `[server] url = "..."` next to
-  `.kata.toml`. `KATA_SERVER` env wins.
+- Client: `export KATA_SERVER=http://100.64.0.5:7777` for one-off routing, or
+  use a gitignored `.kata.local.toml` with `[server] daemon = "work"` next to
+  `.kata.toml`. Resolve that name from `<KATA_HOME>/config.toml` with
+  `[[daemon]] name = "work"` and `token_env = "KATA_WORK_TOKEN"`.
+  `KATA_SERVER` env wins. Do not put `[auth]` or tokens in `.kata.toml` or
+  `.kata.local.toml`.
 - Unauthenticated private-network mode is `--insecure-readonly`, which permits
   GET requests only. Mutations and the event stream require bearer auth.
 - Trusted plaintext bearer targets must be literal non-public IPs (loopback,

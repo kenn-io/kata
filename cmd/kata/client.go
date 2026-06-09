@@ -135,10 +135,12 @@ func discoverDaemon(ctx context.Context) (string, error) {
 // client directly; this wrapper exists only because every existing
 // CLI command site is already named for it.
 func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
+	workspaceStart := workspaceStartForRemote()
 	return client.NewHTTPClient(ctx, baseURL,
 		client.Opts{
-			Timeout:       envHTTPTimeout(defaultHTTPTimeout),
-			AllowInsecure: client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStartForRemote()),
+			Timeout:        envHTTPTimeout(defaultHTTPTimeout),
+			AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart),
+			WorkspaceStart: workspaceStart,
 		})
 }
 
@@ -147,9 +149,11 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 // ResponseHeaderTimeout so a stalled handshake can't hang forever. Body
 // cancellation comes from the request context.
 func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
+	workspaceStart := workspaceStartForRemote()
 	return client.NewHTTPClient(ctx, baseURL, client.Opts{
 		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
-		AllowInsecure:         client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStartForRemote()),
+		AllowInsecure:         client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart),
+		WorkspaceStart:        workspaceStart,
 	})
 }
 

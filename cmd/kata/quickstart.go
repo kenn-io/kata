@@ -136,13 +136,22 @@ KATA_SERVER:
 
    export KATA_SERVER=http://100.64.0.5:7777
 
-Or commit-free per-workspace:
+For commit-free per-workspace routing, prefer a daemon name:
 
    # .kata.local.toml (gitignored by 'kata init')
    version = 1
 
    [server]
+   daemon = "work"
+
+Resolve that name from $KATA_HOME/config.toml:
+
+   [[daemon]]
+   name = "work"
    url = "http://100.64.0.5:7777"
+   token_env = "KATA_WORK_TOKEN"
+
+Do not put [auth] or tokens in .kata.toml or .kata.local.toml.
 
 KATA_SERVER wins over the file when both are set. A configured-but-down
 remote returns exit 7 (kata server not responding) — no silent fallback to

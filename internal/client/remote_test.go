@@ -88,6 +88,167 @@ url = "`+srv.URL+`"
 	assert.Equal(t, srv.URL, url)
 }
 
+func TestResolveRemote_ProjectNamedDaemonWhenNoEnvOrLocalURL(t *testing.T) {
+	srv := pingingServer(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte(`[[daemon]]
+name = "shared"
+url = "`+srv.URL+`"
+`), 0o600))
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"),
+		[]byte(`version = 1
+
+[project]
+name = "spoke-project"
+
+[server]
+daemon = "shared"
+`), 0o600))
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, srv.URL, url)
+}
+
+func TestResolveRemote_LocalNamedDaemonOverridesProjectDaemon(t *testing.T) {
+	projectSrv := pingingServer(t)
+	localSrv := pingingServer(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte(`[[daemon]]
+name = "project"
+url = "`+projectSrv.URL+`"
+
+[[daemon]]
+name = "local"
+url = "`+localSrv.URL+`"
+`), 0o600))
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"),
+		[]byte(`version = 1
+
+[project]
+name = "spoke-project"
+
+[server]
+daemon = "project"
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+
+[server]
+daemon = "local"
+`), 0o600))
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, localSrv.URL, url)
+}
+
+func TestResolveRemote_NamedDaemonMissingErrorsWithoutFallback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"),
+		[]byte(`version = 1
+
+[project]
+name = "spoke-project"
+
+[server]
+daemon = "missing"
+`), 0o600))
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.Error(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, url)
+	assert.Contains(t, err.Error(), `daemon "missing"`)
+}
+
+func TestResolveRemote_NamedDaemonRequiresCatalogEntryEvenWhenConfigNameTomlExists(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.work.toml"),
+		[]byte(`listen = "127.0.0.1:7777"`+"\n"), 0o600))
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"),
+		[]byte(`version = 1
+
+[project]
+name = "spoke-project"
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.Error(t, err)
+	assert.False(t, ok)
+	assert.Empty(t, url)
+	assert.Contains(t, err.Error(), `daemon "work"`)
+	assert.Contains(t, err.Error(), "not configured")
+}
+
+func TestResolveRemote_LocalCatalogDaemonUsesNamedLocalDaemon(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`[[daemon]]
+name = "work"
+local = true
+`), 0o600))
+	dir := t.TempDir()
+	t.Chdir(dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.toml"),
+		[]byte(`version = 1
+
+[project]
+name = "spoke-project"
+
+[server]
+daemon = "work"
+`), 0o600))
+
+	var defaultStarted bool
+	var namedStarted string
+	oldStartDefault := startDaemonForEnsure
+	oldStartNamed := startNamedDaemonForEnsure
+	startDaemonForEnsure = func(context.Context, string) (string, error) {
+		defaultStarted = true
+		return "unix-default", nil
+	}
+	startNamedDaemonForEnsure = func(_ context.Context, name, _ string) (string, error) {
+		namedStarted = name
+		return "unix-named", nil
+	}
+	t.Cleanup(func() {
+		startDaemonForEnsure = oldStartDefault
+		startNamedDaemonForEnsure = oldStartNamed
+	})
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "unix-named", url)
+	assert.False(t, defaultStarted, "named local daemon must not fall back to the default local daemon")
+	assert.Equal(t, "work", namedStarted)
+}
+
 func TestResolveRemote_EnvWinsOverFile(t *testing.T) {
 	srv := pingingServer(t)
 	t.Setenv("KATA_SERVER", srv.URL)

@@ -238,6 +238,40 @@ func TestKataDSN_StorageDSNUsedWhenKataDBUnset(t *testing.T) {
 	assert.Equal(t, "postgres://from-toml/kata", got)
 }
 
+func TestKataDSNForName_IgnoresConfigNameTomlStorage(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_DB", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.work.toml"),
+		[]byte("[storage]\ndsn = \"postgres://work/kata\"\n"), 0o600))
+
+	got, err := config.KataDSNForName(context.Background(), "work")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "kata.work.db"), got)
+}
+
+func TestKataDSNForName_DefaultsToNamedDBPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_DB", "")
+
+	got, err := config.KataDSNForName(context.Background(), "work")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "kata.work.db"), got)
+}
+
+func TestKataDSNForName_RejectsUnsafeName(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_DB", "")
+
+	_, err := config.KataDSNForName(context.Background(), "../work")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "daemon name")
+}
+
 func TestKataDSN_KataDSNOverridesStorageDSN(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

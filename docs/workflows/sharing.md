@@ -23,7 +23,8 @@ Reach for this when several trusted hosts should share one daemon and one
 database.
 
 The daemon runs on the host that owns the SQLite database and listens on a
-private IP address. Clients set `KATA_SERVER` or `.kata.local.toml`.
+private IP address. Clients set `KATA_SERVER` or a non-secret
+`.kata.local.toml` `[server].daemon` selector.
 
 This model gives users one central copy of project state. It still assumes a
 trusted private network and a deliberately small auth model.
