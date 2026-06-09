@@ -67,11 +67,11 @@ func (d *Store) updatePriority(ctx context.Context, issueID int64, newPriority *
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	if err := tx.Commit(); err != nil {
+	updated, err := issueByIDTx(ctx, tx, issueID)
+	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	updated, err := d.IssueByID(ctx, issueID)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return db.Issue{}, nil, false, err
 	}
 	return updated, &evt, true, nil

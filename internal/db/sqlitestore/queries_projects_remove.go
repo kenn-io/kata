@@ -128,12 +128,12 @@ func (d *Store) restoreProject(ctx context.Context, projectID int64, actor strin
 		return db.Project{}, nil, false, fmt.Errorf("restore project rows affected: %w", err)
 	}
 	if n == 0 {
-		if err := tx.Commit(); err != nil {
-			return db.Project{}, nil, false, fmt.Errorf("commit restore project race noop: %w", err)
-		}
-		updated, err := d.ProjectByID(ctx, project.ID)
+		updated, err := projectByIDTx(ctx, tx, project.ID)
 		if err != nil {
 			return db.Project{}, nil, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return db.Project{}, nil, false, fmt.Errorf("commit restore project race noop: %w", err)
 		}
 		return updated, nil, false, nil
 	}

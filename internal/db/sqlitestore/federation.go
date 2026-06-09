@@ -250,11 +250,15 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 		now.UTC().Format(sqliteTimeFormat), actor, reason, p.ID, p.ProjectID); err != nil {
 		return db.FederationQuarantine{}, fmt.Errorf("mark federation quarantine skipped: %w", err)
 	}
+	updated, err := scanFederationQuarantine(tx.QueryRowContext(ctx,
+		federationQuarantineSelect+` WHERE id = ? AND project_id = ?`, p.ID, p.ProjectID))
+	if err != nil {
+		return db.FederationQuarantine{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return db.FederationQuarantine{}, fmt.Errorf("commit skip federation quarantine: %w", err)
 	}
-	return scanFederationQuarantine(d.QueryRowContext(ctx,
-		federationQuarantineSelect+` WHERE id = ? AND project_id = ?`, p.ID, p.ProjectID))
+	return updated, nil
 }
 
 func (d *Store) upsertFederationSyncTime(ctx context.Context, projectID int64, column string, at time.Time) error {

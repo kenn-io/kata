@@ -214,10 +214,15 @@ func (d *Store) enableFederationPush(ctx context.Context, projectID int64, curso
 	if n == 0 {
 		return db.FederationBinding{}, db.ErrNotFound
 	}
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+		federationBindingSelect+` WHERE project_id = ?`, projectID))
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return db.FederationBinding{}, fmt.Errorf("commit enable federation push: %w", err)
 	}
-	return d.FederationBindingByProject(ctx, projectID)
+	return binding, nil
 }
 
 // ResetFederatedProjectIfNoPendingPush clears a spoke only if no local-origin

@@ -218,10 +218,14 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 		return rec, err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return rec, err
+	rec, err = d.getRecurrenceTx(ctx, tx, id)
+	if err != nil {
+		return db.Recurrence{}, err
 	}
-	return d.GetRecurrenceByID(ctx, id)
+	if err := tx.Commit(); err != nil {
+		return db.Recurrence{}, err
+	}
+	return rec, nil
 }
 
 // PatchRecurrence runs an If-Match-guarded UPDATE comparing each supplied
@@ -433,11 +437,11 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		return out, err
 	}
 
-	if err := tx.Commit(); err != nil {
+	next, err := d.getRecurrenceTx(ctx, tx, in.RecurrenceID)
+	if err != nil {
 		return out, err
 	}
-	next, err := d.GetRecurrenceByID(ctx, in.RecurrenceID)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.Recurrence = next

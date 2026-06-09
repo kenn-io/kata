@@ -79,11 +79,11 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 
 	if len(diff) == 0 {
 		// No-op: commit (no writes) and return Changed=false. Revision unchanged.
-		if err := tx.Commit(); err != nil {
+		issue, err := issueByIDTx(ctx, tx, in.IssueID)
+		if err != nil {
 			return out, err
 		}
-		issue, err := d.IssueByID(ctx, in.IssueID)
-		if err != nil {
+		if err := tx.Commit(); err != nil {
 			return out, err
 		}
 		out.Issue = issue
@@ -135,12 +135,11 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 		return out, err
 	}
 
-	if err := tx.Commit(); err != nil {
+	issue, err := issueByIDTx(ctx, tx, in.IssueID)
+	if err != nil {
 		return out, err
 	}
-
-	issue, err := d.IssueByID(ctx, in.IssueID)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.Issue = issue
@@ -217,11 +216,11 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 
 	if len(diff) == 0 {
 		// No-op: commit (no writes) and return Changed=false. Revision unchanged.
-		if err := tx.Commit(); err != nil {
+		project, err := projectByIDTx(ctx, tx, in.ProjectID)
+		if err != nil {
 			return out, err
 		}
-		project, err := d.ProjectByID(ctx, in.ProjectID)
-		if err != nil {
+		if err := tx.Commit(); err != nil {
 			return out, err
 		}
 		out.Project = project
@@ -269,12 +268,11 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 		return out, err
 	}
 
-	if err := tx.Commit(); err != nil {
+	project, err := projectByIDTx(ctx, tx, in.ProjectID)
+	if err != nil {
 		return out, err
 	}
-
-	project, err := d.ProjectByID(ctx, in.ProjectID)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.Project = project

@@ -58,11 +58,11 @@ func (d *Store) softDeleteIssue(ctx context.Context, issueID int64, actor string
 	}
 	if n == 0 {
 		// Lost the race — another tx soft-deleted this issue. No event.
-		if err := tx.Commit(); err != nil {
+		updated, err := issueByIDTx(ctx, tx, issueID)
+		if err != nil {
 			return db.Issue{}, nil, false, err
 		}
-		updated, err := d.IssueByID(ctx, issueID)
-		if err != nil {
+		if err := tx.Commit(); err != nil {
 			return db.Issue{}, nil, false, err
 		}
 		return updated, nil, false, nil
@@ -84,11 +84,11 @@ func (d *Store) softDeleteIssue(ctx context.Context, issueID int64, actor string
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	if err := tx.Commit(); err != nil {
+	updated, err := issueByIDTx(ctx, tx, issueID)
+	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	updated, err := d.IssueByID(ctx, issueID)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return db.Issue{}, nil, false, err
 	}
 	return updated, &evt, true, nil
@@ -136,11 +136,11 @@ func (d *Store) restoreIssue(ctx context.Context, issueID int64, actor string) (
 	}
 	if n == 0 {
 		// Lost the race — another tx restored this issue. No event.
-		if err := tx.Commit(); err != nil {
+		updated, err := issueByIDTx(ctx, tx, issueID)
+		if err != nil {
 			return db.Issue{}, nil, false, err
 		}
-		updated, err := d.IssueByID(ctx, issueID)
-		if err != nil {
+		if err := tx.Commit(); err != nil {
 			return db.Issue{}, nil, false, err
 		}
 		return updated, nil, false, nil
@@ -163,11 +163,11 @@ func (d *Store) restoreIssue(ctx context.Context, issueID int64, actor string) (
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	if err := tx.Commit(); err != nil {
+	updated, err := issueByIDTx(ctx, tx, issueID)
+	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	updated, err := d.IssueByID(ctx, issueID)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return db.Issue{}, nil, false, err
 	}
 	return updated, &evt, true, nil

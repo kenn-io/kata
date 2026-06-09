@@ -188,12 +188,11 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		return out, err
 	}
 
-	if err := tx.Commit(); err != nil {
+	issue, err := issueByIDTx(ctx, tx, in.IssueID)
+	if err != nil {
 		return out, err
 	}
-
-	issue, err := d.IssueByID(ctx, in.IssueID)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.Issue = issue

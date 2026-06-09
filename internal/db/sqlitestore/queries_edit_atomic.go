@@ -161,13 +161,12 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 		anyChange = true
 	}
 
-	if err := tx.Commit(); err != nil {
-		return db.EditIssueAtomicResult{}, fmt.Errorf("commit: %w", err)
-	}
-
-	updated, err := d.IssueByID(ctx, p.IssueID)
+	updated, err := issueByIDTx(ctx, tx, p.IssueID)
 	if err != nil {
 		return db.EditIssueAtomicResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.EditIssueAtomicResult{}, fmt.Errorf("commit: %w", err)
 	}
 	return db.EditIssueAtomicResult{
 		Issue:     updated,
