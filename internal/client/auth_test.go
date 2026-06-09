@@ -337,6 +337,90 @@ url = "`+srv.URL+`"
 	assert.Equal(t, "Bearer global-token", got)
 }
 
+func TestNewHTTPClientKataServerDoesNotSuppressExplicitActiveDaemonAuth(t *testing.T) {
+	var got string
+	active := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(active.Close)
+	ambient := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ambient.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", ambient.URL)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `
+active_daemon = "shared"
+
+[[daemon]]
+name = "shared"
+url = "`+active.URL+`"
+token = "active-token"
+`))
+
+	c, err := NewHTTPClient(context.Background(), active.URL, Opts{})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		active.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: active.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer active-token", got)
+}
+
+func TestNewHTTPClientLocalConfigDoesNotSuppressExplicitActiveDaemonAuth(t *testing.T) {
+	var got string
+	active := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(active.Close)
+	ambient := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ambient.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `
+active_daemon = "shared"
+
+[[daemon]]
+name = "shared"
+url = "`+active.URL+`"
+token = "active-token"
+`))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+ambient.URL+`"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), active.URL, Opts{})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		active.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: active.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer active-token", got)
+}
+
 func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

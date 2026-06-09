@@ -177,7 +177,7 @@ func resolveActiveRemoteTargetToken(target activeRemoteTarget) (string, error) {
 }
 
 func activeRemoteTargetAuthForBaseURL(baseURL string) (TargetAuth, bool, error) {
-	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceConfigured("") {
+	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceMatchesBaseURL(baseURL, "") {
 		return TargetAuth{}, false, nil
 	}
 	target, ok, err := activeRemoteFromConfig()
@@ -201,16 +201,22 @@ func globalAuthTokenOverrideSet() bool {
 	return strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")) != ""
 }
 
-func higherPriorityRemoteSourceConfigured(workspaceStart string) bool {
-	if os.Getenv(remoteServerEnvVar) != "" {
-		return true
+func higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart string) bool {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if v := os.Getenv(remoteServerEnvVar); v != "" {
+		u, err := normalizeRemoteURL(v, envAllowInsecure())
+		return err == nil && u == baseURL
 	}
 	root, _, ok := findLocalConfig(workspaceStart)
 	if !ok {
 		return false
 	}
 	cfg, err := config.ReadLocalConfig(root)
-	return err == nil && cfg.Server.URL != ""
+	if err != nil || cfg == nil || cfg.Server.URL == "" {
+		return false
+	}
+	u, err := normalizeRemoteURL(cfg.Server.URL, cfg.Server.AllowInsecure)
+	return err == nil && u == baseURL
 }
 
 func activeRemoteAllowInsecureForBaseURL(baseURL string) bool {
