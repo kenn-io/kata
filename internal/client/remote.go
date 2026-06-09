@@ -177,7 +177,7 @@ func resolveActiveRemoteTargetToken(target activeRemoteTarget) (string, error) {
 }
 
 func activeRemoteTargetAuthForBaseURL(baseURL string) (TargetAuth, bool, error) {
-	if globalAuthTokenOverrideSet() {
+	if globalAuthTokenOverrideSet() || higherPriorityRemoteSourceConfigured("") {
 		return TargetAuth{}, false, nil
 	}
 	target, ok, err := activeRemoteFromConfig()
@@ -199,6 +199,18 @@ func activeRemoteTargetAuthForBaseURL(baseURL string) (TargetAuth, bool, error) 
 
 func globalAuthTokenOverrideSet() bool {
 	return strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")) != ""
+}
+
+func higherPriorityRemoteSourceConfigured(workspaceStart string) bool {
+	if os.Getenv(remoteServerEnvVar) != "" {
+		return true
+	}
+	root, _, ok := findLocalConfig(workspaceStart)
+	if !ok {
+		return false
+	}
+	cfg, err := config.ReadLocalConfig(root)
+	return err == nil && cfg.Server.URL != ""
 }
 
 func activeRemoteAllowInsecureForBaseURL(baseURL string) bool {

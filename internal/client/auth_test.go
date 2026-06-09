@@ -248,6 +248,95 @@ token = "project-token"
 	assert.Empty(t, got)
 }
 
+func TestNewHTTPClientKataServerIgnoresInvalidActiveDaemon(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", srv.URL)
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `
+active_daemon = "broken"
+
+[auth]
+token = "global-token"
+
+[[daemon]]
+name = "broken"
+url = "::not-a-url::"
+`))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		srv.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer global-token", got)
+}
+
+func TestNewHTTPClientLocalConfigIgnoresInvalidActiveDaemon(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
+			return
+		}
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	require.NoError(t, writeRawConfig(home, `
+active_daemon = "broken"
+
+[auth]
+token = "global-token"
+
+[[daemon]]
+name = "broken"
+url = "::not-a-url::"
+`))
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	writeWorkspaceMarker(t, workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+srv.URL+`"
+`), 0o600))
+
+	baseURL, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, srv.URL, baseURL)
+	c, err := NewHTTPClient(context.Background(), baseURL, Opts{})
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		srv.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, "Bearer global-token", got)
+}
+
 func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
