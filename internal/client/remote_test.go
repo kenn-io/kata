@@ -146,6 +146,32 @@ url = "`+srv.URL+`"
 	assert.Equal(t, srv.URL, url)
 }
 
+func TestResolveRemote_ActiveDaemonAllowsAuthTokenOverrideForMissingTokenEnv(t *testing.T) {
+	srv := pingingServer(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "global-token")
+	t.Setenv("KATA_SHARED_TOKEN", "")
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeWorkspaceMarker(t, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+active_daemon = "shared"
+
+[[daemon]]
+name = "shared"
+url = "`+srv.URL+`"
+token_env = "KATA_SHARED_TOKEN"
+`), 0o600))
+
+	url, ok, err := resolveRemote(context.Background(), "")
+
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, srv.URL, url)
+}
+
 func TestResolveRemote_FileUnreachableErrors(t *testing.T) {
 	t.Setenv("KATA_SERVER", "")
 	dir := t.TempDir()

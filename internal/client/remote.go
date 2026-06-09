@@ -119,7 +119,10 @@ func resolveActiveRemote(ctx context.Context) (string, bool, error) {
 	if err != nil || !ok {
 		return "", false, err
 	}
-	if _, err := resolveActiveRemoteTargetToken(target); err != nil {
+	if !globalAuthTokenOverrideSet() {
+		_, err = resolveActiveRemoteTargetToken(target)
+	}
+	if err != nil {
 		return "", false, err
 	}
 	if !probeRemote(ctx, target.BaseURL) {
@@ -174,7 +177,7 @@ func resolveActiveRemoteTargetToken(target activeRemoteTarget) (string, error) {
 }
 
 func activeRemoteTargetAuthForBaseURL(baseURL string) (TargetAuth, bool, error) {
-	if strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")) != "" {
+	if globalAuthTokenOverrideSet() {
 		return TargetAuth{}, false, nil
 	}
 	target, ok, err := activeRemoteFromConfig()
@@ -192,6 +195,10 @@ func activeRemoteTargetAuthForBaseURL(baseURL string) (TargetAuth, bool, error) 
 		Token:         token,
 		AllowInsecure: target.AllowInsecure,
 	}, true, nil
+}
+
+func globalAuthTokenOverrideSet() bool {
+	return strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN")) != ""
 }
 
 func activeRemoteAllowInsecureForBaseURL(baseURL string) bool {
