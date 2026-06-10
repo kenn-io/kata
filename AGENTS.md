@@ -79,6 +79,27 @@ The daemon refuses parent-close while open children remain. Reviewers
 can replay activity with `kata audit closes` and undo specific lazy
 closes with `kata reopen <ref>`.
 
+## Federation trust/threat model (security-review triage)
+
+kata federation is mutual trust between a spoke and each hub it joins;
+there is no multi-tenant authorization model (`docs/design/federation.md`,
+"Tokens And Trust Boundaries" and "No Multi-Tenant Authorization Model").
+Triage security findings against that model:
+
+- **Out of scope: a hostile federated hub.** A hub the spoke joined is
+  trusted with that project's data and identity. Example: a hub "forging"
+  a project UID it already knows is not a defended attack — UIDs are
+  unguessable ULIDs, so UID equality means the same project. Don't fix
+  these; document the boundary inline where reviews keep re-flagging it
+  (see the rejoin note in `internal/daemon/handlers_federation.go`).
+- **Real, fix them: credential misrouting and partial/stranded state.**
+  A bearer token must only reach the origin it was configured for: the
+  local daemon's global token never goes to a hub, and a catalog entry's
+  admin token never goes to a different hub origin (`--hub-token` is the
+  only deliberate cross-origin path). Teardown/retry paths must not
+  strand state (archive-before-detach; leave's idempotent resume still
+  runs daemon-side credential cleanup).
+
 ## Remote-client mode (private network)
 
 A daemon can serve clients on other hosts over a private network:
