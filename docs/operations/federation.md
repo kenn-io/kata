@@ -438,7 +438,12 @@ kata federation leave <project> --local-only
 Leaving is idempotent: running it on a project that is already standalone
 reports success and finishes any cleanup a failed earlier leave left behind
 (such as a stale hub credential in `credentials.toml`), and `leave --delete`
-on a standalone project still archives it.
+on a standalone project still archives it. An archive-leave retry on an
+already-archived project also resumes instead of erroring: it detaches a
+surviving binding, deletes a stale credential, and reports `archived=false`
+for that call. CLI name resolution hides archived projects, so retry via the
+API/TUI by project ID, or `kata projects restore <project>` and re-run the
+leave.
 
 In the TUI federation view, press `x` on a spoke row to open a leave preview
 (the mutation boundary), toggle detach/archive and local-only, then confirm.

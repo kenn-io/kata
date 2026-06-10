@@ -285,8 +285,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// Archive FIRST when requested. RemoveProject's own transaction is the
 		// authoritative open-issue check, so a refused archive never tears down
 		// federation — there is no external-preflight TOCTOU and no
-		// "detached-but-not-archived" partial state. Only a committed archive
-		// proceeds to the detach below.
+		// "detached-but-not-archived" partial state. Only a committed archive —
+		// from this call or a prior partial leave — proceeds to the detach
+		// below.
 		if disposition == "archive" {
 			project, evt, err := cfg.DB.RemoveProject(ctx, db.RemoveProjectParams{
 				ProjectID: in.ProjectID, Actor: actor, Force: in.Body.Force,
@@ -300,15 +301,20 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 					"close the open issues first, or pass force=true",
 					map[string]any{"open_issues": openErr.OpenIssues})
 			case errors.Is(err, db.ErrProjectAlreadyArchived):
-				return nil, api.NewError(http.StatusConflict, "project_already_archived",
-					"project is already archived", "", nil)
+				// Idempotent resume: a prior archive-leave committed the archive
+				// but failed before the detach or credential cleanup below.
+				// Refusing here would strand that state forever, so keep going;
+				// Archived stays false because this call archived nothing, and
+				// the project fill below uses ProjectByID, which includes
+				// archived rows.
 			case err != nil:
 				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			default:
+				cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
+				cfg.Hooks.Enqueue(*evt)
+				body.Project = dbProjectToOut(project)
+				body.Archived = true
 			}
-			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
-			cfg.Hooks.Enqueue(*evt)
-			body.Project = dbProjectToOut(project)
-			body.Archived = true
 		}
 
 		res, err := cfg.DB.LeaveFederationReplica(ctx, in.ProjectID)

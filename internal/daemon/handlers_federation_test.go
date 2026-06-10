@@ -2440,10 +2440,11 @@ func TestLeaveFederationReplicaRouteMissingProjectReturns404(t *testing.T) {
 }
 
 // TestLeaveFederationReplicaRouteArchiveAlreadyArchived guards re-running a
-// completed `--delete` leave: the binding-less detach is idempotent, so the
-// route reaches RemoveProject on the already-archived project. That must map
-// to a clean 409 project_already_archived (matching the removeProject
-// handler), not an ugly 500.
+// completed `--delete` leave: the archive step hits ErrProjectAlreadyArchived
+// and the binding-less detach is idempotent. The route must treat that as a
+// successful resume with nothing left to do — archived=false and
+// detached=false (this call did neither) — not refuse with a 409 that would
+// block credential cleanup after a partial failure.
 func TestLeaveFederationReplicaRouteArchiveAlreadyArchived(t *testing.T) {
 	env := testenv.New(t)
 
@@ -2457,15 +2458,89 @@ func TestLeaveFederationReplicaRouteArchiveAlreadyArchived(t *testing.T) {
 		t.Fatalf("want 200 on first archive, got %d body=%s", resp.StatusCode, raw)
 	}
 
-	// Second archive leave on the now-archived (binding-less) project: detach
-	// is idempotent and the archive step hits ErrProjectAlreadyArchived.
+	// Second archive leave on the now-archived (binding-less) project resumes
+	// idempotently and reports that nothing was archived or detached.
 	resp, raw = envDoRaw(t, env, http.MethodPost,
 		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
 		map[string]any{"disposition": "archive", "actor": "wesm"}, nil)
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("want 409 project_already_archived on re-archive, got %d body=%s", resp.StatusCode, raw)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200 resume on re-archive, got %d body=%s", resp.StatusCode, raw)
 	}
-	if !strings.Contains(string(raw), "project_already_archived") {
-		t.Fatalf("want project_already_archived code in body, got %s", raw)
+	var body struct {
+		Archived bool `json:"archived"`
+		Detached bool `json:"detached"`
 	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	if body.Archived || body.Detached {
+		t.Fatalf("re-archive resume must report archived=false detached=false, body=%s", raw)
+	}
+}
+
+// TestLeaveFederationReplicaRouteArchiveResumeFinishesTeardown covers retrying
+// an archive-leave whose archive committed but whose later steps failed: the
+// retry must not be refused as project_already_archived; it still detaches a
+// surviving binding and deletes the stale credential.
+func TestLeaveFederationReplicaRouteArchiveResumeFinishesTeardown(t *testing.T) {
+	t.Run("binding survived the partial failure", func(t *testing.T) {
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, _ := newSpokeProject(t, env)
+		// Archive directly (RemoveProject has no federation guard), leaving the
+		// binding and credential in place — the state after a leave that
+		// committed the archive and then failed.
+		_, _, err := env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+			ProjectID: project.ID, Actor: "tester",
+		})
+		require.NoError(t, err)
+
+		resp, raw := envDoRaw(t, env, http.MethodPost,
+			fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+			map[string]any{"disposition": "archive", "actor": "tester"}, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("want 200 resume, got %d body=%s", resp.StatusCode, raw)
+		}
+		var body struct {
+			Archived bool `json:"archived"`
+			Detached bool `json:"detached"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &body))
+		if body.Archived {
+			t.Fatalf("resume must not claim this call archived, body=%s", raw)
+		}
+		if !body.Detached {
+			t.Fatalf("resume should detach the surviving binding, body=%s", raw)
+		}
+		if _, err := env.DB.FederationBindingByProject(ctx, project.ID); !errors.Is(err, db.ErrNotFound) {
+			t.Fatalf("binding should be gone after resume: %v", err)
+		}
+		if got := config.FederationCredentialMetadataFor(project.UID).Status; got != "missing" {
+			t.Fatalf("stale credential should be cleaned, got %q", got)
+		}
+	})
+
+	t.Run("only the credential survived the partial failure", func(t *testing.T) {
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "spoke-project")
+		require.NoError(t, err)
+		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+			HubURL:       "http://127.0.0.1:7373",
+			HubProjectID: 42,
+			Token:        "spoke-token",
+		}))
+		_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+			ProjectID: project.ID, Actor: "tester",
+		})
+		require.NoError(t, err)
+
+		resp, raw := envDoRaw(t, env, http.MethodPost,
+			fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+			map[string]any{"disposition": "archive", "actor": "tester"}, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("want 200 resume, got %d body=%s", resp.StatusCode, raw)
+		}
+		if got := config.FederationCredentialMetadataFor(project.UID).Status; got != "missing" {
+			t.Fatalf("stale credential should be cleaned, got %q", got)
+		}
+	})
 }

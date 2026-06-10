@@ -352,7 +352,10 @@ still runs so a stale hub credential left by a partial leave is deleted on the
 retry). `--delete` also archives the
 now-standalone project (reversible via `kata projects restore`), with archive
 eligibility checked before any detach so an open-issue refusal cannot leave the
-project half-torn-down; `--force` overrides that refusal. `--local-only` tears
+project half-torn-down; `--force` overrides that refusal. Retrying an
+archive-leave whose archive already committed resumes rather than refusing:
+the already-archived step is skipped (that call reports `archived=false`) and
+any surviving detach and credential cleanup still run. `--local-only` tears
 down locally when the hub is unreachable, leaving the enrollment token to be
 revoked manually. A binding-aware guard stops an in-flight sync pass from
 re-creating `federation_sync_status` rows after a leave. A user-facing project
