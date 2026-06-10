@@ -118,7 +118,11 @@ func (d *Store) ClearFederationSyncError(ctx context.Context, projectID int64) e
 
 // RecordFederationQuarantine creates or returns the active quarantine for one
 // project/direction. A second failure while a quarantine is active preserves
-// the original poisoned batch so status and skip stay stable.
+// the original poisoned batch so status and skip stay stable. Like the
+// sync-status writers, it no-ops (zero quarantine, nil error) when the
+// project has no federation binding: an in-flight sync pass that loaded the
+// binding before a leave must not recreate quarantine state for a standalone
+// or archived project.
 func (d *Store) RecordFederationQuarantine(
 	ctx context.Context,
 	p db.RecordFederationQuarantineParams,
@@ -149,14 +153,24 @@ func (d *Store) recordFederationQuarantine(
 		INSERT INTO federation_quarantine(
 			project_id, direction, first_event_id, last_event_id, event_uids, error, created_at
 		)
-		VALUES(?, ?, ?, ?, ?, ?, ?)
+		SELECT ?, ?, ?, ?, ?, ?, ?
+		WHERE EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = ?)
 		ON CONFLICT(project_id, direction) WHERE skipped_at IS NULL DO NOTHING`,
 		p.ProjectID, string(p.Direction), p.FirstEventID, p.LastEventID, string(eventUIDs),
-		p.Error, p.CreatedAt.UTC().Format(sqliteTimeFormat))
+		p.Error, p.CreatedAt.UTC().Format(sqliteTimeFormat), p.ProjectID)
 	if err != nil {
 		return db.FederationQuarantine{}, fmt.Errorf("record federation quarantine: %w", err)
 	}
 	quarantine, err := activeFederationQuarantine(ctx, tx, p.ProjectID, p.Direction)
+	if errors.Is(err, db.ErrNotFound) {
+		// The guarded insert no-opped: no binding row, so leave already tore
+		// this project down (or it was never federated). Surface the no-op,
+		// not an error — the in-flight pass has nothing left to quarantine.
+		if commitErr := tx.Commit(); commitErr != nil {
+			return db.FederationQuarantine{}, commitErr
+		}
+		return db.FederationQuarantine{}, nil
+	}
 	if err != nil {
 		return db.FederationQuarantine{}, err
 	}

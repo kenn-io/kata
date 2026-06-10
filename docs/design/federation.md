@@ -363,8 +363,10 @@ explicit `leave --allow-insecure` flag, so a credential loss cannot strand a
 plain-HTTP overlay hub's enrollment behind the plaintext-bearer refusal. `--local-only` tears
 down locally when the hub is unreachable, leaving the enrollment token to be
 revoked manually. A binding-aware guard stops an in-flight sync pass from
-re-creating `federation_sync_status` rows after a leave. A user-facing project
-purge for the `--delete` path is deferred.
+re-creating `federation_sync_status` rows after a leave, and quarantine
+recording no-ops the same way so a poisoned push response landing after the
+leave cannot recreate active quarantine state for a standalone or archived
+project. A user-facing project purge for the `--delete` path is deferred.
 
 Leave keeps the project's shared identity (its UID stays the hub project's
 UID), which makes the round-trip contract hold: **enroll → leave → enroll

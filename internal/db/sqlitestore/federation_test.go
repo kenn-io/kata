@@ -192,6 +192,8 @@ func TestFederationSyncStatusClearErrorExplicitly(t *testing.T) {
 
 func TestFederationQuarantineRecordAndActiveRoundTrip(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
+	// Quarantine recording is binding-guarded (leave race); seed the binding.
+	upsertTestSpokeFederationBinding(ctx, t, d, p, true)
 	createdAt := time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
 	params := db.RecordFederationQuarantineParams{
 		ProjectID:    p.ID,
@@ -223,6 +225,8 @@ func TestFederationQuarantineRecordAndActiveRoundTrip(t *testing.T) {
 
 func TestFederationQuarantineRecordIsIdempotentPerProjectDirection(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
+	// Quarantine recording is binding-guarded (leave race); seed the binding.
+	upsertTestSpokeFederationBinding(ctx, t, d, p, true)
 	first, err := d.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
 		ProjectID:    p.ID,
 		Direction:    db.FederationQuarantineDirectionPush,
@@ -3267,6 +3271,48 @@ func TestLeaveFederationReplicaMissingProjectIsNotFound(t *testing.T) {
 	if _, err := d.LeaveFederationReplica(ctx, 999999); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("want db.ErrNotFound for missing project, got %v", err)
 	}
+}
+
+// TestQuarantineRecordingNoOpsWithoutBinding: an in-flight push sync that
+// loaded the binding before a leave can receive the hub's poison response
+// after the leave committed. Recording must no-op like the sync-status
+// writers so the race cannot recreate active quarantine state for a
+// standalone (or archived) project and block a later rejoin.
+func TestQuarantineRecordingNoOpsWithoutBinding(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p := createProject(ctx, t, d, "spoke-project")
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+
+	// Leave deletes the binding and quarantine rows; the poisoned push
+	// response lands afterwards.
+	_, err = d.LeaveFederationReplica(ctx, p.ID)
+	require.NoError(t, err)
+
+	got, err := d.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID:    p.ID,
+		Direction:    db.FederationQuarantineDirectionPush,
+		FirstEventID: 7,
+		LastEventID:  9,
+		EventUIDs:    []string{"evt-7"},
+		Error:        "hub rejected batch",
+		CreatedAt:    time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err, "post-leave quarantine recording must no-op, not error")
+	assert.Zero(t, got.ID, "no quarantine row should be created without a binding")
+
+	active, err := d.ActiveFederationQuarantinesByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Empty(t, active, "leave racing a poisoned push must not recreate quarantine state")
 }
 
 func TestSyncStatusWritersNoOpWithoutBinding(t *testing.T) {
