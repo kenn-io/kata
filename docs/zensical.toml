@@ -26,6 +26,7 @@ nav = [
     {"CLI" = "reference/cli.md"},
     {"Configuration" = "reference/configuration.md"},
     {"Agent output format" = "reference/agent-output.md"},
+    {"HTTP API schema" = "reference/http-api.md"},
   ]},
   {"Workflows" = [
     {"Agent workflows" = "workflows/agents.md"},

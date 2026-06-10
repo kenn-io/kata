@@ -7,9 +7,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/stretchr/testify/require"
 )
 
 // artifactPath is the committed OpenAPI schema, relative to this package dir.
@@ -241,6 +243,137 @@ func TestOpenAPIDocumentArrayQueryParamsExplode(t *testing.T) {
 	if actor.Explode == nil || !*actor.Explode {
 		t.Fatalf("digest actor explode = %v, want true", actor.Explode)
 	}
+}
+
+// TestResponseBodyAllowsAdditionalProperties pins the response side of the
+// documented compatibility policy (docs/reference/http-api.md): additive
+// optional response fields may appear without an api_schema_version bump, so a
+// response schema must not reject unknown fields. HealthResponseBody is a pure
+// response body, so it must permit additional properties.
+func TestResponseBodyAllowsAdditionalProperties(t *testing.T) {
+	doc := OpenAPIDocument()
+	schema := doc.Components.Schemas.Map()["HealthResponseBody"]
+	require.NotNil(t, schema, "missing HealthResponseBody schema")
+	require.Equal(t, true, schema.AdditionalProperties, "HealthResponseBody must allow unknown fields")
+}
+
+// TestRequestBodyRejectsAdditionalProperties guards the request side: relaxing
+// responses must not loosen request validation. The daemon should keep
+// rejecting unknown request fields, so request bodies stay strict.
+func TestRequestBodyRejectsAdditionalProperties(t *testing.T) {
+	doc := OpenAPIDocument()
+	schema := doc.Components.Schemas.Map()["CreateIssueRequestBody"]
+	require.NotNil(t, schema, "missing CreateIssueRequestBody schema")
+	require.Equal(t, false, schema.AdditionalProperties, "request bodies must reject unknown fields")
+}
+
+// TestAllResponseSchemasAllowAdditionalProperties is the policy invariant: every
+// object schema reachable from any response must permit unknown fields, so
+// additive response evolution never breaks a client that strict-validates
+// against the published schema. It walks responses independently of the
+// production relaxation pass to cross-check that pass's coverage.
+func TestAllResponseSchemasAllowAdditionalProperties(t *testing.T) {
+	doc := OpenAPIDocument()
+	reg := doc.Components.Schemas
+	seen := map[*huma.Schema]struct{}{}
+	var strict []string
+
+	var walk func(name string, schema *huma.Schema)
+	walk = func(name string, schema *huma.Schema) {
+		if schema == nil {
+			return
+		}
+		if schema.Ref != "" {
+			walk(refName(schema.Ref), reg.SchemaFromRef(schema.Ref))
+			return
+		}
+		if _, ok := seen[schema]; ok {
+			return
+		}
+		seen[schema] = struct{}{}
+		if ap, ok := schema.AdditionalProperties.(bool); ok && !ap {
+			strict = append(strict, name)
+		}
+		for _, prop := range schema.Properties {
+			walk(name, prop)
+		}
+		walk(name, schema.Items)
+		if sub, ok := schema.AdditionalProperties.(*huma.Schema); ok {
+			walk(name, sub)
+		}
+		for _, child := range schema.OneOf {
+			walk(name, child)
+		}
+		for _, child := range schema.AnyOf {
+			walk(name, child)
+		}
+		for _, child := range schema.AllOf {
+			walk(name, child)
+		}
+		walk(name, schema.Not)
+	}
+
+	for _, item := range doc.Paths {
+		if item == nil {
+			continue
+		}
+		for _, op := range []*huma.Operation{
+			item.Get, item.Put, item.Post, item.Delete,
+			item.Options, item.Head, item.Patch, item.Trace,
+		} {
+			if op == nil {
+				continue
+			}
+			for _, resp := range op.Responses {
+				for _, mt := range resp.Content {
+					walk("", mt.Schema)
+				}
+			}
+		}
+	}
+
+	require.Empty(t, strict, "response-reachable schemas must permit unknown fields")
+}
+
+// TestSchemaSharedByRequestAndResponseStaysStrict ensures relaxing responses
+// never loosens request validation. A schema reachable from both a request body
+// and a response must keep additionalProperties:false so the daemon still
+// rejects unknown request fields, while a response-only schema is still relaxed.
+func TestSchemaSharedByRequestAndResponseStaysStrict(t *testing.T) {
+	shared := &huma.Schema{Type: huma.TypeObject, AdditionalProperties: false}
+	responseOnly := &huma.Schema{Type: huma.TypeObject, AdditionalProperties: false}
+	doc := &huma.OpenAPI{
+		Components: &huma.Components{
+			Schemas: huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer),
+		},
+		Paths: map[string]*huma.PathItem{
+			"/share": {Post: &huma.Operation{
+				RequestBody: &huma.RequestBody{Content: map[string]*huma.MediaType{
+					"application/json": {Schema: shared},
+				}},
+				Responses: map[string]*huma.Response{"200": {Content: map[string]*huma.MediaType{
+					"application/json": {Schema: responseOnly},
+				}}},
+			}},
+			"/echo": {Get: &huma.Operation{
+				Responses: map[string]*huma.Response{"200": {Content: map[string]*huma.MediaType{
+					"application/json": {Schema: shared},
+				}}},
+			}},
+		},
+	}
+
+	relaxResponseAdditionalProperties(doc)
+
+	require.Equal(t, false, shared.AdditionalProperties, "shared request/response schema must stay strict")
+	require.Equal(t, true, responseOnly.AdditionalProperties, "response-only schema must be relaxed")
+}
+
+func refName(ref string) string {
+	if i := strings.LastIndex(ref, "/"); i >= 0 {
+		return ref[i+1:]
+	}
+	return ref
 }
 
 func assertSchemaPropertyType(t *testing.T, doc *huma.OpenAPI, schemaName, propertyName, want string) {

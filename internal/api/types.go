@@ -19,14 +19,25 @@ type PingResponse struct {
 }
 
 // HealthResponse mirrors /api/v1/health.
+//
+// SchemaVersion is the database/storage schema version (meta.schema_version);
+// APISchemaVersion is the version stamped into the daemon's OpenAPI document,
+// letting an external client detect the HTTP API contract it is talking to.
+//
+// APISchemaVersion is schema-optional (omitempty) on purpose: the field exists
+// to detect version skew, so it must itself survive it. A client generated from
+// a schema that carries this field still needs to parse the response of an older
+// daemon that predates it — an absent value means "older than this field" rather
+// than a parse failure. Current daemons always populate it.
 type HealthResponse struct {
 	Body struct {
-		OK            bool      `json:"ok"`
-		DBPath        string    `json:"db_path"`
-		SchemaVersion int       `json:"schema_version"`
-		Version       string    `json:"version"`
-		Uptime        string    `json:"uptime"`
-		StartedAt     time.Time `json:"started_at"`
+		OK               bool      `json:"ok"`
+		DBPath           string    `json:"db_path"`
+		SchemaVersion    int       `json:"schema_version"`
+		APISchemaVersion string    `json:"api_schema_version,omitempty"`
+		Version          string    `json:"version"`
+		Uptime           string    `json:"uptime"`
+		StartedAt        time.Time `json:"started_at"`
 	}
 }
 

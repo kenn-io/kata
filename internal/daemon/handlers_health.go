@@ -42,6 +42,7 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.OK = true
 		out.Body.DBPath = cfg.DB.Path()
 		out.Body.SchemaVersion = schema
+		out.Body.APISchemaVersion = APISchemaVersion
 		out.Body.Version = version.Version
 		out.Body.StartedAt = cfg.StartedAt
 		out.Body.Uptime = time.Since(cfg.StartedAt).Round(time.Second).String()

@@ -25,6 +25,7 @@ func OpenAPIDocument() *huma.OpenAPI {
 	doc := NewServer(ServerConfig{}).API().OpenAPI()
 	applyJSONBlobSchemaOverrides(doc)
 	applyArrayQueryParamEncoding(doc)
+	relaxResponseAdditionalProperties(doc)
 	return doc
 }
 
@@ -72,6 +73,120 @@ func OpenAPIJSONVersion(version string) ([]byte, error) {
 	}
 	pretty.WriteByte('\n')
 	return pretty.Bytes(), nil
+}
+
+// relaxResponseAdditionalProperties lets response bodies carry fields a client's
+// generated schema does not yet know about. Huma stamps additionalProperties:false
+// on every struct it emits, which would make a strict client validator reject
+// additive response fields — contradicting the compatibility policy in
+// docs/reference/http-api.md, where additive optional response fields may appear
+// without an api_schema_version bump. It walks every response schema and flips
+// that strict default to permissive, while leaving request schemas untouched so
+// request validation is unchanged.
+func relaxResponseAdditionalProperties(doc *huma.OpenAPI) {
+	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
+		return
+	}
+	reg := doc.Components.Schemas
+	ops := documentOperations(doc)
+	requestStrict := requestReachableSchemas(ops, reg)
+
+	seen := map[*huma.Schema]struct{}{}
+	for _, op := range ops {
+		for _, resp := range op.Responses {
+			for _, mt := range resp.Content {
+				walkSchemaTree(mt.Schema, reg, seen, func(schema *huma.Schema) {
+					if _, ok := requestStrict[schema]; ok {
+						return
+					}
+					if ap, ok := schema.AdditionalProperties.(bool); ok && !ap {
+						schema.AdditionalProperties = true
+					}
+				})
+			}
+		}
+	}
+}
+
+// requestReachableSchemas returns every schema reachable from a request body.
+// These are excluded from relaxation so a schema shared between a request and a
+// response is never silently loosened; today the graphs are disjoint, but this
+// keeps the relaxation pass sound if they ever cross.
+func requestReachableSchemas(ops []*huma.Operation, reg huma.Registry) map[*huma.Schema]struct{} {
+	strict := map[*huma.Schema]struct{}{}
+	seen := map[*huma.Schema]struct{}{}
+	for _, op := range ops {
+		if op.RequestBody == nil {
+			continue
+		}
+		for _, mt := range op.RequestBody.Content {
+			walkSchemaTree(mt.Schema, reg, seen, func(schema *huma.Schema) {
+				strict[schema] = struct{}{}
+			})
+		}
+	}
+	return strict
+}
+
+// documentOperations returns every operation defined across the document's paths.
+func documentOperations(doc *huma.OpenAPI) []*huma.Operation {
+	var ops []*huma.Operation
+	for _, item := range doc.Paths {
+		if item == nil {
+			continue
+		}
+		for _, op := range []*huma.Operation{
+			item.Get, item.Put, item.Post, item.Delete,
+			item.Options, item.Head, item.Patch, item.Trace,
+		} {
+			if op != nil {
+				ops = append(ops, op)
+			}
+		}
+	}
+	return ops
+}
+
+// walkSchemaTree visits schema and every schema reachable from it, resolving
+// component $refs through reg and guarding against cycles with seen.
+func walkSchemaTree(
+	schema *huma.Schema,
+	reg huma.Registry,
+	seen map[*huma.Schema]struct{},
+	visit func(*huma.Schema),
+) {
+	if schema == nil {
+		return
+	}
+	if schema.Ref != "" {
+		walkSchemaTree(reg.SchemaFromRef(schema.Ref), reg, seen, visit)
+		return
+	}
+	if _, ok := seen[schema]; ok {
+		return
+	}
+	seen[schema] = struct{}{}
+	visit(schema)
+	for _, child := range schemaChildren(schema) {
+		walkSchemaTree(child, reg, seen, visit)
+	}
+}
+
+// schemaChildren returns the subschemas directly nested in schema. Nil entries
+// (an absent items or not) are harmless: walkSchemaTree skips them.
+func schemaChildren(schema *huma.Schema) []*huma.Schema {
+	children := make([]*huma.Schema, 0, len(schema.Properties)+len(schema.OneOf)+len(schema.AnyOf)+len(schema.AllOf)+3)
+	for _, prop := range schema.Properties {
+		children = append(children, prop)
+	}
+	children = append(children, schema.Items, schema.Not)
+	if sub, ok := schema.AdditionalProperties.(*huma.Schema); ok {
+		children = append(children, sub)
+	}
+	children = append(children, schema.OneOf...)
+	children = append(children, schema.AnyOf...)
+	children = append(children, schema.AllOf...)
+	return children
 }
 
 func applyJSONBlobSchemaOverrides(doc *huma.OpenAPI) {
