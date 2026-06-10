@@ -71,6 +71,9 @@ irreversibly removed except for tombstones needed to preserve external refs.
 ## Relationships
 
 Relationships are normalized links between issues in the same project.
+Links cannot span projects: relationship flags only accept refs that resolve
+inside the issue's own project (a foreign `<project>#<short_id>` or ULID is
+rejected), and `kata move` refuses to move an issue that still has links.
 
 | Relationship | Cardinality | Meaning |
 | --- | --- | --- |

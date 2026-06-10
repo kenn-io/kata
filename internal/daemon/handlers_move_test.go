@@ -220,6 +220,8 @@ func TestMoveIssue_CrossProjectLinks_409_WithBlockers(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &env409))
 	assert.Equal(t, "cross_project_links", env409.Error.Code)
+	assert.Contains(t, env409.Error.Message, "would become cross-project",
+		"message must explain the links are not yet cross-project; the move would make them so")
 	require.Len(t, env409.Error.Data.Blockers, 1)
 	assert.Equal(t, "blocks", env409.Error.Data.Blockers[0].Type)
 	assert.Equal(t, b.UID, env409.Error.Data.Blockers[0].PeerUID)
@@ -263,4 +265,54 @@ func TestMoveIssue_RecurrencePinned_409(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &env409))
 	assert.Equal(t, "recurrence_pinned", env409.Error.Code)
+}
+
+// TestEditIssue_LinkTargetULIDInOtherProject_404 pins the daemon-side scoping
+// of link refs: a links_delta add naming the ULID of an issue that lives in a
+// different project resolves to issue_not_found. Cross-project links are not
+// supported (the schema forbids the rows), and ULID resolution for link refs
+// is deliberately scoped to the URL issue's project so the endpoint cannot be
+// used to fish for foreign issues. The 404 message must spell out the
+// same-project constraint instead of a bare "issue not found" — the miss is
+// otherwise indistinguishable from a typo'd ref, and the response must read
+// the same whether or not the foreign issue exists.
+func TestEditIssue_LinkTargetULIDInOtherProject_404(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	src, tgt, iss := seedMovePair(t, env)
+	foreign, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "peer in another project", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	body := fmt.Sprintf(`{"actor":"tester","links_delta":{"add_related":[%q]}}`, foreign.UID)
+	resp := doPatch(t, env, env.URL+issuePathRef(src.ID, iss.ShortID, ""), body, "")
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	require.Equalf(t, http.StatusNotFound, resp.StatusCode, "body: %s", raw)
+
+	var env404 struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env404))
+	assert.Equal(t, "issue_not_found", env404.Error.Code)
+	assert.Contains(t, env404.Error.Message, "links can only join issues in the same project")
+
+	// A nonexistent ULID must produce the identical message so the
+	// response does not leak whether a foreign issue exists.
+	bogus := `{"actor":"tester","links_delta":{"add_related":["01ZZZZZZZZZZZZZZZZZZZZZZZZ"]}}`
+	resp2 := doPatch(t, env, env.URL+issuePathRef(src.ID, iss.ShortID, ""), bogus, "")
+	defer func() { _ = resp2.Body.Close() }()
+	raw2, _ := io.ReadAll(resp2.Body)
+	require.Equalf(t, http.StatusNotFound, resp2.StatusCode, "body: %s", raw2)
+	var env404b struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw2, &env404b))
+	assert.Equal(t, env404.Error.Message, env404b.Error.Message,
+		"404 message must be identical for foreign and nonexistent link targets")
 }

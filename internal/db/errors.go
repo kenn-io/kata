@@ -236,7 +236,7 @@ type CrossProjectLinksError struct {
 }
 
 func (e *CrossProjectLinksError) Error() string {
-	return fmt.Sprintf("cannot move: %d cross-project link(s) anchored in source project",
+	return fmt.Sprintf("cannot move: %d link(s) would become cross-project; unlink before moving (links can only join issues in the same project)",
 		len(e.Blockers))
 }
 

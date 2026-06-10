@@ -82,6 +82,23 @@ func qualifiedID(projectName, shortID string) string {
 	return projectName + "#" + shortID
 }
 
+// linkTargetNotFound rewraps an issue_not_found miss from link-ref
+// resolution with a message that states the real constraint: link refs are
+// resolved inside the linking issue's project, and the schema forbids
+// cross-project link rows, so a ULID that lives in another project is just
+// as unreachable as one that does not exist. The message is identical in
+// both cases on purpose — it must not leak whether a foreign issue exists.
+// Non-404 errors pass through unchanged.
+func linkTargetNotFound(err error) error {
+	var ae *api.APIError
+	if errors.As(err, &ae) && ae.Status == 404 && ae.Code == "issue_not_found" {
+		return api.NewError(404, "issue_not_found",
+			"link target not found in this project (links can only join issues in the same project)",
+			"", nil)
+	}
+	return err
+}
+
 // resolveInitialLinks turns CreateInitialLinkBody entries (string ToRef) into
 // db.InitialLink entries (int64 ToNumber, which the db layer treats as an
 // issue row id). Soft-deleted targets are excluded — initial-link creation
@@ -91,7 +108,7 @@ func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64,
 	for _, l := range links {
 		target, err := resolveIssueRef(ctx, store, projectID, l.ToRef, db.IncludeDeletedNo)
 		if err != nil {
-			return nil, err
+			return nil, linkTargetNotFound(err)
 		}
 		out = append(out, db.InitialLink{
 			Type:     l.Type,
@@ -105,7 +122,8 @@ func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64,
 // fillLinksDeltaParams resolves each api.LinksDelta string ref into an
 // issue id and stuffs the int64-keyed slices into params. Each ref is
 // resolved through resolveIssueRef, which already maps to issue_not_found
-// 404 for misses, so error returns are wire-ready.
+// 404 for misses; linkTargetNotFound then rewords the 404 to spell out the
+// same-project scoping, so error returns are wire-ready.
 func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64, d *api.LinksDelta, params *db.EditIssueAtomicParams) error {
 	if d == nil {
 		return nil
@@ -113,7 +131,7 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 	resolve := func(ref string, include db.IncludeDeleted) (int64, error) {
 		issue, err := resolveIssueRef(ctx, store, projectID, ref, include)
 		if err != nil {
-			return 0, err
+			return 0, linkTargetNotFound(err)
 		}
 		return issue.ID, nil
 	}
