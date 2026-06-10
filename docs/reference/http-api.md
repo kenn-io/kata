@@ -54,7 +54,11 @@ Three distinct version fields appear here; they answer different questions:
 | `version` | The daemon build version. |
 
 A client can read `api_schema_version` once at startup and decide whether it
-recognizes the daemon's API before issuing further calls.
+recognizes the daemon's API before issuing further calls. Compare it for
+equality against the `info.version` of the schema the client was generated
+from: the value is semver-shaped, but no ordering semantics are defined, so
+treat any other value as "verify compatibility" rather than inferring safety
+from an unchanged major or minor component.
 
 The field is **optional in the schema** even though current daemons always send
 it. That is deliberate: a version-detection field has to survive version skew,
