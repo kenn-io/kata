@@ -46,7 +46,7 @@ func TestResolveHubAdminAuthNamedEntryURLMismatchErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error when the named entry's URL does not match the binding hub URL")
 	}
-	requireCLIError(t, err, ExitValidation)
+	_ = requireCLIError(t, err, ExitValidation)
 }
 
 // TestResolveHubAdminAuthNamedEntryMatchingURLUsesToken: a --hub <name> entry
@@ -77,7 +77,7 @@ func TestResolveHubAdminAuthNamedEntryNotFoundErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error when --hub names a missing catalog entry")
 	}
-	requireCLIError(t, err, ExitValidation)
+	_ = requireCLIError(t, err, ExitValidation)
 }
 
 // TestResolveHubAdminAuthURLMatchToleratesTrailingSlash asserts the catalog
@@ -131,7 +131,7 @@ func TestResolveHubAdminAuthNoEntryGlobalFallback(t *testing.T) {
 // must error rather than silently fall back to global daemon auth.
 func TestResolveHubAdminAuthSelectedTokenEnvUnsetErrors(t *testing.T) {
 	t.Setenv("KATA_TEST_MISSING_HUB_TOKEN", "")
-	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
+	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{ //nolint:gosec // G101 false positive: token_env holds an env var NAME, not a credential
 		Name: "hub", URL: "https://bound.example", TokenEnv: "KATA_TEST_MISSING_HUB_TOKEN",
 	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub"})
 	if err == nil {
@@ -143,7 +143,7 @@ func TestResolveHubAdminAuthSelectedTokenEnvUnsetErrors(t *testing.T) {
 // selection branch: a URL-matched entry with an empty token_env also errors.
 func TestResolveHubAdminAuthURLMatchTokenEnvUnsetErrors(t *testing.T) {
 	t.Setenv("KATA_TEST_MISSING_HUB_TOKEN", "")
-	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
+	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{ //nolint:gosec // G101 false positive: token_env holds an env var NAME, not a credential
 		Name: "hub", URL: "https://bound.example", TokenEnv: "KATA_TEST_MISSING_HUB_TOKEN",
 	}), hubAuthInputs{hubURL: "https://bound.example"})
 	if err == nil {
@@ -155,7 +155,7 @@ func TestResolveHubAdminAuthURLMatchTokenEnvUnsetErrors(t *testing.T) {
 // token_env on a selected entry resolves to that token.
 func TestResolveHubAdminAuthSelectedTokenEnvSetSucceeds(t *testing.T) {
 	t.Setenv("KATA_TEST_HUB_TOKEN", "env-token")
-	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
+	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{ //nolint:gosec // G101 false positive: token_env holds an env var NAME, not a credential
 		Name: "hub", URL: "https://bound.example", TokenEnv: "KATA_TEST_HUB_TOKEN",
 	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub"})
 	if err != nil {

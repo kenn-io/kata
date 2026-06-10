@@ -406,9 +406,9 @@ type LeaveFederationReplicaResultBody struct {
 	Project ProjectOut `json:"project"`
 	// Detached is true only when this call deleted a federation binding;
 	// false on an idempotent resume of an already-standalone project.
-	Detached    bool       `json:"detached"`
-	Disposition string     `json:"disposition"`
-	Archived    bool       `json:"archived,omitempty"`
+	Detached    bool   `json:"detached"`
+	Disposition string `json:"disposition"`
+	Archived    bool   `json:"archived,omitempty"`
 }
 
 // LeaveFederationReplicaResponse wraps LeaveFederationReplicaResultBody.

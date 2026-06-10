@@ -1271,7 +1271,7 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 
 	// Start a server then immediately close it so the URL is syntactically valid
 	// but the port is closed when the command runs.
-	deadSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadSrv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	deadURL := deadSrv.URL
 	deadSrv.Close()
 
@@ -1386,7 +1386,7 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 		_, err = runCmdOutput(t, env, "federation", "leave",
 			"--project", "standalone-project", "--delete")
 		require.Error(t, err)
-		requireCLIError(t, err, ExitConfirm)
+		_ = requireCLIError(t, err, ExitConfirm)
 
 		// The project must still be active (the archive was gated, not run).
 		alive, dbErr := env.DB.ProjectByName(ctx, project.Name)
