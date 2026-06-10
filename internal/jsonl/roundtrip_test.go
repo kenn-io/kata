@@ -158,6 +158,16 @@ func TestFederationSyncStatusRoundTrip(t *testing.T) {
 	srcDB := openExportTestDB(t)
 	p, err := srcDB.CreateProject(ctx, "sync-status")
 	require.NoError(t, err)
+	// federation_sync_status writers no-op without a live binding (the leave
+	// sync-race guard), so seed one before recording sync status.
+	_, err = srcDB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleHub,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
 	require.NoError(t, srcDB.RecordFederationSyncPullStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:00.000Z")))
 	require.NoError(t, srcDB.RecordFederationSyncPullSuccess(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:01.000Z")))
 	require.NoError(t, srcDB.RecordFederationSyncPushStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:02.000Z")))

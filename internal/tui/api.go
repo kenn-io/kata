@@ -27,6 +27,7 @@ type federationSpokeAPI interface {
 	ListProjects(ctx context.Context) ([]ProjectSummary, error)
 	FederationStatus(ctx context.Context) (FederationStatusBody, error)
 	CreateFederationReplica(ctx context.Context, body CreateFederationReplicaInput) (FederationReplicaResult, error)
+	LeaveFederationReplica(ctx context.Context, projectID int64, body LeaveFederationReplicaInput) (LeaveFederationReplicaResult, error)
 }
 
 type federationHubAdminAPI interface {
@@ -35,6 +36,8 @@ type federationHubAdminAPI interface {
 	EnsureProject(ctx context.Context, name string) (ProjectSummary, error)
 	EnableFederation(ctx context.Context, projectID int64, actor string) (ProjectFederationMetadata, error)
 	CreateFederationEnrollment(ctx context.Context, body CreateFederationEnrollmentInput) (FederationEnrollment, error)
+	ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error)
+	RevokeFederationEnrollment(ctx context.Context, enrollmentID int64) error
 }
 
 type federationEnrollmentAPI interface {

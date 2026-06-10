@@ -235,11 +235,20 @@ func (d *Store) detachProjectAlias(ctx context.Context, p db.DetachAliasParams) 
 	return alias, &evt, nil
 }
 
+// CountOpenIssues returns the number of open, non-deleted issues for one
+// project without mutating state. It is the non-transactional sibling of the
+// refusal check inside RemoveProject, used by preflight callers such as the
+// federation leave route.
+func (d *Store) CountOpenIssues(ctx context.Context, projectID int64) (int64, error) {
+	return countOpenIssues(ctx, d, projectID)
+}
+
 // countOpenIssues returns the number of open, non-deleted issues belonging
-// to projectID. Used by RemoveProject's refusal check.
-func countOpenIssues(ctx context.Context, tx *sql.Tx, projectID int64) (int64, error) {
+// to projectID. Used by RemoveProject's refusal check and the CountOpenIssues
+// preflight; it reads through any sqlReader (a *sql.Tx or the Store itself).
+func countOpenIssues(ctx context.Context, q sqlReader, projectID int64) (int64, error) {
 	var n int64
-	if err := tx.QueryRowContext(ctx,
+	if err := q.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM issues
 		 WHERE project_id = ? AND status = 'open' AND deleted_at IS NULL`,
 		projectID).Scan(&n); err != nil {

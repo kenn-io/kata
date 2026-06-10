@@ -37,6 +37,10 @@ type CreateFederationReplicaResponse = CreateFederationReplicaBody
 
 type CreateFederationReplicaErrorResponse = ErrorEnvelope
 
+type LeaveFederationReplicaResponse = LeaveFederationReplicaResultBody
+
+type LeaveFederationReplicaErrorResponse = ErrorEnvelope
+
 type GetFederationStatusResponse = FederationStatusBody
 
 type GetFederationStatusErrorResponse = ErrorEnvelope
@@ -340,6 +344,13 @@ type CreateFederationReplicaResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateFederationReplicaResponse
+}
+
+type LeaveFederationReplicaResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *LeaveFederationReplicaResponse
 }
 
 type GetFederationStatusResp struct {

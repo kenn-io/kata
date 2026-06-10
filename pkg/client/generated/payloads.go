@@ -4,6 +4,8 @@ package generated
 
 type CreateFederationEnrollmentBody = CreateFederationEnrollmentRequestBody
 
+type LeaveFederationReplicaBody = LeaveFederationReplicaRequestBody
+
 type InitProjectBody = InitProjectRequestBody
 
 type ResolveProjectBody = ResolveProjectRequestBody

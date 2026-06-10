@@ -82,6 +82,40 @@ func TestRemoveProject_ForceOverridesOpenIssues(t *testing.T) {
 		`SELECT COUNT(*) FROM issues WHERE project_id = ? AND status = 'open'`, p.ID)
 }
 
+// TestCountOpenIssues pins the non-mutating preflight count used by the
+// federation leave route: it returns the number of open, non-deleted issues
+// and does not archive or otherwise mutate the project.
+func TestCountOpenIssues(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p, err := d.CreateProject(ctx, "counted")
+	require.NoError(t, err)
+
+	n, err := d.CountOpenIssues(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), n, "fresh project has no open issues")
+
+	_, _, err = d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID, Title: "open one", Author: "tester",
+	})
+	require.NoError(t, err)
+	closed, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID, Title: "to close", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, _, err = d.CloseIssue(ctx, closed.ID, "done", "tester", "", nil)
+	require.NoError(t, err)
+
+	n, err = d.CountOpenIssues(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n, "only the still-open issue counts")
+
+	// The count must not have archived the project.
+	got, err := d.ProjectByID(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got.DeletedAt, "CountOpenIssues must not mutate the project")
+}
+
 // TestRemoveProject_AlreadyArchived covers the idempotency-rejection: a
 // second RemoveProject on an archived project surfaces a clean error rather
 // than silently re-archiving.

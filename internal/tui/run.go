@@ -138,10 +138,12 @@ func buildRunModel(opts Options, c *Client, bi bootInit, conns ...daemonConnecti
 	}
 	if len(bi.projects) > 0 {
 		m.projectsByID = make(map[int64]string, len(bi.projects))
+		m.projectUIDByID = make(map[int64]string, len(bi.projects))
 		m.projectIdentByID = make(map[int64]string, len(bi.projects))
 		m.projectStats = make(map[int64]ProjectStatsSummary, len(bi.projects))
 		for _, r := range bi.projects {
 			m.projectsByID[r.ID] = r.Name
+			m.projectUIDByID[r.ID] = r.UID
 			m.projectIdentByID[r.ID] = r.Name
 			if r.Stats != nil {
 				m.projectStats[r.ID] = *r.Stats

@@ -378,3 +378,38 @@ type FederationBindingOut struct {
 	UpdatedAt            time.Time  `json:"updated_at"`
 	LastSyncAt           *time.Time `json:"last_sync_at,omitempty"`
 }
+
+// LeaveFederationReplicaRequest tears down a local spoke replica. disposition
+// is "detach" (default) or "archive"; force overrides the archive open-issue
+// refusal. Confirm reserves room for a future "purge" disposition.
+type LeaveFederationReplicaRequest struct {
+	ProjectID int64  `path:"project_id"`
+	Confirm   string `header:"X-Kata-Confirm"`
+	Body      LeaveFederationReplicaRequestBody
+}
+
+// LeaveFederationReplicaRequestBody is the named request payload for the leave
+// action. It is distinct from the LeaveFederationReplicaResultBody response
+// type so the generated OpenAPI client sends disposition/force/actor on the
+// request. The response schema must NOT be named "{operationID}Body": the
+// oapi-codegen request-options Body field is hardcoded to that name, so a
+// response component called LeaveFederationReplicaBody would shadow the request
+// body and the generated client could not send force/actor.
+type LeaveFederationReplicaRequestBody struct {
+	Disposition string `json:"disposition,omitempty"` // "detach" | "archive"
+	Force       bool   `json:"force,omitempty"`
+	Actor       string `json:"actor,omitempty"`
+}
+
+// LeaveFederationReplicaResultBody reports the outcome of a leave.
+type LeaveFederationReplicaResultBody struct {
+	Project     ProjectOut `json:"project"`
+	Detached    bool       `json:"detached"`
+	Disposition string     `json:"disposition"`
+	Archived    bool       `json:"archived,omitempty"`
+}
+
+// LeaveFederationReplicaResponse wraps LeaveFederationReplicaResultBody.
+type LeaveFederationReplicaResponse struct {
+	Body LeaveFederationReplicaResultBody
+}

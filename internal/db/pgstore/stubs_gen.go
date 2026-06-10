@@ -158,6 +158,10 @@ func (s *Store) CountLiveClaims(_ context.Context, _ int64) (int64, error) {
 	return 0, ErrNotImplementedPhase3
 }
 
+func (s *Store) CountOpenIssues(_ context.Context, _ int64) (int64, error) {
+	return 0, ErrNotImplementedPhase3
+}
+
 func (s *Store) CountPendingClaims(_ context.Context, _ int64) (int64, error) {
 	return 0, ErrNotImplementedPhase3
 }
@@ -456,6 +460,10 @@ func (s *Store) LabelsForIssue(_ context.Context, _ int64) ([]string, error) {
 
 func (s *Store) LatestAliasForProject(_ context.Context, _ int64) (db.AliasRow, bool, error) {
 	return db.AliasRow{}, false, ErrNotImplementedPhase3
+}
+
+func (s *Store) LeaveFederationReplica(_ context.Context, _ int64) (db.LeaveFederationResult, error) {
+	return db.LeaveFederationResult{}, ErrNotImplementedPhase3
 }
 
 func (s *Store) LinkByEndpoints(_ context.Context, _ int64, _ int64, _ string) (db.Link, error) {

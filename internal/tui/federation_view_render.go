@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -31,6 +33,10 @@ func renderFederation(m Model) string {
 		return renderFederationBrowseHubs(m)
 	case federationModePreview:
 		return renderFederationPreview(m)
+	case federationModeAdoptConfirm:
+		return renderFederationAdoptConfirm(m)
+	case federationModeLeavePreview:
+		return renderFederationLeavePreview(m)
 	case federationModeResult:
 		return renderFederationResult(m)
 	case federationModeRecovery:
@@ -70,7 +76,7 @@ func renderFederation(m Model) string {
 	}
 	body = append(body, "")
 	body = append(body, subtleStyle.Render(
-		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [b] browse hubs  [?] help"))
+		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [x] leave  [b] browse hubs  [?] help"))
 	return strings.Join(body, "\n")
 }
 
@@ -189,8 +195,25 @@ func renderFederationPreview(m Model) string {
 	if draft.AdoptExisting {
 		body = append(body,
 			"",
+			fmt.Sprintf("this federates local project %q INTO hub project %q",
+				sanitizeForLine(emptyDash(draft.SpokeProjectName)),
+				sanitizeForLine(emptyDash(draft.HubProjectName))),
 			"adoption warning: pre-adoption event history is replaced by snapshot events for federation",
 		)
+	}
+	if draft.Operation == federationOperationRejoin {
+		body = append(body,
+			"",
+			fmt.Sprintf("local project %q previously left this federation and still shares the hub project's identity;",
+				sanitizeForLine(draft.SpokeProjectName)),
+			fmt.Sprintf("rejoining resumes syncing with hub project %q (edits made while standalone sync to the hub)",
+				sanitizeForLine(draft.HubProjectName)),
+		)
+		if draft.SpokeProjectName != draft.HubProjectName {
+			body = append(body,
+				"the local project keeps its name; spoke and hub project names do not need to match",
+			)
+		}
 	}
 	if draft.BlockedReason != "" {
 		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
@@ -200,7 +223,80 @@ func renderFederationPreview(m Model) string {
 	return strings.Join(body, "\n")
 }
 
+// renderFederationAdoptConfirm is the typed-confirmation gate for adoption:
+// the consequence is stated in full and the operator must type the local
+// project's name before Enter executes.
+func renderFederationAdoptConfirm(m Model) string {
+	draft := m.federationDraft
+	body := federationModeHeader(m, "Confirm Adoption")
+	body = append(body,
+		fmt.Sprintf("federate local project %q INTO hub project %q?",
+			sanitizeForLine(emptyDash(draft.SpokeProjectName)),
+			sanitizeForLine(emptyDash(draft.HubProjectName))),
+		fmt.Sprintf("%q's issues will be adopted into the hub project and its local event history rewritten as snapshots",
+			sanitizeForLine(emptyDash(draft.SpokeProjectName))),
+		"",
+		fmt.Sprintf("type %q to confirm: %s",
+			sanitizeForLine(draft.SpokeProjectName),
+			sanitizeForLine(m.federationAdoptConfirmInput)),
+	)
+	body = appendFederationEnrollErr(body, m)
+	body = append(body, "", subtleStyle.Render("[enter] confirm  [esc] back"))
+	return strings.Join(body, "\n")
+}
+
+func renderFederationLeavePreview(m Model) string {
+	draft := m.federationLeaveDraft
+	disposition := draft.Disposition
+	if disposition == "" {
+		disposition = "detach"
+	}
+	body := federationModeHeader(m, "Leave Federation")
+	body = append(body,
+		"local spoke project: "+sanitizeForLine(emptyDash(draft.ProjectName)),
+		"hub: "+sanitizeForLine(federationHubDisplay(draft.HubURL)),
+		fmt.Sprintf("hub project ID: %d", draft.HubProjectID),
+		"local project: "+federationLeaveDispositionLabel(disposition),
+		fmt.Sprintf("local-only: %t", draft.LocalOnly),
+		"",
+	)
+	if draft.LocalOnly {
+		body = append(body,
+			errorStyle.Render("local-only: skipping hub revoke; the enrollment token stays valid until manually revoked"),
+			"local teardown only: "+federationLeaveTeardownLabel(disposition),
+		)
+	} else {
+		body = append(body,
+			"will revoke the enrollment(s) on the hub, then "+federationLeaveTeardownLabel(disposition),
+		)
+	}
+	if draft.BlockedReason != "" {
+		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
+	}
+	body = appendFederationEnrollErr(body, m)
+	body = append(body, "",
+		subtleStyle.Render("[enter] confirm  [d] keep / archive  [l] local-only  [esc] back"))
+	return strings.Join(body, "\n")
+}
+
+func federationLeaveDispositionLabel(disposition string) string {
+	if disposition == "archive" {
+		return "archive — remove the replica (reversible via kata projects restore)"
+	}
+	return "keep (detach) — standalone with all issues"
+}
+
+func federationLeaveTeardownLabel(disposition string) string {
+	if disposition == "archive" {
+		return "archive the local replica"
+	}
+	return "detach locally (keep the project standalone)"
+}
+
 func renderFederationResult(m Model) string {
+	if m.federationResultIsLeave {
+		return renderFederationLeaveResult(m)
+	}
 	result := m.federationResult
 	body := federationModeHeader(m, "Enrollment Result")
 	status := "joined"
@@ -220,6 +316,43 @@ func renderFederationResult(m Model) string {
 	return strings.Join(body, "\n")
 }
 
+func renderFederationLeaveResult(m Model) string {
+	result := m.federationLeaveResult
+	body := federationModeHeader(m, "Leave Result")
+	status := "detached"
+	if result.Body.Archived {
+		status = "archived"
+	}
+	revoke := fmt.Sprintf("revoked %d enrollment(s) on the hub", result.RevokedCount)
+	if result.SkippedRevoke {
+		revoke = "hub revoke skipped (local-only): the enrollment token remains valid until manually revoked"
+	}
+	body = append(body,
+		"status: "+status,
+		"local spoke project: "+sanitizeForLine(emptyDash(result.Draft.ProjectName)),
+		"hub: "+sanitizeForLine(federationHubDisplay(result.Draft.HubURL)),
+		revoke,
+	)
+	if len(result.GlobalEnrollmentIDs) > 0 {
+		body = append(body, errorStyle.Render(fmt.Sprintf(
+			"warning: global enrollment(s) %s for this spoke remain active and still authorize this project; revoke manually if intended",
+			formatEnrollmentIDs(result.GlobalEnrollmentIDs))))
+	}
+	body = append(body,
+		"",
+		subtleStyle.Render("[enter] list  [esc] list"),
+	)
+	return strings.Join(body, "\n")
+}
+
+func formatEnrollmentIDs(ids []int64) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, fmt.Sprintf("#%d", id))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func renderFederationRecovery(m Model) string {
 	recovery := m.federationRecovery
 	body := federationModeHeader(m, "Enrollment Recovery")
@@ -228,9 +361,19 @@ func renderFederationRecovery(m Model) string {
 	} else {
 		body = append(body, "hub: enrollment created", "spoke: join failed")
 	}
+	if recovery.Err != nil {
+		body = append(body, errorStyle.Render(sanitizeForLine(recovery.Err.Error())))
+	}
+	body = append(body, "token: hidden")
+	// The token guess is only a plausible explanation for auth failures (or
+	// when no specific error was captured); blaming the token for a 409 sends
+	// the operator chasing the wrong problem.
+	var apiErr *APIError
+	if recovery.Err == nil || (errors.As(recovery.Err, &apiErr) &&
+		(apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden)) {
+		body = append(body, "the hub enrollment may be single-use, expired, revoked, or invalidated")
+	}
 	body = append(body,
-		"token: hidden",
-		"the hub enrollment may be single-use, expired, revoked, or invalidated",
 		"",
 		subtleStyle.Render("[R] reveal recovery command  [esc] back"),
 	)
@@ -309,6 +452,8 @@ func federationOperationLabel(operation federationOperation) string {
 		return "adopt existing local project into selected hub project"
 	case federationOperationCreateReplica:
 		return "create new local replica from hub project"
+	case federationOperationRejoin:
+		return "rejoin: resume syncing a local project that previously left this federation"
 	default:
 		return "-"
 	}
@@ -421,6 +566,9 @@ func federationSelectedProjectLine(m Model) string {
 }
 
 func federationSelectedProjectDisplay(m Model) string {
+	if m.federationDraft.Operation == federationOperationRejoin {
+		return m.federationDraft.SpokeProjectName + " (rejoin)"
+	}
 	if m.federationDraft.CreateReplica {
 		if m.federationDraft.SpokeProjectName != "" {
 			return m.federationDraft.SpokeProjectName + " (new local replica)"

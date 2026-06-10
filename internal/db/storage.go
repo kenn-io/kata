@@ -36,6 +36,11 @@ type Storage interface {
 	ListProjectsIncludingArchived(ctx context.Context) ([]Project, error)
 	RenameProject(ctx context.Context, id int64, name string) (Project, error)
 	RemoveProject(ctx context.Context, p RemoveProjectParams) (Project, *Event, error)
+	// CountOpenIssues returns the number of open, non-deleted issues for one
+	// project without mutating any state. It mirrors the refusal check inside
+	// RemoveProject for preflight callers (e.g. the federation leave route,
+	// which must reject an archive before detaching).
+	CountOpenIssues(ctx context.Context, projectID int64) (int64, error)
 	RestoreProject(ctx context.Context, projectID int64, actor string) (Project, *Event, bool, error)
 	HardDeleteProject(ctx context.Context, id int64) error
 	MergeProjects(ctx context.Context, p MergeProjectsParams) (ProjectMergeResult, error)
@@ -193,6 +198,7 @@ type Storage interface {
 	CountActiveFederationEnrollments(ctx context.Context, projectID int64) (int64, error)
 	SkipFederationQuarantine(ctx context.Context, p SkipFederationQuarantineParams) (FederationQuarantine, error)
 	UpsertFederationBinding(ctx context.Context, b FederationBinding) (FederationBinding, error)
+	LeaveFederationReplica(ctx context.Context, projectID int64) (LeaveFederationResult, error)
 	AdoptProjectIntoFederation(ctx context.Context, p AdoptProjectIntoFederationParams) (AdoptProjectIntoFederationResult, error)
 	AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error
 	InsertRemoteEvent(ctx context.Context, projectID int64, ev RemoteEvent) (bool, error)

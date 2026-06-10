@@ -123,6 +123,11 @@ type Model struct {
 	// owning project's name. Stays nil-safe — a missing entry renders
 	// as a numeric "[#N]" prefix instead of crashing.
 	projectsByID map[int64]string
+	// projectUIDByID maps project_id → project UID alongside projectsByID.
+	// The federation enroll flow compares these against a hub project's UID
+	// to recognize a rejoin (a local project that previously left the hub
+	// project's federation still shares its UID). nil-safe like projectsByID.
+	projectUIDByID map[int64]string
 	// projectStats is the per-project aggregate cache populated by
 	// fetchProjectsWithStats. nil-safe: viewProjects renders rows for
 	// projects in projectsByID even if their stats haven't loaded yet.
@@ -157,8 +162,14 @@ type Model struct {
 	federationEnrollGen           uint64
 	federationEnrollAttempt       uint64
 	federationEnrollRunning       bool
+	federationAdoptConfirmInput   string
 	federationResult              federationEnrollResult
 	federationRecovery            federationRecovery
+	federationLeaveDraft          federationLeaveDraft
+	federationLeaveResult         federationLeaveResult
+	federationLeaveAttempt        uint64
+	federationLeaveRunning        bool
+	federationResultIsLeave       bool
 	// layout is the EFFECTIVE rendered layout — what the View functions
 	// actually draw. Re-evaluated on every WindowSizeMsg via
 	// resolveLayout, which consults preferredLayout + layoutLocked +
@@ -304,10 +315,16 @@ func (m Model) fetchProjects() tea.Cmd {
 			return projectsLoadedMsg{connGen: connGen, err: err}
 		}
 		out := make(map[int64]string, len(summaries))
+		uids := make(map[int64]string, len(summaries))
 		for _, p := range summaries {
 			out[p.ID] = p.Name
+			uids[p.ID] = p.UID
 		}
-		return projectsLoadedMsg{connGen: connGen, projects: out}
+		// uids must ride alongside projects: the federation enroll flow reads
+		// projectUIDByID to detect a rejoin (a local UID-holder). Without it the
+		// boot/refresh path leaves the UID cache stale and rejoin silently
+		// degrades to history-rewriting adoption.
+		return projectsLoadedMsg{connGen: connGen, projects: out, uids: uids}
 	}
 }
 
@@ -433,6 +450,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if pl.projects != nil {
 			m.projectsByID = pl.projects
 		}
+		if pl.uids != nil {
+			m.projectUIDByID = pl.uids
+		}
 		if pl.idents != nil {
 			m.projectIdentByID = pl.idents
 		}
@@ -468,6 +488,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if fer, ok := msg.(federationEnrollResultMsg); ok {
 		next, cmd := m.handleFederationEnrollResult(fer)
+		return next, cmd
+	}
+	if flr, ok := msg.(federationLeaveResultMsg); ok {
+		next, cmd := m.handleFederationLeaveResult(flr)
 		return next, cmd
 	}
 	if _, ok := msg.(projectsDebounceFireMsg); ok {

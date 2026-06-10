@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -714,12 +715,17 @@ func TestFederationReplicaSetupCanUpgradePhase1BindingToPush(t *testing.T) {
 	assert.Equal(t, localEventID, upgraded.Binding.PushCursorEventID)
 }
 
-func TestFederationReplicaSetupRejectsUnboundProjectCollision(t *testing.T) {
+// TestFederationReplicaSetupRebindsUnboundUIDHolder: an unbound local project
+// already holding the hub project UID under the same name is rebound, not
+// refused. This is the post-leave rejoin state and also the recovery path for
+// a partially-failed join (project created, binding upsert never ran).
+func TestFederationReplicaSetupRebindsUnboundUIDHolder(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
-	_, err := env.DB.CreateProjectWithUID(ctx, "hub", "01HZNQ7VFPK1XGD8R5MABCD4EX")
+	holder, err := env.DB.CreateProjectWithUID(ctx, "hub", "01HZNQ7VFPK1XGD8R5MABCD4EX")
 	require.NoError(t, err)
 
+	var out api.CreateFederationReplicaBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
 		"hub_url":                 "http://127.0.0.1:7373",
 		"hub_project_id":          42,
@@ -727,9 +733,14 @@ func TestFederationReplicaSetupRejectsUnboundProjectCollision(t *testing.T) {
 		"project_name":            "hub",
 		"replay_horizon_event_id": 9,
 		"actor":                   "wesm",
-	}, nil)
+	}, &out)
 
-	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, holder.ID, out.Project.ID, "must rebind the holder, not create a new project")
+	binding, err := env.DB.FederationBindingByProject(ctx, holder.ID)
+	require.NoError(t, err)
+	assert.False(t, binding.PushEnabled, "pull-only join must not enable push")
+	assert.Equal(t, int64(8), binding.PullCursorEventID)
 }
 
 func TestFederationReplicaSetupValidatesProjectName(t *testing.T) {
@@ -2166,5 +2177,260 @@ func federationIngestBody(events ...any) map[string]any {
 	return map[string]any{
 		"schema_version": db.CurrentSchemaVersion(),
 		"events":         events,
+	}
+}
+
+func newSpokeProject(t *testing.T, env *testenv.Env) (db.Project, db.FederationBinding) {
+	t.Helper()
+	ctx := context.Background()
+	// Use CreateProject so the daemon generates a valid UID; read it back for credential ops.
+	project, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	binding, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 9,
+		PullCursorEventID:    8,
+		Actor:                "wesm",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+		HubURL:       "http://127.0.0.1:7373",
+		HubProjectID: 42,
+		Token:        "spoke-token",
+		Actor:        "wesm",
+	}))
+	return project, binding
+}
+
+func newSpokeProjectWithOpenIssue(t *testing.T, env *testenv.Env) (db.Project, db.FederationBinding) {
+	t.Helper()
+	ctx := context.Background()
+	// Create the issue before the binding so the spoke read-only guard doesn't block it.
+	project, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "open issue",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	binding, err := env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 9,
+		PullCursorEventID:    8,
+		Actor:                "wesm",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+		HubURL:       "http://127.0.0.1:7373",
+		HubProjectID: 42,
+		Token:        "spoke-token",
+		Actor:        "wesm",
+	}))
+	return project, binding
+}
+
+func TestLeaveFederationReplicaRouteDetach(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+
+	project, _ := newSpokeProject(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "detach", "actor": "wesm"}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+	}
+
+	if _, err := env.DB.FederationBindingByProject(ctx, project.ID); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("binding should be gone: %v", err)
+	}
+	if got := config.FederationCredentialMetadataFor(project.UID).Status; got != "missing" {
+		t.Fatalf("credential should be cleaned, got %q", got)
+	}
+}
+
+func TestLeaveFederationReplicaRouteArchiveRefusesOpenIssues(t *testing.T) {
+	env := testenv.New(t)
+
+	project, _ := newSpokeProjectWithOpenIssue(t, env)
+
+	// archive without force should 409 due to open issues.
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "archive", "actor": "wesm"}, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("want 409 for open issues, got %d body=%s", resp.StatusCode, raw)
+	}
+
+	// archive with force should succeed.
+	resp, raw = envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "archive", "force": true, "actor": "wesm"}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200 with force, got %d body=%s", resp.StatusCode, raw)
+	}
+}
+
+// TestLeaveFederationReplicaRouteArchiveOpenIssuesDoesNotDetach is the Fix 6
+// preflight guarantee: an archive (no force) on a spoke WITH open issues must
+// 409 BEFORE detaching, leaving the binding AND the stored credential intact so
+// the spoke is not left in a "detached-but-not-archived" partial state.
+func TestLeaveFederationReplicaRouteArchiveOpenIssuesDoesNotDetach(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+
+	project, _ := newSpokeProjectWithOpenIssue(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "archive", "actor": "example-actor"}, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("want 409 for open issues, got %d body=%s", resp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "project_has_open_issues") {
+		t.Fatalf("want project_has_open_issues code, got %s", raw)
+	}
+
+	// The binding must still be present (no detach happened).
+	if _, err := env.DB.FederationBindingByProject(ctx, project.ID); err != nil {
+		t.Fatalf("binding should still be present after refused archive: %v", err)
+	}
+	// The stored credential must still be present (not cleaned).
+	if got := config.FederationCredentialMetadataFor(project.UID).Status; got == "missing" {
+		t.Fatalf("credential should still be present after refused archive, got %q", got)
+	}
+}
+
+// TestCreateFederationReplicaRejoinsAfterLeave is the round-trip contract:
+// enroll -> leave -> enroll must work. After leave, the local project still
+// carries the hub project UID with no binding; a fresh join for that hub
+// project must rebind it (rejoin), not refuse it as a collision.
+func TestCreateFederationReplicaRejoinsAfterLeave(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+
+	project, binding := newSpokeProject(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "detach", "actor": "wesm"}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "leave: %s", raw)
+
+	var out api.CreateFederationReplicaBody
+	jresp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 binding.HubURL,
+		"hub_project_id":          binding.HubProjectID,
+		"hub_project_uid":         binding.HubProjectUID,
+		"project_name":            project.Name,
+		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
+		"token":                   "rejoin-token",
+		"capabilities":            "pull,push",
+		"push_enabled":            true,
+	}, &out)
+	require.Equal(t, http.StatusOK, jresp.StatusCode, "rejoin must succeed after leave")
+
+	assert.Equal(t, project.ID, out.Project.ID,
+		"rejoin must bind the existing UID-holder, not create a new project")
+	rebound, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.True(t, rebound.PushEnabled)
+	assert.Equal(t, int64(0), rebound.PushCursorEventID,
+		"rejoin must re-offer local-origin events from 0 so the hub dedups what it has and absorbs standalone-era edits")
+	assert.Equal(t, int64(8), rebound.PullCursorEventID,
+		"rejoin restarts pull just below the replay horizon")
+	assert.Equal(t, "present", config.FederationCredentialMetadataFor(project.UID).Status)
+}
+
+// TestCreateFederationReplicaRejoinNameMismatchIsActionable: when the hub
+// project UID is held by a local project under a different name (the holder
+// previously left), a join for another name must refuse with an error that
+// names the holder and explains how to rejoin, and must not bind anything.
+func TestCreateFederationReplicaRejoinNameMismatchIsActionable(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+
+	project, binding := newSpokeProject(t, env)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "detach", "actor": "wesm"}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "leave: %s", raw)
+
+	resp, raw = envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 binding.HubURL,
+		"hub_project_id":          binding.HubProjectID,
+		"hub_project_uid":         binding.HubProjectUID,
+		"project_name":            "hub-project",
+		"replay_horizon_event_id": 9,
+		"actor":                   "wesm",
+		"token":                   "rejoin-token",
+	}, nil)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	assert.Contains(t, string(raw), "spoke-project", "error must name the local UID-holder")
+	assert.Contains(t, string(raw), "previously left", "error must explain this is a rejoin situation")
+	assert.Contains(t, string(raw), "--project", "error must carry the recovery command hint")
+	if _, err := env.DB.FederationBindingByProject(ctx, project.ID); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("name-mismatch rejoin must not bind anything: %v", err)
+	}
+}
+
+// TestLeaveFederationReplicaRouteMissingProjectReturns404 confirms the leave
+// route maps a missing project to 404 project_not_found (the storage layer now
+// surfaces db.ErrNotFound from the UID lookup) rather than a 500.
+func TestLeaveFederationReplicaRouteMissingProjectReturns404(t *testing.T) {
+	env := testenv.New(t)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		"/api/v1/federation/replicas/999999/actions/leave",
+		map[string]any{"disposition": "detach", "actor": "example-actor"}, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("want 404 for missing project, got %d body=%s", resp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "project_not_found") {
+		t.Fatalf("want project_not_found code in body, got %s", raw)
+	}
+}
+
+// TestLeaveFederationReplicaRouteArchiveAlreadyArchived guards re-running a
+// completed `--delete` leave: the binding-less detach is idempotent, so the
+// route reaches RemoveProject on the already-archived project. That must map
+// to a clean 409 project_already_archived (matching the removeProject
+// handler), not an ugly 500.
+func TestLeaveFederationReplicaRouteArchiveAlreadyArchived(t *testing.T) {
+	env := testenv.New(t)
+
+	project, _ := newSpokeProject(t, env)
+
+	// First archive leave: detach + archive succeed (no open issues).
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "archive", "actor": "wesm"}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200 on first archive, got %d body=%s", resp.StatusCode, raw)
+	}
+
+	// Second archive leave on the now-archived (binding-less) project: detach
+	// is idempotent and the archive step hits ErrProjectAlreadyArchived.
+	resp, raw = envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "archive", "actor": "wesm"}, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("want 409 project_already_archived on re-archive, got %d body=%s", resp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "project_already_archived") {
+		t.Fatalf("want project_already_archived code in body, got %s", raw)
 	}
 }

@@ -35,10 +35,12 @@ func (m Model) fetchProjectsWithStats() tea.Cmd {
 			return projectsLoadedMsg{connGen: connGen, err: err, gen: gen}
 		}
 		names := make(map[int64]string, len(rows))
+		uids := make(map[int64]string, len(rows))
 		idents := make(map[int64]string, len(rows))
 		stats := make(map[int64]ProjectStatsSummary, len(rows))
 		for _, r := range rows {
 			names[r.ID] = r.Name
+			uids[r.ID] = r.UID
 			idents[r.ID] = r.Name
 			if r.Stats != nil {
 				stats[r.ID] = *r.Stats
@@ -47,6 +49,7 @@ func (m Model) fetchProjectsWithStats() tea.Cmd {
 		return projectsLoadedMsg{
 			connGen:  connGen,
 			projects: names,
+			uids:     uids,
 			idents:   idents,
 			stats:    stats,
 			gen:      gen,

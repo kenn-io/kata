@@ -10,6 +10,10 @@ type RevokeFederationEnrollmentPath struct {
 	EnrollmentID int64 `json:"enrollment_id"`
 }
 
+type LeaveFederationReplicaPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type ShowIssueByUIDPath struct {
 	UID string `json:"uid" validate:"required"`
 }

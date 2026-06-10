@@ -85,11 +85,12 @@ func (d *Store) RecordFederationSyncError(ctx context.Context, projectID int64, 
 	return d.RetryTransient(ctx, func() error {
 		_, err := d.ExecContext(ctx, `
 			INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
-			VALUES(?, ?, ?)
+			SELECT ?, ?, ?
+			WHERE EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = ?)
 			ON CONFLICT(project_id) DO UPDATE SET
 				last_error_at = excluded.last_error_at,
 				last_error = excluded.last_error`,
-			projectID, at.UTC().Format(sqliteTimeFormat), msg)
+			projectID, at.UTC().Format(sqliteTimeFormat), msg, projectID)
 		if err != nil {
 			return fmt.Errorf("record federation sync error: %w", err)
 		}
@@ -103,10 +104,11 @@ func (d *Store) ClearFederationSyncError(ctx context.Context, projectID int64) e
 	return d.RetryTransient(ctx, func() error {
 		_, err := d.ExecContext(ctx, `
 			INSERT INTO federation_sync_status(project_id, last_error_at, last_error)
-			VALUES(?, NULL, NULL)
+			SELECT ?, NULL, NULL
+			WHERE EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = ?)
 			ON CONFLICT(project_id) DO UPDATE SET
 				last_error_at = NULL,
-				last_error = NULL`, projectID)
+				last_error = NULL`, projectID, projectID)
 		if err != nil {
 			return fmt.Errorf("clear federation sync error: %w", err)
 		}
@@ -292,10 +294,11 @@ func (d *Store) upsertFederationSyncTime(ctx context.Context, projectID int64, c
 	return d.RetryTransient(ctx, func() error {
 		_, err := d.ExecContext(ctx, fmt.Sprintf(`
 			INSERT INTO federation_sync_status(project_id, %s)
-			VALUES(?, ?)
+			SELECT ?, ?
+			WHERE EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = ?)
 			ON CONFLICT(project_id) DO UPDATE SET
 				%s = excluded.%s`, column, column, column),
-			projectID, at.UTC().Format(sqliteTimeFormat))
+			projectID, at.UTC().Format(sqliteTimeFormat), projectID)
 		if err != nil {
 			return fmt.Errorf("record federation sync %s: %w", column, err)
 		}
@@ -362,6 +365,61 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 		return db.FederationBinding{}, err
 	}
 	return binding, nil
+}
+
+// LeaveFederationReplica detaches a spoke project: it deletes the binding,
+// sync-status, and quarantine rows and clears claim projection state in one
+// transaction, returning the project UID for credential cleanup. It is
+// idempotent: a project with no binding returns a zero-role result and no
+// error. A hub binding returns db.ErrFederationNotSpoke.
+func (d *Store) LeaveFederationReplica(ctx context.Context, projectID int64) (db.LeaveFederationResult, error) {
+	return retryWrite1(ctx, d, func() (db.LeaveFederationResult, error) {
+		return d.leaveFederationReplica(ctx, projectID)
+	})
+}
+
+func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64) (db.LeaveFederationResult, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.LeaveFederationResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	uid, err := projectUIDTx(ctx, tx, projectID)
+	if err != nil {
+		return db.LeaveFederationResult{}, err
+	}
+
+	binding, err := federationBindingByProject(ctx, tx, projectID)
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		if err := tx.Commit(); err != nil {
+			return db.LeaveFederationResult{}, err
+		}
+		return db.LeaveFederationResult{ProjectID: projectID, ProjectUID: uid}, nil
+	case err != nil:
+		return db.LeaveFederationResult{}, err
+	}
+	if binding.Role != db.FederationRoleSpoke {
+		return db.LeaveFederationResult{}, db.ErrFederationNotSpoke
+	}
+
+	for _, stmt := range []string{
+		`DELETE FROM federation_quarantine WHERE project_id = ?`,
+		`DELETE FROM federation_sync_status WHERE project_id = ?`,
+		`DELETE FROM federation_bindings WHERE project_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, projectID); err != nil {
+			return db.LeaveFederationResult{}, fmt.Errorf("leave federation replica: %w", err)
+		}
+	}
+	if err := clearProjectClaimStateTx(ctx, tx, projectID); err != nil {
+		return db.LeaveFederationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.LeaveFederationResult{}, err
+	}
+	return db.LeaveFederationResult{ProjectID: projectID, ProjectUID: uid, Role: db.FederationRoleSpoke}, nil
 }
 
 func (d *Store) boundFederationActorTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, bool, error) {
@@ -1220,8 +1278,14 @@ func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]d
 
 func projectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, error) {
 	var uid string
-	if err := tx.QueryRowContext(ctx,
-		`SELECT uid FROM projects WHERE id = ?`, projectID).Scan(&uid); err != nil {
+	err := tx.QueryRowContext(ctx,
+		`SELECT uid FROM projects WHERE id = ?`, projectID).Scan(&uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Surface the domain not-found sentinel so callers (e.g. the daemon
+		// leave route) can map a missing project to 404 via errors.Is.
+		return "", db.ErrNotFound
+	}
+	if err != nil {
 		return "", fmt.Errorf("lookup project uid: %w", err)
 	}
 	return uid, nil

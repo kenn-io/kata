@@ -518,6 +518,14 @@ type AdoptProjectIntoFederationResult struct {
 	AdoptionSnapshotCount int64
 }
 
+// LeaveFederationResult reports what LeaveFederationReplica removed. ProjectUID
+// lets the daemon route run credential cleanup after the DB transaction.
+type LeaveFederationResult struct {
+	ProjectID  int64
+	ProjectUID string
+	Role       FederationRole
+}
+
 // FederationIngestEvent carries one spoke event plus the spoke-local event row
 // id used only for push cursor acknowledgement.
 type FederationIngestEvent struct {

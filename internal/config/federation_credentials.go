@@ -82,6 +82,36 @@ func FederationCredentialMetadataFor(projectUID string) FederationCredentialMeta
 	}
 }
 
+// DeleteFederationCredential removes one project credential from
+// <KATA_HOME>/credentials.toml. It is idempotent: a missing entry or a missing
+// file is not an error. Called from the daemon leave route, mirroring
+// WriteFederationCredential.
+func DeleteFederationCredential(projectUID string) error {
+	creds, err := ReadFederationCredentials()
+	if err != nil {
+		return err
+	}
+	if _, ok := creds.Projects[projectUID]; !ok {
+		return nil
+	}
+	delete(creds.Projects, projectUID)
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(creds); err != nil {
+		return fmt.Errorf("encode federation credentials: %w", err)
+	}
+	path, err := FederationCredentialsPath()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil { //nolint:gosec // credentials file must be owner-only
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("chmod %s: %w", path, err)
+	}
+	return nil
+}
+
 // WriteFederationCredential upserts one project credential into
 // <KATA_HOME>/credentials.toml with owner-only permissions.
 func WriteFederationCredential(projectUID string, c FederationCredential) error {

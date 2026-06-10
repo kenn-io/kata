@@ -252,6 +252,7 @@ type labelsFetchedMsg struct {
 type projectsLoadedMsg struct {
 	connGen  uint64
 	projects map[int64]string
+	uids     map[int64]string
 	idents   map[int64]string
 	stats    map[int64]ProjectStatsSummary
 	err      error
@@ -279,6 +280,13 @@ type federationEnrollResultMsg struct {
 	connGen uint64
 	attempt uint64
 	result  federationEnrollResult
+	err     error
+}
+
+type federationLeaveResultMsg struct {
+	connGen uint64
+	attempt uint64
+	result  federationLeaveResult
 	err     error
 }
 

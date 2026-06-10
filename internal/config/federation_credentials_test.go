@@ -140,3 +140,31 @@ func TestFederationCredentialMetadataForUnreadableCredential(t *testing.T) {
 	assert.Equal(t, "unreadable", got.Status)
 	assert.False(t, got.AllowInsecure)
 }
+
+func TestDeleteFederationCredentialIdempotent(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	uid := "01KQJF75QFKWXHASB1QK74ZACZ"
+	other := "01KT4E0PJ4FRW0T0QB86EMZ1SN"
+	if err := config.WriteFederationCredential(uid, config.FederationCredential{HubURL: "http://hub.example", HubProjectID: 1, Token: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteFederationCredential(other, config.FederationCredential{HubURL: "http://hub.example", HubProjectID: 2, Token: "u"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.DeleteFederationCredential(uid); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if got := config.FederationCredentialMetadataFor(uid).Status; got != "missing" {
+		t.Fatalf("want missing, got %q", got)
+	}
+	if got := config.FederationCredentialMetadataFor(other).Status; got != "present" {
+		t.Fatalf("other credential should survive, got %q", got)
+	}
+	if err := config.DeleteFederationCredential(uid); err != nil {
+		t.Fatalf("second delete should be nil, got %v", err)
+	}
+	t.Setenv("KATA_HOME", t.TempDir())
+	if err := config.DeleteFederationCredential(uid); err != nil {
+		t.Fatalf("delete with no file should be nil, got %v", err)
+	}
+}

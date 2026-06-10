@@ -182,6 +182,7 @@ func TestFederationHelpIsVisible(t *testing.T) {
 	assert.Contains(t, out, "enroll")
 	assert.Contains(t, out, "enrollments")
 	assert.Contains(t, out, "join")
+	assert.Contains(t, out, "leave")
 	assert.Contains(t, out, "revoke")
 }
 
@@ -299,7 +300,9 @@ func TestFederationEnrollCLIPrintsJoinCommand(t *testing.T) {
 	assert.NotContains(t, out, "--replay-horizon")
 	assert.NotContains(t, out, "--baseline-through")
 	assert.Contains(t, out, "--push")
-	assert.Contains(t, out, "--adopt-existing")
+	// The single-daemon setup makes the spoke project the hub project itself
+	// (same UID), which is the rejoin shape: no adoption is auto-marked.
+	assert.NotContains(t, out, "--adopt-existing")
 	assert.Contains(t, out, "--token ")
 }
 
@@ -1007,6 +1010,368 @@ func TestFederationRevokeCLIRevokesEnrollment(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestResolveHubAdminAuthPrecedence(t *testing.T) {
+	cat := &config.DaemonConfig{Daemons: []config.CatalogDaemonConfig{
+		{Name: "hub-daemon", URL: "http://hub.example:7777", Token: "catalog-tok", AllowInsecure: true},
+	}}
+	got, err := resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "http://hub.example:7777", hubName: "hub-daemon", hubToken: "explicit"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.token != "explicit" {
+		t.Fatalf("explicit token should win, got %q", got.token)
+	}
+	got, err = resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "http://hub.example:7777", hubName: "hub-daemon"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.token != "catalog-tok" {
+		t.Fatalf("catalog token expected, got %q", got.token)
+	}
+	// allow_insecure comes from the binding, not the catalog entry: with the
+	// binding flag unset, the catalog's AllowInsecure must not leak through.
+	if got.allowInsecure {
+		t.Fatalf("allow_insecure must come from the binding, not the catalog, got %+v", got)
+	}
+	got, err = resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "http://hub.example:7777"})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.token != "catalog-tok" {
+		t.Fatalf("url-matched catalog token expected, got %q", got.token)
+	}
+}
+
+// fakeLeaveHub is a minimal hub stub for federation-leave CLI tests. It serves
+// the enrollment list (one active enrollment matching the spoke instance and
+// hub project) and records revoke calls so a test can assert revoke-first
+// behavior. spokeInstanceUID and hubProjectID are matched by the command.
+type fakeLeaveHub struct {
+	spokeInstanceUID string
+	hubProjectID     int64
+	enrollmentID     int64
+	// globalEnrollmentID, when nonzero, is served as an active enrollment with
+	// nil project scope (a global grant for the same spoke instance).
+	globalEnrollmentID int64
+	revokedIDs         []int64
+}
+
+func newFakeLeaveHub(t *testing.T, spokeInstanceUID string, hubProjectID int64) (*fakeLeaveHub, *httptest.Server) {
+	t.Helper()
+	h := &fakeLeaveHub{spokeInstanceUID: spokeInstanceUID, hubProjectID: hubProjectID, enrollmentID: 7}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/ping":
+			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/enrollments":
+			pid := h.hubProjectID
+			out := api.ListFederationEnrollmentsBody{Enrollments: []api.FederationEnrollmentOut{{
+				ID:               h.enrollmentID,
+				SpokeInstanceUID: h.spokeInstanceUID,
+				ProjectID:        &pid,
+				Capabilities:     "pull,push,claim",
+				Actor:            "wesm",
+			}}}
+			if h.globalEnrollmentID != 0 {
+				out.Enrollments = append(out.Enrollments, api.FederationEnrollmentOut{
+					ID:               h.globalEnrollmentID,
+					SpokeInstanceUID: h.spokeInstanceUID,
+					Capabilities:     "pull,push,claim",
+					Actor:            "wesm",
+				})
+			}
+			_ = json.NewEncoder(w).Encode(out)
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/federation/enrollments/") && strings.HasSuffix(r.URL.Path, "/revoke"):
+			idStr := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/federation/enrollments/"), "/revoke")
+			id, _ := strconv.ParseInt(idStr, 10, 64)
+			h.revokedIDs = append(h.revokedIDs, id)
+			_ = json.NewEncoder(w).Encode(api.RevokeFederationEnrollmentBody{ID: id, Revoked: true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return h, srv
+}
+
+// seedLeaveSpoke creates a push-enabled spoke project on env's daemon bound to
+// hubURL, with a stored transport credential. Mirrors the daemon leave-route
+// test fixtures but points hub_url at a caller-controlled fake hub.
+func seedLeaveSpoke(t *testing.T, env *testenv.Env, name, hubURL string, hubProjectID int64) db.Project {
+	t.Helper()
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, name)
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               hubURL,
+		HubProjectID:         hubProjectID,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 9,
+		PullCursorEventID:    8,
+		PushEnabled:          true,
+		Actor:                "wesm",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+		HubURL:       hubURL,
+		HubProjectID: hubProjectID,
+		Token:        "spoke-token",
+		Actor:        "wesm",
+	}))
+	return project
+}
+
+func TestFederationLeaveDetachRevokesThenTearsDown(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	ctx := context.Background()
+	const hubProjectID int64 = 42
+	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+	project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+
+	out := requireCmdOutput(t, env, "federation", "leave", "--project", "spoke-project", "--yes")
+
+	// Hub revoke was called for the matching enrollment before teardown.
+	require.Equal(t, []int64{hub.enrollmentID}, hub.revokedIDs)
+	// Local binding is gone afterward: the project is standalone.
+	_, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	assert.Contains(t, out, "standalone")
+}
+
+func TestFederationLeaveLocalOnlySkipsRevoke(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	ctx := context.Background()
+	const hubProjectID int64 = 42
+	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+	project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+
+	stdout, stderr, err := runCmdCapture(t, env, "federation", "leave",
+		"--project", "spoke-project", "--local-only", "--yes")
+	require.NoError(t, err)
+
+	// --local-only must not touch the hub.
+	require.Empty(t, hub.revokedIDs)
+	// Local teardown still happened.
+	_, err = env.DB.FederationBindingByProject(ctx, project.ID)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	assert.Contains(t, stdout, "standalone")
+	assert.Contains(t, stderr, "token remains valid")
+}
+
+func TestFederationLeaveDeleteArchivesReplica(t *testing.T) {
+	t.Run("no open issues", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		const hubProjectID int64 = 42
+		hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+
+		out := requireCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--delete", "--yes")
+
+		// Hub revoke happened before archive.
+		require.Equal(t, []int64{hub.enrollmentID}, hub.revokedIDs)
+		// Project is now archived (not resolving as active).
+		_, err := env.DB.ProjectByName(ctx, project.Name)
+		assert.ErrorIs(t, err, db.ErrNotFound)
+		// But it exists in the archive.
+		archived, err := env.DB.ProjectByNameIncludingArchived(ctx, project.Name)
+		require.NoError(t, err)
+		require.NotNil(t, archived.DeletedAt, "project should be archived")
+		assert.Contains(t, out, "archived")
+	})
+
+	t.Run("open issue without force returns error", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		const hubProjectID int64 = 42
+		_, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+		_, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID,
+			Title:     "open issue",
+			Author:    "tester",
+		})
+		require.NoError(t, err)
+
+		_, err = runCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--delete", "--yes")
+
+		require.Error(t, err)
+		ce := requireCLIError(t, err, ExitConflict)
+		assert.Contains(t, ce.Message, "open issues")
+		// The archive is refused BEFORE the local detach (preflight), so the
+		// binding is still present and the project is still active — no
+		// "detached-but-not-archived" partial state.
+		_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, bindErr, "binding should still be present after refused archive")
+		alive, dbErr := env.DB.ProjectByName(ctx, project.Name)
+		require.NoError(t, dbErr, "project should still be active (not archived)")
+		assert.Nil(t, alive.DeletedAt)
+	})
+
+	t.Run("open issue with force archives", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		const hubProjectID int64 = 42
+		hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+		_, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID,
+			Title:     "open issue",
+			Author:    "tester",
+		})
+		require.NoError(t, err)
+
+		out := requireCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--delete", "--force", "--yes")
+
+		require.Equal(t, []int64{hub.enrollmentID}, hub.revokedIDs)
+		_, err = env.DB.ProjectByName(ctx, project.Name)
+		assert.ErrorIs(t, err, db.ErrNotFound)
+		assert.Contains(t, out, "archived")
+	})
+}
+
+func TestFederationLeaveNotASpoke(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	// EnableProjectFederation creates a proper hub binding using the project's UID.
+	_, err = env.DB.EnableProjectFederation(ctx, project.ID, "tester")
+	require.NoError(t, err)
+	// Stand up a fake hub to confirm it gets zero calls.
+	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), project.ID)
+	_ = hubSrv
+
+	_, err = runCmdOutput(t, env, "federation", "leave", "--project", "hub-project", "--yes")
+
+	require.Error(t, err)
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, "not_a_spoke", ce.Code)
+	// No hub calls made.
+	require.Empty(t, hub.revokedIDs)
+}
+
+func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	ctx := context.Background()
+	const hubProjectID int64 = 42
+
+	// Start a server then immediately close it so the URL is syntactically valid
+	// but the port is closed when the command runs.
+	deadSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := deadSrv.URL
+	deadSrv.Close()
+
+	project := seedLeaveSpoke(t, env, "spoke-project", deadURL, hubProjectID)
+
+	// Without --local-only: should fail because hub is unreachable.
+	_, err := runCmdOutput(t, env, "federation", "leave",
+		"--project", "spoke-project", "--yes")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "hub revoke failed")
+	// Local binding must still be present (teardown was not run).
+	_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, bindErr, "binding should still be present after hub-unreachable abort")
+
+	// With --local-only: should succeed and tear down the local binding.
+	_, _, err = runCmdCapture(t, env, "federation", "leave",
+		"--project", "spoke-project", "--local-only", "--yes")
+	require.NoError(t, err)
+	_, bindErr = env.DB.FederationBindingByProject(ctx, project.ID)
+	assert.ErrorIs(t, bindErr, db.ErrNotFound)
+}
+
+func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
+	t.Run("delete on no-binding project archives it", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "standalone-project")
+		require.NoError(t, err)
+
+		// No hub server needed: no revoke should be attempted.
+		out := requireCmdOutput(t, env, "federation", "leave",
+			"--project", "standalone-project", "--delete", "--yes")
+
+		// Project is archived (no hub contact needed).
+		_, err = env.DB.ProjectByName(ctx, project.Name)
+		assert.ErrorIs(t, err, db.ErrNotFound)
+		archived, err := env.DB.ProjectByNameIncludingArchived(ctx, project.Name)
+		require.NoError(t, err)
+		require.NotNil(t, archived.DeletedAt, "project should be archived")
+		assert.Contains(t, out, "archived")
+	})
+
+	t.Run("plain leave on no-binding project prints already standalone", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "standalone-project")
+		require.NoError(t, err)
+
+		out := requireCmdOutput(t, env, "federation", "leave",
+			"--project", "standalone-project", "--yes")
+
+		assert.Contains(t, out, "already standalone")
+		// Project is still active (not archived).
+		alive, err := env.DB.ProjectByName(ctx, project.Name)
+		require.NoError(t, err)
+		assert.Nil(t, alive.DeletedAt)
+	})
+
+	t.Run("plain leave on no-binding project honors --json", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		_, err := env.DB.CreateProject(ctx, "standalone-project")
+		require.NoError(t, err)
+
+		out := requireCmdOutput(t, env, "--json", "federation", "leave",
+			"--project", "standalone-project", "--yes")
+
+		// Output must be machine-readable JSON, not the human one-liner.
+		var body map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &body),
+			"standalone no-op must honor --json, got: %s", out)
+		assert.Equal(t, false, body["detached"], "no-op did not detach")
+		assert.Equal(t, "detach", body["disposition"])
+	})
+
+	t.Run("delete on no-binding project requires confirmation without --yes", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "standalone-project")
+		require.NoError(t, err)
+
+		// No --yes and no TTY: the standalone --delete archive must be
+		// confirm-gated, not silently archived.
+		_, err = runCmdOutput(t, env, "federation", "leave",
+			"--project", "standalone-project", "--delete")
+		require.Error(t, err)
+		requireCLIError(t, err, ExitConfirm)
+
+		// The project must still be active (the archive was gated, not run).
+		alive, dbErr := env.DB.ProjectByName(ctx, project.Name)
+		require.NoError(t, dbErr)
+		assert.Nil(t, alive.DeletedAt, "archive must not run without confirmation")
+	})
+}
+
 func setupFederationStatusCLIState(t *testing.T) (*testenv.Env, db.Project) {
 	t.Helper()
 	resetFlags(t)
@@ -1123,4 +1488,111 @@ func ingestCLIClaimViolation(
 	})
 	require.NoError(t, err)
 	return ev
+}
+
+// TestFederationJoinLeaveJoinRoundTrip is the CLI round-trip contract: a spoke
+// that joins, leaves, and joins the same hub project again must come back as a
+// working replica. The leave keeps the local project's shared hub UID, so the
+// second join exercises the daemon's rejoin path.
+func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	ctx := context.Background()
+	const hubProjectID int64 = 42
+	hubProjectUID := "01HZNQ7VFPK1XGD8R5MABCD4EG"
+	_, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+
+	join := func(token string) string {
+		return requireCmdOutput(t, env, "federation", "join",
+			"--project", "fedlab",
+			"--hub-url", hubSrv.URL,
+			"--hub-project-id", "42",
+			"--hub-project-uid", hubProjectUID,
+			"--replay-horizon", "7",
+			"--token", token,
+			"--actor", "wesm",
+			"--push")
+	}
+
+	join("join-token")
+	project, err := env.DB.ProjectByUID(ctx, hubProjectUID)
+	require.NoError(t, err)
+
+	requireCmdOutput(t, env, "federation", "leave", "--project", "fedlab", "--yes")
+	_, err = env.DB.FederationBindingByProject(ctx, project.ID)
+	require.ErrorIs(t, err, db.ErrNotFound, "leave must remove the binding")
+
+	out := join("rejoin-token")
+	assert.Contains(t, out, "joined federation project fedlab")
+	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.True(t, binding.PushEnabled, "rejoin must honor --push")
+	assert.Equal(t, int64(0), binding.PushCursorEventID,
+		"rejoin re-offers local-origin events from 0 for hub-side dedup")
+	creds, err := config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, "rejoin-token", creds.Projects[project.UID].Token,
+		"rejoin must store the fresh enrollment token")
+}
+
+// TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin: when the spoke's
+// same-name project already shares the hub project's UID (it previously left
+// this federation), enroll must not auto-mark adoption — the printed join is
+// a plain rejoin that rebinds without rewriting local event history.
+func TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin(t *testing.T) {
+	resetFlags(t)
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	spoke := testenv.New(t)
+	t.Setenv("KATA_SERVER", spoke.URL)
+	ctx := context.Background()
+	hubProject, err := hub.DB.CreateProject(ctx, "fedlab")
+	require.NoError(t, err)
+	_, err = spoke.DB.CreateProjectWithUID(ctx, "fedlab", hubProject.UID)
+	require.NoError(t, err)
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--project", "fedlab",
+		"federation", "enroll",
+		"--spoke-instance", spoke.DB.InstanceUID(),
+		"--hub-url", hub.URL,
+		"--actor", "operator",
+	})
+
+	require.NoError(t, cmd.Execute())
+	out := buf.String()
+	assert.Contains(t, out, "federation join")
+	assert.NotContains(t, out, "--adopt-existing",
+		"a UID-holder rejoin must not be railroaded into adoption")
+
+	enrollments, err := hub.DB.ListFederationEnrollments(ctx)
+	require.NoError(t, err)
+	require.Len(t, enrollments, 1)
+	assert.False(t, enrollments[0].AllowAdoptionSnapshotAuthors)
+}
+
+// TestFederationLeaveWarnsAboutActiveGlobalEnrollment: leave revokes the
+// project-scoped enrollment but must not silently ignore a matching GLOBAL
+// enrollment — it still authorizes the project, yet may serve the spoke's
+// other projects, so it is surfaced as a warning instead of auto-revoked.
+func TestFederationLeaveWarnsAboutActiveGlobalEnrollment(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	const hubProjectID int64 = 42
+	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+	hub.globalEnrollmentID = 11
+	seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+
+	stdout, stderr, err := runCmdCapture(t, env, "federation", "leave",
+		"--project", "spoke-project", "--yes")
+	require.NoError(t, err)
+
+	require.Equal(t, []int64{hub.enrollmentID}, hub.revokedIDs,
+		"only the project-scoped enrollment is revoked")
+	assert.Contains(t, stdout, "standalone")
+	assert.Contains(t, stderr, "global enrollment(s) #11")
+	assert.Contains(t, stderr, "remain active")
 }

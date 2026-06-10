@@ -1836,6 +1836,32 @@ components:
       required:
         - labels
       type: object
+    LeaveFederationReplicaRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        disposition:
+          type: string
+        force:
+          type: boolean
+      type: object
+    LeaveFederationReplicaResultBody:
+      additionalProperties: true
+      properties:
+        archived:
+          type: boolean
+        detached:
+          type: boolean
+        disposition:
+          type: string
+        project:
+          $ref: "#/components/schemas/ProjectOut"
+      required:
+        - project
+        - detached
+        - disposition
+      type: object
     LinkChanges:
       additionalProperties: true
       properties:
@@ -3223,6 +3249,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreateFederationReplicaBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/federation/replicas/{project_id}/actions/leave:
+    post:
+      operationId: leaveFederationReplica
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: X-Kata-Confirm
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeaveFederationReplicaRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaveFederationReplicaResultBody"
           description: OK
         default:
           content:

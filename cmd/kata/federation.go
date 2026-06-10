@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,6 +16,8 @@ import (
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 	hubclient "go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/textsafe"
 )
@@ -30,6 +33,7 @@ func newFederationCmd() *cobra.Command {
 		federationEnrollCmd(),
 		federationEnrollmentsCmd(),
 		federationJoinCmd(),
+		federationLeaveCmd(),
 		federationRevokeCmd(),
 		federationStatusCmd(),
 		federationQuarantineCmd(),
@@ -168,8 +172,16 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			adoptExisting := adoptExistingFlag || (pushCapable &&
-				federationSpokeProjectExists(ctx, metadata.ProjectName, spokeInstance))
+			adoptExisting := adoptExistingFlag
+			if !adoptExisting && pushCapable {
+				if spokeUID, ok := federationSpokeProjectUID(ctx, metadata.ProjectName, spokeInstance); ok {
+					// A same-name spoke project is normally adopted — unless it
+					// already shares the hub project's UID (it previously left
+					// this federation). Then the join is a plain rejoin and
+					// adoption would needlessly rewrite its event history.
+					adoptExisting = spokeUID == "" || spokeUID != metadata.ProjectUID
+				}
+			}
 			status, bs, err := httpDoJSON(ctx, hubClient, http.MethodPost,
 				hubBaseURL+"/api/v1/federation/enrollments",
 				map[string]any{
@@ -236,20 +248,29 @@ func federationEnrollHTTPClientError(err error) error {
 }
 
 func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstance string) bool {
+	_, ok := federationSpokeProjectUID(ctx, projectName, spokeInstance)
+	return ok
+}
+
+// federationSpokeProjectUID reports whether the default/spoke daemon (when its
+// instance matches spokeInstance) has a project named projectName, returning
+// that project's UID. The UID is "" when the daemon's list payload predates
+// uid, in which case callers should fall back to the adoption default.
+func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance string) (string, bool) {
 	spokeURL, err := ensureDaemon(ctx)
 	if err != nil {
-		return false
+		return "", false
 	}
 	spokeClient, err := clientpkg.NewHTTPClientForTarget(ctx, spokeURL, clientpkg.TargetAuth{}, clientpkg.Opts{
 		Timeout: envHTTPTimeout(defaultHTTPTimeout),
 	})
 	if err != nil {
-		return false
+		return "", false
 	}
 	if strings.TrimSpace(spokeInstance) != "" {
 		uid, err := federationSpokeInstanceUID(ctx, spokeClient, spokeURL)
 		if err != nil || uid != strings.TrimSpace(spokeInstance) {
-			return false
+			return "", false
 		}
 	}
 	return federationSpokeProjectNameExists(ctx, spokeClient, spokeURL, projectName)
@@ -272,27 +293,30 @@ func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseUR
 	return strings.TrimSpace(body.InstanceUID), nil
 }
 
-func federationSpokeProjectNameExists(ctx context.Context, client *http.Client, baseURL, projectName string) bool {
+func federationSpokeProjectNameExists(ctx context.Context, client *http.Client, baseURL, projectName string) (string, bool) {
 	projectName = strings.TrimSpace(projectName)
 	if projectName == "" {
-		return false
+		return "", false
 	}
 	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/projects", nil)
 	if err != nil || status >= 400 {
-		return false
+		return "", false
 	}
 	var body struct {
-		Projects []projectRef `json:"projects"`
+		Projects []struct {
+			Name string `json:"name"`
+			UID  string `json:"uid"`
+		} `json:"projects"`
 	}
 	if err := json.Unmarshal(bs, &body); err != nil {
-		return false
+		return "", false
 	}
 	for _, project := range body.Projects {
 		if project.Name == projectName {
-			return true
+			return project.UID, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func federationEnrollmentsCmd() *cobra.Command {
@@ -454,6 +478,377 @@ func federationJoinCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&bundle.PushEnabled, "push", false, "enable spoke push")
 	cmd.Flags().BoolVar(&bundle.AdoptExisting, "adopt-existing", false, "adopt matching existing local data into the federation")
 	return cmd
+}
+
+// spokeLeaveTarget captures the resolved local spoke a leave will tear down.
+// When standalone is true, the project has no federation binding; leave is a
+// no-op for plain detach and proceeds to archive-only (no hub revoke) for
+// --delete. hubURL, hubProjectID, and instanceUID are only valid when
+// standalone is false.
+type spokeLeaveTarget struct {
+	projectID     int64
+	projectName   string
+	hubURL        string
+	hubProjectID  int64
+	instanceUID   string
+	allowInsecure bool
+	standalone    bool
+}
+
+func federationLeaveCmd() *cobra.Command {
+	var (
+		deleteFlag bool
+		force      bool
+		localOnly  bool
+		hubName    string
+		hubToken   string
+		yes        bool
+	)
+	cmd := &cobra.Command{
+		Use:   "leave [project]",
+		Short: "leave a hub federation as a spoke (revoke + local teardown)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if force && !deleteFlag {
+				return &cliError{Message: "--force requires --delete", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			ctx := cmd.Context()
+			baseURL, err := ensureDaemon(ctx)
+			if err != nil {
+				return err
+			}
+			client, err := httpClientFor(ctx, baseURL)
+			if err != nil {
+				return err
+			}
+			target, err := resolveSpokeForLeave(ctx, client, baseURL, args)
+			if err != nil {
+				return err
+			}
+			disposition := "detach"
+			if deleteFlag {
+				disposition = "archive"
+			}
+			// Standalone path: project has no federation binding. Plain leave is a
+			// no-op success; --delete proceeds to archive without any hub revoke.
+			if target.standalone {
+				if !deleteFlag {
+					// Already standalone: route through the output-mode-aware
+					// printer so --json/--agent are honored, not a raw string.
+					return printFederationLeaveAlreadyStandalone(cmd, target.projectName)
+				}
+				// --delete on a standalone project: archive only, skip hub revoke.
+				// Gate the archive on the same confirmation as the bound path
+				// (no hub revoke note, since there is no hub contact here).
+				if err := confirmFederationLeave(cmd, target, "archive", true, yes); err != nil {
+					return err
+				}
+				actor, _ := resolveActor(ctx, flags.As, nil)
+				status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
+					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
+					map[string]any{"disposition": "archive", "force": force, "actor": actor})
+				if err != nil {
+					return err
+				}
+				if status >= 400 {
+					return apiErrFromBody(status, bs)
+				}
+				return printFederationLeave(cmd, bs)
+			}
+			if err := confirmFederationLeave(cmd, target, disposition, localOnly, yes); err != nil {
+				return err
+			}
+			if localOnly {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"warning: --local-only skips hub revoke; the enrollment token remains valid until you run `kata federation revoke <id>` on the hub %s\n",
+					textsafe.Line(target.hubURL))
+			} else {
+				globals, err := revokeSpokeEnrollmentsOnHub(ctx, target, hubAuthInputs{
+					hubURL:        target.hubURL,
+					hubName:       hubName,
+					hubToken:      hubToken,
+					allowInsecure: target.allowInsecure,
+				})
+				if err != nil {
+					return err
+				}
+				if len(globals) > 0 {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"warning: global enrollment(s) %s for this spoke remain active on the hub and still authorize this project; revoke with `kata federation revoke <id>` if intended\n",
+						formatEnrollmentIDList(globals))
+				}
+			}
+			actor, _ := resolveActor(ctx, flags.As, nil)
+			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
+				fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
+				map[string]any{"disposition": disposition, "force": force, "actor": actor})
+			if err != nil {
+				return err
+			}
+			if status >= 400 {
+				return apiErrFromBody(status, bs)
+			}
+			return printFederationLeave(cmd, bs)
+		},
+	}
+	cmd.Flags().BoolVar(&deleteFlag, "delete", false, "archive the local replica after detaching (reversible via kata projects restore)")
+	cmd.Flags().BoolVar(&force, "force", false, "with --delete, override the open-issue refusal")
+	cmd.Flags().BoolVar(&localOnly, "local-only", false, "skip the hub revoke when the hub is unreachable (leaves the token valid)")
+	cmd.Flags().StringVar(&hubName, "hub", "", "named daemon catalog entry for hub admin auth")
+	cmd.Flags().StringVar(&hubToken, "hub-token", "", "explicit hub admin token (highest precedence)")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip the interactive confirmation")
+	return cmd
+}
+
+// resolveSpokeForLeave resolves the target project and its federation status:
+//   - spoke binding → returns a full spokeLeaveTarget (normal leave path).
+//   - no binding     → returns spokeLeaveTarget{standalone: true} (idempotent
+//     no-op for plain leave; archive-only path for --delete).
+//   - hub binding    → hard error "not_a_spoke" (this command does not disband
+//     hubs).
+func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL string, args []string) (spokeLeaveTarget, error) {
+	project, err := resolveFederationProject(ctx, client, baseURL, args, false)
+	if err != nil {
+		return spokeLeaveTarget{}, err
+	}
+	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
+	if err != nil {
+		return spokeLeaveTarget{}, err
+	}
+	if status >= 400 {
+		return spokeLeaveTarget{}, apiErrFromBody(status, bs)
+	}
+	var body api.FederationStatusBody
+	if err := json.Unmarshal(bs, &body); err != nil {
+		return spokeLeaveTarget{}, err
+	}
+	var match *api.FederationProjectStatus
+	for i := range body.Statuses {
+		if body.Statuses[i].ProjectID == project.ID {
+			match = &body.Statuses[i]
+			break
+		}
+	}
+	// No binding at all → project is already standalone. Return the standalone
+	// signal so the caller can no-op (plain leave) or archive (--delete) without
+	// any hub contact.
+	if match == nil {
+		return spokeLeaveTarget{
+			projectID:   project.ID,
+			projectName: project.Name,
+			standalone:  true,
+		}, nil
+	}
+	// Hub-role binding → refuse with not_a_spoke (this command only handles
+	// spoke teardown; hub disbanding is out of scope).
+	if match.Role != string(db.FederationRoleSpoke) {
+		return spokeLeaveTarget{}, &cliError{
+			Message:  fmt.Sprintf("project %s is not a spoke", project.Name),
+			Code:     "not_a_spoke",
+			Kind:     kindValidation,
+			ExitCode: ExitValidation,
+		}
+	}
+	instanceUID, err := federationSpokeInstanceUID(ctx, client, baseURL)
+	if err != nil {
+		return spokeLeaveTarget{}, err
+	}
+	return spokeLeaveTarget{
+		projectID:     project.ID,
+		projectName:   project.Name,
+		hubURL:        strings.TrimRight(match.HubURL, "/"),
+		hubProjectID:  match.HubProjectID,
+		instanceUID:   instanceUID,
+		allowInsecure: match.AllowInsecure,
+	}, nil
+}
+
+// revokeSpokeEnrollmentsOnHub lists the hub's enrollments and revokes every
+// active one bound to this spoke instance and hub project. Zero active matches
+// is success (already revoked). Any hub transport/auth failure aborts before
+// local teardown and instructs the operator to retry with --local-only.
+// revokeSpokeEnrollmentsOnHub revokes every active project-scoped enrollment
+// for this spoke instance + hub project. Matching GLOBAL enrollments
+// (project_id NULL) are returned, not revoked: they may authorize the spoke's
+// other projects on the hub, but they do keep authorizing the left project, so
+// the caller warns about them.
+func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, in hubAuthInputs) ([]int64, error) {
+	cat, err := config.ReadDaemonConfig()
+	if err != nil {
+		return nil, err
+	}
+	auth, err := resolveHubAdminAuth(cat, in)
+	if err != nil {
+		return nil, err
+	}
+	hub, err := hubAdminClient(ctx, auth)
+	if err != nil {
+		return nil, federationLeaveHubError(err)
+	}
+	status, bs, err := httpDoJSON(ctx, hub, http.MethodGet, auth.url+"/api/v1/federation/enrollments", nil)
+	if err != nil {
+		return nil, federationLeaveHubError(err)
+	}
+	if status >= 400 {
+		return nil, federationLeaveHubError(apiErrFromBody(status, bs))
+	}
+	var list api.ListFederationEnrollmentsBody
+	if err := json.Unmarshal(bs, &list); err != nil {
+		return nil, err
+	}
+	var globals []int64
+	for _, enrollment := range list.Enrollments {
+		if enrollment.RevokedAt != nil {
+			continue
+		}
+		if enrollment.SpokeInstanceUID != target.instanceUID {
+			continue
+		}
+		if enrollment.ProjectID == nil {
+			globals = append(globals, enrollment.ID)
+			continue
+		}
+		if *enrollment.ProjectID != target.hubProjectID {
+			continue
+		}
+		status, bs, err := httpDoJSON(ctx, hub, http.MethodPost,
+			fmt.Sprintf("%s/api/v1/federation/enrollments/%d/revoke", auth.url, enrollment.ID), map[string]any{})
+		if err != nil {
+			return nil, federationLeaveHubError(err)
+		}
+		if status >= 400 {
+			return nil, federationLeaveHubError(apiErrFromBody(status, bs))
+		}
+	}
+	return globals, nil
+}
+
+func formatEnrollmentIDList(ids []int64) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, fmt.Sprintf("#%d", id))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// federationLeaveHubError wraps a hub-side failure with guidance to retry the
+// leave with --local-only, since the local teardown is intentionally not
+// attempted when the hub revoke cannot complete.
+func federationLeaveHubError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("hub revoke failed: %w; rerun `kata federation leave --local-only` to tear down locally, then revoke on the hub later", err)
+}
+
+func confirmFederationLeave(cmd *cobra.Command, target spokeLeaveTarget, disposition string, localOnly, yes bool) error {
+	if yes {
+		return nil
+	}
+	action := "detach"
+	if disposition == "archive" {
+		action = "archive"
+	}
+	revokeNote := fmt.Sprintf("revoke the hub enrollment on %s, then ", textsafe.Line(target.hubURL))
+	if localOnly {
+		revokeNote = ""
+	}
+	prompt := fmt.Sprintf("This will %sleave federation for %q (%s). Continue? [y/N]: ",
+		revokeNote, textsafe.Line(target.projectName), action)
+	return resolveYesNo(cmd, prompt)
+}
+
+// resolveYesNo prompts for a yes/no confirmation on a TTY and accepts y/yes
+// (case-insensitive). Without a TTY it returns confirm_required, mirroring
+// resolveConfirm so noninteractive callers must pass --yes.
+func resolveYesNo(cmd *cobra.Command, prompt string) error {
+	if !isTTY(os.Stdin) {
+		return &cliError{
+			Message:  "no TTY: pass --yes to proceed noninteractively",
+			Code:     "confirm_required",
+			Kind:     kindConfirm,
+			ExitCode: ExitConfirm,
+		}
+	}
+	if _, err := fmt.Fprint(cmd.ErrOrStderr(), prompt); err != nil {
+		return err
+	}
+	r := bufio.NewReader(cmd.InOrStdin())
+	//nolint:errcheck // EOF here means stdin closed; treat as a "no".
+	line, _ := r.ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return nil
+	default:
+		return &cliError{
+			Message:  "leave cancelled",
+			Code:     "confirm_mismatch",
+			Kind:     kindConfirm,
+			ExitCode: ExitConfirm,
+		}
+	}
+}
+
+func printFederationLeave(cmd *cobra.Command, bs []byte) error {
+	if currentOutputMode() == outputJSON {
+		var buf bytes.Buffer
+		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+		return err
+	}
+	var body api.LeaveFederationReplicaResultBody
+	if err := json.Unmarshal(bs, &body); err != nil {
+		return err
+	}
+	if currentOutputMode() == outputAgent {
+		return writeAgentKVRow(cmd.OutOrStdout(),
+			agentRowField("project", body.Project.Name),
+			agentRowField("disposition", body.Disposition),
+			agentRowField("detached", strconv.FormatBool(body.Detached)),
+			agentRowField("archived", strconv.FormatBool(body.Archived)),
+		)
+	}
+	if flags.Quiet {
+		return nil
+	}
+	if body.Archived {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(),
+			"left federation and archived %s (restore with `kata projects restore %s`)\n",
+			textsafe.Line(body.Project.Name), textsafe.Line(body.Project.Name))
+		return err
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(),
+		"left federation: %s is now a standalone local project\n", textsafe.Line(body.Project.Name))
+	return err
+}
+
+// printFederationLeaveAlreadyStandalone reports the no-op "already standalone"
+// outcome through the same output-mode-aware surface as printFederationLeave so
+// --json/--agent are honored. Nothing was detached or archived.
+func printFederationLeaveAlreadyStandalone(cmd *cobra.Command, projectName string) error {
+	if currentOutputMode() == outputJSON {
+		return emitJSON(cmd.OutOrStdout(), api.LeaveFederationReplicaResultBody{
+			Project:     api.ProjectOut{Name: projectName},
+			Detached:    false,
+			Disposition: "detach",
+		})
+	}
+	if currentOutputMode() == outputAgent {
+		return writeAgentKVRow(cmd.OutOrStdout(),
+			agentRowField("project", projectName),
+			agentRowField("disposition", "detach"),
+			agentRowField("detached", strconv.FormatBool(false)),
+			agentRowField("archived", strconv.FormatBool(false)),
+		)
+	}
+	if flags.Quiet {
+		return nil
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(),
+		"project %s is already standalone\n", textsafe.Line(projectName))
+	return err
 }
 
 func federationStatusCmd() *cobra.Command {

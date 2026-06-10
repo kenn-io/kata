@@ -142,6 +142,7 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.cache = newIssueCache()
 	m.projectLabels = newLabelCache()
 	m.projectsByID = map[int64]string{}
+	m.projectUIDByID = map[int64]string{}
 	m.projectIdentByID = map[int64]string{}
 	m.projectStats = map[int64]ProjectStatsSummary{}
 	m.projectsCursor = 0
@@ -178,10 +179,12 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	m.nextDetailFollowGen++
 	if len(conn.init.projects) > 0 {
 		m.projectsByID = make(map[int64]string, len(conn.init.projects))
+		m.projectUIDByID = make(map[int64]string, len(conn.init.projects))
 		m.projectIdentByID = make(map[int64]string, len(conn.init.projects))
 		m.projectStats = make(map[int64]ProjectStatsSummary, len(conn.init.projects))
 		for _, r := range conn.init.projects {
 			m.projectsByID[r.ID] = r.Name
+			m.projectUIDByID[r.ID] = r.UID
 			m.projectIdentByID[r.ID] = r.Name
 			if r.Stats != nil {
 				m.projectStats[r.ID] = *r.Stats

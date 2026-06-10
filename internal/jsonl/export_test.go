@@ -215,7 +215,17 @@ func TestExportFederationKindOrderPlacesEnrollmentBeforeEvent(t *testing.T) {
 
 func TestExportFederationSyncStatus(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
-	err := d.RecordFederationSyncPullStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:00.000Z"))
+	// federation_sync_status writers no-op without a live binding (the leave
+	// sync-race guard), so seed one before recording sync status.
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleHub,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 1,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	err = d.RecordFederationSyncPullStarted(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:00.000Z"))
 	require.NoError(t, err)
 	err = d.RecordFederationSyncPullSuccess(ctx, p.ID, mustParseTime(t, "2026-05-23T01:00:01.000Z"))
 	require.NoError(t, err)

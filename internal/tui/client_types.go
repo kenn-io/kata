@@ -174,6 +174,9 @@ type ResolveResp struct {
 type ProjectSummary struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
+	// UID is the project's durable identity. Federated replicas share it with
+	// their hub project, which is how the enroll flow recognizes a rejoin.
+	UID string `json:"uid,omitempty"`
 }
 
 // InstanceInfo is the daemon instance identity returned by /api/v1/instance.
@@ -201,6 +204,16 @@ type ProjectFederationMetadata = api.ProjectFederationBody
 
 // FederationReplicaResult is the spoke join/adoption result response.
 type FederationReplicaResult = api.CreateFederationReplicaBody
+
+// LeaveFederationReplicaResult is the spoke leave (detach/archive) response.
+type LeaveFederationReplicaResult = api.LeaveFederationReplicaResultBody
+
+// LeaveFederationReplicaInput is the spoke leave request body.
+type LeaveFederationReplicaInput struct {
+	Disposition string `json:"disposition,omitempty"` // "detach" | "archive"
+	Force       bool   `json:"force,omitempty"`
+	Actor       string `json:"actor,omitempty"`
+}
 
 // CreateFederationReplicaInput is the spoke join/adoption request body.
 type CreateFederationReplicaInput struct {

@@ -7,6 +7,10 @@ type StreamEventsHeaders struct {
 	LastEventID *int64 `json:"Last-Event-ID,omitempty"`
 }
 
+type LeaveFederationReplicaHeaders struct {
+	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
+}
+
 type PollFederationProjectEventsHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }

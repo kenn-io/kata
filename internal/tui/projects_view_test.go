@@ -142,6 +142,16 @@ func TestProjectsView_FTransitionsToFederationWithHighlightedProjectSelected(t *
 	out, cmd = out.routeFederationViewKey(keyRune('n'))
 
 	require.Nil(t, cmd)
+	// The local-project step is shown with the highlighted project pre-cursored
+	// (never skipped); one Enter proceeds to hub selection with it adopted.
+	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
+	rows := federationLocalProjectRows(out)
+	require.Greater(t, len(rows), out.federationLocalProjectCursor)
+	require.False(t, rows[out.federationLocalProjectCursor].createReplica)
+	assert.Equal(t, "beta-project", rows[out.federationLocalProjectCursor].project.Name)
+
+	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.Nil(t, cmd)
 	assert.Equal(t, federationModeSelectHub, out.federationMode)
 	assert.Equal(t, int64(22), out.federationDraft.SpokeProjectID)
 	assert.Equal(t, "beta-project", out.federationDraft.SpokeProjectName)

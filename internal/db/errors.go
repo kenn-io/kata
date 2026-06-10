@@ -172,6 +172,10 @@ var (
 	// ErrFederationIngestValidation is returned by IngestFederationEvents when a
 	// batch fails validation.
 	ErrFederationIngestValidation = errors.New("federation ingest validation")
+
+	// ErrFederationNotSpoke is returned when a leave is attempted on a project
+	// whose binding is not a spoke (e.g. a hub).
+	ErrFederationNotSpoke = errors.New("federation binding is not a spoke")
 )
 
 // LinkTargetNotFoundError carries the offending project-scoped number

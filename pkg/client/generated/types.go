@@ -7473,6 +7473,133 @@ func (l LabelsListResponseBody) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+type LeaveFederationReplicaRequestBody struct {
+	Actor       *string `json:"actor,omitempty"`
+	Disposition *string `json:"disposition,omitempty"`
+	Force       *bool   `json:"force,omitempty"`
+}
+
+type LeaveFederationReplicaResultBody struct {
+	Archived             *bool          `json:"archived,omitempty"`
+	Detached             bool           `json:"detached"`
+	Disposition          string         `json:"disposition" validate:"required"`
+	Project              ProjectOut     `json:"project"`
+	AdditionalProperties map[string]any `json:"-"`
+}
+
+func (l LeaveFederationReplicaResultBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Disposition, "required"); err != nil {
+		errors = errors.Append("Disposition", err)
+	}
+	if v, ok := any(l.Project).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Project", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+// Getter for additional properties for LeaveFederationReplicaResultBody. Returns the specified
+// element and whether it was found
+func (l LeaveFederationReplicaResultBody) Get(fieldName string) (value any, found bool) {
+	if l.AdditionalProperties != nil {
+		value, found = l.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for LeaveFederationReplicaResultBody
+func (l *LeaveFederationReplicaResultBody) Set(fieldName string, value any) {
+	if l.AdditionalProperties == nil {
+		l.AdditionalProperties = make(map[string]any)
+	}
+	l.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for LeaveFederationReplicaResultBody to handle AdditionalProperties
+func (l *LeaveFederationReplicaResultBody) UnmarshalJSON(data []byte) error {
+	object := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(data, &object); err != nil {
+		return err
+	}
+
+	if raw, found := object["archived"]; found {
+		if err := json.Unmarshal(raw, &l.Archived); err != nil {
+			return fmt.Errorf("error reading 'archived': %w", err)
+		}
+		delete(object, "archived")
+	}
+	if raw, found := object["detached"]; found {
+		if err := json.Unmarshal(raw, &l.Detached); err != nil {
+			return fmt.Errorf("error reading 'detached': %w", err)
+		}
+		delete(object, "detached")
+	}
+	if raw, found := object["disposition"]; found {
+		if err := json.Unmarshal(raw, &l.Disposition); err != nil {
+			return fmt.Errorf("error reading 'disposition': %w", err)
+		}
+		delete(object, "disposition")
+	}
+	if raw, found := object["project"]; found {
+		if err := json.Unmarshal(raw, &l.Project); err != nil {
+			return fmt.Errorf("error reading 'project': %w", err)
+		}
+		delete(object, "project")
+	}
+	if len(object) != 0 {
+		l.AdditionalProperties = make(map[string]any)
+		for fieldName, fieldBuf := range object {
+			var fieldVal any
+			if err := json.Unmarshal(fieldBuf, &fieldVal); err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			l.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for LeaveFederationReplicaResultBody to handle AdditionalProperties
+func (l LeaveFederationReplicaResultBody) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if l.Archived != nil {
+		object["archived"], err = json.Marshal(l.Archived)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'archived': %w", err)
+		}
+	}
+
+	object["detached"], err = json.Marshal(l.Detached)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'detached': %w", err)
+	}
+
+	object["disposition"], err = json.Marshal(l.Disposition)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'disposition': %w", err)
+	}
+
+	object["project"], err = json.Marshal(l.Project)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'project': %w", err)
+	}
+
+	for fieldName, field := range l.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
 type LinkChanges struct {
 	BlockedByAdded       []LinkPeer     `json:"blocked_by_added,omitempty"`
 	BlockedByRemoved     []LinkPeer     `json:"blocked_by_removed,omitempty"`

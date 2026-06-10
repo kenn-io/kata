@@ -406,6 +406,40 @@ func (c *Client) CreateFederationReplica(
 	return resp, err
 }
 
+// ListFederationEnrollments lists the hub's federation transport grants. Used
+// by the leave flow to find the active enrollments to revoke before teardown.
+// Tokens are never returned by this endpoint.
+func (c *Client) ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error) {
+	var resp struct {
+		Enrollments []FederationEnrollment `json:"enrollments"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/v1/federation/enrollments", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Enrollments, nil
+}
+
+// RevokeFederationEnrollment revokes one hub enrollment by ID. Revocation is
+// idempotent at the daemon; an already-revoked row still reports revoked.
+func (c *Client) RevokeFederationEnrollment(ctx context.Context, enrollmentID int64) error {
+	path := fmt.Sprintf("/api/v1/federation/enrollments/%d/revoke", enrollmentID)
+	return c.do(ctx, http.MethodPost, path, map[string]any{}, nil)
+}
+
+// LeaveFederationReplica tears down a local spoke replica (detach or archive).
+// This is the local-only daemon primitive; the hub revoke is composed by the
+// caller before invoking it, mirroring the CLI leave orchestration.
+func (c *Client) LeaveFederationReplica(
+	ctx context.Context,
+	projectID int64,
+	body LeaveFederationReplicaInput,
+) (LeaveFederationReplicaResult, error) {
+	var resp LeaveFederationReplicaResult
+	path := fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", projectID)
+	err := c.do(ctx, http.MethodPost, path, body, &resp)
+	return resp, err
+}
+
 // ListProjectsWithStats returns every active project with per-project
 // aggregates {open, closed, last_event_at} populated. Used by the
 // projects view. Spec §7.3.

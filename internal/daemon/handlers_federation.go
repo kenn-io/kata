@@ -251,6 +251,94 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 
 	huma.Register(humaAPI, huma.Operation{
+		OperationID: "leaveFederationReplica",
+		Method:      "POST",
+		Path:        "/api/v1/federation/replicas/{project_id}/actions/leave",
+	}, func(ctx context.Context, in *api.LeaveFederationReplicaRequest) (*api.LeaveFederationReplicaResponse, error) {
+		if in.ProjectID <= 0 {
+			return nil, api.NewError(http.StatusBadRequest, "validation", "project_id must be a positive integer", "", nil)
+		}
+		disposition := strings.TrimSpace(in.Body.Disposition)
+		if disposition == "" {
+			disposition = "detach"
+		}
+		if disposition != "detach" && disposition != "archive" {
+			return nil, api.NewError(http.StatusBadRequest, "validation", `disposition must be "detach" or "archive"`, "", nil)
+		}
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
+			return nil, err
+		}
+		// Refuse a non-spoke before any teardown so an archive-leave on a hub
+		// project does not archive it and then fail to detach. A project with no
+		// binding is the idempotent resume case and is allowed (RemoveProject and
+		// LeaveFederationReplica below handle existence and the standalone path).
+		if binding, bErr := cfg.DB.FederationBindingByProject(ctx, in.ProjectID); bErr == nil {
+			if binding.Role != db.FederationRoleSpoke {
+				return nil, api.NewError(http.StatusConflict, "not_a_spoke", "federation binding is not a spoke", "", nil)
+			}
+		} else if !errors.Is(bErr, db.ErrNotFound) {
+			return nil, api.NewError(http.StatusInternalServerError, "internal", bErr.Error(), "", nil)
+		}
+
+		body := api.LeaveFederationReplicaResultBody{Detached: true, Disposition: disposition}
+		// Archive FIRST when requested. RemoveProject's own transaction is the
+		// authoritative open-issue check, so a refused archive never tears down
+		// federation — there is no external-preflight TOCTOU and no
+		// "detached-but-not-archived" partial state. Only a committed archive
+		// proceeds to the detach below.
+		if disposition == "archive" {
+			project, evt, err := cfg.DB.RemoveProject(ctx, db.RemoveProjectParams{
+				ProjectID: in.ProjectID, Actor: actor, Force: in.Body.Force,
+			})
+			var openErr *db.ProjectHasOpenIssuesError
+			switch {
+			case errors.Is(err, db.ErrNotFound):
+				return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+			case errors.As(err, &openErr):
+				return nil, api.NewError(http.StatusConflict, "project_has_open_issues", "project has open issues",
+					"close the open issues first, or pass force=true",
+					map[string]any{"open_issues": openErr.OpenIssues})
+			case errors.Is(err, db.ErrProjectAlreadyArchived):
+				return nil, api.NewError(http.StatusConflict, "project_already_archived",
+					"project is already archived", "", nil)
+			case err != nil:
+				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			}
+			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
+			cfg.Hooks.Enqueue(*evt)
+			body.Project = dbProjectToOut(project)
+			body.Archived = true
+		}
+
+		res, err := cfg.DB.LeaveFederationReplica(ctx, in.ProjectID)
+		switch {
+		case errors.Is(err, db.ErrNotFound):
+			return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+		case errors.Is(err, db.ErrFederationNotSpoke):
+			return nil, api.NewError(http.StatusConflict, "not_a_spoke", "federation binding is not a spoke", "", nil)
+		case err != nil:
+			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		}
+		if res.ProjectUID != "" {
+			if err := config.DeleteFederationCredential(res.ProjectUID); err != nil {
+				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			}
+		}
+		if !body.Archived {
+			project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
+			if err != nil {
+				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			}
+			body.Project = dbProjectToOut(project)
+		}
+		if cfg.FederationWake != nil {
+			cfg.FederationWake()
+		}
+		return &api.LeaveFederationReplicaResponse{Body: body}, nil
+	})
+
+	huma.Register(humaAPI, huma.Operation{
 		OperationID: "pollFederationProjectEvents",
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/federation/events",
@@ -424,6 +512,12 @@ func adoptExistingReplica(
 						api.NewError(409, "federation_project_collision",
 							fmt.Sprintf("hub project UID belongs to local project %q; cannot adopt local project %q", project.Name, projectName), "", nil)
 				}
+				// An explicit adopt_existing on an unbound UID-holder is
+				// honored: adoption is the actor-safe transmission path for
+				// local events authored by other actors (raw push would be
+				// rejected by the hub's actor binding). The post-leave rejoin
+				// railroading is prevented upstream — the enroll command and
+				// the TUI no longer request adoption for UID-holders.
 				result, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
 					ProjectID:            project.ID,
 					HubURL:               in.Body.HubURL,
@@ -517,7 +611,8 @@ func ensureReplicaBinding(
 	} else if err != nil {
 		return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
 	} else if project.DeletedAt != nil {
-		return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision", "a deleted project already has the hub project UID", "", nil)
+		return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision",
+			fmt.Sprintf("an archived local project %q already has the hub project UID; restore it with `kata projects restore` first", project.Name), "", nil)
 	}
 
 	replayHorizon := in.Body.ReplayHorizonEventID
@@ -540,7 +635,28 @@ func ensureReplicaBinding(
 	} else if !errors.Is(err, db.ErrNotFound) {
 		return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
 	} else if !createdProject {
-		return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision", "an existing unbound project already has the hub project UID", "", nil)
+		// An unbound local project holding the hub project UID is the normal
+		// post-leave state: leave removes the binding but the project keeps the
+		// shared identity. A join naming that project is a rejoin — rebind it.
+		// Pull restarts just below the replay horizon (event-UID dedup absorbs
+		// the overlap) and a push-enabled rejoin re-offers local-origin events
+		// from cursor 0 so the hub dedups what it already has and absorbs edits
+		// made while the project was standalone.
+		//
+		// Trust model: a spoke and the hubs it federates with trust each other
+		// (docs/design/federation.md "Tokens And Trust Boundaries" / "No
+		// Multi-Tenant Authorization Model"). The UID is an unguessable ULID, so
+		// a hub reporting it as a project identity means it IS the project that
+		// federated there; we do not defend against a hostile hub forging a known
+		// UID to capture local data (out of scope). The operator-facing rejoin
+		// preview (CLI/TUI) is the confirmation surface.
+		if project.Name != projectName {
+			return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_rejoin_name_mismatch",
+				fmt.Sprintf("hub project UID is held by local project %q, which previously left this federation; rerun join with --project %q to rejoin it", project.Name, project.Name), "", nil)
+		}
+		if in.Body.PushEnabled {
+			pushEnabled = true
+		}
 	}
 
 	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
