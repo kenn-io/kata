@@ -417,7 +417,12 @@ the binding's hub URL. With no hub credential the revoke request is sent
 **unauthenticated** — the local daemon's global `KATA_AUTH_TOKEN` /
 `[auth].token` is never sent to the hub origin implicitly, so a token-protected
 hub requires `--hub-token`, a catalog entry, or `--local-only`. The hub URL
-itself always comes from the binding. Leave also warns when the hub holds a
+itself always comes from the binding, and a catalog token is only ever sent to
+the origin its entry is configured for: a `--hub <name>` entry that is missing
+or whose URL does not match the binding's hub URL is rejected, so a catalog
+admin token cannot leak to a different hub. Use `--hub-token` when you
+deliberately need to present a token the catalog does not associate with that
+hub. Leave also warns when the hub holds a
 matching **global** enrollment (no project scope) for this spoke: it still
 authorizes the left project but is not auto-revoked, since it may serve the
 spoke's other projects.

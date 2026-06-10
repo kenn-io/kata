@@ -9,6 +9,7 @@ import (
 
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/textsafe"
 )
 
 type hubAuthInputs struct {
@@ -31,9 +32,13 @@ type hubAdminAuth struct {
 // origin implicitly; a token-protected hub requires --hub-token or a catalog
 // entry).
 //
-// The target URL is ALWAYS the binding's hub URL (in.hubURL); a catalog entry
-// supplies only the admin TOKEN, never the origin, so the admin token cannot be
-// redirected to a foreign host. allow_insecure for the hub client likewise
+// The target URL is ALWAYS the binding's hub URL (in.hubURL), and a catalog
+// token is only attached when its entry's URL matches that target: token and
+// origin travel together, so neither can redirect the other to a foreign host.
+// A --hub <name> entry that is missing or whose URL differs from the binding
+// errors out — sending a named entry's admin token to a different origin is
+// the cross-origin leak this guards against; --hub-token is the only
+// deliberate cross-origin path. allow_insecure for the hub client likewise
 // comes from the binding (in.allowInsecure), not the catalog.
 //
 // When a catalog entry IS selected (by --hub <name> or by URL match) but its
@@ -46,15 +51,37 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 		out.token = in.hubToken
 		return out, nil
 	}
-	if cat != nil {
-		if e := catalogByName(cat, in.hubName); e != nil {
-			token, err := selectedCatalogToken(e)
-			if err != nil {
-				return hubAdminAuth{}, err
-			}
-			out.token = token
-			return out, nil
+	if name := strings.TrimSpace(in.hubName); name != "" {
+		var e *config.CatalogDaemonConfig
+		if cat != nil {
+			e = catalogByName(cat, name)
 		}
+		if e == nil {
+			return hubAdminAuth{}, &cliError{
+				Message:  fmt.Sprintf("--hub %q does not match any daemon catalog entry", name),
+				Code:     "hub_catalog_entry_not_found",
+				Kind:     kindValidation,
+				ExitCode: ExitValidation,
+			}
+		}
+		if strings.TrimRight(e.URL, "/") != out.url {
+			return hubAdminAuth{}, &cliError{
+				Message: fmt.Sprintf(
+					"--hub %q resolves to %s, not this spoke's hub %s; refusing to send its admin token to a different origin (pass --hub-token to use an explicit token with this hub)",
+					name, textsafe.Line(e.URL), textsafe.Line(out.url)),
+				Code:     "hub_catalog_url_mismatch",
+				Kind:     kindValidation,
+				ExitCode: ExitValidation,
+			}
+		}
+		token, err := selectedCatalogToken(e)
+		if err != nil {
+			return hubAdminAuth{}, err
+		}
+		out.token = token
+		return out, nil
+	}
+	if cat != nil {
 		if e := catalogByURL(cat, out.url); e != nil {
 			token, err := selectedCatalogToken(e)
 			if err != nil {

@@ -584,7 +584,7 @@ func federationLeaveCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&deleteFlag, "delete", false, "archive the local replica after detaching (reversible via kata projects restore)")
 	cmd.Flags().BoolVar(&force, "force", false, "with --delete, override the open-issue refusal")
 	cmd.Flags().BoolVar(&localOnly, "local-only", false, "skip the hub revoke when the hub is unreachable (leaves the token valid)")
-	cmd.Flags().StringVar(&hubName, "hub", "", "named daemon catalog entry for hub admin auth")
+	cmd.Flags().StringVar(&hubName, "hub", "", "named daemon catalog entry for hub admin auth (its URL must match the binding's hub URL)")
 	cmd.Flags().StringVar(&hubToken, "hub-token", "", "explicit hub admin token (highest precedence)")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the interactive confirmation")
 	return cmd

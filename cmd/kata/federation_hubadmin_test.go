@@ -34,13 +34,27 @@ func TestResolveHubAdminAuthExplicitTokenKeepsBindingURL(t *testing.T) {
 	}
 }
 
-// TestResolveHubAdminAuthNamedEntryKeepsBindingURL is the core Fix 1 case: a
-// --hub <name> catalog entry supplies ONLY the token; the target URL must
-// remain the binding's hub URL even though the catalog entry has a different
-// URL, so the admin token is never sent to a foreign origin.
-func TestResolveHubAdminAuthNamedEntryKeepsBindingURL(t *testing.T) {
+// TestResolveHubAdminAuthNamedEntryURLMismatchErrors: a --hub <name> entry
+// whose URL differs from the binding's hub URL must be rejected. Attaching its
+// token while targeting the binding URL would send that entry's admin token to
+// a foreign origin (the binding hub); deliberate cross-origin token use is
+// --hub-token only.
+func TestResolveHubAdminAuthNamedEntryURLMismatchErrors(t *testing.T) {
+	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
+		Name: "hub", URL: "https://trusted.example", Token: "catalog-token",
+	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub"})
+	if err == nil {
+		t.Fatalf("expected an error when the named entry's URL does not match the binding hub URL")
+	}
+	requireCLIError(t, err, ExitValidation)
+}
+
+// TestResolveHubAdminAuthNamedEntryMatchingURLUsesToken: a --hub <name> entry
+// whose URL matches the binding hub URL (modulo trailing slash) supplies its
+// token, and the target stays the normalized binding URL.
+func TestResolveHubAdminAuthNamedEntryMatchingURLUsesToken(t *testing.T) {
 	out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
-		Name: "hub", URL: "https://attacker.example", Token: "catalog-token",
+		Name: "hub", URL: "https://bound.example/", Token: "catalog-token",
 	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "hub"})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -51,6 +65,19 @@ func TestResolveHubAdminAuthNamedEntryKeepsBindingURL(t *testing.T) {
 	if out.token != "catalog-token" {
 		t.Fatalf("token should come from the catalog entry, got %q", out.token)
 	}
+}
+
+// TestResolveHubAdminAuthNamedEntryNotFoundErrors: an explicitly selected
+// --hub <name> that resolves to no catalog entry must error rather than
+// silently falling through to URL-match or the unauthenticated fallback.
+func TestResolveHubAdminAuthNamedEntryNotFoundErrors(t *testing.T) {
+	_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
+		Name: "hub", URL: "https://bound.example", Token: "catalog-token",
+	}), hubAuthInputs{hubURL: "https://bound.example", hubName: "other-hub"})
+	if err == nil {
+		t.Fatalf("expected an error when --hub names a missing catalog entry")
+	}
+	requireCLIError(t, err, ExitValidation)
 }
 
 // TestResolveHubAdminAuthURLMatchToleratesTrailingSlash asserts the catalog
