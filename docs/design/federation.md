@@ -347,7 +347,9 @@ standalone project — removing the binding, sync-status, quarantine, and claim
 rows and deleting the daemon-local hub credential in one daemon-route operation
 (`POST /api/v1/federation/replicas/{id}/actions/leave`). Leaving is revoke-first,
 so a hub failure leaves local state intact for a clean retry; it is idempotent
-(a project with no binding is a no-op success). `--delete` also archives the
+(a project with no binding reports "already standalone", and the daemon route
+still runs so a stale hub credential left by a partial leave is deleted on the
+retry). `--delete` also archives the
 now-standalone project (reversible via `kata projects restore`), with archive
 eligibility checked before any detach so an open-issue refusal cannot leave the
 project half-torn-down; `--force` overrides that refusal. `--local-only` tears

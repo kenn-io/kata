@@ -481,10 +481,11 @@ func federationJoinCmd() *cobra.Command {
 }
 
 // spokeLeaveTarget captures the resolved local spoke a leave will tear down.
-// When standalone is true, the project has no federation binding; leave is a
-// no-op for plain detach and proceeds to archive-only (no hub revoke) for
-// --delete. hubURL, hubProjectID, and instanceUID are only valid when
-// standalone is false.
+// When standalone is true, the project has no federation binding; leave skips
+// hub revoke and confirmation for plain detach (the daemon call still runs to
+// clean up a stale credential) and proceeds to archive-only for --delete.
+// hubURL, hubProjectID, and instanceUID are only valid when standalone is
+// false.
 type spokeLeaveTarget struct {
 	projectID     int64
 	projectName   string
@@ -529,53 +530,42 @@ func federationLeaveCmd() *cobra.Command {
 			if deleteFlag {
 				disposition = "archive"
 			}
-			// Standalone path: project has no federation binding. Plain leave is a
-			// no-op success; --delete proceeds to archive without any hub revoke.
+			// Standalone path: project has no federation binding, so there is no
+			// hub contact either way. Plain leave skips the confirmation (nothing
+			// is detached or archived) but must NOT skip the daemon leave call:
+			// the route is the idempotent resume that deletes a stale hub
+			// credential left by a partial leave (binding gone, credential delete
+			// failed). --delete gates the archive on the same confirmation as the
+			// bound path (no hub revoke note, since there is no hub contact here).
 			if target.standalone {
-				if !deleteFlag {
-					// Already standalone: route through the output-mode-aware
-					// printer so --json/--agent are honored, not a raw string.
-					return printFederationLeaveAlreadyStandalone(cmd, target.projectName)
+				if deleteFlag {
+					if err := confirmFederationLeave(cmd, target, "archive", true, yes); err != nil {
+						return err
+					}
 				}
-				// --delete on a standalone project: archive only, skip hub revoke.
-				// Gate the archive on the same confirmation as the bound path
-				// (no hub revoke note, since there is no hub contact here).
-				if err := confirmFederationLeave(cmd, target, "archive", true, yes); err != nil {
-					return err
-				}
-				actor, _ := resolveActor(ctx, flags.As, nil)
-				status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
-					map[string]any{"disposition": "archive", "force": force, "actor": actor})
-				if err != nil {
-					return err
-				}
-				if status >= 400 {
-					return apiErrFromBody(status, bs)
-				}
-				return printFederationLeave(cmd, bs)
-			}
-			if err := confirmFederationLeave(cmd, target, disposition, localOnly, yes); err != nil {
+			} else if err := confirmFederationLeave(cmd, target, disposition, localOnly, yes); err != nil {
 				return err
 			}
-			if localOnly {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-					"warning: --local-only skips hub revoke; the enrollment token remains valid until you run `kata federation revoke <id>` on the hub %s\n",
-					textsafe.Line(target.hubURL))
-			} else {
-				globals, err := revokeSpokeEnrollmentsOnHub(ctx, target, hubAuthInputs{
-					hubURL:        target.hubURL,
-					hubName:       hubName,
-					hubToken:      hubToken,
-					allowInsecure: target.allowInsecure,
-				})
-				if err != nil {
-					return err
-				}
-				if len(globals) > 0 {
+			if !target.standalone {
+				if localOnly {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-						"warning: global enrollment(s) %s for this spoke remain active on the hub and still authorize this project; revoke with `kata federation revoke <id>` if intended\n",
-						formatEnrollmentIDList(globals))
+						"warning: --local-only skips hub revoke; the enrollment token remains valid until you run `kata federation revoke <id>` on the hub %s\n",
+						textsafe.Line(target.hubURL))
+				} else {
+					globals, err := revokeSpokeEnrollmentsOnHub(ctx, target, hubAuthInputs{
+						hubURL:        target.hubURL,
+						hubName:       hubName,
+						hubToken:      hubToken,
+						allowInsecure: target.allowInsecure,
+					})
+					if err != nil {
+						return err
+					}
+					if len(globals) > 0 {
+						_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+							"warning: global enrollment(s) %s for this spoke remain active on the hub and still authorize this project; revoke with `kata federation revoke <id>` if intended\n",
+							formatEnrollmentIDList(globals))
+					}
 				}
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
@@ -603,7 +593,7 @@ func federationLeaveCmd() *cobra.Command {
 // resolveSpokeForLeave resolves the target project and its federation status:
 //   - spoke binding → returns a full spokeLeaveTarget (normal leave path).
 //   - no binding     → returns spokeLeaveTarget{standalone: true} (idempotent
-//     no-op for plain leave; archive-only path for --delete).
+//     resume for plain leave; archive-only path for --delete).
 //   - hub binding    → hard error "not_a_spoke" (this command does not disband
 //     hubs).
 func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL string, args []string) (spokeLeaveTarget, error) {
@@ -630,8 +620,8 @@ func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL stri
 		}
 	}
 	// No binding at all → project is already standalone. Return the standalone
-	// signal so the caller can no-op (plain leave) or archive (--delete) without
-	// any hub contact.
+	// signal so the caller skips hub contact; the daemon leave call still runs
+	// to finish any stale-credential cleanup (plain leave) or archive (--delete).
 	if match == nil {
 		return spokeLeaveTarget{
 			projectID:   project.ID,
@@ -819,35 +809,15 @@ func printFederationLeave(cmd *cobra.Command, bs []byte) error {
 			textsafe.Line(body.Project.Name), textsafe.Line(body.Project.Name))
 		return err
 	}
+	if !body.Detached {
+		// Idempotent resume: the daemon found no binding (it still cleans up
+		// any stale hub credential), so nothing was left this time.
+		_, err := fmt.Fprintf(cmd.OutOrStdout(),
+			"project %s is already standalone\n", textsafe.Line(body.Project.Name))
+		return err
+	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(),
 		"left federation: %s is now a standalone local project\n", textsafe.Line(body.Project.Name))
-	return err
-}
-
-// printFederationLeaveAlreadyStandalone reports the no-op "already standalone"
-// outcome through the same output-mode-aware surface as printFederationLeave so
-// --json/--agent are honored. Nothing was detached or archived.
-func printFederationLeaveAlreadyStandalone(cmd *cobra.Command, projectName string) error {
-	if currentOutputMode() == outputJSON {
-		return emitJSON(cmd.OutOrStdout(), api.LeaveFederationReplicaResultBody{
-			Project:     api.ProjectOut{Name: projectName},
-			Detached:    false,
-			Disposition: "detach",
-		})
-	}
-	if currentOutputMode() == outputAgent {
-		return writeAgentKVRow(cmd.OutOrStdout(),
-			agentRowField("project", projectName),
-			agentRowField("disposition", "detach"),
-			agentRowField("detached", strconv.FormatBool(false)),
-			agentRowField("archived", strconv.FormatBool(false)),
-		)
-	}
-	if flags.Quiet {
-		return nil
-	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(),
-		"project %s is already standalone\n", textsafe.Line(projectName))
 	return err
 }
 

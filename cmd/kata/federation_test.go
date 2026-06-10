@@ -1333,6 +1333,29 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 		assert.Nil(t, alive.DeletedAt)
 	})
 
+	t.Run("plain leave on no-binding project deletes a stale credential", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "standalone-project")
+		require.NoError(t, err)
+		// A partially failed leave deletes the binding but can leave the hub
+		// credential behind; the no-op retry must still complete that cleanup
+		// instead of reporting success around it.
+		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+			HubURL:       "http://hub.example:7777",
+			HubProjectID: 42,
+			Token:        "stale-token",
+		}))
+
+		out := requireCmdOutput(t, env, "federation", "leave",
+			"--project", "standalone-project", "--yes")
+
+		assert.Contains(t, out, "already standalone")
+		assert.Equal(t, "missing", config.FederationCredentialMetadataFor(project.UID).Status,
+			"stale hub credential must be deleted by the resume path")
+	})
+
 	t.Run("plain leave on no-binding project honors --json", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)

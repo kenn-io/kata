@@ -281,7 +281,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusInternalServerError, "internal", bErr.Error(), "", nil)
 		}
 
-		body := api.LeaveFederationReplicaResultBody{Detached: true, Disposition: disposition}
+		body := api.LeaveFederationReplicaResultBody{Disposition: disposition}
 		// Archive FIRST when requested. RemoveProject's own transaction is the
 		// authoritative open-issue check, so a refused archive never tears down
 		// federation — there is no external-preflight TOCTOU and no
@@ -320,6 +320,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case err != nil:
 			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 		}
+		// Zero role means there was no binding: this is the idempotent resume
+		// (only the credential delete below may still have work to do), so the
+		// response must not claim a detach happened.
+		body.Detached = res.Role == db.FederationRoleSpoke
 		if res.ProjectUID != "" {
 			if err := config.DeleteFederationCredential(res.ProjectUID); err != nil {
 				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)

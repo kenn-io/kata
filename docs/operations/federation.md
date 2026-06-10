@@ -430,8 +430,10 @@ contacting the hub. The enrollment token then **remains valid** until you run
 kata federation leave <project> --local-only
 ```
 
-Leaving is idempotent: running it on a project that is already standalone is a
-no-op success, and `leave --delete` on a standalone project still archives it.
+Leaving is idempotent: running it on a project that is already standalone
+reports success and finishes any cleanup a failed earlier leave left behind
+(such as a stale hub credential in `credentials.toml`), and `leave --delete`
+on a standalone project still archives it.
 
 In the TUI federation view, press `x` on a spoke row to open a leave preview
 (the mutation boundary), toggle detach/archive and local-only, then confirm.

@@ -2261,6 +2261,41 @@ func TestLeaveFederationReplicaRouteDetach(t *testing.T) {
 	}
 }
 
+// TestLeaveFederationReplicaRouteResumeCleansStaleCredential covers the
+// idempotent resume: a prior leave deleted the binding but failed before the
+// credential delete. The route must still delete the stale credential and
+// report detached=false, since nothing was detached on this call.
+func TestLeaveFederationReplicaRouteResumeCleansStaleCredential(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+
+	project, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+		HubURL:       "http://127.0.0.1:7373",
+		HubProjectID: 42,
+		Token:        "spoke-token",
+	}))
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "detach", "actor": "tester"}, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+	}
+
+	var body struct {
+		Detached bool `json:"detached"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	if body.Detached {
+		t.Fatalf("resume leave must report detached=false, body=%s", raw)
+	}
+	if got := config.FederationCredentialMetadataFor(project.UID).Status; got != "missing" {
+		t.Fatalf("stale credential should be cleaned, got %q", got)
+	}
+}
+
 func TestLeaveFederationReplicaRouteArchiveRefusesOpenIssues(t *testing.T) {
 	env := testenv.New(t)
 
