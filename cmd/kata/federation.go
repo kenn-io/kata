@@ -498,12 +498,13 @@ type spokeLeaveTarget struct {
 
 func federationLeaveCmd() *cobra.Command {
 	var (
-		deleteFlag bool
-		force      bool
-		localOnly  bool
-		hubName    string
-		hubToken   string
-		yes        bool
+		deleteFlag    bool
+		force         bool
+		localOnly     bool
+		hubName       string
+		hubToken      string
+		allowInsecure bool
+		yes           bool
 	)
 	cmd := &cobra.Command{
 		Use:   "leave [project]",
@@ -553,10 +554,13 @@ func federationLeaveCmd() *cobra.Command {
 						textsafe.Line(target.hubURL))
 				} else {
 					globals, err := revokeSpokeEnrollmentsOnHub(ctx, target, hubAuthInputs{
-						hubURL:        target.hubURL,
-						hubName:       hubName,
-						hubToken:      hubToken,
-						allowInsecure: target.allowInsecure,
+						hubURL:   target.hubURL,
+						hubName:  hubName,
+						hubToken: hubToken,
+						// Union of opt-ins: the binding/status flag (which can be
+						// lost with the credential during a partial-leave
+						// recovery) and the explicit leave-time flag.
+						allowInsecure: target.allowInsecure || allowInsecure,
 					})
 					if err != nil {
 						return err
@@ -586,6 +590,7 @@ func federationLeaveCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&localOnly, "local-only", false, "skip the hub revoke when the hub is unreachable (leaves the token valid)")
 	cmd.Flags().StringVar(&hubName, "hub", "", "named daemon catalog entry for hub admin auth (its URL must match the binding's hub URL)")
 	cmd.Flags().StringVar(&hubToken, "hub-token", "", "explicit hub admin token (highest precedence)")
+	cmd.Flags().BoolVar(&allowInsecure, "allow-insecure", false, "allow the hub revoke to send a bearer token to a plaintext HTTP hub hostname (private overlay networks); restores the join-time opt-in when it was lost with the credential")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip the interactive confirmation")
 	return cmd
 }

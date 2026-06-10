@@ -304,6 +304,7 @@ CREATE TABLE federation_bindings (
   push_enabled            INTEGER NOT NULL DEFAULT 0 CHECK(push_enabled IN (0,1)),
   push_cursor_event_id    INTEGER NOT NULL DEFAULT 0 CHECK(push_cursor_event_id >= 0),
   bound_actor             TEXT NOT NULL DEFAULT '',
+  allow_insecure          INTEGER NOT NULL DEFAULT 0 CHECK(allow_insecure IN (0,1)),
   enabled                 INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
   created_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),

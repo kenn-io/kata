@@ -111,6 +111,37 @@ func TestResolveHubAdminAuthUsesBindingAllowInsecure(t *testing.T) {
 	}
 }
 
+// TestResolveHubAdminAuthUnionsSameOriginCatalogAllowInsecure: a catalog entry
+// for the SAME origin carries the operator's own transport opt-in, so it can
+// restore allow_insecure when the binding-side flag was lost with the
+// credential (partial-leave recovery). Opt-ins union; a catalog entry can add
+// the opt-in for its origin but never remove the binding's.
+func TestResolveHubAdminAuthUnionsSameOriginCatalogAllowInsecure(t *testing.T) {
+	t.Run("named entry", func(t *testing.T) {
+		out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
+			Name: "hub", URL: "http://hub.internal:7373", Token: "catalog-token", AllowInsecure: true,
+		}), hubAuthInputs{hubURL: "http://hub.internal:7373", hubName: "hub"})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if !out.allowInsecure {
+			t.Fatalf("same-origin named entry allow_insecure should union in, got %v", out.allowInsecure)
+		}
+	})
+
+	t.Run("url-matched entry", func(t *testing.T) {
+		out, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{
+			Name: "hub", URL: "http://hub.internal:7373", Token: "catalog-token", AllowInsecure: true,
+		}), hubAuthInputs{hubURL: "http://hub.internal:7373"})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if !out.allowInsecure {
+			t.Fatalf("same-origin URL-matched entry allow_insecure should union in, got %v", out.allowInsecure)
+		}
+	})
+}
+
 // TestResolveHubAdminAuthNoEntryGlobalFallback asserts the no-entry case yields
 // an empty token (the caller then falls back to global auth) with no error.
 func TestResolveHubAdminAuthNoEntryGlobalFallback(t *testing.T) {

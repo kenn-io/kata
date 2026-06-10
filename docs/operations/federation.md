@@ -422,7 +422,16 @@ the origin its entry is configured for: a `--hub <name>` entry that is missing
 or whose URL does not match the binding's hub URL is rejected, so a catalog
 admin token cannot leak to a different hub. Use `--hub-token` when you
 deliberately need to present a token the catalog does not associate with that
-hub. Leave also warns when the hub holds a
+hub.
+
+For plain-HTTP overlay hubs joined with `--allow-insecure`, the transport
+opt-in is recorded on the binding itself (as well as in the credential), so
+the leave-time hub client can carry a bearer token to the plaintext hostname
+even after a partial leave lost `credentials.toml`. A same-origin catalog
+entry with `allow_insecure = true` also restores the opt-in, and
+`kata federation leave --allow-insecure` asserts it explicitly when no local
+record of it survives. Without one of those, a token-bearing request to a
+plaintext hostname is refused before any network I/O. Leave also warns when the hub holds a
 matching **global** enrollment (no project scope) for this spoke: it still
 authorizes the left project but is not auto-revoked, since it may serve the
 spoke's other projects.

@@ -307,17 +307,21 @@ func importFederationBinding(ctx context.Context, tx *sql.Tx, b *db.FederationBi
 	if b.Role == string(db.FederationRoleSpoke) && pushEnabled == 1 && actor == "" {
 		pushEnabled = 0
 	}
+	allowInsecure := 0
+	if b.AllowInsecure {
+		allowInsecure = 1
+	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO federation_bindings(
 		   project_id, role, hub_url, hub_project_id, hub_project_uid,
 		   replay_horizon_event_id, pull_cursor_event_id, push_enabled,
-		   push_cursor_event_id, bound_actor, enabled,
+		   push_cursor_event_id, bound_actor, allow_insecure, enabled,
 		   created_at, updated_at, last_sync_at
 		 )
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		b.ProjectID, b.Role, b.HubURL, b.HubProjectID, b.HubProjectUID,
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled,
-		b.PushCursorEventID, actor, enabled,
+		b.PushCursorEventID, actor, allowInsecure, enabled,
 		b.CreatedAt, b.UpdatedAt, b.LastSyncAt)
 	return wrapImportErr(db.ImportKindFederationBinding, err)
 }

@@ -508,6 +508,7 @@ type AdoptProjectIntoFederationParams struct {
 	HubProjectUID        string
 	ReplayHorizonEventID int64
 	Actor                string
+	AllowInsecure        bool
 }
 
 // AdoptProjectIntoFederationResult describes the adopted project, binding, and

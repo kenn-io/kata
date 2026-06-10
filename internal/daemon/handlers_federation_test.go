@@ -2261,6 +2261,96 @@ func TestLeaveFederationReplicaRouteDetach(t *testing.T) {
 	}
 }
 
+// TestFederationReplicaPersistsAllowInsecureOnBinding: the join body's
+// allow_insecure opt-in must be recorded on the binding itself, not only in
+// the credential file — the binding is what survives a credential loss, and
+// leave needs the opt-in to rebuild the hub revoke transport.
+func TestFederationReplicaPersistsAllowInsecureOnBinding(t *testing.T) {
+	env := testenv.New(t)
+
+	var out api.CreateFederationReplicaBody
+	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://hub.internal:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "spoke-project",
+		"replay_horizon_event_id": 9,
+		"actor":                   "tester",
+		"token":                   "spoke-token",
+		"allow_insecure":          true,
+	}, &out)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	binding, err := env.DB.FederationBindingByProject(context.Background(), out.Project.ID)
+	require.NoError(t, err)
+	assert.True(t, binding.AllowInsecure, "join must persist allow_insecure on the binding")
+}
+
+// TestFederationStatusAllowInsecureBindingOrCredential: status must report the
+// allow_insecure opt-in when EITHER local record holds it. The binding is the
+// durable source (it survives credential loss during leave recovery); the
+// credential keeps legacy bindings created before the flag was persisted
+// working.
+func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
+	t.Run("binding opt-in survives a missing credential", func(t *testing.T) {
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "spoke-project")
+		require.NoError(t, err)
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID:            project.ID,
+			Role:                 db.FederationRoleSpoke,
+			HubURL:               "http://hub.internal:7373",
+			HubProjectID:         42,
+			HubProjectUID:        project.UID,
+			ReplayHorizonEventID: 9,
+			AllowInsecure:        true,
+			Enabled:              true,
+		})
+		require.NoError(t, err)
+		// No credential on disk: the partial-leave recovery state.
+
+		var body api.FederationStatusBody
+		resp := envDoJSON(t, env, http.MethodGet, "/api/v1/federation/status", nil, &body)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Len(t, body.Statuses, 1)
+		assert.Equal(t, "missing", body.Statuses[0].CredentialStatus)
+		assert.True(t, body.Statuses[0].AllowInsecure,
+			"binding allow_insecure must surface in status when the credential is gone")
+	})
+
+	t.Run("legacy credential opt-in still surfaces", func(t *testing.T) {
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "spoke-project")
+		require.NoError(t, err)
+		// Pre-persistence binding: allow_insecure lives only in the credential.
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID:            project.ID,
+			Role:                 db.FederationRoleSpoke,
+			HubURL:               "http://hub.internal:7373",
+			HubProjectID:         42,
+			HubProjectUID:        project.UID,
+			ReplayHorizonEventID: 9,
+			Enabled:              true,
+		})
+		require.NoError(t, err)
+		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+			HubURL:        "http://hub.internal:7373",
+			HubProjectID:  42,
+			Token:         "spoke-token",
+			AllowInsecure: true,
+		}))
+
+		var body api.FederationStatusBody
+		resp := envDoJSON(t, env, http.MethodGet, "/api/v1/federation/status", nil, &body)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Len(t, body.Statuses, 1)
+		assert.True(t, body.Statuses[0].AllowInsecure,
+			"credential allow_insecure must still surface for legacy bindings")
+	})
+}
+
 // TestLeaveFederationReplicaRouteResumeCleansStaleCredential covers the
 // idempotent resume: a prior leave deleted the binding but failed before the
 // credential delete. The route must still delete the stale credential and

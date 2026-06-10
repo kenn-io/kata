@@ -415,6 +415,7 @@ func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
 		PushEnabled:          true,
 		PushCursorEventID:    5,
 		Actor:                "wesm",
+		AllowInsecure:        true,
 		Enabled:              true,
 	}
 	_, err = srcDB.UpsertFederationBinding(ctx, binding)
@@ -438,6 +439,7 @@ func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
 	assert.Equal(t, true, bindingPayload["push_enabled"])
 	assert.Equal(t, float64(5), bindingPayload["push_cursor_event_id"])
 	assert.Equal(t, "wesm", bindingPayload["bound_actor"])
+	assert.Equal(t, true, bindingPayload["allow_insecure"])
 	assert.NotContains(t, bindingPayload, "materialize_after_event_id")
 
 	dstDB := openImportTargetDB(t)
@@ -447,6 +449,7 @@ func TestRoundtrip_FederationBindingCarriesPushState(t *testing.T) {
 	assert.True(t, got.PushEnabled)
 	assert.Equal(t, int64(5), got.PushCursorEventID)
 	assert.Equal(t, "wesm", got.Actor)
+	assert.True(t, got.AllowInsecure, "allow_insecure must survive the JSONL round trip")
 }
 
 func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {

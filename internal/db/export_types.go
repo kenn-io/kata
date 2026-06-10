@@ -131,6 +131,7 @@ type FederationBindingExport struct {
 	PushEnabled          bool    `json:"push_enabled"`
 	PushCursorEventID    int64   `json:"push_cursor_event_id"`
 	Actor                string  `json:"bound_actor,omitempty"`
+	AllowInsecure        bool    `json:"allow_insecure,omitempty"`
 	Enabled              bool    `json:"enabled"`
 	CreatedAt            string  `json:"created_at"`
 	UpdatedAt            string  `json:"updated_at"`

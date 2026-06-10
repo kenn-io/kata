@@ -1097,6 +1097,24 @@ func TestFederationLeaveHubTargetUsesBindingURLAndToleratesTrailingSlash(t *test
 	assert.False(t, got.Implicit, "a matched catalog entry is not an implicit target")
 }
 
+// TestFederationLeaveHubTargetUnionsCatalogAllowInsecure: a same-origin
+// catalog entry's allow_insecure is the operator's own transport opt-in and
+// must be able to RESTORE the flag when the binding-side value was lost with
+// the credential; the union means the catalog can add but never remove the
+// binding's opt-in.
+func TestFederationLeaveHubTargetUnionsCatalogAllowInsecure(t *testing.T) {
+	m := newTestModel()
+	m.daemonTargets = []daemonTarget{
+		{Name: "hub", URL: "http://hub.internal:7373", Token: "catalog-token", AllowInsecure: true},
+	}
+
+	got := m.federationLeaveHubTarget("http://hub.internal:7373", false)
+
+	assert.Equal(t, "catalog-token", got.Token)
+	assert.True(t, got.AllowInsecure,
+		"same-origin catalog allow_insecure must union into the leave hub target")
+}
+
 func TestFederationLeaveHubTargetNoMatchFallsBackToBindingURL(t *testing.T) {
 	m := newTestModel()
 	m.daemonTargets = []daemonTarget{{Name: "local", Local: true}}

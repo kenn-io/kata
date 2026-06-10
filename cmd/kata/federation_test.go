@@ -1028,10 +1028,11 @@ func TestResolveHubAdminAuthPrecedence(t *testing.T) {
 	if got.token != "catalog-tok" {
 		t.Fatalf("catalog token expected, got %q", got.token)
 	}
-	// allow_insecure comes from the binding, not the catalog entry: with the
-	// binding flag unset, the catalog's AllowInsecure must not leak through.
-	if got.allowInsecure {
-		t.Fatalf("allow_insecure must come from the binding, not the catalog, got %+v", got)
+	// allow_insecure unions the binding flag with the SAME-ORIGIN catalog
+	// entry's: the entry is the operator's own opt-in for this exact origin
+	// and restores the flag when it was lost with the credential.
+	if !got.allowInsecure {
+		t.Fatalf("same-origin catalog allow_insecure should union in, got %+v", got)
 	}
 	got, err = resolveHubAdminAuth(cat, hubAuthInputs{hubURL: "http://hub.example:7777"})
 	if err != nil {
@@ -1293,6 +1294,59 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 	require.NoError(t, err)
 	_, bindErr = env.DB.FederationBindingByProject(ctx, project.ID)
 	assert.ErrorIs(t, bindErr, db.ErrNotFound)
+}
+
+// TestFederationLeaveAllowInsecureFlag covers the partial-leave recovery state
+// where the credential (and with it the recorded allow_insecure opt-in) is
+// gone but the binding to a plaintext-hostname overlay hub remains. Without a
+// restored opt-in the bearer transport refuses --hub-token before any I/O;
+// --allow-insecure is the explicit leave-time escape hatch.
+func TestFederationLeaveAllowInsecureFlag(t *testing.T) {
+	seed := func(t *testing.T, env *testenv.Env) {
+		t.Helper()
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "spoke-project")
+		require.NoError(t, err)
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID:            project.ID,
+			Role:                 db.FederationRoleSpoke,
+			HubURL:               "http://hub.invalid:7373",
+			HubProjectID:         42,
+			HubProjectUID:        project.UID,
+			ReplayHorizonEventID: 9,
+			Enabled:              true,
+		})
+		require.NoError(t, err)
+		// No credential on disk: the opt-in recorded at join time is lost.
+	}
+
+	t.Run("hub token to a plaintext hostname is refused without the opt-in", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		seed(t, env)
+
+		_, err := runCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--hub-token", "admin-token", "--yes")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "refusing to attach bearer token",
+			"plaintext hostname + bearer token must be refused without allow_insecure")
+	})
+
+	t.Run("--allow-insecure restores the transport opt-in", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		seed(t, env)
+
+		_, err := runCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--hub-token", "admin-token", "--allow-insecure", "--yes")
+
+		// hub.invalid never resolves, so the revoke still fails — but at the
+		// network layer, past the bearer-transport refusal.
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), "refusing to attach bearer token",
+			"--allow-insecure must get past the plaintext bearer refusal")
+	})
 }
 
 func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {

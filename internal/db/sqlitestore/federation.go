@@ -332,13 +332,17 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	allowInsecure := 0
+	if b.AllowInsecure {
+		allowInsecure = 1
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO federation_bindings(
 			project_id, role, hub_url, hub_project_id, hub_project_uid,
 			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
-			push_cursor_event_id, bound_actor, enabled
+			push_cursor_event_id, bound_actor, allow_insecure, enabled
 		)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id) DO UPDATE SET
 			role = excluded.role,
 			hub_url = excluded.hub_url,
@@ -349,11 +353,12 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 			push_enabled = excluded.push_enabled,
 			push_cursor_event_id = excluded.push_cursor_event_id,
 			bound_actor = excluded.bound_actor,
+			allow_insecure = excluded.allow_insecure,
 			enabled = excluded.enabled,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		b.ProjectID, string(b.Role), b.HubURL, b.HubProjectID, b.HubProjectUID,
 		b.ReplayHorizonEventID, b.PullCursorEventID, pushEnabled, b.PushCursorEventID,
-		actor, enabled)
+		actor, allowInsecure, enabled)
 	if err != nil {
 		return db.FederationBinding{}, fmt.Errorf("upsert federation binding: %w", err)
 	}
@@ -939,7 +944,7 @@ func ensureFederatedMoveAllowedTx(ctx context.Context, q sqlReader, projectIDs .
 
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
        replay_horizon_event_id, pull_cursor_event_id, push_enabled, push_cursor_event_id,
-       bound_actor, enabled, created_at, updated_at, last_sync_at
+       bound_actor, allow_insecure, enabled, created_at, updated_at, last_sync_at
   FROM federation_bindings`
 
 func federationBindingByProject(ctx context.Context, q sqlReader, projectID int64) (db.FederationBinding, error) {
@@ -949,18 +954,20 @@ func federationBindingByProject(ctx context.Context, q sqlReader, projectID int6
 
 func scanFederationBinding(r rowScanner) (db.FederationBinding, error) {
 	var (
-		b           db.FederationBinding
-		role        string
-		enabled     int
-		pushEnabled int
-		lastSyncAt  sql.NullTime
+		b             db.FederationBinding
+		role          string
+		enabled       int
+		pushEnabled   int
+		allowInsecure int
+		lastSyncAt    sql.NullTime
 	)
 	err := r.Scan(&b.ProjectID, &role, &b.HubURL, &b.HubProjectID, &b.HubProjectUID,
 		&b.ReplayHorizonEventID, &b.PullCursorEventID, &pushEnabled,
-		&b.PushCursorEventID, &b.Actor, &enabled, &b.CreatedAt, &b.UpdatedAt, &lastSyncAt)
+		&b.PushCursorEventID, &b.Actor, &allowInsecure, &enabled, &b.CreatedAt, &b.UpdatedAt, &lastSyncAt)
 	if err == nil {
 		b.Role = db.FederationRole(role)
 		b.PushEnabled = pushEnabled == 1
+		b.AllowInsecure = allowInsecure == 1
 		b.Enabled = enabled == 1
 		if lastSyncAt.Valid {
 			b.LastSyncAt = &lastSyncAt.Time
@@ -1886,15 +1893,19 @@ func (d *Store) adoptProjectIntoFederation(
 	if pullCursor < 0 {
 		pullCursor = 0
 	}
+	allowInsecure := 0
+	if p.AllowInsecure {
+		allowInsecure = 1
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO federation_bindings(
 			project_id, role, hub_url, hub_project_id, hub_project_uid,
 			replay_horizon_event_id, pull_cursor_event_id, push_enabled,
-			push_cursor_event_id, bound_actor, enabled
+			push_cursor_event_id, bound_actor, allow_insecure, enabled
 		)
-		VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 1)`,
+		VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 1)`,
 		project.ID, string(db.FederationRoleSpoke), p.HubURL, p.HubProjectID, p.HubProjectUID,
-		p.ReplayHorizonEventID, pullCursor, pushFloor, actor); err != nil {
+		p.ReplayHorizonEventID, pullCursor, pushFloor, actor, allowInsecure); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("insert adoption federation binding: %w", err)
 	}
 

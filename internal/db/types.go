@@ -89,10 +89,14 @@ type FederationBinding struct {
 	PushEnabled          bool
 	PushCursorEventID    int64
 	Actor                string
-	Enabled              bool
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	LastSyncAt           *time.Time
+	// AllowInsecure records the join-time plaintext-HTTP transport opt-in on
+	// the binding itself so leave can rebuild the hub client even when the
+	// credential file (the only other holder of the flag) is gone.
+	AllowInsecure bool
+	Enabled       bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	LastSyncAt    *time.Time
 }
 
 // FederationQuarantineDirection identifies which federation stream is blocked.

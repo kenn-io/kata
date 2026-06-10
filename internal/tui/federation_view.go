@@ -605,11 +605,13 @@ func (m Model) federationLeaveHubTarget(hubURL string, allowInsecure bool) daemo
 		if strings.TrimRight(target.URL, "/") == want {
 			// Token/token_env come from the catalog entry, but pin the URL to
 			// the binding's hub URL so the admin token is sent only to the
-			// bound origin, and take allow_insecure from the BINDING (the
-			// transport opt-in recorded at join time), not the catalog.
+			// bound origin. allow_insecure is the UNION of the binding's
+			// join-time opt-in and the same-origin catalog entry's: the
+			// catalog can restore an opt-in lost with the credential during a
+			// partial-leave recovery, but can never remove the binding's.
 			matched := target
 			matched.URL = want
-			matched.AllowInsecure = allowInsecure
+			matched.AllowInsecure = allowInsecure || target.AllowInsecure
 			return matched
 		}
 	}

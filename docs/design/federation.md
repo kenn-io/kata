@@ -355,7 +355,12 @@ eligibility checked before any detach so an open-issue refusal cannot leave the
 project half-torn-down; `--force` overrides that refusal. Retrying an
 archive-leave whose archive already committed resumes rather than refusing:
 the already-archived step is skipped (that call reports `archived=false`) and
-any surviving detach and credential cleanup still run. `--local-only` tears
+any surviving detach and credential cleanup still run. The join-time
+`--allow-insecure` transport opt-in is persisted on the binding (schema 15)
+and surfaced in status as the union with the credential's copy; the leave hub
+client further unions a same-origin catalog entry's `allow_insecure` and the
+explicit `leave --allow-insecure` flag, so a credential loss cannot strand a
+plain-HTTP overlay hub's enrollment behind the plaintext-bearer refusal. `--local-only` tears
 down locally when the hub is unreachable, leaving the enrollment token to be
 revoked manually. A binding-aware guard stops an in-flight sync pass from
 re-creating `federation_sync_status` rows after a leave. A user-facing project

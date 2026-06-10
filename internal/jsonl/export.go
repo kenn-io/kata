@@ -892,6 +892,7 @@ func exportFederationBindings(
 		PushEnabled          bool    `json:"push_enabled"`
 		PushCursorEventID    int64   `json:"push_cursor_event_id"`
 		Actor                string  `json:"bound_actor,omitempty"`
+		AllowInsecure        bool    `json:"allow_insecure,omitempty"`
 		Enabled              bool    `json:"enabled"`
 		CreatedAt            string  `json:"created_at"`
 		UpdatedAt            string  `json:"updated_at"`
@@ -901,9 +902,13 @@ func exportFederationBindings(
 	if sourceSchemaVersion >= 13 {
 		actorSelect = `bound_actor`
 	}
+	allowInsecureSelect := `0`
+	if sourceSchemaVersion >= 15 {
+		allowInsecureSelect = `allow_insecure`
+	}
 	query := `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
 	                 replay_horizon_event_id, pull_cursor_event_id, push_enabled,
-	                 push_cursor_event_id, ` + actorSelect + `, enabled,
+	                 push_cursor_event_id, ` + actorSelect + `, ` + allowInsecureSelect + `, enabled,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT),
 	                 CAST(last_sync_at AS TEXT)
 	          FROM federation_bindings`
@@ -919,12 +924,13 @@ func exportFederationBindings(
 	}
 	return scanRecords(rows, KindFederationBinding, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
-		var enabled, pushEnabled int
+		var enabled, pushEnabled, allowInsecure int
 		err := rows.Scan(&rec.ProjectID, &rec.Role, &rec.HubURL, &rec.HubProjectID,
 			&rec.HubProjectUID, &rec.ReplayHorizonEventID, &rec.PullCursorEventID,
-			&pushEnabled, &rec.PushCursorEventID, &rec.Actor, &enabled, &rec.CreatedAt,
-			&rec.UpdatedAt, &rec.LastSyncAt)
+			&pushEnabled, &rec.PushCursorEventID, &rec.Actor, &allowInsecure, &enabled,
+			&rec.CreatedAt, &rec.UpdatedAt, &rec.LastSyncAt)
 		rec.PushEnabled = pushEnabled == 1
+		rec.AllowInsecure = allowInsecure == 1
 		rec.Enabled = enabled == 1
 		return rec, err
 	})

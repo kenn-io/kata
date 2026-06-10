@@ -38,8 +38,13 @@ type hubAdminAuth struct {
 // A --hub <name> entry that is missing or whose URL differs from the binding
 // errors out — sending a named entry's admin token to a different origin is
 // the cross-origin leak this guards against; --hub-token is the only
-// deliberate cross-origin path. allow_insecure for the hub client likewise
-// comes from the binding (in.allowInsecure), not the catalog.
+// deliberate cross-origin path.
+//
+// allow_insecure for the hub client is the UNION of the caller's opt-in
+// (binding/status or --allow-insecure) and the matched same-origin catalog
+// entry's: every source is the operator's own local record for this exact
+// origin, so the catalog can restore an opt-in lost with the credential but
+// can never remove the binding's.
 //
 // When a catalog entry IS selected (by --hub <name> or by URL match) but its
 // token_env is set and empty, resolution returns an error instead of an empty
@@ -79,6 +84,7 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 			return hubAdminAuth{}, err
 		}
 		out.token = token
+		out.allowInsecure = out.allowInsecure || e.AllowInsecure
 		return out, nil
 	}
 	if cat != nil {
@@ -88,6 +94,7 @@ func resolveHubAdminAuth(cat *config.DaemonConfig, in hubAuthInputs) (hubAdminAu
 				return hubAdminAuth{}, err
 			}
 			out.token = token
+			out.allowInsecure = out.allowInsecure || e.AllowInsecure
 			return out, nil
 		}
 	}

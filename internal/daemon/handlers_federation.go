@@ -535,6 +535,7 @@ func adoptExistingReplica(
 					HubProjectUID:        in.Body.HubProjectUID,
 					ReplayHorizonEventID: in.Body.ReplayHorizonEventID,
 					Actor:                strings.TrimSpace(in.Body.Actor),
+					AllowInsecure:        in.Body.AllowInsecure,
 				})
 				if err != nil {
 					return db.AdoptProjectIntoFederationResult{}, false, api.NewError(500, "internal", err.Error(), "", nil)
@@ -587,6 +588,7 @@ func adoptExistingReplica(
 		HubProjectUID:        in.Body.HubProjectUID,
 		ReplayHorizonEventID: in.Body.ReplayHorizonEventID,
 		Actor:                strings.TrimSpace(in.Body.Actor),
+		AllowInsecure:        in.Body.AllowInsecure,
 	})
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, true, api.NewError(500, "internal", err.Error(), "", nil)
@@ -680,6 +682,7 @@ func ensureReplicaBinding(
 		PushEnabled:          pushEnabled,
 		PushCursorEventID:    pushCursor,
 		Actor:                strings.TrimSpace(in.Body.Actor),
+		AllowInsecure:        in.Body.AllowInsecure,
 		Enabled:              true,
 	})
 	if err != nil {
@@ -848,18 +851,21 @@ func federationProjectStatus(ctx context.Context, store db.Storage, binding db.F
 		credentialMetadata = config.FederationCredentialMetadataFor(project.UID)
 	}
 	return api.FederationProjectStatus{
-		ProjectID:                   project.ID,
-		ProjectUID:                  project.UID,
-		ProjectName:                 project.Name,
-		Role:                        string(binding.Role),
-		Enabled:                     binding.Enabled,
-		PushEnabled:                 binding.PushEnabled,
-		BoundActor:                  binding.Actor,
-		HubURL:                      binding.HubURL,
-		HubProjectID:                binding.HubProjectID,
-		HubProjectUID:               binding.HubProjectUID,
-		Capabilities:                credentialMetadata.Capabilities,
-		AllowInsecure:               credentialMetadata.AllowInsecure,
+		ProjectID:     project.ID,
+		ProjectUID:    project.UID,
+		ProjectName:   project.Name,
+		Role:          string(binding.Role),
+		Enabled:       binding.Enabled,
+		PushEnabled:   binding.PushEnabled,
+		BoundActor:    binding.Actor,
+		HubURL:        binding.HubURL,
+		HubProjectID:  binding.HubProjectID,
+		HubProjectUID: binding.HubProjectUID,
+		Capabilities:  credentialMetadata.Capabilities,
+		// Opt-ins union: the binding is the durable record (it survives a
+		// credential loss during leave recovery); the credential copy keeps
+		// bindings recorded before allow_insecure was persisted working.
+		AllowInsecure:               binding.AllowInsecure || credentialMetadata.AllowInsecure,
 		CredentialStatus:            credentialMetadata.Status,
 		PullCursorEventID:           binding.PullCursorEventID,
 		PushCursorEventID:           binding.PushCursorEventID,

@@ -20,7 +20,7 @@ import (
 func TestFederationSchemaVersionAndTable(t *testing.T) {
 	d := openTestDB(t)
 
-	assert.Equal(t, 14, db.CurrentSchemaVersion())
+	assert.Equal(t, 15, db.CurrentSchemaVersion())
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 	assertSchemaObject(t, d, "federation_bindings")
 	assertSchemaObject(t, d, "idx_federation_bindings_role_enabled")
@@ -31,6 +31,7 @@ func TestFederationSchemaVersionAndTable(t *testing.T) {
 	assertSchemaObject(t, d, "idx_events_origin_project_id")
 	assertFederationBindingColumn(t, d, "push_enabled")
 	assertFederationBindingColumn(t, d, "push_cursor_event_id")
+	assertFederationBindingColumn(t, d, "allow_insecure")
 	for _, column := range []string{
 		"last_pull_started_at", "last_pull_success_at",
 		"last_push_started_at", "last_push_success_at",
