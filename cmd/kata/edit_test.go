@@ -253,9 +253,10 @@ func TestEdit_EquivalentParentRefsAccepted(t *testing.T) {
 
 // TestEdit_CrossProjectLinkRefRejected pins that link flags refuse a
 // qualified ref naming a project other than the URL issue's project.
-// The daemon's wire shape (RefForAPI is just the short_id resolved
-// against the current project) would silently target the wrong issue;
-// the user must pass the peer's ULID for a cross-project link.
+// Cross-project links are not supported (the schema forbids them), so
+// the error must state that constraint — and must NOT steer the user
+// toward passing a ULID, which the daemon also resolves only inside the
+// URL issue's project.
 func TestEdit_CrossProjectLinkRefRejected(t *testing.T) {
 	env, dir := setupCLIEnv(t)
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
@@ -264,8 +265,10 @@ func TestEdit_CrossProjectLinkRefRejected(t *testing.T) {
 
 	_, err := runCLICapture(t, env, dir, "edit", subject, "--blocks", "other#"+peer)
 	require.Error(t, err, "cross-project qualified ref must be rejected")
-	assert.Contains(t, err.Error(), "cross-project")
+	assert.Contains(t, err.Error(), "cross-project links are not supported")
 	assert.Contains(t, err.Error(), "--blocks")
+	assert.NotContains(t, err.Error(), "ULID",
+		"error must not suggest ULIDs: the daemon scopes ULID link refs to the issue's project too")
 }
 
 // TestEdit_ConflictDetectedAcrossRefForms pins that the add/remove

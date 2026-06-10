@@ -138,9 +138,10 @@ func workspaceProjectName(startPath string) string {
 // currentProject is the canonical name of the project the surrounding command
 // targets (i.e. the URL issue's project for `kata edit`, or the create-time
 // project for `kata create`). A qualified ref whose project segment names a
-// different project is rejected — cross-project links require the full ULID
-// path, not a `<other>#abc4` shortcut. Pass "" to skip the cross-project
-// check (intended for callers that can't yet plumb the canonical name).
+// different project is rejected — links can only join issues in the same
+// project (the schema forbids cross-project link rows), so such a ref can
+// never be satisfied. Pass "" to skip the cross-project check (intended for
+// callers that can't yet plumb the canonical name).
 //
 // includeDeleted=true matches the soft-delete-tolerant lookup the daemon's
 // remove paths use: the link row is real, and the user can still ask to
@@ -186,19 +187,20 @@ func resolveRefToWireOpts(ctx context.Context, baseURL, currentProject string, p
 			ExitCode: ExitValidation,
 		}
 	}
-	// A qualified ref ("other#abc4") names a project explicitly. The
-	// wire shape we hand the daemon (RefForAPI is just the short_id) is
-	// resolved against the URL issue's project, so a cross-project ref
-	// would silently target the wrong issue. Reject up front and steer
-	// the user toward the ULID form, which the daemon resolves
-	// project-independently. parsed.ProjectName matches currentProject
+	// A qualified ref ("other#abc4") names a project explicitly. Links can
+	// only join issues in the same project: the daemon resolves link refs
+	// (short_ids and ULIDs alike) against the URL issue's project, and the
+	// schema forbids cross-project link rows outright. A ref naming a
+	// different project can therefore never be satisfied — reject up front
+	// with the real constraint instead of letting the daemon report a
+	// bare "issue not found". parsed.ProjectName matches currentProject
 	// for both bare refs (workspace fallback) and same-project qualified
 	// refs ("kata#abc4" when current project is "kata"); the inequality
 	// fires only when the ref names a different project.
 	if currentProject != "" && parsed.ProjectName != "" && parsed.ProjectName != currentProject {
 		return "", &cliError{
-			Message: fmt.Sprintf("%s: cross-project refs not supported here; pass the issue's ULID instead of %q",
-				flagName, ref),
+			Message: fmt.Sprintf("%s: cross-project links are not supported; %q must name an issue in project %q",
+				flagName, ref, currentProject),
 			Kind:     kindValidation,
 			ExitCode: ExitValidation,
 		}
