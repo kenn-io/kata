@@ -480,6 +480,26 @@ func federationJoinCmd() *cobra.Command {
 	return cmd
 }
 
+// resolveLeaveProject resolves the leave target like resolveFederationProject
+// but includes archived projects for the explicit argument and --project
+// forms: an archive-leave retry whose archive already committed must reach
+// the daemon's idempotent resume, and active-only resolution would report
+// the project as not found while detach/credential cleanup is pending. The
+// status list hides archived projects, so such a retry runs as the
+// standalone resume (no hub contact — the revoke-first ordering means the
+// hub side was already revoked before the original failure). The cwd
+// workspace form keeps active-only resolution: its alias surface treats
+// archived projects as gone.
+func resolveLeaveProject(ctx context.Context, client *http.Client, baseURL string, args []string) (projectRef, error) {
+	if len(args) > 0 {
+		return resolveProjectSelectorIncludingArchived(ctx, client, baseURL, args[0])
+	}
+	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
+		return resolveProjectSelectorIncludingArchived(ctx, client, baseURL, projectName)
+	}
+	return resolveFederationProject(ctx, client, baseURL, args, false)
+}
+
 // spokeLeaveTarget captures the resolved local spoke a leave will tear down.
 // When standalone is true, the project has no federation binding; leave skips
 // hub revoke and confirmation for plain detach (the daemon call still runs to
@@ -602,7 +622,7 @@ func federationLeaveCmd() *cobra.Command {
 //   - hub binding    → hard error "not_a_spoke" (this command does not disband
 //     hubs).
 func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL string, args []string) (spokeLeaveTarget, error) {
-	project, err := resolveFederationProject(ctx, client, baseURL, args, false)
+	project, err := resolveLeaveProject(ctx, client, baseURL, args)
 	if err != nil {
 		return spokeLeaveTarget{}, err
 	}

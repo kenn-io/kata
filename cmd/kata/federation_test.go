@@ -1296,6 +1296,70 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 	assert.ErrorIs(t, bindErr, db.ErrNotFound)
 }
 
+// TestFederationLeaveResolvesArchivedProject: an archive-leave retry must be
+// able to reach the daemon's idempotent resume by name even though the
+// project is archived — active-only resolution would report "not found"
+// while detach/credential cleanup is still pending.
+func TestFederationLeaveResolvesArchivedProject(t *testing.T) {
+	t.Run("stale credential cleaned through the archived project", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "spoke-project")
+		require.NoError(t, err)
+		// Partial archive-leave: archive committed, credential delete failed.
+		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+			HubURL:       "http://hub.internal:7373",
+			HubProjectID: 42,
+			Token:        "stale-token",
+		}))
+		_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+			ProjectID: project.ID, Actor: "tester",
+		})
+		require.NoError(t, err)
+
+		out := requireCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--yes")
+
+		assert.Contains(t, out, "already standalone")
+		assert.Equal(t, "missing", config.FederationCredentialMetadataFor(project.UID).Status,
+			"resume cleanup must be reachable for archived projects from the CLI")
+	})
+
+	t.Run("surviving binding detached through the archived project", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "spoke-project")
+		require.NoError(t, err)
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID:            project.ID,
+			Role:                 db.FederationRoleSpoke,
+			HubURL:               "http://hub.internal:7373",
+			HubProjectID:         42,
+			HubProjectUID:        project.UID,
+			ReplayHorizonEventID: 9,
+			Enabled:              true,
+		})
+		require.NoError(t, err)
+		// Partial archive-leave: archive committed, detach never ran. The
+		// status list hides archived projects, so the retry runs as the
+		// standalone resume — no hub contact (the revoke already happened
+		// before the original failure), full local teardown.
+		_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+			ProjectID: project.ID, Actor: "tester",
+		})
+		require.NoError(t, err)
+
+		_ = requireCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--yes")
+
+		_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
+		assert.ErrorIs(t, bindErr, db.ErrNotFound,
+			"the surviving binding must be detached on the archived-project retry")
+	})
+}
+
 // TestFederationLeaveAllowInsecureFlag covers the partial-leave recovery state
 // where the credential (and with it the recorded allow_insecure opt-in) is
 // gone but the binding to a plaintext-hostname overlay hub remains. Without a
