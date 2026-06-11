@@ -551,15 +551,18 @@ func federationLeaveCmd() *cobra.Command {
 			if deleteFlag {
 				disposition = "archive"
 			}
-			// Archive-eligibility preflight BEFORE the irreversible hub revoke:
-			// a predictable open-issue refusal must not strand the spoke
-			// hub-revoked but locally bound. Advisory only — the authoritative
-			// check stays inside the daemon's RemoveProject transaction.
-			if !target.standalone && deleteFlag {
+			// Daemon preflight BEFORE the irreversible hub revoke, for every
+			// leave that will contact the hub: the route can refuse a detach
+			// too (role drift, vanished project, actor validation), and the
+			// archive disposition adds the open-issue refusal. A refusal
+			// discovered only after the revoke would strand the spoke locally
+			// bound with the hub side gone. Advisory only — the authoritative
+			// checks stay inside the daemon's transactions.
+			if !target.standalone && !localOnly {
 				actor, _ := resolveActor(ctx, flags.As, nil)
 				status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
 					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
-					map[string]any{"disposition": "archive", "force": force, "actor": actor, "preflight": true})
+					map[string]any{"disposition": disposition, "force": force, "actor": actor, "preflight": true})
 				if err != nil {
 					return err
 				}

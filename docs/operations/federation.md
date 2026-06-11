@@ -404,9 +404,10 @@ kata federation leave <project> --delete
 ```
 
 If the project still has open issues and you do not pass `--force`, the leave
-is refused (`project_has_open_issues`) by an archive-eligibility preflight
-**before the hub enrollment is revoked**: the binding, the credential, and the
-hub enrollment all stay intact. Close the open issues (or re-run with
+is refused (`project_has_open_issues`) by a daemon preflight **before the hub
+enrollment is revoked**: the binding, the credential, and the hub enrollment
+all stay intact. The same preflight runs for plain detach leaves too, so any
+local refusal the daemon can predict surfaces before hub contact. Close the open issues (or re-run with
 `--force`) and run the leave again. The preflight is advisory — the
 authoritative check runs inside the archive transaction itself, which executes
 after the revoke — so an issue opened in that small window can still land the

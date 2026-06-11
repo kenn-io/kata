@@ -1030,9 +1030,15 @@ func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.
 	})
 	realLeaveRan := false
 	spoke := mockDaemon(t, map[string]http.HandlerFunc{
-		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, _ *http.Request) {
-			realLeaveRan = true
-			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: true, Disposition: "detach"})
+		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, r *http.Request) {
+			var body LeaveFederationReplicaInput
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			// The non-mutating preflight legitimately precedes the revoke;
+			// only the real teardown must be blocked by the abort.
+			if !body.Preflight {
+				realLeaveRan = true
+			}
+			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: !body.Preflight, Disposition: "detach"})
 		},
 	})
 
@@ -1051,6 +1057,59 @@ func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.
 	assert.Contains(t, msg.err.Error(), "#21", "the surviving enrollment ID must be named")
 	assert.Empty(t, hub.revokedEnrollmentIDs, "a foreign-instance enrollment must not be auto-revoked")
 	assert.False(t, realLeaveRan, "local teardown must not run after the abort")
+	_ = out
+}
+
+// TestFederationLeaveDetachPreflightRefusalSkipsRevoke: detach leaves run the
+// same daemon preflight as archive leaves — the route can refuse a detach too
+// (role drift, vanished project, actor validation), and a refusal discovered
+// only after the hub revoke would strand the spoke locally bound with the hub
+// side gone.
+func TestFederationLeaveDetachPreflightRefusalSkipsRevoke(t *testing.T) {
+	hubProject := int64(42)
+	hub := &recordingFederationHubAdmin{
+		enrollments: []FederationEnrollment{
+			{ID: 11, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", ProjectID: &hubProject},
+		},
+	}
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		target daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		return hub, target, nil
+	})
+	realLeaveRan := false
+	spoke := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, r *http.Request) {
+			var body LeaveFederationReplicaInput
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			if body.Preflight {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"status":409,"error":{"code":"not_a_spoke","message":"federation binding is not a spoke"}}`))
+				return
+			}
+			realLeaveRan = true
+			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: true, Disposition: "detach"})
+		},
+	})
+
+	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
+	m.api = NewClient(spoke.URL, spoke.Client())
+	m.list.actor = "operator"
+	m.federationCursor = 0
+	out, _ := m.routeFederationViewKey(keyRune('x'))
+	require.Equal(t, federationModeLeavePreview, out.federationMode)
+	require.NotEqual(t, "archive", out.federationLeaveDraft.Disposition, "this test covers the default detach path")
+
+	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationLeaveResultMsg)
+
+	require.Error(t, msg.err, "the refused detach must surface before any teardown")
+	assert.Empty(t, hub.revokedEnrollmentIDs,
+		"the hub enrollment must not be revoked when the local detach would be refused")
+	assert.False(t, realLeaveRan, "the real leave must not run after a refused preflight")
 	_ = out
 }
 
@@ -1158,9 +1217,15 @@ func TestFederationLeaveHubRevokeFailureReturnsToPreview(t *testing.T) {
 	})
 	var leaveCalled bool
 	spoke := mockDaemon(t, map[string]http.HandlerFunc{
-		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, _ *http.Request) {
-			leaveCalled = true
-			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: true})
+		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, r *http.Request) {
+			var body LeaveFederationReplicaInput
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			// The non-mutating preflight legitimately precedes the revoke;
+			// only the real teardown call must be blocked by the hub failure.
+			if !body.Preflight {
+				leaveCalled = true
+			}
+			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: !body.Preflight})
 		},
 	})
 

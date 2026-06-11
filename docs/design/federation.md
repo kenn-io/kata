@@ -353,9 +353,10 @@ retry). `--delete` also archives the
 now-standalone project (reversible via `kata projects restore`), with archive
 eligibility checked before any detach so an open-issue refusal cannot leave the
 project half-torn-down; `--force` overrides that refusal. An advisory daemon
-preflight (`preflight=true` on the leave route) runs the same eligibility check
-before the hub revoke, so the predictable refusal cannot strand a hub-revoked,
-locally bound spoke either. Retrying an
+preflight (`preflight=true` on the leave route) runs before the hub revoke for
+every hub-contacting leave — detach refusals (spoke-role drift, vanished
+project, actor validation) and the archive's open-issue check alike — so a
+predictable local refusal cannot strand a hub-revoked, locally bound spoke. Retrying an
 archive-leave whose archive already committed resumes rather than refusing:
 the already-archived step is skipped (that call reports `archived=false`) and
 any surviving detach and credential cleanup still run. The join-time

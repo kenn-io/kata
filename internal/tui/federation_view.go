@@ -648,10 +648,13 @@ func runFederationLeave(
 	if disposition == "" {
 		disposition = "detach"
 	}
-	if disposition == "archive" {
-		// Archive-eligibility preflight BEFORE the irreversible hub revoke:
-		// a predictable open-issue refusal must not strand the spoke
-		// hub-revoked but locally bound.
+	if !draft.LocalOnly {
+		// Daemon preflight BEFORE the irreversible hub revoke, for every
+		// leave that will contact the hub: the route can refuse a detach too
+		// (role drift, vanished project, actor validation), and the archive
+		// disposition adds the open-issue refusal. A refusal discovered only
+		// after the revoke would strand the spoke locally bound with the hub
+		// side gone.
 		if _, err := spoke.LeaveFederationReplica(ctx, draft.ProjectID, LeaveFederationReplicaInput{
 			Disposition: disposition,
 			Actor:       draft.Actor,
