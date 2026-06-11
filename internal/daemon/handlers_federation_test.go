@@ -2386,6 +2386,81 @@ func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
 	})
 }
 
+// TestLeaveFederationReplicaRoutePreflight: preflight=true validates what the
+// real call would refuse — most importantly an archive's open-issue refusal —
+// without mutating anything, so leave clients can check archive eligibility
+// BEFORE the irreversible hub revoke.
+func TestLeaveFederationReplicaRoutePreflight(t *testing.T) {
+	t.Run("archive open-issue refusal mutates nothing", func(t *testing.T) {
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, _ := newSpokeProjectWithOpenIssue(t, env)
+
+		resp, raw := envDoRaw(t, env, http.MethodPost,
+			fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+			map[string]any{"disposition": "archive", "actor": "tester", "preflight": true}, nil)
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("want 409 preflight refusal, got %d body=%s", resp.StatusCode, raw)
+		}
+		if !strings.Contains(string(raw), "project_has_open_issues") {
+			t.Fatalf("want project_has_open_issues, got %s", raw)
+		}
+		if _, err := env.DB.FederationBindingByProject(ctx, project.ID); err != nil {
+			t.Fatalf("binding must be untouched by preflight: %v", err)
+		}
+		alive, err := env.DB.ProjectByName(ctx, project.Name)
+		require.NoError(t, err)
+		require.Nil(t, alive.DeletedAt, "preflight must not archive")
+		if got := config.FederationCredentialMetadataFor(project.UID).Status; got != "present" {
+			t.Fatalf("credential must be untouched by preflight, got %q", got)
+		}
+	})
+
+	t.Run("force passes without mutating", func(t *testing.T) {
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, _ := newSpokeProjectWithOpenIssue(t, env)
+
+		resp, raw := envDoRaw(t, env, http.MethodPost,
+			fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+			map[string]any{"disposition": "archive", "actor": "tester", "preflight": true, "force": true}, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("want 200 forced preflight, got %d body=%s", resp.StatusCode, raw)
+		}
+		var body struct {
+			Archived bool `json:"archived"`
+			Detached bool `json:"detached"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &body))
+		if body.Archived || body.Detached {
+			t.Fatalf("preflight must not claim work happened, body=%s", raw)
+		}
+		if _, err := env.DB.FederationBindingByProject(ctx, project.ID); err != nil {
+			t.Fatalf("binding must be untouched by preflight: %v", err)
+		}
+	})
+
+	t.Run("already-archived target passes for the resume", func(t *testing.T) {
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, _ := newSpokeProject(t, env)
+		_, _, err := env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+			ProjectID: project.ID, Actor: "tester",
+		})
+		require.NoError(t, err)
+
+		resp, raw := envDoRaw(t, env, http.MethodPost,
+			fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+			map[string]any{"disposition": "archive", "actor": "tester", "preflight": true}, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("archived resume preflight should pass, got %d body=%s", resp.StatusCode, raw)
+		}
+		if _, err := env.DB.FederationBindingByProject(ctx, project.ID); err != nil {
+			t.Fatalf("binding must be untouched by preflight: %v", err)
+		}
+	})
+}
+
 // TestFederationStatusIncludeArchived: the status list hides archived
 // projects by default; include=archived surfaces their bindings so the CLI
 // leave can run the bound path (idempotent hub revoke + teardown) for spokes

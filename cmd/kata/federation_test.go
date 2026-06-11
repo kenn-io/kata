@@ -1361,6 +1361,83 @@ func TestFederationLeaveResolvesArchivedProject(t *testing.T) {
 	})
 }
 
+// TestFederationLeaveDeletePreflightsArchiveBeforeRevoke: leave --delete must
+// validate archive eligibility BEFORE the irreversible hub revoke. A
+// predictable open-issue refusal after the revoke would leave the spoke
+// locally bound with a revoked hub token, breaking sync until manual
+// recovery.
+func TestFederationLeaveDeletePreflightsArchiveBeforeRevoke(t *testing.T) {
+	seed := func(t *testing.T, env *testenv.Env, hubURL string, hubProjectID int64) db.Project {
+		t.Helper()
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "spoke-project")
+		require.NoError(t, err)
+		// Open issue created before the binding so the spoke read-only guard
+		// does not block it.
+		_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "open issue", Author: "tester",
+		})
+		require.NoError(t, err)
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID:            project.ID,
+			Role:                 db.FederationRoleSpoke,
+			HubURL:               hubURL,
+			HubProjectID:         hubProjectID,
+			HubProjectUID:        project.UID,
+			ReplayHorizonEventID: 9,
+			Enabled:              true,
+		})
+		require.NoError(t, err)
+		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+			HubURL:       hubURL,
+			HubProjectID: hubProjectID,
+			Token:        "spoke-token",
+		}))
+		return project
+	}
+
+	t.Run("open-issue refusal happens before any revoke", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		const hubProjectID int64 = 42
+		hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+		project := seed(t, env, hubSrv.URL, hubProjectID)
+
+		_, err := runCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--delete", "--yes")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "open issues")
+		assert.Empty(t, hub.revokedIDs,
+			"the hub enrollment must not be revoked when the archive would be refused")
+		_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, bindErr, "binding must stay intact after the preflight refusal")
+		alive, dbErr := env.DB.ProjectByName(ctx, project.Name)
+		require.NoError(t, dbErr)
+		assert.Nil(t, alive.DeletedAt)
+	})
+
+	t.Run("--force skips the refusal and completes the leave", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		const hubProjectID int64 = 42
+		hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+		project := seed(t, env, hubSrv.URL, hubProjectID)
+
+		_ = requireCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--delete", "--force", "--yes")
+
+		assert.Equal(t, []int64{hub.enrollmentID}, hub.revokedIDs)
+		_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
+		assert.ErrorIs(t, bindErr, db.ErrNotFound)
+		archived, dbErr := env.DB.ProjectByNameIncludingArchived(ctx, project.Name)
+		require.NoError(t, dbErr)
+		assert.NotNil(t, archived.DeletedAt, "forced archive-leave must archive")
+	})
+}
+
 // TestFederationLeaveRevokesAfterProjectsRemoveArchive: `kata projects remove`
 // archives a federated spoke without revoking its hub enrollment (the remove
 // route has no federation guard). Leave on that archived project must still

@@ -403,13 +403,15 @@ open issues:
 kata federation leave <project> --delete
 ```
 
-If the project still has open issues and you do not pass `--force`, the archive
-is **refused before the local detach happens** (`project_has_open_issues`): the
-spoke binding stays intact rather than landing in a detached-but-not-archived
-state. Close the open issues (or re-run with `--force`) to finish. Note that the
-hub enrollment is revoked first, so after a refused archive the spoke is
-"hub-revoked, locally intact"; re-running `leave --delete --local-only` (or
-`--force`) completes the teardown.
+If the project still has open issues and you do not pass `--force`, the leave
+is refused (`project_has_open_issues`) by an archive-eligibility preflight
+**before the hub enrollment is revoked**: the binding, the credential, and the
+hub enrollment all stay intact. Close the open issues (or re-run with
+`--force`) and run the leave again. The preflight is advisory — the
+authoritative check runs inside the archive transaction itself, which executes
+after the revoke — so an issue opened in that small window can still land the
+spoke "hub-revoked, locally intact"; re-running `leave --delete --local-only`
+(or `--force`) completes that teardown.
 
 Hub admin auth for the revoke is resolved, in order: `--hub-token`, the
 `--hub <name>` daemon-catalog entry, then the catalog entry whose URL matches

@@ -551,6 +551,22 @@ func federationLeaveCmd() *cobra.Command {
 			if deleteFlag {
 				disposition = "archive"
 			}
+			// Archive-eligibility preflight BEFORE the irreversible hub revoke:
+			// a predictable open-issue refusal must not strand the spoke
+			// hub-revoked but locally bound. Advisory only — the authoritative
+			// check stays inside the daemon's RemoveProject transaction.
+			if !target.standalone && deleteFlag {
+				actor, _ := resolveActor(ctx, flags.As, nil)
+				status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
+					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
+					map[string]any{"disposition": "archive", "force": force, "actor": actor, "preflight": true})
+				if err != nil {
+					return err
+				}
+				if status >= 400 {
+					return apiErrFromBody(status, bs)
+				}
+			}
 			// Standalone path: project has no federation binding, so there is no
 			// hub contact either way. Plain leave skips the confirmation (nothing
 			// is detached or archived) but must NOT skip the daemon leave call:

@@ -1008,6 +1008,60 @@ func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T
 	assert.Contains(t, rendered, "revoked 1 enrollment")
 }
 
+// TestFederationLeaveArchivePreflightRefusalSkipsRevoke: an archive-leave
+// whose archive would be refused (open issues) must fail BEFORE the hub
+// revoke — otherwise the spoke is left locally bound with a revoked hub
+// token, breaking sync until manual recovery.
+func TestFederationLeaveArchivePreflightRefusalSkipsRevoke(t *testing.T) {
+	hubProject := int64(42)
+	hub := &recordingFederationHubAdmin{
+		enrollments: []FederationEnrollment{
+			{ID: 11, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", ProjectID: &hubProject},
+		},
+	}
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		target daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		return hub, target, nil
+	})
+	realLeaveRan := false
+	spoke := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, r *http.Request) {
+			var body LeaveFederationReplicaInput
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			if body.Preflight {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"status":409,"error":{"code":"project_has_open_issues","message":"project has open issues"}}`))
+				return
+			}
+			realLeaveRan = true
+			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: true, Disposition: "archive", Archived: true})
+		},
+	})
+
+	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
+	m.api = NewClient(spoke.URL, spoke.Client())
+	m.list.actor = "operator"
+	m.federationCursor = 0
+	out, _ := m.routeFederationViewKey(keyRune('x'))
+	require.Equal(t, federationModeLeavePreview, out.federationMode)
+	out, _ = out.routeFederationViewKey(keyRune('d')) // toggle disposition to archive
+	require.Equal(t, "archive", out.federationLeaveDraft.Disposition)
+
+	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationLeaveResultMsg)
+
+	require.Error(t, msg.err, "the refused archive must surface as the leave error")
+	assert.Contains(t, msg.err.Error(), "open issues")
+	assert.Empty(t, hub.revokedEnrollmentIDs,
+		"the hub enrollment must not be revoked when the archive would be refused")
+	assert.False(t, realLeaveRan, "the real leave must not run after a refused preflight")
+	_ = out
+}
+
 func TestFederationLeaveLocalOnlySkipsHubRevoke(t *testing.T) {
 	hub := &recordingFederationHubAdmin{}
 	restoreFederationHubAdminClient(t, func(

@@ -1845,6 +1845,8 @@ components:
           type: string
         force:
           type: boolean
+        preflight:
+          type: boolean
       type: object
     LeaveFederationReplicaResultBody:
       additionalProperties: true

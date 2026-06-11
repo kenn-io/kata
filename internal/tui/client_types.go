@@ -216,6 +216,9 @@ type LeaveFederationReplicaInput struct {
 	Disposition string `json:"disposition,omitempty"` // "detach" | "archive"
 	Force       bool   `json:"force,omitempty"`
 	Actor       string `json:"actor,omitempty"`
+	// Preflight validates (archive eligibility, spoke role) without mutating,
+	// so the archive's open-issue refusal can surface BEFORE the hub revoke.
+	Preflight bool `json:"preflight,omitempty"`
 }
 
 // CreateFederationReplicaInput is the spoke join/adoption request body.

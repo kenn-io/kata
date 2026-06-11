@@ -637,6 +637,22 @@ func runFederationLeave(
 	if spoke == nil {
 		return result, errors.New("spoke: leave failed: daemon client unavailable")
 	}
+	disposition := draft.Disposition
+	if disposition == "" {
+		disposition = "detach"
+	}
+	if disposition == "archive" {
+		// Archive-eligibility preflight BEFORE the irreversible hub revoke:
+		// a predictable open-issue refusal must not strand the spoke
+		// hub-revoked but locally bound.
+		if _, err := spoke.LeaveFederationReplica(ctx, draft.ProjectID, LeaveFederationReplicaInput{
+			Disposition: disposition,
+			Actor:       draft.Actor,
+			Preflight:   true,
+		}); err != nil {
+			return result, fmt.Errorf("spoke: leave preflight failed: %w", err)
+		}
+	}
 	if draft.LocalOnly {
 		result.SkippedRevoke = true
 	} else {
@@ -646,10 +662,6 @@ func runFederationLeave(
 		}
 		result.RevokedCount = revoked
 		result.GlobalEnrollmentIDs = globals
-	}
-	disposition := draft.Disposition
-	if disposition == "" {
-		disposition = "detach"
 	}
 	body, err := spoke.LeaveFederationReplica(ctx, draft.ProjectID, LeaveFederationReplicaInput{
 		Disposition: disposition,

@@ -404,6 +404,13 @@ type LeaveFederationReplicaRequestBody struct {
 	Disposition string `json:"disposition,omitempty"` // "detach" | "archive"
 	Force       bool   `json:"force,omitempty"`
 	Actor       string `json:"actor,omitempty"`
+	// Preflight runs the same validation as the real call — spoke-role
+	// refusal and the archive's open-issue check (honoring Force, with an
+	// already-archived project passing as the resume) — without mutating
+	// anything. Leave clients use it to verify archive eligibility BEFORE
+	// the irreversible hub revoke. Advisory only: the authoritative check
+	// stays inside RemoveProject's transaction.
+	Preflight bool `json:"preflight,omitempty"`
 }
 
 // LeaveFederationReplicaResultBody reports the outcome of a leave.

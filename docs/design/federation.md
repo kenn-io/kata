@@ -352,7 +352,10 @@ still runs so a stale hub credential left by a partial leave is deleted on the
 retry). `--delete` also archives the
 now-standalone project (reversible via `kata projects restore`), with archive
 eligibility checked before any detach so an open-issue refusal cannot leave the
-project half-torn-down; `--force` overrides that refusal. Retrying an
+project half-torn-down; `--force` overrides that refusal. An advisory daemon
+preflight (`preflight=true` on the leave route) runs the same eligibility check
+before the hub revoke, so the predictable refusal cannot strand a hub-revoked,
+locally bound spoke either. Retrying an
 archive-leave whose archive already committed resumes rather than refusing:
 the already-archived step is skipped (that call reports `archived=false`) and
 any surviving detach and credential cleanup still run. The join-time

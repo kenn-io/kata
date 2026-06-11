@@ -281,6 +281,39 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusInternalServerError, "internal", bErr.Error(), "", nil)
 		}
 
+		if in.Body.Preflight {
+			// Advisory dry-run: surface what the real call would refuse —
+			// most importantly an archive's open-issue refusal — WITHOUT
+			// mutating anything, so leave clients can verify archive
+			// eligibility before the irreversible hub revoke. Advisory only:
+			// the authoritative check stays inside RemoveProject's
+			// transaction below.
+			project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
+			switch {
+			case errors.Is(err, db.ErrNotFound):
+				return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+			case err != nil:
+				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			}
+			// Mirror RemoveProject's refusal for a live archive target; an
+			// already-archived project passes (the real call resumes).
+			if disposition == "archive" && project.DeletedAt == nil && !in.Body.Force {
+				openIssues, err := cfg.DB.CountOpenIssues(ctx, in.ProjectID)
+				if err != nil {
+					return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+				}
+				if openIssues > 0 {
+					return nil, api.NewError(http.StatusConflict, "project_has_open_issues", "project has open issues",
+						"close the open issues first, or pass force=true",
+						map[string]any{"open_issues": openIssues})
+				}
+			}
+			return &api.LeaveFederationReplicaResponse{Body: api.LeaveFederationReplicaResultBody{
+				Disposition: disposition,
+				Project:     dbProjectToOut(project),
+			}}, nil
+		}
+
 		body := api.LeaveFederationReplicaResultBody{Disposition: disposition}
 		// Archive FIRST when requested. RemoveProject's own transaction is the
 		// authoritative open-issue check, so a refused archive never tears down
