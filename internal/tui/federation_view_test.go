@@ -1030,7 +1030,7 @@ func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.
 	})
 	realLeaveRan := false
 	spoke := mockDaemon(t, map[string]http.HandlerFunc{
-		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, r *http.Request) {
+		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, _ *http.Request) {
 			realLeaveRan = true
 			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: true, Disposition: "detach"})
 		},
