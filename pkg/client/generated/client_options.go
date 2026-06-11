@@ -385,6 +385,50 @@ func (o *LeaveFederationReplicaRequestOptions) GetHeader() (map[string]string, e
 	return runtime.AsMap[string](o.Header)
 }
 
+// GetFederationStatusRequestOptions is the options needed to make a request to GetFederationStatus.
+type GetFederationStatusRequestOptions struct {
+	Query *GetFederationStatusQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *GetFederationStatusRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *GetFederationStatusRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *GetFederationStatusRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *GetFederationStatusRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *GetFederationStatusRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // ListAllIssuesRequestOptions is the options needed to make a request to ListAllIssues.
 type ListAllIssuesRequestOptions struct {
 	Query *ListAllIssuesQuery

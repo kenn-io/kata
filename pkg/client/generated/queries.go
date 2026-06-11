@@ -45,6 +45,10 @@ type StreamEventsQuery struct {
 	ProjectID *int64 `json:"project_id,omitempty"`
 }
 
+type GetFederationStatusQuery struct {
+	Include *string `json:"include,omitempty"`
+}
+
 type ListAllIssuesQuery struct {
 	ProjectID *int64                    `json:"project_id,omitempty"`
 	Status    *ListAllIssuesQueryStatus `json:"status,omitempty"`

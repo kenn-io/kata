@@ -452,7 +452,12 @@ already-archived project also resumes instead of erroring: it detaches a
 surviving binding, deletes a stale credential, and reports `archived=false`
 for that call. The leave command resolves archived projects for its argument
 and `--project` forms, so rerunning the same `kata federation leave
-<project>` completes the pending cleanup directly.
+<project>` completes the pending cleanup directly. A binding surviving on an
+archived project takes the normal bound path: the hub revoke runs (it is
+idempotent, so a retry whose enrollment was already revoked is a no-op, while
+a spoke archived via `kata projects remove` — which does not revoke — gets
+its enrollment revoked instead of silently stranded), then the local teardown
+finishes. `--local-only` remains the unreachable-hub escape.
 
 In the TUI federation view, press `x` on a spoke row to open a leave preview
 (the mutation boundary), toggle detach/archive and local-only, then confirm.

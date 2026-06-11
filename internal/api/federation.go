@@ -22,7 +22,12 @@ type ProjectFederationRequest struct {
 
 // FederationStatusRequest reads status for all locally bound federation
 // projects through the normal local/admin daemon auth surface.
-type FederationStatusRequest struct{}
+// include=archived also surfaces bindings whose project is archived, so a
+// leave on an archived bound spoke can run the full bound path instead of
+// misclassifying it as standalone.
+type FederationStatusRequest struct {
+	Include string `query:"include"`
+}
 
 // ProjectFederationStatusRequest reads status for one locally bound
 // federation project through the normal local/admin daemon auth surface.

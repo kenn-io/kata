@@ -145,8 +145,8 @@ type ClientInterface interface {
 	LeaveFederationReplica(ctx context.Context, options *LeaveFederationReplicaRequestOptions, reqEditors ...runtime.RequestEditorFn) (*LeaveFederationReplicaResponse, error)
 	LeaveFederationReplicaWithResponse(ctx context.Context, options *LeaveFederationReplicaRequestOptions, reqEditors ...runtime.RequestEditorFn) (*LeaveFederationReplicaResp, error)
 
-	GetFederationStatus(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResponse, error)
-	GetFederationStatusWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResp, error)
+	GetFederationStatus(ctx context.Context, options *GetFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResponse, error)
+	GetFederationStatusWithResponse(ctx context.Context, options *GetFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResp, error)
 
 	Health(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*HealthResponse, error)
 	HealthWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*HealthResp, error)
@@ -905,11 +905,17 @@ func (c *Client) LeaveFederationReplica(ctx context.Context, options *LeaveFeder
 	return responseParser(ctx, resp)
 }
 
-func (c *Client) GetFederationStatus(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResponse, error) {
+func (c *Client) GetFederationStatus(ctx context.Context, options *GetFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResponse, error) {
 	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"include": {Style: "form", Explode: &[]bool{false}[0]},
+	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/federation/status",
-		Method:     "GET",
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/federation/status",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

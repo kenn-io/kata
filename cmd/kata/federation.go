@@ -484,10 +484,10 @@ func federationJoinCmd() *cobra.Command {
 // but includes archived projects for the explicit argument and --project
 // forms: an archive-leave retry whose archive already committed must reach
 // the daemon's idempotent resume, and active-only resolution would report
-// the project as not found while detach/credential cleanup is pending. The
-// status list hides archived projects, so such a retry runs as the
-// standalone resume (no hub contact — the revoke-first ordering means the
-// hub side was already revoked before the original failure). The cwd
+// the project as not found while detach/credential cleanup is pending. A
+// surviving binding on the archived project is surfaced via the
+// include=archived status fetch in resolveSpokeForLeave, so such a retry
+// runs the normal bound path (idempotent hub revoke + teardown). The cwd
 // workspace form keeps active-only resolution: its alias surface treats
 // archived projects as gone.
 func resolveLeaveProject(ctx context.Context, client *http.Client, baseURL string, args []string) (projectRef, error) {
@@ -626,7 +626,14 @@ func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL stri
 	if err != nil {
 		return spokeLeaveTarget{}, err
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
+	// include=archived: an archived spoke can still hold a binding — either a
+	// partial archive-leave (detach failed after the archive committed) or a
+	// `kata projects remove` on a federated project, which archives without
+	// revoking. Both must take the bound path below; the hub revoke is
+	// idempotent, so the already-revoked retry is a no-op while the
+	// never-revoked remove case gets its enrollment revoked instead of
+	// silently stranded.
+	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status?include=archived", nil)
 	if err != nil {
 		return spokeLeaveTarget{}, err
 	}

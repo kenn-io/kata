@@ -1343,21 +1343,53 @@ func TestFederationLeaveResolvesArchivedProject(t *testing.T) {
 		})
 		require.NoError(t, err)
 		// Partial archive-leave: archive committed, detach never ran. The
-		// status list hides archived projects, so the retry runs as the
-		// standalone resume — no hub contact (the revoke already happened
-		// before the original failure), full local teardown.
+		// surviving binding is visible to leave (include=archived), so the
+		// retry runs the normal bound path; with the hub unreachable,
+		// --local-only completes the local teardown like any bound leave.
 		_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{
 			ProjectID: project.ID, Actor: "tester",
 		})
 		require.NoError(t, err)
 
-		_ = requireCmdOutput(t, env, "federation", "leave",
-			"--project", "spoke-project", "--yes")
+		_, _, err = runCmdCapture(t, env, "federation", "leave",
+			"--project", "spoke-project", "--local-only", "--yes")
+		require.NoError(t, err)
 
 		_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
 		assert.ErrorIs(t, bindErr, db.ErrNotFound,
 			"the surviving binding must be detached on the archived-project retry")
 	})
+}
+
+// TestFederationLeaveRevokesAfterProjectsRemoveArchive: `kata projects remove`
+// archives a federated spoke without revoking its hub enrollment (the remove
+// route has no federation guard). Leave on that archived project must still
+// run the bound path — revoke the enrollment, then detach — instead of
+// classifying the hidden archived binding as standalone and silently
+// stranding an active enrollment on the hub. For the archive-leave retry,
+// where the enrollment was already revoked, the same pass is an idempotent
+// no-op (zero active matches is success).
+func TestFederationLeaveRevokesAfterProjectsRemoveArchive(t *testing.T) {
+	resetFlags(t)
+	env := testenv.New(t)
+	ctx := context.Background()
+	const hubProjectID int64 = 42
+	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
+	project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+	// Archive the bound spoke directly — the kata projects remove path.
+	_, _, err := env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: project.ID, Actor: "tester",
+	})
+	require.NoError(t, err)
+
+	_ = requireCmdOutput(t, env, "federation", "leave",
+		"--project", "spoke-project", "--yes")
+
+	require.Equal(t, []int64{hub.enrollmentID}, hub.revokedIDs,
+		"leave on an archived bound spoke must still revoke the hub enrollment")
+	_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
+	assert.ErrorIs(t, bindErr, db.ErrNotFound)
+	assert.Equal(t, "missing", config.FederationCredentialMetadataFor(project.UID).Status)
 }
 
 // TestFederationLeaveAllowInsecureFlag covers the partial-leave recovery state

@@ -2386,6 +2386,31 @@ func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
 	})
 }
 
+// TestFederationStatusIncludeArchived: the status list hides archived
+// projects by default; include=archived surfaces their bindings so the CLI
+// leave can run the bound path (idempotent hub revoke + teardown) for spokes
+// archived via projects remove or a partial archive-leave.
+func TestFederationStatusIncludeArchived(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, _ := newSpokeProject(t, env)
+	_, _, err := env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: project.ID, Actor: "tester",
+	})
+	require.NoError(t, err)
+
+	var hidden api.FederationStatusBody
+	resp := envDoJSON(t, env, http.MethodGet, "/api/v1/federation/status", nil, &hidden)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Empty(t, hidden.Statuses, "archived projects stay hidden by default")
+
+	var shown api.FederationStatusBody
+	resp = envDoJSON(t, env, http.MethodGet, "/api/v1/federation/status?include=archived", nil, &shown)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, shown.Statuses, 1, "include=archived must surface the archived binding")
+	assert.Equal(t, project.ID, shown.Statuses[0].ProjectID)
+}
+
 // TestLeaveFederationReplicaRouteResumeCleansStaleCredential covers the
 // idempotent resume: a prior leave deleted the binding but failed before the
 // credential delete. The route must still delete the stale credential and

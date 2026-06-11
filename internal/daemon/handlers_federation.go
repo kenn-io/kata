@@ -56,8 +56,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "getFederationStatus",
 		Method:      "GET",
 		Path:        "/api/v1/federation/status",
-	}, func(ctx context.Context, _ *api.FederationStatusRequest) (*api.FederationStatusResponse, error) {
-		body, err := federationStatusBody(ctx, cfg.DB, nil)
+	}, func(ctx context.Context, in *api.FederationStatusRequest) (*api.FederationStatusResponse, error) {
+		body, err := federationStatusBody(ctx, cfg.DB, nil, includeContains(in.Include, "archived"))
 		if err != nil {
 			return nil, err
 		}
@@ -69,7 +69,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/federation/status",
 	}, func(ctx context.Context, in *api.ProjectFederationStatusRequest) (*api.FederationStatusResponse, error) {
-		body, err := federationStatusBody(ctx, cfg.DB, &in.ProjectID)
+		body, err := federationStatusBody(ctx, cfg.DB, &in.ProjectID, false)
 		if err != nil {
 			return nil, err
 		}
@@ -763,14 +763,14 @@ func federationEnrollmentToOut(enrollment db.FederationEnrollment, token string)
 	}
 }
 
-func federationStatusBody(ctx context.Context, store db.Storage, projectID *int64) (api.FederationStatusBody, error) {
+func federationStatusBody(ctx context.Context, store db.Storage, projectID *int64, includeArchived bool) (api.FederationStatusBody, error) {
 	bindings, err := federationStatusBindings(ctx, store, projectID)
 	if err != nil {
 		return api.FederationStatusBody{}, err
 	}
 	out := api.FederationStatusBody{Statuses: make([]api.FederationProjectStatus, 0, len(bindings))}
 	for _, binding := range bindings {
-		status, err := federationProjectStatus(ctx, store, binding)
+		status, err := federationProjectStatus(ctx, store, binding, includeArchived)
 		if err != nil {
 			if projectID == nil && isProjectNotFound(err) {
 				continue
@@ -811,9 +811,19 @@ func federationStatusBindings(ctx context.Context, store db.Storage, projectID *
 	return []db.FederationBinding{binding}, nil
 }
 
-func federationProjectStatus(ctx context.Context, store db.Storage, binding db.FederationBinding) (api.FederationProjectStatus, error) {
+func federationProjectStatus(ctx context.Context, store db.Storage, binding db.FederationBinding, includeArchived bool) (api.FederationProjectStatus, error) {
 	project, err := activeProjectByID(ctx, store, binding.ProjectID)
-	if err != nil {
+	if includeArchived && isProjectNotFound(err) {
+		// include=archived: an archived project's binding is still real —
+		// leave needs it to run the bound path (idempotent hub revoke +
+		// teardown) instead of misclassifying the spoke as standalone.
+		project, err = store.ProjectByID(ctx, binding.ProjectID)
+		if errors.Is(err, db.ErrNotFound) {
+			return api.FederationProjectStatus{}, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
+		} else if err != nil {
+			return api.FederationProjectStatus{}, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		}
+	} else if err != nil {
 		return api.FederationProjectStatus{}, err
 	}
 	syncStatus, err := store.FederationSyncStatusByProject(ctx, binding.ProjectID)

@@ -431,11 +431,12 @@ func (c *Client) LeaveFederationReplicaWithResponse(ctx context.Context, options
 	}
 }
 
-func (c *Client) GetFederationStatusWithResponse(ctx context.Context, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResp, error) {
+func (c *Client) GetFederationStatusWithResponse(ctx context.Context, options *GetFederationStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationStatusResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/federation/status",
 		Method:     "GET",
+		Options:    options,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

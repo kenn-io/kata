@@ -3224,6 +3224,12 @@ paths:
   /api/v1/federation/status:
     get:
       operationId: getFederationStatus
+      parameters:
+        - explode: false
+          in: query
+          name: include
+          schema:
+            type: string
       responses:
         "200":
           content:
