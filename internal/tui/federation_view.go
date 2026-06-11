@@ -471,7 +471,14 @@ func (m Model) routeFederationAdoptConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.federationAdoptConfirmInput = string(r[:len(r)-1])
 		}
 		return m, nil
-	case tea.KeyRunes, tea.KeySpace:
+	case tea.KeySpace:
+		// bubbletea v1.3.10 delivers KeySpace with Runes{' '} (a back-compat
+		// detail) and Windows sends KeyRunes, so msg.Runes works today —
+		// append the literal so a runeless KeySpace from another backend or a
+		// future library version cannot silently drop the character.
+		m.federationAdoptConfirmInput += " "
+		return m, nil
+	case tea.KeyRunes:
 		m.federationAdoptConfirmInput += string(msg.Runes)
 		return m, nil
 	}

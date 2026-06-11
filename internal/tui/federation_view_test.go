@@ -1608,6 +1608,37 @@ func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
 	assert.Equal(t, federationModePreview, out.federationMode)
 }
 
+// TestFederationAdoptConfirmTypesSpaces: project names may contain spaces
+// (ValidateProjectName rejects only non-printables), so the typed
+// confirmation gate must accept the space key in every event shape: unix
+// terminals deliver KeySpace WITH Runes{' '} (bubbletea v1.3.10 keeps the
+// rune "for backwards compatibility"), Windows delivers KeyRunes, and a
+// runeless KeySpace — a hand-built message or a future input backend — must
+// not silently drop the character.
+func TestFederationAdoptConfirmTypesSpaces(t *testing.T) {
+	newConfirm := func() Model {
+		m := setupFederationView()
+		m.federationMode = federationModeAdoptConfirm
+		m.federationDraft = newFederationDraft("operator")
+		m.federationDraft.SpokeProjectName = "spoke project"
+		return m
+	}
+
+	t.Run("runeless KeySpace appends a space", func(t *testing.T) {
+		m := typeFederationKeys(newConfirm(), "spoke")
+		m, _ = m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeySpace})
+		m = typeFederationKeys(m, "project")
+		assert.Equal(t, "spoke project", m.federationAdoptConfirmInput)
+	})
+
+	t.Run("unix-shape KeySpace with rune appends one space", func(t *testing.T) {
+		m := typeFederationKeys(newConfirm(), "spoke")
+		m, _ = m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+		m = typeFederationKeys(m, "project")
+		assert.Equal(t, "spoke project", m.federationAdoptConfirmInput)
+	})
+}
+
 // TestFederationAdoptTypedConfirmationExecutes: typing the exact project name
 // and confirming runs the enrollment.
 func TestFederationAdoptTypedConfirmationExecutes(t *testing.T) {
