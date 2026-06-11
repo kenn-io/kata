@@ -438,6 +438,14 @@ matching **global** enrollment (no project scope) for this spoke: it still
 authorizes the left project but is not auto-revoked, since it may serve the
 spoke's other projects.
 
+If no active enrollment matches this spoke's instance UID but project-scoped
+enrollment(s) still authorize the hub project, the leave **aborts** and names
+them instead of treating zero matches as success — the instance UID can change
+after a clone/import, or the enrollment may have been created for another
+instance (including another spoke of a shared hub project). Revoke the right
+one with `kata federation revoke <id>` on the hub, or rerun with
+`--local-only`.
+
 If the hub is unreachable, `--local-only` tears down the local spoke without
 contacting the hub. The enrollment token then **remains valid** until you run
 `kata federation revoke <enrollment-id>` on the hub yourself:

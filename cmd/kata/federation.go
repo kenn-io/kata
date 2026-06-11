@@ -702,14 +702,19 @@ func resolveSpokeForLeave(ctx context.Context, client *http.Client, baseURL stri
 }
 
 // revokeSpokeEnrollmentsOnHub lists the hub's enrollments and revokes every
-// active one bound to this spoke instance and hub project. Zero active matches
-// is success (already revoked). Any hub transport/auth failure aborts before
-// local teardown and instructs the operator to retry with --local-only.
-// revokeSpokeEnrollmentsOnHub revokes every active project-scoped enrollment
-// for this spoke instance + hub project. Matching GLOBAL enrollments
+// active project-scoped one bound to this spoke instance and hub project.
+// Zero active matches is success (already revoked) ONLY when no other active
+// project-scoped enrollment authorizes the hub project: the spoke's instance
+// UID can drift from the enrollment's (clone/import refresh, or an enroll
+// created with an explicit --spoke-instance), and silently proceeding would
+// strand a live token with hub access. That case aborts with the surviving
+// enrollment IDs; --local-only is the explicit local-teardown escape. The
+// surviving IDs may also be other spokes of a shared hub project — the abort
+// names them so the operator decides. Matching GLOBAL enrollments
 // (project_id NULL) are returned, not revoked: they may authorize the spoke's
 // other projects on the hub, but they do keep authorizing the left project, so
-// the caller warns about them.
+// the caller warns about them. Any hub transport/auth failure aborts before
+// local teardown and instructs the operator to retry with --local-only.
 func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, in hubAuthInputs) ([]int64, error) {
 	cat, err := config.ReadDaemonConfig()
 	if err != nil {
@@ -734,23 +739,39 @@ func revokeSpokeEnrollmentsOnHub(ctx context.Context, target spokeLeaveTarget, i
 	if err := json.Unmarshal(bs, &list); err != nil {
 		return nil, err
 	}
-	var globals []int64
+	var globals, matched, foreignScoped []int64
 	for _, enrollment := range list.Enrollments {
 		if enrollment.RevokedAt != nil {
 			continue
 		}
-		if enrollment.SpokeInstanceUID != target.instanceUID {
-			continue
-		}
 		if enrollment.ProjectID == nil {
-			globals = append(globals, enrollment.ID)
+			if enrollment.SpokeInstanceUID == target.instanceUID {
+				globals = append(globals, enrollment.ID)
+			}
 			continue
 		}
 		if *enrollment.ProjectID != target.hubProjectID {
 			continue
 		}
+		if enrollment.SpokeInstanceUID == target.instanceUID {
+			matched = append(matched, enrollment.ID)
+			continue
+		}
+		foreignScoped = append(foreignScoped, enrollment.ID)
+	}
+	if len(matched) == 0 && len(foreignScoped) > 0 {
+		return nil, &cliError{
+			Message: fmt.Sprintf(
+				"no active enrollment matches this spoke's instance UID, but enrollment(s) %s still authorize hub project %d — the instance UID can change after a clone/import, or the enrollment may belong to another spoke instance; revoke the right one with `kata federation revoke <id>` on the hub, or rerun with --local-only to tear down locally without revoking",
+				formatEnrollmentIDList(foreignScoped), target.hubProjectID),
+			Code:     "leave_enrollment_uid_mismatch",
+			Kind:     kindConflict,
+			ExitCode: ExitConflict,
+		}
+	}
+	for _, id := range matched {
 		status, bs, err := httpDoJSON(ctx, hub, http.MethodPost,
-			fmt.Sprintf("%s/api/v1/federation/enrollments/%d/revoke", auth.url, enrollment.ID), map[string]any{})
+			fmt.Sprintf("%s/api/v1/federation/enrollments/%d/revoke", auth.url, id), map[string]any{})
 		if err != nil {
 			return nil, federationLeaveHubError(err)
 		}

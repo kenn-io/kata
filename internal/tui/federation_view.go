@@ -704,7 +704,12 @@ func revokeFederationLeaveEnrollments(
 	if err != nil {
 		return 0, nil, federationLeaveHubError(err)
 	}
-	ids, globals := matchFederationLeaveEnrollments(enrollments, draft.InstanceUID, draft.HubProjectID)
+	ids, globals, foreign := matchFederationLeaveEnrollments(enrollments, draft.InstanceUID, draft.HubProjectID)
+	if len(ids) == 0 && len(foreign) > 0 {
+		return 0, nil, fmt.Errorf(
+			"no active enrollment matches this spoke's instance UID, but enrollment(s) %s still authorize the hub project — the instance UID can change after a clone/import, or the enrollment may belong to another spoke instance; revoke the right one with `kata federation revoke <id>` on the hub, or retry with local-only to tear down locally without revoking",
+			formatEnrollmentIDs(foreign))
+	}
 	for _, id := range ids {
 		if err := hub.RevokeFederationEnrollment(ctx, id); err != nil {
 			return 0, nil, federationLeaveHubError(err)
@@ -715,32 +720,39 @@ func revokeFederationLeaveEnrollments(
 
 // matchFederationLeaveEnrollments returns the IDs of active (not-revoked)
 // enrollments whose spoke instance UID and hub project ID match this spoke's
-// binding, plus the IDs of active GLOBAL enrollments (nil project scope) for
-// the same spoke — those still authorize this project but are not auto-revoked
-// because they may serve the spoke's other projects on the hub. Mirrors the
-// CLI's revokeSpokeEnrollmentsOnHub selection.
+// binding, the IDs of active GLOBAL enrollments (nil project scope) for the
+// same spoke — those still authorize this project but are not auto-revoked
+// because they may serve the spoke's other projects on the hub — and the IDs
+// of active project-scoped enrollments for OTHER spoke instances. The caller
+// must not treat zero matches as success while foreign ones exist: the
+// instance UID can drift from the enrollment's (clone/import refresh or an
+// explicit --spoke-instance enroll), and silently proceeding would strand a
+// live token. Mirrors the CLI's revokeSpokeEnrollmentsOnHub selection.
 func matchFederationLeaveEnrollments(
 	enrollments []FederationEnrollment,
 	instanceUID string,
 	hubProjectID int64,
-) (ids []int64, globals []int64) {
+) (ids, globals, foreign []int64) {
 	for _, enrollment := range enrollments {
 		if enrollment.RevokedAt != nil {
 			continue
 		}
-		if enrollment.SpokeInstanceUID != instanceUID {
-			continue
-		}
 		if enrollment.ProjectID == nil {
-			globals = append(globals, enrollment.ID)
+			if enrollment.SpokeInstanceUID == instanceUID {
+				globals = append(globals, enrollment.ID)
+			}
 			continue
 		}
 		if *enrollment.ProjectID != hubProjectID {
 			continue
 		}
-		ids = append(ids, enrollment.ID)
+		if enrollment.SpokeInstanceUID == instanceUID {
+			ids = append(ids, enrollment.ID)
+			continue
+		}
+		foreign = append(foreign, enrollment.ID)
 	}
-	return ids, globals
+	return ids, globals, foreign
 }
 
 // federationLeaveHubError wraps a hub-side failure with guidance to retry with
@@ -1268,18 +1280,22 @@ func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 			// project's identity — the post-leave state. Adoption would rewrite
 			// its event history a second time; rejoin just rebinds it. Mirrors
 			// the create-replica branch's detection for the adopt-first flow.
-			if hubUID := federationHubProjectUIDByID(m, draft.HubProjectID); hubUID != "" &&
-				m.projectUIDByID[draft.SpokeProjectID] == hubUID {
+			// Either UID being unknown disables that comparison, so block
+			// rather than default to history-rewriting adoption.
+			hubUID := federationHubProjectUIDByID(m, draft.HubProjectID)
+			localUID := m.projectUIDByID[draft.SpokeProjectID]
+			switch {
+			case hubUID != "" && localUID == hubUID:
 				draft.Operation = federationOperationRejoin
 				draft.AdoptExisting = false
-			} else if m.projectUIDByID[draft.SpokeProjectID] == "" {
-				// Unknown local UID means the rejoin check above could not
-				// run (project-list fetch still in flight, or it failed).
-				// Block rather than default to adoption, which would rewrite
-				// a post-leave project's history.
+			case localUID == "":
 				draft.BlockedReason = fmt.Sprintf(
 					"local project %q identity is still loading; press esc and retry",
 					draft.SpokeProjectName)
+			case hubUID == "":
+				draft.BlockedReason = fmt.Sprintf(
+					"hub project %q identity is unknown; refresh the hub project list and retry",
+					draft.HubProjectName)
 			}
 		}
 	}

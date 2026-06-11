@@ -1143,6 +1143,51 @@ func TestFederationLeaveDetachRevokesThenTearsDown(t *testing.T) {
 	assert.Contains(t, out, "standalone")
 }
 
+// TestFederationLeaveAbortsOnEnrollmentUIDMismatch: when no active enrollment
+// matches this spoke's instance UID but project-scoped enrollment(s) for the
+// hub project are still active, "zero matches is success" would silently
+// detach and delete the credential while a live token keeps hub access — the
+// instance UID can drift from the enrollment's (clone/import refresh, or an
+// enroll created with an explicit --spoke-instance). Leave must abort with
+// the surviving IDs; --local-only stays the explicit local-teardown path.
+func TestFederationLeaveAbortsOnEnrollmentUIDMismatch(t *testing.T) {
+	t.Run("aborts before any teardown", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		const hubProjectID int64 = 42
+		// The hub's only active enrollment is for a different spoke instance.
+		hub, hubSrv := newFakeLeaveHub(t, "01HZNQ7VFPK1XGD8R5MABCD4FF", hubProjectID)
+		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+
+		_, err := runCmdOutput(t, env, "federation", "leave",
+			"--project", "spoke-project", "--yes")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "#7", "the surviving enrollment ID must be named")
+		assert.Contains(t, err.Error(), "--local-only")
+		assert.Empty(t, hub.revokedIDs, "a foreign-instance enrollment must not be auto-revoked")
+		_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
+		require.NoError(t, bindErr, "binding must stay intact after the abort")
+		assert.Equal(t, "present", config.FederationCredentialMetadataFor(project.UID).Status)
+	})
+
+	t.Run("--local-only remains the explicit escape", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		const hubProjectID int64 = 42
+		_, hubSrv := newFakeLeaveHub(t, "01HZNQ7VFPK1XGD8R5MABCD4FF", hubProjectID)
+		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
+
+		_, _, err := runCmdCapture(t, env, "federation", "leave",
+			"--project", "spoke-project", "--local-only", "--yes")
+		require.NoError(t, err)
+		_, bindErr := env.DB.FederationBindingByProject(ctx, project.ID)
+		assert.ErrorIs(t, bindErr, db.ErrNotFound)
+	})
+}
+
 func TestFederationLeaveLocalOnlySkipsRevoke(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)

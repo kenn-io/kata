@@ -1008,6 +1008,52 @@ func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T
 	assert.Contains(t, rendered, "revoked 1 enrollment")
 }
 
+// TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject: when no
+// active enrollment matches this spoke's instance UID but the hub project
+// still has active project-scoped enrollment(s), the leave must abort before
+// local teardown instead of treating zero matches as success — the instance
+// UID can drift from the enrollment's (clone/import refresh or an explicit
+// --spoke-instance enroll), and proceeding would strand a live token.
+func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.T) {
+	hubProject := int64(42)
+	hub := &recordingFederationHubAdmin{
+		enrollments: []FederationEnrollment{
+			// Active, project-scoped, but for a different spoke instance.
+			{ID: 21, SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4FF", ProjectID: &hubProject},
+		},
+	}
+	restoreFederationHubAdminClient(t, func(
+		_ context.Context,
+		target daemonTarget,
+	) (federationHubAdminAPI, daemonTarget, error) {
+		return hub, target, nil
+	})
+	realLeaveRan := false
+	spoke := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/federation/replicas/7/actions/leave": func(w http.ResponseWriter, r *http.Request) {
+			realLeaveRan = true
+			respondJSON(t, w, api.LeaveFederationReplicaResultBody{Detached: true, Disposition: "detach"})
+		},
+	})
+
+	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
+	m.api = NewClient(spoke.URL, spoke.Client())
+	m.list.actor = "operator"
+	m.federationCursor = 0
+	out, _ := m.routeFederationViewKey(keyRune('x'))
+	require.Equal(t, federationModeLeavePreview, out.federationMode)
+
+	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd().(federationLeaveResultMsg)
+
+	require.Error(t, msg.err)
+	assert.Contains(t, msg.err.Error(), "#21", "the surviving enrollment ID must be named")
+	assert.Empty(t, hub.revokedEnrollmentIDs, "a foreign-instance enrollment must not be auto-revoked")
+	assert.False(t, realLeaveRan, "local teardown must not run after the abort")
+	_ = out
+}
+
 // TestFederationLeaveArchivePreflightRefusalSkipsRevoke: an archive-leave
 // whose archive would be refused (open issues) must fail BEFORE the hub
 // revoke — otherwise the spoke is left locally bound with a revoked hub
@@ -1147,11 +1193,13 @@ func TestFederationLeaveMatchesActiveEnrollmentsForSpokeInstanceAndHubProject(t 
 		{ID: 5, SpokeInstanceUID: "spoke-uid", ProjectID: nil},
 	}
 
-	got, globals := matchFederationLeaveEnrollments(enrollments, "spoke-uid", hubProject)
+	got, globals, foreign := matchFederationLeaveEnrollments(enrollments, "spoke-uid", hubProject)
 
 	assert.Equal(t, []int64{1}, got)
 	assert.Equal(t, []int64{5}, globals,
 		"active global enrollments for this spoke must be surfaced (they still authorize the project) without being auto-revoked")
+	assert.Equal(t, []int64{3}, foreign,
+		"active project-scoped enrollments for other spoke instances must be surfaced so a zero-match leave can refuse instead of stranding them")
 }
 
 func TestFederationLeaveHubTargetUsesBindingURLAndToleratesTrailingSlash(t *testing.T) {
@@ -1673,6 +1721,29 @@ func TestFederationPreviewAdoptFlowBlocksWithoutLocalUID(t *testing.T) {
 	draft := out.federationDraft
 	assert.NotEmpty(t, draft.BlockedReason,
 		"unknown local project UID must block adoption, not silently proceed with it")
+	assert.NotEqual(t, federationOperationRejoin, draft.Operation)
+}
+
+// TestFederationPreviewAdoptFlowBlocksWithoutHubUID: an unknown HUB project
+// UID disables the rejoin comparison just like an unknown local UID — the
+// preview must block rather than default to adoption, which could rewrite a
+// post-leave project's event history.
+func TestFederationPreviewAdoptFlowBlocksWithoutHubUID(t *testing.T) {
+	m := setupFederationView()
+	m.projectsByID = map[int64]string{7: "spoke-project"}
+	m.projectUIDByID = map[int64]string{7: "01HZNQ7VFPK1XGD8R5MABCD4EX"}
+	m.federationDraft = newFederationDraft("operator")
+	m.federationDraft.SpokeProjectID = 7
+	m.federationDraft.SpokeProjectName = "spoke-project"
+	// Hub row carries no UID (e.g. an older hub daemon's project list).
+	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project"}}
+	m.federationHubProjectCursor = 0 // adopt-same-name row
+
+	out, _ := m.previewFederationEnrollment()
+
+	draft := out.federationDraft
+	assert.NotEmpty(t, draft.BlockedReason,
+		"unknown hub project UID must block adoption, not silently proceed with it")
 	assert.NotEqual(t, federationOperationRejoin, draft.Operation)
 }
 
