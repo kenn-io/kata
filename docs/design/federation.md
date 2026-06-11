@@ -357,7 +357,8 @@ archive-leave whose archive already committed resumes rather than refusing:
 the already-archived step is skipped (that call reports `archived=false`) and
 any surviving detach and credential cleanup still run. The join-time
 `--allow-insecure` transport opt-in is persisted on the binding (schema 15)
-and surfaced in status as the union with the credential's copy; the leave hub
+and surfaced in status as the union with the credential's copy (only when
+that credential names the binding's hub URL and project); the leave hub
 client further unions a same-origin catalog entry's `allow_insecure` and the
 explicit `leave --allow-insecure` flag, so a credential loss cannot strand a
 plain-HTTP overlay hub's enrollment behind the plaintext-bearer refusal. `--local-only` tears

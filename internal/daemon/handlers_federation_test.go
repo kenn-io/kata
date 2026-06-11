@@ -2335,8 +2335,10 @@ func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
 			Enabled:              true,
 		})
 		require.NoError(t, err)
+		// Trailing slash: the same-hub check must use the leave client's URL
+		// normalization, not exact string equality.
 		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
-			HubURL:        "http://hub.internal:7373",
+			HubURL:        "http://hub.internal:7373/",
 			HubProjectID:  42,
 			Token:         "spoke-token",
 			AllowInsecure: true,
@@ -2348,6 +2350,39 @@ func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
 		require.Len(t, body.Statuses, 1)
 		assert.True(t, body.Statuses[0].AllowInsecure,
 			"credential allow_insecure must still surface for legacy bindings")
+	})
+
+	t.Run("stale credential for a different hub does not leak its opt-in", func(t *testing.T) {
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "spoke-project")
+		require.NoError(t, err)
+		// Binding points at hub B with no transport opt-in...
+		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID:            project.ID,
+			Role:                 db.FederationRoleSpoke,
+			HubURL:               "http://hub-b.internal:7373",
+			HubProjectID:         43,
+			HubProjectUID:        project.UID,
+			ReplayHorizonEventID: 9,
+			Enabled:              true,
+		})
+		require.NoError(t, err)
+		// ...while a stale credential from an older hub A enrollment (e.g. a
+		// tokenless rejoin skipped the credential rewrite) still carries one.
+		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
+			HubURL:        "http://hub-a.internal:7373",
+			HubProjectID:  42,
+			Token:         "stale-token",
+			AllowInsecure: true,
+		}))
+
+		var body api.FederationStatusBody
+		resp := envDoJSON(t, env, http.MethodGet, "/api/v1/federation/status", nil, &body)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Len(t, body.Statuses, 1)
+		assert.False(t, body.Statuses[0].AllowInsecure,
+			"a different hub's credential opt-in must not authorize plaintext bearer to this binding's hub")
 	})
 }
 

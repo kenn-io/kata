@@ -898,9 +898,17 @@ type federationLocalProjectRow struct {
 
 func federationLocalProjectRows(m Model) []federationLocalProjectRow {
 	rows := []federationLocalProjectRow{{createReplica: true}}
-	projects := make([]ProjectSummary, 0, len(m.projectsByID))
+	projects := make([]ProjectSummary, 0, len(m.projectsByID)+1)
 	for id, name := range m.projectsByID {
 		projects = append(projects, ProjectSummary{ID: id, Name: name})
+	}
+	// The boot project-list fetch is asynchronous and can fail, so the
+	// scoped/selected project must stay adoptable from scope state alone —
+	// an empty cache must not reduce the flow to "create replica" only.
+	if id, name, ok := m.defaultFederationProject(); ok {
+		if _, cached := m.projectsByID[id]; !cached {
+			projects = append(projects, ProjectSummary{ID: id, Name: name})
+		}
 	}
 	sort.SliceStable(projects, func(i, j int) bool {
 		li, lj := strings.ToLower(projects[i].Name), strings.ToLower(projects[j].Name)

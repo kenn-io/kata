@@ -850,6 +850,14 @@ func federationProjectStatus(ctx context.Context, store db.Storage, binding db.F
 	if binding.Role == db.FederationRoleSpoke {
 		credentialMetadata = config.FederationCredentialMetadataFor(project.UID)
 	}
+	// The credential's allow_insecure is only meaningful for the hub it was
+	// recorded for: a stale credential from an older enrollment (e.g. a
+	// tokenless rejoin that skipped the credential rewrite) must not authorize
+	// plaintext bearer transport to the binding's CURRENT hub. Same URL
+	// normalization as the leave client's catalog matching.
+	credentialAllowInsecure := credentialMetadata.AllowInsecure &&
+		credentialMetadata.HubProjectID == binding.HubProjectID &&
+		strings.TrimRight(credentialMetadata.HubURL, "/") == strings.TrimRight(binding.HubURL, "/")
 	return api.FederationProjectStatus{
 		ProjectID:     project.ID,
 		ProjectUID:    project.UID,
@@ -863,9 +871,9 @@ func federationProjectStatus(ctx context.Context, store db.Storage, binding db.F
 		HubProjectUID: binding.HubProjectUID,
 		Capabilities:  credentialMetadata.Capabilities,
 		// Opt-ins union: the binding is the durable record (it survives a
-		// credential loss during leave recovery); the credential copy keeps
-		// bindings recorded before allow_insecure was persisted working.
-		AllowInsecure:               binding.AllowInsecure || credentialMetadata.AllowInsecure,
+		// credential loss during leave recovery); the same-hub credential copy
+		// keeps bindings recorded before allow_insecure was persisted working.
+		AllowInsecure:               binding.AllowInsecure || credentialAllowInsecure,
 		CredentialStatus:            credentialMetadata.Status,
 		PullCursorEventID:           binding.PullCursorEventID,
 		PushCursorEventID:           binding.PushCursorEventID,

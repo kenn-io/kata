@@ -278,6 +278,29 @@ func TestFederationEnroll_NWithCurrentProjectStartsLocalSelectionCursored(t *tes
 	assert.Equal(t, "operator", out.federationDraft.RequestedActor)
 }
 
+// TestFederationEnroll_ScopedProjectAdoptableWithEmptyProjectCache: the boot
+// project-list fetch is asynchronous and can fail, so the scoped project must
+// be adoptable from scope state alone — an empty projectsByID cache must not
+// reduce the enroll flow to "create replica" only.
+func TestFederationEnroll_ScopedProjectAdoptableWithEmptyProjectCache(t *testing.T) {
+	m := setupFederationView()
+	m.scope = homedScope(7, "spoke-project")
+	// No injectProjects: simulate pressing `n` before projectsLoadedMsg (or
+	// after a failed boot fetch).
+
+	out, cmd := m.routeFederationViewKey(keyRune('n'))
+
+	require.Nil(t, cmd)
+	require.Equal(t, federationModeSelectLocalProject, out.federationMode)
+	rows := federationLocalProjectRows(out)
+	require.Greater(t, len(rows), out.federationLocalProjectCursor)
+	cursorRow := rows[out.federationLocalProjectCursor]
+	require.False(t, cursorRow.createReplica,
+		"scoped project must be selectable (and pre-positioned) without the project cache")
+	assert.Equal(t, "spoke-project", cursorRow.project.Name)
+	assert.Equal(t, int64(7), cursorRow.project.ID)
+}
+
 func TestFederationEnroll_NWithoutProjectStartsLocalProjectSelection(t *testing.T) {
 	m := setupFederationView()
 	m.scope = scope{allProjects: true}
