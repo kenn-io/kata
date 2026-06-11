@@ -1568,6 +1568,29 @@ func TestFederationAdoptTypedConfirmationExecutes(t *testing.T) {
 	assert.True(t, joinBody.AdoptExisting)
 }
 
+// TestFederationPreviewAdoptFlowBlocksWithoutLocalUID: when the selected
+// local project's UID is not yet known (the async project-list fetch has not
+// landed, or it failed), the adopt-first preview cannot distinguish genuine
+// adoption from a post-leave rejoin. It must block rather than default to
+// adoption, which would rewrite the project's event history.
+func TestFederationPreviewAdoptFlowBlocksWithoutLocalUID(t *testing.T) {
+	m := setupFederationView()
+	m.projectsByID = map[int64]string{7: "spoke-project"}
+	// projectUIDByID intentionally unseeded: the boot race window.
+	m.federationDraft = newFederationDraft("operator")
+	m.federationDraft.SpokeProjectID = 7
+	m.federationDraft.SpokeProjectName = "spoke-project"
+	m.federationHubProjects = []ProjectSummary{{ID: 42, Name: "spoke-project", UID: "01HZNQ7VFPK1XGD8R5MABCD4EX"}}
+	m.federationHubProjectCursor = 0 // adopt-same-name row
+
+	out, _ := m.previewFederationEnrollment()
+
+	draft := out.federationDraft
+	assert.NotEmpty(t, draft.BlockedReason,
+		"unknown local project UID must block adoption, not silently proceed with it")
+	assert.NotEqual(t, federationOperationRejoin, draft.Operation)
+}
+
 // TestFederationPreviewAdoptFlowDetectsRejoinForUIDHolder: selecting a local
 // project that already shares the target hub project's identity (the
 // post-leave state) must present rejoin, not adoption — adoption would

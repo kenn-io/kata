@@ -166,6 +166,9 @@ type ResolveResp struct {
 	Project struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
+		// UID seeds projectUIDByID at boot so the enroll flow's rejoin
+		// detection works before the async project-list fetch lands.
+		UID string `json:"uid"`
 	} `json:"project"`
 	WorkspaceRoot string `json:"workspace_root"`
 }

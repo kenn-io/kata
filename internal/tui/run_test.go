@@ -196,6 +196,30 @@ func TestBoot_UnresolvedWithProjects_LandsViewProjects(t *testing.T) {
 	assert.Equal(t, "kata", bi.projects[0].Name)
 }
 
+// TestBootScopedResolveSeedsProjectUID: a TUI launched inside a project must
+// know that project's UID from the first frame. The adopt-first enroll flow's
+// rejoin detection reads projectUIDByID; before the async project-list fetch
+// lands, an unseeded cache would let a post-leave adoption rewrite the
+// project's history instead of rebinding it.
+func TestBootScopedResolveSeedsProjectUID(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/projects/resolve", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(
+			`{"project":{"id":7,"uid":"01HZNQ7VFPK1XGD8R5MABCD4EX","name":"spoke-project"},"workspace_root":"/tmp/ws"}`))
+	})
+
+	bi, err := bootResolveScope(t.Context(), c, "/tmp/ws")
+	require.NoError(t, err)
+	assert.Equal(t, viewList, bi.view)
+	assert.Equal(t, int64(7), bi.scope.projectID)
+
+	m := buildRunModel(Options{}, c, bi)
+	assert.Equal(t, "spoke-project", m.projectsByID[7])
+	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", m.projectUIDByID[7],
+		"scoped boot must seed the resolved project's UID for rejoin detection")
+}
+
 // TestBuildRunModel_SeedsViewProjectsCacheFromBoot pins that when boot
 // lands on viewProjects, the initial model's cache maps are populated
 // from the boot fetch — no empty-then-fill flicker on the first frame.

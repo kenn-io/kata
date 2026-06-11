@@ -1253,6 +1253,14 @@ func (m Model) previewFederationEnrollment() (Model, tea.Cmd) {
 				m.projectUIDByID[draft.SpokeProjectID] == hubUID {
 				draft.Operation = federationOperationRejoin
 				draft.AdoptExisting = false
+			} else if m.projectUIDByID[draft.SpokeProjectID] == "" {
+				// Unknown local UID means the rejoin check above could not
+				// run (project-list fetch still in flight, or it failed).
+				// Block rather than default to adoption, which would rewrite
+				// a post-leave project's history.
+				draft.BlockedReason = fmt.Sprintf(
+					"local project %q identity is still loading; press esc and retry",
+					draft.SpokeProjectName)
 			}
 		}
 	}
