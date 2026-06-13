@@ -512,6 +512,53 @@ func TestInit_WithAgents_AppendsToExistingFile(t *testing.T) {
 	assert.Contains(t, string(content), agentsBlockBegin)
 }
 
+func TestInit_WithAgents_AppendsToExistingClaudeFile(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "CLAUDE.md"), //nolint:gosec // test fixture under TempDir
+		[]byte("# Claude rules\n\nUse the project test helper.\n"), 0o644))
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "Use the project test helper.")
+	assert.Contains(t, string(content), agentsBlockBegin)
+	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"))
+}
+
+func TestInit_WithAgents_AppendsToBothAgentFilesWhenBothExist(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), //nolint:gosec // test fixture under TempDir
+		[]byte("# Agent rules\n\nRun `go test`.\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "CLAUDE.md"), //nolint:gosec // test fixture under TempDir
+		[]byte("# Claude rules\n\nUse the project test helper.\n"), 0o644))
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	claude, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(agents), "Run `go test`.")
+	assert.Contains(t, string(agents), agentsBlockBegin)
+	assert.Contains(t, string(claude), "Use the project test helper.")
+	assert.Contains(t, string(claude), agentsBlockBegin)
+}
+
 func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 	env := testenv.New(t)
 	dir := t.TempDir()
@@ -636,10 +683,9 @@ func TestInit_WithAgents_BeadsBlockInClaude_WritesSidecar(t *testing.T) {
 	assert.Contains(t, string(proposed), agentsBlockBegin)
 	assert.NotContains(t, string(proposed), beadsBlockBeginPrefix)
 
-	// AGENTS.md (absent here) still gets kata's block written normally.
-	agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	assert.Contains(t, string(agents), agentsBlockBegin)
+	// CLAUDE.md is the only real guidance file here, so kata does not create
+	// AGENTS.md on the side.
+	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"))
 }
 
 // kata's own convention symlinks CLAUDE.md at AGENTS.md. A symlinked CLAUDE.md

@@ -70,18 +70,20 @@ To also drop a short kata briefing where coding agents look for it, pass
 kata init --with-agents
 ```
 
-This writes a marker-delimited block into `AGENTS.md` in the workspace, pointing
-agents at `kata quickstart` and the close discipline. The block is idempotent:
-re-running refreshes kata's section in place and leaves the rest of the file
-untouched. The flag is off by default, so a plain `kata init` still writes only
-`.kata.toml`.
+This writes a marker-delimited block where coding agents look for workspace
+guidance, pointing them at `kata quickstart` and the close discipline. If
+`AGENTS.md` and/or a real, non-symlinked `CLAUDE.md` already exist, kata
+refreshes each of those files. If neither exists, kata creates `AGENTS.md`. The
+block is idempotent: re-running refreshes kata's section in place and leaves the
+rest of each file untouched. The flag is off by default, so a plain `kata init`
+still writes only `.kata.toml`.
 
 If `AGENTS.md` (or a real, non-symlinked `CLAUDE.md`) still carries a Beads
 integration block — common when migrating off Beads — kata refuses to edit it in
 place. It leaves the original untouched and writes a `<file>.kata-proposed`
 sidecar with the Beads block removed and kata's block added. Review the sidecar,
-then `mv AGENTS.md.kata-proposed AGENTS.md` to adopt it, or delete it to keep the
-original. kata prints where the sidecar landed. For safety, a symlinked
+then move `<file>.kata-proposed` over the original to adopt it, or delete it to
+keep the original. kata prints where the sidecar landed. For safety, a symlinked
 `AGENTS.md` is refused before it is read; replace it with a regular file before
 using `--with-agents`.
 

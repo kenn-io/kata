@@ -27,9 +27,11 @@ workspace. Pass `--project` to choose the project name explicitly instead of
 deriving it from the git remote.
 
 Pass `--with-agents` to add or refresh kata's marker-delimited guidance block
-in `AGENTS.md`. The block points coding agents at `kata quickstart` and the
-close discipline; re-running the command updates only kata's block and leaves
-other content untouched.
+where coding agents look for workspace instructions. Existing real `AGENTS.md`
+and `CLAUDE.md` files are both refreshed; if neither exists, kata creates
+`AGENTS.md`. The block points coding agents at `kata quickstart` and the close
+discipline; re-running the command updates only kata's block and leaves other
+content untouched.
 
 When migrating from Beads, an existing `AGENTS.md` or real `CLAUDE.md` may still
 carry a Beads integration block. kata leaves that file untouched and writes a

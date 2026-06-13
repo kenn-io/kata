@@ -35,8 +35,9 @@ expand or collapse all parents in nested view, and `?` for the full keybinding
 list.
 
 For agent-heavy workspaces, use `kata init --with-agents` to also write a
-managed kata briefing into `AGENTS.md`; re-running it refreshes kata's block
-without overwriting the rest of the file.
+managed kata briefing into agent guidance files. It refreshes existing real
+`AGENTS.md` and `CLAUDE.md` files, or creates `AGENTS.md` when neither exists,
+without overwriting the rest of either file.
 
 ## What kata does
 

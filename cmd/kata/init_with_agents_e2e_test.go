@@ -41,9 +41,8 @@ func TestE2E_InitWithAgents_NewEmptyRepo(t *testing.T) {
 }
 
 // TestE2E_InitWithAgents_PreservesExistingAgentDocs runs init in a repo that
-// already ships a CLAUDE.md and an AGENTS.md full of unrelated guidance. The
-// CLAUDE.md must be byte-for-byte untouched, and every pre-existing AGENTS.md
-// section must survive alongside kata's appended block.
+// already ships a CLAUDE.md and an AGENTS.md full of unrelated guidance. Both
+// files keep their existing content and gain kata's appended block.
 func TestE2E_InitWithAgents_PreservesExistingAgentDocs(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
@@ -58,10 +57,11 @@ func TestE2E_InitWithAgents_PreservesExistingAgentDocs(t *testing.T) {
 
 	runCLI(t, env, dir, "init", "--with-agents")
 
-	// CLAUDE.md is not part of the managed surface — it must be identical.
+	// CLAUDE.md is part of the managed surface when it already exists.
 	gotClaude, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
-	assert.Equal(t, claude, string(gotClaude), "CLAUDE.md must be left exactly as the project had it")
+	assert.Contains(t, string(gotClaude), "Project-specific Claude rules.")
+	assert.Contains(t, string(gotClaude), agentsBlockBegin)
 
 	// AGENTS.md keeps every pre-existing section and gains kata's block.
 	gotAgents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir

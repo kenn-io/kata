@@ -138,7 +138,7 @@ get committed.`,
 
 	cmd.Flags().BoolVar(&opts.Replace, "replace", false, "overwrite .kata.toml binding when it conflicts")
 	cmd.Flags().BoolVar(&opts.Reassign, "reassign", false, "move an existing alias to this project")
-	cmd.Flags().BoolVar(&opts.WithAgents, "with-agents", false, "write kata agent guidance into AGENTS.md in the workspace")
+	cmd.Flags().BoolVar(&opts.WithAgents, "with-agents", false, "write kata agent guidance into AGENTS.md/CLAUDE.md in the workspace")
 
 	return cmd
 }
@@ -373,7 +373,7 @@ func warnAgentsUpdate(err error) {
 	if currentOutputMode() != outputHuman {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "kata: warning: could not update AGENTS.md: %v\n", err)
+	fmt.Fprintf(os.Stderr, "kata: warning: could not update agent guidance: %v\n", err)
 }
 
 // warnBeadsConflict tells the user kata declined to edit a file in place
@@ -606,53 +606,79 @@ func agentsManagedBlock() string {
 }
 
 // applyAgentGuidance is the entry point for `--with-agents`. It writes kata's
-// block into AGENTS.md and, when migrating off beads, sidesteps a destructive
-// edit: if a file still carries a beads integration block, kata leaves it
-// untouched and writes a <file>.kata-proposed copy (beads block removed, kata
-// block added) for the user to adopt or discard. CLAUDE.md is only considered
-// in that conflict case, and only when it is a real file rather than a symlink
-// (kata's own convention points CLAUDE.md at AGENTS.md).
+// block into existing real agent guidance files (AGENTS.md and CLAUDE.md), or
+// creates AGENTS.md when neither exists. When migrating off beads, it sidesteps
+// a destructive edit: if a file still carries a beads integration block, kata
+// leaves it untouched and writes a <file>.kata-proposed copy (beads block
+// removed, kata block added) for the user to adopt or discard.
 func applyAgentGuidance(dir string) (bool, error) {
 	changed := false
 
 	agentsPath := filepath.Join(dir, "AGENTS.md")
 	// Refuse a symlinked AGENTS.md before reading it. Following the link would
 	// let a hostile repo copy an outside file's content into the workspace via
-	// the migration sidecar, or rewrite the link target. CLAUDE.md gets the same
-	// treatment through regularFileWithBeads.
+	// the migration sidecar, or rewrite the link target.
 	if fi, lerr := os.Lstat(agentsPath); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return changed, fmt.Errorf("refusing to manage symlinked %s", agentsPath)
 	}
-	content, exists, err := readIfExists(agentsPath)
+
+	claudePath := filepath.Join(dir, "CLAUDE.md")
+	agentsExists, err := regularGuidanceFileExists(agentsPath)
 	if err != nil {
 		return changed, err
 	}
-	if exists && hasBeadsBlock(content) {
-		sidecar, err := writeMigrationProposal(agentsPath, content)
+	claudeExists, err := regularGuidanceFileExists(claudePath)
+	if err != nil {
+		return changed, err
+	}
+
+	if agentsExists || !claudeExists {
+		c, err := applyAgentGuidanceFile(agentsPath, agentsExists)
 		if err != nil {
 			return changed, err
 		}
-		warnBeadsConflict(agentsPath, sidecar)
-		changed = true
-	} else {
-		c, err := ensureAgentsBlock(agentsPath, content, exists)
+		changed = changed || c
+	}
+	if claudeExists {
+		c, err := applyAgentGuidanceFile(claudePath, true)
 		if err != nil {
 			return changed, err
 		}
 		changed = changed || c
 	}
 
-	claudePath := filepath.Join(dir, "CLAUDE.md")
-	if claude, ok := regularFileWithBeads(claudePath); ok {
-		sidecar, err := writeMigrationProposal(claudePath, claude)
-		if err != nil {
-			return changed, err
-		}
-		warnBeadsConflict(claudePath, sidecar)
-		changed = true
-	}
-
 	return changed, nil
+}
+
+// regularGuidanceFileExists reports whether path is an existing real guidance
+// file. Symlinks and directories are not managed through this path.
+func regularGuidanceFileExists(path string) (bool, error) {
+	fi, err := os.Lstat(path)
+	switch {
+	case err == nil:
+		return fi.Mode()&os.ModeSymlink == 0 && !fi.IsDir(), nil
+	case errors.Is(err, os.ErrNotExist):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+func applyAgentGuidanceFile(path string, exists bool) (bool, error) {
+	content, readExists, err := readIfExists(path)
+	if err != nil {
+		return false, err
+	}
+	exists = exists && readExists
+	if exists && hasBeadsBlock(content) {
+		sidecar, err := writeMigrationProposal(path, content)
+		if err != nil {
+			return false, err
+		}
+		warnBeadsConflict(path, sidecar)
+		return true, nil
+	}
+	return ensureAgentsBlock(path, content, exists)
 }
 
 // ensureAgentsBlock writes kata's block into an agent guidance file whose
@@ -797,24 +823,4 @@ func readIfExists(path string) (string, bool, error) {
 	default:
 		return "", false, err
 	}
-}
-
-// regularFileWithBeads reports the content of path when it is a regular file
-// (not a symlink or directory) that carries a beads integration block. kata
-// skips symlinked CLAUDE.md so it never rewrites a file that merely points at
-// AGENTS.md.
-func regularFileWithBeads(path string) (string, bool) {
-	fi, err := os.Lstat(path)
-	if err != nil || fi.Mode()&os.ModeSymlink != 0 || fi.IsDir() {
-		return "", false
-	}
-	bs, err := os.ReadFile(path) //nolint:gosec
-	if err != nil {
-		return "", false
-	}
-	content := string(bs)
-	if !hasBeadsBlock(content) {
-		return "", false
-	}
-	return content, true
 }
