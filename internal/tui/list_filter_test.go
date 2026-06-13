@@ -189,7 +189,7 @@ func TestList_StatusOpenDoesNotAutoExpandMatchingChildren(t *testing.T) {
 		},
 		{
 			ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Status: "open",
-			Title: "child", ParentShortID: &parentSID,
+			Title: "child", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID},
 		},
 	}}
 
@@ -219,7 +219,7 @@ func TestList_StatusOpenPromotesChildWhenParentClosed(t *testing.T) {
 		},
 		{
 			ProjectID: 7, UID: "01TEST-c090", ShortID: "c090", Status: "open",
-			Title: "open child", ParentShortID: &parentSID,
+			Title: "open child", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID},
 		},
 	}}
 
@@ -241,8 +241,8 @@ func TestList_StatusOpenShowsNestedMatchingGrandchildContext(t *testing.T) {
 	childSID := "c002"
 	rows := buildQueueRows([]Issue{
 		{ProjectID: 7, UID: "01TEST-p001", ShortID: parentSID, Status: "open", Title: "parent"},
-		{ProjectID: 7, UID: "01TEST-c002", ShortID: childSID, Status: "closed", Title: "child", ParentShortID: &parentSID},
-		{ProjectID: 7, UID: "01TEST-g003", ShortID: "g003", Status: "open", Title: "grandchild", ParentShortID: &childSID},
+		{ProjectID: 7, UID: "01TEST-c002", ShortID: childSID, Status: "closed", Title: "child", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID}},
+		{ProjectID: 7, UID: "01TEST-g003", ShortID: "g003", Status: "open", Title: "grandchild", Parent: &LinkPeer{UID: "01TEST-" + childSID, ShortID: childSID}},
 	}, ListFilter{Status: "open"}, nil)
 
 	require.Len(t, rows, 3)
@@ -434,7 +434,7 @@ func TestList_ExpandCollapse(t *testing.T) {
 	lm := listModel{
 		issues: []Issue{
 			{ProjectID: 7, UID: "01TEST-p001", ShortID: parentSID, ChildCounts: &ChildCounts{Open: 1, Total: 1}},
-			{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", ParentShortID: &parentSID},
+			{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID}},
 		},
 	}
 
@@ -475,7 +475,7 @@ func TestList_ArrowExpandCollapse(t *testing.T) {
 	lm := listModel{
 		issues: []Issue{
 			{ProjectID: 7, UID: "01TEST-p001", ShortID: parentSID, ChildCounts: &ChildCounts{Open: 1, Total: 1}},
-			{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", ParentShortID: &parentSID},
+			{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID}},
 		},
 	}
 
@@ -708,7 +708,7 @@ func TestList_SelectionPreservedAcrossRefetchWithParentInsertion(t *testing.T) {
 
 	lm = lm.applyFetched(refetchedMsg{issues: []Issue{
 		{ProjectID: 7, UID: "01TEST-p001", ShortID: parentSID, Title: "parent", ChildCounts: &ChildCounts{Open: 1, Total: 1}},
-		{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Title: "child", ParentShortID: &parentSID},
+		{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Title: "child", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID}},
 	}})
 	iss, ok := lm.targetRow()
 	if !ok || iss.ShortID != "c002" {

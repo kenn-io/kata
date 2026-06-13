@@ -170,7 +170,7 @@ func TestPurgeIssue_RemovesAllDependentsAndAudits(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
-		ProjectID: p.ID, FromIssueID: keeper.ID, ToIssueID: target.ID,
+		FromIssueID: keeper.ID, ToIssueID: target.ID,
 		Type: "blocks", Author: "tester",
 	}, db.LinkEventParams{
 		EventType:    "issue.linked",
@@ -643,4 +643,30 @@ func TestPurgeTombstone_DifferentProjectsDoNotInterfere(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "d4ex", b.ShortID,
 		"P1's purge_log tombstone must not gate P2's short_id pool")
+}
+
+// TestEditIssueAtomic_ChangesCarryPeerProject pins that change capture
+// reports each peer's project name: the wire renders foreign peers
+// qualified, and the project is captured in-tx so it cannot race a
+// concurrent move.
+func TestEditIssueAtomic_ChangesCarryPeerProject(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	alpha := createProject(ctx, t, d, "alpha")
+	beta := createProject(ctx, t, d, "beta")
+	subject := makeIssue(t, ctx, d, alpha.ID, "subject in alpha", "tester")
+	peer := makeIssue(t, ctx, d, beta.ID, "peer in beta", "tester")
+
+	out, err := d.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID:   subject.ID,
+		Actor:     "tester",
+		AddBlocks: []int64{peer.ID},
+	})
+	require.NoError(t, err)
+	require.Len(t, out.Changes.BlocksAdded, 1)
+	added := out.Changes.BlocksAdded[0]
+	assert.Equal(t, peer.ShortID, added.ShortID)
+	assert.Equal(t, peer.UID, added.UID)
+	assert.Equal(t, "beta", added.Project, "peer project must be captured in-tx")
 }

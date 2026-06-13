@@ -83,6 +83,13 @@ kata import --input backups/myproj.jsonl --target /tmp/myproj-only.db
 This is useful for archiving one project, handing history to a collaborator who
 will set up a fresh kata install, or moving one project to another host.
 
+Links may span projects, and a scoped export only contains the named
+project's issues — so the envelope can carry a link edge whose peer issue is
+absent. Import skips those links (and any import-mapping records that
+reference them) instead of failing, and prints an aggregate
+`note: skipped N link record(s)…` to stderr. Importing a fuller envelope that
+contains both endpoints later recreates the skipped edges.
+
 What does not work today:
 
 - importing a per-project snapshot into an existing populated database;

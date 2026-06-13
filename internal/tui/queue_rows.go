@@ -39,6 +39,33 @@ type issueKey struct {
 	shortID   string
 }
 
+// issueKeysByUID indexes the loaded issues' keys by issue UID, for resolving
+// parent peers. Issues without a UID (a daemon predating the field) are not
+// indexed; their children render top-level.
+func issueKeysByUID(issues []Issue) map[string]issueKey {
+	keys := make(map[string]issueKey, len(issues))
+	for _, iss := range issues {
+		if iss.UID == "" {
+			continue
+		}
+		keys[iss.UID] = issueKey{projectID: iss.ProjectID, shortID: iss.ShortID}
+	}
+	return keys
+}
+
+// parentKeyIn returns the key of iss's parent when that parent is among the
+// indexed issues, matched by UID. Parents may live in another project, so a
+// short_id match inside the child's project would be wrong twice over: it
+// misses the real parent and can capture an unrelated issue that reuses the
+// short_id.
+func parentKeyIn(iss Issue, keysByUID map[string]issueKey) (issueKey, bool) {
+	if iss.Parent == nil || iss.Parent.UID == "" {
+		return issueKey{}, false
+	}
+	key, ok := keysByUID[iss.Parent.UID]
+	return key, ok
+}
+
 type queueRow struct {
 	issue       Issue
 	key         issueKey
@@ -74,7 +101,7 @@ func buildQueueRowsWithView(
 	state := newQueueBuildState(issues, filter, expanded, childSort)
 	for _, key := range state.order {
 		iss := state.byKey[key]
-		if iss.ParentShortID != nil && state.hasIssue(issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}) {
+		if _, ok := state.parentKey(iss); ok {
 			continue
 		}
 		state.appendNode(key, 0, false, nil)
@@ -106,6 +133,7 @@ func buildFlatQueueRows(issues []Issue, filter ListFilter) []queueRow {
 
 type queueBuildState struct {
 	byKey            map[issueKey]Issue
+	keysByUID        map[string]issueKey
 	childrenByParent map[issueKey][]issueKey
 	order            []issueKey
 	filter           ListFilter
@@ -124,6 +152,7 @@ func newQueueBuildState(
 ) *queueBuildState {
 	state := &queueBuildState{
 		byKey:            make(map[issueKey]Issue, len(issues)),
+		keysByUID:        issueKeysByUID(issues),
 		childrenByParent: make(map[issueKey][]issueKey),
 		order:            make([]issueKey, 0, len(issues)),
 		filter:           filter,
@@ -142,12 +171,8 @@ func newQueueBuildState(
 	}
 	for _, key := range state.order {
 		iss := state.byKey[key]
-		if iss.ParentShortID == nil {
-			continue
-		}
-		parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
-		if state.hasIssue(parentKey) {
-			state.childrenByParent[parentKey] = append(state.childrenByParent[parentKey], key)
+		if pk, ok := state.parentKey(iss); ok {
+			state.childrenByParent[pk] = append(state.childrenByParent[pk], key)
 		}
 	}
 	state.computeIncluded()
@@ -178,20 +203,24 @@ func (s *queueBuildState) computeIncluded() {
 	}
 }
 
+// parentKey returns the in-list key of iss's parent (matched by UID) and
+// ok=true; ok=false when the issue has no parent or the parent is not among
+// the loaded issues.
+func (s *queueBuildState) parentKey(iss Issue) (issueKey, bool) {
+	return parentKeyIn(iss, s.keysByUID)
+}
+
 func (s *queueBuildState) includeAncestors(key issueKey) {
 	seen := map[issueKey]bool{key: true}
 	for {
 		iss := s.byKey[key]
-		if iss.ParentShortID == nil {
+		pk, ok := s.parentKey(iss)
+		if !ok || seen[pk] {
 			return
 		}
-		parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
-		if seen[parentKey] || !s.hasIssue(parentKey) {
-			return
-		}
-		s.included[parentKey] = true
-		seen[parentKey] = true
-		key = parentKey
+		s.included[pk] = true
+		seen[pk] = true
+		key = pk
 	}
 }
 
@@ -200,22 +229,19 @@ func (s *queueBuildState) includeAncestorsWhenTheyConnectToMatchedAncestor(key i
 	seen := map[issueKey]bool{key: true}
 	for {
 		iss := s.byKey[key]
-		if iss.ParentShortID == nil {
+		pk, ok := s.parentKey(iss)
+		if !ok || seen[pk] {
 			return
 		}
-		parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
-		if seen[parentKey] || !s.hasIssue(parentKey) {
-			return
-		}
-		path = append(path, parentKey)
-		if s.matched[parentKey] {
+		path = append(path, pk)
+		if s.matched[pk] {
 			for _, ancestor := range path {
 				s.included[ancestor] = true
 			}
 			return
 		}
-		seen[parentKey] = true
-		key = parentKey
+		seen[pk] = true
+		key = pk
 	}
 }
 
@@ -308,16 +334,35 @@ func (s *queueBuildState) topologicalChildKeys(children []issueKey) []issueKey {
 		return children
 	}
 	index := make(map[issueKey]int, len(children))
-	byShortID := make(map[string]issueKey, len(children))
+	shortIDSiblings := make(map[string][]issueKey, len(children))
 	for i, key := range children {
 		index[key] = i
-		byShortID[key.shortID] = key
+		shortIDSiblings[key.shortID] = append(shortIDSiblings[key.shortID], key)
+	}
+	// resolveBlocked maps a Blocks peer to a sibling key. The UID match is
+	// authoritative — siblings may span projects, so two of them can share a
+	// short_id. A peer without a UID (a daemon predating the field) falls
+	// back to short_id only while exactly one sibling carries it.
+	resolveBlocked := func(peer LinkPeer) (issueKey, bool) {
+		if peer.UID != "" {
+			key, ok := s.keysByUID[peer.UID]
+			if !ok {
+				return issueKey{}, false
+			}
+			_, isSibling := index[key]
+			return key, isSibling
+		}
+		siblings := shortIDSiblings[peer.ShortID]
+		if len(siblings) != 1 {
+			return issueKey{}, false
+		}
+		return siblings[0], true
 	}
 	outgoing := make(map[issueKey][]issueKey, len(children))
 	indegree := make(map[issueKey]int, len(children))
 	for _, key := range children {
 		for _, blocked := range s.byKey[key].Blocks {
-			blockedKey, ok := byShortID[blocked.ShortID]
+			blockedKey, ok := resolveBlocked(blocked)
 			if !ok || blockedKey == key {
 				continue
 			}
@@ -376,18 +421,9 @@ func insertReadyByOriginalOrder(
 	return ready
 }
 
-func (s *queueBuildState) hasIssue(key issueKey) bool {
-	_, ok := s.byKey[key]
-	return ok
-}
-
 func (s *queueBuildState) hasIncludedParent(key issueKey) bool {
-	iss := s.byKey[key]
-	if iss.ParentShortID == nil {
-		return false
-	}
-	parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
-	return s.included[parentKey]
+	pk, ok := s.parentKey(s.byKey[key])
+	return ok && s.included[pk]
 }
 
 func hasActiveQueueFilter(f ListFilter) bool {

@@ -201,10 +201,12 @@ func (d *Store) ExportRecurrences(ctx context.Context, f db.ExportFilter) iter.S
 		})
 }
 
-// ExportLinks streams links ordered by id, scoped to f.ProjectID when set.
-// Soft-deleted endpoints (either side) drop the link unless IncludeDeleted is true.
+// ExportLinks streams links ordered by id. Links are project-independent edges
+// (storage v16), so a scoped export (f.ProjectID set) includes any link that
+// touches the project on either endpoint. Soft-deleted endpoints (either side)
+// drop the link unless IncludeDeleted is true.
 func (d *Store) ExportLinks(ctx context.Context, f db.ExportFilter) iter.Seq2[db.LinkExport, error] {
-	query := `SELECT links.id, links.project_id, links.from_issue_id, links.from_issue_uid,
+	query := `SELECT links.id, links.from_issue_id, links.from_issue_uid,
 	                 links.to_issue_id, links.to_issue_uid,
 	                 links.type, links.author, CAST(links.created_at AS TEXT)
 	          FROM links
@@ -213,8 +215,8 @@ func (d *Store) ExportLinks(ctx context.Context, f db.ExportFilter) iter.Seq2[db
 	var clauses []string
 	var args []any
 	if f.ProjectID != nil {
-		clauses = append(clauses, `links.project_id = ?`)
-		args = append(args, *f.ProjectID)
+		clauses = append(clauses, `(from_issues.project_id = ? OR to_issues.project_id = ?)`)
+		args = append(args, *f.ProjectID, *f.ProjectID)
 	}
 	if !f.IncludeDeleted {
 		clauses = append(clauses, `from_issues.deleted_at IS NULL`, `to_issues.deleted_at IS NULL`)
@@ -223,7 +225,7 @@ func (d *Store) ExportLinks(ctx context.Context, f db.ExportFilter) iter.Seq2[db
 	return streamRows(ctx, d.readQ, "links", query, args,
 		func(rows *sql.Rows) (db.LinkExport, error) {
 			var rec db.LinkExport
-			if err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.FromIssueID, &rec.FromIssueUID,
+			if err := rows.Scan(&rec.ID, &rec.FromIssueID, &rec.FromIssueUID,
 				&rec.ToIssueID, &rec.ToIssueUID, &rec.Type, &rec.Author, &rec.CreatedAt); err != nil {
 				return db.LinkExport{}, scanError("link", err)
 			}
@@ -515,38 +517,78 @@ func (d *Store) ExportPurgeLog(ctx context.Context, f db.ExportFilter) iter.Seq2
 }
 
 // ExportEvents streams events ordered by id, reproducing the orphan filter and
-// related-id scrub from the v10 jsonl export.
+// related-id scrub from the v10 jsonl export. The subject join matches by row
+// id / UID alone — kata move rehomes the issue row while its historical
+// events stay in the source project, so requiring the subject's project to
+// equal the event's would silently drop every event of a moved issue.
 func (d *Store) ExportEvents(ctx context.Context, f db.ExportFilter) iter.Seq2[db.EventExport, error] {
 	// Scrub related_issue_id/_uid when the peer is missing entirely (any
-	// event type, either id-keyed or uid-keyed) OR, on live-only export,
-	// when an issue.links_changed peer is soft-deleted (kata#1 history-
-	// preservation rule). Peer-missing must be checked first so
-	// `peer.deleted_at` doesn't dereference a NULL row. The peer JOIN
-	// matches by id when present, and falls back to uid for federation-
-	// inserted events that carry only related_issue_uid.
+	// event type, either id-keyed or uid-keyed) OR, on a project-filtered
+	// export, when the peer issue lives in an omitted project (cross-project
+	// links export from both sides at storage v16, so the filtered envelope
+	// would otherwise carry a peer the importer never receives) OR, on live-
+	// only export, when an issue.links_changed peer is soft-deleted (kata#1
+	// history-preservation rule). Peer-missing must be checked first so
+	// `peer.deleted_at` doesn't dereference a NULL row. The peer JOIN matches
+	// by id when present, and falls back to uid for federation-inserted events
+	// that carry only related_issue_uid.
 	scrubCondition := `(peer.id IS NULL AND (events.related_issue_id IS NOT NULL OR events.related_issue_uid IS NOT NULL))`
+	// scrubArgs collects the args bound inside the SELECT-list CASE
+	// expressions; they precede every WHERE-clause arg because the CASE
+	// expressions appear first in the query. scrubCondition is embedded once
+	// per related-id/uid expression, so each placeholder it carries is bound
+	// twice.
+	var scrubArgs []any
+	if f.ProjectID != nil {
+		scrubCondition += ` OR (peer.id IS NOT NULL AND peer.project_id <> ?)`
+		scrubArgs = append(scrubArgs, *f.ProjectID, *f.ProjectID)
+	}
 	if !f.IncludeDeleted {
 		scrubCondition += ` OR (events.type = 'issue.links_changed' AND peer.deleted_at IS NOT NULL)`
 	}
 	relatedIDExpr := `CASE WHEN ` + scrubCondition + ` THEN NULL ELSE events.related_issue_id END`
 	relatedUIDExpr := `CASE WHEN ` + scrubCondition + ` THEN NULL ELSE events.related_issue_uid END`
-	subjectLiveClause := `((events.issue_id IS NULL AND events.issue_uid IS NULL) OR subject_issue.id IS NOT NULL)`
-	if !f.IncludeDeleted {
-		subjectLiveClause = `((events.issue_id IS NULL AND events.issue_uid IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
+	issueIDExpr := `events.issue_id`
+	var subjectArgs []any
+	if f.ProjectID != nil {
+		// A moved subject is alive in another project: its events stay in
+		// this envelope, but a project-filtered envelope omits the issue
+		// row itself and events.issue_id carries an FK the importer would
+		// trip over. Scrub the row id and keep issue_uid (the content-hash
+		// identity) — the UID-only shape federation-inserted events
+		// already use.
+		issueIDExpr = `CASE WHEN subject_issue.id IS NOT NULL AND subject_issue.project_id <> ? THEN NULL ELSE events.issue_id END`
+		subjectArgs = append(subjectArgs, *f.ProjectID)
 	}
-	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, events.issue_id, events.issue_uid,
+	// Subject liveness: id-keyed events need a joined row — a missing row
+	// means the issue was purged (the v10 orphan rule). UID-only events
+	// (issue_id NULL, issue_uid set) pass without a row: moved-issue
+	// events re-imported from a scoped envelope and federation-pending
+	// events reference subjects that legitimately live elsewhere, and
+	// requiring a row made first-generation preservation decay on the
+	// next export. On live-only exports any JOINED subject must also be
+	// un-deleted; a UID-only event whose subject does materialize locally
+	// as a soft-deleted row drops like its id-keyed siblings.
+	subjectLiveClause := `(events.issue_id IS NULL OR subject_issue.id IS NOT NULL)`
+	if !f.IncludeDeleted {
+		subjectLiveClause = `((events.issue_id IS NULL AND subject_issue.id IS NULL) OR (subject_issue.id IS NOT NULL AND subject_issue.deleted_at IS NULL))`
+	}
+	query := `SELECT events.id, events.uid, events.origin_instance_uid, events.project_id, export_project.uid, events.project_name, ` + issueIDExpr + `, events.issue_uid,
 	                 ` + relatedIDExpr + `, ` + relatedUIDExpr + `,
 	                 events.type, events.actor, events.payload, events.hlc_physical_ms, events.hlc_counter, events.content_hash,
 	                 CAST(events.created_at AS TEXT)
 	          FROM events
 	          JOIN projects export_project ON export_project.id = events.project_id
-	          LEFT JOIN issues subject_issue ON subject_issue.project_id = events.project_id
-	               AND (subject_issue.id = events.issue_id OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid))
+	          LEFT JOIN issues subject_issue ON subject_issue.id = events.issue_id
+	               OR (events.issue_id IS NULL AND events.issue_uid IS NOT NULL AND subject_issue.uid = events.issue_uid)
 	          LEFT JOIN issues peer ON peer.id = events.related_issue_id
 	               OR (events.related_issue_id IS NULL AND events.related_issue_uid IS NOT NULL AND peer.uid = events.related_issue_uid)`
 
 	clauses := []string{subjectLiveClause}
-	var args []any
+	// SELECT-list args bind in column order — the subject scrub (issue_id
+	// CASE) precedes the related scrubs — and all of them precede every
+	// WHERE-clause arg.
+	args := append(subjectArgs, scrubArgs...)
 	if f.ProjectID != nil {
 		clauses = append(clauses, `events.project_id = ?`)
 		args = append(args, *f.ProjectID)

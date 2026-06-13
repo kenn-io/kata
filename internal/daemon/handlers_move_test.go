@@ -178,54 +178,38 @@ func TestMoveIssue_IssueNotFound_404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-func TestMoveIssue_CrossProjectLinks_409_WithBlockers(t *testing.T) {
+// TestMoveIssue_PreservesLinks pins the storage-v16 contract: moving an
+// issue never touches its links. Endpoints are row ids and UIDs, both
+// stable across a move, so every edge survives verbatim.
+func TestMoveIssue_PreservesLinks(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
-	src, tgt, a := seedMovePair(t, env)
-	b, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
-		ProjectID: src.ID, Title: "B", Author: "tester",
-	})
-	require.NoError(t, err)
+	src, tgt, iss := seedMovePair(t, env)
 
-	// Create a blocks link between a and b inside src — moving a would
-	// produce a cross-project link with b.
-	_, err = env.DB.CreateLink(t.Context(), db.CreateLinkParams{
-		ProjectID:   src.ID,
-		FromIssueID: a.ID,
-		ToIssueID:   b.ID,
-		Type:        "blocks",
-		Author:      "tester",
+	peer, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: src.ID, Title: "peer stays behind", Author: "tester",
 	})
 	require.NoError(t, err)
+	for _, typ := range []string{"parent", "blocks"} {
+		_, err := env.DB.CreateLink(t.Context(), db.CreateLinkParams{
+			FromIssueID: iss.ID, ToIssueID: peer.ID, Type: typ, Author: "tester",
+		})
+		require.NoError(t, err)
+	}
 
 	body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q}`, tgt.UID)
-	ifMatch := fmt.Sprintf(`"rev-%d"`, a.Revision)
-	resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, a.ShortID), body, ifMatch)
+	ifMatch := fmt.Sprintf(`"rev-%d"`, iss.Revision)
+	resp := doPostWithIfMatch(t, env, moveURL(env, src.ID, iss.ShortID), body, ifMatch)
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
-	require.Equalf(t, http.StatusConflict, resp.StatusCode, "body: %s", raw)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "move must succeed with links anchored; body: %s", raw)
 
-	var env409 struct {
-		Status int `json:"status"`
-		Error  struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-			Data    struct {
-				Blockers []struct {
-					LinkID  int64  `json:"link_id"`
-					PeerUID string `json:"peer_uid"`
-					Type    string `json:"type"`
-				} `json:"blockers"`
-			} `json:"data"`
-		} `json:"error"`
+	links, err := env.DB.LinksByIssue(t.Context(), iss.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 2, "both links survive the move")
+	for _, l := range links {
+		assert.Equal(t, iss.UID, l.FromIssueUID, "uid endpoints untouched")
+		assert.Equal(t, peer.UID, l.ToIssueUID)
 	}
-	require.NoError(t, json.Unmarshal(raw, &env409))
-	assert.Equal(t, "cross_project_links", env409.Error.Code)
-	assert.Contains(t, env409.Error.Message, "would become cross-project",
-		"message must explain the links are not yet cross-project; the move would make them so")
-	require.Len(t, env409.Error.Data.Blockers, 1)
-	assert.Equal(t, "blocks", env409.Error.Data.Blockers[0].Type)
-	assert.Equal(t, b.UID, env409.Error.Data.Blockers[0].PeerUID)
-	assert.NotZero(t, env409.Error.Data.Blockers[0].LinkID)
 }
 
 func TestMoveIssue_RecurrencePinned_409(t *testing.T) {
@@ -267,29 +251,61 @@ func TestMoveIssue_RecurrencePinned_409(t *testing.T) {
 	assert.Equal(t, "recurrence_pinned", env409.Error.Code)
 }
 
-// TestEditIssue_LinkTargetULIDInOtherProject_404 pins the daemon-side scoping
-// of link refs: a links_delta add naming the ULID of an issue that lives in a
-// different project resolves to issue_not_found. Cross-project links are not
-// supported (the schema forbids the rows), and ULID resolution for link refs
-// is deliberately scoped to the URL issue's project so the endpoint cannot be
-// used to fish for foreign issues. The 404 message must spell out the
-// same-project constraint instead of a bare "issue not found" — the miss is
-// otherwise indistinguishable from a typo'd ref, and the response must read
-// the same whether or not the foreign issue exists.
-func TestEditIssue_LinkTargetULIDInOtherProject_404(t *testing.T) {
+// TestEditIssue_CrossProjectLinkTargets pins link-target resolution forms via
+// the edit path: a foreign ULID and a foreign qualified ref both resolve
+// (links span projects since storage v16), set_parent works cross-project, and
+// a nonexistent ULID is a plain issue_not_found with no same-project verbiage
+// (misses now mean "not found anywhere", and single-token auth makes that no
+// leak).
+func TestEditIssue_CrossProjectLinkTargets(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	src, tgt, iss := seedMovePair(t, env)
-	foreign, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
-		ProjectID: tgt.ID, Title: "peer in another project", Author: "tester",
+	peer1, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "peer one", Author: "tester",
 	})
 	require.NoError(t, err)
+	peer2, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "peer two", Author: "tester",
+	})
+	require.NoError(t, err)
+	peer3, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "peer three", Author: "tester",
+	})
+	require.NoError(t, err)
+	subjectPath := env.URL + issuePathRef(src.ID, iss.ShortID, "")
 
-	body := fmt.Sprintf(`{"actor":"tester","links_delta":{"add_related":[%q]}}`, foreign.UID)
-	resp := doPatch(t, env, env.URL+issuePathRef(src.ID, iss.ShortID, ""), body, "")
-	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(resp.Body)
+	// 1. Foreign ULID resolves as an add target.
+	body := fmt.Sprintf(`{"actor":"tester","links_delta":{"add_related":[%q]}}`, peer1.UID)
+	resp := doPatch(t, env, subjectPath, body, "")
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+
+	// 2. Foreign qualified short_id resolves as an add target.
+	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"add_blocked_by":[%q]}}`,
+		tgt.Name+"#"+peer2.ShortID)
+	resp = doPatch(t, env, subjectPath, body, "")
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+
+	// 3. Cross-project set_parent via the edit path must work (not only POST
+	// /links), and remove_parent must then clean it up.
+	qualifiedPeer3 := tgt.Name + "#" + peer3.ShortID
+	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"set_parent":%q}}`, qualifiedPeer3)
+	resp = doPatch(t, env, subjectPath, body, "")
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "set_parent body: %s", raw)
+
+	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"remove_parent":%q}}`, qualifiedPeer3)
+	resp = doPatch(t, env, subjectPath, body, "")
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "remove_parent body: %s", raw)
+
+	// 4. A nonexistent ULID is a plain issue_not_found with no same-project
+	// verbiage.
+	bogus := `{"actor":"tester","links_delta":{"add_related":["01ZZZZZZZZZZZZZZZZZZZZZZZZ"]}}`
+	resp = doPatch(t, env, subjectPath, bogus, "")
+	raw = readClose(t, resp)
 	require.Equalf(t, http.StatusNotFound, resp.StatusCode, "body: %s", raw)
-
 	var env404 struct {
 		Error struct {
 			Code    string `json:"code"`
@@ -298,21 +314,125 @@ func TestEditIssue_LinkTargetULIDInOtherProject_404(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &env404))
 	assert.Equal(t, "issue_not_found", env404.Error.Code)
-	assert.Contains(t, env404.Error.Message, "links can only join issues in the same project")
+	assert.Contains(t, env404.Error.Message, "issue not found")
+	assert.NotContains(t, env404.Error.Message, "same project")
 
-	// A nonexistent ULID must produce the identical message so the
-	// response does not leak whether a foreign issue exists.
-	bogus := `{"actor":"tester","links_delta":{"add_related":["01ZZZZZZZZZZZZZZZZZZZZZZZZ"]}}`
-	resp2 := doPatch(t, env, env.URL+issuePathRef(src.ID, iss.ShortID, ""), bogus, "")
-	defer func() { _ = resp2.Body.Close() }()
-	raw2, _ := io.ReadAll(resp2.Body)
-	require.Equalf(t, http.StatusNotFound, resp2.StatusCode, "body: %s", raw2)
-	var env404b struct {
+	// 5. A soft-deleted foreign issue in an active project is resolved with
+	// IncludeDeletedNo on the add path, so add_related must 404.
+	softDeleted, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "soft-deleted foreign peer", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), softDeleted.ID, "tester")
+	require.NoError(t, err)
+	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"add_related":[%q]}}`, softDeleted.UID)
+	resp = doPatch(t, env, subjectPath, body, "")
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusNotFound, resp.StatusCode, "soft-deleted add body: %s", raw)
+}
+
+// TestEditIssue_ArchivedPeerRules pins the archived-peer policy: adds reject a
+// target in an archived project with 409 link_target_archived (naming the
+// project), while removes still resolve archived peers so existing links can
+// always be cleaned up.
+func TestEditIssue_ArchivedPeerRules(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	src, tgt, iss := seedMovePair(t, env)
+	peer, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "peer to archive", Author: "tester",
+	})
+	require.NoError(t, err)
+	subjectPath := env.URL + issuePathRef(src.ID, iss.ShortID, "")
+
+	// 1. Link subject→peer while the peer's project is active.
+	body := fmt.Sprintf(`{"actor":"tester","links_delta":{"add_related":[%q]}}`, peer.UID)
+	resp := doPatch(t, env, subjectPath, body, "")
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+
+	// 2. Archive the peer's project.
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: tgt.ID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	// 3. A new add against the archived peer is rejected.
+	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"add_blocks":[%q]}}`, peer.UID)
+	resp = doPatch(t, env, subjectPath, body, "")
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusConflict, resp.StatusCode, "body: %s", raw)
+	var env409 struct {
 		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Hint    string `json:"hint"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env409))
+	assert.Equal(t, "link_target_archived", env409.Error.Code)
+	assert.Contains(t, env409.Error.Message, tgt.Name)
+	// Remedy belongs in the hint field, not the message.
+	assert.Equal(t, "unarchive the project to add links", env409.Error.Hint)
+
+	// 4. Removing the existing link to the archived peer still resolves.
+	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"remove_related":[%q]}}`, peer.UID)
+	resp = doPatch(t, env, subjectPath, body, "")
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+}
+
+// TestEditIssue_ArchivedPeerRules_QualifiedRef pins the same archived-peer
+// policy as TestEditIssue_ArchivedPeerRules but exercises the QUALIFIED-REF
+// form ("project#short_id") instead of the bare ULID. This is the form that
+// requires ProjectByNameIncludingArchived: the project lookup must succeed
+// so the gate can reject adds and permit removes. Swapping that call to the
+// active-only ProjectByName would turn the 409 into a 404 and break this test,
+// killing Mutation A.
+func TestEditIssue_ArchivedPeerRules_QualifiedRef(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	src, tgt, iss := seedMovePair(t, env)
+	peer, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "peer via qualified ref", Author: "tester",
+	})
+	require.NoError(t, err)
+	subjectPath := env.URL + issuePathRef(src.ID, iss.ShortID, "")
+	qualifiedRef := tgt.Name + "#" + peer.ShortID
+
+	// 1. Link subject→peer via qualified ref while the peer's project is active.
+	body := fmt.Sprintf(`{"actor":"tester","links_delta":{"add_related":[%q]}}`, qualifiedRef)
+	resp := doPatch(t, env, subjectPath, body, "")
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "initial add body: %s", raw)
+
+	// 2. Archive the peer's project.
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: tgt.ID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	// 3. A new add via qualified ref against the archived peer is rejected with
+	// 409 link_target_archived (project resolves via IncludingArchived, then
+	// the gate fires). A 404 here would mean the project lookup used the
+	// active-only path and lost the archived project entirely.
+	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"add_blocks":[%q]}}`, qualifiedRef)
+	resp = doPatch(t, env, subjectPath, body, "")
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusConflict, resp.StatusCode, "add body: %s", raw)
+	var env409 struct {
+		Error struct {
+			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	require.NoError(t, json.Unmarshal(raw2, &env404b))
-	assert.Equal(t, env404.Error.Message, env404b.Error.Message,
-		"404 message must be identical for foreign and nonexistent link targets")
+	require.NoError(t, json.Unmarshal(raw, &env409))
+	assert.Equal(t, "link_target_archived", env409.Error.Code)
+	assert.Contains(t, env409.Error.Message, tgt.Name)
+
+	// 4. Removing the existing link via qualified ref into the archived project
+	// still resolves — tolerant removes must work even when the target project
+	// is archived.
+	body = fmt.Sprintf(`{"actor":"tester","links_delta":{"remove_related":[%q]}}`, qualifiedRef)
+	resp = doPatch(t, env, subjectPath, body, "")
+	raw = readClose(t, resp)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "remove body: %s", raw)
 }

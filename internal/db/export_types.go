@@ -67,7 +67,6 @@ type RecurrenceExport struct {
 // to_issues query.
 type LinkExport struct {
 	ID           int64  `json:"id"`
-	ProjectID    int64  `json:"project_id"`
 	FromIssueID  int64  `json:"from_issue_id"`
 	FromIssueUID string `json:"from_issue_uid"`
 	ToIssueID    int64  `json:"to_issue_id"`
@@ -254,7 +253,8 @@ type PurgeLogExport struct {
 // EventExport is one event row in export shape. ProjectUID is marshaled as
 // `json:"-"` because it is used only to compute the content hash and is not
 // part of the wire envelope. related_issue_id/uid are scrubbed to NULL when
-// the peer row is missing (any type) or, on live-only export, when an
+// the peer row is missing (any type), or on a project-filtered export when the
+// peer issue lives in an omitted project, or on live-only export when an
 // issue.links_changed peer is soft-deleted.
 type EventExport struct {
 	ID                int64           `json:"id"`

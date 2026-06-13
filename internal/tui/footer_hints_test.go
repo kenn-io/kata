@@ -198,7 +198,7 @@ func hierarchyIssues() []Issue {
 	parentSID := "p001"
 	return []Issue{
 		{ProjectID: 7, UID: "01TEST-p001", ShortID: parentSID, Title: "parent", Status: "open"},
-		{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", ParentShortID: &parentSID, Title: "child", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID}, Title: "child", Status: "open"},
 	}
 }
 

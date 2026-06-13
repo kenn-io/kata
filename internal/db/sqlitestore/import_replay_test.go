@@ -1,11 +1,15 @@
 package sqlitestore_test
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -94,7 +98,7 @@ func TestImportReplayInsertsEveryEntity(t *testing.T) {
 	src, _, p, issue := setupTestIssue(t)
 	other, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "b", Author: "a"})
 	require.NoError(t, err)
-	_, err = src.CreateLink(ctx, db.CreateLinkParams{ProjectID: p.ID, FromIssueID: issue.ID, ToIssueID: other.ID, Type: "blocks", Author: "a"})
+	_, err = src.CreateLink(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: other.ID, Type: "blocks", Author: "a"})
 	require.NoError(t, err)
 	_, err = src.AddLabel(ctx, issue.ID, "urgent", "a")
 	require.NoError(t, err)
@@ -109,6 +113,91 @@ func TestImportReplayInsertsEveryEntity(t *testing.T) {
 	for _, table := range []string{"projects", "issues", "comments", "issue_labels", "links", "events"} {
 		require.Equalf(t, tableCount(t, ctx, src, table), tableCount(t, ctx, dst, table), "%s row count", table)
 	}
+}
+
+// TestImportReplay_SkipsDanglingCrossProjectLink pins the missing-peer rule:
+// a project-filtered envelope can carry a link whose peer issue is omitted;
+// import skips it (reported, not fatal) instead of failing the FK pass, and
+// importing the peer project's envelope later self-heals the edge once.
+func TestImportReplay_SkipsDanglingCrossProjectLink(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	alpha, err := src.CreateProject(ctx, "alpha")
+	require.NoError(t, err)
+	beta, err := src.CreateProject(ctx, "beta")
+	require.NoError(t, err)
+	alphaIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: alpha.ID, Title: "a", Author: "a"})
+	require.NoError(t, err)
+	betaIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: beta.ID, Title: "b", Author: "a"})
+	require.NoError(t, err)
+	link, err := src.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: alphaIssue.ID, ToIssueID: betaIssue.ID, Type: "blocks", Author: "a",
+	})
+	require.NoError(t, err)
+
+	// The alpha-filtered envelope carries the link (it touches alpha) but omits
+	// the beta peer issue. Import must skip the dangling edge, not fail the FK
+	// pass.
+	alphaRecs := collectImportRecordsForProject(t, ctx, src, alpha.ID)
+	dst := openTestDB(t)
+	require.NoError(t, dst.ImportReplay(ctx, alphaRecs, db.ImportOptions{}),
+		"a dangling cross-project link must be skipped, not fail the import")
+	require.Equal(t, 0, tableCount(t, ctx, dst, "links"),
+		"the link whose peer issue is omitted must not be inserted")
+
+	// Self-heal: a whole-DB envelope (both peers present) lands the edge exactly
+	// once. ImportReplay is a whole-DB atomic replace, so the peer side
+	// re-delivers the edge through a fresh full replay rather than an
+	// incremental merge into the alpha target.
+	wholeRecs := collectImportRecords(t, ctx, src)
+	healed := openTestDB(t)
+	require.NoError(t, healed.ImportReplay(ctx, wholeRecs, db.ImportOptions{}))
+	var fromUID, toUID, linkType string
+	require.NoError(t, healed.QueryRowContext(ctx,
+		`SELECT from_issue_uid, to_issue_uid, type FROM links`).Scan(&fromUID, &toUID, &linkType))
+	require.Equal(t, 1, tableCount(t, ctx, healed, "links"), "self-heal lands exactly one link row")
+	require.Equal(t, alphaIssue.UID, fromUID)
+	require.Equal(t, betaIssue.UID, toUID)
+	require.Equal(t, link.Type, linkType)
+}
+
+// TestImportReplay_DedupesRepeatedCrossProjectLink pins the natural-key no-op:
+// both envelopes of one source DB carry the same cross-project edge, so a
+// replay batch can present the same link record twice. The second delivery
+// must be skipped (equal natural key implies equal id under id-preservation),
+// leaving exactly one row instead of tripping UNIQUE(id) or
+// UNIQUE(from_issue_id, to_issue_id, type).
+func TestImportReplay_DedupesRepeatedCrossProjectLink(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	alpha, err := src.CreateProject(ctx, "alpha")
+	require.NoError(t, err)
+	beta, err := src.CreateProject(ctx, "beta")
+	require.NoError(t, err)
+	alphaIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: alpha.ID, Title: "a", Author: "a"})
+	require.NoError(t, err)
+	betaIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: beta.ID, Title: "b", Author: "a"})
+	require.NoError(t, err)
+	_, err = src.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: alphaIssue.ID, ToIssueID: betaIssue.ID, Type: "blocks", Author: "a",
+	})
+	require.NoError(t, err)
+
+	recs := collectImportRecords(t, ctx, src)
+	var dupLink db.LinkExport
+	for _, r := range recs {
+		if r.Kind == db.ImportKindLink {
+			dupLink = *r.Link
+			break
+		}
+	}
+	require.NotZero(t, dupLink.ID, "fixture must export a link record")
+	recs = append(recs, db.ImportRecord{Kind: db.ImportKindLink, Link: &dupLink})
+
+	dst := openTestDB(t)
+	require.NoError(t, dst.ImportReplay(ctx, recs, db.ImportOptions{}),
+		"a repeated cross-project link record must be deduped, not collide")
+	require.Equal(t, 1, tableCount(t, ctx, dst, "links"), "the repeated edge lands exactly once")
 }
 
 func TestImportReplayRejectsEventHashComputedBeforeResolvedIssueUID(t *testing.T) {
@@ -234,6 +323,57 @@ func collectImportRecords(t *testing.T, ctx context.Context, d *sqlitestore.Stor
 		require.NoError(t, err)
 		v := rec
 		recs = append(recs, db.ImportRecord{Kind: "purge_log", PurgeLog: &v})
+	}
+	for rec, err := range d.ExportSequences(ctx) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: "sqlite_sequence", Sequence: &v})
+	}
+	return recs
+}
+
+// collectImportRecordsForProject drains the project-scoped export iterators
+// into an ImportRecord slice, mirroring a project-filtered JSONL envelope. It
+// gathers the instance-level rows (meta, sequences) plus the project, its
+// issues, the links that touch it, its import mappings, and its events — enough
+// to replay the fixtures these cross-project tests build. ExportLinks includes
+// any edge touching the project, so the slice can carry a link whose peer issue
+// is omitted.
+//
+//nolint:revive // test helper: t *testing.T conventionally precedes ctx.
+func collectImportRecordsForProject(t *testing.T, ctx context.Context, d *sqlitestore.Store, projectID int64) []db.ImportRecord {
+	t.Helper()
+	f := db.ExportFilter{ProjectID: &projectID, IncludeDeleted: true}
+	var recs []db.ImportRecord
+	for rec, err := range d.ExportMeta(ctx) {
+		require.NoError(t, err)
+		m := rec
+		recs = append(recs, db.ImportRecord{Kind: "meta", Meta: &m})
+	}
+	for rec, err := range d.ExportProjects(ctx, f) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: "project", Project: &v})
+	}
+	for rec, err := range d.ExportIssues(ctx, f) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: "issue", Issue: &v})
+	}
+	for rec, err := range d.ExportLinks(ctx, f) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: "link", Link: &v})
+	}
+	for rec, err := range d.ExportImportMappings(ctx, f) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: "import_mapping", ImportMapping: &v})
+	}
+	for rec, err := range d.ExportEvents(ctx, f) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: "event", Event: &v})
 	}
 	for rec, err := range d.ExportSequences(ctx) {
 		require.NoError(t, err)
@@ -429,6 +569,204 @@ func TestImportReplayRejectsMalformedRecord(t *testing.T) {
 	require.Equal(t, 0, n, "no mutation on a malformed batch")
 }
 
+// TestImportReplay_SkipsMappingForSkippedLink pins Finding B: a project-scoped
+// envelope can carry an import_mapping (object_type=link) whose link record was
+// skipped because the peer issue is absent. Without the fix, the FK check at
+// commit fails. With the fix, the mapping is silently skipped and a note is
+// emitted on stderr.
+func TestImportReplay_SkipsMappingForSkippedLink(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	spoke, err := src.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	hub, err := src.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	spokeIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: spoke.ID, Title: "a", Author: "a"})
+	require.NoError(t, err)
+	hubIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: hub.ID, Title: "b", Author: "a"})
+	require.NoError(t, err)
+	link, err := src.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: spokeIssue.ID, ToIssueID: hubIssue.ID, Type: "blocks", Author: "a",
+	})
+	require.NoError(t, err)
+	_, err = src.UpsertImportMapping(ctx, db.ImportMappingParams{
+		Source:     "ext-tracker",
+		ExternalID: "ext-link-1",
+		ObjectType: "link",
+		ProjectID:  spoke.ID,
+		IssueID:    &spokeIssue.ID,
+		LinkID:     &link.ID,
+	})
+	require.NoError(t, err)
+
+	// The spoke-scoped envelope carries the link (it touches spoke) and the
+	// import_mapping referencing it, but omits the hub peer issue. The link gets
+	// skipped; without the fix, the import_mapping INSERT then FK-fails the replay.
+	spokeRecs := collectImportRecordsForProject(t, ctx, src, spoke.ID)
+	dst := openTestDB(t)
+	stderr, restore := captureStderr(t)
+	err = dst.ImportReplay(ctx, spokeRecs, db.ImportOptions{})
+	restore()
+	require.NoError(t, err, "import_mapping referencing a skipped link must not fail the replay")
+	require.Equal(t, 0, tableCount(t, ctx, dst, "links"), "skipped link must not be inserted")
+	require.Equal(t, 0, tableCount(t, ctx, dst, "import_mappings"), "mapping for skipped link must not be inserted")
+	out := stderr.String()
+	assert.Contains(t, out, "skipped 1 link record(s) whose peer issue is not in this envelope or database")
+	assert.Contains(t, out, "skipped 1 import mapping record(s) referencing skipped link(s)")
+}
+
+// captureStderr redirects os.Stderr to an in-memory buffer for the duration of
+// the test. The returned restore function reverts os.Stderr and drains any
+// remaining pipe data into the buffer. Use the buffer for assertions.
+// A t.Cleanup guard ensures restore runs even if the test calls t.Fatal early.
+func captureStderr(t *testing.T) (*bytes.Buffer, func() *bytes.Buffer) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	original := os.Stderr
+	os.Stderr = w
+	buf := &bytes.Buffer{}
+	done := make(chan struct{})
+	go func() {
+		_, _ = buf.ReadFrom(r)
+		close(done)
+	}()
+	var once sync.Once
+	restore := func() *bytes.Buffer {
+		once.Do(func() {
+			os.Stderr = original
+			_ = w.Close()
+			<-done
+			_ = r.Close()
+		})
+		return buf
+	}
+	t.Cleanup(func() { _ = restore() })
+	return buf, restore
+}
+
+// TestImportReplay_StderrNotesMissingPeerOnly pins that the missing-peer
+// aggregate note is emitted when only missing-peer skips occur, and the
+// duplicate-skip note is absent.
+func TestImportReplay_StderrNotesMissingPeerOnly(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	alpha, err := src.CreateProject(ctx, "alpha")
+	require.NoError(t, err)
+	beta, err := src.CreateProject(ctx, "beta")
+	require.NoError(t, err)
+	aIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: alpha.ID, Title: "a", Author: "a"})
+	require.NoError(t, err)
+	bIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: beta.ID, Title: "b", Author: "a"})
+	require.NoError(t, err)
+	_, err = src.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: aIssue.ID, ToIssueID: bIssue.ID, Type: "blocks", Author: "a",
+	})
+	require.NoError(t, err)
+
+	alphaRecs := collectImportRecordsForProject(t, ctx, src, alpha.ID)
+	dst := openTestDB(t)
+	stderr, restore := captureStderr(t)
+	require.NoError(t, dst.ImportReplay(ctx, alphaRecs, db.ImportOptions{}))
+	restore()
+
+	out := stderr.String()
+	assert.Contains(t, out, "skipped 1 link record(s) whose peer issue is not in this envelope or database")
+	assert.NotContains(t, out, "duplicate link record")
+}
+
+// TestImportReplay_StderrNotesDuplicateOnly pins that the duplicate-edge
+// aggregate note is emitted when only duplicate skips occur, and the
+// missing-peer note is absent.
+func TestImportReplay_StderrNotesDuplicateOnly(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	alpha, err := src.CreateProject(ctx, "alpha")
+	require.NoError(t, err)
+	beta, err := src.CreateProject(ctx, "beta")
+	require.NoError(t, err)
+	aIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: alpha.ID, Title: "a", Author: "a"})
+	require.NoError(t, err)
+	bIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: beta.ID, Title: "b", Author: "a"})
+	require.NoError(t, err)
+	_, err = src.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: aIssue.ID, ToIssueID: bIssue.ID, Type: "blocks", Author: "a",
+	})
+	require.NoError(t, err)
+
+	recs := collectImportRecords(t, ctx, src)
+	var dupLink db.LinkExport
+	for _, r := range recs {
+		if r.Kind == db.ImportKindLink {
+			dupLink = *r.Link
+			break
+		}
+	}
+	require.NotZero(t, dupLink.ID, "fixture must export a link record")
+	recs = append(recs, db.ImportRecord{Kind: db.ImportKindLink, Link: &dupLink})
+
+	dst := openTestDB(t)
+	stderr, restore := captureStderr(t)
+	require.NoError(t, dst.ImportReplay(ctx, recs, db.ImportOptions{}))
+	restore()
+
+	out := stderr.String()
+	assert.Contains(t, out, "skipped 1 duplicate link record(s) (edge already present)")
+	assert.NotContains(t, out, "peer issue is not in this envelope")
+}
+
+// TestImportReplay_StderrNotesMixed pins that both aggregate notes are emitted
+// with the correct individual counts when both skip reasons occur in one replay.
+func TestImportReplay_StderrNotesMixed(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	alpha, err := src.CreateProject(ctx, "alpha")
+	require.NoError(t, err)
+	beta, err := src.CreateProject(ctx, "beta")
+	require.NoError(t, err)
+	aIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: alpha.ID, Title: "a", Author: "a"})
+	require.NoError(t, err)
+	bIssue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: beta.ID, Title: "b", Author: "a"})
+	require.NoError(t, err)
+	_, err = src.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: aIssue.ID, ToIssueID: bIssue.ID, Type: "blocks", Author: "a",
+	})
+	require.NoError(t, err)
+
+	// Whole-envelope so the link itself lands, then append a duplicate of that
+	// same link (triggers skippedDup=1) plus two alpha-scoped link records whose
+	// peer (bIssue) is absent (triggers skippedMissingPeer=2).
+	wholeRecs := collectImportRecords(t, ctx, src)
+	var realLink db.LinkExport
+	for _, r := range wholeRecs {
+		if r.Kind == db.ImportKindLink {
+			realLink = *r.Link
+			break
+		}
+	}
+	require.NotZero(t, realLink.ID, "fixture must export a link record")
+
+	// Two extra missing-peer links: fabricate records with the same from-issue
+	// but non-existent to-issue ids so importLink returns linkSkipMissingPeer.
+	ghost1 := db.LinkExport{ID: 900, FromIssueID: aIssue.ID, FromIssueUID: aIssue.UID, ToIssueID: 9901, ToIssueUID: "ghost-1", Type: "related", Author: "a", CreatedAt: realLink.CreatedAt}
+	ghost2 := db.LinkExport{ID: 901, FromIssueID: aIssue.ID, FromIssueUID: aIssue.UID, ToIssueID: 9902, ToIssueUID: "ghost-2", Type: "related", Author: "a", CreatedAt: realLink.CreatedAt}
+
+	mixed := append(wholeRecs,
+		db.ImportRecord{Kind: db.ImportKindLink, Link: &realLink}, // duplicate
+		db.ImportRecord{Kind: db.ImportKindLink, Link: &ghost1},   // missing peer
+		db.ImportRecord{Kind: db.ImportKindLink, Link: &ghost2},   // missing peer
+	)
+
+	dst := openTestDB(t)
+	stderr, restore := captureStderr(t)
+	require.NoError(t, dst.ImportReplay(ctx, mixed, db.ImportOptions{}))
+	restore()
+
+	out := stderr.String()
+	assert.Contains(t, out, "skipped 2 link record(s) whose peer issue is not in this envelope or database")
+	assert.Contains(t, out, "skipped 1 duplicate link record(s) (edge already present)")
+}
+
 // TestFKColumnResolverResolvesIssuesProjectID exercises the newly-public
 // resolver against the real schema: issues has FK columns project_id and
 // recurrence_id, so at least one foreign_key_list index must resolve to a
@@ -458,4 +796,24 @@ func TestFKColumnResolverResolvesIssuesProjectID(t *testing.T) {
 	if col != "" {
 		t.Fatalf("out-of-range fkid should resolve to empty, got %q", col)
 	}
+}
+
+// TestImportReplay_RejectsControlCharacterProjectName pins import-side name
+// validation: daemon create/rename reject names that can spoof terminal
+// output (config.ValidateProjectName), and a crafted envelope must not
+// bypass that gate — an imported project name is echoed by every CLI/TUI
+// surface, including cross-project qualified refs. Storage-level
+// CreateProject does not validate (the daemon handler does), which is
+// exactly how a malicious envelope would be produced.
+func TestImportReplay_RejectsControlCharacterProjectName(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	_, err := src.CreateProject(ctx, "evil\x1b]0;pwned\x07proj")
+	require.NoError(t, err)
+
+	recs := collectImportRecords(t, ctx, src)
+	dst := openTestDB(t)
+	err = dst.ImportReplay(ctx, recs, db.ImportOptions{})
+	require.Error(t, err, "imported project names must pass creation-time validation")
+	require.Contains(t, err.Error(), "non-printable")
 }

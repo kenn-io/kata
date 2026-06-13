@@ -50,7 +50,7 @@ func newShowCmd() *cobra.Command {
 				return err
 			}
 			if mode == outputAgent {
-				return printShowAgent(cmd.OutOrStdout(), b)
+				return printShowAgent(cmd.OutOrStdout(), b, ref.ProjectName)
 			}
 			out := cmd.OutOrStdout()
 			if _, err := fmt.Fprintf(out, "%s  %s  [%s]  by %s\n",
@@ -102,7 +102,7 @@ func newShowCmd() *cobra.Command {
 					return err
 				}
 				for _, l := range b.Links {
-					label, other := linkLabelFromPOV(l.Type, b.Issue.UID, l.From, l.To)
+					label, other := linkLabelFromPOV(l.Type, b.Issue.UID, ref.ProjectName, l.From, l.To)
 					if _, err := fmt.Fprintf(out, "%s: %s\n", label, other); err != nil {
 						return err
 					}
@@ -146,7 +146,7 @@ type showResponseForCLI struct {
 	LeaseViolations []claimViolationForCLI `json:"lease_violations"`
 }
 
-func printShowAgent(w io.Writer, b showResponseForCLI) error {
+func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject string) error {
 	if _, err := fmt.Fprintf(w, "OK show %s\n", b.Issue.ShortID); err != nil {
 		return err
 	}
@@ -207,7 +207,7 @@ func printShowAgent(w io.Writer, b showResponseForCLI) error {
 			return err
 		}
 		for _, l := range b.Links {
-			label, other := linkLabelFromPOV(l.Type, b.Issue.UID, l.From, l.To)
+			label, other := linkLabelFromPOV(l.Type, b.Issue.UID, subjectProject, l.From, l.To)
 			if err := writeAgentKVRow(w,
 				agentRowField("type", label),
 				agentRowField("issue", other),
@@ -262,10 +262,15 @@ func printShowAgentLeaseViolationLines(w io.Writer, violations []claimViolationF
 }
 
 // linkPeerForCLI mirrors api.LinkPeer for the show command's decode path. UID
-// is the stable handle; short_id is the human-readable display.
+// is the stable handle; ShortID is the bare human-readable display. Project
+// and QualifiedID are always populated (0.2.0) and used for cross-project
+// rendering: when the peer's project differs from the subject's, QualifiedID
+// is shown instead of ShortID.
 type linkPeerForCLI struct {
-	UID     string `json:"uid"`
-	ShortID string `json:"short_id"`
+	UID         string `json:"uid"`
+	ShortID     string `json:"short_id"`
+	Project     string `json:"project"`
+	QualifiedID string `json:"qualified_id"`
 }
 
 type claimForShowCLI struct {
@@ -362,32 +367,48 @@ func formatClaimTimeLeft(d time.Duration) string {
 	}
 }
 
-// linkLabelFromPOV returns the label and the OTHER endpoint's short_id,
+// peerRefForDisplay renders a peer's ref bare when it belongs to the same
+// project as the subject issue, and qualified ("project#short_id") otherwise.
+// QualifiedID embeds a project name — user-supplied data that can reach the
+// DB unvalidated through crafted import envelopes — and this helper feeds
+// human terminal sinks only (show link lines, create/edit echoes), so it
+// sanitizes like every other user-authored field. JSON paths marshal the
+// wire structs directly and keep the daemon's raw bytes.
+func peerRefForDisplay(p linkPeerForCLI, subjectProject string) string {
+	if p.Project != "" && p.Project != subjectProject {
+		return textsafe.Line(p.QualifiedID)
+	}
+	return textsafe.Line(p.ShortID)
+}
+
+// linkLabelFromPOV returns the label and the OTHER endpoint's display ref,
 // framed from the viewing issue's point of view. The display matches the
 // relationship-flag vocabulary on `kata create` / `kata edit`: "parent" /
 // "child" for the parent slot, "blocks" / "blocked-by" for the directed
-// blocks edge, and "related" for the symmetric one.
-func linkLabelFromPOV(linkType, viewerUID string, from, to linkPeerForCLI) (label, other string) {
+// blocks edge, and "related" for the symmetric one. subjectProject is the
+// project name of the issue being shown; it is used to render foreign peers
+// qualified while same-project peers stay bare.
+func linkLabelFromPOV(linkType, viewerUID, subjectProject string, from, to linkPeerForCLI) (label, other string) {
 	if from.UID == viewerUID {
 		switch linkType {
 		case "parent":
-			return "parent", to.ShortID
+			return "parent", peerRefForDisplay(to, subjectProject)
 		case "blocks":
-			return "blocks", to.ShortID
+			return "blocks", peerRefForDisplay(to, subjectProject)
 		case "related":
-			return "related", to.ShortID
+			return "related", peerRefForDisplay(to, subjectProject)
 		default:
-			return linkType, to.ShortID
+			return linkType, peerRefForDisplay(to, subjectProject)
 		}
 	}
 	switch linkType {
 	case "parent":
-		return "child", from.ShortID
+		return "child", peerRefForDisplay(from, subjectProject)
 	case "blocks":
-		return "blocked-by", from.ShortID
+		return "blocked-by", peerRefForDisplay(from, subjectProject)
 	case "related":
-		return "related", from.ShortID
+		return "related", peerRefForDisplay(from, subjectProject)
 	default:
-		return linkType, from.ShortID
+		return linkType, peerRefForDisplay(from, subjectProject)
 	}
 }

@@ -91,7 +91,7 @@ func TestIssueMutationsCarryUpdatedAt(t *testing.T) {
 	assertEventCarriesUpdatedAt(t, unlabelEvt, issueByID(ctx, t, d, a.ID))
 
 	link, linkEvt, err := d.CreateLinkAndEvent(ctx,
-		db.CreateLinkParams{ProjectID: p.ID, FromIssueID: a.ID, ToIssueID: b.ID, Type: "blocks", Author: "agent"},
+		db.CreateLinkParams{FromIssueID: a.ID, ToIssueID: b.ID, Type: "blocks", Author: "agent"},
 		db.LinkEventParams{
 			EventType: "issue.linked", EventIssueID: a.ID,
 			FromShortID: a.ShortID, FromUID: a.UID, ToShortID: b.ShortID, ToUID: b.UID, Actor: "agent",

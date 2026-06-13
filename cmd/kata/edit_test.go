@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 // TestEdit_AddsAllFourLinkDirections covers the new add flags on `kata edit`.
@@ -251,24 +252,78 @@ func TestEdit_EquivalentParentRefsAccepted(t *testing.T) {
 	assert.True(t, sawParent, "equivalent --parent refs must reconcile to the same issue")
 }
 
-// TestEdit_CrossProjectLinkRefRejected pins that link flags refuse a
-// qualified ref naming a project other than the URL issue's project.
-// Cross-project links are not supported (the schema forbids them), so
-// the error must state that constraint — and must NOT steer the user
-// toward passing a ULID, which the daemon also resolves only inside the
-// URL issue's project.
-func TestEdit_CrossProjectLinkRefRejected(t *testing.T) {
-	env, dir := setupCLIEnv(t)
-	pid := resolvePIDViaHTTP(t, env.URL, dir)
-	subject := createIssue(t, env, pid, "subject")
-	peer := createIssue(t, env, pid, "peer")
+// TestEdit_CrossProjectLinkViaQualifiedRef pins the CLI contract: a
+// qualified ref naming another project is forwarded to the daemon and
+// the link lands; kata show renders the foreign peer qualified while
+// same-project peers stay bare. The edit command's own one-liner output
+// must apply the same bare/qualified rule so the user sees the correct
+// ref immediately after the mutation.
+func TestEdit_CrossProjectLinkViaQualifiedRef(t *testing.T) {
+	env := testenv.New(t)
+	// hub-project: the workspace the CLI is bound to.
+	hubDir := initBoundWorkspace(t, env.URL, "https://github.com/example/hub-project.git")
+	hubPID := resolvePIDViaHTTP(t, env.URL, hubDir)
+	// spoke-project: a second project the link target lives in.
+	spokeDir := initBoundWorkspace(t, env.URL, "https://github.com/example/spoke-project.git")
+	spokePID := resolvePIDViaHTTP(t, env.URL, spokeDir)
 
-	_, err := runCLICapture(t, env, dir, "edit", subject, "--blocks", "other#"+peer)
-	require.Error(t, err, "cross-project qualified ref must be rejected")
-	assert.Contains(t, err.Error(), "cross-project links are not supported")
-	assert.Contains(t, err.Error(), "--blocks")
-	assert.NotContains(t, err.Error(), "ULID",
-		"error must not suggest ULIDs: the daemon scopes ULID link refs to the issue's project too")
+	subject := createIssue(t, env, hubPID, "subject")
+	// same-project peer in hub-project for the bare-rendering assertion.
+	sameProjectPeer := createIssue(t, env, hubPID, "same-project-peer")
+	// cross-project peer in spoke-project.
+	foreignPeer := createIssue(t, env, spokePID, "foreign-peer")
+
+	// Step 1: link subject → spoke-project#foreignPeer (cross-project).
+	// The edit command's one-liner must show the foreign peer qualified.
+	editOut1 := runCLI(t, env, hubDir, "edit", subject, "--blocks", "spoke-project#"+foreignPeer)
+	assert.Contains(t, editOut1, "spoke-project#"+foreignPeer,
+		"edit one-liner must render foreign peer qualified:\n%s", editOut1)
+
+	// Step 2: link subject → sameProjectPeer (same project, bare ref).
+	// The edit command's one-liner must show the same-project peer bare.
+	editOut2 := runCLI(t, env, hubDir, "edit", subject, "--related", sameProjectPeer)
+	assert.Contains(t, editOut2, sameProjectPeer,
+		"edit one-liner must contain same-project peer:\n%s", editOut2)
+	assert.NotContains(t, editOut2, "hub-project#"+sameProjectPeer,
+		"edit one-liner must render same-project peer BARE, not qualified:\n%s", editOut2)
+
+	// Step 3: kata show subject must render foreign peer QUALIFIED and
+	// same-project peer BARE.
+	out := runCLI(t, env, hubDir, "show", subject)
+	assert.Contains(t, out, "spoke-project#"+foreignPeer,
+		"foreign peer must render qualified in show output:\n%s", out)
+	assert.Contains(t, out, sameProjectPeer,
+		"same-project peer must appear in show output:\n%s", out)
+	assert.NotContains(t, out, "hub-project#"+sameProjectPeer,
+		"same-project peer must render BARE, not qualified:\n%s", out)
+}
+
+// TestEdit_CrossProjectLinkReversePOV verifies that after a cross-project
+// `--blocks` edit, `kata show` on the SPOKE-side issue (from the hub workspace,
+// using a qualified ref) renders the hub subject as "blocked-by: hub-project#<sid>".
+// This exercises the wire-data reverse-POV rendering path in linkLabelFromPOV:
+// from the spoke issue's viewpoint the link type is "blocks" and from == hub
+// subject, so linkLabelFromPOV returns ("blocked-by", peerRefForDisplay(from, spokeProject)).
+// Since from.Project == "hub-project" != "spoke-project", it must render qualified.
+func TestEdit_CrossProjectLinkReversePOV(t *testing.T) {
+	env := testenv.New(t)
+	hubDir := initBoundWorkspace(t, env.URL, "https://github.com/example/hub-project.git")
+	hubPID := resolvePIDViaHTTP(t, env.URL, hubDir)
+	spokeDir := initBoundWorkspace(t, env.URL, "https://github.com/example/spoke-project.git")
+	spokePID := resolvePIDViaHTTP(t, env.URL, spokeDir)
+
+	subject := createIssue(t, env, hubPID, "hub-subject")
+	foreignPeer := createIssue(t, env, spokePID, "spoke-peer")
+
+	// Edit hub subject to blocks spoke-project#foreignPeer.
+	runCLI(t, env, hubDir, "edit", subject, "--blocks", "spoke-project#"+foreignPeer)
+
+	// Show the SPOKE issue from the hub workspace via a qualified ref.
+	// linkLabelFromPOV for the spoke issue: from.UID == hubSubjectUID, viewer == spokePeer,
+	// so the spoke issue is the "to" end → label = "blocked-by", other = hub subject ref.
+	spokeShowOut := runCLI(t, env, hubDir, "show", "spoke-project#"+foreignPeer)
+	assert.Contains(t, spokeShowOut, "blocked-by: hub-project#"+subject,
+		"spoke-side show must render hub subject as 'blocked-by: hub-project#<sid>':\n%s", spokeShowOut)
 }
 
 // TestEdit_ConflictDetectedAcrossRefForms pins that the add/remove

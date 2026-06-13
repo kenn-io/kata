@@ -76,7 +76,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
 		}
-		if err := CheckParentCloseCompleteness(ctx, cfg.DB, in.ProjectID, issue.ID, issue.ShortID); err != nil {
+		if err := CheckParentCloseCompleteness(ctx, cfg.DB, issue.ID, issue.ShortID); err != nil {
 			return nil, api.NewError(409, "parent_has_open_children", err.Error(), "", nil)
 		}
 		now := time.Now()
@@ -87,7 +87,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// completeness guard above) still apply.
 		if !cfg.CloseThrottle.ThrottleDisabled {
 			if parentRef, cohort, refusal := CheckSiblingCloseThrottle(
-				ctx, cfg.DB, in.ProjectID, issue.ID, actor, now); refusal != nil {
+				ctx, cfg.DB, issue, actor, now); refusal != nil {
 				// Dry-run is side-effect-free: surface the 429 but skip persisting
 				// an audit event so kata events --tail doesn't fill with would-be
 				// refusals from validation probes.
@@ -104,7 +104,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(429, "sibling_throttle", refusal.Error(), "", nil)
 			}
 			if priorRef, parentRef, refusal := CheckRepeatedMessageGuard(
-				ctx, cfg.DB, in.ProjectID, issue.ID,
+				ctx, cfg.DB, issue,
 				actor, in.Body.Reason, in.Body.Message, now); refusal != nil {
 				if !in.Body.DryRun {
 					if err := emitThrottledEvent(ctx, cfg, issue, actor,
@@ -154,7 +154,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if errors.Is(err, db.ErrOpenChildren) {
 				detail := err.Error()
 				if listErr := CheckParentCloseCompleteness(ctx, cfg.DB,
-					in.ProjectID, issue.ID, issue.ShortID); listErr != nil {
+					issue.ID, issue.ShortID); listErr != nil {
 					detail = listErr.Error()
 				}
 				return nil, api.NewError(409, "parent_has_open_children", detail, "", nil)

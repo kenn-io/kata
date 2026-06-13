@@ -137,7 +137,7 @@ func requireFederatedImportClaims(
 		if err != nil {
 			return err
 		}
-		if err := requireFederatedLinkClaims(ctx, cfg, projectID, actor, peers...); err != nil {
+		if err := requireFederatedLinkClaims(ctx, cfg, actor, peers...); err != nil {
 			return err
 		}
 	}

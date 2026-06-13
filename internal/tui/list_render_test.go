@@ -402,7 +402,7 @@ func TestRenderListBody_UsesQueueRowsWithDisclosureAndChildCounts(t *testing.T) 
 			ProjectID: 7, UID: "01TEST-p001", ShortID: parentSID, Title: "parent", Status: "open",
 			ChildCounts: &ChildCounts{Open: 1, Total: 2},
 		},
-		{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", ParentShortID: &parentSID, Title: "child", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID}, Title: "child", Status: "open"},
 	}}
 
 	collapsed := renderBodyNoColor(lm, 100, 6, viewChrome{})
@@ -420,7 +420,7 @@ func TestRenderListBody_ContextRowHasVisibleMarkerInNoColor(t *testing.T) {
 	lm := listModel{
 		issues: []Issue{
 			{ProjectID: 7, UID: "01TEST-p001", ShortID: parentSID, Title: "parent", Status: "open"},
-			{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", ParentShortID: &parentSID, Title: "child login", Status: "open"},
+			{ProjectID: 7, UID: "01TEST-c002", ShortID: "c002", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID}, Title: "child login", Status: "open"},
 		},
 		filter: ListFilter{Search: "login"},
 	}

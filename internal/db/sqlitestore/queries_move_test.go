@@ -47,22 +47,29 @@ func TestMoveIssueProject_HappyPath(t *testing.T) {
 	assert.Contains(t, payload, `"to_short_id":"`+res.NewShortID+`"`)
 }
 
-func TestMoveIssueProject_RefusesCrossProjectLinks(t *testing.T) {
+// TestMoveIssueProject_PreservesLinks pins the storage-v16 contract: links
+// are never removed or modified during a project move. Endpoints are row IDs
+// and UIDs — both stable — so every edge survives verbatim.
+func TestMoveIssueProject_PreservesLinks(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 	srcP, _ := d.CreateProject(ctx, "src")
 	tgtP, _ := d.CreateProject(ctx, "target")
 	a := seedIssueInProject(t, d, srcP.ID, "A", "tester")
 	b := seedIssueInProject(t, d, srcP.ID, "B", "tester")
-	seedLink(t, d, srcP.ID, a.ID, b.ID, "blocks", "tester")
+	seedLink(t, d, a.ID, b.ID, "blocks", "tester")
 
 	_, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: a.ID, FromProjectID: srcP.ID, ToProjectID: tgtP.ID,
 		IfMatchRev: 1, Actor: "tester",
 	})
-	var cpe *db.CrossProjectLinksError
-	require.ErrorAs(t, err, &cpe)
-	assert.GreaterOrEqual(t, len(cpe.Blockers), 1)
+	require.NoError(t, err)
+
+	links, err := d.LinksByIssue(ctx, a.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1, "link survives the move")
+	assert.Equal(t, a.UID, links[0].FromIssueUID)
+	assert.Equal(t, b.UID, links[0].ToIssueUID)
 }
 
 func TestMoveIssueProject_RefusesRecurrencePinned(t *testing.T) {

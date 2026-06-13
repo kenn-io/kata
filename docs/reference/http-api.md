@@ -38,7 +38,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.1.0",
+  "api_schema_version": "0.2.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db"
@@ -66,6 +66,13 @@ so a client generated from a schema that includes it can still parse the
 response of an older daemon that predates it. Treat an **absent or empty**
 `api_schema_version` as "a daemon older than this field," not a parse error.
 
+### Version history
+
+| Version | Change |
+| --- | --- |
+| `0.2.0` | Removed `links[].project_id` from link projections. Links are now project-independent edges that may span projects, so a single `project_id` no longer describes a link. `links[].from` and `links[].to` (and the edit response's `changes` block peers) gain `project` and `qualified_id` — always populated. `IssueOut.parent_short_id` is replaced by `parent` (a `LinkPeer` object with all four fields). The cross-project link feature lands across this version. Event payloads are unchanged: a cross-project link mutation currently emits its event in the subject issue's project only (mirrored peer-project events are planned). |
+| `0.1.0` | Initial published contract. |
+
 ## Compatibility expectations
 
 These are the current intentions, not a contractual guarantee:
@@ -77,6 +84,11 @@ These are the current intentions, not a contractual guarantee:
   validation. The response relaxation never loosens request schemas: those keep
   the strictness their types declare — `additionalProperties: false` by default,
   so unknown request fields are rejected unless a type explicitly opts in.
+  The OpenAPI 3.0 flavor (`kata openapi --version 3.0`), which exists as
+  code-generator input, leaves `additionalProperties` unset on response
+  schemas instead — the same permissive meaning, phrased so generators model
+  optional object-valued response fields (such as `parent`) as pointers
+  rather than always-present values.
 - **Breaking changes bump `api_schema_version`.** Removing or renaming a field,
   changing a field's type, or removing an endpoint is a breaking change and is
   signalled by a change to `api_schema_version`. A client that pins or checks

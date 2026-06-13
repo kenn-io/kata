@@ -365,10 +365,15 @@ Adoption preserves the current state of local issues, including closed and
 soft-deleted issues, comments, labels, metadata, priority, owner, and
 same-project links. It does not preserve the old local event history. Instead
 it removes those pre-adoption local events, queues fresh snapshots for the hub
-with same-project links embedded in the snapshot payloads, and reports how many
-snapshots were queued. Adoption snapshot event actors are the bound federation
-actor. Snapshot payload authors and comment authors are preserved, so adopted
-issues keep their original displayed content authors.
+with each issue's links embedded in the snapshot payloads, and reports how
+many snapshots were queued. Links between issues in the adopted project
+replicate to the hub. A link to an issue in another project does not: the hub
+rejects ingest batches that reference issues it does not have, so a
+cross-project link on an adopted issue can land the adoption push in
+quarantine (see Consistency limitations). Remove cross-project links from the
+project's issues before adopting. Adoption snapshot event actors are the
+bound federation actor. Snapshot payload authors and comment authors are
+preserved, so adopted issues keep their original displayed content authors.
 
 > **Preserving the pre-adoption timeline:** Adoption is a cutover, not an
 > in-place history merge. If you need the old local event timeline for audit or
@@ -644,6 +649,19 @@ Federation has expected stale or deferred states:
 - Pushed event actors are bound to the enrollment actor. A buggy, old, or
   malicious spoke that pushes a different actor is rejected by the hub and the
   spoke records the failed batch in quarantine.
+- Links may span projects, but federation replicates one project per binding,
+  and link replication is scoped to the binding: an edge materializes only
+  when both endpoint issues belong to the same federated project. A
+  cross-project link does not propagate through federation — even when both
+  endpoint projects are federated between the same instances — and stays
+  local to the instance where it was created. Pushes are stricter: the hub
+  rejects a batch whose link payloads reference an issue it does not have
+  (unless that peer's snapshot arrives in the same batch), so a cross-project
+  link mutation on a push-enabled spoke, or an adoption snapshot embedding
+  one, can land the push batch in quarantine. Same-project edges are
+  unaffected: a baseline arriving over multiple poll pages defers an edge
+  whose peer snapshot is on a later page to a later materialization pass
+  rather than dropping it.
 
 ## Cutover notes
 

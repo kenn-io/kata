@@ -88,9 +88,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if _, err := tx.ExecContext(ctx, `UPDATE issues SET project_id = ? WHERE project_id = ?`, target.ID, source.ID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("move issues: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE links SET project_id = ? WHERE project_id = ?`, target.ID, source.ID); err != nil {
-		return db.ProjectMergeResult{}, fmt.Errorf("move links: %w", err)
-	}
+	// Links are project-independent edges (storage v16): they reference issues
+	// by id/uid, so moving the issues above carries every link with them. No
+	// link reproject is needed.
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE events SET project_id = ?, project_name = ? WHERE project_id = ?`,
 		target.ID, target.Name, source.ID); err != nil {

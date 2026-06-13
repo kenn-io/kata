@@ -152,7 +152,7 @@ func TestMergeProjects_MovesSourceIntoSurvivingTarget(t *testing.T) {
 	parent := makeIssue(t, ctx, d, alpha.ID, "parent", "tester")
 	child := makeIssue(t, ctx, d, alpha.ID, "child", "tester")
 	_, _, err := d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
-		ProjectID: alpha.ID, FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester",
+		FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester",
 	}, db.LinkEventParams{
 		EventType:    "issue.linked",
 		EventIssueID: child.ID,

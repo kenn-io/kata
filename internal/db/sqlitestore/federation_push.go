@@ -81,8 +81,8 @@ func (d *Store) queryPendingFederationPushEvents(ctx context.Context, where stri
 	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
 	      FROM events e
 	      JOIN projects p ON p.id = e.project_id
-	      LEFT JOIN issues i ON i.project_id = e.project_id AND (i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid))
-	      LEFT JOIN issues ri ON ri.project_id = e.project_id AND (ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid))
+	      LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
+	      LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
 	      `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("pending federation push events: %w", err)

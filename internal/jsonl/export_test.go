@@ -319,7 +319,6 @@ func TestExportNoIncludeDeletedOmitsSoftDeletedIssueDependents(t *testing.T) {
 	deleted := createTesterIssue(ctx, t, d, p.ID, "deleted issue", "", "gone")
 	addTesterComment(ctx, t, d, deleted.ID, "deleted comment")
 	_, _, err := d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
-		ProjectID:   p.ID,
 		FromIssueID: deleted.ID,
 		ToIssueID:   kept.ID,
 		Type:        "blocks",

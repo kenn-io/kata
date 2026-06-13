@@ -2,10 +2,12 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -192,9 +194,67 @@ func TestCreateLink_ParentReplaceSelfLinkLeavesNoMutation(t *testing.T) {
 	// And the original parent link row itself is still attached.
 	var parentLinks int
 	require.NoError(t, env.DB.QueryRowContext(t.Context(),
-		`SELECT COUNT(*) FROM links WHERE project_id = ? AND type = 'parent'`,
+		`SELECT COUNT(*) FROM links
+		   WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
+		     AND type = 'parent'`,
 		pid).Scan(&parentLinks))
 	assert.Equal(t, 1, parentLinks, "original parent link must still exist")
+}
+
+// TestCreateLink_ParentReplaceCycleLeavesNoMutation verifies that a parent
+// --replace whose new parent would close a cycle returns 400 BEFORE deleting
+// the existing parent. Chain: c's parent = p1, d's parent = c (so d is a
+// descendant of c). Replacing c's parent with d would create c -> d -> c.
+// With the bug, DeleteLinkAndEvent committed the unlink (row + event) before
+// the in-tx cycle guard fired, leaving c parentless. We assert directly
+// against the events and links tables: no NEW issue.unlinked event for c, and
+// c's parent is still p1.
+func TestCreateLink_ParentReplaceCycleLeavesNoMutation(t *testing.T) {
+	env := testenv.New(t)
+	pid, c, p1 := setupTwoIssues(t, env)
+	d := createIssueViaHTTP(t, env, pid, "d")
+	cIss, err := env.DB.IssueByID(t.Context(), c)
+	require.NoError(t, err)
+	p1Iss, err := env.DB.IssueByID(t.Context(), p1)
+	require.NoError(t, err)
+	dIss, err := env.DB.IssueByID(t.Context(), d)
+	require.NoError(t, err)
+
+	postLink(t, env, pid, c, "parent", p1) // c's parent = p1
+	postLink(t, env, pid, d, "parent", c)  // d's parent = c (d descends from c)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(pid, cIss.ShortID, "links"), map[string]any{
+			"actor":   "tester",
+			"type":    "parent",
+			"to_ref":  dIss.ShortID,
+			"replace": true,
+		}, nil)
+	require.Equalf(t, http.StatusBadRequest, resp.StatusCode,
+		"a cycle-rejected replace must 400, body: %s", raw)
+	var env400 struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env400))
+	assert.Equal(t, "validation", env400.Error.Code)
+	assert.Equal(t, "set_parent on #"+cIss.ShortID+" would create a parent cycle",
+		env400.Error.Message)
+
+	// No issue.unlinked event for c: the bug's signature was a committed unlink
+	// (old parent p1 removed) followed by the 400.
+	var unlinkedForC int
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM events WHERE type = 'issue.unlinked' AND issue_id = ?`,
+		c).Scan(&unlinkedForC))
+	assert.Equal(t, 0, unlinkedForC, "no issue.unlinked event should exist for c after rejected replace")
+
+	// c's parent is still p1.
+	parent, err := env.DB.ParentOf(t.Context(), c)
+	require.NoError(t, err, "c must still have a parent")
+	assert.Equal(t, p1Iss.ID, parent.ToIssueID, "c's parent must still be p1 after a rejected replace")
 }
 
 func TestCreateLink_BlankActorIs400(t *testing.T) {
@@ -298,4 +358,122 @@ func TestDeleteLink_EventPayloadOrientsFromURLIssue(t *testing.T) {
 	assert.Equal(t, aIss.ShortID, pl.ToShortID, "to_short_id must be the peer (A)")
 	assert.Equal(t, bIss.UID, pl.FromUID, "from_uid must be the URL issue (B)")
 	assert.Equal(t, aIss.UID, pl.ToUID, "to_uid must be the peer (A)")
+}
+
+// TestCreateLink_ArchivedPeerIs409 pins that POST /links rejects a link whose
+// target lives in an archived project with 409 link_target_archived.
+// requireLinkTargetAddable is wired in the POST handler (handlers_links.go);
+// this test ensures that path is covered alongside the edit and create-issue
+// paths that already have archived-target tests.
+func TestCreateLink_ArchivedPeerIs409(t *testing.T) {
+	env := testenv.New(t)
+	src, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	tgt, err := env.DB.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	subject, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: src.ID, Title: "subject", Author: "tester",
+	})
+	require.NoError(t, err)
+	peer, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "peer", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	// Archive the peer's project before attempting to link.
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: tgt.ID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(src.ID, subject.ShortID, "links"),
+		map[string]any{"actor": "tester", "type": "blocks", "to_ref": peer.UID},
+		nil)
+	require.Equalf(t, http.StatusConflict, resp.StatusCode, "body: %s", raw)
+	var env409 struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env409))
+	assert.Equal(t, "link_target_archived", env409.Error.Code)
+}
+
+// TestCreateLink_SameProjectParentCycleParity pins that POST /links parent
+// creation runs the same in-tx cycle check as the edit path and emits the
+// byte-identical wire error. b's parent is a; POSTing a --parent--> b would
+// close the loop and must be rejected with the edit path's exact code and
+// message (a is the child whose parent is being set).
+func TestCreateLink_SameProjectParentCycleParity(t *testing.T) {
+	env := testenv.New(t)
+	pid, a, b := setupTwoIssues(t, env)
+	aIss, err := env.DB.IssueByID(t.Context(), a)
+	require.NoError(t, err)
+	bIss, err := env.DB.IssueByID(t.Context(), b)
+	require.NoError(t, err)
+	// b's parent = a, so a is an ancestor of b.
+	_, err = env.DB.CreateLink(t.Context(), db.CreateLinkParams{
+		FromIssueID: b, ToIssueID: a, Type: "parent", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(pid, aIss.ShortID, "links"), map[string]string{
+			"actor":  "tester",
+			"type":   "parent",
+			"to_ref": bIss.ShortID,
+		}, nil)
+	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
+	var env400 struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env400))
+	assert.Equal(t, "validation", env400.Error.Code)
+	assert.Equal(t, "set_parent on #"+aIss.ShortID+" would create a parent cycle", env400.Error.Message)
+}
+
+// TestCreateLink_ParentCycleParity pins that POST /links parent creation runs
+// the same in-tx cycle check as the edit path for a chain that spans projects:
+// a in src has parent b in tgt; POSTing b --parent--> a closes the loop and
+// must be rejected with the byte-identical cycle error the edit path emits.
+func TestCreateLink_ParentCycleParity(t *testing.T) {
+	env := testenv.New(t)
+	src, err := env.DB.CreateProject(t.Context(), "src")
+	require.NoError(t, err)
+	tgt, err := env.DB.CreateProject(t.Context(), "tgt")
+	require.NoError(t, err)
+	a, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: src.ID, Title: "a", Author: "tester",
+	})
+	require.NoError(t, err)
+	b, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: tgt.ID, Title: "b", Author: "tester",
+	})
+	require.NoError(t, err)
+	// a's parent = b (cross-project), so b is an ancestor of a.
+	_, err = env.DB.CreateLink(t.Context(), db.CreateLinkParams{
+		FromIssueID: a.ID, ToIssueID: b.ID, Type: "parent", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(tgt.ID, b.ShortID, "links"), map[string]string{
+			"actor":  "tester",
+			"type":   "parent",
+			"to_ref": a.UID,
+		}, nil)
+	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
+	var env400 struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env400))
+	assert.Equal(t, "validation", env400.Error.Code)
+	assert.Equal(t, "set_parent on #"+b.ShortID+" would create a parent cycle", env400.Error.Message)
 }

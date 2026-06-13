@@ -382,7 +382,6 @@ type RemoteEvent struct {
 // Link mirrors a row in links.
 type Link struct {
 	ID           int64     `json:"id"`
-	ProjectID    int64     `json:"project_id"`
 	FromIssueID  int64     `json:"from_issue_id"`
 	FromIssueUID string    `json:"from_issue_uid"`
 	ToIssueID    int64     `json:"to_issue_id"`

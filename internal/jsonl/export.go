@@ -766,7 +766,6 @@ func exportLinks(ctx context.Context, d exportQuerier, enc *Encoder, opts Export
 	}
 	type record struct {
 		ID           int64  `json:"id"`
-		ProjectID    int64  `json:"project_id"`
 		FromIssueID  int64  `json:"from_issue_id"`
 		FromIssueUID string `json:"from_issue_uid"`
 		ToIssueID    int64  `json:"to_issue_id"`
@@ -775,7 +774,7 @@ func exportLinks(ctx context.Context, d exportQuerier, enc *Encoder, opts Export
 		Author       string `json:"author"`
 		CreatedAt    string `json:"created_at"`
 	}
-	query := `SELECT links.id, links.project_id, links.from_issue_id, links.from_issue_uid,
+	query := `SELECT links.id, links.from_issue_id, links.from_issue_uid,
 	                 links.to_issue_id, links.to_issue_uid,
 	                 links.type, links.author, CAST(links.created_at AS TEXT)
 	          FROM links
@@ -789,7 +788,7 @@ func exportLinks(ctx context.Context, d exportQuerier, enc *Encoder, opts Export
 	}
 	return scanRecords(rows, KindLink, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
-		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.FromIssueID, &rec.FromIssueUID,
+		err := rows.Scan(&rec.ID, &rec.FromIssueID, &rec.FromIssueUID,
 			&rec.ToIssueID, &rec.ToIssueUID, &rec.Type, &rec.Author, &rec.CreatedAt)
 		return rec, err
 	})
@@ -798,14 +797,13 @@ func exportLinks(ctx context.Context, d exportQuerier, enc *Encoder, opts Export
 func exportLinksV1(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
 	type record struct {
 		ID          int64  `json:"id"`
-		ProjectID   int64  `json:"project_id"`
 		FromIssueID int64  `json:"from_issue_id"`
 		ToIssueID   int64  `json:"to_issue_id"`
 		Type        string `json:"type"`
 		Author      string `json:"author"`
 		CreatedAt   string `json:"created_at"`
 	}
-	query := `SELECT links.id, links.project_id, links.from_issue_id, links.to_issue_id,
+	query := `SELECT links.id, links.from_issue_id, links.to_issue_id,
 	                 links.type, links.author, CAST(links.created_at AS TEXT)
 	          FROM links
 	          JOIN issues AS from_issues ON from_issues.id = links.from_issue_id
@@ -818,7 +816,7 @@ func exportLinksV1(ctx context.Context, d exportQuerier, enc *Encoder, opts Expo
 	}
 	return scanRecords(rows, KindLink, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
-		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.FromIssueID, &rec.ToIssueID,
+		err := rows.Scan(&rec.ID, &rec.FromIssueID, &rec.ToIssueID,
 			&rec.Type, &rec.Author, &rec.CreatedAt)
 		return rec, err
 	})
@@ -1763,8 +1761,10 @@ func linkExportWhere(opts ExportOptions) (string, []any) {
 	clauses := []string{}
 	args := []any{}
 	if opts.ProjectID > 0 {
-		clauses = append(clauses, `links.project_id = ?`)
-		args = append(args, opts.ProjectID)
+		// Links are project-independent edges (storage v16); a scoped export
+		// includes any link touching the project on either endpoint.
+		clauses = append(clauses, `(from_issues.project_id = ? OR to_issues.project_id = ?)`)
+		args = append(args, opts.ProjectID, opts.ProjectID)
 	}
 	if !opts.IncludeDeleted {
 		clauses = append(clauses, `from_issues.deleted_at IS NULL`, `to_issues.deleted_at IS NULL`)

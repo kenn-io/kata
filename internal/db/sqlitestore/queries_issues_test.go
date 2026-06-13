@@ -501,7 +501,7 @@ func TestCloseIssue_RefusesParentWithOpenChildren(t *testing.T) {
 	// and the close write still aborts the close at commit time.
 	d, ctx, p, parent := setupTestIssue(t)
 	child, _ := createTesterIssue(ctx, t, d, p.ID, "child")
-	makeLink(ctx, t, d, p.ID, child.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, child.ID, parent.ID, "parent")
 
 	_, _, _, err := d.CloseIssue(ctx, parent.ID, "done", "agent", "", nil)
 	require.ErrorIs(t, err, db.ErrOpenChildren)
@@ -510,7 +510,7 @@ func TestCloseIssue_RefusesParentWithOpenChildren(t *testing.T) {
 func TestCloseIssue_AllowsParentWithOnlyClosedChildren(t *testing.T) {
 	d, ctx, p, parent := setupTestIssue(t)
 	child, _ := createTesterIssue(ctx, t, d, p.ID, "child")
-	makeLink(ctx, t, d, p.ID, child.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, child.ID, parent.ID, "parent")
 	_, _, _, err := d.CloseIssue(ctx, child.ID, "done", "agent", "", nil)
 	require.NoError(t, err)
 

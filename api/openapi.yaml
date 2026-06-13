@@ -1742,8 +1742,8 @@ components:
           type: string
         owner:
           type: string
-        parent_short_id:
-          type: string
+        parent:
+          $ref: "#/components/schemas/LinkPeer"
         priority:
           format: int64
           type: integer
@@ -1921,16 +1921,12 @@ components:
         id:
           format: int64
           type: integer
-        project_id:
-          format: int64
-          type: integer
         to:
           $ref: "#/components/schemas/LinkPeer"
         type:
           type: string
       required:
         - id
-        - project_id
         - from
         - to
         - type
@@ -1940,6 +1936,10 @@ components:
     LinkPeer:
       additionalProperties: true
       properties:
+        project:
+          type: string
+        qualified_id:
+          type: string
         short_id:
           type: string
         uid:
@@ -1947,6 +1947,8 @@ components:
       required:
         - uid
         - short_id
+        - project
+        - qualified_id
       type: object
     LinksDelta:
       additionalProperties: false
@@ -3009,7 +3011,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.1.0
+  version: 0.2.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

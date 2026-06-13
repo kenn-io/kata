@@ -90,11 +90,11 @@ func (s *Store) BatchProjectStats(_ context.Context) (map[int64]db.ProjectStats,
 	return nil, ErrNotImplementedPhase3
 }
 
-func (s *Store) BlockNumbersByIssues(_ context.Context, _ int64, _ []int64) (map[int64][]int64, error) {
+func (s *Store) BlockNumbersByIssues(_ context.Context, _ []int64) (map[int64][]int64, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
-func (s *Store) BlockedByNumbersByIssues(_ context.Context, _ int64, _ []int64) (map[int64][]int64, error) {
+func (s *Store) BlockedByNumbersByIssues(_ context.Context, _ []int64) (map[int64][]int64, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
@@ -102,11 +102,11 @@ func (s *Store) CheckClaimGate(_ context.Context, _ db.ClaimGateParams) error {
 	return ErrNotImplementedPhase3
 }
 
-func (s *Store) ChildCountsByParents(_ context.Context, _ int64, _ []int64) (map[int64]db.ChildCounts, error) {
+func (s *Store) ChildCountsByParents(_ context.Context, _ []int64) (map[int64]db.ChildCounts, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
-func (s *Store) ChildrenOfIssue(_ context.Context, _ int64, _ int64) ([]db.Issue, error) {
+func (s *Store) ChildrenOfIssue(_ context.Context, _ int64) ([]db.Issue, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
@@ -558,11 +558,11 @@ func (s *Store) MoveIssueProject(_ context.Context, _ db.MoveIssueProjectIn) (db
 	return db.MoveIssueProjectOut{}, ErrNotImplementedPhase3
 }
 
-func (s *Store) OpenChildrenOf(_ context.Context, _ int64, _ int64, _ int) ([]db.Issue, int, error) {
+func (s *Store) OpenChildrenOf(_ context.Context, _ int64, _ int) ([]db.Issue, int, error) {
 	return nil, 0, ErrNotImplementedPhase3
 }
 
-func (s *Store) ParentNumbersByIssues(_ context.Context, _ int64, _ []int64) (map[int64]int64, error) {
+func (s *Store) ParentNumbersByIssues(_ context.Context, _ []int64) (map[int64]int64, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
@@ -570,7 +570,7 @@ func (s *Store) ParentOf(_ context.Context, _ int64) (db.Link, error) {
 	return db.Link{}, ErrNotImplementedPhase3
 }
 
-func (s *Store) ParentShortIDsByIssues(_ context.Context, _ int64, _ []int64) (map[int64]string, error) {
+func (s *Store) ParentShortIDsByIssues(_ context.Context, _ []int64) (map[int64]string, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
@@ -634,11 +634,11 @@ func (s *Store) ReassignAlias(_ context.Context, _ int64, _ int64) error {
 	return ErrNotImplementedPhase3
 }
 
-func (s *Store) RecentSameMessageClose(_ context.Context, _ int64, _ int64, _ int64, _ string, _ string, _ time.Time) (*db.Event, error) {
+func (s *Store) RecentSameMessageClose(_ context.Context, _ int64, _ int64, _ string, _ string, _ time.Time) (*db.Event, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
-func (s *Store) RecentSiblingCloses(_ context.Context, _ int64, _ int64, _ int64, _ string, _ time.Time) ([]db.Event, error) {
+func (s *Store) RecentSiblingCloses(_ context.Context, _ int64, _ int64, _ string, _ time.Time) ([]db.Event, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
@@ -678,7 +678,7 @@ func (s *Store) RejectPendingClaim(_ context.Context, _ string, _ string, _ time
 	return ErrNotImplementedPhase3
 }
 
-func (s *Store) RelatedNumbersByIssues(_ context.Context, _ int64, _ []int64) (map[int64][]int64, error) {
+func (s *Store) RelatedNumbersByIssues(_ context.Context, _ []int64) (map[int64][]int64, error) {
 	return nil, ErrNotImplementedPhase3
 }
 

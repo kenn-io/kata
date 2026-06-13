@@ -151,7 +151,6 @@ CREATE INDEX idx_comments_issue ON comments(issue_id, created_at);
 
 CREATE TABLE links (
   id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  project_id    BIGINT NOT NULL REFERENCES projects(id),
   from_issue_id BIGINT NOT NULL REFERENCES issues(id),
   to_issue_id   BIGINT NOT NULL REFERENCES issues(id),
   from_issue_uid TEXT NOT NULL,
@@ -170,35 +169,12 @@ CREATE UNIQUE INDEX uniq_one_parent_per_child
   ON links(from_issue_id) WHERE type = 'parent';
 CREATE INDEX idx_links_from    ON links(from_issue_id, type);
 CREATE INDEX idx_links_to      ON links(to_issue_id, type);
-CREATE INDEX idx_links_project ON links(project_id);
 CREATE INDEX idx_links_from_uid ON links(from_issue_uid);
 CREATE INDEX idx_links_to_uid   ON links(to_issue_uid);
 
 -- ----------------------------------------------------------------------
--- Trigger functions: PG ports of the six SQLite RAISE(ABORT, ...) triggers.
+-- Trigger functions: PG ports of the four SQLite RAISE(ABORT, ...) triggers.
 -- ----------------------------------------------------------------------
-
--- enforce_links_same_project: both endpoints must belong to NEW.project_id.
-CREATE OR REPLACE FUNCTION enforce_links_same_project() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE
-  from_project BIGINT;
-  to_project BIGINT;
-BEGIN
-  SELECT project_id INTO from_project FROM issues WHERE id = NEW.from_issue_id;
-  SELECT project_id INTO to_project   FROM issues WHERE id = NEW.to_issue_id;
-  IF from_project IS DISTINCT FROM NEW.project_id
-     OR to_project IS DISTINCT FROM NEW.project_id THEN
-    RAISE EXCEPTION 'cross-project links are not allowed';
-  END IF;
-  RETURN NEW;
-END $$;
-
-CREATE TRIGGER trg_links_same_project_insert
-  BEFORE INSERT ON links
-  FOR EACH ROW EXECUTE FUNCTION enforce_links_same_project();
-CREATE TRIGGER trg_links_same_project_update
-  BEFORE UPDATE ON links
-  FOR EACH ROW EXECUTE FUNCTION enforce_links_same_project();
 
 -- enforce_links_uid_consistency: stored UIDs must match the referenced rows.
 CREATE OR REPLACE FUNCTION enforce_links_uid_consistency() RETURNS trigger LANGUAGE plpgsql AS $$

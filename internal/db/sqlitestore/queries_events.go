@@ -30,6 +30,9 @@ func (d *Store) MaxEventID(ctx context.Context) (int64, error) {
 // related_issue short_ids are joined from the live `issues` table so events
 // render with display ids that stay current even after `kata projects merge`
 // or a future federation merge shifts a peer's short_id. UIDs remain stable.
+// The joins match by row id / UID alone — both globally unique — with no
+// project filter: a link event's related issue may live in another project,
+// and `kata move` rehomes an issue while its historical events stay put.
 func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.Event, error) {
 	var (
 		conds []string
@@ -52,8 +55,8 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
 	      FROM events e
 	      JOIN projects p ON p.id = e.project_id
-	      LEFT JOIN issues i ON i.project_id = e.project_id AND (i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid))
-	      LEFT JOIN issues ri ON ri.project_id = e.project_id AND (ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid))
+	      LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
+	      LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
 	      WHERE ` + strings.Join(conds, " AND ") + ` ORDER BY e.id ASC LIMIT ?`
 	args = append(args, p.Limit)
 	rows, err := d.QueryContext(ctx, q, args...)
@@ -131,8 +134,8 @@ func (d *Store) EventsInWindow(ctx context.Context, p db.EventsInWindowParams) (
 	             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
 	      FROM events e
 	      JOIN projects p ON p.id = e.project_id
-	      LEFT JOIN issues i ON i.project_id = e.project_id AND (i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid))
-	      LEFT JOIN issues ri ON ri.project_id = e.project_id AND (ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid))
+	      LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
+	      LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
 	      WHERE ` + strings.Join(conds, " AND ") + ` ORDER BY e.id ASC`
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -153,21 +156,26 @@ func (d *Store) EventsInWindow(ctx context.Context, p db.EventsInWindowParams) (
 }
 
 // RecentSiblingCloses returns issue.closed events emitted by actor on direct
-// children of parentIssueID in projectID since the given timestamp, EXCLUDING
-// any prior close of excludeIssueID itself. Ordered by created_at DESC so
-// callers can render the most recent closures first.
+// children of parentIssueID since the given timestamp, EXCLUDING any prior
+// close of excludeIssueID itself. Ordered by created_at DESC so callers can
+// render the most recent closures first.
 //
 // Used by the sibling-close throttle (spec §3.9) and the repeated-message
 // guard (§3.10). The exclude filter keeps a reopen→re-close cycle on the
 // same issue from matching its own prior close: the guards are intended to
 // compare against SIBLING issues, not the issue currently being closed.
 //
+// Links are project-independent edges (storage v16), so the sibling cohort
+// is defined by the parent edge alone and spans projects: a child closed in
+// another project counts. Scoping to one project would let an actor bypass
+// the close guards by distributing sibling closes across projects.
+//
 // The same scoped projection used by EventsInWindow is sufficient here — the
 // guards only need id, issue_short_id, actor, payload, and created_at; the
 // wider uid/related columns stay zero-valued.
 func (d *Store) RecentSiblingCloses(
 	ctx context.Context,
-	projectID, parentIssueID, excludeIssueID int64,
+	parentIssueID, excludeIssueID int64,
 	actor string,
 	since time.Time,
 ) ([]db.Event, error) {
@@ -177,18 +185,16 @@ func (d *Store) RecentSiblingCloses(
 	           FROM events e
 	           JOIN links l ON l.from_issue_id = e.issue_id
 	           JOIN issues i ON i.id = e.issue_id
-	           WHERE e.project_id = ?
-	             AND e.type = 'issue.closed'
+	           WHERE e.type = 'issue.closed'
 	             AND e.actor = ?
 	             AND e.created_at >= ?
 	             AND l.type = 'parent'
 	             AND l.to_issue_id = ?
-	             AND l.project_id = ?
 	             AND e.issue_id <> ?
 	           ORDER BY e.created_at DESC`
 	rows, err := d.QueryContext(ctx, q,
-		projectID, actor, since.UTC().Format(sqliteTimeFormat),
-		parentIssueID, projectID, excludeIssueID)
+		actor, since.UTC().Format(sqliteTimeFormat),
+		parentIssueID, excludeIssueID)
 	if err != nil {
 		return nil, fmt.Errorf("recent sibling closes: %w", err)
 	}
@@ -223,11 +229,11 @@ func (d *Store) RecentSiblingCloses(
 // matches even when the surrounding whitespace differs.
 func (d *Store) RecentSameMessageClose(
 	ctx context.Context,
-	projectID, parentIssueID, excludeIssueID int64,
+	parentIssueID, excludeIssueID int64,
 	actor, normalizedMessage string,
 	since time.Time,
 ) (*db.Event, error) {
-	siblings, err := d.RecentSiblingCloses(ctx, projectID, parentIssueID, excludeIssueID, actor, since)
+	siblings, err := d.RecentSiblingCloses(ctx, parentIssueID, excludeIssueID, actor, since)
 	if err != nil {
 		return nil, err
 	}

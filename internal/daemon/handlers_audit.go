@@ -154,7 +154,7 @@ func buildAuditRows(
 	if err != nil {
 		return nil, err
 	}
-	legacyParents, err := loadLegacyParentsForCloseEvents(ctx, cfg, in.ProjectID, events, parsed)
+	legacyParents, err := loadLegacyParentsForCloseEvents(ctx, cfg, events, parsed)
 	if err != nil {
 		return nil, err
 	}
@@ -258,13 +258,17 @@ func buildAuditRows(
 
 // auditParentFilter holds the multiple identities we'll compare each
 // row against. resolvedShortID is the parent's CURRENT short_id from
-// a live (IncludeDeletedYes) lookup; parsedShortID and parsedUID
+// a live (IncludeDeletedYes) lookup; resolvedUID is its UID from that
+// same lookup, matched against the close payload's frozen parent_uid —
+// the only identity that works when the parent lives in another
+// project (parent links span projects). parsedShortID and parsedUID
 // come from running the raw ref through shortid.Parse so a purged
 // parent referenced as `project#short` or by full UID still matches
 // stored snapshots in close payloads. raw preserves the literal
 // fallback for any odd form Parse rejected.
 type auditParentFilter struct {
 	resolvedShortID string
+	resolvedUID     string
 	parsedShortID   string
 	parsedUID       string
 	raw             string
@@ -272,12 +276,15 @@ type auditParentFilter struct {
 }
 
 // resolveAuditParentFilter turns the --parent query value into an
-// auditParentFilter, accepting any ref form the issue resolver
-// accepts. Soft-deleted parents resolve through IncludeDeletedYes —
-// audit is a historical view and a close of a child whose parent was
-// later soft-deleted is still a real audit row. Purged parents (no
-// row remains) fall through; the matcher uses parsed/raw values to
-// hit stored parent_uid and parent_short_id snapshots in payloads.
+// auditParentFilter, accepting any ref form the link-target resolver
+// accepts: bare short_id (audited project), qualified
+// `project#short_id` (any project, archived included — parent links
+// span projects), or full UID (global). Soft-deleted parents resolve
+// through IncludeDeletedYes — audit is a historical view and a close
+// of a child whose parent was later soft-deleted is still a real
+// audit row. Purged parents (no row remains) fall through; the
+// matcher uses parsed/raw values to hit stored parent_uid and
+// parent_short_id snapshots in payloads.
 func resolveAuditParentFilter(
 	ctx context.Context, cfg ServerConfig, projectID int64, parentRef string,
 ) (auditParentFilter, error) {
@@ -290,23 +297,33 @@ func resolveAuditParentFilter(
 		f.parsedShortID = parsed.ShortID
 		f.parsedUID = parsed.ULID
 	}
-	issue, rerr := activeIssueByRef(ctx, cfg.DB, projectID, parentRef, db.IncludeDeletedYes)
+	issue, rerr := resolveLinkTargetRef(ctx, cfg.DB, projectID, parentRef, db.IncludeDeletedYes)
 	if rerr == nil {
-		f.resolvedShortID = issue.ShortID
+		f.resolvedUID = issue.UID
+		if issue.ProjectID == projectID {
+			f.resolvedShortID = issue.ShortID
+		} else {
+			// Foreign parent: match by UID only. row.Parent is a display
+			// short_id from the audited project's perspective, so the
+			// foreign ref's bare suffix must not match same-suffix issues
+			// in the audited project.
+			f.parsedShortID = ""
+		}
 		return f, nil
 	}
 	var apiErr *api.APIError
 	if !errors.As(rerr, &apiErr) || apiErr.Status != http.StatusNotFound {
 		return auditParentFilter{}, rerr
 	}
-	// Resolver 404 covers two cases: a purged parent in THIS project
-	// (we want the parsed/raw fallback to hit stored snapshots), or a
-	// qualified ref pointing at a different project (we must NOT let
-	// parsedShortID match same-suffix issues in the scoped project).
-	// Distinguish by re-checking the parsed qualifier against the
-	// scoped project's name. Mismatched qualifiers clear the parsed
-	// short_id so only the raw form remains as a fallback, and the raw
-	// form ("other#abc4") never matches a bare row.Parent.
+	// Resolver 404 means the ref resolved nowhere: a purged parent in
+	// THIS project (we want the parsed/raw fallback to hit stored
+	// snapshots), or a qualified ref whose project or short_id suffix
+	// does not exist (we must NOT let parsedShortID match same-suffix
+	// issues in the scoped project). Distinguish by re-checking the
+	// parsed qualifier against the scoped project's name. Mismatched
+	// qualifiers clear the parsed short_id so only the raw form remains
+	// as a fallback, and the raw form ("other#abc4") never matches a
+	// bare row.Parent.
 	if perr == nil && parsed.Project != "" {
 		project, projErr := cfg.DB.ProjectByID(ctx, projectID)
 		if projErr != nil {
@@ -329,7 +346,18 @@ func resolveAuditParentFilter(
 // short_id) and payloadParentUID (frozen close-time UID, may be nil
 // for legacy events) line up with the filter under any of the
 // accepted ref forms.
+//
+// When the filter resolved a concrete parent (UID known) and the row
+// froze a parent UID at close time, UID equality is authoritative:
+// falling through to short_id comparison would let a same-suffix
+// parent in another project claim the row (foreign parents display
+// only their bare close-time short_id). The short_id fallbacks remain
+// for legacy rows with no frozen UID and for purged parents, where the
+// snapshot is the only signal left.
 func (f auditParentFilter) matches(rowParent string, payloadParentUID *string) bool {
+	if f.resolvedUID != "" && payloadParentUID != nil && *payloadParentUID != "" {
+		return *payloadParentUID == f.resolvedUID
+	}
 	if f.resolvedShortID != "" && rowParent == f.resolvedShortID {
 		return true
 	}
@@ -357,7 +385,7 @@ func (f auditParentFilter) matches(rowParent string, payloadParentUID *string) b
 // parent for legacy events.
 func loadLegacyParentsForCloseEvents(
 	ctx context.Context, cfg ServerConfig,
-	projectID int64, events []db.Event, parsed []closeEventPayload,
+	events []db.Event, parsed []closeEventPayload,
 ) (map[int64]string, error) {
 	ids := make([]int64, 0, len(events))
 	seen := map[int64]struct{}{}
@@ -377,7 +405,7 @@ func loadLegacyParentsForCloseEvents(
 	if len(ids) == 0 {
 		return map[int64]string{}, nil
 	}
-	parents, err := cfg.DB.ParentShortIDsByIssues(ctx, projectID, ids)
+	parents, err := cfg.DB.ParentShortIDsByIssues(ctx, ids)
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}

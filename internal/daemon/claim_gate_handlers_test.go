@@ -142,11 +142,39 @@ func TestClaimGateLinkCreateDeniesOtherPeerClaimHolder(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
 }
 
+// TestClaimGateLinkCreateEvaluatesTargetAgainstItsOwnProject pins that the
+// peer claim gate is evaluated against the PEER's project, not the URL
+// project. The subject lives in a non-federated project (no binding), so the
+// old per-URL-project gate would have silently passed; the foreign target
+// lives in a federated project whose claim is held by another actor, which
+// must deny the link.
+func TestClaimGateLinkCreateEvaluatesTargetAgainstItsOwnProject(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	src, err := env.DB.CreateProject(ctx, "src")
+	require.NoError(t, err)
+	subject, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: src.ID, Title: "subject", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	tgt, peer, _ := setupClaimGateProject(t, env, true)
+	acquireClaimGateIssue(t, env, tgt, peer, "other")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(src.ID, subject.ShortID, "links"), map[string]string{
+			"actor":  "agent",
+			"type":   "related",
+			"to_ref": peer.UID,
+		}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
+}
+
 func TestClaimGateDuplicateLinkCreateDoesNotRequirePeerClaim(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)
 	_, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: issue.ID,
 		ToIssueID:   peer.ID,
 		Type:        "related",
@@ -175,7 +203,6 @@ func TestClaimGateLinkDeleteAllowsUnclaimedPeer(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)
 	link, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: issue.ID,
 		ToIssueID:   peer.ID,
 		Type:        "related",
@@ -194,7 +221,6 @@ func TestClaimGateLinkDeleteDeniesOtherPeerClaimHolder(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)
 	link, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: issue.ID,
 		ToIssueID:   peer.ID,
 		Type:        "related",
@@ -214,7 +240,6 @@ func TestClaimGateLinkDeleteSkipsSoftDeletedPeerClaim(t *testing.T) {
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, true)
 	link, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: issue.ID,
 		ToIssueID:   peer.ID,
 		Type:        "related",
@@ -241,7 +266,6 @@ func TestClaimGateParentReplaceAllowsUnclaimedOldParent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: child.ID,
 		ToIssueID:   oldParent.ID,
 		Type:        "parent",
@@ -271,7 +295,6 @@ func TestClaimGateParentReplaceDeniesOtherOldParentClaimHolder(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: child.ID,
 		ToIssueID:   oldParent.ID,
 		Type:        "parent",
@@ -302,7 +325,6 @@ func TestClaimGateParentReplaceSkipsSoftDeletedOldParentClaim(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: child.ID,
 		ToIssueID:   oldParent.ID,
 		Type:        "parent",
@@ -355,7 +377,6 @@ func TestClaimGateEditLinksDeltaRemoveSkipsSoftDeletedPeerClaim(t *testing.T) {
 	env := testenv.New(t)
 	project, child, parent := setupClaimGateProject(t, env, true)
 	_, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: child.ID,
 		ToIssueID:   parent.ID,
 		Type:        "parent",
@@ -384,7 +405,6 @@ func TestClaimGateEditLinksDeltaParentReplaceAllowsUnclaimedOldParent(t *testing
 	})
 	require.NoError(t, err)
 	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: child.ID,
 		ToIssueID:   oldParent.ID,
 		Type:        "parent",
@@ -412,7 +432,6 @@ func TestClaimGateEditLinksDeltaParentReplaceDeniesOtherOldParentClaimHolder(t *
 	})
 	require.NoError(t, err)
 	_, err = env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: child.ID,
 		ToIssueID:   oldParent.ID,
 		Type:        "parent",
@@ -823,7 +842,6 @@ func claimGateLinkDeleteRequest(t *testing.T, federated bool) (*testenv.Env, cla
 	env := testenv.New(t)
 	project, issue, peer := setupClaimGateProject(t, env, false)
 	link, err := env.DB.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   project.ID,
 		FromIssueID: issue.ID,
 		ToIssueID:   peer.ID,
 		Type:        "related",

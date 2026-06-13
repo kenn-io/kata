@@ -185,13 +185,13 @@ func setupAssignedIssue(t *testing.T, owner string) (*sqlitestore.Store, context
 	return d, ctx, p, issue
 }
 
-// makeLink creates a link of the given type between fromID and toID under
-// projectID, authored by "tester". Used for setup steps that aren't themselves
-// the subject of an error assertion.
-func makeLink(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID, fromID, toID int64, linkType string) db.Link {
+// makeLink creates a link of the given type between fromID and toID,
+// authored by "tester". Used for setup steps that aren't themselves the
+// subject of an error assertion. Links are project-independent edges
+// (storage v16), so the endpoints carry all the project context.
+func makeLink(ctx context.Context, t *testing.T, d *sqlitestore.Store, fromID, toID int64, linkType string) db.Link {
 	t.Helper()
 	link, err := d.CreateLink(ctx, db.CreateLinkParams{
-		ProjectID:   projectID,
 		FromIssueID: fromID,
 		ToIssueID:   toID,
 		Type:        linkType,
@@ -264,12 +264,12 @@ func seedRecurrenceInstance(
 	return iss.ID, iss.UID
 }
 
-// seedLink creates a directed link of the given type between fromID and toID
-// under projectID, authored by the given actor.
-func seedLink(t *testing.T, d *sqlitestore.Store, projectID, fromID, toID int64, linkType, actor string) {
+// seedLink creates a directed link of the given type between fromID and toID,
+// authored by the given actor. Links are project-independent edges (storage
+// v16), so the endpoints carry all the project context.
+func seedLink(t *testing.T, d *sqlitestore.Store, fromID, toID int64, linkType, actor string) {
 	t.Helper()
 	_, err := d.CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   projectID,
 		FromIssueID: fromID,
 		ToIssueID:   toID,
 		Type:        linkType,

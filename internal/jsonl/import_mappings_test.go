@@ -24,7 +24,6 @@ func TestExportImport_DeletedIssueOmitsImportMappings(t *testing.T) {
 	comment, _, err := src.CreateComment(ctx, db.CreateCommentParams{IssueID: deleted.ID, Author: "tester", Body: "deleted comment"})
 	require.NoError(t, err)
 	link, _, err := src.CreateLinkAndEvent(ctx, db.CreateLinkParams{
-		ProjectID:   p.ID,
 		FromIssueID: deleted.ID,
 		ToIssueID:   live.ID,
 		Type:        "blocks",

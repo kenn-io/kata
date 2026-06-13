@@ -27,7 +27,7 @@ func TestReadyIssues_ExcludesIssuesBlockedByOpenBlocker(t *testing.T) {
 	blocker := makeIssue(t, ctx, d, p.ID, "blocker", "tester")
 	blocked := makeIssue(t, ctx, d, p.ID, "blocked", "tester")
 	standalone := makeIssue(t, ctx, d, p.ID, "standalone", "tester")
-	makeLink(ctx, t, d, p.ID, blocker.ID, blocked.ID, "blocks")
+	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
 
 	got := readyNumbers(t, ctx, d, p.ID)
 	assert.Contains(t, got, blocker.ShortID, "blocker is ready (not blocked itself)")
@@ -39,7 +39,7 @@ func TestReadyIssues_ClosedBlockerUnblocksDownstream(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	blocker := makeIssue(t, ctx, d, p.ID, "blocker", "tester")
 	blocked := makeIssue(t, ctx, d, p.ID, "blocked", "tester")
-	makeLink(ctx, t, d, p.ID, blocker.ID, blocked.ID, "blocks")
+	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
 	_, _, _, err := d.CloseIssue(ctx, blocker.ID, "done", "tester", "", nil)
 	require.NoError(t, err)
 
@@ -276,7 +276,7 @@ func TestReadyIssuesGlobal_ExcludesBlockedIssues(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	blocker := makeIssue(t, ctx, d, p.ID, "blocker", "tester")
 	blocked := makeIssue(t, ctx, d, p.ID, "blocked", "tester")
-	makeLink(ctx, t, d, p.ID, blocker.ID, blocked.ID, "blocks")
+	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
 
 	rows, err := d.ReadyIssuesGlobal(ctx, 0)
 	require.NoError(t, err)

@@ -189,39 +189,31 @@ type EditIssueAtomicParams struct {
 	RemoveRelated   []int64
 }
 
-// ProjectIDFor returns the issue's project ID — a tiny helper so link-op loops
-// in the backend read cleanly. Defined on the params type so it travels with
-// the contract.
-func (EditIssueAtomicParams) ProjectIDFor(i Issue) int64 { return i.ProjectID }
+// PeerIdentity is the stable identity of a link peer as captured inside
+// the mutating transaction: display ref, canonical pointer, and the
+// peer's project at mutation time (links span projects since storage
+// v16, so a bare short_id no longer identifies a peer unambiguously).
+type PeerIdentity struct {
+	ShortID string
+	UID     string
+	Project string
+}
 
 // AtomicEditChanges describes which link mutations actually applied.
-// Each entry pairs the peer's short_id (display snapshot) with its UID
-// (stable identity) — the aggregated issue.links_changed event payload
-// carries both forms so consumers can render display strings and key on
-// UIDs for cross-cutover stability.
+// Each entry captures the peer's full identity (ShortID, UID, Project)
+// so the wire can render foreign peers qualified. The issue.links_changed
+// event payload keeps the legacy parallel-slice JSON shape; sqlitestore's
+// linksChangedWirePayload owns that projection.
 type AtomicEditChanges struct {
-	ParentSet        *string `json:"parent_set,omitempty"`
-	ParentSetUID     *string `json:"parent_set_uid,omitempty"`
-	ParentRemoved    *string `json:"parent_removed,omitempty"`
-	ParentRemovedUID *string `json:"parent_removed_uid,omitempty"`
+	ParentSet     *PeerIdentity
+	ParentRemoved *PeerIdentity
 
-	BlocksAdded     []string `json:"blocks_added,omitempty"`
-	BlocksAddedUIDs []string `json:"blocks_added_uids,omitempty"`
-
-	BlocksRemoved     []string `json:"blocks_removed,omitempty"`
-	BlocksRemovedUIDs []string `json:"blocks_removed_uids,omitempty"`
-
-	BlockedByAdded     []string `json:"blocked_by_added,omitempty"`
-	BlockedByAddedUIDs []string `json:"blocked_by_added_uids,omitempty"`
-
-	BlockedByRemoved     []string `json:"blocked_by_removed,omitempty"`
-	BlockedByRemovedUIDs []string `json:"blocked_by_removed_uids,omitempty"`
-
-	RelatedAdded     []string `json:"related_added,omitempty"`
-	RelatedAddedUIDs []string `json:"related_added_uids,omitempty"`
-
-	RelatedRemoved     []string `json:"related_removed,omitempty"`
-	RelatedRemovedUIDs []string `json:"related_removed_uids,omitempty"`
+	BlocksAdded      []PeerIdentity
+	BlocksRemoved    []PeerIdentity
+	BlockedByAdded   []PeerIdentity
+	BlockedByRemoved []PeerIdentity
+	RelatedAdded     []PeerIdentity
+	RelatedRemoved   []PeerIdentity
 }
 
 // EditIssueAtomicResult is what the handler renders into a wire response.
@@ -235,7 +227,6 @@ type EditIssueAtomicResult struct {
 // CreateLinkParams carries inputs for CreateLink. The caller is responsible
 // for canonical ordering of `related` links (from < to) before calling.
 type CreateLinkParams struct {
-	ProjectID   int64
 	FromIssueID int64
 	ToIssueID   int64
 	Type        string // "parent" | "blocks" | "related"

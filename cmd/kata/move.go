@@ -21,14 +21,10 @@ func newMoveCmd() *cobra.Command {
 		Short: "move an issue to another project",
 		Long: `Move an issue to another project.
 
-The issue keeps its UID, comments, and history; a fresh short_id is
-assigned in the target project.
-
-Moving is refused while the issue has links (parent, blocks/blocked-by,
-related): links can only join issues in the same project, so they cannot
-survive the move. Remove the links first (kata edit <ref> --remove-*),
-move the issue, and re-create the links in the target project — moving
-the peer issues there too if you need to keep the relationships.`,
+The issue keeps its UID, comments, history, and all of its links
+(parent, blocks/blocked-by, related) — relationships are never severed
+by a move and may span projects afterward. A fresh short_id is
+assigned in the target project.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMove(cmd, args[0], args[1], dryRun)

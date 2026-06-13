@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.kenn.io/kata/internal/testenv"
 )
 
 // wontfixMessage is the canned ≥60-char wontfix message used by the
@@ -585,4 +587,52 @@ func TestAuditCloses_ThrottledFlagSurfaces(t *testing.T) {
 
 	out := runCLI(t, env, dir, "audit", "closes", "--actor", "agent-a", "--json")
 	assert.Contains(t, out, `"throttled"`)
+}
+
+// TestAuditCloses_FilterByCrossProjectParent pins --parent for parents
+// that live in another project. Parent links may span projects, so a
+// close payload can freeze a foreign parent_uid; filtering by the
+// qualified ref (`spoke-project#<sid>`) must resolve the foreign
+// parent and match those rows by UID. A qualified ref that does NOT
+// resolve must keep matching nothing — its bare suffix must not leak
+// onto same-suffix issues in the audited project.
+func TestAuditCloses_FilterByCrossProjectParent(t *testing.T) {
+	env := testenv.New(t)
+	hubDir := initBoundWorkspace(t, env.URL, "https://github.com/example/hub-project.git")
+	hubPID := resolvePIDViaHTTP(t, env.URL, hubDir)
+	spokeDir := initBoundWorkspace(t, env.URL, "https://github.com/example/spoke-project.git")
+	spokePID := resolvePIDViaHTTP(t, env.URL, spokeDir)
+
+	foreignParent := createIssue(t, env, spokePID, "foreign parent")
+	child := createIssue(t, env, hubPID, "hub child")
+	runCLI(t, env, hubDir, "edit", child, "--parent", "spoke-project#"+foreignParent)
+	runCLI(t, env, hubDir, "close", child, "--done",
+		"--message", "Fixed the hub child under the foreign parent and ran the tests.",
+		"--commit", "abc1234")
+
+	// Same-suffix guard control: a hub-local close under a hub parent.
+	hubParent := createIssue(t, env, hubPID, "hub parent")
+	hubChild2 := createIssue(t, env, hubPID, "hub child two")
+	runCLI(t, env, hubDir, "edit", hubChild2, "--parent", hubParent)
+	runCLI(t, env, hubDir, "close", hubChild2, "--done",
+		"--message", "Fixed the second hub child under the hub parent and ran the tests.",
+		"--commit", "def5678")
+
+	out := runCLI(t, env, hubDir, "audit", "closes",
+		"--parent", "spoke-project#"+foreignParent, "--json")
+	assert.Contains(t, out, `"issue":"`+child+`"`,
+		"qualified foreign --parent must match closes frozen under that parent")
+	assert.NotContains(t, out, `"issue":"`+hubChild2+`"`,
+		"foreign --parent must not match closes under same-project parents")
+
+	// A qualified ref whose suffix exists in the audited project but not
+	// in the named project must match nothing. Guard the (vanishingly
+	// unlikely) random sid collision that would make the ref resolve.
+	if hubParent != foreignParent {
+		outGhost := runCLI(t, env, hubDir, "audit", "closes",
+			"--parent", "spoke-project#"+hubParent, "--json")
+		assert.NotContains(t, outGhost, `"issue":"`+child+`"`)
+		assert.NotContains(t, outGhost, `"issue":"`+hubChild2+`"`,
+			"unresolved foreign suffix must not match the audited project's rows")
+	}
 }

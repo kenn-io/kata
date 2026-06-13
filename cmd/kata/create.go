@@ -175,7 +175,7 @@ func newCreateCmd() *cobra.Command {
 		// direction (`--blocked-by` adding to `blocked_by_added` rather
 		// than `blocks_added`) preserves the user's POV.
 		applied := initialLinksAsChanges(parentRef, blocksRefs, blockedByRefs, relatedRefs)
-		return printMutationWithApplied(cmd, bs, applied)
+		return printMutationWithApplied(cmd, bs, applied, projectName)
 	}
 	return cmd
 }
@@ -197,8 +197,7 @@ func initialLinksAsChanges(parentRef string, blocks, blockedBy, related []string
 	}
 	c := &mutationChanges{}
 	if parentRef != "" {
-		ref := parentRef
-		c.ParentSet = &linkPeerForChanges{ShortID: ref}
+		c.ParentSet = &linkPeerForCLI{ShortID: parentRef}
 	}
 	c.BlocksAdded = stringSliceToPeers(dedupeStrings(blocks))
 	c.BlockedByAdded = stringSliceToPeers(dedupeStrings(blockedBy))
@@ -225,16 +224,19 @@ func dedupeStrings(in []string) []string {
 	return out
 }
 
-// stringSliceToPeers wraps each ref into a linkPeerForChanges with ShortID
-// set; used by initialLinksAsChanges so create's synthetic changes shape
-// matches the daemon's edit-response shape.
-func stringSliceToPeers(refs []string) []linkPeerForChanges {
+// stringSliceToPeers wraps each ref into a linkPeerForCLI with ShortID set;
+// used by initialLinksAsChanges so create's synthetic changes shape matches
+// the daemon's edit-response shape. The create path passes wire refs that are
+// already qualified when cross-project (e.g. "spoke-project#abc4"), so they
+// render correctly even without project/qualified_id being set — peerRefForDisplay
+// falls back to ShortID when Project is empty.
+func stringSliceToPeers(refs []string) []linkPeerForCLI {
 	if len(refs) == 0 {
 		return nil
 	}
-	out := make([]linkPeerForChanges, 0, len(refs))
+	out := make([]linkPeerForCLI, 0, len(refs))
 	for _, r := range refs {
-		out = append(out, linkPeerForChanges{ShortID: r})
+		out = append(out, linkPeerForCLI{ShortID: r})
 	}
 	return out
 }
@@ -438,16 +440,18 @@ func aliasInputBody(info config.AliasInfo) map[string]any {
 // flag is false renders an explicit "(no changes applied)" tail so a
 // no-op edit doesn't look identical to a successful one.
 func printMutation(cmd *cobra.Command, bs []byte) error {
-	return printMutationWithApplied(cmd, bs, nil)
+	return printMutationWithApplied(cmd, bs, nil, "")
 }
 
-// printMutationWithApplied is printMutation with an optional fallback
-// `changes` block. When the response itself doesn't carry one (the
-// /issues create path doesn't), pass `applied` describing the
-// requested mutations so human-mode output still echoes a `links: ...`
-// summary. The wire payload (JSON-mode output) is left unchanged —
-// the `applied` argument only seeds the human-mode renderer.
-func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationChanges) error {
+// printMutationWithApplied formats a mutation response with an optional
+// synthetic changes block for the create path. applied is a fallback `changes`
+// block used when the wire response carries none (create path); nil elsewhere.
+// subjectProject drives bare/qualified rendering: foreign peers
+// (project != subjectProject) render qualified ("project#short_id"), same-project
+// peers stay bare. Pass "" when the subject project is unknown (close, restore);
+// those responses carry no changes block, so nothing renders. If one ever did,
+// wire-populated peers would all render qualified (the unambiguous form).
+func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationChanges, subjectProject string) error {
 	mode := currentOutputMode()
 	var b struct {
 		Issue struct {
@@ -520,7 +524,7 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 		// in its OWN response.
 		changes = applied
 	}
-	if summary := summarizeChanges(changes, changed); summary != "" {
+	if summary := summarizeChanges(changes, changed, subjectProject); summary != "" {
 		if _, err := fmt.Fprint(cmd.OutOrStdout(), " "+summary); err != nil {
 			return err
 		}
@@ -529,61 +533,56 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 	return err
 }
 
-// linkPeerForChanges mirrors api.LinkPeer's wire shape so the CLI's
-// changes-decoder can pluck the short_id off each link mutation entry. UID
-// is decoded too in case the CLI ever needs to disambiguate, but the human
-// summary only renders short_id.
-type linkPeerForChanges struct {
-	UID     string `json:"uid"`
-	ShortID string `json:"short_id"`
-}
-
 // mutationChanges mirrors the wire `changes` block produced by `kata edit`
-// for link mutations. Each entry is a LinkPeer (UID + short_id) so the human
-// renderer can show "<short_id>" without resolving anything.
+// for link mutations. Each entry is a linkPeerForCLI (uid, short_id, project,
+// qualified_id) so the human renderer can show the bare or qualified form
+// depending on whether the peer belongs to the same project as the subject.
 type mutationChanges struct {
-	ParentSet        *linkPeerForChanges  `json:"parent_set,omitempty"`
-	ParentRemoved    *linkPeerForChanges  `json:"parent_removed,omitempty"`
-	BlocksAdded      []linkPeerForChanges `json:"blocks_added,omitempty"`
-	BlocksRemoved    []linkPeerForChanges `json:"blocks_removed,omitempty"`
-	BlockedByAdded   []linkPeerForChanges `json:"blocked_by_added,omitempty"`
-	BlockedByRemoved []linkPeerForChanges `json:"blocked_by_removed,omitempty"`
-	RelatedAdded     []linkPeerForChanges `json:"related_added,omitempty"`
-	RelatedRemoved   []linkPeerForChanges `json:"related_removed,omitempty"`
+	ParentSet        *linkPeerForCLI  `json:"parent_set,omitempty"`
+	ParentRemoved    *linkPeerForCLI  `json:"parent_removed,omitempty"`
+	BlocksAdded      []linkPeerForCLI `json:"blocks_added,omitempty"`
+	BlocksRemoved    []linkPeerForCLI `json:"blocks_removed,omitempty"`
+	BlockedByAdded   []linkPeerForCLI `json:"blocked_by_added,omitempty"`
+	BlockedByRemoved []linkPeerForCLI `json:"blocked_by_removed,omitempty"`
+	RelatedAdded     []linkPeerForCLI `json:"related_added,omitempty"`
+	RelatedRemoved   []linkPeerForCLI `json:"related_removed,omitempty"`
 }
 
-// summarizeChanges renders a human-mode tail for the printMutation
-// one-liner. Returns "" when this response has no link information to
-// surface (e.g. plain title-edit, plain create, comment, close).
-func summarizeChanges(c *mutationChanges, changed bool) string {
+// summarizeChanges renders a human-mode tail for the printMutation one-liner.
+// subjectProject is the canonical name of the issue being mutated; foreign peers
+// (project != subjectProject) are rendered qualified ("project#short_id") while
+// same-project peers stay bare. Returns "" when this response has no link
+// information to surface (e.g. plain title-edit, plain create, comment, close).
+func summarizeChanges(c *mutationChanges, changed bool, subjectProject string) string {
 	if c == nil {
 		return ""
 	}
+	ref := func(p linkPeerForCLI) string { return peerRefForDisplay(p, subjectProject) }
 	parts := make([]string, 0, 8)
 	if c.ParentSet != nil && c.ParentRemoved != nil {
-		parts = append(parts, fmt.Sprintf("parent %s→%s", c.ParentRemoved.ShortID, c.ParentSet.ShortID))
+		parts = append(parts, fmt.Sprintf("parent %s→%s", ref(*c.ParentRemoved), ref(*c.ParentSet)))
 	} else if c.ParentSet != nil {
-		parts = append(parts, fmt.Sprintf("+parent %s", c.ParentSet.ShortID))
+		parts = append(parts, fmt.Sprintf("+parent %s", ref(*c.ParentSet)))
 	} else if c.ParentRemoved != nil {
-		parts = append(parts, fmt.Sprintf("-parent %s", c.ParentRemoved.ShortID))
+		parts = append(parts, fmt.Sprintf("-parent %s", ref(*c.ParentRemoved)))
 	}
 	for _, p := range c.BlocksAdded {
-		parts = append(parts, fmt.Sprintf("+blocks %s", p.ShortID))
+		parts = append(parts, fmt.Sprintf("+blocks %s", ref(p)))
 	}
 	for _, p := range c.BlocksRemoved {
-		parts = append(parts, fmt.Sprintf("-blocks %s", p.ShortID))
+		parts = append(parts, fmt.Sprintf("-blocks %s", ref(p)))
 	}
 	for _, p := range c.BlockedByAdded {
-		parts = append(parts, fmt.Sprintf("+blocked_by %s", p.ShortID))
+		parts = append(parts, fmt.Sprintf("+blocked_by %s", ref(p)))
 	}
 	for _, p := range c.BlockedByRemoved {
-		parts = append(parts, fmt.Sprintf("-blocked_by %s", p.ShortID))
+		parts = append(parts, fmt.Sprintf("-blocked_by %s", ref(p)))
 	}
 	for _, p := range c.RelatedAdded {
-		parts = append(parts, fmt.Sprintf("+related %s", p.ShortID))
+		parts = append(parts, fmt.Sprintf("+related %s", ref(p)))
 	}
 	for _, p := range c.RelatedRemoved {
-		parts = append(parts, fmt.Sprintf("-related %s", p.ShortID))
+		parts = append(parts, fmt.Sprintf("-related %s", ref(p)))
 	}
 	if len(parts) == 0 {
 		// `changes` was present but every entry was an idempotent no-op.

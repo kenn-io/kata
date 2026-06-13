@@ -557,21 +557,25 @@ func (lm listModel) nearestVisibleAncestorIndex(rows []queueRow) (int, bool) {
 	for _, iss := range lm.issues {
 		issuesByKey[issueKey{projectID: iss.ProjectID, shortID: iss.ShortID}] = iss
 	}
+	keysByUID := issueKeysByUID(lm.issues)
 	seen := map[issueKey]bool{selectedKey: true}
 	for key := selectedKey; ; {
 		iss, ok := issuesByKey[key]
-		if !ok || iss.ParentShortID == nil {
+		if !ok {
 			return 0, false
 		}
-		parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
-		if idx, ok := visibleByKey[parentKey]; ok {
+		pk, ok := parentKeyIn(iss, keysByUID)
+		if !ok {
+			return 0, false
+		}
+		if idx, ok := visibleByKey[pk]; ok {
 			return idx, true
 		}
-		if seen[parentKey] {
+		if seen[pk] {
 			return 0, false
 		}
-		seen[parentKey] = true
-		key = parentKey
+		seen[pk] = true
+		key = pk
 	}
 }
 
@@ -586,22 +590,16 @@ func (lm listModel) selectedIssueKey() (issueKey, bool) {
 }
 
 func (lm listModel) expandableKeys() []issueKey {
-	present := make(map[issueKey]bool, len(lm.issues))
-	for _, iss := range lm.issues {
-		present[issueKey{projectID: iss.ProjectID, shortID: iss.ShortID}] = true
-	}
+	keysByUID := issueKeysByUID(lm.issues)
 	seen := map[issueKey]bool{}
 	keys := []issueKey{}
 	for _, iss := range lm.issues {
-		if iss.ParentShortID == nil {
+		pk, ok := parentKeyIn(iss, keysByUID)
+		if !ok || seen[pk] {
 			continue
 		}
-		parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
-		if !present[parentKey] || seen[parentKey] {
-			continue
-		}
-		seen[parentKey] = true
-		keys = append(keys, parentKey)
+		seen[pk] = true
+		keys = append(keys, pk)
 	}
 	return keys
 }
@@ -861,25 +859,23 @@ func (lm listModel) expandAncestorsOfSelection() listModel {
 	if selectedKey.shortID == "" {
 		return lm
 	}
+	keysByUID := issueKeysByUID(lm.issues)
 	seen := map[issueKey]bool{selectedKey: true}
 	for key := selectedKey; ; {
 		iss := byKey[key]
-		if iss.ParentShortID == nil {
+		pk, ok := parentKeyIn(iss, keysByUID)
+		if !ok {
 			return lm
 		}
-		parentKey := issueKey{projectID: iss.ProjectID, shortID: *iss.ParentShortID}
-		if seen[parentKey] {
-			return lm
-		}
-		if _, ok := byKey[parentKey]; !ok {
+		if seen[pk] {
 			return lm
 		}
 		if lm.expanded == nil {
 			lm.expanded = expansionSet{}
 		}
-		lm.expanded[parentKey] = true
-		seen[parentKey] = true
-		key = parentKey
+		lm.expanded[pk] = true
+		seen[pk] = true
+		key = pk
 	}
 }
 

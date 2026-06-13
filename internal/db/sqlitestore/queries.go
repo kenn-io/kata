@@ -541,12 +541,14 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64,
 	}
 
 	// Initial links — resolve to_number → (to_issue_id, to_issue_uid,
-	// to_issue_short_id) within the same project, excluding soft-deleted
-	// targets. The schema's same-project trigger enforces the cross-project
-	// check, but we'd rather surface a typed not-found than a generic
-	// constraint failure. The peer UID and short_id are captured here and
-	// folded into the issue.created event payload: UID is canonical, short_id
-	// is the rendered display value (spec §11).
+	// to_issue_short_id), excluding soft-deleted targets. Targets may live
+	// in any project (links span projects since storage v16); the daemon
+	// resolves refs and gates archived peer projects before calling in, so
+	// this is the in-tx existence re-check. We surface a typed not-found
+	// rather than letting a constraint failure propagate. The peer UID and
+	// short_id are captured here and folded into the issue.created event
+	// payload: UID is canonical, short_id is the rendered display value
+	// (spec §11).
 	resolvedTargets := make([]createdLinkTarget, 0, len(links))
 	for _, l := range links {
 		var (
@@ -554,13 +556,10 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64,
 			toIssueUID     string
 			toIssueShortID string
 		)
-		// Initial-link targets are addressed by their issue ID for now; the
-		// CLI/daemon will be migrated to short_ids in Tasks 11/14. Until
-		// then this lookup intentionally treats ToNumber as a numeric ID.
 		err := tx.QueryRowContext(ctx,
 			`SELECT id, uid, short_id FROM issues
-			 WHERE project_id = ? AND id = ? AND deleted_at IS NULL`,
-			p.ProjectID, l.ToNumber).Scan(&toIssueID, &toIssueUID, &toIssueShortID)
+			 WHERE id = ? AND deleted_at IS NULL`,
+			l.ToNumber).Scan(&toIssueID, &toIssueUID, &toIssueShortID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, db.Event{}, db.ErrInitialLinkTargetNotFound
 		}
@@ -579,9 +578,9 @@ func (d *Store) createIssue(ctx context.Context, p db.CreateIssueParams) (int64,
 			fromID, toID = toID, fromID
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-			 VALUES(?, ?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
-			p.ProjectID, fromID, toID, fromID, toID, l.Type, p.Author); err != nil {
+			`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+			 VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
+			fromID, toID, fromID, toID, l.Type, p.Author); err != nil {
 			return 0, db.Event{}, classifyLinkInsertError(err)
 		}
 	}
@@ -1172,7 +1171,7 @@ func (d *Store) closeIssueWithEvents(
 		}
 		return issue, nil, false, nil
 	}
-	if hasOpen, err := txHasOpenChildren(ctx, tx, issue.ProjectID, issueID); err != nil {
+	if hasOpen, err := txHasOpenChildren(ctx, tx, issueID); err != nil {
 		return db.Issue{}, nil, false, err
 	} else if hasOpen {
 		return db.Issue{}, nil, false, db.ErrOpenChildren
@@ -2028,8 +2027,8 @@ const eventSelectByID = `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id
        e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
   FROM events e
   JOIN projects p ON p.id = e.project_id
-  LEFT JOIN issues i ON i.project_id = e.project_id AND (i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid))
-  LEFT JOIN issues ri ON ri.project_id = e.project_id AND (ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid))
+  LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
+  LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
  WHERE e.id = ?`
 
 func stringPtrValue(s *string) any {

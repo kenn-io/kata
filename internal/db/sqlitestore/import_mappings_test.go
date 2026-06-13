@@ -61,7 +61,7 @@ func TestImportMapping_PurgeIssueRemovesMappedDependents(t *testing.T) {
 	keeper := makeIssue(t, ctx, d, p.ID, "keeper", "tester")
 	comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "tester", Body: "hi"})
 	require.NoError(t, err)
-	link := makeLink(ctx, t, d, p.ID, keeper.ID, target.ID, "blocks")
+	link := makeLink(ctx, t, d, keeper.ID, target.ID, "blocks")
 	_, _, err = d.AddLabelAndEvent(ctx, target.ID, db.LabelEventParams{EventType: "issue.labeled", Label: "bug", Actor: "tester"})
 	require.NoError(t, err)
 	label := "bug"

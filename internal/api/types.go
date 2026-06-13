@@ -333,11 +333,11 @@ type CreateIssueRequest struct {
 // ToRef is a short_id, qualified short_id ("kata#abc4"), or a 26-char ULID;
 // the daemon resolves it to the target issue at request time. Default
 // direction: the new issue is the link's "from" side (e.g. for type=blocks
-// the new issue blocks ToRef). Setting Incoming=true reverses for
-// type=blocks so the link runs from ToRef to the new issue (i.e. the new
-// issue is blocked by ToRef). Incoming=true is rejected for type=parent (no
-// inverse parent direction is exposed) and is a no-op for type=related
-// (which is symmetric).
+// the new issue blocks ToRef). Incoming applies only to type=blocks: when
+// true the link runs from ToRef to the new issue (i.e. the new issue is
+// blocked by ToRef). type=parent rejects Incoming=true with 400 validation
+// (there is no inverse parent form; the child files the link via
+// type=parent). type=related ignores Incoming — the edge is symmetric.
 type CreateInitialLinkBody struct {
 	Type     string `json:"type" enum:"parent,blocks,related"`
 	ToRef    string `json:"to_ref"`
@@ -409,21 +409,21 @@ type ListAllIssuesRequest struct {
 // (LabelsByIssue / LabelsByIssues are explicit calls).
 //
 // Blocks/BlockedBy/Related carry structured LinkPeer entries (UID +
-// short_id) so callers can correlate across short_id cutovers without
-// a follow-up join.
+// short_id + project + qualified_id) so callers can correlate across
+// short_id cutovers and project boundaries without a follow-up join.
 //
 // omitempty drops the field on rows with no labels so the wire
 // payload doesn't carry an empty array per row on label-sparse
 // projects.
 type IssueOut struct {
 	db.Issue
-	QualifiedID   string          `json:"qualified_id"`
-	Labels        []string        `json:"labels,omitempty"`
-	ParentShortID *string         `json:"parent_short_id,omitempty"`
-	ChildCounts   *db.ChildCounts `json:"child_counts,omitempty"`
-	Blocks        []LinkPeer      `json:"blocks,omitempty"`
-	BlockedBy     []LinkPeer      `json:"blocked_by,omitempty"`
-	Related       []LinkPeer      `json:"related,omitempty"`
+	QualifiedID string          `json:"qualified_id"`
+	Labels      []string        `json:"labels,omitempty"`
+	Parent      *LinkPeer       `json:"parent,omitempty"`
+	ChildCounts *db.ChildCounts `json:"child_counts,omitempty"`
+	Blocks      []LinkPeer      `json:"blocks,omitempty"`
+	BlockedBy   []LinkPeer      `json:"blocked_by,omitempty"`
+	Related     []LinkPeer      `json:"related,omitempty"`
 }
 
 // ListIssuesResponse is the list payload. Plan 8 commit 5b: each row
@@ -629,13 +629,15 @@ type CreateLinkRequest struct {
 	}
 }
 
-// LinkPeer pairs an issue UID with the rendered short_id. UID is the stable
-// reference; short_id is a display snapshot that may shift across a short_id
-// cutover or federation merge. Used by every wire shape that carries a link
-// endpoint (LinkOut, LinkChanges, IssueOut.Blocks/BlockedBy/Related).
+// LinkPeer identifies one endpoint of a link. Project and QualifiedID are
+// always populated (0.2.0): links may span projects, so a bare short_id
+// is ambiguous without them. ShortID stays bare — it never carries a
+// "project#" prefix.
 type LinkPeer struct {
-	UID     string `json:"uid"`
-	ShortID string `json:"short_id"`
+	UID         string `json:"uid"`
+	ShortID     string `json:"short_id"`
+	Project     string `json:"project"`
+	QualifiedID string `json:"qualified_id"`
 }
 
 // LinkOut is the wire projection of a link with both endpoints rendered as
@@ -643,7 +645,6 @@ type LinkPeer struct {
 // without an extra lookup.
 type LinkOut struct {
 	ID        int64     `json:"id"`
-	ProjectID int64     `json:"project_id"`
 	From      LinkPeer  `json:"from"`
 	To        LinkPeer  `json:"to"`
 	Type      string    `json:"type"`

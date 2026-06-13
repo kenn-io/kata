@@ -100,8 +100,10 @@ func issueRefByID(t *testing.T, h *httptestServerHandle, issueID int64) string {
 // linkPeerTest mirrors api.LinkPeer for test JSON decoding. UID is the
 // canonical reference; ShortID is the rendered display value.
 type linkPeerTest struct {
-	UID     string `json:"uid"`
-	ShortID string `json:"short_id"`
+	UID         string `json:"uid"`
+	ShortID     string `json:"short_id"`
+	Project     string `json:"project"`
+	QualifiedID string `json:"qualified_id"`
 }
 
 // issueShortIDFromCreate decodes the short_id field from a /issues POST
@@ -510,6 +512,17 @@ func doPatch(t *testing.T, env *testenv.Env, url, body, ifMatch string) *http.Re
 
 func doDelete(t *testing.T, env *testenv.Env, url string) *http.Response {
 	return doReqEnv(t, env, http.MethodDelete, url, "", "")
+}
+
+// readClose drains and closes resp.Body, returning the bytes. Use it in tests
+// that fire several requests in sequence so each body is closed eagerly rather
+// than accumulating deferred closes until the function returns.
+func readClose(t *testing.T, resp *http.Response) []byte {
+	t.Helper()
+	defer func() { _ = resp.Body.Close() }()
+	bs, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return bs
 }
 
 // seedProject creates a project named name via the DB and asserts no error.

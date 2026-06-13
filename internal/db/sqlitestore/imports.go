@@ -564,9 +564,9 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 		if createdAt.IsZero() {
 			createdAt = item.CreatedAt
 		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author, created_at)
-			VALUES(?, ?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?, ?)`,
-			p.ProjectID, fromID, toID, fromID, toID, importLink.Type, p.Actor, createdAt)
+		res, err := tx.ExecContext(ctx, `INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author, created_at)
+			VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?, ?)`,
+			fromID, toID, fromID, toID, importLink.Type, p.Actor, createdAt)
 		if err != nil {
 			return nil, 0, classifyLinkInsertError(err)
 		}

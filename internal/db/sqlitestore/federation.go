@@ -1313,15 +1313,24 @@ func projectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, err
 }
 
 func clearFederatedProjection(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	for _, stmt := range []string{
-		`DELETE FROM pending_claim_requests WHERE project_id = ?`,
-		`DELETE FROM issue_claims WHERE project_id = ?`,
-		`DELETE FROM issue_labels WHERE issue_id IN (SELECT id FROM issues WHERE project_id = ?)`,
-		`DELETE FROM comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id = ?)`,
-		`DELETE FROM links WHERE project_id = ?`,
-		`DELETE FROM issues WHERE project_id = ?`,
-	} {
-		if _, err := tx.ExecContext(ctx, stmt, projectID); err != nil {
+	// Links are project-independent edges (storage v16), so the project scope
+	// comes from the endpoints: drop every link touching one of this
+	// project's issues before the issues themselves go.
+	stmts := []struct {
+		sql  string
+		args []any
+	}{
+		{`DELETE FROM pending_claim_requests WHERE project_id = ?`, []any{projectID}},
+		{`DELETE FROM issue_claims WHERE project_id = ?`, []any{projectID}},
+		{`DELETE FROM issue_labels WHERE issue_id IN (SELECT id FROM issues WHERE project_id = ?)`, []any{projectID}},
+		{`DELETE FROM comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id = ?)`, []any{projectID}},
+		{`DELETE FROM links
+		   WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
+		      OR to_issue_id   IN (SELECT id FROM issues WHERE project_id = ?)`, []any{projectID, projectID}},
+		{`DELETE FROM issues WHERE project_id = ?`, []any{projectID}},
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
 			return fmt.Errorf("clear federated projection: %w", err)
 		}
 	}
@@ -1707,29 +1716,35 @@ func reconcileFederatedLinks(ctx context.Context, tx *sql.Tx, projectID int64, i
 			}
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE links
-				   SET project_id = ?, from_issue_id = ?, to_issue_id = ?,
+				   SET from_issue_id = ?, to_issue_id = ?,
 				       from_issue_uid = ?, to_issue_uid = ?, type = ?
 				 WHERE id = ?`,
-				projectID, row.fromID, row.toID, row.fromUID, row.toUID, row.typ, existingRow.id); err != nil {
+				row.fromID, row.toID, row.fromUID, row.toUID, row.typ, existingRow.id); err != nil {
 				return fmt.Errorf("update federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 			}
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-			VALUES(?, ?, ?, ?, ?, ?, 'federation')`,
-			projectID, row.fromID, row.toID, row.fromUID, row.toUID, row.typ); err != nil {
+			INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+			VALUES(?, ?, ?, ?, ?, 'federation')`,
+			row.fromID, row.toID, row.fromUID, row.toUID, row.typ); err != nil {
 			return fmt.Errorf("insert federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 		}
 	}
 	return nil
 }
 
+// federatedLinkRows returns the existing mirror links for a federated
+// project. Storage v16 dropped links.project_id, so the project scope now
+// comes from the endpoints: a federated mirror links two issues materialized
+// into the same shadow project, so both endpoints sit in projectID.
 func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectID int64) (map[db.FoldLinkKey]federatedLinkRow, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type
-		  FROM links
-		 WHERE project_id = ?`, projectID)
+		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type
+		  FROM links l
+		  JOIN issues f ON f.id = l.from_issue_id
+		  JOIN issues t ON t.id = l.to_issue_id
+		 WHERE f.project_id = ? AND t.project_id = ?`, projectID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list federated links: %w", err)
 	}

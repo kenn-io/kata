@@ -36,8 +36,11 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 
-		links, err := resolveInitialLinks(ctx, cfg.DB, in.ProjectID, in.Body.Links)
+		links, linkTargets, err := resolveInitialLinks(ctx, cfg.DB, in.ProjectID, in.Body.Links)
 		if err != nil {
+			return nil, err
+		}
+		if err := requireFederatedLinkClaims(ctx, cfg, actor, linkTargets...); err != nil {
 			return nil, err
 		}
 
@@ -81,7 +84,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"link.type must be parent|blocks|related", "", nil)
 		case errors.Is(err, db.ErrInitialLinkTargetNotFound):
 			return nil, api.NewError(404, "issue_not_found",
-				"initial link target not found in this project", "", nil)
+				"initial link target not found", "", nil)
 		case errors.Is(err, db.ErrSelfLink):
 			return nil, api.NewError(400, "validation",
 				"cannot link an issue to itself", "", nil)
@@ -308,7 +311,7 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			if err := validateResolvedLinksDelta(&params); err != nil {
 				return nil, err
 			}
-			if err := requireFederatedLinksDeltaClaims(ctx, cfg, in.ProjectID, actor, issue, &params); err != nil {
+			if err := requireFederatedLinksDeltaClaims(ctx, cfg, actor, issue, &params); err != nil {
 				return nil, err
 			}
 		}
@@ -349,11 +352,7 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		// envelope carries no operations and should be treated like the
 		// field-only PATCH it functionally is.
 		if linksDeltaRequestsAnyOp(in.Body.LinksDelta) {
-			changes, err := buildLinkChanges(ctx, cfg.DB, result.Changes)
-			if err != nil {
-				return nil, api.NewError(500, "internal", err.Error(), "", nil)
-			}
-			out.Body.Changes = changes
+			out.Body.Changes = buildLinkChanges(result.Changes)
 		}
 		return out, nil
 	}
@@ -397,8 +396,6 @@ func mapAtomicEditError(err error, issueShortID string, delta *api.LinksDelta) e
 			"read the current parent before asserting a removal", nil)
 	case errors.Is(err, db.ErrSelfLink):
 		return api.NewError(400, "validation", "cannot link an issue to itself", "", nil)
-	case errors.Is(err, db.ErrCrossProjectLink):
-		return api.NewError(400, "validation", "cross-project links are not allowed", "", nil)
 	case errors.Is(err, db.ErrParentCycle):
 		return api.NewError(400, "validation",
 			fmt.Sprintf("set_parent on #%s would create a parent cycle", issueShortID),
@@ -476,7 +473,6 @@ func validateResolvedLinksDelta(p *db.EditIssueAtomicParams) error {
 func requireFederatedLinksDeltaClaims(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
 	actor string,
 	source db.Issue,
 	p *db.EditIssueAtomicParams,
@@ -526,7 +522,7 @@ func requireFederatedLinksDeltaClaims(
 		}
 		issues = append(issues, issue)
 	}
-	return requireFederatedLinkClaims(ctx, cfg, projectID, actor, issues...)
+	return requireFederatedLinkClaims(ctx, cfg, actor, issues...)
 }
 
 // firstIDConflict reports the first int64 present in both slices.
@@ -649,11 +645,15 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
-	children, err := cfg.DB.ChildrenOfIssue(ctx, issue.ProjectID, issue.ID)
+	children, err := cfg.DB.ChildrenOfIssue(ctx, issue.ID)
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
-	childOuts, err := hydrateIssueOuts(ctx, cfg.DB, issue.ProjectID, children)
+	// ChildrenOfIssue returns children from any project (links span projects,
+	// storage v16), so hydrate each child against its OWN project rather than
+	// the parent's — otherwise a cross-project child gets the parent's project
+	// prefix in qualified_id and its labels resolved against the wrong project.
+	childOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, children)
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
@@ -789,6 +789,85 @@ func hydrateIssueOutsCrossProject(ctx context.Context, store db.Storage, issues 
 	return out, nil
 }
 
+// projectNames memoizes ProjectByID name lookups for one response
+// assembly; peers may span several projects per issue.
+type projectNames struct {
+	store db.Storage
+	byID  map[int64]string
+}
+
+func (c *projectNames) name(ctx context.Context, id int64) (string, error) {
+	if n, ok := c.byID[id]; ok {
+		return n, nil
+	}
+	p, err := c.store.ProjectByID(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if c.byID == nil {
+		c.byID = map[int64]string{}
+	}
+	c.byID[p.ID] = p.Name
+	return p.Name, nil
+}
+
+// linkPeerFor resolves a db.Issue into a fully-populated api.LinkPeer using a
+// per-request projectNames cache. Project and QualifiedID are always set.
+func linkPeerFor(ctx context.Context, names *projectNames, iss db.Issue) (api.LinkPeer, error) {
+	project, err := names.name(ctx, iss.ProjectID)
+	if err != nil {
+		return api.LinkPeer{}, err
+	}
+	return api.LinkPeer{
+		UID:         iss.UID,
+		ShortID:     iss.ShortID,
+		Project:     project,
+		QualifiedID: qualifiedID(project, iss.ShortID),
+	}, nil
+}
+
+// collectLinkPeers resolves all peer issue IDs referenced by the three
+// relationship families and the parent map into a single id→LinkPeer cache.
+func collectLinkPeers(
+	ctx context.Context,
+	store db.Storage,
+	names *projectNames,
+	parents map[int64]int64,
+	families ...map[int64][]int64,
+) (map[int64]api.LinkPeer, error) {
+	cache := map[int64]api.LinkPeer{}
+	collect := func(id int64) error {
+		if _, ok := cache[id]; ok {
+			return nil
+		}
+		peerIss, err := store.IssueByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		lp, err := linkPeerFor(ctx, names, peerIss)
+		if err != nil {
+			return err
+		}
+		cache[id] = lp
+		return nil
+	}
+	for _, family := range families {
+		for _, ids := range family {
+			for _, id := range ids {
+				if err := collect(id); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	for _, id := range parents {
+		if err := collect(id); err != nil {
+			return nil, err
+		}
+	}
+	return cache, nil
+}
+
 func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, issues []db.Issue) ([]api.IssueOut, error) {
 	project, err := store.ProjectByID(ctx, projectID)
 	if err != nil {
@@ -802,65 +881,32 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 	if err != nil {
 		return nil, err
 	}
-	parentNumbers, err := store.ParentNumbersByIssues(ctx, projectID, ids)
+	parentNumbers, err := store.ParentNumbersByIssues(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	childCounts, err := store.ChildCountsByParents(ctx, projectID, ids)
+	childCounts, err := store.ChildCountsByParents(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	blocks, err := store.BlockNumbersByIssues(ctx, projectID, ids)
+	blocks, err := store.BlockNumbersByIssues(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	blockedBy, err := store.BlockedByNumbersByIssues(ctx, projectID, ids)
+	blockedBy, err := store.BlockedByNumbersByIssues(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	related, err := store.RelatedNumbersByIssues(ctx, projectID, ids)
+	related, err := store.RelatedNumbersByIssues(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 	// Gather peer ids referenced by any relationship slice so we can resolve
-	// each to LinkPeer{UID, ShortID} in one pass.
-	peerCache := map[int64]api.LinkPeer{}
-	collectPeer := func(id int64) error {
-		if _, ok := peerCache[id]; ok {
-			return nil
-		}
-		peer, err := store.IssueByID(ctx, id)
-		if err != nil {
-			return err
-		}
-		peerCache[id] = api.LinkPeer{UID: peer.UID, ShortID: peer.ShortID}
-		return nil
-	}
-	for _, ids := range blocks {
-		for _, id := range ids {
-			if err := collectPeer(id); err != nil {
-				return nil, err
-			}
-		}
-	}
-	for _, ids := range blockedBy {
-		for _, id := range ids {
-			if err := collectPeer(id); err != nil {
-				return nil, err
-			}
-		}
-	}
-	for _, ids := range related {
-		for _, id := range ids {
-			if err := collectPeer(id); err != nil {
-				return nil, err
-			}
-		}
-	}
-	for _, id := range parentNumbers {
-		if err := collectPeer(id); err != nil {
-			return nil, err
-		}
+	// each to a fully-populated LinkPeer in one pass.
+	names := &projectNames{store: store, byID: map[int64]string{project.ID: project.Name}}
+	peerCache, err := collectLinkPeers(ctx, store, names, parentNumbers, blocks, blockedBy, related)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]api.IssueOut, len(issues))
 	for i, iss := range issues {
@@ -874,8 +920,8 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 		}
 		if parentID, ok := parentNumbers[iss.ID]; ok {
 			if peer, ok := peerCache[parentID]; ok {
-				sid := peer.ShortID
-				row.ParentShortID = &sid
+				p := peer
+				row.Parent = &p
 			}
 		}
 		if counts := childCounts[iss.ID]; counts.Total > 0 {
@@ -902,29 +948,37 @@ func peerSlice(cache map[int64]api.LinkPeer, ids []int64) []api.LinkPeer {
 }
 
 // loadLinkOuts fetches every link involving issueID, resolving both endpoint
-// short_ids so the wire response carries LinkPeer (UID + short_id) for each
-// side. One IssueByID call per endpoint is fine for show; pagination is a
-// Plan 4 concern.
+// peers so the wire response carries a fully-populated LinkPeer (UID +
+// short_id + project + qualified_id) for each side. One IssueByID call per
+// endpoint is fine for show; pagination is a Plan 4 concern.
 func loadLinkOuts(ctx context.Context, store db.Storage, issueID int64) ([]api.LinkOut, error) {
 	rows, err := store.LinksByIssue(ctx, issueID)
 	if err != nil {
 		return nil, err
 	}
+	names := &projectNames{store: store}
 	out := make([]api.LinkOut, 0, len(rows))
 	for _, l := range rows {
-		from, err := store.IssueByID(ctx, l.FromIssueID)
+		fromIss, err := store.IssueByID(ctx, l.FromIssueID)
 		if err != nil {
 			return nil, err
 		}
-		to, err := store.IssueByID(ctx, l.ToIssueID)
+		toIss, err := store.IssueByID(ctx, l.ToIssueID)
+		if err != nil {
+			return nil, err
+		}
+		fromPeer, err := linkPeerFor(ctx, names, fromIss)
+		if err != nil {
+			return nil, err
+		}
+		toPeer, err := linkPeerFor(ctx, names, toIss)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, api.LinkOut{
 			ID:        l.ID,
-			ProjectID: l.ProjectID,
-			From:      api.LinkPeer{UID: from.UID, ShortID: from.ShortID},
-			To:        api.LinkPeer{UID: to.UID, ShortID: to.ShortID},
+			From:      fromPeer,
+			To:        toPeer,
 			Type:      l.Type,
 			Author:    l.Author,
 			CreatedAt: l.CreatedAt,

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -15,10 +16,14 @@ import (
 // issue.unlinked event, and the issues.updated_at touch in one TX so there's
 // no window where the row mutation lands without its event.
 //
-// For type=parent --replace, the handler emits an issue.unlinked event for
-// the old parent (in its own TX) before inserting the new parent link with
-// its issue.linked event. The response shape carries only the linked event;
-// the unlinked event still lands in the events table for SSE/poll clients.
+// For type=parent --replace, the handler runs a pre-flight cycle check (walk
+// the prospective parent's ancestor chain) BEFORE deleting the old parent, so
+// a cycle-rejected replace leaves the existing parent untouched and emits no
+// issue.unlinked event. On the happy path it emits an issue.unlinked event for
+// the old parent (in its own TX) before inserting the new parent link with its
+// issue.linked event. The response shape carries only the linked event; the
+// unlinked event still lands in the events table for SSE/poll clients. The
+// in-tx cycle guard in CreateLinkAndEvent stays as the race backstop.
 func registerLinksHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "createLink",
@@ -33,7 +38,13 @@ func registerLinksHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, deleteLinkHandler(cfg))
 }
 
-func requireFederatedLinkClaims(ctx context.Context, cfg ServerConfig, projectID int64, actor string, issues ...db.Issue) error {
+// requireFederatedLinkClaims gates a set of link endpoints, evaluating each
+// issue against its OWN project's federation binding. Links span projects
+// (storage v16), so a peer in a federated project must be checked against
+// that project's claim state, not the URL issue's project. Soft-deleted
+// peers are skipped (their link rows are still removable, but the issue can't
+// hold a live claim). Duplicates are evaluated once.
+func requireFederatedLinkClaims(ctx context.Context, cfg ServerConfig, actor string, issues ...db.Issue) error {
 	seen := make(map[int64]struct{}, len(issues))
 	for _, issue := range issues {
 		if _, ok := seen[issue.ID]; ok {
@@ -43,7 +54,7 @@ func requireFederatedLinkClaims(ctx context.Context, cfg ServerConfig, projectID
 			continue
 		}
 		seen[issue.ID] = struct{}{}
-		if err := requireFederatedIssueClaim(ctx, cfg, projectID, issue, actor); err != nil {
+		if err := requireFederatedIssueClaim(ctx, cfg, issue.ProjectID, issue, actor); err != nil {
 			return err
 		}
 	}
@@ -60,11 +71,14 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err != nil {
 			return nil, err
 		}
-		to, err := resolveIssueRef(ctx, cfg.DB, in.ProjectID, in.Body.ToRef, db.IncludeDeletedNo)
+		to, err := resolveLinkTargetRef(ctx, cfg.DB, in.ProjectID, in.Body.ToRef, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
 		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, from, actor); err != nil {
+		if err := requireLinkTargetAddable(ctx, cfg.DB, in.ProjectID, to); err != nil {
+			return nil, err
+		}
+		if err := requireFederatedIssueClaim(ctx, cfg, from.ProjectID, from, actor); err != nil {
 			return nil, err
 		}
 
@@ -72,8 +86,9 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		// but in the --replace path we delete the existing parent before we'd
 		// see that error from CreateLinkAndEvent — leaving us with an
 		// unlinked-but-unreplaced parent and a fired issue.unlinked event.
-		// Cross-project links are already prevented by routing (both source and
-		// target are looked up via the same in.ProjectID).
+		// Links may span projects (storage v16): `to` is resolved globally via
+		// resolveLinkTargetRef and gated against its own project's archive
+		// state by requireLinkTargetAddable above.
 		if from.ID == to.ID {
 			return nil, api.NewError(400, "validation", "cannot link an issue to itself", "", nil)
 		}
@@ -84,8 +99,15 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		// canonical link, e.g. (3, 5) regardless of which side the user posted
 		// from). Event attribution always uses the URL issue (from).
 		storageFromID, storageToID := from.ID, to.ID
-		canonicalFromPeer := api.LinkPeer{UID: from.UID, ShortID: from.ShortID}
-		canonicalToPeer := api.LinkPeer{UID: to.UID, ShortID: to.ShortID}
+		names := &projectNames{store: cfg.DB}
+		canonicalFromPeer, err := linkPeerFor(ctx, names, from)
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		canonicalToPeer, err := linkPeerFor(ctx, names, to)
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
 		if in.Body.Type == "related" && storageFromID > storageToID {
 			storageFromID, storageToID = storageToID, storageFromID
 			canonicalFromPeer, canonicalToPeer = canonicalToPeer, canonicalFromPeer
@@ -95,7 +117,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		} else if !errors.Is(lookupErr, db.ErrNotFound) {
 			return nil, api.NewError(500, "internal", lookupErr.Error(), "", nil)
 		}
-		if err := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, to, actor); err != nil {
+		if err := requireFederatedIssueClaim(ctx, cfg, to.ProjectID, to, actor); err != nil {
 			return nil, err
 		}
 
@@ -103,6 +125,22 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		// (emitting issue.unlinked) before inserting the new parent link. Parent
 		// links are never canonicalized, so storageFromID == from.ID here.
 		if in.Body.Type == "parent" && in.Body.Replace {
+			// Pre-flight cycle check before any mutation: walk the prospective
+			// parent's ancestor chain and reject if `from` is already an
+			// ancestor. Without it the delete-then-insert sequence would unlink
+			// the old parent (and emit issue.unlinked) before the in-tx guard
+			// fires, leaving `from` parentless. The in-tx guard stays as the
+			// race backstop; this closes the practical gap.
+			cycle, cerr := parentReplaceWouldCycle(ctx, cfg.DB, from.ID, to.ID)
+			if cerr != nil {
+				return nil, api.NewError(500, "internal", cerr.Error(), "", nil)
+			}
+			if cycle {
+				// Byte-identical to the insert path's db.ErrParentCycle mapping.
+				return nil, api.NewError(400, "validation",
+					fmt.Sprintf("set_parent on #%s would create a parent cycle", from.ShortID),
+					"the requested parent is a descendant of this issue", nil)
+			}
 			if existing, perr := cfg.DB.ParentOf(ctx, from.ID); perr == nil {
 				if existing.ToIssueID == to.ID {
 					// Replacing with the same parent is a no-op.
@@ -114,7 +152,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 				if err != nil {
 					return nil, api.NewError(500, "internal", err.Error(), "", nil)
 				}
-				if err := requireFederatedLinkClaims(ctx, cfg, in.ProjectID, actor, oldParentIssue); err != nil {
+				if err := requireFederatedLinkClaims(ctx, cfg, actor, oldParentIssue); err != nil {
 					return nil, err
 				}
 				unlinkEv := db.LinkEventParams{
@@ -152,7 +190,6 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			Actor:        actor,
 		}
 		link, evt, err := cfg.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{
-			ProjectID:   in.ProjectID,
 			FromIssueID: storageFromID,
 			ToIssueID:   storageToID,
 			Type:        in.Body.Type,
@@ -171,8 +208,13 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 				"this issue already has a parent", "pass replace=true to swap", nil)
 		case errors.Is(err, db.ErrSelfLink):
 			return nil, api.NewError(400, "validation", "cannot link an issue to itself", "", nil)
-		case errors.Is(err, db.ErrCrossProjectLink):
-			return nil, api.NewError(400, "validation", "cross-project links are not allowed", "", nil)
+		case errors.Is(err, db.ErrParentCycle):
+			// Byte-identical to the edit path's mapping (handlers_issues.go).
+			// from is the child whose parent is being set, matching the edit
+			// path's issueShortID.
+			return nil, api.NewError(400, "validation",
+				fmt.Sprintf("set_parent on #%s would create a parent cycle", from.ShortID),
+				"the requested parent is a descendant of this issue", nil)
 		case errors.Is(err, db.ErrFederatedReadOnly):
 			return nil, federationReadOnlyError(err)
 		case err != nil:
@@ -187,6 +229,35 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		cfg.Hooks.Enqueue(evt)
 		return mutationLinkResponse(updatedIssue, link, canonicalFromPeer, canonicalToPeer, &evt, true), nil
 	}
+}
+
+// parentReplaceWouldCycle reports whether making prospectiveParentID the parent
+// of childID would close a parent cycle, by walking the prospective parent's
+// ancestor chain upward via ParentOf. The cycle exists when childID is already
+// an ancestor of (or equal to) the prospective parent. A db.ErrNotFound from
+// ParentOf is the chain end (the issue has no parent), not an error. Used by
+// the parent --replace pre-flight so a rejected replace never deletes the old
+// parent first.
+//
+// The walk shares db.MaxParentDepth with the storage layer's in-transaction
+// cycle guard: any chain that guard would refuse must already fail here,
+// before the old parent is unlinked.
+func parentReplaceWouldCycle(ctx context.Context, store db.Storage, childID, prospectiveParentID int64) (bool, error) {
+	cursor := prospectiveParentID
+	for hops := 0; hops < db.MaxParentDepth; hops++ {
+		if cursor == childID {
+			return true, nil
+		}
+		link, err := store.ParentOf(ctx, cursor)
+		if errors.Is(err, db.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		cursor = link.ToIssueID
+	}
+	return false, fmt.Errorf("parent chain exceeded %d hops walking from issue %d", db.MaxParentDepth, prospectiveParentID)
 }
 
 func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRequest) (*api.MutationResponse, error) {
@@ -212,13 +283,13 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
-		if link.ProjectID != in.ProjectID {
-			return nil, api.NewError(404, "link_not_found", "link not in this project", "", nil)
-		}
 		// The URL says we're operating on issue {ref}'s links. Reject if
 		// the link's two endpoints don't include this issue — defends against
 		// URL manipulation that would otherwise emit an event attributed to
-		// the wrong issue.
+		// the wrong issue. The resolved `from` already belongs to in.ProjectID,
+		// so requiring it as an endpoint also scopes the delete to this project;
+		// links themselves are project-independent edges (storage v16) and may
+		// legitimately reach a peer in another project.
 		if link.FromIssueID != from.ID && link.ToIssueID != from.ID {
 			return nil, api.NewError(404, "link_not_found", "link not attached to this issue", "", nil)
 		}
@@ -242,7 +313,7 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		if link.FromIssueID != from.ID {
 			linkFrom, linkTo = linkTo, linkFrom
 		}
-		if err := requireFederatedLinkClaims(ctx, cfg, in.ProjectID, actor, linkFrom, linkTo); err != nil {
+		if err := requireFederatedLinkClaims(ctx, cfg, actor, linkFrom, linkTo); err != nil {
 			return nil, err
 		}
 		ev := db.LinkEventParams{
@@ -292,7 +363,6 @@ func mutationLinkResponse(issue db.Issue, link db.Link, from, to api.LinkPeer, e
 	out.Body.Issue = issue
 	out.Body.Link = api.LinkOut{
 		ID:        link.ID,
-		ProjectID: link.ProjectID,
 		From:      from,
 		To:        to,
 		Type:      link.Type,

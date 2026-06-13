@@ -375,3 +375,22 @@ func enqueueCLIPendingClaim(
 	require.NoError(t, err)
 	return pending
 }
+
+// TestPeerRefForDisplay_SanitizesHostileQualifiedRef pins the terminal
+// boundary for link-peer refs: QualifiedID embeds a project name, which is
+// user-supplied data (and reaches the DB unvalidated via crafted import
+// envelopes), so the human render path must strip ANSI/control sequences
+// the same way titles and authors already do. JSON output does not go
+// through this helper and keeps the daemon's raw bytes.
+func TestPeerRefForDisplay_SanitizesHostileQualifiedRef(t *testing.T) {
+	hostile := linkPeerForCLI{
+		UID:         "01TESTPEERAAAAAAAAAAAAAAAA",
+		ShortID:     "abc4",
+		Project:     "evil\x1b]0;pwned\x07proj",
+		QualifiedID: "evil\x1b]0;pwned\x07proj#abc4",
+	}
+	got := peerRefForDisplay(hostile, "hub-project")
+	assert.NotContains(t, got, "\x1b", "ANSI escapes must not reach the terminal")
+	assert.NotContains(t, got, "\x07", "BEL must not reach the terminal")
+	assert.Contains(t, got, "#abc4", "the ref itself must survive sanitization")
+}

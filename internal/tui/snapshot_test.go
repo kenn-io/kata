@@ -150,19 +150,19 @@ func snapTreeFixture() []Issue {
 			ChildCounts: &ChildCounts{Open: 1, Total: 2},
 		},
 		{
-			ProjectID: 7, UID: "01TEST-c011", ShortID: childSID, ParentShortID: &parentSID,
+			ProjectID: 7, UID: "01TEST-c011", ShortID: childSID, Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID},
 			Title: "detail hint bars incomplete", Status: "open",
 			Owner:       ptrString("claude"),
 			UpdatedAt:   snapshotFixedNow.Add(-45 * time.Minute),
 			ChildCounts: &ChildCounts{Open: 1, Total: 1},
 		},
 		{
-			ProjectID: 7, UID: "01TEST-c012", ShortID: "c012", ParentShortID: &parentSID,
+			ProjectID: 7, UID: "01TEST-c012", ShortID: "c012", Parent: &LinkPeer{UID: "01TEST-" + parentSID, ShortID: parentSID},
 			Title: "new issue form parent field", Status: "closed",
 			UpdatedAt: snapshotFixedNow.Add(-2 * time.Hour),
 		},
 		{
-			ProjectID: 7, UID: "01TEST-g013", ShortID: "g013", ParentShortID: &childSID,
+			ProjectID: 7, UID: "01TEST-g013", ShortID: "g013", Parent: &LinkPeer{UID: "01TEST-" + childSID, ShortID: childSID},
 			Title: "child detail jump target", Status: "open",
 			UpdatedAt: snapshotFixedNow.Add(-3 * time.Hour),
 		},

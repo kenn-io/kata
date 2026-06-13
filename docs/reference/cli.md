@@ -85,6 +85,15 @@ kata edit <issue-ref> \
   [--comment TEXT]
 ```
 
+Link flags (`--parent`, `--blocks`, `--blocked-by`, `--related`, and their
+`--remove-*` counterparts) accept `short_id` (same project),
+`project#short_id`, or a full ULID. Cross-project peers render as
+`project#short_id` in `kata show` output and in `kata edit`'s one-line change
+summary; same-project peers stay bare. `kata create`'s summary echoes link
+refs as you supplied them (a ULID input echoes the ULID). Adds targeting
+archived projects are rejected with a hint to unarchive the project first.
+`--remove-*` flags work against archived or soft-deleted peers.
+
 Move between projects:
 
 ```sh
@@ -98,14 +107,9 @@ may differ from the source `short_id` if the target project already has a
 collision. `--dry-run` is a client-side preview: it resolves the source issue
 and target project without mutating anything.
 
-`move` refuses while the issue has links (`parent`, `blocks`/`blocked-by`,
-`related`). Links can only join issues in the same project — cross-project
-links are not supported — so a moved issue's links would otherwise dangle
-across projects. To move a linked issue: remove its links (`kata edit <ref>
---remove-blocks/--remove-blocked-by/--remove-related/--remove-parent`), move
-it, and re-create the links in the target project. Re-linking requires the
-peer issues to live in the target project too, so `kata move` each peer you
-want to stay connected before re-linking.
+Links survive a move — `parent`, `blocks`/`blocked-by`, and `related` edges
+are never removed or rewritten. See the link-flag reference above for
+cross-project ref syntax and rendering rules.
 
 Comment:
 

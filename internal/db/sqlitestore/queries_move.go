@@ -17,7 +17,6 @@ import (
 //   - source and target projects are the same
 //   - IfMatchRev does not match the current revision (RevisionConflictError)
 //   - the issue belongs to a recurrence series (RecurrencePinnedError)
-//   - any link is anchored on the issue (CrossProjectLinksError)
 func (d *Store) MoveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
 	return retryWrite1(ctx, d, func() (db.MoveIssueProjectOut, error) {
 		return d.moveIssueProject(ctx, in)
@@ -65,14 +64,6 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	}
 	if recurrenceID != nil {
 		return out, &db.RecurrencePinnedError{}
-	}
-
-	blockers, err := d.findLinksTx(ctx, tx, in.IssueID)
-	if err != nil {
-		return out, err
-	}
-	if len(blockers) > 0 {
-		return out, &db.CrossProjectLinksError{Blockers: blockers}
 	}
 
 	var (
@@ -200,29 +191,4 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	out.NewShortID = newShortID
 	out.NewRevision = newRev
 	return out, nil
-}
-
-// findLinksTx returns all links involving issueID (as either endpoint),
-// used to detect anchored links that would become cross-project after a move.
-func (d *Store) findLinksTx(ctx context.Context, tx *sql.Tx, issueID int64) ([]db.LinkBlocker, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT l.id, l.type,
-		       CASE WHEN l.from_issue_id = ? THEN l.to_issue_uid ELSE l.from_issue_uid END AS peer_uid
-		  FROM links l
-		 WHERE l.from_issue_id = ? OR l.to_issue_id = ?`,
-		issueID, issueID, issueID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []db.LinkBlocker
-	for rows.Next() {
-		var b db.LinkBlocker
-		if err := rows.Scan(&b.LinkID, &b.Type, &b.PeerUID); err != nil {
-			return nil, err
-		}
-		out = append(out, b)
-	}
-	return out, rows.Err()
 }

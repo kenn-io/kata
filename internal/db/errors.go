@@ -24,7 +24,8 @@ var (
 	ErrNoFields = errors.New("no fields to update")
 
 	// ErrInitialLinkTargetNotFound is returned when CreateIssue's InitialLink
-	// references a parent issue that does not exist.
+	// references a target issue that does not exist (in any project) or is
+	// soft-deleted.
 	ErrInitialLinkTargetNotFound = errors.New("initial link target not found")
 
 	// ErrInitialLinkInvalidType is returned when CreateIssue's InitialLink
@@ -49,6 +50,14 @@ var (
 	ErrParentCycle = errors.New("parent cycle")
 )
 
+// MaxParentDepth bounds every parent-chain ancestor walk: the storage
+// cycle guard that runs inside link-mutation transactions and the daemon's
+// parent --replace pre-flight. The walks MUST share one cap. If the
+// pre-flight tolerated deeper chains than the transactional guard, a
+// replace on a deep valid chain would pass pre-flight, unlink the old
+// parent, then fail the guard — leaving the issue parentless.
+const MaxParentDepth = 1024
+
 // Link sentinels.
 var (
 	// ErrLinkExists is returned when CreateLink tries to add a duplicate edge.
@@ -58,8 +67,6 @@ var (
 	ErrParentAlreadySet = errors.New("parent already set")
 	// ErrSelfLink is returned when CreateLink would link an issue to itself.
 	ErrSelfLink = errors.New("self-link not allowed")
-	// ErrCrossProjectLink is returned when CreateLink endpoints span projects.
-	ErrCrossProjectLink = errors.New("cross-project link not allowed")
 )
 
 // Label sentinels.
@@ -178,12 +185,10 @@ var (
 	ErrFederationNotSpoke = errors.New("federation binding is not a spoke")
 )
 
-// LinkTargetNotFoundError carries the offending project-scoped number
-// when an add-edge or set-parent operation references an issue that
-// doesn't exist. The handler renders a message that names the
-// specific ref so multi-flag PATCHes (`--blocks 5 --blocks 99 --blocks 7`)
-// can identify which target failed. Wraps ErrNotFound so existing
-// errors.Is checks keep working.
+// LinkTargetNotFoundError carries the requested issue row id (globally unique
+// since storage v16) when an add-edge or set-parent operation references an
+// issue that doesn't exist. Wraps ErrNotFound so existing errors.Is checks
+// keep working.
 type LinkTargetNotFoundError struct {
 	Number int64
 }
@@ -231,24 +236,6 @@ func (e *ProjectMergeImportMappingCollisionError) Error() string {
 
 func (e *ProjectMergeImportMappingCollisionError) Unwrap() error {
 	return ErrProjectMergeImportMappingCollision
-}
-
-// CrossProjectLinksError is returned by MoveIssueProject when the issue
-// has one or more links that would become cross-project after the move.
-type CrossProjectLinksError struct {
-	Blockers []LinkBlocker
-}
-
-func (e *CrossProjectLinksError) Error() string {
-	return fmt.Sprintf("cannot move: %d link(s) would become cross-project; unlink before moving (links can only join issues in the same project)",
-		len(e.Blockers))
-}
-
-// LinkBlocker identifies one link that prevents a project move.
-type LinkBlocker struct {
-	LinkID  int64  `json:"link_id"`
-	PeerUID string `json:"peer_uid"`
-	Type    string `json:"type"`
 }
 
 // RecurrencePinnedError is returned by MoveIssueProject when the issue

@@ -1429,6 +1429,224 @@ func TestCreateIssue_InitialSelfLinkIs400(t *testing.T) {
 	assert.Equal(t, 400, resp.StatusCode)
 }
 
+// TestCreateIssue_CrossProjectInitialLinks pins the two cross-project
+// initial-link behaviors that resolveInitialLinks must enforce:
+//
+//  1. Happy path — creating an issue in project A with a `links` entry
+//     targeting an issue in active project B resolves via both a qualified
+//     short_id ref and a plain ULID ref; the link is visible on the new
+//     issue's show endpoint afterward.
+//
+//  2. Archived rejection — a `links` entry targeting an issue in an
+//     archived project is rejected with 409 link_target_archived, and no
+//     issue row is created (the gate runs before CreateIssue).
+//
+// Reverting resolveInitialLinks to a subject-scoped resolver without the
+// addable gate fails both legs: cross-project refs stop resolving (the
+// happy path 404s) and the archived case surfaces 404 instead of 409.
+func TestCreateIssue_CrossProjectInitialLinks(t *testing.T) {
+	env := testenv.New(t)
+	// Two active projects: hub-project (A) and spoke-project (B).
+	hubPID := mkProject(t, env, "", "hub-project")
+	spokePID := mkProject(t, env, "", "spoke-project")
+
+	// Create a target issue in spoke-project.
+	target, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: spokePID, Title: "target in spoke", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	// "related" edges are canonicalized from<to by row id, so the foreign
+	// peer may land on either side; assert by qualified endpoints instead
+	// of direction.
+	assertRelatedToTarget := func(subjectShortID string) {
+		t.Helper()
+		var showOut struct {
+			Links []struct {
+				Type string `json:"type"`
+				From struct {
+					QualifiedID string `json:"qualified_id"`
+				} `json:"from"`
+				To struct {
+					QualifiedID string `json:"qualified_id"`
+				} `json:"to"`
+			} `json:"links"`
+		}
+		envGetJSON(t, env, issuePathRef(hubPID, subjectShortID, ""), &showOut)
+		require.Len(t, showOut.Links, 1, "initial link must appear in show")
+		assert.Equal(t, "related", showOut.Links[0].Type)
+		peers := []string{showOut.Links[0].From.QualifiedID, showOut.Links[0].To.QualifiedID}
+		assert.Contains(t, peers, "spoke-project#"+target.ShortID,
+			"the foreign peer must be one endpoint")
+		assert.Contains(t, peers, "hub-project#"+subjectShortID,
+			"the new issue must be the other endpoint")
+	}
+
+	// 1a. Create via qualified short_id ref → must succeed and the link must
+	// be visible in the new issue's show response.
+	qualifiedRef := "spoke-project#" + target.ShortID
+	var createOut struct {
+		Issue struct {
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}
+	resp := envDoJSON(t, env, http.MethodPost, projectPath(hubPID)+"/issues",
+		map[string]any{
+			"actor": "tester",
+			"title": "child with qualified initial link",
+			"links": []map[string]any{{"type": "related", "to_ref": qualifiedRef}},
+		}, &createOut)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "create via qualified ref failed")
+	require.NotEmpty(t, createOut.Issue.ShortID)
+	assertRelatedToTarget(createOut.Issue.ShortID)
+
+	// 1b. Create via plain ULID ref → must also succeed.
+	var createOut2 struct {
+		Issue struct {
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}
+	resp = envDoJSON(t, env, http.MethodPost, projectPath(hubPID)+"/issues",
+		map[string]any{
+			"actor": "tester",
+			"title": "child with ULID initial link",
+			"links": []map[string]any{{"type": "related", "to_ref": target.UID}},
+		}, &createOut2)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "create via ULID ref failed")
+	require.NotEmpty(t, createOut2.Issue.ShortID)
+	assertRelatedToTarget(createOut2.Issue.ShortID)
+
+	// 2. Archive spoke-project and retry → 409 link_target_archived. The
+	// gate runs before CreateIssue, so no issue row may exist afterward.
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: spokePID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(hubPID)+"/issues",
+		map[string]any{
+			"actor": "tester",
+			"title": "child with archived initial link",
+			"links": []map[string]any{{"type": "related", "to_ref": target.UID}},
+		}, nil)
+	require.Equalf(t, http.StatusConflict, resp.StatusCode, "archived initial link body: %s", raw)
+	var env409 struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env409))
+	assert.Equal(t, "link_target_archived", env409.Error.Code)
+	assert.Contains(t, env409.Error.Message, "spoke-project")
+
+	var listOut struct {
+		Issues []struct {
+			Title string `json:"title"`
+		} `json:"issues"`
+	}
+	envGetJSON(t, env, projectPath(hubPID)+"/issues", &listOut)
+	for _, iss := range listOut.Issues {
+		assert.NotEqual(t, "child with archived initial link", iss.Title,
+			"rejected initial link must not leave a created issue behind")
+	}
+}
+
+// TestCreateIssue_InitialLinksFederatedClaimGate pins that the federated claim
+// gate applies to initial links expressed as part of POST /issues, not only
+// POST /links. The fixture mirrors TestClaimGateLinkCreateEvaluatesTargetAgainstItsOwnProject:
+// the subject lives in a non-federated project (no binding), so a gate scoped
+// only to the URL project would silently pass; the foreign target lives in a
+// federated project whose claim is held by another actor, which must deny the
+// create with the same 409 claim_denied the link endpoint returns.
+func TestCreateIssue_InitialLinksFederatedClaimGate(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+
+	// src: non-federated project — the URL project for the create call.
+	src, err := env.DB.CreateProject(ctx, "src-gate-test")
+	require.NoError(t, err)
+
+	// tgt: federated project whose issue is claimed by "other".
+	tgt, peer, _ := setupClaimGateProject(t, env, true)
+	acquireClaimGateIssue(t, env, tgt, peer, "other")
+
+	// POST /issues in src with an initial link to the claimed foreign peer.
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(src.ID)+"/issues",
+		map[string]any{
+			"actor": "agent",
+			"title": "issue with claimed-peer initial link",
+			"links": []map[string]any{{"type": "related", "to_ref": peer.UID}},
+		}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "claim_denied")
+}
+
+// TestCreateIssue_InvalidInitialLinkTypeBeatsClaimGate pins that a
+// semantically-invalid initial link is rejected with 400 validation even when
+// the target is a claimed foreign issue. type=parent + incoming=true is the
+// nonsensical "this issue is the parent of N" form the DB rejects with
+// ErrInitialLinkInvalidType — and it slips past huma's enum tag (the type
+// string itself is valid). Because the federated claim gate ran before that
+// DB-level rejection, a claimed target surfaced 409 claim_denied instead of the
+// 400 the malformed link deserves; a bad request should never look like an
+// authorization failure.
+func TestCreateIssue_InvalidInitialLinkTypeBeatsClaimGate(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+
+	src, err := env.DB.CreateProject(ctx, "src-bad-type")
+	require.NoError(t, err)
+	tgt, peer, _ := setupClaimGateProject(t, env, true)
+	acquireClaimGateIssue(t, env, tgt, peer, "other")
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(src.ID)+"/issues",
+		map[string]any{
+			"actor": "agent",
+			"title": "issue with invalid claimed-peer initial link",
+			"links": []map[string]any{{"type": "parent", "incoming": true, "to_ref": peer.UID}},
+		}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	var env400 struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env400))
+	assert.Equal(t, "link.type must be parent|blocks|related", env400.Error.Message)
+}
+
+// TestCreateIssue_InvalidInitialLinkTypeNoClaims pins that the same
+// semantically-invalid initial link (no claims involved) returns the same 400
+// validation, so the up-front validation isn't claim-gate-specific.
+func TestCreateIssue_InvalidInitialLinkTypeNoClaims(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+
+	pid := mkProject(t, env, "", "plain-bad-type")
+	peer, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: pid, Title: "peer", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues",
+		map[string]any{
+			"actor": "agent",
+			"title": "issue with invalid initial link",
+			"links": []map[string]any{{"type": "parent", "incoming": true, "to_ref": peer.ShortID}},
+		}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
+	var env400 struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &env400))
+	assert.Equal(t, "link.type must be parent|blocks|related", env400.Error.Message)
+}
+
 // TestCreate_IdempotencyReuse_SameFingerprint verifies that a second create
 // with the same Idempotency-Key + same body returns the reuse envelope: no
 // fresh event, the original_event populated, changed=false, reused=true.
@@ -1715,44 +1933,37 @@ func TestListIssues_IncludesHierarchyMetadata(t *testing.T) {
 	parentShort := refForIssue(t, env, parent)
 	childShort := refForIssue(t, env, child)
 
+	type issueHierarchyRow struct {
+		ShortID string `json:"short_id"`
+		Parent  *struct {
+			ShortID string `json:"short_id"`
+		} `json:"parent,omitempty"`
+		ChildCounts *struct {
+			Open  int `json:"open"`
+			Total int `json:"total"`
+		} `json:"child_counts"`
+	}
 	var out struct {
-		Issues []struct {
-			ShortID       string  `json:"short_id"`
-			ParentShortID *string `json:"parent_short_id"`
-			ChildCounts   *struct {
-				Open  int `json:"open"`
-				Total int `json:"total"`
-			} `json:"child_counts"`
-		} `json:"issues"`
+		Issues []issueHierarchyRow `json:"issues"`
 	}
 	envGetJSON(t, env, projectPath(pid)+"/issues", &out)
 	require.Len(t, out.Issues, 2)
-	byShort := map[string]struct {
-		ParentShortID *string
-		ChildCounts   *struct {
-			Open  int `json:"open"`
-			Total int `json:"total"`
-		}
-	}{}
+	byShort := map[string]issueHierarchyRow{}
 	for _, iss := range out.Issues {
-		byShort[iss.ShortID] = struct {
-			ParentShortID *string
-			ChildCounts   *struct {
-				Open  int `json:"open"`
-				Total int `json:"total"`
-			}
-		}{ParentShortID: iss.ParentShortID, ChildCounts: iss.ChildCounts}
+		byShort[iss.ShortID] = iss
 	}
 	require.NotNil(t, byShort[parentShort].ChildCounts)
 	assert.Equal(t, 1, byShort[parentShort].ChildCounts.Open)
 	assert.Equal(t, 1, byShort[parentShort].ChildCounts.Total)
-	require.NotNil(t, byShort[childShort].ParentShortID)
-	assert.Equal(t, parentShort, *byShort[childShort].ParentShortID)
+	require.NotNil(t, byShort[childShort].Parent)
+	assert.Equal(t, parentShort, byShort[childShort].Parent.ShortID)
 }
 
 func TestListIssues_IncludesBlockerMetadata(t *testing.T) {
 	env := testenv.New(t)
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	project, err := env.DB.ProjectByID(t.Context(), pid)
+	require.NoError(t, err)
 	blocker := createIssueViaHTTP(t, env, pid, "blocker")
 	blocked := createIssueViaHTTP(t, env, pid, "blocked")
 	postLink(t, env, pid, blocker, "blocks", blocked)
@@ -1772,6 +1983,8 @@ func TestListIssues_IncludesBlockerMetadata(t *testing.T) {
 	}
 	require.Len(t, byShort[blockerShort], 1)
 	assert.Equal(t, blockedShort, byShort[blockerShort][0].ShortID)
+	assert.Equal(t, project.Name, byShort[blockerShort][0].Project)
+	assert.Equal(t, project.Name+"#"+blockedShort, byShort[blockerShort][0].QualifiedID)
 	assert.Empty(t, byShort[blockedShort])
 }
 
@@ -1969,4 +2182,145 @@ func TestShowIssue_IncludesParentAndChildren(t *testing.T) {
 	require.NotNil(t, out.Children[0].ChildCounts)
 	assert.Equal(t, 1, out.Children[0].ChildCounts.Open)
 	assert.Equal(t, 1, out.Children[0].ChildCounts.Total)
+}
+
+// TestIssueResponses_QualifyCrossProjectPeers pins the wire contract for
+// cross-project peers: every LinkPeer carries project and qualified_id
+// (always populated), and IssueOut.parent is a full LinkPeer, not a
+// bare short_id. Read paths (list + show) are tested here; cross-project
+// link creation through PATCH/POST is gated until Task 3.
+func TestIssueResponses_QualifyCrossProjectPeers(t *testing.T) {
+	env := testenv.New(t)
+	alphaID := mkProject(t, env, "", "alpha")
+	betaID := mkProject(t, env, "", "beta")
+
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: alphaID, Title: "child in alpha", Author: "tester",
+	})
+	require.NoError(t, err)
+	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: betaID, Title: "parent in beta", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	_, err = env.DB.CreateLink(t.Context(), db.CreateLinkParams{
+		FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	// List endpoint: IssueOut carries Parent *LinkPeer with project + qualified_id.
+	var listOut struct {
+		Issues []struct {
+			ShortID string `json:"short_id"`
+			Parent  *struct {
+				ShortID     string `json:"short_id"`
+				Project     string `json:"project"`
+				QualifiedID string `json:"qualified_id"`
+			} `json:"parent,omitempty"`
+		} `json:"issues"`
+	}
+	envGetJSON(t, env, projectPath(alphaID)+"/issues", &listOut)
+	require.Len(t, listOut.Issues, 1)
+	require.NotNil(t, listOut.Issues[0].Parent, "parent annotation must be a LinkPeer")
+	assert.Equal(t, parent.ShortID, listOut.Issues[0].Parent.ShortID)
+	assert.Equal(t, "beta", listOut.Issues[0].Parent.Project)
+	assert.Equal(t, "beta#"+parent.ShortID, listOut.Issues[0].Parent.QualifiedID)
+
+	// Show endpoint: links carry project + qualified_id on both sides.
+	var showOut struct {
+		Links []struct {
+			Type string `json:"type"`
+			From struct {
+				ShortID     string `json:"short_id"`
+				Project     string `json:"project"`
+				QualifiedID string `json:"qualified_id"`
+			} `json:"from"`
+			To struct {
+				ShortID     string `json:"short_id"`
+				Project     string `json:"project"`
+				QualifiedID string `json:"qualified_id"`
+			} `json:"to"`
+		} `json:"links"`
+	}
+	envGetJSON(t, env, issuePathRef(alphaID, child.ShortID, ""), &showOut)
+	require.Len(t, showOut.Links, 1)
+	assert.Equal(t, "beta", showOut.Links[0].To.Project)
+	assert.Equal(t, "beta#"+parent.ShortID, showOut.Links[0].To.QualifiedID)
+	assert.Equal(t, "alpha", showOut.Links[0].From.Project, "same-project side is populated too")
+	assert.Equal(t, "alpha#"+child.ShortID, showOut.Links[0].From.QualifiedID)
+}
+
+// TestShowIssue_CrossProjectChildHydratedWithChildProject pins that the show
+// handler hydrates each child against the child's OWN project, not the
+// parent's. A child in alpha whose parent is in beta must come back with
+// qualified_id "alpha#<child>" — hydrating it against the parent's project
+// (beta) would mislabel it "beta#<child>".
+func TestShowIssue_CrossProjectChildHydratedWithChildProject(t *testing.T) {
+	env := testenv.New(t)
+	alphaID := mkProject(t, env, "", "alpha")
+	betaID := mkProject(t, env, "", "beta")
+
+	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: betaID, Title: "parent in beta", Author: "tester",
+	})
+	require.NoError(t, err)
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: alphaID, Title: "child in alpha", Author: "tester",
+	})
+	require.NoError(t, err)
+	// child's parent = parent (cross-project). ChildrenOfIssue(parent)
+	// returns this child regardless of project.
+	_, err = env.DB.CreateLink(t.Context(), db.CreateLinkParams{
+		FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	var showOut struct {
+		Children []struct {
+			ShortID     string `json:"short_id"`
+			QualifiedID string `json:"qualified_id"`
+		} `json:"children"`
+	}
+	envGetJSON(t, env, issuePathRef(betaID, parent.ShortID, ""), &showOut)
+	require.Len(t, showOut.Children, 1)
+	assert.Equal(t, child.ShortID, showOut.Children[0].ShortID)
+	assert.Equal(t, "alpha#"+child.ShortID, showOut.Children[0].QualifiedID,
+		"a cross-project child must be hydrated against its own project, not the parent's")
+}
+
+// TestIssueResponses_PATCHChangesCarryProjectAndQualifiedID pins that the
+// changes block in a PATCH edit response populates project + qualified_id
+// on every LinkPeer, including same-project peers. This covers the
+// buildLinkChanges path (which reads from PeerIdentity captured in-tx).
+func TestIssueResponses_PATCHChangesCarryProjectAndQualifiedID(t *testing.T) {
+	h, ts, pid, src := bootstrapProjectWithIssue(t)
+	project, err := h.DB().ProjectByID(t.Context(), pid)
+	require.NoError(t, err)
+	resp, bs := postJSON(t, ts, issuesURL(pid),
+		map[string]any{"actor": "tester", "title": "blocked target"})
+	require.Equalf(t, 200, resp.StatusCode, "create target: %s", string(bs))
+	target := issueShortIDFromCreate(t, bs)
+
+	resp, bs = patchJSON(t, ts, issueURL(pid, src, ""), map[string]any{
+		"actor": "tester",
+		"links_delta": map[string]any{
+			"add_blocks": []string{target},
+		},
+	})
+	require.Equalf(t, 200, resp.StatusCode, "patch: %s", string(bs))
+
+	var out struct {
+		Changes struct {
+			BlocksAdded []struct {
+				ShortID     string `json:"short_id"`
+				Project     string `json:"project"`
+				QualifiedID string `json:"qualified_id"`
+			} `json:"blocks_added"`
+		} `json:"changes"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	require.Len(t, out.Changes.BlocksAdded, 1)
+	assert.Equal(t, target, out.Changes.BlocksAdded[0].ShortID)
+	assert.Equal(t, project.Name, out.Changes.BlocksAdded[0].Project)
+	assert.Equal(t, project.Name+"#"+target, out.Changes.BlocksAdded[0].QualifiedID)
 }

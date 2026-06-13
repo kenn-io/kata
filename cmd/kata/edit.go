@@ -104,12 +104,12 @@ func newEditCmd() *cobra.Command {
 		}
 
 		// --parent and --remove-parent are at-most-one but accept any of
-		// short_id, qualified, or ULID. resolveSingletonRefToWire rejects
-		// only when distinct refs resolve to *different* issues, so
+		// short_id, qualified ("other#abc4"), or ULID. resolveSingletonRefToWire
+		// rejects only when distinct refs resolve to *different* issues, so
 		// equivalent forms (e.g. `--parent abc4 --parent kata#abc4`) succeed.
-		// issue.ProjectName is the URL issue's canonical project — link
-		// targets must belong to that same project (cross-project refs
-		// require the ULID form, not `<other>#abc4`).
+		// issue.ProjectName is the URL issue's canonical project. Bare refs resolve
+		// against it; a qualified ref names the target project explicitly; ULIDs
+		// resolve globally. The daemon enforces archived/existence rules.
 		var parentRef, removeParentRef string
 		if cmd.Flags().Changed("parent") {
 			parentRef, err = resolveSingletonRefToWire(ctx, baseURL, issue.ProjectName, pid, parentRefSlice, "--parent", false)
@@ -166,7 +166,7 @@ func newEditCmd() *cobra.Command {
 			if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
 				return err
 			}
-			return printMutation(cmd, syntheticNoopFromShow(bs))
+			return printMutationWithApplied(cmd, syntheticNoopFromShow(bs), nil, issue.ProjectName)
 		}
 
 		// At least one mutation must be present, mirroring the daemon's check
@@ -200,7 +200,7 @@ func newEditCmd() *cobra.Command {
 		if err := postFollowupComment(ctx, client, baseURL, pid, issue.RefForAPI, actor, comment); err != nil {
 			return err
 		}
-		return printMutation(cmd, bs)
+		return printMutationWithApplied(cmd, bs, nil, issue.ProjectName)
 	}
 	return cmd
 }
@@ -208,12 +208,15 @@ func newEditCmd() *cobra.Command {
 // buildLinksDelta translates the edit command's link flags into a wire-format
 // links_delta map. Returns nil when no link flag was passed. Resolves every
 // ref (short_id, qualified, or ULID) to its wire ref string before building
-// the payload, then runs client-side conflict checks so an obviously-broken
-// delta never reaches the daemon.
+// the payload, then runs client-side conflict checks to catch obvious same-project
+// contradictions early; foreign refs (qualified or ULID naming another project)
+// resolve to "" in the subject-scoped GET and are skipped here — the daemon's
+// own validation catches cross-project overlaps.
 //
-// currentProject is the canonical name of the URL issue's project. Every
-// link target must belong to that project; a qualified `<other>#abc4` ref
-// is rejected up front so it can't silently target the wrong issue.
+// currentProject is the canonical name of the URL issue's project. Bare refs
+// resolve against it; a qualified `<other>#abc4` ref names the target project
+// explicitly and is forwarded to the daemon verbatim; ULIDs resolve globally.
+// The daemon enforces archived/existence rules for all forms.
 func buildLinksDelta(
 	ctx context.Context,
 	cmd *cobra.Command,
@@ -369,11 +372,14 @@ func syntheticNoopFromShow(showBody []byte) []byte {
 // miss the conflict and let an obviously contradictory mutation reach
 // the daemon.
 //
-// Refs that fail to resolve (issue doesn't exist) are skipped; the
-// underlying remove flags are documented as idempotent, and a typo on
-// the add side would surface through the daemon's own validation. The
-// canonical wire string (passed back from the add side) is returned as
-// the conflict label so error messages match what the user typed.
+// Refs that fail to resolve are skipped: foreign refs (qualified or ULID
+// naming another project) resolve to "" because the subject-scoped GET 404s
+// them by design, and the daemon backstops with its own 400/409 for
+// cross-project overlaps. Same-project refs that genuinely don't exist are
+// also skipped — idempotent removes tolerate that, and a typo on the add side
+// surfaces through the daemon's validation. The canonical wire string (passed
+// back from the add side) is returned as the conflict label so error messages
+// match what the user typed.
 func firstResolvedOverlap(ctx context.Context, baseURL string, projectID int64, adds, removes []string) (string, error) {
 	if len(adds) == 0 || len(removes) == 0 {
 		return "", nil

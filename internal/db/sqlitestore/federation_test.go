@@ -20,7 +20,7 @@ import (
 func TestFederationSchemaVersionAndTable(t *testing.T) {
 	d := openTestDB(t)
 
-	assert.Equal(t, 15, db.CurrentSchemaVersion())
+	assert.Equal(t, 16, db.CurrentSchemaVersion())
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 	assertSchemaObject(t, d, "federation_bindings")
 	assertSchemaObject(t, d, "idx_federation_bindings_role_enabled")
@@ -1198,7 +1198,6 @@ func TestEnableProjectFederationEmitsBaselineSnapshotsAtHorizon(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = d.CreateLink(ctx, db.CreateLinkParams{
-		ProjectID:   p.ID,
 		FromIssueID: active.ID,
 		ToIssueID:   deleted.ID,
 		Type:        "related",
@@ -2389,7 +2388,9 @@ func TestMaterializeFederatedProject(t *testing.T) {
 	assertRowCount(ctx, t, d, 1, "label materialized",
 		`SELECT count(*) FROM issue_labels WHERE issue_id = ? AND label = 'area:db'`, issue.ID)
 	assertRowCount(ctx, t, d, 1, "link materialized",
-		`SELECT count(*) FROM links WHERE project_id = ? AND type = 'related'`, p.ID)
+		`SELECT count(*) FROM links
+		   WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
+		     AND type = 'related'`, p.ID)
 }
 
 func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T) {
@@ -2420,7 +2421,6 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 	})
 	require.NoError(t, err)
 	_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
-		ProjectID:   p.ID,
 		FromIssueID: issue.ID,
 		ToIssueID:   peer.ID,
 		Type:        "related",
@@ -2469,7 +2469,9 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 	assertRowCount(ctx, t, d, 1, "label reconciled by key",
 		`SELECT count(*) FROM issue_labels WHERE issue_id = ? AND label = 'area:db'`, issue.ID)
 	assertRowCount(ctx, t, d, 1, "link reconciled by uid key",
-		`SELECT count(*) FROM links WHERE project_id = ? AND type = 'related'`, p.ID)
+		`SELECT count(*) FROM links
+		   WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
+		     AND type = 'related'`, p.ID)
 }
 
 func TestMaterializeFederatedProjectExtendsCollidingIncomingShortIDs(t *testing.T) {
@@ -2542,9 +2544,8 @@ func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *test
 			})
 			return err
 		},
-		"link": func(ctx context.Context, d *sqlitestore.Store, p db.Project, issue, peer db.Issue) error {
+		"link": func(ctx context.Context, d *sqlitestore.Store, _ db.Project, issue, peer db.Issue) error {
 			_, _, err := d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
-				ProjectID:   p.ID,
 				FromIssueID: issue.ID,
 				ToIssueID:   peer.ID,
 				Type:        "related",
@@ -2800,7 +2801,6 @@ func TestBoundFederationActor_OverridesCreateLinkAndEventAuthor(t *testing.T) {
 
 	link, evt, err := d.CreateLinkAndEvent(ctx,
 		db.CreateLinkParams{
-			ProjectID:   p.ID,
 			FromIssueID: from.ID,
 			ToIssueID:   to.ID,
 			Type:        "blocks",

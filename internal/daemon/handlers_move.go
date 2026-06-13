@@ -76,13 +76,6 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			return nil, api.NewError(412, "revision_conflict",
 				fmt.Sprintf("issue revision is %d", conflict.CurrentRevision), "", nil)
 		}
-		var cpErr *db.CrossProjectLinksError
-		if errors.As(err, &cpErr) {
-			return nil, api.NewError(409, "cross_project_links",
-				cpErr.Error(),
-				"remove the issue's links, move, then re-link in the target project (peers must live there too — links cannot span projects)",
-				map[string]any{"blockers": cpErr.Blockers})
-		}
 		var rpErr *db.RecurrencePinnedError
 		if errors.As(err, &rpErr) {
 			return nil, api.NewError(409, "recurrence_pinned",

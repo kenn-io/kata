@@ -41,8 +41,8 @@ func TestIssueRefHasShortIDAndQualifiedID(t *testing.T) {
 }
 
 // TestIssueOutHasShortIDFamily covers the list/search row projection that the
-// daemon hydrates: short_id, qualified_id, parent_short_id, plus structured
-// peer arrays for blocks/blocked_by/related (UID + short_id).
+// daemon hydrates: short_id, qualified_id, plus structured peer arrays for
+// blocks/blocked_by/related (UID + short_id).
 //
 // ShortID/QualifiedID and the three peer arrays are required: a regression
 // that deletes any of them is a wire-shape break, not an optional change.
@@ -54,7 +54,6 @@ func TestIssueOutHasShortIDFamily(t *testing.T) {
 	// traverses anonymous fields, so the lookup still resolves.
 	requireFieldHasJSONTag(t, typ, "ShortID", "short_id")
 	requireFieldHasJSONTag(t, typ, "QualifiedID", "qualified_id")
-	requireFieldHasJSONTag(t, typ, "ParentShortID", "parent_short_id")
 	for _, f := range []string{"Number", "ParentNumber"} {
 		_, has := typ.FieldByName(f)
 		assert.Falsef(t, has, "IssueOut.%s must disappear", f)
@@ -84,20 +83,38 @@ func TestProjectOutHasNoNextIssueNumber(t *testing.T) {
 }
 
 // TestLinkPeerShape pins the structured replacement for from_number/to_number
-// on link records.
+// on link records. Project and QualifiedID are always populated (0.2.0).
 func TestLinkPeerShape(t *testing.T) {
 	typ := reflect.TypeOf(api.LinkPeer{})
 	requireFieldHasJSONTag(t, typ, "UID", "uid")
 	requireFieldHasJSONTag(t, typ, "ShortID", "short_id")
+	requireFieldHasJSONTag(t, typ, "Project", "project")
+	requireFieldHasJSONTag(t, typ, "QualifiedID", "qualified_id")
+}
+
+// TestIssueOutUsesLinkPeerForParent pins that IssueOut carries Parent *LinkPeer
+// (0.2.0) and no longer exposes the bare ParentShortID string.
+func TestIssueOutUsesLinkPeerForParent(t *testing.T) {
+	typ := reflect.TypeOf(api.IssueOut{})
+	_, hasOld := typ.FieldByName("ParentShortID")
+	assert.False(t, hasOld, "IssueOut.ParentShortID must be removed (replaced by Parent *LinkPeer)")
+	f, ok := typ.FieldByName("Parent")
+	if !ok {
+		t.Fatal("IssueOut.Parent missing")
+	}
+	peerPtrType := reflect.TypeOf((*api.LinkPeer)(nil))
+	assert.Equal(t, peerPtrType, f.Type, "IssueOut.Parent must be *LinkPeer")
 }
 
 // TestLinkOutUsesLinkPeer covers the wire projection of one link: from/to are
-// now structured peer objects rather than flat integer numbers.
+// now structured peer objects rather than flat integer numbers, and the
+// project_id field is gone now that links are project-independent edges
+// (storage v16 / API 0.2.0).
 func TestLinkOutUsesLinkPeer(t *testing.T) {
 	typ := reflect.TypeOf(api.LinkOut{})
-	for _, field := range []string{"FromNumber", "FromIssueUID", "ToNumber", "ToIssueUID"} {
+	for _, field := range []string{"FromNumber", "FromIssueUID", "ToNumber", "ToIssueUID", "ProjectID"} {
 		_, has := typ.FieldByName(field)
-		assert.Falsef(t, has, "LinkOut.%s must be replaced by structured From/To peers", field)
+		assert.Falsef(t, has, "LinkOut.%s must not be on the wire", field)
 	}
 	for _, field := range []string{"From", "To"} {
 		f, ok := typ.FieldByName(field)

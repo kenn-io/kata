@@ -27,9 +27,9 @@ func (d *Store) createLink(ctx context.Context, p db.CreateLinkParams) (db.Link,
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-		 VALUES(?, ?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
-		p.ProjectID, p.FromIssueID, p.ToIssueID, p.FromIssueID, p.ToIssueID, p.Type, p.Author)
+		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		 VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
+		p.FromIssueID, p.ToIssueID, p.FromIssueID, p.ToIssueID, p.Type, p.Author)
 	if err != nil {
 		classified := classifyLinkInsertError(err)
 		// SQLite may report the partial-parent index violation as a bare
@@ -78,8 +78,6 @@ func classifyLinkInsertError(err error) error {
 	case strings.Contains(msg, "CHECK constraint failed") &&
 		strings.Contains(msg, "from_issue_id <> to_issue_id"):
 		return db.ErrSelfLink
-	case strings.Contains(msg, "cross-project links are not allowed"):
-		return db.ErrCrossProjectLink
 	}
 	return fmt.Errorf("insert link: %w", err)
 }
@@ -118,10 +116,11 @@ func (d *Store) ParentOf(ctx context.Context, childIssueID int64) (db.Link, erro
 const relationshipChunkSize = labelsByIssuesChunkSize
 
 // ParentShortIDsByIssues returns child issue ID -> parent short_id for
-// parent links inside projectID. Used by the audit handler to render and
-// filter close rows by parent ref.
+// parent links. Used by the audit handler to render and filter close rows by
+// parent ref. Links are project-independent edges (storage v16), so the
+// traversal follows endpoints regardless of project.
 func (d *Store) ParentShortIDsByIssues(
-	ctx context.Context, projectID int64, issueIDs []int64,
+	ctx context.Context, issueIDs []int64,
 ) (map[int64]string, error) {
 	out := map[int64]string{}
 	if len(issueIDs) == 0 {
@@ -132,15 +131,12 @@ func (d *Store) ParentShortIDsByIssues(
 		if end > len(issueIDs) {
 			end = len(issueIDs)
 		}
-		placeholders, args := relationshipChunkPlaceholders(projectID, issueIDs[i:end])
+		placeholders, args := relationshipChunkPlaceholders(issueIDs[i:end])
 		query := `SELECT l.from_issue_id, parent.short_id
 		          FROM links l
 		          JOIN issues child  ON child.id  = l.from_issue_id
 		          JOIN issues parent ON parent.id = l.to_issue_id
-		          WHERE l.project_id = ?
-		            AND child.project_id = ?
-		            AND parent.project_id = ?
-		            AND l.type = 'parent'
+		          WHERE l.type = 'parent'
 		            AND l.from_issue_id IN (` + placeholders + `)`
 		rows, err := d.QueryContext(ctx, query, args...)
 		if err != nil {
@@ -167,11 +163,12 @@ func scanParentShortIDs(rows *sql.Rows, out map[int64]string) error {
 }
 
 // ParentNumbersByIssues returns child issue ID -> parent issue id for
-// parent links inside projectID. Despite the name (transitional), the map
-// value is the parent's rowid, not a user-facing number; downstream code
-// resolves it to a LinkPeer.
+// parent links. Despite the name (transitional), the map value is the
+// parent's rowid, not a user-facing number; downstream code resolves it to a
+// LinkPeer. Links are project-independent edges (storage v16), so a parent in
+// another project is still returned.
 func (d *Store) ParentNumbersByIssues(
-	ctx context.Context, projectID int64, issueIDs []int64,
+	ctx context.Context, issueIDs []int64,
 ) (map[int64]int64, error) {
 	out := map[int64]int64{}
 	if len(issueIDs) == 0 {
@@ -182,7 +179,7 @@ func (d *Store) ParentNumbersByIssues(
 		if end > len(issueIDs) {
 			end = len(issueIDs)
 		}
-		if err := d.appendParentNumbersForChunk(ctx, projectID, issueIDs[i:end], out); err != nil {
+		if err := d.appendParentNumbersForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
 	}
@@ -190,20 +187,16 @@ func (d *Store) ParentNumbersByIssues(
 }
 
 func (d *Store) appendParentNumbersForChunk(
-	ctx context.Context, projectID int64, chunk []int64, out map[int64]int64,
+	ctx context.Context, chunk []int64, out map[int64]int64,
 ) error {
-	placeholders, args := relationshipChunkPlaceholders(projectID, chunk)
-	// Result references the parent issue's id while callers transition off
-	// of `number` (Tasks 11/13/14). The map shape is preserved so downstream
-	// list/show code keeps compiling against int64 keys until it migrates.
+	placeholders, args := relationshipChunkPlaceholders(chunk)
+	// Maps child issue id → parent issue row id; callers resolve the row id
+	// to a display identity themselves (parents may live in other projects).
 	query := `SELECT l.from_issue_id, parent.id
 	          FROM links l
 	          JOIN issues child ON child.id = l.from_issue_id
 	          JOIN issues parent ON parent.id = l.to_issue_id
-	          WHERE l.project_id = ?
-	            AND child.project_id = ?
-	            AND parent.project_id = ?
-	            AND l.type = 'parent'
+	          WHERE l.type = 'parent'
 	            AND l.from_issue_id IN (` + placeholders + `)
 	          ORDER BY l.from_issue_id ASC`
 	rows, err := d.QueryContext(ctx, query, args...)
@@ -225,9 +218,10 @@ func (d *Store) appendParentNumbersForChunk(
 }
 
 // BlockNumbersByIssues returns issue ID -> issue numbers directly blocked by
-// that issue for outgoing "blocks" links inside projectID.
+// that issue for outgoing "blocks" links. Links are project-independent edges
+// (storage v16), so a blocked issue in another project is still returned.
 func (d *Store) BlockNumbersByIssues(
-	ctx context.Context, projectID int64, issueIDs []int64,
+	ctx context.Context, issueIDs []int64,
 ) (map[int64][]int64, error) {
 	out := map[int64][]int64{}
 	if len(issueIDs) == 0 {
@@ -238,7 +232,7 @@ func (d *Store) BlockNumbersByIssues(
 		if end > len(issueIDs) {
 			end = len(issueIDs)
 		}
-		if err := d.appendBlockNumbersForChunk(ctx, projectID, issueIDs[i:end], out); err != nil {
+		if err := d.appendBlockNumbersForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
 	}
@@ -246,17 +240,14 @@ func (d *Store) BlockNumbersByIssues(
 }
 
 func (d *Store) appendBlockNumbersForChunk(
-	ctx context.Context, projectID int64, chunk []int64, out map[int64][]int64,
+	ctx context.Context, chunk []int64, out map[int64][]int64,
 ) error {
-	placeholders, args := relationshipChunkPlaceholders(projectID, chunk)
+	placeholders, args := relationshipChunkPlaceholders(chunk)
 	query := `SELECT l.from_issue_id, blocked.id
 	          FROM links l
 	          JOIN issues blocker ON blocker.id = l.from_issue_id
 	          JOIN issues blocked ON blocked.id = l.to_issue_id
-	          WHERE l.project_id = ?
-	            AND blocker.project_id = ?
-	            AND blocked.project_id = ?
-	            AND l.type = 'blocks'
+	          WHERE l.type = 'blocks'
 	            AND blocked.deleted_at IS NULL
 	            AND l.from_issue_id IN (` + placeholders + `)
 	          ORDER BY l.from_issue_id ASC, blocked.id ASC`
@@ -282,9 +273,10 @@ func (d *Store) appendBlockNumbersForChunk(
 // that issue. Inverse of BlockNumbersByIssues: for each issue X, the
 // returned numbers are the issues whose outgoing `blocks` link points
 // at X. Used by `kata list --json` to surface every relationship type
-// per row, not just outgoing blocks.
+// per row, not just outgoing blocks. Links are project-independent edges
+// (storage v16), so a blocker in another project is still returned.
 func (d *Store) BlockedByNumbersByIssues(
-	ctx context.Context, projectID int64, issueIDs []int64,
+	ctx context.Context, issueIDs []int64,
 ) (map[int64][]int64, error) {
 	out := map[int64][]int64{}
 	if len(issueIDs) == 0 {
@@ -295,7 +287,7 @@ func (d *Store) BlockedByNumbersByIssues(
 		if end > len(issueIDs) {
 			end = len(issueIDs)
 		}
-		if err := d.appendBlockedByNumbersForChunk(ctx, projectID, issueIDs[i:end], out); err != nil {
+		if err := d.appendBlockedByNumbersForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
 	}
@@ -303,17 +295,14 @@ func (d *Store) BlockedByNumbersByIssues(
 }
 
 func (d *Store) appendBlockedByNumbersForChunk(
-	ctx context.Context, projectID int64, chunk []int64, out map[int64][]int64,
+	ctx context.Context, chunk []int64, out map[int64][]int64,
 ) error {
-	placeholders, args := relationshipChunkPlaceholders(projectID, chunk)
+	placeholders, args := relationshipChunkPlaceholders(chunk)
 	query := `SELECT l.to_issue_id, blocker.id
 	          FROM links l
 	          JOIN issues blocker ON blocker.id = l.from_issue_id
 	          JOIN issues blocked ON blocked.id = l.to_issue_id
-	          WHERE l.project_id = ?
-	            AND blocker.project_id = ?
-	            AND blocked.project_id = ?
-	            AND l.type = 'blocks'
+	          WHERE l.type = 'blocks'
 	            AND blocker.deleted_at IS NULL
 	            AND l.to_issue_id IN (` + placeholders + `)
 	          ORDER BY l.to_issue_id ASC, blocker.id ASC`
@@ -335,9 +324,10 @@ func (d *Store) appendBlockedByNumbersForChunk(
 // RelatedNumbersByIssues returns issue ID -> issue numbers symmetrically
 // related to that issue. Related links are stored canonically as (from <
 // to), so for any viewer X the peers may sit on either side; the query
-// projects both directions.
+// projects both directions. Links are project-independent edges (storage
+// v16), so a related peer in another project is still returned.
 func (d *Store) RelatedNumbersByIssues(
-	ctx context.Context, projectID int64, issueIDs []int64,
+	ctx context.Context, issueIDs []int64,
 ) (map[int64][]int64, error) {
 	out := map[int64][]int64{}
 	if len(issueIDs) == 0 {
@@ -348,7 +338,7 @@ func (d *Store) RelatedNumbersByIssues(
 		if end > len(issueIDs) {
 			end = len(issueIDs)
 		}
-		if err := d.appendRelatedNumbersForChunk(ctx, projectID, issueIDs[i:end], out); err != nil {
+		if err := d.appendRelatedNumbersForChunk(ctx, issueIDs[i:end], out); err != nil {
 			return nil, err
 		}
 	}
@@ -356,32 +346,24 @@ func (d *Store) RelatedNumbersByIssues(
 }
 
 func (d *Store) appendRelatedNumbersForChunk(
-	ctx context.Context, projectID int64, chunk []int64, out map[int64][]int64,
+	ctx context.Context, chunk []int64, out map[int64][]int64,
 ) error {
-	placeholders, args := relationshipChunkPlaceholders(projectID, chunk)
+	placeholders, args := relationshipChunkPlaceholders(chunk)
 	// Project both directions so a viewer on either canonical end sees
 	// the other endpoint. Live-only join on the peer side mirrors what
 	// the blocks queries do for soft-delete tolerance.
 	query := `SELECT viewer_id, peer_number FROM (
 	            SELECT l.from_issue_id AS viewer_id, peer.id AS peer_number
 	              FROM links l
-	              JOIN issues self ON self.id = l.from_issue_id
 	              JOIN issues peer ON peer.id = l.to_issue_id
-	             WHERE l.project_id = ?
-	               AND self.project_id = ?
-	               AND peer.project_id = ?
-	               AND l.type = 'related'
+	             WHERE l.type = 'related'
 	               AND peer.deleted_at IS NULL
 	               AND l.from_issue_id IN (` + placeholders + `)
 	            UNION ALL
 	            SELECT l.to_issue_id AS viewer_id, peer.id AS peer_number
 	              FROM links l
-	              JOIN issues self ON self.id = l.to_issue_id
 	              JOIN issues peer ON peer.id = l.from_issue_id
-	             WHERE l.project_id = ?
-	               AND self.project_id = ?
-	               AND peer.project_id = ?
-	               AND l.type = 'related'
+	             WHERE l.type = 'related'
 	               AND peer.deleted_at IS NULL
 	               AND l.to_issue_id IN (` + placeholders + `)
 	          ) ORDER BY viewer_id ASC, peer_number ASC`
@@ -405,9 +387,10 @@ func (d *Store) appendRelatedNumbersForChunk(
 }
 
 // ChildCountsByParents returns direct-child open/total counts keyed by parent
-// issue ID inside projectID.
+// issue ID. Links are project-independent edges (storage v16), so children in
+// another project are still counted.
 func (d *Store) ChildCountsByParents(
-	ctx context.Context, projectID int64, parentIssueIDs []int64,
+	ctx context.Context, parentIssueIDs []int64,
 ) (map[int64]db.ChildCounts, error) {
 	out := map[int64]db.ChildCounts{}
 	if len(parentIssueIDs) == 0 {
@@ -418,7 +401,7 @@ func (d *Store) ChildCountsByParents(
 		if end > len(parentIssueIDs) {
 			end = len(parentIssueIDs)
 		}
-		if err := d.appendChildCountsForChunk(ctx, projectID, parentIssueIDs[i:end], out); err != nil {
+		if err := d.appendChildCountsForChunk(ctx, parentIssueIDs[i:end], out); err != nil {
 			return nil, err
 		}
 	}
@@ -429,20 +412,19 @@ func (d *Store) ChildCountsByParents(
 // non-closed children when run inside the close transaction. The daemon
 // handler runs the user-friendly OpenChildrenOf-backed check first; this
 // closes the race between that read and the close write by re-checking
-// inside the same write transaction.
-func txHasOpenChildren(ctx context.Context, tx *sql.Tx, projectID, parentIssueID int64) (bool, error) {
+// inside the same write transaction. Links are project-independent edges
+// (storage v16), so a child in another project still gates the close.
+func txHasOpenChildren(ctx context.Context, tx *sql.Tx, parentIssueID int64) (bool, error) {
 	var total int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*)
 		 FROM links l
 		 JOIN issues child ON child.id = l.from_issue_id
-		 WHERE l.project_id = ?
-		   AND child.project_id = ?
-		   AND l.type = 'parent'
+		 WHERE l.type = 'parent'
 		   AND l.to_issue_id = ?
 		   AND child.status = 'open'
 		   AND child.deleted_at IS NULL`,
-		projectID, projectID, parentIssueID).Scan(&total); err != nil {
+		parentIssueID).Scan(&total); err != nil {
 		return false, fmt.Errorf("open children check: %w", err)
 	}
 	return total > 0, nil
@@ -475,22 +457,22 @@ func txParentIdentity(ctx context.Context, tx *sql.Tx, childIssueID int64) (uid,
 // OpenChildrenOf returns up to limit non-deleted, non-closed children of
 // parentIssueID, plus the total open-children count. Used by the parent-
 // close completeness check: the truncated slice feeds the error listing,
-// and the full count drives the "(N more)" suffix.
+// and the full count drives the "(N more)" suffix. Links are
+// project-independent edges (storage v16), so a child in another project is
+// still listed and counted.
 func (d *Store) OpenChildrenOf(
-	ctx context.Context, projectID, parentIssueID int64, limit int,
+	ctx context.Context, parentIssueID int64, limit int,
 ) ([]db.Issue, int, error) {
 	var total int
 	if err := d.QueryRowContext(ctx,
 		`SELECT COUNT(*)
 		 FROM links l
 		 JOIN issues child ON child.id = l.from_issue_id
-		 WHERE l.project_id = ?
-		   AND child.project_id = ?
-		   AND l.type = 'parent'
+		 WHERE l.type = 'parent'
 		   AND l.to_issue_id = ?
 		   AND child.status = 'open'
 		   AND child.deleted_at IS NULL`,
-		projectID, projectID, parentIssueID).Scan(&total); err != nil {
+		parentIssueID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("open children count: %w", err)
 	}
 	if total == 0 {
@@ -498,15 +480,13 @@ func (d *Store) OpenChildrenOf(
 	}
 	rows, err := d.QueryContext(ctx, issueSelect+`
 		JOIN links l ON l.from_issue_id = i.id
-		WHERE l.project_id = ?
-		  AND i.project_id = ?
-		  AND l.type = 'parent'
+		WHERE l.type = 'parent'
 		  AND l.to_issue_id = ?
 		  AND i.status = 'open'
 		  AND i.deleted_at IS NULL
 		ORDER BY i.created_at ASC
 		LIMIT ?`,
-		projectID, projectID, parentIssueID, limit)
+		parentIssueID, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open children: %w", err)
 	}
@@ -526,19 +506,16 @@ func (d *Store) OpenChildrenOf(
 }
 
 // ChildrenOfIssue returns direct, non-deleted children for parentIssueID in
-// the same order as ListIssues.
-func (d *Store) ChildrenOfIssue(ctx context.Context, projectID, parentIssueID int64) ([]db.Issue, error) {
+// the same order as ListIssues. Links are project-independent edges (storage
+// v16), so a child in another project is still returned.
+func (d *Store) ChildrenOfIssue(ctx context.Context, parentIssueID int64) ([]db.Issue, error) {
 	query := issueSelect + `
 		JOIN links l ON l.from_issue_id = i.id
-		JOIN issues parent ON parent.id = l.to_issue_id
-		WHERE l.project_id = ?
-		  AND i.project_id = ?
-		  AND parent.project_id = ?
-		  AND l.type = 'parent'
+		WHERE l.type = 'parent'
 		  AND l.to_issue_id = ?
 		  AND i.deleted_at IS NULL
 		ORDER BY i.updated_at DESC, i.id DESC`
-	rows, err := d.QueryContext(ctx, query, projectID, projectID, projectID, parentIssueID)
+	rows, err := d.QueryContext(ctx, query, parentIssueID)
 	if err != nil {
 		return nil, fmt.Errorf("children of issue: %w", err)
 	}
@@ -558,19 +535,15 @@ func (d *Store) ChildrenOfIssue(ctx context.Context, projectID, parentIssueID in
 }
 
 func (d *Store) appendChildCountsForChunk(
-	ctx context.Context, projectID int64, chunk []int64, out map[int64]db.ChildCounts,
+	ctx context.Context, chunk []int64, out map[int64]db.ChildCounts,
 ) error {
-	placeholders, args := relationshipChunkPlaceholders(projectID, chunk)
+	placeholders, args := relationshipChunkPlaceholders(chunk)
 	query := `SELECT l.to_issue_id,
 	                 SUM(CASE WHEN child.status = 'open' THEN 1 ELSE 0 END) AS open_count,
 	                 COUNT(*) AS total_count
 	          FROM links l
 	          JOIN issues child ON child.id = l.from_issue_id
-	          JOIN issues parent ON parent.id = l.to_issue_id
-	          WHERE l.project_id = ?
-	            AND child.project_id = ?
-	            AND parent.project_id = ?
-	            AND l.type = 'parent'
+	          WHERE l.type = 'parent'
 	            AND child.deleted_at IS NULL
 	            AND l.to_issue_id IN (` + placeholders + `)
 	          GROUP BY l.to_issue_id
@@ -594,10 +567,9 @@ func (d *Store) appendChildCountsForChunk(
 	return nil
 }
 
-func relationshipChunkPlaceholders(projectID int64, chunk []int64) (string, []any) {
+func relationshipChunkPlaceholders(chunk []int64) (string, []any) {
 	placeholders := make([]string, len(chunk))
-	args := make([]any, 0, len(chunk)+3)
-	args = append(args, projectID, projectID, projectID)
+	args := make([]any, 0, len(chunk))
 	for i, id := range chunk {
 		placeholders[i] = "?"
 		args = append(args, id)
@@ -645,11 +617,11 @@ func (d *Store) DeleteLinkByID(ctx context.Context, linkID int64) error {
 	})
 }
 
-const linkSelect = `SELECT id, project_id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at FROM links`
+const linkSelect = `SELECT id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at FROM links`
 
 func scanLink(r rowScanner) (db.Link, error) {
 	var l db.Link
-	err := r.Scan(&l.ID, &l.ProjectID, &l.FromIssueID, &l.FromIssueUID, &l.ToIssueID, &l.ToIssueUID, &l.Type, &l.Author, &l.CreatedAt)
+	err := r.Scan(&l.ID, &l.FromIssueID, &l.FromIssueUID, &l.ToIssueID, &l.ToIssueUID, &l.Type, &l.Author, &l.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Link{}, db.ErrNotFound
 	}
@@ -662,8 +634,7 @@ func scanLink(r rowScanner) (db.Link, error) {
 // CreateLinkAndEvent inserts a link, emits the matching issue.linked event,
 // and bumps the URL issue's updated_at — all in one TX. Returns the new link
 // and the event row. Typed errors (ErrLinkExists, ErrParentAlreadySet,
-// ErrSelfLink, ErrCrossProjectLink) flow up unchanged from the underlying
-// INSERT classification.
+// ErrSelfLink) flow up unchanged from the underlying INSERT classification.
 //
 // The DB-layer methods CreateLinkAndEvent and DeleteLinkAndEvent split "the
 // link's storage endpoints" (from_issue_id/to_issue_id, possibly canonicalized
@@ -689,7 +660,7 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
+	eventIssue, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
 	if err != nil {
 		return db.Link{}, db.Event{}, err
 	}
@@ -697,17 +668,27 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 	if requestedActor == "" {
 		requestedActor = p.Author
 	}
-	effectiveActor, err := d.effectiveLocalMutationActorTx(ctx, tx, p.ProjectID, requestedActor)
+	effectiveActor, err := d.effectiveLocalMutationActorTx(ctx, tx, eventIssue.ProjectID, requestedActor)
 	if err != nil {
 		return db.Link{}, db.Event{}, err
 	}
 	p.Author = effectiveActor
 	ev.Actor = effectiveActor
 
+	if p.Type == "parent" {
+		// Same in-tx cycle guard as the edit path: FromIssueID is the child,
+		// ToIssueID is the prospective parent. Rejects an insert that would
+		// close a parent loop (#1 → #2 → #1), including chains spanning
+		// projects (storage v16 links are project-independent edges).
+		if err := assertNoParentCycleTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
+			return db.Link{}, db.Event{}, err
+		}
+	}
+
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-		 VALUES(?, ?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
-		p.ProjectID, p.FromIssueID, p.ToIssueID, p.FromIssueID, p.ToIssueID, p.Type, p.Author)
+		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		 VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
+		p.FromIssueID, p.ToIssueID, p.FromIssueID, p.ToIssueID, p.Type, p.Author)
 	if err != nil {
 		classified := classifyLinkInsertError(err)
 		// Same exact-duplicate-parent disambiguation as the non-TX CreateLink:
@@ -751,7 +732,7 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 		return db.Link{}, db.Event{}, fmt.Errorf("marshal link payload: %w", err)
 	}
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
-		ProjectID:      p.ProjectID,
+		ProjectID:      eventIssue.ProjectID,
 		ProjectName:    projectName,
 		IssueID:        &ev.EventIssueID,
 		RelatedIssueID: &relatedID,
@@ -801,7 +782,7 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
+	eventIssue, projectName, err := lookupIssueForEvent(ctx, tx, ev.EventIssueID)
 	if err != nil {
 		return db.Event{}, err
 	}
@@ -835,7 +816,7 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 		return db.Event{}, fmt.Errorf("marshal unlink payload: %w", err)
 	}
 	evt, err := d.insertEventTx(ctx, tx, eventInsert{
-		ProjectID:      link.ProjectID,
+		ProjectID:      eventIssue.ProjectID,
 		ProjectName:    projectName,
 		IssueID:        &ev.EventIssueID,
 		RelatedIssueID: &relatedID,

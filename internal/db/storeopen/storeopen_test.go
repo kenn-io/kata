@@ -2,6 +2,7 @@ package storeopen_test
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/db/storeopen"
+	_ "modernc.org/sqlite"
 )
 
 // TestOpen_BarePathBootstrapsFreshSQLite opens a bare filesystem path and
@@ -213,6 +215,210 @@ func TestOpenResolvedFromStorageDSNKeepsPasswordOutOfError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not selectable")
 	assert.NotContains(t, err.Error(), "SECRET")
+}
+
+// TestOpen_V14CutoverCarriesLinks proves the v14→v16 storage cutover
+// (links.project_id removed, same-project triggers dropped) carries a link
+// row intact through the full storeopen.Open path.
+//
+// Fixture mechanism: the current-schema DB is bootstrapped by sqlitestore.Open
+// and then rebuilt in-place to the real v14 physical shape (links table WITH
+// project_id and the same-project enforcement trigger). One project with two
+// issues and one same-project link are seeded; schema_version is set to 14.
+// storeopen.Open sees version 14 < 15, routes through AutoCutover, and the
+// assertions below verify the v16 DB looks correct.
+//
+// The export step (exportLinks, sourceSchemaVersion=14) does NOT include
+// project_id in its SELECT, so the JSONL link records produced by the cutover
+// do not carry a stray project_id key. Stray-key tolerance is covered
+// separately by TestImport_LinkWithStrayProjectIDKeyIsIgnored in
+// internal/jsonl/cutover_test.go.
+func TestOpen_V14CutoverCarriesLinks(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	seedV14DBWithLink(t, path)
+
+	s, err := storeopen.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	// Schema bumped to v16 by cutover.
+	v, err := s.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, db.CurrentSchemaVersion(), v)
+
+	// Open a raw connection to assert structural invariants.
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = raw.Close() })
+
+	// links table must NOT have a project_id column.
+	cols := tableColumns(t, raw, "links")
+	assert.NotContains(t, cols, "project_id", "v16 links table must not have project_id")
+	assert.Contains(t, cols, "from_issue_uid", "from_issue_uid must survive")
+	assert.Contains(t, cols, "to_issue_uid", "to_issue_uid must survive")
+
+	// The seeded link row must have survived with correct endpoints and type.
+	var fromUID, toUID, linkType, author string
+	err = raw.QueryRowContext(ctx,
+		`SELECT from_issue_uid, to_issue_uid, type, author FROM links`).
+		Scan(&fromUID, &toUID, &linkType, &author)
+	require.NoError(t, err)
+	assert.Equal(t, v14FromIssueUID, fromUID, "from_issue_uid must survive cutover")
+	assert.Equal(t, v14ToIssueUID, toUID, "to_issue_uid must survive cutover")
+	assert.Equal(t, "blocks", linkType)
+	assert.Equal(t, "tester", author)
+
+	// Sanity: both issues must have survived.
+	var issueCount int
+	require.NoError(t, raw.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM issues`).Scan(&issueCount))
+	assert.Equal(t, 2, issueCount, "both seeded issues must survive cutover")
+}
+
+// Issue UIDs used by seedV14DBWithLink. Fixed values so assertions are
+// deterministic; Crockford base32 characters only so short_id derivation
+// accepts them.
+const (
+	v14FromIssueUID = "01HZZZZZZZZZZZZZZZZZZZZA01"
+	v14ToIssueUID   = "01HZZZZZZZZZZZZZZZZZZZZA02"
+)
+
+// seedV14DBWithLink builds a SQLite database at path whose physical shape
+// matches storage v14: links has project_id + same-project enforcement trigger,
+// and meta.schema_version = 14. One project with two issues and one same-
+// project "blocks" link is seeded.
+//
+// The fixture mechanism mirrors seedV8DBWithOrphans in internal/jsonl: bootstrap
+// the current v16 schema via sqlitestore.Open (so meta, sqlite_sequence, and all
+// unrelated tables exist in the right shape), then rebuild links in-place to the
+// v14 physical shape, seed rows, and rewrite schema_version.
+//
+// Deliberate subset: the embedded shape is the minimal v14 subset the cutover
+// read path touches. idx_links_project, idx_links_from_uid/to_uid,
+// trg_links_same_project_update, and both trg_links_uid_consistency_* triggers
+// are intentionally omitted because the export SELECT never exercises them.
+func seedV14DBWithLink(t *testing.T, path string) {
+	t.Helper()
+	ctx := context.Background()
+	t.Setenv("KATA_HOME", t.TempDir())
+	d, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+
+	// Disable FK enforcement while rebuilding the links table to v14 shape.
+	_, err = raw.ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+
+	// Drop v16 links objects (index + triggers + table).
+	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS uniq_one_parent_per_child`,
+		`DROP INDEX IF EXISTS idx_links_from`,
+		`DROP INDEX IF EXISTS idx_links_to`,
+		`DROP INDEX IF EXISTS idx_links_from_uid`,
+		`DROP INDEX IF EXISTS idx_links_to_uid`,
+		`DROP TRIGGER IF EXISTS trg_links_uid_consistency_insert`,
+		`DROP TRIGGER IF EXISTS trg_links_uid_consistency_update`,
+		`DROP TABLE links`,
+	} {
+		_, err = raw.ExecContext(ctx, stmt)
+		require.NoErrorf(t, err, "drop v16 links object: %s", stmt)
+	}
+
+	// Recreate links as v14: WITH project_id + same-project trigger.
+	_, err = raw.ExecContext(ctx, `
+		CREATE TABLE links (
+		  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		  project_id    INTEGER NOT NULL REFERENCES projects(id),
+		  from_issue_id INTEGER NOT NULL REFERENCES issues(id),
+		  to_issue_id   INTEGER NOT NULL REFERENCES issues(id),
+		  from_issue_uid TEXT NOT NULL,
+		  to_issue_uid   TEXT NOT NULL,
+		  type          TEXT NOT NULL CHECK(type IN ('parent','blocks','related')),
+		  author        TEXT NOT NULL,
+		  created_at    DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  UNIQUE(from_issue_id, to_issue_id, type),
+		  CHECK (from_issue_id <> to_issue_id),
+		  CHECK (length(from_issue_uid) = 26),
+		  CHECK (length(to_issue_uid)   = 26),
+		  CHECK (length(trim(author)) > 0),
+		  CHECK (type <> 'related' OR from_issue_id < to_issue_id)
+		)`)
+	require.NoError(t, err)
+	_, err = raw.ExecContext(ctx, `
+		CREATE TRIGGER trg_links_same_project_insert
+		BEFORE INSERT ON links
+		FOR EACH ROW BEGIN
+		  SELECT RAISE(ABORT, 'cross-project links are not allowed')
+		  WHERE (SELECT project_id FROM issues WHERE id = NEW.from_issue_id)
+		     <> (SELECT project_id FROM issues WHERE id = NEW.to_issue_id);
+		END`)
+	require.NoError(t, err)
+	_, err = raw.ExecContext(ctx, `CREATE UNIQUE INDEX uniq_one_parent_per_child ON links(from_issue_id) WHERE type = 'parent'`)
+	require.NoError(t, err)
+	_, err = raw.ExecContext(ctx, `CREATE INDEX idx_links_from ON links(from_issue_id, type)`)
+	require.NoError(t, err)
+	_, err = raw.ExecContext(ctx, `CREATE INDEX idx_links_to ON links(to_issue_id, type)`)
+	require.NoError(t, err)
+
+	// Remove the auto-created system project so our seed project can use id=1.
+	_, err = raw.ExecContext(ctx, `DELETE FROM projects WHERE name = ?`, db.SystemProjectName)
+	require.NoError(t, err)
+
+	// Seed one project and two issues.
+	const projUID = "01HZZZZZZZZZZZZZZZZZZZZZZZ"
+	_, err = raw.ExecContext(ctx,
+		`INSERT INTO projects(id, uid, name, metadata, revision) VALUES(1, ?, 'spoke-project', '{}', 1)`,
+		projUID)
+	require.NoError(t, err)
+	for _, row := range []struct {
+		id      int64
+		uid     string
+		shortID string
+	}{
+		{1, v14FromIssueUID, "za01"},
+		{2, v14ToIssueUID, "za02"},
+	} {
+		_, err = raw.ExecContext(ctx,
+			`INSERT INTO issues(id, uid, project_id, short_id, title, author, metadata, revision)
+			 VALUES(?, ?, 1, ?, ?, 'tester', '{}', 1)`,
+			row.id, row.uid, row.shortID, "issue "+row.shortID)
+		require.NoError(t, err)
+	}
+
+	// FK enforcement back on so the link INSERT validates correctly.
+	_, err = raw.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+
+	_, err = raw.ExecContext(ctx,
+		`INSERT INTO links(project_id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author)
+		 VALUES(1, 1, ?, 2, ?, 'blocks', 'tester')`,
+		v14FromIssueUID, v14ToIssueUID)
+	require.NoError(t, err)
+
+	_, err = raw.ExecContext(ctx, `UPDATE meta SET value='14' WHERE key='schema_version'`)
+	require.NoError(t, err)
+}
+
+// tableColumns returns the set of column names for table in raw.
+func tableColumns(t *testing.T, raw *sql.DB, table string) map[string]bool {
+	t.Helper()
+	rows, err := raw.Query(`SELECT name FROM pragma_table_info('` + table + `')`) //nolint:gosec // table is a test-controlled literal
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	cols := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		require.NoError(t, rows.Scan(&name))
+		cols[name] = true
+	}
+	require.NoError(t, rows.Err())
+	return cols
 }
 
 func TestDatabaseOpenTerminologyAvoidsMigrationLanguage(t *testing.T) {

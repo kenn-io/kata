@@ -17,7 +17,7 @@ func TestCreateLink_RoundTrips(t *testing.T) {
 	a := makeIssue(t, ctx, d, p.ID, "child", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 
-	link := makeLink(ctx, t, d, p.ID, a.ID, b.ID, "parent")
+	link := makeLink(ctx, t, d, a.ID, b.ID, "parent")
 	assert.Greater(t, link.ID, int64(0))
 	assert.Equal(t, "parent", link.Type)
 	assert.Equal(t, a.ID, link.FromIssueID)
@@ -38,13 +38,13 @@ func TestLinksRejectMismatchedUIDCache(t *testing.T) {
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
 
 	_, err := d.ExecContext(ctx,
-		`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-		 VALUES(?, ?, ?, ?, ?, 'blocks', 'tester')`,
-		p.ID, a.ID, b.ID, b.UID, b.UID)
+		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		 VALUES(?, ?, ?, ?, 'blocks', 'tester')`,
+		a.ID, b.ID, b.UID, b.UID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "from_issue_uid does not match from_issue_id")
 
-	link := makeLink(ctx, t, d, p.ID, a.ID, b.ID, "blocks")
+	link := makeLink(ctx, t, d, a.ID, b.ID, "blocks")
 	_, err = d.ExecContext(ctx,
 		`UPDATE links SET to_issue_uid = ? WHERE id = ?`, a.UID, link.ID)
 	require.Error(t, err)
@@ -58,9 +58,9 @@ func TestCreateLink_DuplicateIsErrLinkExists(t *testing.T) {
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
 
-	makeLink(ctx, t, d, p.ID, a.ID, b.ID, "blocks")
+	makeLink(ctx, t, d, a.ID, b.ID, "blocks")
 	_, err := d.CreateLink(ctx, db.CreateLinkParams{
-		ProjectID: p.ID, FromIssueID: a.ID, ToIssueID: b.ID, Type: "blocks", Author: "tester",
+		FromIssueID: a.ID, ToIssueID: b.ID, Type: "blocks", Author: "tester",
 	})
 	assert.True(t, errors.Is(err, db.ErrLinkExists), "expected ErrLinkExists, got %v", err)
 }
@@ -73,9 +73,9 @@ func TestCreateLink_SecondParentIsErrParentAlreadySet(t *testing.T) {
 	p1 := makeIssue(t, ctx, d, p.ID, "p1", "tester")
 	p2 := makeIssue(t, ctx, d, p.ID, "p2", "tester")
 
-	makeLink(ctx, t, d, p.ID, child.ID, p1.ID, "parent")
+	makeLink(ctx, t, d, child.ID, p1.ID, "parent")
 	_, err := d.CreateLink(ctx, db.CreateLinkParams{
-		ProjectID: p.ID, FromIssueID: child.ID, ToIssueID: p2.ID, Type: "parent", Author: "tester",
+		FromIssueID: child.ID, ToIssueID: p2.ID, Type: "parent", Author: "tester",
 	})
 	assert.True(t, errors.Is(err, db.ErrParentAlreadySet),
 		"expected ErrParentAlreadySet, got %v", err)
@@ -87,31 +87,39 @@ func TestCreateLink_ExactDuplicateParentIsErrLinkExists(t *testing.T) {
 	parent := makeIssue(t, ctx, d, p.ID, "parent", "tester")
 
 	// First insert succeeds.
-	makeLink(ctx, t, d, p.ID, child.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, child.ID, parent.ID, "parent")
 
 	// Re-inserting the exact same triple is "already linked" (idempotent
 	// no-op), not "different parent set". Must be ErrLinkExists.
 	_, err := d.CreateLink(ctx, db.CreateLinkParams{
-		ProjectID: p.ID, FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester",
+		FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "tester",
 	})
 	assert.True(t, errors.Is(err, db.ErrLinkExists),
 		"exact duplicate parent must be ErrLinkExists, got %v", err)
 }
 
-func TestCreateLink_CrossProjectIsErrCrossProject(t *testing.T) {
+// TestCreateLink_CrossProject pins storage v16: links are project-independent
+// edges, so endpoints in different projects are legal at the db layer.
+func TestCreateLink_CrossProject(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
-	p1 := createProject(ctx, t, d, "p1")
-	p2 := createProject(ctx, t, d, "p2")
-	a := makeIssue(t, ctx, d, p1.ID, "a", "tester")
-	b := makeIssue(t, ctx, d, p2.ID, "b", "tester")
 
-	_, err := d.CreateLink(ctx, db.CreateLinkParams{
-		ProjectID: p1.ID, FromIssueID: a.ID, ToIssueID: b.ID, Type: "blocks", Author: "tester",
+	pa := createProject(ctx, t, d, "alpha")
+	pb := createProject(ctx, t, d, "beta")
+	ia := makeIssue(t, ctx, d, pa.ID, "issue in alpha", "tester")
+	ib := makeIssue(t, ctx, d, pb.ID, "issue in beta", "tester")
+
+	link, err := d.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: ia.ID,
+		ToIssueID:   ib.ID,
+		Type:        "blocks",
+		Author:      "tester",
 	})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, db.ErrCrossProjectLink),
-		"expected ErrCrossProjectLink, got %v", err)
+	require.NoError(t, err, "cross-project link must be legal at the store level")
+	assert.Equal(t, ia.ID, link.FromIssueID)
+	assert.Equal(t, ib.ID, link.ToIssueID)
+	assert.Equal(t, ia.UID, link.FromIssueUID, "uid denormalization intact")
+	assert.Equal(t, ib.UID, link.ToIssueUID)
 }
 
 func TestCreateLink_SelfLinkIsError(t *testing.T) {
@@ -119,7 +127,7 @@ func TestCreateLink_SelfLinkIsError(t *testing.T) {
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 
 	_, err := d.CreateLink(ctx, db.CreateLinkParams{
-		ProjectID: p.ID, FromIssueID: a.ID, ToIssueID: a.ID, Type: "related", Author: "tester",
+		FromIssueID: a.ID, ToIssueID: a.ID, Type: "related", Author: "tester",
 	})
 	assert.True(t, errors.Is(err, db.ErrSelfLink),
 		"expected ErrSelfLink, got %v", err)
@@ -129,7 +137,7 @@ func TestLinkByEndpoints_FindsExisting(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
-	created := makeLink(ctx, t, d, p.ID, a.ID, b.ID, "related")
+	created := makeLink(ctx, t, d, a.ID, b.ID, "related")
 
 	got, err := d.LinkByEndpoints(ctx, a.ID, b.ID, "related")
 	require.NoError(t, err)
@@ -145,8 +153,8 @@ func TestLinksByIssue_ReturnsBothDirections(t *testing.T) {
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
 	c := makeIssue(t, ctx, d, p.ID, "c", "tester")
 	// a → blocks → b ; c → parent → a
-	makeLink(ctx, t, d, p.ID, a.ID, b.ID, "blocks")
-	makeLink(ctx, t, d, p.ID, c.ID, a.ID, "parent")
+	makeLink(ctx, t, d, a.ID, b.ID, "blocks")
+	makeLink(ctx, t, d, c.ID, a.ID, "parent")
 
 	got, err := d.LinksByIssue(ctx, a.ID)
 	require.NoError(t, err)
@@ -162,28 +170,28 @@ func TestParentOf_ReturnsErrNotFoundWhenAbsent(t *testing.T) {
 }
 
 func TestParentNumbersByIssues_EmptyInput(t *testing.T) {
-	d, ctx, p := setupTestProject(t)
+	d, ctx, _ := setupTestProject(t)
 
-	got, err := d.ParentNumbersByIssues(ctx, p.ID, nil)
+	got, err := d.ParentNumbersByIssues(ctx, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
 
-	got, err = d.ParentNumbersByIssues(ctx, p.ID, []int64{})
+	got, err = d.ParentNumbersByIssues(ctx, []int64{})
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
 }
 
 func TestChildCountsByParents_EmptyInput(t *testing.T) {
-	d, ctx, p := setupTestProject(t)
+	d, ctx, _ := setupTestProject(t)
 
-	got, err := d.ChildCountsByParents(ctx, p.ID, nil)
+	got, err := d.ChildCountsByParents(ctx, nil)
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
 
-	got, err = d.ChildCountsByParents(ctx, p.ID, []int64{})
+	got, err = d.ChildCountsByParents(ctx, []int64{})
 	require.NoError(t, err)
 	assert.NotNil(t, got)
 	assert.Empty(t, got)
@@ -196,33 +204,14 @@ func TestParentNumbersByIssues_ReturnsImmediateParents(t *testing.T) {
 	child2 := makeIssue(t, ctx, d, p.ID, "child 2", "tester")
 	unrelated := makeIssue(t, ctx, d, p.ID, "unrelated", "tester")
 
-	makeLink(ctx, t, d, p.ID, child1.ID, parent.ID, "parent")
-	makeLink(ctx, t, d, p.ID, child2.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, child1.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, child2.ID, parent.ID, "parent")
 
-	got, err := d.ParentNumbersByIssues(ctx, p.ID, []int64{child1.ID, child2.ID, unrelated.ID})
+	got, err := d.ParentNumbersByIssues(ctx, []int64{child1.ID, child2.ID, unrelated.ID})
 	require.NoError(t, err)
 	assert.Equal(t, parent.ID, got[child1.ID])
 	assert.Equal(t, parent.ID, got[child2.ID])
 	assert.NotContains(t, got, unrelated.ID)
-}
-
-func TestParentNumbersByIssues_ConstrainsProject(t *testing.T) {
-	d := openTestDB(t)
-	ctx := context.Background()
-	pa := createProject(ctx, t, d, "a")
-	pb := createProject(ctx, t, d, "b")
-	parentA := makeIssue(t, ctx, d, pa.ID, "parent a", "tester")
-	childA := makeIssue(t, ctx, d, pa.ID, "child a", "tester")
-	parentB := makeIssue(t, ctx, d, pb.ID, "parent b", "tester")
-	childB := makeIssue(t, ctx, d, pb.ID, "child b", "tester")
-
-	makeLink(ctx, t, d, pa.ID, childA.ID, parentA.ID, "parent")
-	makeLink(ctx, t, d, pb.ID, childB.ID, parentB.ID, "parent")
-
-	got, err := d.ParentNumbersByIssues(ctx, pa.ID, []int64{childA.ID, childB.ID})
-	require.NoError(t, err)
-	assert.Equal(t, parentA.ID, got[childA.ID])
-	assert.NotContains(t, got, childB.ID)
 }
 
 func TestChildCountsByParents_ReturnsOpenAndTotalDirectChildren(t *testing.T) {
@@ -232,12 +221,12 @@ func TestChildCountsByParents_ReturnsOpenAndTotalDirectChildren(t *testing.T) {
 	child2 := makeIssue(t, ctx, d, p.ID, "child 2", "tester")
 	child3 := makeIssue(t, ctx, d, p.ID, "child 3", "tester")
 	for _, child := range []db.Issue{child1, child2, child3} {
-		makeLink(ctx, t, d, p.ID, child.ID, parent.ID, "parent")
+		makeLink(ctx, t, d, child.ID, parent.ID, "parent")
 	}
 	_, _, _, err := d.CloseIssue(ctx, child2.ID, "done", "tester", "", nil)
 	require.NoError(t, err)
 
-	got, err := d.ChildCountsByParents(ctx, p.ID, []int64{parent.ID})
+	got, err := d.ChildCountsByParents(ctx, []int64{parent.ID})
 	require.NoError(t, err)
 	assert.Equal(t, db.ChildCounts{Open: 2, Total: 3}, got[parent.ID])
 }
@@ -248,11 +237,11 @@ func TestChildrenOfIssue_ReturnsDirectChildrenOnly(t *testing.T) {
 	child1 := makeIssue(t, ctx, d, p.ID, "child 1", "tester")
 	child2 := makeIssue(t, ctx, d, p.ID, "child 2", "tester")
 	grandchild := makeIssue(t, ctx, d, p.ID, "grandchild", "tester")
-	makeLink(ctx, t, d, p.ID, child1.ID, parent.ID, "parent")
-	makeLink(ctx, t, d, p.ID, child2.ID, parent.ID, "parent")
-	makeLink(ctx, t, d, p.ID, grandchild.ID, child1.ID, "parent")
+	makeLink(ctx, t, d, child1.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, child2.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, grandchild.ID, child1.ID, "parent")
 
-	got, err := d.ChildrenOfIssue(ctx, p.ID, parent.ID)
+	got, err := d.ChildrenOfIssue(ctx, parent.ID)
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.Equal(t, child2.ID, got[0].ID)
@@ -269,9 +258,9 @@ func TestChildCountsByParents_ChunksLargeInputs(t *testing.T) {
 		parentIDs = append(parentIDs, parent.ID)
 	}
 	child := makeIssue(t, ctx, d, p.ID, "child", "tester")
-	makeLink(ctx, t, d, p.ID, child.ID, parentIDs[parentCount-1], "parent")
+	makeLink(ctx, t, d, child.ID, parentIDs[parentCount-1], "parent")
 
-	got, err := d.ChildCountsByParents(ctx, p.ID, parentIDs)
+	got, err := d.ChildCountsByParents(ctx, parentIDs)
 	require.NoError(t, err, "large parent batches must be chunked under SQLite parameter limits")
 	assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parentIDs[parentCount-1]])
 	assert.NotContains(t, got, parentIDs[0])
@@ -281,7 +270,7 @@ func TestDeleteLinkByID_RemovesRow(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
-	link := makeLink(ctx, t, d, p.ID, a.ID, b.ID, "blocks")
+	link := makeLink(ctx, t, d, a.ID, b.ID, "blocks")
 
 	require.NoError(t, d.DeleteLinkByID(ctx, link.ID))
 	_, err := d.LinkByID(ctx, link.ID)
@@ -291,4 +280,128 @@ func TestDeleteLinkByID_RemovesRow(t *testing.T) {
 	// no-op or 404).
 	err = d.DeleteLinkByID(ctx, link.ID)
 	assert.True(t, errors.Is(err, db.ErrNotFound))
+}
+
+// TestRelationshipQueries_CrossProjectPeersVisible pins that every read query
+// in queries_links.go traverses edges regardless of endpoint project: storage
+// v16 drops project_id from links entirely, so no filter can re-scope them.
+//
+// Seed layout:
+//   - project alpha: child, relA
+//   - project beta:  parent, blocked, relB
+//   - child  --parent--> parent   (cross-project)
+//   - child  --blocks--> blocked  (cross-project)
+//   - relA   --related-- relB     (cross-project; relA.ID < relB.ID guaranteed
+//     by creation order)
+func TestRelationshipQueries_CrossProjectPeersVisible(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+
+	alpha := createProject(ctx, t, d, "alpha")
+	beta := createProject(ctx, t, d, "beta")
+
+	// Create in order so relA.ID < relB.ID (SQLite auto-increment).
+	child := makeIssue(t, ctx, d, alpha.ID, "child", "tester")
+	relA := makeIssue(t, ctx, d, alpha.ID, "relA", "tester")
+	parent := makeIssue(t, ctx, d, beta.ID, "parent", "tester")
+	blocked := makeIssue(t, ctx, d, beta.ID, "blocked", "tester")
+	relB := makeIssue(t, ctx, d, beta.ID, "relB", "tester")
+
+	makeLink(ctx, t, d, child.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, child.ID, blocked.ID, "blocks")
+	// related canonical ordering: from_issue_id < to_issue_id.
+	if relA.ID < relB.ID {
+		makeLink(ctx, t, d, relA.ID, relB.ID, "related")
+	} else {
+		makeLink(ctx, t, d, relB.ID, relA.ID, "related")
+	}
+
+	t.Run("ParentShortIDsByIssues", func(t *testing.T) {
+		got, err := d.ParentShortIDsByIssues(ctx, []int64{child.ID})
+		require.NoError(t, err)
+		assert.Equal(t, parent.ShortID, got[child.ID],
+			"child's parent short_id must resolve across project boundary")
+	})
+
+	t.Run("ParentNumbersByIssues", func(t *testing.T) {
+		got, err := d.ParentNumbersByIssues(ctx, []int64{child.ID})
+		require.NoError(t, err)
+		assert.Equal(t, parent.ID, got[child.ID],
+			"child's parent id must resolve across project boundary")
+	})
+
+	t.Run("BlockNumbersByIssues", func(t *testing.T) {
+		got, err := d.BlockNumbersByIssues(ctx, []int64{child.ID})
+		require.NoError(t, err)
+		require.Contains(t, got, child.ID,
+			"blocker must have an entry in the map")
+		assert.Equal(t, []int64{blocked.ID}, got[child.ID],
+			"blocked issue id must be visible from the blocker across project boundary")
+	})
+
+	t.Run("BlockedByNumbersByIssues", func(t *testing.T) {
+		got, err := d.BlockedByNumbersByIssues(ctx, []int64{blocked.ID})
+		require.NoError(t, err)
+		require.Contains(t, got, blocked.ID,
+			"blocked issue must have an entry in the map")
+		assert.Equal(t, []int64{child.ID}, got[blocked.ID],
+			"blocker id must be visible from the blocked issue across project boundary")
+	})
+
+	t.Run("RelatedNumbersByIssues_fromSide", func(t *testing.T) {
+		got, err := d.RelatedNumbersByIssues(ctx, []int64{relA.ID})
+		require.NoError(t, err)
+		require.Contains(t, got, relA.ID,
+			"relA must appear in the map")
+		assert.Equal(t, []int64{relB.ID}, got[relA.ID],
+			"relB id must be visible from relA across project boundary")
+	})
+
+	t.Run("RelatedNumbersByIssues_toSide", func(t *testing.T) {
+		got, err := d.RelatedNumbersByIssues(ctx, []int64{relB.ID})
+		require.NoError(t, err)
+		require.Contains(t, got, relB.ID,
+			"relB must appear in the map")
+		assert.Equal(t, []int64{relA.ID}, got[relB.ID],
+			"relA id must be visible from relB across project boundary (UNION handles canonical direction)")
+	})
+
+	t.Run("ChildCountsByParents", func(t *testing.T) {
+		got, err := d.ChildCountsByParents(ctx, []int64{parent.ID})
+		require.NoError(t, err)
+		assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parent.ID],
+			"alpha-child must be counted under beta-parent across project boundary")
+	})
+
+	t.Run("OpenChildrenOf", func(t *testing.T) {
+		children, total, err := d.OpenChildrenOf(ctx, parent.ID, 10)
+		require.NoError(t, err)
+		assert.Equal(t, 1, total,
+			"open-children count must include alpha-child across project boundary")
+		require.Len(t, children, 1)
+		assert.Equal(t, child.ID, children[0].ID,
+			"returned child must be the alpha-child")
+	})
+
+	t.Run("ChildrenOfIssue", func(t *testing.T) {
+		children, err := d.ChildrenOfIssue(ctx, parent.ID)
+		require.NoError(t, err)
+		require.Len(t, children, 1)
+		assert.Equal(t, child.ID, children[0].ID,
+			"ChildrenOfIssue must return alpha-child for beta-parent across project boundary")
+	})
+
+	t.Run("LinksByIssue", func(t *testing.T) {
+		links, err := d.LinksByIssue(ctx, child.ID)
+		require.NoError(t, err)
+		// child has two links: --parent--> beta-parent and --blocks--> beta-blocked.
+		require.Len(t, links, 2,
+			"LinksByIssue must return both cross-project edges for alpha-child")
+		seen := map[string]bool{}
+		for _, l := range links {
+			seen[l.Type] = true
+		}
+		assert.True(t, seen["parent"], "parent edge must appear")
+		assert.True(t, seen["blocks"], "blocks edge must appear")
+	})
 }

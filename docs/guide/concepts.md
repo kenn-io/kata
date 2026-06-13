@@ -70,10 +70,11 @@ irreversibly removed except for tombstones needed to preserve external refs.
 
 ## Relationships
 
-Relationships are normalized links between issues in the same project.
-Links cannot span projects: relationship flags only accept refs that resolve
-inside the issue's own project (a foreign `<project>#<short_id>` or ULID is
-rejected), and `kata move` refuses to move an issue that still has links.
+Relationships are normalized links between issues in the same daemon database;
+links may span projects. Relationship flags accept `short_id` (same project),
+`project#short_id`, or a full ULID — foreign refs are forwarded to the daemon,
+which resolves them in the named project. Adding a link whose target is in an
+archived project is rejected; unarchive the project to add links to it.
 
 | Relationship | Cardinality | Meaning |
 | --- | --- | --- |

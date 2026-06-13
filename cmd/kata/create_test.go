@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/testfix"
 )
 
@@ -330,6 +331,52 @@ func TestResolveProjectID_ExplicitProjectFlagSendsNameOnly(t *testing.T) {
 	assert.False(t, hasAlias, "--project must send name only — no alias-first repair")
 	_, hasStartPath := got["start_path"]
 	assert.False(t, hasStartPath)
+}
+
+// TestCreate_CrossProjectLinkViaQualifiedRef pins the create-path echo and
+// show rendering for cross-project link flags. A `kata create` in hub-project
+// with `--blocks spoke-project#<sid>` must:
+//
+//  1. Succeed (exit 0).
+//  2. Echo the qualified ref in the create one-liner — the synthetic echo peer
+//     is fabricated by stringSliceToPeers (empty Project, ShortID =
+//     "spoke-project#<sid>"), so peerRefForDisplay falls back to ShortID and
+//     renders the qualified string verbatim.
+//  3. `kata show` the new issue and confirm the foreign peer renders qualified
+//     from wire data (daemon populates Project/QualifiedID on the response).
+func TestCreate_CrossProjectLinkViaQualifiedRef(t *testing.T) {
+	env := testenv.New(t)
+	hubDir := initBoundWorkspace(t, env.URL, "https://github.com/example/hub-project.git")
+	spokeDir := initBoundWorkspace(t, env.URL, "https://github.com/example/spoke-project.git")
+	spokePID := resolvePIDViaHTTP(t, env.URL, spokeDir)
+
+	foreignPeer := createIssue(t, env, spokePID, "foreign-peer")
+	qualifiedRef := "spoke-project#" + foreignPeer
+
+	// Step 1+2: create in hub-project with --blocks spoke-project#<sid>.
+	// The create echo one-liner must contain the qualified ref.
+	createOut := runCLI(t, env, hubDir, "create", "hub-subject", "--blocks", qualifiedRef)
+	assert.Contains(t, createOut, qualifiedRef,
+		"create one-liner must render foreign peer qualified (echo path):\n%s", createOut)
+
+	// Decode the new issue's short_id from the quiet create response.
+	subjectShortID := runCLI(t, env, hubDir, "--quiet", "create", "hub-subject2", "--blocks", qualifiedRef)
+	require.NotEmpty(t, subjectShortID)
+
+	// Step 3: kata show must render the foreign peer qualified from wire data.
+	showOut := runCLI(t, env, hubDir, "show", subjectShortID)
+	assert.Contains(t, showOut, qualifiedRef,
+		"show output must render foreign peer qualified (wire path):\n%s", showOut)
+
+	// Confirm the link was actually persisted: spoke issue must show blocks entry.
+	spokeFetched := fetchIssueViaHTTP(t, env, spokePID, foreignPeer)
+	var sawBlockedBy bool
+	for _, l := range spokeFetched.Links {
+		if l.Type == "blocks" && l.To.ShortID == foreignPeer {
+			sawBlockedBy = true
+		}
+	}
+	assert.True(t, sawBlockedBy, "spoke issue must have a blocks link targeting it from hub")
 }
 
 // TestResolveProjectID_RewritesStaleKataToml mirrors what the daemon

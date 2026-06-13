@@ -273,6 +273,131 @@ func TestSiblingThrottle_FourthCloseUnderSameParentRefused(t *testing.T) {
 	assert.Contains(t, body, refForIssue(t, env, parent))
 }
 
+// Parent links may span projects, so the sibling cohort can too. The
+// throttle counts closes of all children under the shared parent regardless
+// of which project each child lives in — distributing sibling closes across
+// projects must not reset the counter.
+func TestSiblingThrottle_CountsCrossProjectSiblings(t *testing.T) {
+	env := testenv.New(t)
+	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/example/hub-project.git")
+	pidB := mkProject(t, env, "github.com/example/spoke-project", "spoke-project")
+	parent := createIssueViaHTTP(t, env, pidA, "parent issue")
+	parentIssue, err := env.DB.IssueByID(context.Background(), parent)
+	require.NoError(t, err)
+
+	spokeRefs := make([]string, 0, 3)
+	for i := 0; i < 3; i++ {
+		c := createIssueViaHTTP(t, env, pidB, fmt.Sprintf("spoke child %d", i+1))
+		spokeRefs = append(spokeRefs, "spoke-project#"+refForIssue(t, env, c))
+		resp, _ := postLinkRaw(t, env, pidB, c, map[string]any{
+			"actor": "agent-a", "type": "parent", "to_ref": parentIssue.UID})
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		closeResp, bs := closeIssueWithEvidence(t, env, pidB, c, "agent-a",
+			"done",
+			fmt.Sprintf("Implementation of spoke child %d complete and tested.", i+1),
+			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+		require.Equalf(t, http.StatusOK, closeResp.StatusCode,
+			"close spoke child %d: %s", i+1, string(bs))
+	}
+
+	hubChild := createIssueViaHTTP(t, env, pidA, "hub child")
+	postLinkAs(t, env, pidA, hubChild, "agent-a", "parent", parent)
+	resp, bs := closeIssueWithEvidence(t, env, pidA, hubChild, "agent-a",
+		"done",
+		"Implementation of hub child complete and tested.",
+		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusTooManyRequests, "sibling_throttle")
+
+	// Short_ids are only unique within a project, so the refusal text and
+	// the close.throttled audit payload must qualify foreign cohort
+	// members; a bare spoke sid could point a reviewer at the wrong hub
+	// issue. The parent shares the refused close's project and stays bare.
+	body := string(bs)
+	for _, ref := range spokeRefs {
+		assert.Contains(t, body, ref,
+			"refusal must reference foreign siblings qualified")
+	}
+	assert.Contains(t, body, refForIssue(t, env, parent))
+
+	events := fetchEvents(t, env, pidA)
+	var throttled *throttledEventRecord
+	for i := range events {
+		if events[i].Type == "close.throttled" {
+			throttled = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, throttled, "expected a close.throttled event")
+	var payload struct {
+		Parent string   `json:"parent"`
+		Cohort []string `json:"cohort"`
+	}
+	require.NoError(t, json.Unmarshal(throttled.Payload, &payload),
+		"payload: %s", string(throttled.Payload))
+	assert.Equal(t, refForIssue(t, env, parent), payload.Parent,
+		"same-project parent stays bare")
+	assert.ElementsMatch(t, spokeRefs, payload.Cohort,
+		"foreign cohort members must be qualified in the audit payload")
+}
+
+// Same cross-project cohort rule for the repeated-message guard: an
+// identical close message on a sibling in another project is still a
+// duplicate.
+func TestRepeatedMessageGuard_CountsCrossProjectSiblings(t *testing.T) {
+	env := testenv.New(t)
+	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/example/hub-project.git")
+	pidB := mkProject(t, env, "github.com/example/spoke-project", "spoke-project")
+	parent := createIssueViaHTTP(t, env, pidA, "parent issue")
+	parentIssue, err := env.DB.IssueByID(context.Background(), parent)
+	require.NoError(t, err)
+
+	const message = "Verified fix across the shared component and tests pass."
+
+	spokeChild := createIssueViaHTTP(t, env, pidB, "spoke child")
+	resp, _ := postLinkRaw(t, env, pidB, spokeChild, map[string]any{
+		"actor": "agent-a", "type": "parent", "to_ref": parentIssue.UID})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	closeResp, bs := closeIssueWithEvidence(t, env, pidB, spokeChild, "agent-a",
+		"done", message,
+		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+	require.Equalf(t, http.StatusOK, closeResp.StatusCode, "close spoke child: %s", string(bs))
+
+	hubChild := createIssueViaHTTP(t, env, pidA, "hub child")
+	postLinkAs(t, env, pidA, hubChild, "agent-a", "parent", parent)
+	closeResp, bs = closeIssueWithEvidence(t, env, pidA, hubChild, "agent-a",
+		"done", message,
+		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+	assertAPIError(t, closeResp.StatusCode, bs, http.StatusTooManyRequests, "duplicate_message")
+
+	// The prior close lives in another project: the refusal text and the
+	// close.throttled payload must reference it qualified, not by a bare
+	// short_id that is only unique within the hub project.
+	spokeRef := "spoke-project#" + refForIssue(t, env, spokeChild)
+	assert.Contains(t, string(bs), spokeRef,
+		"refusal must reference the prior foreign close qualified")
+
+	events := fetchEvents(t, env, pidA)
+	var throttled *throttledEventRecord
+	for i := range events {
+		if events[i].Type == "close.throttled" {
+			throttled = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, throttled, "expected a close.throttled event")
+	var payload struct {
+		Parent string  `json:"parent"`
+		Prior  *string `json:"prior"`
+	}
+	require.NoError(t, json.Unmarshal(throttled.Payload, &payload),
+		"payload: %s", string(throttled.Payload))
+	assert.Equal(t, refForIssue(t, env, parent), payload.Parent,
+		"same-project parent stays bare")
+	require.NotNil(t, payload.Prior, "duplicate-message path must set prior")
+	assert.Equal(t, spokeRef, *payload.Prior,
+		"foreign prior must be qualified in the audit payload")
+}
+
 func TestSiblingThrottle_AllowsFourthCloseWhenOldestSiblingIsOutsideDefaultWindow(t *testing.T) {
 	env := testenv.New(t)
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")

@@ -718,6 +718,56 @@ func TestAutoCutoverV9SchemaDB(t *testing.T) {
 	assert.Equal(t, 1, eventCount, "v9 event must survive cutover")
 }
 
+// --- v14 → v16 ---
+
+// TestImport_LinkWithStrayProjectIDKeyIsIgnored covers the stray-key
+// tolerance that the import-replay decoder inherits from json.Unmarshal.
+//
+// In storage v14 the links table had a project_id column; v16 dropped it.
+// The export path (exportLinks, sourceSchemaVersion ≥ 2) does NOT select
+// project_id, so a real v14 cutover produces link JSONL without that key.
+// However, a manually crafted or externally generated v14 envelope might carry
+// the stray key. db.LinkExport has no ProjectID field, so json.Unmarshal into
+// it silently discards "project_id"; importLink then INSERTs the row without
+// any such column, which succeeds on the v16 schema that has none.
+//
+// This test exercises the actual decoding path (toImportRecord → decodeData →
+// json.Unmarshal into db.LinkExport → importLink INSERT) end-to-end with a
+// hand-crafted JSONL line that contains "project_id":1.
+func TestImport_LinkWithStrayProjectIDKeyIsIgnored(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+
+	// Minimal envelope: meta export_version + one project + two issues + one
+	// link record whose data carries a stray "project_id":1 key. The export
+	// version is set to the current schema version so no cutover reshaping runs;
+	// this isolates the json.Unmarshal tolerance path alone.
+	// The project and issue lines are scaffolding for FK validity; the assertion
+	// target is solely the link record's stray "project_id" key.
+	const (
+		projUID   = "01HZZZZZZZZZZZZZZZZZZZZZZZ"
+		fromUID   = "01HZZZZZZZZZZZZZZZZZZZZA01"
+		toUID     = "01HZZZZZZZZZZZZZZZZZZZZA02"
+		exportVer = "15"
+	)
+	require.NoError(t, importJSONL(ctx, target,
+		`{"kind":"meta","data":{"key":"export_version","value":"`+exportVer+`"}}`,
+		`{"kind":"meta","data":{"key":"instance_uid","value":"01HZZZZZZZZZZZZZZZZZZZZZ20"}}`,
+		`{"kind":"project","data":{"id":1,"uid":"`+projUID+`","name":"hub-project","metadata":{},"revision":1,"created_at":"2026-01-01T00:00:00.000Z"}}`,
+		`{"kind":"issue","data":{"id":1,"uid":"`+fromUID+`","project_id":1,"short_id":"za01","title":"from issue","body":"","status":"open","closed_reason":null,"owner":null,"author":"tester","created_at":"2026-01-01T00:00:01.000Z","updated_at":"2026-01-01T00:00:01.000Z","closed_at":null,"deleted_at":null,"metadata":{},"revision":1}}`,
+		`{"kind":"issue","data":{"id":2,"uid":"`+toUID+`","project_id":1,"short_id":"za02","title":"to issue","body":"","status":"open","closed_reason":null,"owner":null,"author":"tester","created_at":"2026-01-01T00:00:02.000Z","updated_at":"2026-01-01T00:00:02.000Z","closed_at":null,"deleted_at":null,"metadata":{},"revision":1}}`,
+		// Link record with stray "project_id":1 — the tolerance under test.
+		`{"kind":"link","data":{"id":1,"from_issue_id":1,"from_issue_uid":"`+fromUID+`","to_issue_id":2,"to_issue_uid":"`+toUID+`","type":"blocks","author":"tester","created_at":"2026-01-01T00:00:03.000Z","project_id":1}}`,
+	))
+
+	var fromGot, toGot, typeGot string
+	require.NoError(t, target.QueryRowContext(ctx,
+		`SELECT from_issue_uid, to_issue_uid, type FROM links`).Scan(&fromGot, &toGot, &typeGot))
+	assert.Equal(t, fromUID, fromGot, "from_issue_uid must survive despite stray project_id key")
+	assert.Equal(t, toUID, toGot, "to_issue_uid must survive despite stray project_id key")
+	assert.Equal(t, "blocks", typeGot)
+}
+
 func trimCurrentDBToV11Shape(t *testing.T, path string) {
 	t.Helper()
 	ctx := context.Background()

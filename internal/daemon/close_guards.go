@@ -38,9 +38,9 @@ const repeatedMessageWindow = 30 * time.Minute
 // issueShortID is the user-facing ref quoted in the "kata show ... --json"
 // hint so the suggested command is something the user can actually run.
 func CheckParentCloseCompleteness(
-	ctx context.Context, d db.Storage, projectID, issueID int64, issueShortID string,
+	ctx context.Context, d db.Storage, issueID int64, issueShortID string,
 ) error {
-	children, total, err := d.OpenChildrenOf(ctx, projectID, issueID, openChildrenSampleLimit)
+	children, total, err := d.OpenChildrenOf(ctx, issueID, openChildrenSampleLimit)
 	if err != nil {
 		return err
 	}
@@ -62,12 +62,65 @@ func CheckParentCloseCompleteness(
 		total, strings.Join(lines, "\n"), suffix)
 }
 
+// guardRefRenderer renders sibling/parent/prior refs for throttle refusal
+// messages and close.throttled audit payloads. Sibling cohorts are defined
+// by the shared parent edge and may span projects, while a bare short_id is
+// only unique within one project — so peers outside the closing issue's
+// project render qualified ("project#short_id"). Lookup errors soft-fail to
+// the bare short_id already hydrated on the event: the guards never block
+// or distort a close over a render-path read error.
+type guardRefRenderer struct {
+	d          db.Storage
+	subjectPID int64
+	names      map[int64]string
+}
+
+func newGuardRefRenderer(d db.Storage, subjectProjectID int64) *guardRefRenderer {
+	return &guardRefRenderer{d: d, subjectPID: subjectProjectID, names: map[int64]string{}}
+}
+
+// issueRef renders iss bare when it shares the subject's project and
+// qualified otherwise.
+func (r *guardRefRenderer) issueRef(ctx context.Context, iss db.Issue) string {
+	if iss.ProjectID == r.subjectPID {
+		return iss.ShortID
+	}
+	name, ok := r.names[iss.ProjectID]
+	if !ok {
+		project, err := r.d.ProjectByID(ctx, iss.ProjectID)
+		if err != nil {
+			return iss.ShortID
+		}
+		name = project.Name
+		r.names[iss.ProjectID] = name
+	}
+	return qualifiedID(name, iss.ShortID)
+}
+
+// eventIssueRef renders the issue a close event points at. The event's
+// hydrated short_id is the bare fallback when the issue row can no longer
+// be loaded (purged peer); ok=false means the event carries no issue label
+// at all and the caller should skip the entry.
+func (r *guardRefRenderer) eventIssueRef(ctx context.Context, ev db.Event) (string, bool) {
+	if ev.IssueID != nil {
+		if iss, err := r.d.IssueByID(ctx, *ev.IssueID); err == nil {
+			return r.issueRef(ctx, iss), true
+		}
+	}
+	if ev.IssueShortID != nil {
+		return *ev.IssueShortID, true
+	}
+	return "", false
+}
+
 // CheckSiblingCloseThrottle implements spec §3.9. When the close is allowed,
 // it returns refusal=nil and the other fields are zero. When refused, it
-// returns the parent issue number, the recent sibling-close cohort (issue
-// numbers ordered newest-first), and a descriptive error; the handler maps
-// the refusal to a 429 sibling_throttle and feeds parentNumber+cohort into
-// the close.throttled audit event.
+// returns the parent's display ref, the recent sibling-close cohort (display
+// refs ordered newest-first), and a descriptive error; the handler maps
+// the refusal to a 429 sibling_throttle and feeds parentRef+cohort into
+// the close.throttled audit event. Cohorts span projects (the parent edge,
+// not the project, defines siblinghood), so refs are qualified
+// ("project#short_id") for peers outside the closing issue's project.
 //
 // Issues with no parent link are not throttled — the rule depends on a shared
 // parent. Database lookup errors soft-fail (refusal=nil) so a broken read path
@@ -89,16 +142,16 @@ func CheckParentCloseCompleteness(
 // the practical bound.
 func CheckSiblingCloseThrottle(
 	ctx context.Context, d db.Storage,
-	projectID, issueID int64, actor string, now time.Time,
-) (parentShortID string, cohort []string, refusal error) {
-	parentLink, err := d.ParentOf(ctx, issueID)
+	issue db.Issue, actor string, now time.Time,
+) (parentRef string, cohort []string, refusal error) {
+	parentLink, err := d.ParentOf(ctx, issue.ID)
 	if err != nil {
 		// ErrNotFound = no parent set; any other error is treated as a soft
 		// failure rather than blocking the close.
 		return "", nil, nil
 	}
 	since := now.Add(-siblingThrottleWindow)
-	siblings, err := d.RecentSiblingCloses(ctx, projectID, parentLink.ToIssueID, issueID, actor, since)
+	siblings, err := d.RecentSiblingCloses(ctx, parentLink.ToIssueID, issue.ID, actor, since)
 	if err != nil {
 		return "", nil, nil
 	}
@@ -109,31 +162,35 @@ func CheckSiblingCloseThrottle(
 	if err != nil {
 		return "", nil, nil
 	}
+	render := newGuardRefRenderer(d, issue.ProjectID)
+	parentRef = render.issueRef(ctx, parentIssue)
 	lines := make([]string, 0, len(siblings))
 	refs := make([]string, 0, len(siblings))
 	for _, ev := range siblings {
-		if ev.IssueShortID == nil {
+		ref, ok := render.eventIssueRef(ctx, ev)
+		if !ok {
 			continue
 		}
-		refs = append(refs, *ev.IssueShortID)
+		refs = append(refs, ref)
 		lines = append(lines, fmt.Sprintf("  %s closed %s ago",
-			*ev.IssueShortID, humanizeDuration(now.Sub(ev.CreatedAt))))
+			ref, humanizeDuration(now.Sub(ev.CreatedAt))))
 	}
 	refusal = fmt.Errorf(
 		"sibling-close throttle: you closed %d children of %s in the last %s:\n%s\n"+
 			"Slow down and review the scope of each remaining child before closing. "+
 			"Wait for the throttle window to clear, or ask a human reviewer to inspect and close",
-		len(siblings), parentIssue.ShortID, humanizeDuration(siblingThrottleWindow),
+		len(siblings), parentRef, humanizeDuration(siblingThrottleWindow),
 		strings.Join(lines, "\n"))
-	return parentIssue.ShortID, refs, refusal
+	return parentRef, refs, refusal
 }
 
 // CheckRepeatedMessageGuard implements spec §3.10. When the close is allowed,
 // all returns are zero. When refused, it returns the prior matching close's
-// issue number, the parent's issue number, and a descriptive error; the
-// handler maps the refusal to a 429 duplicate_message and feeds priorNumber
-// and parentNumber into the close.throttled audit event without re-resolving
-// the parent.
+// display ref, the parent's display ref, and a descriptive error; the
+// handler maps the refusal to a 429 duplicate_message and feeds priorRef
+// and parentRef into the close.throttled audit event without re-resolving
+// the parent. Like the sibling throttle, the cohort spans projects, so refs
+// are qualified for peers outside the closing issue's project.
 //
 // The guard only applies to reason=done and reason=audit-no-change closes
 // on parented issues: wontfix / duplicate / superseded plausibly reuse
@@ -155,13 +212,13 @@ func CheckSiblingCloseThrottle(
 // exposure.
 func CheckRepeatedMessageGuard(
 	ctx context.Context, d db.Storage,
-	projectID, issueID int64,
+	issue db.Issue,
 	actor, reason, message string, now time.Time,
-) (priorShortID, parentShortID string, refusal error) {
+) (priorRef, parentRef string, refusal error) {
 	if reason != "done" && reason != "audit-no-change" {
 		return "", "", nil
 	}
-	parentLink, err := d.ParentOf(ctx, issueID)
+	parentLink, err := d.ParentOf(ctx, issue.ID)
 	if err != nil {
 		// ErrNotFound = no parent set; any other error is treated as a soft
 		// failure rather than blocking the close.
@@ -176,15 +233,16 @@ func CheckRepeatedMessageGuard(
 		return "", "", nil
 	}
 	since := now.Add(-repeatedMessageWindow)
-	prior, err := d.RecentSameMessageClose(ctx, projectID, parentLink.ToIssueID, issueID, actor, norm, since)
+	prior, err := d.RecentSameMessageClose(ctx, parentLink.ToIssueID, issue.ID, actor, norm, since)
 	if err != nil || prior == nil {
 		return "", "", nil
 	}
-	if prior.IssueShortID != nil {
-		priorShortID = *prior.IssueShortID
+	render := newGuardRefRenderer(d, issue.ProjectID)
+	if ref, ok := render.eventIssueRef(ctx, *prior); ok {
+		priorRef = ref
 	}
 	if parentIssue, perr := d.IssueByID(ctx, parentLink.ToIssueID); perr == nil {
-		parentShortID = parentIssue.ShortID
+		parentRef = render.issueRef(ctx, parentIssue)
 	}
 	refusal = fmt.Errorf(
 		"refusing — identical close message to your close of %s at %s. "+
@@ -192,8 +250,8 @@ func CheckRepeatedMessageGuard(
 			"Each closure should describe its specific issue. If the same "+
 			"prose truly applies, close as `--duplicate-of` or "+
 			"`--superseded-by` instead",
-		priorShortID, prior.CreatedAt.Format("15:04:05"))
-	return priorShortID, parentShortID, refusal
+		priorRef, prior.CreatedAt.Format("15:04:05"))
+	return priorRef, parentRef, refusal
 }
 
 // humanizeDuration renders d as "N sec" under a minute and "N min" otherwise.

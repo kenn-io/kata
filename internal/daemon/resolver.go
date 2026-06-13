@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -82,66 +83,170 @@ func qualifiedID(projectName, shortID string) string {
 	return projectName + "#" + shortID
 }
 
-// linkTargetNotFound rewraps an issue_not_found miss from link-ref
-// resolution with a message that states the real constraint: link refs are
-// resolved inside the linking issue's project, and the schema forbids
-// cross-project link rows, so a ULID that lives in another project is just
-// as unreachable as one that does not exist. The message is identical in
-// both cases on purpose — it must not leak whether a foreign issue exists.
-// Non-404 errors pass through unchanged.
-func linkTargetNotFound(err error) error {
-	var ae *api.APIError
-	if errors.As(err, &ae) && ae.Status == 404 && ae.Code == "issue_not_found" {
-		return api.NewError(404, "issue_not_found",
-			"link target not found in this project (links can only join issues in the same project)",
-			"", nil)
+// resolveLinkTargetRef resolves a link-target ref. Unlike resolveIssueRef
+// (the URL-subject resolver, which scopes every ref form to the URL project
+// as an anti-fishing guard), link targets may live in any project: a bare
+// short_id resolves in the subject issue's project, a qualified
+// "project#short_id" in the named project, and a 26-char ULID globally. A
+// miss is a plain issue_not_found — it means "not found anywhere", and
+// single-token auth makes that no leak.
+func resolveLinkTargetRef(ctx context.Context, store db.Storage, subjectProjectID int64, ref string, include db.IncludeDeleted) (db.Issue, error) {
+	notFound := api.NewError(404, "issue_not_found", "issue not found", "", nil)
+	parsed, err := shortid.Parse(ref)
+	if err != nil {
+		return db.Issue{}, notFound
 	}
-	return err
+	if parsed.ULID != "" {
+		issue, err := store.IssueByUID(ctx, parsed.ULID, include)
+		if errors.Is(err, db.ErrNotFound) {
+			return db.Issue{}, notFound
+		}
+		if err != nil {
+			return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		return issue, nil
+	}
+	projectID := subjectProjectID
+	if parsed.Project != "" {
+		// Archived projects resolve here so removes can clean up existing
+		// links; adds reject archived targets in requireLinkTargetAddable.
+		project, err := store.ProjectByNameIncludingArchived(ctx, parsed.Project)
+		if errors.Is(err, db.ErrNotFound) {
+			return db.Issue{}, notFound
+		}
+		if err != nil {
+			return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		projectID = project.ID
+	}
+	issue, err := store.IssueByShortID(ctx, projectID, parsed.ShortID, include)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, notFound
+	}
+	if err != nil {
+		return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	return issue, nil
+}
+
+// requireLinkTargetAddable gates ADD-side link targets: a peer whose project
+// is archived cannot gain new links (409 link_target_archived, naming the
+// project), while removes never call this — existing links to archived
+// projects must always be removable. The subject issue's own project is
+// already gated active by the handler (activeIssueByRef / activeProjectByID).
+// The TARGET's project is checked regardless of which ref form resolved it,
+// so a ULID that lands on an archived-project issue is rejected too.
+func requireLinkTargetAddable(ctx context.Context, store db.Storage, subjectProjectID int64, target db.Issue) error {
+	if target.ProjectID == subjectProjectID {
+		return nil
+	}
+	project, err := store.ProjectByID(ctx, target.ProjectID)
+	if err != nil {
+		return api.NewError(500, "internal", err.Error(), "", nil)
+	}
+	if project.DeletedAt != nil {
+		return api.NewError(409, "link_target_archived",
+			fmt.Sprintf("link target %s is in archived project %q",
+				qualifiedID(project.Name, target.ShortID), project.Name),
+			"unarchive the project to add links", nil)
+	}
+	return nil
+}
+
+// validateInitialLinkType rejects an initial link whose type the DB layer
+// would reject with db.ErrInitialLinkInvalidType, returning the byte-identical
+// 400 the create handler maps for that error. Mirrors the DB's rule (queries.go):
+// only parent|blocks|related are valid, and type=parent has no incoming form
+// (a child-side link is filed from the child's POV via type=parent). Running
+// this before target resolution keeps a malformed type a 400 even when the
+// target is a claimed foreign issue.
+func validateInitialLinkType(l api.CreateInitialLinkBody) error {
+	invalid := api.NewError(400, "validation",
+		"link.type must be parent|blocks|related", "", nil)
+	switch l.Type {
+	case "parent":
+		if l.Incoming {
+			return invalid
+		}
+		return nil
+	case "blocks", "related":
+		return nil
+	default:
+		return invalid
+	}
 }
 
 // resolveInitialLinks turns CreateInitialLinkBody entries (string ToRef) into
 // db.InitialLink entries (int64 ToNumber, which the db layer treats as an
 // issue row id). Soft-deleted targets are excluded — initial-link creation
-// must reject hidden peers per spec §6.
-func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64, links []api.CreateInitialLinkBody) ([]db.InitialLink, error) {
+// must reject hidden peers per spec §6. Initial links are always adds, so
+// each target is gated through requireLinkTargetAddable.
+//
+// The second return value contains the resolved target issues in input order;
+// the caller must pass them to requireFederatedLinkClaims before creating the
+// issue so the federated claim gate applies on the create path too.
+func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64, links []api.CreateInitialLinkBody) ([]db.InitialLink, []db.Issue, error) {
 	out := make([]db.InitialLink, 0, len(links))
+	targets := make([]db.Issue, 0, len(links))
 	for _, l := range links {
-		target, err := resolveIssueRef(ctx, store, projectID, l.ToRef, db.IncludeDeletedNo)
+		// Validate link type before resolving the target, so an invalid type
+		// is a 400 even when the target is a claimed foreign issue (the
+		// federated claim gate runs after this resolver). The DB applies the
+		// same rule via db.ErrInitialLinkInvalidType; matching it here keeps a
+		// malformed request a validation error rather than a claim_denied 409.
+		if err := validateInitialLinkType(l); err != nil {
+			return nil, nil, err
+		}
+		target, err := resolveLinkTargetRef(ctx, store, projectID, l.ToRef, db.IncludeDeletedNo)
 		if err != nil {
-			return nil, linkTargetNotFound(err)
+			return nil, nil, err
+		}
+		if err := requireLinkTargetAddable(ctx, store, projectID, target); err != nil {
+			return nil, nil, err
 		}
 		out = append(out, db.InitialLink{
 			Type:     l.Type,
 			ToNumber: target.ID,
 			Incoming: l.Incoming,
 		})
+		targets = append(targets, target)
 	}
-	return out, nil
+	return out, targets, nil
 }
 
 // fillLinksDeltaParams resolves each api.LinksDelta string ref into an
-// issue id and stuffs the int64-keyed slices into params. Each ref is
-// resolved through resolveIssueRef, which already maps to issue_not_found
-// 404 for misses; linkTargetNotFound then rewords the 404 to spell out the
-// same-project scoping, so error returns are wire-ready.
+// issue id and stuffs the int64-keyed slices into params. Refs resolve
+// through resolveLinkTargetRef, which maps misses to a plain issue_not_found
+// 404, so error returns are wire-ready. Add paths (set_parent, add_*)
+// additionally gate the target through requireLinkTargetAddable, which
+// rejects peers in archived projects; remove paths never gate so existing
+// links to archived peers can always be cleaned up.
 func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64, d *api.LinksDelta, params *db.EditIssueAtomicParams) error {
 	if d == nil {
 		return nil
 	}
-	resolve := func(ref string, include db.IncludeDeleted) (int64, error) {
-		issue, err := resolveIssueRef(ctx, store, projectID, ref, include)
+	resolve := func(ref string, include db.IncludeDeleted) (db.Issue, error) {
+		return resolveLinkTargetRef(ctx, store, projectID, ref, include)
+	}
+	// resolveAdd is the add-side variant: resolve then gate the target so a
+	// peer in an archived project is rejected before any mutation runs.
+	resolveAdd := func(ref string, include db.IncludeDeleted) (int64, error) {
+		issue, err := resolve(ref, include)
 		if err != nil {
-			return 0, linkTargetNotFound(err)
+			return 0, err
+		}
+		if err := requireLinkTargetAddable(ctx, store, projectID, issue); err != nil {
+			return 0, err
 		}
 		return issue.ID, nil
 	}
-	resolveSlice := func(refs []string, include db.IncludeDeleted) ([]int64, error) {
+	resolveAddSlice := func(refs []string, include db.IncludeDeleted) ([]int64, error) {
 		if len(refs) == 0 {
 			return nil, nil
 		}
 		ids := make([]int64, 0, len(refs))
 		for _, r := range refs {
-			id, err := resolve(r, include)
+			id, err := resolveAdd(r, include)
 			if err != nil {
 				return nil, err
 			}
@@ -150,16 +255,17 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 		return ids, nil
 	}
 	// resolveSliceTolerant is the idempotent-remove variant: misses
-	// (issue_not_found) are silently dropped instead of surfacing 404.
-	// The desired end state — "no link from this issue to N" — already
-	// holds when there is no N at all, so the remove is a no-op.
+	// (issue_not_found) are silently dropped instead of surfacing 404, and
+	// no addable gate is applied. The desired end state — "no link from this
+	// issue to N" — already holds when there is no N at all, so the remove
+	// is a no-op.
 	resolveSliceTolerant := func(refs []string, include db.IncludeDeleted) ([]int64, error) {
 		if len(refs) == 0 {
 			return nil, nil
 		}
 		ids := make([]int64, 0, len(refs))
 		for _, r := range refs {
-			id, err := resolve(r, include)
+			issue, err := resolve(r, include)
 			if err != nil {
 				var ae *api.APIError
 				if errors.As(err, &ae) && ae.Status == 404 {
@@ -167,12 +273,12 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 				}
 				return nil, err
 			}
-			ids = append(ids, id)
+			ids = append(ids, issue.ID)
 		}
 		return ids, nil
 	}
 	if d.SetParent != nil {
-		id, err := resolve(*d.SetParent, db.IncludeDeletedNo)
+		id, err := resolveAdd(*d.SetParent, db.IncludeDeletedNo)
 		if err != nil {
 			return err
 		}
@@ -180,21 +286,21 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 	}
 	if d.RemoveParent != nil {
 		// Remove paths must tolerate a soft-deleted peer (the link row is
-		// still live; the user can still ask to clean it up).
-		id, err := resolve(*d.RemoveParent, db.IncludeDeletedYes)
+		// still live; the user can still ask to clean it up) and never gate.
+		issue, err := resolve(*d.RemoveParent, db.IncludeDeletedYes)
 		if err != nil {
 			return err
 		}
-		params.RemoveParent = &id
+		params.RemoveParent = &issue.ID
 	}
 	var err error
-	if params.AddBlocks, err = resolveSlice(d.AddBlocks, db.IncludeDeletedNo); err != nil {
+	if params.AddBlocks, err = resolveAddSlice(d.AddBlocks, db.IncludeDeletedNo); err != nil {
 		return err
 	}
-	if params.AddBlockedBy, err = resolveSlice(d.AddBlockedBy, db.IncludeDeletedNo); err != nil {
+	if params.AddBlockedBy, err = resolveAddSlice(d.AddBlockedBy, db.IncludeDeletedNo); err != nil {
 		return err
 	}
-	if params.AddRelated, err = resolveSlice(d.AddRelated, db.IncludeDeletedNo); err != nil {
+	if params.AddRelated, err = resolveAddSlice(d.AddRelated, db.IncludeDeletedNo); err != nil {
 		return err
 	}
 	if params.RemoveBlocks, err = resolveSliceTolerant(d.RemoveBlocks, db.IncludeDeletedYes); err != nil {
@@ -210,40 +316,41 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 }
 
 // buildLinkChanges projects db.AtomicEditChanges into the wire-facing
-// api.LinkChanges. The db layer reports parallel slices of (short_id, uid);
-// peers project 1:1 onto LinkPeer.
-func buildLinkChanges(_ context.Context, _ db.Storage, changes db.AtomicEditChanges) (*api.LinkChanges, error) {
-	peer := func(short string, uid string) api.LinkPeer {
-		return api.LinkPeer{UID: uid, ShortID: short}
+// api.LinkChanges. PeerIdentity carries the project name captured in-tx,
+// so no storage lookup is required.
+func buildLinkChanges(changes db.AtomicEditChanges) *api.LinkChanges {
+	peer := func(p db.PeerIdentity) api.LinkPeer {
+		return api.LinkPeer{
+			UID:         p.UID,
+			ShortID:     p.ShortID,
+			Project:     p.Project,
+			QualifiedID: qualifiedID(p.Project, p.ShortID),
+		}
 	}
-	peers := func(shorts, uids []string) []api.LinkPeer {
-		if len(shorts) == 0 {
+	peers := func(ps []db.PeerIdentity) []api.LinkPeer {
+		if len(ps) == 0 {
 			return nil
 		}
-		out := make([]api.LinkPeer, 0, len(shorts))
-		for i, s := range shorts {
-			var u string
-			if i < len(uids) {
-				u = uids[i]
-			}
-			out = append(out, peer(s, u))
+		out := make([]api.LinkPeer, 0, len(ps))
+		for _, p := range ps {
+			out = append(out, peer(p))
 		}
 		return out
 	}
 	out := &api.LinkChanges{}
-	if changes.ParentSet != nil && changes.ParentSetUID != nil {
-		p := peer(*changes.ParentSet, *changes.ParentSetUID)
+	if changes.ParentSet != nil {
+		p := peer(*changes.ParentSet)
 		out.ParentSet = &p
 	}
-	if changes.ParentRemoved != nil && changes.ParentRemovedUID != nil {
-		p := peer(*changes.ParentRemoved, *changes.ParentRemovedUID)
+	if changes.ParentRemoved != nil {
+		p := peer(*changes.ParentRemoved)
 		out.ParentRemoved = &p
 	}
-	out.BlocksAdded = peers(changes.BlocksAdded, changes.BlocksAddedUIDs)
-	out.BlocksRemoved = peers(changes.BlocksRemoved, changes.BlocksRemovedUIDs)
-	out.BlockedByAdded = peers(changes.BlockedByAdded, changes.BlockedByAddedUIDs)
-	out.BlockedByRemoved = peers(changes.BlockedByRemoved, changes.BlockedByRemovedUIDs)
-	out.RelatedAdded = peers(changes.RelatedAdded, changes.RelatedAddedUIDs)
-	out.RelatedRemoved = peers(changes.RelatedRemoved, changes.RelatedRemovedUIDs)
-	return out, nil
+	out.BlocksAdded = peers(changes.BlocksAdded)
+	out.BlocksRemoved = peers(changes.BlocksRemoved)
+	out.BlockedByAdded = peers(changes.BlockedByAdded)
+	out.BlockedByRemoved = peers(changes.BlockedByRemoved)
+	out.RelatedAdded = peers(changes.RelatedAdded)
+	out.RelatedRemoved = peers(changes.RelatedRemoved)
+	return out
 }

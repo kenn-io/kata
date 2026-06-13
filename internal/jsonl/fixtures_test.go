@@ -254,7 +254,6 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 	addTesterComment(ctx, t, d, purged.ID, "purged comment text")
 
 	_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
-		ProjectID:   p1.ID,
 		FromIssueID: blocker.ID,
 		ToIssueID:   login.ID,
 		Type:        "blocks",
@@ -587,8 +586,8 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 		require.NoError(t, err)
 	}
 	_, err = raw.Exec(
-		`INSERT INTO links(id, project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-		 VALUES (1, 1, 1, 2, ?, ?, 'related', 'tester')`,
+		`INSERT INTO links(id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		 VALUES (1, 1, 2, ?, ?, 'related', 'tester')`,
 		issueUIDs[0], issueUIDs[1])
 	require.NoError(t, err)
 	_, err = raw.Exec(
@@ -637,8 +636,8 @@ func seedV8DBWithOrphans(t *testing.T, path string, spec orphanSpec) {
 		// Vary to_issue_id per row so the (from, to, type) UNIQUE on
 		// links doesn't collide across multiple orphan inserts.
 		_, err = raw.Exec(
-			`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-			 VALUES (1, 1, ?, ?, '01HZZZZZZZZZZZZZZZZZZZZA99', 'related', 'tester')`,
+			`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+			 VALUES (1, ?, ?, '01HZZZZZZZZZZZZZZZZZZZZA99', 'related', 'tester')`,
 			900+i, issueUIDs[0])
 		require.NoError(t, err)
 	}

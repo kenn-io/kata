@@ -44,9 +44,35 @@ func withTitle(title string) issueOpt {
 
 func withParent(parentShortID string) issueOpt {
 	return func(i *Issue) {
-		p := parentShortID
-		i.ParentShortID = &p
+		i.Parent = &LinkPeer{UID: "01TEST-" + parentShortID, ShortID: parentShortID}
 	}
+}
+
+// withParentPeer points the issue's parent at a specific issue, carrying the
+// peer's real UID — the form the daemon emits for cross-project parents.
+func withParentPeer(parent Issue) issueOpt {
+	return func(i *Issue) {
+		i.Parent = &LinkPeer{UID: parent.UID, ShortID: parent.ShortID}
+	}
+}
+
+// withBlocksPeer appends a blocks edge to a specific issue, carrying the
+// peer's real UID — the form the daemon emits for cross-project blockers.
+func withBlocksPeer(blocked Issue) issueOpt {
+	return func(i *Issue) {
+		i.Blocks = append(i.Blocks, LinkPeer{UID: blocked.UID, ShortID: blocked.ShortID})
+	}
+}
+
+func inProject(projectID int64) issueOpt {
+	return func(i *Issue) { i.ProjectID = projectID }
+}
+
+// withUID overrides the builder's shortID-derived UID. Needed when a test
+// reuses one short_id across projects: short_ids are project-scoped, UIDs
+// are global.
+func withUID(uid string) issueOpt {
+	return func(i *Issue) { i.UID = uid }
 }
 
 func withCounts(open, total int) issueOpt {

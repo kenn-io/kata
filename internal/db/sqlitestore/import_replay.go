@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -55,10 +56,39 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		return err
 	}
 
+	var skippedMissingPeer, skippedDup, skippedMappings int
+	skippedLinkIDs := make(map[int64]struct{})
 	for _, r := range recs {
-		if err := importRecord(ctx, tx, r, opts); err != nil {
+		skip, err := importRecord(ctx, tx, r, opts, skippedLinkIDs)
+		if err != nil {
 			return err
 		}
+		switch skip {
+		case linkSkipMissingPeer:
+			skippedMissingPeer++
+			if r.Link != nil {
+				skippedLinkIDs[r.Link.ID] = struct{}{}
+			}
+		case linkSkipDuplicate:
+			skippedDup++
+		case linkSkipMapping:
+			skippedMappings++
+		}
+	}
+	if skippedMissingPeer > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d link record(s) whose peer issue is not in this envelope or database\n",
+			skippedMissingPeer)
+	}
+	if skippedDup > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d duplicate link record(s) (edge already present)\n",
+			skippedDup)
+	}
+	if skippedMappings > 0 {
+		fmt.Fprintf(os.Stderr,
+			"note: skipped %d import mapping record(s) referencing skipped link(s)\n",
+			skippedMappings)
 	}
 	if err := ensureSystemProject(ctx, tx); err != nil {
 		return err
@@ -81,47 +111,62 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	return nil
 }
 
-func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.ImportOptions) error {
+// linkSkip classifies why importLink or importMapping skipped a record.
+type linkSkip int
+
+const (
+	linkSkipNone        linkSkip = iota // not skipped; record was inserted
+	linkSkipMissingPeer                 // peer issue absent from envelope/database
+	linkSkipDuplicate                   // edge already present (natural-key no-op)
+	linkSkipMapping                     // import_mapping references a skipped link
+)
+
+// importRecord applies one record. For link records importLink may signal a
+// skip; for import_mapping records importMapping consults skippedLinkIDs to
+// skip mappings whose link was already skipped. Every other kind returns
+// linkSkipNone. The replay loop counts each reason separately and emits
+// per-reason aggregate notes.
+func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.ImportOptions, skippedLinkIDs map[int64]struct{}) (linkSkip, error) {
 	switch r.Kind {
 	case db.ImportKindMeta:
-		return importMeta(ctx, tx, r.Meta, opts)
+		return linkSkipNone, importMeta(ctx, tx, r.Meta, opts)
 	case db.ImportKindProject:
-		return importProject(ctx, tx, r.Project)
+		return linkSkipNone, importProject(ctx, tx, r.Project)
 	case db.ImportKindProjectAlias:
-		return importAlias(ctx, tx, r.Alias)
+		return linkSkipNone, importAlias(ctx, tx, r.Alias)
 	case db.ImportKindRecurrence:
-		return importRecurrence(ctx, tx, r.Recurrence)
+		return linkSkipNone, importRecurrence(ctx, tx, r.Recurrence)
 	case db.ImportKindIssue:
-		return importIssue(ctx, tx, r.Issue)
+		return linkSkipNone, importIssue(ctx, tx, r.Issue)
 	case db.ImportKindComment:
-		return importComment(ctx, tx, r.Comment)
+		return linkSkipNone, importComment(ctx, tx, r.Comment)
 	case db.ImportKindIssueLabel:
-		return importLabel(ctx, tx, r.Label)
+		return linkSkipNone, importLabel(ctx, tx, r.Label)
 	case db.ImportKindLink:
 		return importLink(ctx, tx, r.Link)
 	case db.ImportKindImportMapping:
-		return importMapping(ctx, tx, r.ImportMapping)
+		return importMapping(ctx, tx, r.ImportMapping, skippedLinkIDs)
 	case db.ImportKindFederationBinding:
-		return importFederationBinding(ctx, tx, r.FederationBinding)
+		return linkSkipNone, importFederationBinding(ctx, tx, r.FederationBinding)
 	case db.ImportKindFederationSyncStatus:
-		return importFederationSyncStatus(ctx, tx, r.FederationSyncStatus)
+		return linkSkipNone, importFederationSyncStatus(ctx, tx, r.FederationSyncStatus)
 	case db.ImportKindFederationQuarantine:
-		return importFederationQuarantine(ctx, tx, r.FederationQuarantine)
+		return linkSkipNone, importFederationQuarantine(ctx, tx, r.FederationQuarantine)
 	case db.ImportKindFederationEnrollment:
-		return importFederationEnrollment(ctx, tx, r.FederationEnrollment)
+		return linkSkipNone, importFederationEnrollment(ctx, tx, r.FederationEnrollment)
 	case db.ImportKindIssueClaim:
-		return importIssueClaim(ctx, tx, r.IssueClaim)
+		return linkSkipNone, importIssueClaim(ctx, tx, r.IssueClaim)
 	case db.ImportKindPendingClaimRequest:
-		return importPendingClaimRequest(ctx, tx, r.PendingClaimRequest, opts)
+		return linkSkipNone, importPendingClaimRequest(ctx, tx, r.PendingClaimRequest, opts)
 	case db.ImportKindEvent:
-		return importEvent(ctx, tx, r.Event, opts)
+		return linkSkipNone, importEvent(ctx, tx, r.Event, opts)
 	case db.ImportKindPurgeLog:
-		return importPurgeLog(ctx, tx, r.PurgeLog)
+		return linkSkipNone, importPurgeLog(ctx, tx, r.PurgeLog)
 	case db.ImportKindSQLiteSequence:
-		return upsertSequence(ctx, tx, r.Sequence.Name, r.Sequence.Seq)
+		return linkSkipNone, upsertSequence(ctx, tx, r.Sequence.Name, r.Sequence.Seq)
 	default:
 		// Unreachable: validate() already rejected unknown kinds.
-		return fmt.Errorf("import: unsupported kind %q", r.Kind)
+		return linkSkipNone, fmt.Errorf("import: unsupported kind %q", r.Kind)
 	}
 }
 
@@ -143,6 +188,17 @@ func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOpt
 }
 
 func importProject(ctx context.Context, tx *sql.Tx, p *db.ProjectExport) error {
+	// Envelopes are untrusted input: hold imported names to the same rule
+	// the daemon's create/rename handlers enforce, or a crafted export
+	// could land a project name with control characters that every CLI/TUI
+	// surface (including cross-project qualified refs) would echo to the
+	// terminal. Names from a kata-produced envelope already passed this
+	// gate at creation time, so cutover replays are unaffected. %q keeps
+	// the hostile name escaped inside the error itself.
+	if err := config.ValidateProjectName(p.Name); err != nil {
+		return wrapImportErr(db.ImportKindProject,
+			fmt.Errorf("project %d name %q: %w", p.ID, p.Name, err))
+	}
 	// The system project is identified by UID+name; preserve it verbatim so the
 	// post-loop ensureSystemProject treats it as already present.
 	if p.UID == db.SystemProjectUID && p.Name == db.SystemProjectName {
@@ -270,28 +326,61 @@ func importLabel(ctx context.Context, tx *sql.Tx, l *db.IssueLabelExport) error 
 	return wrapImportErr(db.ImportKindIssueLabel, err)
 }
 
-func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) error {
+// importLink applies one link record. Project-filtered envelopes may carry
+// links whose peer issue is omitted (cross-project edges export from both
+// sides); such records are skipped — the peer side's envelope re-delivers
+// the edge and the natural-key check below makes that re-delivery a no-op.
+// Both envelopes of one source DB agree on row ids, so equal natural key
+// implies equal id and the id-preserving INSERT can never collide.
+func importLink(ctx context.Context, tx *sql.Tx, lk *db.LinkExport) (linkSkip, error) {
+	var present int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM issues WHERE id IN (?, ?)`,
+		lk.FromIssueID, lk.ToIssueID).Scan(&present); err != nil {
+		return linkSkipNone, wrapImportErr(db.ImportKindLink, err)
+	}
+	if present != 2 {
+		return linkSkipMissingPeer, nil
+	}
+	var dup int
+	// Storage canonicalizes related from<to, so the swapped arm only matters for non-canonical foreign envelopes.
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM links
+		  WHERE type = ?
+		    AND ((from_issue_uid = ? AND to_issue_uid = ?)
+		      OR (type = 'related' AND from_issue_uid = ? AND to_issue_uid = ?))`,
+		lk.Type, lk.FromIssueUID, lk.ToIssueUID, lk.ToIssueUID, lk.FromIssueUID).Scan(&dup); err != nil {
+		return linkSkipNone, wrapImportErr(db.ImportKindLink, err)
+	}
+	if dup > 0 {
+		return linkSkipDuplicate, nil
+	}
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO links(id, project_id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at)
+		`INSERT INTO links(id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at)
 		 VALUES(
-		   ?, ?, ?,
+		   ?, ?,
 		   COALESCE(NULLIF(?, ''), (SELECT uid FROM issues WHERE id = ?)),
 		   ?,
 		   COALESCE(NULLIF(?, ''), (SELECT uid FROM issues WHERE id = ?)),
 		   ?, ?, ?
 		 )`,
-		lk.ID, lk.ProjectID, lk.FromIssueID, lk.FromIssueUID, lk.FromIssueID,
+		lk.ID, lk.FromIssueID, lk.FromIssueUID, lk.FromIssueID,
 		lk.ToIssueID, lk.ToIssueUID, lk.ToIssueID, lk.Type, lk.Author, lk.CreatedAt)
-	return wrapImportErr(db.ImportKindLink, err)
+	return linkSkipNone, wrapImportErr(db.ImportKindLink, err)
 }
 
-func importMapping(ctx context.Context, tx *sql.Tx, m *db.ImportMappingExport) error {
+func importMapping(ctx context.Context, tx *sql.Tx, m *db.ImportMappingExport, skippedLinkIDs map[int64]struct{}) (linkSkip, error) {
+	if m.LinkID != nil {
+		if _, skipped := skippedLinkIDs[*m.LinkID]; skipped {
+			return linkSkipMapping, nil
+		}
+	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO import_mappings(id, source, external_id, object_type, project_id, issue_id, comment_id, link_id, label, source_updated_at, imported_at)
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.Source, m.ExternalID, m.ObjectType, m.ProjectID, m.IssueID, m.CommentID,
 		m.LinkID, m.Label, m.SourceUpdatedAt, m.ImportedAt)
-	return wrapImportErr(db.ImportKindImportMapping, err)
+	return linkSkipNone, wrapImportErr(db.ImportKindImportMapping, err)
 }
 
 func importFederationBinding(ctx context.Context, tx *sql.Tx, b *db.FederationBindingExport) error {

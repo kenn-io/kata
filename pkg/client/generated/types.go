@@ -1585,7 +1585,7 @@ type IssueOut struct {
 	Metadata      map[string]any `json:"metadata"`
 	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
 	Owner         *string        `json:"owner,omitempty"`
-	ParentShortID *string        `json:"parent_short_id,omitempty"`
+	Parent        *LinkPeer      `json:"parent,omitempty"`
 	Priority      *int64         `json:"priority,omitempty"`
 	ProjectID     int64          `json:"project_id"`
 	ProjectUID    *string        `json:"project_uid,omitempty"`
@@ -1631,6 +1631,13 @@ func (i IssueOut) Validate() error {
 	}
 	if err := typesValidator.Var(i.CreatedAt, "required"); err != nil {
 		errors = errors.Append("CreatedAt", err)
+	}
+	if i.Parent != nil {
+		if v, ok := any(i.Parent).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Parent", err)
+			}
+		}
 	}
 	if err := typesValidator.Var(i.QualifiedID, "required"); err != nil {
 		errors = errors.Append("QualifiedID", err)
@@ -1813,7 +1820,6 @@ type LinkOut struct {
 	CreatedAt time.Time `json:"created_at" validate:"required"`
 	From      LinkPeer  `json:"from"`
 	ID        int64     `json:"id"`
-	ProjectID int64     `json:"project_id"`
 	To        LinkPeer  `json:"to"`
 	Type      string    `json:"type" validate:"required"`
 }
@@ -1846,8 +1852,10 @@ func (l LinkOut) Validate() error {
 }
 
 type LinkPeer struct {
-	ShortID string `json:"short_id" validate:"required"`
-	UID     string `json:"uid" validate:"required"`
+	Project     string `json:"project" validate:"required"`
+	QualifiedID string `json:"qualified_id" validate:"required"`
+	ShortID     string `json:"short_id" validate:"required"`
+	UID         string `json:"uid" validate:"required"`
 }
 
 func (l LinkPeer) Validate() error {

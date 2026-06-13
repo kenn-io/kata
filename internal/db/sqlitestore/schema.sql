@@ -85,7 +85,6 @@ CREATE INDEX idx_comments_issue ON comments(issue_id, created_at);
 
 CREATE TABLE links (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  project_id    INTEGER NOT NULL REFERENCES projects(id),
   from_issue_id INTEGER NOT NULL REFERENCES issues(id),
   to_issue_id   INTEGER NOT NULL REFERENCES issues(id),
   from_issue_uid TEXT NOT NULL,
@@ -104,25 +103,8 @@ CREATE UNIQUE INDEX uniq_one_parent_per_child
   ON links(from_issue_id) WHERE type = 'parent';
 CREATE INDEX idx_links_from    ON links(from_issue_id, type);
 CREATE INDEX idx_links_to      ON links(to_issue_id, type);
-CREATE INDEX idx_links_project ON links(project_id);
 CREATE INDEX idx_links_from_uid ON links(from_issue_uid);
 CREATE INDEX idx_links_to_uid   ON links(to_issue_uid);
-
--- Enforce same-project: both endpoints must belong to links.project_id.
-CREATE TRIGGER trg_links_same_project_insert
-BEFORE INSERT ON links
-FOR EACH ROW BEGIN
-  SELECT RAISE(ABORT, 'cross-project links are not allowed')
-  WHERE (SELECT project_id FROM issues WHERE id = NEW.from_issue_id) <> NEW.project_id
-     OR (SELECT project_id FROM issues WHERE id = NEW.to_issue_id)   <> NEW.project_id;
-END;
-CREATE TRIGGER trg_links_same_project_update
-BEFORE UPDATE ON links
-FOR EACH ROW BEGIN
-  SELECT RAISE(ABORT, 'cross-project links are not allowed')
-  WHERE (SELECT project_id FROM issues WHERE id = NEW.from_issue_id) <> NEW.project_id
-     OR (SELECT project_id FROM issues WHERE id = NEW.to_issue_id)   <> NEW.project_id;
-END;
 
 CREATE TRIGGER trg_links_uid_consistency_insert
 BEFORE INSERT ON links

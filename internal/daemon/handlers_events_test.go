@@ -168,7 +168,7 @@ func TestPollEvents_UIDsIncludeRelatedIssue(t *testing.T) {
 	project, err := env.DB.ProjectByID(context.Background(), pid)
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateLinkAndEvent(context.Background(), db.CreateLinkParams{
-		ProjectID: pid, FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "tester",
+		FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "tester",
 	}, db.LinkEventParams{
 		EventType: "issue.linked", EventIssueID: from.ID,
 		FromShortID: from.ShortID, FromUID: from.UID,
@@ -198,6 +198,88 @@ func TestPollEvents_UIDsIncludeRelatedIssue(t *testing.T) {
 	require.NotNil(t, b.Events[0].RelatedIssueShortID, "envelope must surface related_issue_short_id for linked events")
 	assert.Equal(t, from.ShortID, *b.Events[0].IssueShortID)
 	assert.Equal(t, to.ShortID, *b.Events[0].RelatedIssueShortID)
+}
+
+// Cross-project link events reference a related issue in another project;
+// the envelope must still hydrate its short_id (the join may not assume the
+// related issue lives in the event's project).
+func TestPollEvents_RelatedShortIDForCrossProjectLink(t *testing.T) {
+	env := testenv.New(t)
+	pidA := mkProject(t, env, "github.com/test/a", "a")
+	pidB := mkProject(t, env, "github.com/test/b", "b")
+	from := mkIssue(t, env, pidA, "from")
+	to := mkIssue(t, env, pidB, "to")
+	_, _, err := env.DB.CreateLinkAndEvent(context.Background(), db.CreateLinkParams{
+		FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "tester",
+	}, db.LinkEventParams{
+		EventType: "issue.linked", EventIssueID: from.ID,
+		FromShortID: from.ShortID, FromUID: from.UID,
+		ToShortID: to.ShortID, ToUID: to.UID, Actor: "tester",
+	})
+	require.NoError(t, err)
+
+	var b struct {
+		Events []struct {
+			Type                string  `json:"type"`
+			IssueShortID        *string `json:"issue_short_id"`
+			RelatedIssueUID     *string `json:"related_issue_uid"`
+			RelatedIssueShortID *string `json:"related_issue_short_id"`
+		} `json:"events"`
+	}
+	envGetJSON(t, env, "/api/v1/events?after_id=0&limit=50", &b)
+	var found bool
+	for _, ev := range b.Events {
+		if ev.Type != "issue.linked" {
+			continue
+		}
+		found = true
+		require.NotNil(t, ev.RelatedIssueUID)
+		assert.Equal(t, to.UID, *ev.RelatedIssueUID)
+		require.NotNil(t, ev.RelatedIssueShortID,
+			"cross-project related issue must still hydrate related_issue_short_id")
+		assert.Equal(t, to.ShortID, *ev.RelatedIssueShortID)
+		require.NotNil(t, ev.IssueShortID)
+		assert.Equal(t, from.ShortID, *ev.IssueShortID)
+	}
+	require.True(t, found, "expected an issue.linked event in the feed")
+}
+
+// Moving an issue leaves its historical events in the source project; those
+// events must keep hydrating the issue's current short_id rather than going
+// blank because the issue's project no longer matches the event's.
+func TestPollEvents_IssueShortIDSurvivesMove(t *testing.T) {
+	env := testenv.New(t)
+	pidA := mkProject(t, env, "github.com/test/a", "a")
+	pidB := mkProject(t, env, "github.com/test/b", "b")
+	issue := mkIssue(t, env, pidA, "movable")
+	moved, err := env.DB.MoveIssueProject(context.Background(), db.MoveIssueProjectIn{
+		IssueID:       issue.ID,
+		FromProjectID: pidA,
+		ToProjectID:   pidB,
+		IfMatchRev:    issue.Revision,
+		Actor:         "tester",
+	})
+	require.NoError(t, err)
+
+	var b struct {
+		Events []struct {
+			Type         string  `json:"type"`
+			IssueShortID *string `json:"issue_short_id"`
+		} `json:"events"`
+	}
+	envGetJSON(t, env,
+		"/api/v1/projects/"+strconv.FormatInt(pidA, 10)+"/events?after_id=0&limit=50", &b)
+	var found bool
+	for _, ev := range b.Events {
+		if ev.Type != "issue.created" {
+			continue
+		}
+		found = true
+		require.NotNil(t, ev.IssueShortID,
+			"historical events must keep hydrating the moved issue's short_id")
+		assert.Equal(t, moved.Issue.ShortID, *ev.IssueShortID)
+	}
+	require.True(t, found, "expected the issue.created event in the source project feed")
 }
 
 func TestPollEvents_NextAfterIDEchoesAfterIDOnEmpty(t *testing.T) {

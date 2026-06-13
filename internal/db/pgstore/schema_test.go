@@ -40,9 +40,6 @@ var expectedTables = []string{
 // Counts the SQLite RAISE(ABORT, ...) ports + the FTS sync triggers, omitting
 // the FK CASCADE that replaces SQLite's issue-delete FTS trigger.
 var expectedTriggers = []string{
-	// Same-project link enforcement.
-	"trg_links_same_project_insert",
-	"trg_links_same_project_update",
 	// UID consistency on links.
 	"trg_links_uid_consistency_insert",
 	"trg_links_uid_consistency_update",
@@ -64,7 +61,7 @@ var expectedFKCounts = map[string]int{
 	"recurrences":            1, // -> projects (CASCADE)
 	"issues":                 2, // -> projects, -> recurrences
 	"comments":               1, // -> issues
-	"links":                  3, // -> projects, -> issues x2
+	"links":                  2, // -> issues x2 (project-independent edges, storage v16)
 	"issue_labels":           1, // -> issues
 	"events":                 3, // -> projects, -> issues, -> issues (related)
 	"federation_bindings":    1, // -> projects
@@ -164,7 +161,6 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 
 	// --- 3 PL/pgSQL trigger functions exist ---
 	for _, fn := range []string{
-		"enforce_links_same_project",
 		"enforce_links_uid_consistency",
 		"enforce_uid_immutable",
 		"rebuild_issue_search",

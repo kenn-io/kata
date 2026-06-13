@@ -128,31 +128,24 @@ func workspaceProjectName(startPath string) string {
 	return cfg.Project.Name
 }
 
-// resolveRefToIDOpts resolves one issue-ref string to its database row id by
-// calling the daemon's resolve endpoint. Used by relationship flags on `kata
-// edit` so they accept the same shapes as positional issue-ref args.
+// resolveRefToWireOpts resolves one link-flag ref string to the wire value the
+// daemon expects. Used by relationship flags on `kata edit` and `kata create`
+// so they accept the same shapes as positional issue-ref args.
 //
-// flagName is folded into the validation error so the user knows which flag
-// failed when one of several link flags is malformed.
+// flagName is folded into validation errors so the user knows which flag failed.
 //
 // currentProject is the canonical name of the project the surrounding command
-// targets (i.e. the URL issue's project for `kata edit`, or the create-time
-// project for `kata create`). A qualified ref whose project segment names a
-// different project is rejected — links can only join issues in the same
-// project (the schema forbids cross-project link rows), so such a ref can
-// never be satisfied. Pass "" to skip the cross-project check (intended for
-// callers that can't yet plumb the canonical name).
+// targets (i.e. the URL issue's project for `kata edit`, the create-time project
+// for `kata create`). A qualified ref whose project segment differs from
+// currentProject is forwarded verbatim as "project#short_id" — the daemon
+// resolves link targets in the named project (storage v16, cross-project links).
+// Bare refs and same-project qualified refs are forwarded as plain short_ids or
+// ULIDs so the daemon resolves them against the URL issue's project. Pass "" to
+// skip the qualified-forward path (intended for callers that can't yet plumb the
+// canonical name).
 //
 // includeDeleted=true matches the soft-delete-tolerant lookup the daemon's
-// remove paths use: the link row is real, and the user can still ask to
-// clean it up even when the peer issue has been soft-deleted. The remove
-// flags pass true; the add flags (which require a live target) pass false.
-//
-// The returned int64 is the issue's row id, which the daemon uses internally
-// for the LinksDelta wire format (the daemon's resolver then re-maps it). To
-// avoid hard-coding daemon internals, we send the resolved ref string and let
-// the daemon do the lookup; this helper validates the ref locally and returns
-// the literal string the wire payload should carry.
+// remove paths use. The remove flags pass true; the add flags pass false.
 func resolveRefToWireOpts(ctx context.Context, baseURL, currentProject string, projectID int64, ref, flagName string, includeDeleted bool) (string, error) {
 	_ = ctx
 	_ = baseURL
@@ -187,23 +180,16 @@ func resolveRefToWireOpts(ctx context.Context, baseURL, currentProject string, p
 			ExitCode: ExitValidation,
 		}
 	}
-	// A qualified ref ("other#abc4") names a project explicitly. Links can
-	// only join issues in the same project: the daemon resolves link refs
-	// (short_ids and ULIDs alike) against the URL issue's project, and the
-	// schema forbids cross-project link rows outright. A ref naming a
-	// different project can therefore never be satisfied — reject up front
-	// with the real constraint instead of letting the daemon report a
-	// bare "issue not found". parsed.ProjectName matches currentProject
-	// for both bare refs (workspace fallback) and same-project qualified
-	// refs ("kata#abc4" when current project is "kata"); the inequality
-	// fires only when the ref names a different project.
+	// A qualified ref ("other#abc4") names a project explicitly. Links may
+	// span projects (storage v16), and the daemon resolves link-target refs
+	// in the named project — forward the qualified form verbatim so the
+	// daemon can. Bare refs and same-project qualified refs keep the bare
+	// wire shape the daemon resolves against the URL issue's project.
+	// For ULID refs, ResolveRef sets ProjectName to the workspace fallback
+	// (same as currentProject), so parsed.ProjectName == currentProject and
+	// the condition below is false; ULID refs are forwarded bare in RefForAPI.
 	if currentProject != "" && parsed.ProjectName != "" && parsed.ProjectName != currentProject {
-		return "", &cliError{
-			Message: fmt.Sprintf("%s: cross-project links are not supported; %q must name an issue in project %q",
-				flagName, ref, currentProject),
-			Kind:     kindValidation,
-			ExitCode: ExitValidation,
-		}
+		return parsed.ProjectName + "#" + parsed.RefForAPI, nil
 	}
 	return parsed.RefForAPI, nil
 }

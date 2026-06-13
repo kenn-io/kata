@@ -62,7 +62,6 @@ func TestReplayInvariant_ProjectProjectionMatchesDirectWrites(t *testing.T) {
 
 	_, _, err = d.CreateLinkAndEvent(ctx,
 		db.CreateLinkParams{
-			ProjectID:   p.ID,
 			FromIssueID: a.ID,
 			ToIssueID:   b.ID,
 			Type:        "blocks",

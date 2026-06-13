@@ -334,7 +334,8 @@ func TestSyncFederationOnceAdvancesAcrossIncompleteBaselineLinkPage(t *testing.T
 	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		  FROM links
-		 WHERE project_id = ? AND type = 'related'`,
+		 WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
+		   AND type = 'related'`,
 		project.ID).Scan(&linkCount))
 	assert.Equal(t, 1, linkCount)
 }
@@ -1422,7 +1423,6 @@ func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = spoke.DB.CreateLink(ctx, db.CreateLinkParams{
-		ProjectID:   localProject.ID,
 		FromIssueID: source.ID,
 		ToIssueID:   target.ID,
 		Type:        "related",
@@ -1479,7 +1479,8 @@ func TestSyncFederationOncePushesAdoptedIssueSnapshotsAndLinks(t *testing.T) {
 	require.NoError(t, hub.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		  FROM links
-		 WHERE project_id = ? AND from_issue_uid = ? AND to_issue_uid = ? AND type = 'related'`,
+		 WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
+		   AND from_issue_uid = ? AND to_issue_uid = ? AND type = 'related'`,
 		hubProject.ID, source.UID, target.UID).Scan(&linkCount))
 	assert.Equal(t, 1, linkCount)
 	var quarantineCount int

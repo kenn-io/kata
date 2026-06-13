@@ -386,7 +386,7 @@ func TestImportBatch_SourceOwnedLabelsLinksReconcileLocalRemain(t *testing.T) {
 	require.NoError(t, err)
 	_, err = d.AddLabel(ctx, *aMap.IssueID, "local", "local")
 	require.NoError(t, err)
-	localLink := makeLink(ctx, t, d, p.ID, *aMap.IssueID, *cMap.IssueID, "related")
+	localLink := makeLink(ctx, t, d, *aMap.IssueID, *cMap.IssueID, "related")
 
 	res, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{
 		{ExternalID: "a", Title: "A2", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t2, Labels: []string{"source:beads", "new"}, Links: []db.ImportLink{{Type: "blocks", TargetExternalID: "c"}}},
@@ -426,7 +426,7 @@ func TestImportBatch_DoesNotAdoptPreExistingLocalLink(t *testing.T) {
 	require.NoError(t, err)
 	bMap, err := d.ImportMappingBySource(ctx, p.ID, "beads", "issue", "b")
 	require.NoError(t, err)
-	localLink := makeLink(ctx, t, d, p.ID, *aMap.IssueID, *bMap.IssueID, "blocks")
+	localLink := makeLink(ctx, t, d, *aMap.IssueID, *bMap.IssueID, "blocks")
 
 	res, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{
 		{ExternalID: "a", Title: "A2", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t2, Links: []db.ImportLink{{Type: "blocks", TargetExternalID: "b"}}},
@@ -471,7 +471,7 @@ func TestImportBatch_ReimportRecreatesLinkWhenMappingReferencesStaleLink(t *test
 	require.NotNil(t, linkMap.LinkID)
 	oldLinkID := *linkMap.LinkID
 
-	localLink := makeLink(ctx, t, d, p.ID, *aMap.IssueID, *cMap.IssueID, "related")
+	localLink := makeLink(ctx, t, d, *aMap.IssueID, *cMap.IssueID, "related")
 	_, err = d.ExecContext(ctx, `UPDATE import_mappings SET link_id = ? WHERE id = ?`, localLink.ID, linkMap.ID)
 	require.NoError(t, err)
 	require.NoError(t, d.DeleteLinkByID(ctx, oldLinkID))
@@ -622,13 +622,13 @@ func labelsForIssue(ctx context.Context, t *testing.T, d *sqlitestore.Store, iss
 
 func linksForIssue(ctx context.Context, t *testing.T, d *sqlitestore.Store, issueID int64) []db.Link {
 	t.Helper()
-	rows, err := d.QueryContext(ctx, `SELECT id, project_id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at FROM links WHERE from_issue_id = ? OR to_issue_id = ? ORDER BY id ASC`, issueID, issueID)
+	rows, err := d.QueryContext(ctx, `SELECT id, from_issue_id, from_issue_uid, to_issue_id, to_issue_uid, type, author, created_at FROM links WHERE from_issue_id = ? OR to_issue_id = ? ORDER BY id ASC`, issueID, issueID)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var out []db.Link
 	for rows.Next() {
 		var l db.Link
-		require.NoError(t, rows.Scan(&l.ID, &l.ProjectID, &l.FromIssueID, &l.FromIssueUID, &l.ToIssueID, &l.ToIssueUID, &l.Type, &l.Author, &l.CreatedAt))
+		require.NoError(t, rows.Scan(&l.ID, &l.FromIssueID, &l.FromIssueUID, &l.ToIssueID, &l.ToIssueUID, &l.Type, &l.Author, &l.CreatedAt))
 		out = append(out, l)
 	}
 	require.NoError(t, rows.Err())
