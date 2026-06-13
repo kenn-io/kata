@@ -22,10 +22,28 @@ const APISchemaVersion = "0.1.0"
 // configuration — notably the disabled SchemaLinkTransformer — so the schema
 // matches the daemon's actual wire shapes.
 func OpenAPIDocument() *huma.OpenAPI {
+	doc := baseOpenAPIDocument()
+	relaxResponseAdditionalProperties(doc)
+	return doc
+}
+
+// openAPIClientDocument builds the document flavor consumed by code
+// generators (`kata openapi --version 3.0`). Response schemas leave
+// additionalProperties unset instead of the published document's explicit
+// true: absence carries the same permissive semantics, but the Go client
+// generator (oapi-codegen-dd) models optional object-typed properties as
+// value types whenever the target schema carries an explicit
+// additionalProperties constraint.
+func openAPIClientDocument() *huma.OpenAPI {
+	doc := baseOpenAPIDocument()
+	clearResponseAdditionalProperties(doc)
+	return doc
+}
+
+func baseOpenAPIDocument() *huma.OpenAPI {
 	doc := NewServer(ServerConfig{}).API().OpenAPI()
 	applyJSONBlobSchemaOverrides(doc)
 	applyArrayQueryParamEncoding(doc)
-	relaxResponseAdditionalProperties(doc)
 	return doc
 }
 
@@ -35,32 +53,33 @@ func OpenAPIYAML() ([]byte, error) {
 }
 
 // OpenAPIYAMLVersion renders the OpenAPI document as YAML for a supported
-// OpenAPI version. Version 3.0 is used by code generators that do not yet
-// consume OpenAPI 3.1's JSON Schema dialect.
+// OpenAPI version. Version 3.0 is the code-generator flavor: it serves
+// generators that do not yet consume OpenAPI 3.1's JSON Schema dialect, and
+// its response schemas leave additionalProperties unset (see
+// openAPIClientDocument).
 func OpenAPIYAMLVersion(version string) ([]byte, error) {
-	doc := OpenAPIDocument()
 	switch version {
 	case "3.1":
-		return doc.YAML()
+		return OpenAPIDocument().YAML()
 	case "3.0":
-		return doc.DowngradeYAML()
+		return openAPIClientDocument().DowngradeYAML()
 	default:
 		return nil, fmt.Errorf("unsupported openapi version %q", version)
 	}
 }
 
-// OpenAPIJSONVersion renders the OpenAPI document as pretty JSON.
+// OpenAPIJSONVersion renders the OpenAPI document as pretty JSON. The 3.0
+// flavor differs from 3.1 the same way as in OpenAPIYAMLVersion.
 func OpenAPIJSONVersion(version string) ([]byte, error) {
-	doc := OpenAPIDocument()
 	var (
 		raw []byte
 		err error
 	)
 	switch version {
 	case "3.1":
-		raw, err = doc.MarshalJSON()
+		raw, err = OpenAPIDocument().MarshalJSON()
 	case "3.0":
-		raw, err = doc.Downgrade()
+		raw, err = openAPIClientDocument().Downgrade()
 	default:
 		return nil, fmt.Errorf("unsupported openapi version %q", version)
 	}
@@ -81,9 +100,27 @@ func OpenAPIJSONVersion(version string) ([]byte, error) {
 // additive response fields — contradicting the compatibility policy in
 // docs/reference/http-api.md, where additive optional response fields may appear
 // without an api_schema_version bump. It walks every response schema and flips
-// that strict default to permissive, while leaving request schemas untouched so
-// request validation is unchanged.
+// that strict default to an explicit additionalProperties:true, while leaving
+// request schemas untouched so request validation is unchanged.
 func relaxResponseAdditionalProperties(doc *huma.OpenAPI) {
+	replaceStrictResponseAdditionalProperties(doc, true)
+}
+
+// clearResponseAdditionalProperties removes the strict default instead of
+// flipping it to true. Used by the code-generator document flavor: an unset
+// additionalProperties is just as permissive, and it keeps generators from
+// modeling optional object-typed properties as value types (see
+// openAPIClientDocument).
+func clearResponseAdditionalProperties(doc *huma.OpenAPI) {
+	replaceStrictResponseAdditionalProperties(doc, nil)
+}
+
+// replaceStrictResponseAdditionalProperties rewrites the
+// additionalProperties:false default on every response-reachable schema to
+// replacement. Schemas reachable from a request body are skipped so request
+// validation never loosens; map-typed schemas (additionalProperties holding a
+// value schema) are untouched.
+func replaceStrictResponseAdditionalProperties(doc *huma.OpenAPI, replacement any) {
 	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
 		return
 	}
@@ -100,7 +137,7 @@ func relaxResponseAdditionalProperties(doc *huma.OpenAPI) {
 						return
 					}
 					if ap, ok := schema.AdditionalProperties.(bool); ok && !ap {
-						schema.AdditionalProperties = true
+						schema.AdditionalProperties = replacement
 					}
 				})
 			}

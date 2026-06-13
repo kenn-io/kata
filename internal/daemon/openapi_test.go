@@ -369,6 +369,28 @@ func TestSchemaSharedByRequestAndResponseStaysStrict(t *testing.T) {
 	require.Equal(t, true, responseOnly.AdditionalProperties, "response-only schema must be relaxed")
 }
 
+// TestClientDocumentLeavesResponseAdditionalPropertiesUnset pins the client
+// generator flavor (kata openapi --version 3.0): response schemas leave
+// additionalProperties unset. Absence carries the same permissive semantics
+// as the published 3.1 document's explicit true, but the Go client generator
+// (oapi-codegen-dd) models optional object-typed properties as value types
+// whenever the target schema carries an explicit additionalProperties
+// constraint. Request schemas stay strict in both flavors.
+func TestClientDocumentLeavesResponseAdditionalPropertiesUnset(t *testing.T) {
+	doc := openAPIClientDocument()
+	schemas := doc.Components.Schemas.Map()
+
+	linkChanges := schemas["LinkChanges"]
+	require.NotNil(t, linkChanges, "missing LinkChanges schema")
+	require.Nil(t, linkChanges.AdditionalProperties,
+		"client-flavor response schemas must leave additionalProperties unset")
+
+	request := schemas["CreateIssueRequestBody"]
+	require.NotNil(t, request, "missing CreateIssueRequestBody schema")
+	require.Equal(t, false, request.AdditionalProperties,
+		"client-flavor request bodies must stay strict")
+}
+
 func refName(ref string) string {
 	if i := strings.LastIndex(ref, "/"); i >= 0 {
 		return ref[i+1:]

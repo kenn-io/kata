@@ -43,7 +43,6 @@ components:
         - label
       type: object
     AddLabelResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -84,7 +83,6 @@ components:
         - owner
       type: object
     AuditCloseRow:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -115,7 +113,6 @@ components:
         - reason
       type: object
     AuditClosesResponseBody:
-      additionalProperties: true
       properties:
         rows:
           items:
@@ -126,7 +123,6 @@ components:
         - rows
       type: object
     AuthInfoOut:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -136,7 +132,6 @@ components:
         - kind
       type: object
     ChildCounts:
-      additionalProperties: true
       properties:
         open:
           format: int64
@@ -168,7 +163,6 @@ components:
           type: integer
       type: object
     ClaimActionResponseBody:
-      additionalProperties: true
       properties:
         claim:
           $ref: "#/components/schemas/IssueClaimOut"
@@ -189,7 +183,6 @@ components:
         - holder
       type: object
     ClaimPrincipalOut:
-      additionalProperties: true
       properties:
         client_kind:
           type: string
@@ -213,7 +206,6 @@ components:
         - actor
       type: object
     ClaimResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -228,7 +220,6 @@ components:
         - changed
       type: object
     ClaimStatusBody:
-      additionalProperties: true
       properties:
         claim:
           $ref: "#/components/schemas/IssueClaimOut"
@@ -247,7 +238,6 @@ components:
         - hub_now
       type: object
     ClaimViolationOut:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -278,7 +268,6 @@ components:
         - at
       type: object
     Comment:
-      additionalProperties: true
       properties:
         author:
           type: string
@@ -315,7 +304,6 @@ components:
         - body
       type: object
     CommentResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -354,7 +342,6 @@ components:
         - capabilities
       type: object
     CreateFederationReplicaBody:
-      additionalProperties: true
       properties:
         adopted:
           type: boolean
@@ -474,7 +461,6 @@ components:
         - to_ref
       type: object
     CreateLinkResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -511,7 +497,6 @@ components:
         - template
       type: object
     CreateRecurrenceResponseBody:
-      additionalProperties: true
       properties:
         recurrence:
           $ref: "#/components/schemas/Recurrence"
@@ -529,7 +514,6 @@ components:
         - actor
       type: object
     CreateTokenResponseBody:
-      additionalProperties: true
       properties:
         plaintext:
           type: string
@@ -550,7 +534,6 @@ components:
         - actor
       type: object
     DetachProjectAliasResponseBody:
-      additionalProperties: true
       properties:
         alias:
           $ref: "#/components/schemas/ProjectAlias"
@@ -561,7 +544,6 @@ components:
         - event
       type: object
     DigestActorEntry:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -578,7 +560,6 @@ components:
         - issues
       type: object
     DigestIssueActions:
-      additionalProperties: true
       properties:
         actions:
           items:
@@ -602,7 +583,6 @@ components:
         - actions
       type: object
     DigestResponseBody:
-      additionalProperties: true
       properties:
         actors:
           items:
@@ -632,7 +612,6 @@ components:
         - actors
       type: object
     DigestTotals:
-      additionalProperties: true
       properties:
         assigned:
           format: int64
@@ -726,7 +705,6 @@ components:
         - actor
       type: object
     EditIssueResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -753,7 +731,6 @@ components:
           type: string
       type: object
     ErrorBody:
-      additionalProperties: true
       properties:
         code:
           type: string
@@ -769,7 +746,6 @@ components:
         - message
       type: object
     ErrorEnvelope:
-      additionalProperties: true
       properties:
         error:
           $ref: "#/components/schemas/ErrorBody"
@@ -781,7 +757,6 @@ components:
         - error
       type: object
     Event:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -844,7 +819,6 @@ components:
         - created_at
       type: object
     EventEnvelope:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -928,7 +902,6 @@ components:
         - type
       type: object
     FederationBindingOut:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -981,7 +954,6 @@ components:
         - updated_at
       type: object
     FederationEnrollmentOut:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -1064,7 +1036,6 @@ components:
         - created_at
       type: object
     FederationIngestEventsBody:
-      additionalProperties: true
       properties:
         accepted:
           format: int64
@@ -1095,7 +1066,6 @@ components:
         - schema_version
       type: object
     FederationProjectStatus:
-      additionalProperties: true
       properties:
         active_quarantine_count:
           format: int64
@@ -1214,7 +1184,6 @@ components:
         - recent_violations
       type: object
     FederationQuarantineSummary:
-      additionalProperties: true
       properties:
         created_at:
           format: date-time
@@ -1247,7 +1216,6 @@ components:
         - created_at
       type: object
     FederationStatusBody:
-      additionalProperties: true
       properties:
         statuses:
           items:
@@ -1258,7 +1226,6 @@ components:
         - statuses
       type: object
     FederationViolationSummary:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -1289,7 +1256,6 @@ components:
         - at
       type: object
     HealthResponseBody:
-      additionalProperties: true
       properties:
         api_schema_version:
           type: string
@@ -1316,7 +1282,6 @@ components:
         - started_at
       type: object
     ImportBatchResult:
-      additionalProperties: true
       properties:
         comments:
           format: int64
@@ -1436,7 +1401,6 @@ components:
         - updated_at
       type: object
     ImportItemResult:
-      additionalProperties: true
       properties:
         external_id:
           type: string
@@ -1501,7 +1465,6 @@ components:
           type: string
       type: object
     InitProjectResponseBody:
-      additionalProperties: true
       properties:
         alias:
           $ref: "#/components/schemas/ProjectAlias"
@@ -1517,7 +1480,6 @@ components:
         - alias
       type: object
     InstanceResponseBody:
-      additionalProperties: true
       properties:
         auth:
           $ref: "#/components/schemas/AuthInfoOut"
@@ -1535,7 +1497,6 @@ components:
         - auth
       type: object
     Issue:
-      additionalProperties: true
       properties:
         author:
           type: string
@@ -1602,7 +1563,6 @@ components:
         - updated_at
       type: object
     IssueClaimOut:
-      additionalProperties: true
       properties:
         acquired_at:
           format: date-time
@@ -1652,7 +1612,6 @@ components:
         - updated_at
       type: object
     IssueLabel:
-      additionalProperties: true
       properties:
         author:
           type: string
@@ -1671,7 +1630,6 @@ components:
         - created_at
       type: object
     IssueOut:
-      additionalProperties: true
       properties:
         author:
           type: string
@@ -1765,7 +1723,6 @@ components:
         - updated_at
       type: object
     IssueRef:
-      additionalProperties: true
       properties:
         qualified_id:
           type: string
@@ -1785,7 +1742,6 @@ components:
         - status
       type: object
     LabelCount:
-      additionalProperties: true
       properties:
         count:
           format: int64
@@ -1797,7 +1753,6 @@ components:
         - count
       type: object
     LabelsListResponseBody:
-      additionalProperties: true
       properties:
         labels:
           items:
@@ -1820,7 +1775,6 @@ components:
           type: boolean
       type: object
     LeaveFederationReplicaResultBody:
-      additionalProperties: true
       properties:
         archived:
           type: boolean
@@ -1836,7 +1790,6 @@ components:
         - disposition
       type: object
     LinkChanges:
-      additionalProperties: true
       properties:
         blocked_by_added:
           items:
@@ -1874,7 +1827,6 @@ components:
           type: array
       type: object
     LinkOut:
-      additionalProperties: true
       properties:
         author:
           type: string
@@ -1903,7 +1855,6 @@ components:
         - created_at
       type: object
     LinkPeer:
-      additionalProperties: true
       properties:
         short_id:
           type: string
@@ -1952,7 +1903,6 @@ components:
           type: string
       type: object
     ListFederationEnrollmentsBody:
-      additionalProperties: true
       properties:
         enrollments:
           items:
@@ -1963,7 +1913,6 @@ components:
         - enrollments
       type: object
     ListIssuesResponseBody:
-      additionalProperties: true
       properties:
         issues:
           items:
@@ -1974,7 +1923,6 @@ components:
         - issues
       type: object
     ListProjectsResponseBody:
-      additionalProperties: true
       properties:
         projects:
           items:
@@ -1985,7 +1933,6 @@ components:
         - projects
       type: object
     ListRecurrencesResponseBody:
-      additionalProperties: true
       properties:
         recurrences:
           items:
@@ -1996,7 +1943,6 @@ components:
         - recurrences
       type: object
     ListTokensResponseBody:
-      additionalProperties: true
       properties:
         tokens:
           items:
@@ -2018,7 +1964,6 @@ components:
         - source_project_id
       type: object
     MergeProjectResultOut:
-      additionalProperties: true
       properties:
         aliases_moved:
           format: int64
@@ -2050,7 +1995,6 @@ components:
         - purge_logs_moved
       type: object
     MergeShortIDExtension:
-      additionalProperties: true
       properties:
         post_merge_short_id:
           type: string
@@ -2075,7 +2019,6 @@ components:
         - to_project_uid
       type: object
     MoveIssueResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -2093,7 +2036,6 @@ components:
         - changed
       type: object
     MutationResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -2123,7 +2065,6 @@ components:
         - patch
       type: object
     PatchIssueMetadataResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -2148,7 +2089,6 @@ components:
         - patch
       type: object
     PatchProjectMetadataResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -2177,7 +2117,6 @@ components:
         - actor
       type: object
     PatchRecurrenceResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -2188,7 +2127,6 @@ components:
         - changed
       type: object
     PendingClaimOut:
-      additionalProperties: true
       properties:
         claim_kind:
           type: string
@@ -2222,7 +2160,6 @@ components:
         - requested_at
       type: object
     PingResponseBody:
-      additionalProperties: true
       properties:
         ok:
           type: boolean
@@ -2239,7 +2176,6 @@ components:
         - version
       type: object
     PollEventsBody:
-      additionalProperties: true
       properties:
         events:
           items:
@@ -2271,7 +2207,6 @@ components:
         - actor
       type: object
     Project:
-      additionalProperties: true
       properties:
         created_at:
           format: date-time
@@ -2301,7 +2236,6 @@ components:
         - created_at
       type: object
     ProjectAlias:
-      additionalProperties: true
       properties:
         alias_identity:
           type: string
@@ -2324,7 +2258,6 @@ components:
         - created_at
       type: object
     ProjectFederationBody:
-      additionalProperties: true
       properties:
         baseline_through_event_id:
           format: int64
@@ -2347,7 +2280,6 @@ components:
         - baseline_through_event_id
       type: object
     ProjectOut:
-      additionalProperties: true
       properties:
         created_at:
           format: date-time
@@ -2379,7 +2311,6 @@ components:
         - created_at
       type: object
     ProjectResolveBody:
-      additionalProperties: true
       properties:
         alias:
           $ref: "#/components/schemas/ProjectAlias"
@@ -2392,7 +2323,6 @@ components:
         - alias
       type: object
     ProjectStatsOut:
-      additionalProperties: true
       properties:
         closed:
           format: int64
@@ -2410,7 +2340,6 @@ components:
         - last_event_at
       type: object
     PurgeLog:
-      additionalProperties: true
       properties:
         actor:
           type: string
@@ -2482,7 +2411,6 @@ components:
         - purged_at
       type: object
     PurgeResponseBody:
-      additionalProperties: true
       properties:
         purge_log:
           $ref: "#/components/schemas/PurgeLog"
@@ -2490,7 +2418,6 @@ components:
         - purge_log
       type: object
     ReadyGlobalIssue:
-      additionalProperties: true
       properties:
         author:
           type: string
@@ -2560,7 +2487,6 @@ components:
         - updated_at
       type: object
     ReadyGlobalResponseBody:
-      additionalProperties: true
       properties:
         issues:
           items:
@@ -2571,7 +2497,6 @@ components:
         - issues
       type: object
     ReadyResponseBody:
-      additionalProperties: true
       properties:
         issues:
           items:
@@ -2582,7 +2507,6 @@ components:
         - issues
       type: object
     Recurrence:
-      additionalProperties: true
       properties:
         author:
           type: string
@@ -2693,7 +2617,6 @@ components:
           type: string
       type: object
     RemoveProjectResponseBody:
-      additionalProperties: true
       properties:
         event:
           $ref: "#/components/schemas/Event"
@@ -2725,7 +2648,6 @@ components:
           type: string
       type: object
     RestoreProjectResponseBody:
-      additionalProperties: true
       properties:
         changed:
           type: boolean
@@ -2747,7 +2669,6 @@ components:
         - actor
       type: object
     RevokeFederationEnrollmentBody:
-      additionalProperties: true
       properties:
         id:
           format: int64
@@ -2759,7 +2680,6 @@ components:
         - revoked
       type: object
     RevokeTokenResponseBody:
-      additionalProperties: true
       properties:
         event:
           $ref: "#/components/schemas/Event"
@@ -2770,7 +2690,6 @@ components:
         - event
       type: object
     SearchHit:
-      additionalProperties: true
       properties:
         issue:
           $ref: "#/components/schemas/Issue"
@@ -2788,7 +2707,6 @@ components:
         - matched_in
       type: object
     SearchResponseBody:
-      additionalProperties: true
       properties:
         query:
           type: string
@@ -2802,7 +2720,6 @@ components:
         - results
       type: object
     ShowIssueResponseBody:
-      additionalProperties: true
       properties:
         children:
           items:
@@ -2871,7 +2788,6 @@ components:
         - labels
       type: object
     ShowProjectResponseBody:
-      additionalProperties: true
       properties:
         aliases:
           items:
@@ -2885,7 +2801,6 @@ components:
         - aliases
       type: object
     ShowRecurrenceResponseBody:
-      additionalProperties: true
       properties:
         recurrence:
           $ref: "#/components/schemas/Recurrence"
@@ -2903,7 +2818,6 @@ components:
         - actor
       type: object
     TokenOut:
-      additionalProperties: true
       properties:
         actor:
           type: string
