@@ -2338,9 +2338,16 @@ func (m Model) handleJumpDetail(msg jumpDetailMsg) (tea.Model, tea.Cmd) {
 	if len(m.detail.navStack) >= detailNavCap {
 		return m, nil
 	}
+	pid, ok := m.jumpProjectID(msg)
+	if !ok {
+		// A named target project that the cache can't resolve must NOT
+		// fall back to the current project: fetching a foreign peer's bare
+		// short_id under the current project resolves a same-suffix issue
+		// or 404s. No-op the jump instead of navigating to the wrong issue.
+		return m, nil
+	}
 	prior := m.detail
 	prior.navStack = nil
-	pid := m.jumpProjectID(msg)
 	m.nextGen++
 	gen := m.nextGen
 	// tabExplicit carries forward with activeTab so a late-arriving
@@ -2373,25 +2380,26 @@ func (m Model) handleJumpDetail(msg jumpDetailMsg) (tea.Model, tea.Cmd) {
 }
 
 // jumpProjectID resolves the project_id the jump's fetches should run
-// under. A jump to a cross-project peer must fetch under the peer's own
-// project: the daemon's URL-subject resolver scopes every ref to the URL
-// project as an anti-fishing guard, so a foreign bare short_id fetched
-// under the current project resolves a same-suffix issue or 404s.
+// under, returning ok=false when a named target project can't be resolved
+// (the caller must then no-op the jump). A jump to a cross-project peer
+// must fetch under the peer's own project: the daemon's URL-subject
+// resolver scopes every ref to the URL project as an anti-fishing guard,
+// so a foreign bare short_id fetched under the current project resolves a
+// same-suffix issue or 404s.
 //
 // Precedence: an explicit projectID (children carry their numeric project)
-// wins; else a projectName (link peers carry it) is mapped through
-// projectsByID; else — same-project jump, or the name is not in the cache
-// — the current detail's project is kept.
-func (m Model) jumpProjectID(msg jumpDetailMsg) int64 {
+// wins; else a projectName (link peers carry it) MUST map through
+// projectsByID — an unresolved name returns ok=false rather than silently
+// falling back to the current project; else (no project routing, e.g. an
+// event-tab jump) the current detail's project is used.
+func (m Model) jumpProjectID(msg jumpDetailMsg) (int64, bool) {
 	if msg.projectID != 0 {
-		return msg.projectID
+		return msg.projectID, true
 	}
 	if msg.projectName != "" {
-		if id, ok := m.projectIDForName(msg.projectName); ok {
-			return id
-		}
+		return m.projectIDForName(msg.projectName)
 	}
-	return m.detail.scopePID
+	return m.detail.scopePID, true
 }
 
 // projectIDForName reverse-looks-up a project_id from its display name via

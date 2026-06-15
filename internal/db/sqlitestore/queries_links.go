@@ -413,17 +413,21 @@ func (d *Store) ChildCountsByParents(
 // handler runs the user-friendly OpenChildrenOf-backed check first; this
 // closes the race between that read and the close write by re-checking
 // inside the same write transaction. Links are project-independent edges
-// (storage v16), so a child in another project still gates the close.
+// (storage v16), so a child in another active project still gates the
+// close — but a child whose project is archived is excluded, matching
+// OpenChildrenOf so the guard never rejects a close the pre-check allowed.
 func txHasOpenChildren(ctx context.Context, tx *sql.Tx, parentIssueID int64) (bool, error) {
 	var total int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*)
 		 FROM links l
 		 JOIN issues child ON child.id = l.from_issue_id
+		 JOIN projects cp ON cp.id = child.project_id
 		 WHERE l.type = 'parent'
 		   AND l.to_issue_id = ?
 		   AND child.status = 'open'
-		   AND child.deleted_at IS NULL`,
+		   AND child.deleted_at IS NULL
+		   AND cp.deleted_at IS NULL`,
 		parentIssueID).Scan(&total); err != nil {
 		return false, fmt.Errorf("open children check: %w", err)
 	}

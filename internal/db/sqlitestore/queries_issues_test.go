@@ -507,6 +507,26 @@ func TestCloseIssue_RefusesParentWithOpenChildren(t *testing.T) {
 	require.ErrorIs(t, err, db.ErrOpenChildren)
 }
 
+// TestCloseIssue_AllowsParentWhenOnlyChildInArchivedProject pins the
+// in-transaction close guard to the same archived-project exclusion as
+// OpenChildrenOf: a parent whose only open child lives in an archived
+// project must close. Without the guard matching the read-side check, the
+// handler's OpenChildrenOf pre-check sees zero children and proceeds, then
+// txHasOpenChildren counts the archived-project child and rejects at commit.
+func TestCloseIssue_AllowsParentWhenOnlyChildInArchivedProject(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	pa := createProject(ctx, t, d, "alpha")
+	pb := createProject(ctx, t, d, "beta")
+	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")
+	archivedChild := makeIssue(t, ctx, d, pb.ID, "archived child", "tester")
+	makeLink(ctx, t, d, archivedChild.ID, parent.ID, "parent")
+	archiveProjectByID(ctx, t, d, pb.ID)
+
+	_, _, _, err := d.CloseIssue(ctx, parent.ID, "done", "agent", "", nil)
+	require.NoError(t, err, "archived-project child must not block parent close")
+}
+
 func TestCloseIssue_AllowsParentWithOnlyClosedChildren(t *testing.T) {
 	d, ctx, p, parent := setupTestIssue(t)
 	child, _ := createTesterIssue(ctx, t, d, p.ID, "child")

@@ -1366,10 +1366,10 @@ func TestHandleJumpDetail_ChildProjectIDWins(t *testing.T) {
 	}
 }
 
-// TestHandleJumpDetail_UnknownProjectKeepsCurrent: a same-project jump (no
-// project routing) or a name absent from the cache keeps the current
-// project, so a plain in-project jump is unaffected.
-func TestHandleJumpDetail_UnknownProjectKeepsCurrent(t *testing.T) {
+// TestHandleJumpDetail_SameProjectNameResolvesToCurrent: a jump whose peer
+// project name resolves to the current project keeps the current project,
+// so a plain in-project link jump is unaffected.
+func TestHandleJumpDetail_SameProjectNameResolvesToCurrent(t *testing.T) {
 	m := newTestModel()
 	m.view = viewDetail
 	m.projectsByID = map[int64]string{7: "alpha"}
@@ -1383,6 +1383,31 @@ func TestHandleJumpDetail_UnknownProjectKeepsCurrent(t *testing.T) {
 	m, _ = updateModel(m, jumpDetailMsg{ref: "7bb", projectName: "alpha"})
 	if m.detail.scopePID != 7 {
 		t.Fatalf("post-jump scopePID = %d, want 7 (same project)", m.detail.scopePID)
+	}
+}
+
+// TestHandleJumpDetail_UnresolvableProjectNoOps: a named target project the
+// cache can't resolve must NOT fall back to the current project (that would
+// fetch a foreign bare short_id under the wrong project, opening a
+// same-suffix issue or 404ing). The jump no-ops: no navStack push, the
+// current detail is untouched.
+func TestHandleJumpDetail_UnresolvableProjectNoOps(t *testing.T) {
+	m := newTestModel()
+	m.view = viewDetail
+	m.projectsByID = map[int64]string{7: "alpha"}
+	current := &Issue{UID: "01TEST-42aa", ShortID: "42aa"}
+	m.detail = detailModel{issue: current, scopePID: 7, gen: 1}
+	m.nextGen = 1
+
+	m, cmd := updateModel(m, jumpDetailMsg{ref: "7bb", projectName: "ghost"})
+	if len(m.detail.navStack) != 0 {
+		t.Fatalf("navStack length = %d, want 0 (jump must no-op)", len(m.detail.navStack))
+	}
+	if m.detail.issue != current {
+		t.Fatalf("detail issue changed on an unresolvable jump; want untouched")
+	}
+	if cmd != nil {
+		t.Fatal("unresolvable jump must not dispatch fetches")
 	}
 }
 
