@@ -1454,6 +1454,31 @@ func TestDetail_EnterOnEventWithIssueRef_JumpsAndStacks(t *testing.T) {
 	assertJumpDetailCmd(t, cmd, "l1l1")
 }
 
+// TestDetail_EnterOnLinkEvent_PrefersPeerUID: a link event carries the peer's
+// UID but no project. Jumping by the bare short_id would resolve under the
+// current project and could open a same-suffix issue in the wrong project.
+// The jump must use the peer's UID, which the daemon resolves under the
+// current project — landing on the right issue when same-project and failing
+// closed (issue_not_found) for a foreign peer rather than the wrong issue.
+func TestDetail_EnterOnLinkEvent_PrefersPeerUID(t *testing.T) {
+	api := &fakeDetailAPI{
+		getIssueResult: &Issue{UID: "01TESTPEERUID0000000000000", ShortID: "l1l1"},
+	}
+	dm := detailFixture()
+	dm.activeTab = tabEvents
+	dm.events = []EventLogEntry{
+		{Type: "issue.linked", Actor: "wesm",
+			Payload: map[string]any{
+				"type":        "blocks",
+				"to_short_id": "l1l1",
+				"to_uid":      "01TESTPEERUID0000000000000",
+			}},
+	}
+	dm.tabCursor = 0
+	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, newKeymap(), api)
+	assertJumpDetailCmd(t, cmd, "01TESTPEERUID0000000000000")
+}
+
 func TestDetail_EnterOnCurrentIssueEventDoesNotSelfJump(t *testing.T) {
 	api := &fakeDetailAPI{}
 	dm := detailFixture()

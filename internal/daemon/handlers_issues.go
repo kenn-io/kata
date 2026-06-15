@@ -40,9 +40,6 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if err := requireFederatedLinkClaims(ctx, cfg, actor, linkTargets...); err != nil {
-			return nil, err
-		}
 
 		// Validate priority before the idempotency lookup so an out-of-range
 		// value is rejected with a 400 instead of being silently absorbed by a
@@ -53,13 +50,24 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 
-		// Idempotency runs before look-alike so it wins over force_new (§3.7).
+		// Idempotency runs before the federated claim gate AND before
+		// look-alike: a retry of an already-successful create must return the
+		// stored reuse envelope, not re-run the claim gate (whose target claim
+		// state may have changed since the first request — a retry would then
+		// fail claim_denied for an issue that already exists). It also wins
+		// over force_new (§3.7).
 		idempotencyFingerprint, reuse, err := tryIdempotencyMatch(ctx, cfg, in, links)
 		if err != nil {
 			return nil, err
 		}
 		if reuse != nil {
 			return reuse, nil
+		}
+
+		// Fresh create (no reuse): now gate the link targets. A federated
+		// peer claimed by another actor blocks the new link.
+		if err := requireFederatedLinkClaims(ctx, cfg, actor, linkTargets...); err != nil {
+			return nil, err
 		}
 		if !in.Body.ForceNew {
 			if err := runLookalikeCheck(ctx, cfg, in); err != nil {

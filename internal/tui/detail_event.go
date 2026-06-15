@@ -412,19 +412,45 @@ func fmtTime(t time.Time) string {
 	return t.Format("2006-01-02 15:04")
 }
 
-// eventJumpTarget reads the issue short_id that a jumpable event refers
-// to. link.added / link.removed carry to_short_id; we also accept
-// issue_short_id for events whose subject IS the jump target.
+// eventJumpTarget reads the ref a jumpable event refers to, resolved under
+// the current detail project. link.added / link.removed carry the peer
+// (to_uid / to_short_id); we also accept issue_short_id for events whose
+// subject IS the jump target.
 func eventJumpTarget(events []EventLogEntry, idx int) (string, bool) {
 	if idx < 0 || idx >= len(events) {
 		return "", false
 	}
-	return readEventTargetShortID(events[idx])
+	return readEventTargetRef(events[idx])
 }
 
-// readEventTargetShortID pulls a short_id out of e.Payload. The keys
-// checked are "to_short_id" and "issue_short_id" in order so a link-
-// event payload's peer wins over the subject issue's own ref.
+// readEventTargetRef pulls a jump ref out of e.Payload. A link peer's UID
+// ("to_uid") is preferred over its short_id: an event row carries no peer
+// project, so a bare short_id is resolved under the CURRENT detail project —
+// which would open a same-suffix issue (or 404) when the peer is actually in
+// another project. The peer UID is globally unique and the daemon's resolver
+// scopes it to the URL project, so a same-project peer resolves while a
+// foreign peer returns issue_not_found: the jump fails closed instead of
+// landing on the wrong issue. Keys are checked most-specific first:
+// to_uid, to_short_id (legacy/pre-UID link events, which predate
+// cross-project links), then issue_short_id (subject events, same project).
+func readEventTargetRef(e EventLogEntry) (string, bool) {
+	if e.Payload == nil {
+		return "", false
+	}
+	for _, k := range []string{"to_uid", "to_short_id", "issue_short_id"} {
+		if v, ok := e.Payload[k]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return s, true
+			}
+		}
+	}
+	return "", false
+}
+
+// readEventTargetShortID pulls the peer's display short_id out of e.Payload
+// for rendering link-event descriptions. Unlike readEventTargetRef (the jump
+// path), this never returns a UID — the row text always shows the friendly
+// short_id. Keys: to_short_id (link peer) then issue_short_id (subject).
 func readEventTargetShortID(e EventLogEntry) (string, bool) {
 	if e.Payload == nil {
 		return "", false

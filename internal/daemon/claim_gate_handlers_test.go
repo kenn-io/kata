@@ -148,6 +148,42 @@ func TestClaimGateLinkCreateDeniesOtherPeerClaimHolder(t *testing.T) {
 // old per-URL-project gate would have silently passed; the foreign target
 // lives in a federated project whose claim is held by another actor, which
 // must deny the link.
+// TestClaimGateCreateIdempotentRetryReusesDespiteChangedPeerClaim pins that a
+// retry of an already-successful create (same Idempotency-Key + body) returns
+// the stored reuse envelope even when a linked target's claim changed after
+// the first request. The idempotency lookup must win over the federated claim
+// gate: a safe retry of an issue that already exists must not 409 claim_denied.
+func TestClaimGateCreateIdempotentRetryReusesDespiteChangedPeerClaim(t *testing.T) {
+	env := testenv.New(t)
+	project, _, peer := setupClaimGateProject(t, env, true)
+	body := map[string]any{
+		"actor": "agent",
+		"title": "links to a federated peer",
+		"links": []map[string]any{{"type": "related", "to_ref": peer.ShortID}},
+	}
+	headers := map[string]string{"Idempotency-Key": "create-reuse-1"}
+
+	// First create: peer is unclaimed, so the claim gate passes and the
+	// idempotency record is stored.
+	first, raw := envDoRaw(t, env, http.MethodPost, issuesURL(project.ID), body, headers)
+	require.Equal(t, http.StatusOK, first.StatusCode, string(raw))
+
+	// A different actor now holds the peer's claim — a fresh claim gate for
+	// "agent" would be denied.
+	acquireClaimGateIssue(t, env, project, peer, "other")
+
+	// Retry with the same key + body: must reuse, not re-run the claim gate.
+	second, raw2 := envDoRaw(t, env, http.MethodPost, issuesURL(project.ID), body, headers)
+	require.Equal(t, http.StatusOK, second.StatusCode, string(raw2))
+	var out struct {
+		Reused  bool `json:"reused"`
+		Changed bool `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(raw2, &out))
+	require.True(t, out.Reused, "idempotent retry must return the reuse envelope")
+	require.False(t, out.Changed, "idempotent retry must not report a change")
+}
+
 func TestClaimGateLinkCreateEvaluatesTargetAgainstItsOwnProject(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
