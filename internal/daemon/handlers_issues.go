@@ -64,8 +64,15 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return reuse, nil
 		}
 
-		// Fresh create (no reuse): now gate the link targets. A federated
-		// peer claimed by another actor blocks the new link.
+		// Fresh create (no reuse): now run the state-dependent link-target
+		// gates. A target in an archived project (link_target_archived) or a
+		// federated peer claimed by another actor (claim_denied) blocks the
+		// new link. These run after idempotency so a retry of an already-
+		// successful create still reuses even if a target was archived or its
+		// claim changed since the first request.
+		if err := requireInitialLinkTargetsAddable(ctx, cfg.DB, in.ProjectID, linkTargets); err != nil {
+			return nil, err
+		}
 		if err := requireFederatedLinkClaims(ctx, cfg, actor, linkTargets...); err != nil {
 			return nil, err
 		}

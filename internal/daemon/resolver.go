@@ -179,12 +179,18 @@ func validateInitialLinkType(l api.CreateInitialLinkBody) error {
 // resolveInitialLinks turns CreateInitialLinkBody entries (string ToRef) into
 // db.InitialLink entries (int64 ToNumber, which the db layer treats as an
 // issue row id). Soft-deleted targets are excluded — initial-link creation
-// must reject hidden peers per spec §6. Initial links are always adds, so
-// each target is gated through requireLinkTargetAddable.
+// must reject hidden peers per spec §6.
 //
-// The second return value contains the resolved target issues in input order;
-// the caller must pass them to requireFederatedLinkClaims before creating the
-// issue so the federated claim gate applies on the create path too.
+// This does only pure resolution and link-type validation so its result feeds
+// the idempotency fingerprint. The archived-target gate
+// (requireInitialLinkTargetsAddable) and the federated claim gate
+// (requireFederatedLinkClaims) are state-dependent and must run only on a
+// fresh create — AFTER the idempotency lookup — so a retry of an
+// already-successful create still returns the stored reuse envelope even if a
+// target's project was archived or its claim changed since the first request.
+//
+// The second return value contains the resolved target issues in input order
+// for those two gates.
 func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64, links []api.CreateInitialLinkBody) ([]db.InitialLink, []db.Issue, error) {
 	out := make([]db.InitialLink, 0, len(links))
 	targets := make([]db.Issue, 0, len(links))
@@ -201,9 +207,6 @@ func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64,
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := requireLinkTargetAddable(ctx, store, projectID, target); err != nil {
-			return nil, nil, err
-		}
 		out = append(out, db.InitialLink{
 			Type:     l.Type,
 			ToNumber: target.ID,
@@ -212,6 +215,20 @@ func resolveInitialLinks(ctx context.Context, store db.Storage, projectID int64,
 		targets = append(targets, target)
 	}
 	return out, targets, nil
+}
+
+// requireInitialLinkTargetsAddable gates each resolved initial-link target
+// through requireLinkTargetAddable (rejecting peers in archived projects).
+// Initial links are always adds. Run this only on a fresh create — after the
+// idempotency lookup finds no reuse — so an idempotent retry is not refused by
+// an archive that happened after the original create succeeded.
+func requireInitialLinkTargetsAddable(ctx context.Context, store db.Storage, projectID int64, targets []db.Issue) error {
+	for _, target := range targets {
+		if err := requireLinkTargetAddable(ctx, store, projectID, target); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // fillLinksDeltaParams resolves each api.LinksDelta string ref into an

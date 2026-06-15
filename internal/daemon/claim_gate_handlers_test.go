@@ -184,6 +184,52 @@ func TestClaimGateCreateIdempotentRetryReusesDespiteChangedPeerClaim(t *testing.
 	require.False(t, out.Changed, "idempotent retry must not report a change")
 }
 
+// TestCreateIdempotentRetryReusesDespiteArchivedLinkTarget pins that a retry
+// of an already-successful create (same Idempotency-Key + body) returns the
+// stored reuse envelope even when a linked target's project was archived after
+// the first request. The archived-target gate must run only on a fresh create
+// (after the idempotency lookup), not during link resolution.
+func TestCreateIdempotentRetryReusesDespiteArchivedLinkTarget(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	subj, err := env.DB.CreateProject(ctx, "subj")
+	require.NoError(t, err)
+	peerProj, err := env.DB.CreateProject(ctx, "peerproj")
+	require.NoError(t, err)
+	peer, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: peerProj.ID, Title: "peer", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	body := map[string]any{
+		"actor": "agent",
+		"title": "links to a cross-project peer",
+		"links": []map[string]any{{"type": "related", "to_ref": "peerproj#" + peer.ShortID}},
+	}
+	headers := map[string]string{"Idempotency-Key": "create-archived-reuse-1"}
+
+	// First create: peer's project is active, so the addable gate passes.
+	first, raw := envDoRaw(t, env, http.MethodPost, issuesURL(subj.ID), body, headers)
+	require.Equal(t, http.StatusOK, first.StatusCode, string(raw))
+
+	// Archive the peer's project after the successful create.
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: peerProj.ID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	// Retry with the same key + body: must reuse, not fail link_target_archived.
+	second, raw2 := envDoRaw(t, env, http.MethodPost, issuesURL(subj.ID), body, headers)
+	require.Equal(t, http.StatusOK, second.StatusCode, string(raw2))
+	var out struct {
+		Reused  bool `json:"reused"`
+		Changed bool `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(raw2, &out))
+	require.True(t, out.Reused, "idempotent retry must return the reuse envelope")
+	require.False(t, out.Changed, "idempotent retry must not report a change")
+}
+
 func TestClaimGateLinkCreateEvaluatesTargetAgainstItsOwnProject(t *testing.T) {
 	env := testenv.New(t)
 	ctx := context.Background()
