@@ -1771,15 +1771,21 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 }
 
 // ReadyIssues returns open, non-deleted issues with no open `blocks` predecessor,
-// ordered by updated_at DESC. limit==0 means no limit.
+// ordered by updated_at DESC. limit==0 means no limit. Blockers may live in
+// another project (links span projects, storage v16), but a blocker whose
+// project is archived (projects.deleted_at IS NOT NULL) does not gate
+// readiness — mirroring the child/close queries' archived-project exclusion,
+// so an active issue is not stranded behind hidden archived work.
 func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, filter db.ReadyIssuesFilter) ([]db.Issue, error) {
 	q := issueSelect + `
 		WHERE i.project_id = ? AND i.status = 'open' AND i.deleted_at IS NULL
 		  AND NOT EXISTS (
 		    SELECT 1 FROM links l
 		    JOIN issues blocker ON blocker.id = l.from_issue_id
+		    JOIN projects bp ON bp.id = blocker.project_id
 		    WHERE l.type = 'blocks' AND l.to_issue_id = i.id
 		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
+		      AND bp.deleted_at IS NULL
 		  )`
 	args := []any{projectID}
 
@@ -1825,9 +1831,10 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 
 // ReadyIssuesGlobal returns ready issues across every non-archived project,
 // each paired with its project name. "Ready" matches ReadyIssues: open,
-// not soft-deleted, and not blocked by an open `blocks` predecessor.
-// Issues from archived projects (projects.deleted_at IS NOT NULL) are
-// excluded. Ordering matches ReadyIssues so behavior is consistent.
+// not soft-deleted, and not blocked by an open `blocks` predecessor in an
+// active project. Issues from archived projects (projects.deleted_at IS NOT
+// NULL) are excluded, and an open blocker in an archived project does not
+// gate readiness. Ordering matches ReadyIssues so behavior is consistent.
 func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int) ([]db.ReadyGlobalIssue, error) {
 	// issueSelect ends with "FROM issues i JOIN projects p ON p.id = i.project_id"
 	// We need to add p.name before FROM, so we build the SELECT from scratch.
@@ -1837,8 +1844,10 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int) ([]db.ReadyGlo
 		  AND NOT EXISTS (
 		    SELECT 1 FROM links l
 		    JOIN issues blocker ON blocker.id = l.from_issue_id
+		    JOIN projects bp ON bp.id = blocker.project_id
 		    WHERE l.type = 'blocks' AND l.to_issue_id = i.id
 		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
+		      AND bp.deleted_at IS NULL
 		  )
 		ORDER BY i.updated_at DESC, i.id DESC`
 	if limit > 0 {

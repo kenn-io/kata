@@ -287,3 +287,43 @@ func TestReadyIssuesGlobal_ExcludesBlockedIssues(t *testing.T) {
 	assert.True(t, got[blocker.ShortID])
 	assert.False(t, got[blocked.ShortID])
 }
+
+// TestReadyIssues_IgnoresBlockerInArchivedProject: a cross-project blocker
+// whose project is archived must not keep an active issue out of ReadyIssues.
+// Links survive project archival (storage v16), so without joining the
+// blocker's project an open blocker hidden behind an archived project would
+// strand the downstream issue as perpetually not-ready.
+func TestReadyIssues_IgnoresBlockerInArchivedProject(t *testing.T) {
+	d, ctx, p1 := setupTestProject(t)
+	p2, err := d.CreateProject(ctx, "blocker-project")
+	require.NoError(t, err)
+	blocked := makeIssue(t, ctx, d, p1.ID, "blocked", "tester")
+	blocker := makeIssue(t, ctx, d, p2.ID, "blocker", "tester")
+	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
+	archiveProjectByID(ctx, t, d, p2.ID)
+
+	got := readyNumbers(t, ctx, d, p1.ID)
+	assert.Contains(t, got, blocked.ShortID,
+		"issue blocked only by an archived-project blocker must be ready")
+}
+
+// TestReadyIssuesGlobal_IgnoresBlockerInArchivedProject mirrors the per-project
+// case for the global ready query.
+func TestReadyIssuesGlobal_IgnoresBlockerInArchivedProject(t *testing.T) {
+	d, ctx, p1 := setupTestProject(t)
+	p2, err := d.CreateProject(ctx, "blocker-project")
+	require.NoError(t, err)
+	blocked := makeIssue(t, ctx, d, p1.ID, "blocked", "tester")
+	blocker := makeIssue(t, ctx, d, p2.ID, "blocker", "tester")
+	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
+	archiveProjectByID(ctx, t, d, p2.ID)
+
+	rows, err := d.ReadyIssuesGlobal(ctx, 0)
+	require.NoError(t, err)
+	got := map[string]bool{}
+	for _, r := range rows {
+		got[r.ShortID] = true
+	}
+	assert.True(t, got[blocked.ShortID],
+		"issue blocked only by an archived-project blocker must be ready")
+}
