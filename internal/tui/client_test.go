@@ -714,6 +714,40 @@ func TestClient_ListEvents_FiltersByIssueShortID(t *testing.T) {
 	}
 }
 
+// TestClient_ListEvents_MatchesByIssueUID: a link-event jump resolves the peer
+// by UID, so handleJumpDetail fetches the events tab with the UID as ref. The
+// events filter must match on issue_uid as well as issue_short_id, or the
+// events tab comes back empty for an issue opened by UID.
+func TestClient_ListEvents_MatchesByIssueUID(t *testing.T) {
+	const wantUID = "01JZ0000000000000000000001"
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("after_id") != "" {
+			respondJSON(t, w, map[string]any{
+				"events": []map[string]any{}, "next_after_id": 2, "reset_required": false,
+			})
+			return
+		}
+		respondJSON(t, w, map[string]any{
+			"events": []map[string]any{
+				{
+					"event_id": 1, "type": "issue.commented",
+					"issue_short_id": "abc4", "issue_uid": wantUID, "actor": "a",
+				},
+				{
+					"event_id": 2, "type": "issue.commented",
+					"issue_short_id": "xyz9", "issue_uid": "01JZ0000000000000000000099", "actor": "a",
+				},
+			},
+			"next_after_id":  2,
+			"reset_required": false,
+		})
+	})
+	got, err := c.ListEvents(context.Background(), 7, wantUID)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "events tab must populate when the ref is the issue UID")
+	require.Equal(t, int64(1), got[0].ID)
+}
+
 func TestClient_ListEvents_PaginatesProjectEventStream(t *testing.T) {
 	var calls int
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

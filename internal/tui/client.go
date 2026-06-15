@@ -470,9 +470,11 @@ func (c *Client) ListComments(
 }
 
 // ListEvents returns the events tab data for one issue. See above note
-// on the client-side filter. ref is the issue's short_id; the daemon's
-// event stream embeds issue_short_id on every issue-scoped event, so
-// the filter is project-local and stable for the life of the daemon.
+// on the client-side filter. ref is the issue's short_id OR its UID: the
+// daemon's event rows embed both issue_short_id and issue_uid, so matching
+// either keeps the tab populated when the detail view was opened by UID
+// (the link-event jump path resolves the peer by UID). A bare short_id ref
+// still matches issue_short_id as before.
 //
 // TODO(plan-6/task-8): the 200-event window is a one-shot snapshot;
 // full pagination via next_after_id is deferred. The poll envelope's
@@ -488,7 +490,7 @@ func (c *Client) ListEvents(ctx context.Context, projectID int64, ref string) ([
 			return nil, err
 		}
 		for _, e := range resp.Events {
-			if ref != "" && e.IssueShortID != nil && *e.IssueShortID == ref {
+			if eventMatchesRef(e, ref) {
 				out = append(out, e)
 			}
 		}
@@ -497,6 +499,20 @@ func (c *Client) ListEvents(ctx context.Context, projectID int64, ref string) ([
 		}
 		afterID = resp.NextAfterID
 	}
+}
+
+// eventMatchesRef reports whether an event belongs to the issue named by
+// ref, accepting either the issue's UID or its short_id. The UID match
+// supports detail views opened by UID (link-event jumps); the short_id match
+// preserves the original short_id-keyed contract.
+func eventMatchesRef(e EventLogEntry, ref string) bool {
+	if ref == "" {
+		return false
+	}
+	if e.IssueUID == ref {
+		return true
+	}
+	return e.IssueShortID != nil && *e.IssueShortID == ref
 }
 
 type eventsPageResp struct {
