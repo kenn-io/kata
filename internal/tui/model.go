@@ -2340,7 +2340,7 @@ func (m Model) handleJumpDetail(msg jumpDetailMsg) (tea.Model, tea.Cmd) {
 	}
 	prior := m.detail
 	prior.navStack = nil
-	pid := m.detail.scopePID
+	pid := m.jumpProjectID(msg)
 	m.nextGen++
 	gen := m.nextGen
 	// tabExplicit carries forward with activeTab so a late-arriving
@@ -2370,6 +2370,39 @@ func (m Model) handleJumpDetail(msg jumpDetailMsg) (tea.Model, tea.Cmd) {
 		fetchLinks(m.api, pid, msg.ref, gen),
 	}
 	return m, tea.Batch(cmds...)
+}
+
+// jumpProjectID resolves the project_id the jump's fetches should run
+// under. A jump to a cross-project peer must fetch under the peer's own
+// project: the daemon's URL-subject resolver scopes every ref to the URL
+// project as an anti-fishing guard, so a foreign bare short_id fetched
+// under the current project resolves a same-suffix issue or 404s.
+//
+// Precedence: an explicit projectID (children carry their numeric project)
+// wins; else a projectName (link peers carry it) is mapped through
+// projectsByID; else — same-project jump, or the name is not in the cache
+// — the current detail's project is kept.
+func (m Model) jumpProjectID(msg jumpDetailMsg) int64 {
+	if msg.projectID != 0 {
+		return msg.projectID
+	}
+	if msg.projectName != "" {
+		if id, ok := m.projectIDForName(msg.projectName); ok {
+			return id
+		}
+	}
+	return m.detail.scopePID
+}
+
+// projectIDForName reverse-looks-up a project_id from its display name via
+// the projectsByID cache (id → name) seeded at boot by fetchProjects.
+func (m Model) projectIDForName(name string) (int64, bool) {
+	for id, n := range m.projectsByID {
+		if n == name {
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 // dispatchToView forwards msg to the active sub-view's Update.

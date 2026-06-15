@@ -405,3 +405,66 @@ func TestRelationshipQueries_CrossProjectPeersVisible(t *testing.T) {
 		assert.True(t, seen["blocks"], "blocks edge must appear")
 	})
 }
+
+// TestOpenChildrenOf_ExcludesArchivedProjectChildren: an open child living in
+// an archived project must not surface in the parent-close completeness check
+// — neither in the listing nor the count — so an active parent is not blocked
+// from closing by a child hidden behind an archived project.
+func TestOpenChildrenOf_ExcludesArchivedProjectChildren(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	pa := createProject(ctx, t, d, "alpha")
+	pb := createProject(ctx, t, d, "beta")
+	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")
+	liveChild := makeIssue(t, ctx, d, pa.ID, "live child", "tester")
+	archivedChild := makeIssue(t, ctx, d, pb.ID, "archived child", "tester")
+	makeLink(ctx, t, d, liveChild.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, archivedChild.ID, parent.ID, "parent")
+	archiveProjectByID(ctx, t, d, pb.ID)
+
+	got, total, err := d.OpenChildrenOf(ctx, parent.ID, 10)
+	require.NoError(t, err)
+	assert.Equal(t, 1, total, "archived-project child must not count")
+	require.Len(t, got, 1)
+	assert.Equal(t, liveChild.ID, got[0].ID)
+}
+
+// TestChildrenOfIssue_ExcludesArchivedProjectChildren: the surface child
+// listing must omit children whose project is archived.
+func TestChildrenOfIssue_ExcludesArchivedProjectChildren(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	pa := createProject(ctx, t, d, "alpha")
+	pb := createProject(ctx, t, d, "beta")
+	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")
+	liveChild := makeIssue(t, ctx, d, pa.ID, "live child", "tester")
+	archivedChild := makeIssue(t, ctx, d, pb.ID, "archived child", "tester")
+	makeLink(ctx, t, d, liveChild.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, archivedChild.ID, parent.ID, "parent")
+	archiveProjectByID(ctx, t, d, pb.ID)
+
+	got, err := d.ChildrenOfIssue(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "archived-project child must not be listed")
+	assert.Equal(t, liveChild.ID, got[0].ID)
+}
+
+// TestChildCountsByParents_ExcludesArchivedProjectChildren: child counts on
+// queue/detail rows must not include children in archived projects.
+func TestChildCountsByParents_ExcludesArchivedProjectChildren(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	pa := createProject(ctx, t, d, "alpha")
+	pb := createProject(ctx, t, d, "beta")
+	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")
+	liveChild := makeIssue(t, ctx, d, pa.ID, "live child", "tester")
+	archivedChild := makeIssue(t, ctx, d, pb.ID, "archived child", "tester")
+	makeLink(ctx, t, d, liveChild.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, archivedChild.ID, parent.ID, "parent")
+	archiveProjectByID(ctx, t, d, pb.ID)
+
+	got, err := d.ChildCountsByParents(ctx, []int64{parent.ID})
+	require.NoError(t, err)
+	assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parent.ID],
+		"archived-project child must not count toward open or total")
+}

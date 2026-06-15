@@ -79,7 +79,7 @@ type Storage interface {
 	UpdateOwner(ctx context.Context, issueID int64, newOwner *string, actor string) (Issue, *Event, bool, error)
 	UpdatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (Issue, *Event, bool, error)
 	PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
-	ShortIDsByUIDs(ctx context.Context, projectID int64, uids []string) (map[string]string, error)
+	IssueQualifiersByUIDs(ctx context.Context, uids []string) (map[string]IssueQualifier, error)
 	PurgeResetCheck(ctx context.Context, afterID, projectID int64) (int64, error)
 
 	// comments

@@ -201,6 +201,17 @@ func makeLink(ctx context.Context, t *testing.T, d *sqlitestore.Store, fromID, t
 	return link
 }
 
+// archiveProjectByID soft-deletes a project (sets projects.deleted_at) so
+// tests can exercise the archived-project exclusion in child-relationship
+// reads. Mirrors the raw-SQL archive used elsewhere in the suite.
+func archiveProjectByID(ctx context.Context, t *testing.T, d *sqlitestore.Store, projectID int64) {
+	t.Helper()
+	_, err := d.ExecContext(ctx,
+		`UPDATE projects SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`,
+		projectID)
+	require.NoError(t, err)
+}
+
 // attachAlias attaches a "git" alias to projectID, asserting no error. Used by
 // tests that need an alias as setup but aren't asserting on AttachAlias's
 // behavior.

@@ -807,16 +807,18 @@ func (d *Store) IssueByUID(ctx context.Context, issueUID string, include db.Incl
 	return scanIssue(row)
 }
 
-// ShortIDsByUIDs returns the current short_id for each requested issue
-// UID inside projectID. UIDs that don't resolve (purged, never existed,
-// or live in a different project) are omitted from the result. Used by
+// IssueQualifiersByUIDs resolves each requested issue UID to its current
+// project (id + name) and short_id, across ALL projects — UIDs are
+// globally unique, so no project scope is applied. UIDs that don't
+// resolve (purged or never existed) are omitted from the result. Used by
 // the audit projection to map a close-time parent UID to the parent's
-// CURRENT short_id, which is stable across project-merge collision
-// reshuffles even though the short_id itself is not.
-func (d *Store) ShortIDsByUIDs(
-	ctx context.Context, projectID int64, uids []string,
-) (map[string]string, error) {
-	out := map[string]string{}
+// CURRENT short_id (stable across project-merge collision reshuffles) and
+// to its owning project so a foreign parent renders qualified
+// ("project#short_id") rather than as an ambiguous bare suffix.
+func (d *Store) IssueQualifiersByUIDs(
+	ctx context.Context, uids []string,
+) (map[string]db.IssueQualifier, error) {
+	out := map[string]db.IssueQualifier{}
 	if len(uids) == 0 {
 		return out, nil
 	}
@@ -828,29 +830,30 @@ func (d *Store) ShortIDsByUIDs(
 		}
 		slice := uids[i:end]
 		placeholders := make([]string, len(slice))
-		args := make([]any, 0, len(slice)+1)
-		args = append(args, projectID)
+		args := make([]any, 0, len(slice))
 		for j, u := range slice {
 			placeholders[j] = "?"
 			args = append(args, u)
 		}
-		q := `SELECT uid, short_id FROM issues
-		      WHERE project_id = ? AND uid IN (` + strings.Join(placeholders, ",") + `)`
+		q := `SELECT i.uid, i.project_id, p.name, i.short_id
+		      FROM issues i JOIN projects p ON p.id = i.project_id
+		      WHERE i.uid IN (` + strings.Join(placeholders, ",") + `)`
 		rows, err := d.QueryContext(ctx, q, args...)
 		if err != nil {
-			return nil, fmt.Errorf("short ids by uids: %w", err)
+			return nil, fmt.Errorf("issue qualifiers by uids: %w", err)
 		}
 		for rows.Next() {
-			var uid, sid string
-			if err := rows.Scan(&uid, &sid); err != nil {
+			var uid string
+			var qual db.IssueQualifier
+			if err := rows.Scan(&uid, &qual.ProjectID, &qual.ProjectName, &qual.ShortID); err != nil {
 				_ = rows.Close()
-				return nil, fmt.Errorf("scan short id by uid: %w", err)
+				return nil, fmt.Errorf("scan issue qualifier by uid: %w", err)
 			}
-			out[uid] = sid
+			out[uid] = qual
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
-			return nil, fmt.Errorf("iterate short ids by uids: %w", err)
+			return nil, fmt.Errorf("iterate issue qualifiers by uids: %w", err)
 		}
 		_ = rows.Close()
 	}

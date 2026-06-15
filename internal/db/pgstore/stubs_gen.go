@@ -434,6 +434,10 @@ func (s *Store) IssueByUID(_ context.Context, _ string, _ db.IncludeDeleted) (db
 	return db.Issue{}, ErrNotImplementedPhase3
 }
 
+func (s *Store) IssueQualifiersByUIDs(_ context.Context, _ []string) (map[string]db.IssueQualifier, error) {
+	return nil, ErrNotImplementedPhase3
+}
+
 func (s *Store) IssueUIDPrefixMatch(_ context.Context, _ string, _ int, _ db.IncludeDeleted) ([]db.Issue, error) {
 	return nil, ErrNotImplementedPhase3
 }
@@ -747,10 +751,6 @@ func (s *Store) SearchFTS(_ context.Context, _ int64, _ string, _ int, _ bool) (
 }
 
 func (s *Store) SearchFTSAny(_ context.Context, _ int64, _ string, _ int, _ bool) ([]db.SearchCandidate, error) {
-	return nil, ErrNotImplementedPhase3
-}
-
-func (s *Store) ShortIDsByUIDs(_ context.Context, _ int64, _ []string) (map[string]string, error) {
 	return nil, ErrNotImplementedPhase3
 }
 

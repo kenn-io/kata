@@ -452,23 +452,40 @@ func numberFromAny(v any) (int64, bool) {
 	return 0, false
 }
 
-// linkJumpTarget returns the short_id to navigate to from the link at
-// idx. Outgoing links jump to To.ShortID; incoming links (where
-// To.ShortID == current) jump to From.ShortID instead so Enter on an
+// linkJumpTarget returns the peer to navigate to from the link at idx.
+// Outgoing links jump to the To peer; incoming links (where the To side is
+// the current issue) jump to the From peer instead, so Enter on an
 // "X blocks me" entry takes the user to X rather than re-opening the
-// current issue. self-loop links (rare) fall through to To.ShortID and
-// re-open the current issue, which is harmless.
-func linkJumpTarget(links []LinkEntry, idx int, current string) (string, bool) {
+// current issue. The chosen peer's project rides along so a cross-project
+// link resolves under the peer's own project.
+//
+// "Is this the current issue?" is decided by UID when both ends carry one:
+// short_ids are unique only within a project, so a foreign peer can share
+// the current issue's bare short_id, and short_id equality alone would
+// misroute an incoming cross-project link. Self-loop links resolve to the
+// current issue and are rejected (no jump).
+func linkJumpTarget(links []LinkEntry, idx int, currentShortID, currentUID string) (jumpTargetRef, bool) {
 	if idx < 0 || idx >= len(links) {
-		return "", false
+		return jumpTargetRef{}, false
 	}
 	l := links[idx]
-	target := l.To.ShortID
-	if target == current && l.From.ShortID != "" {
-		target = l.From.ShortID
+	peer := l.To
+	if peerIsCurrent(l.To, currentShortID, currentUID) && l.From.ShortID != "" {
+		peer = l.From
 	}
-	if target == "" {
-		return "", false
+	if peer.ShortID == "" || peerIsCurrent(peer, currentShortID, currentUID) {
+		return jumpTargetRef{}, false
 	}
-	return target, true
+	return jumpTargetRef{projectName: peer.Project, ref: peer.ShortID}, true
+}
+
+// peerIsCurrent reports whether a link peer is the issue currently open in
+// the detail view. UID equality is authoritative when both the peer and
+// the current issue carry a UID; otherwise it falls back to short_id
+// equality (the only signal available for fixtures or pre-UID rows).
+func peerIsCurrent(p LinkPeer, currentShortID, currentUID string) bool {
+	if currentUID != "" && p.UID != "" {
+		return p.UID == currentUID
+	}
+	return currentShortID != "" && p.ShortID == currentShortID
 }

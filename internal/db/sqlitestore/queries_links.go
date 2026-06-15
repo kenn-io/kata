@@ -458,8 +458,11 @@ func txParentIdentity(ctx context.Context, tx *sql.Tx, childIssueID int64) (uid,
 // parentIssueID, plus the total open-children count. Used by the parent-
 // close completeness check: the truncated slice feeds the error listing,
 // and the full count drives the "(N more)" suffix. Links are
-// project-independent edges (storage v16), so a child in another project is
-// still listed and counted.
+// project-independent edges (storage v16), so a child in another active
+// project is still listed and counted — but a child whose project is
+// archived (projects.deleted_at IS NOT NULL) is excluded, so an active
+// parent is not blocked from closing by a child hidden behind an archived
+// project.
 func (d *Store) OpenChildrenOf(
 	ctx context.Context, parentIssueID int64, limit int,
 ) ([]db.Issue, int, error) {
@@ -468,10 +471,12 @@ func (d *Store) OpenChildrenOf(
 		`SELECT COUNT(*)
 		 FROM links l
 		 JOIN issues child ON child.id = l.from_issue_id
+		 JOIN projects cp ON cp.id = child.project_id
 		 WHERE l.type = 'parent'
 		   AND l.to_issue_id = ?
 		   AND child.status = 'open'
-		   AND child.deleted_at IS NULL`,
+		   AND child.deleted_at IS NULL
+		   AND cp.deleted_at IS NULL`,
 		parentIssueID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("open children count: %w", err)
 	}
@@ -484,6 +489,7 @@ func (d *Store) OpenChildrenOf(
 		  AND l.to_issue_id = ?
 		  AND i.status = 'open'
 		  AND i.deleted_at IS NULL
+		  AND p.deleted_at IS NULL
 		ORDER BY i.created_at ASC
 		LIMIT ?`,
 		parentIssueID, limit)
@@ -507,13 +513,16 @@ func (d *Store) OpenChildrenOf(
 
 // ChildrenOfIssue returns direct, non-deleted children for parentIssueID in
 // the same order as ListIssues. Links are project-independent edges (storage
-// v16), so a child in another project is still returned.
+// v16), so a child in another active project is still returned — but a child
+// whose project is archived (projects.deleted_at IS NOT NULL) is excluded so
+// the surface listing matches the archived-project visibility contract.
 func (d *Store) ChildrenOfIssue(ctx context.Context, parentIssueID int64) ([]db.Issue, error) {
 	query := issueSelect + `
 		JOIN links l ON l.from_issue_id = i.id
 		WHERE l.type = 'parent'
 		  AND l.to_issue_id = ?
 		  AND i.deleted_at IS NULL
+		  AND p.deleted_at IS NULL
 		ORDER BY i.updated_at DESC, i.id DESC`
 	rows, err := d.QueryContext(ctx, query, parentIssueID)
 	if err != nil {
@@ -543,8 +552,10 @@ func (d *Store) appendChildCountsForChunk(
 	                 COUNT(*) AS total_count
 	          FROM links l
 	          JOIN issues child ON child.id = l.from_issue_id
+	          JOIN projects cp ON cp.id = child.project_id
 	          WHERE l.type = 'parent'
 	            AND child.deleted_at IS NULL
+	            AND cp.deleted_at IS NULL
 	            AND l.to_issue_id IN (` + placeholders + `)
 	          GROUP BY l.to_issue_id
 	          ORDER BY l.to_issue_id ASC`

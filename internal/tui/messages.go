@@ -101,9 +101,22 @@ type openInputMsg struct {
 // ref is the short_id, qualified short_id, or UID accepted by the
 // daemon's path resolver — the same wire shape that any client-side
 // fetch path uses.
+//
+// projectID / projectName identify the project the target lives in, which
+// can differ from the current detail's project because links and children
+// may span projects (storage v16). The daemon's URL-subject resolver
+// scopes every ref to the URL's project as an anti-fishing guard, so a
+// foreign peer's bare short_id MUST be fetched under the peer's own
+// project — otherwise it resolves a same-suffix issue in the current
+// project or 404s. handleJumpDetail resolves the fetch PID from these:
+// projectID (carried by children, which know their numeric project) wins;
+// else projectName (carried by link peers) is mapped via projectsByID;
+// else the current detail's project is used.
 type jumpDetailMsg struct {
-	connGen uint64
-	ref     string
+	connGen     uint64
+	ref         string
+	projectID   int64
+	projectName string
 }
 
 // mutationDoneMsg is the result of any single mutation (create now,

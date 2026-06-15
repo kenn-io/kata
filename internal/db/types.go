@@ -291,6 +291,16 @@ type ProjectAlias struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// IssueQualifier is the minimal identity needed to render an issue
+// reference: the owning project (id + name) and the issue's current
+// short_id. It lets a caller render a ref bare for a same-project issue
+// and qualified ("project#short_id") for a foreign one.
+type IssueQualifier struct {
+	ProjectID   int64
+	ProjectName string
+	ShortID     string
+}
+
 // Issue mirrors a row in issues. Priority is 0..4 with 0 = highest priority
 // and 4 = lowest; nil means no priority is set.
 type Issue struct {

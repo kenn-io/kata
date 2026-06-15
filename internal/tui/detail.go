@@ -506,7 +506,12 @@ func (dm detailModel) handleEnter(api detailAPI) (detailModel, tea.Cmd) {
 		if dm.childCursor < 0 || dm.childCursor >= len(dm.children) {
 			return dm, nil
 		}
-		return dm, jumpDetailCmd(dm.children[dm.childCursor].ShortID)
+		// A child carries its own numeric project_id (hydrated
+		// cross-project on the show response), so route the jump to that
+		// project — a child in another project must not resolve under the
+		// current parent's project.
+		child := dm.children[dm.childCursor]
+		return dm, jumpDetailCmd(jumpTargetRef{projectID: child.ProjectID, ref: child.ShortID})
 	}
 	target, ok := dm.jumpTarget()
 	if !ok {
@@ -600,34 +605,51 @@ func clampInt(v, lo, hi int) int {
 // jumpDetailCmd emits a jumpDetailMsg so Model.handleJumpDetail can
 // perform the actual jump (with a fresh monotonic gen). Splitting the
 // emit off handleEnter keeps the cmd shape obvious in tests.
-func jumpDetailCmd(ref string) tea.Cmd {
-	return func() tea.Msg { return jumpDetailMsg{ref: ref} }
+func jumpDetailCmd(target jumpTargetRef) tea.Cmd {
+	return func() tea.Msg {
+		return jumpDetailMsg{
+			ref:         target.ref,
+			projectID:   target.projectID,
+			projectName: target.projectName,
+		}
+	}
 }
 
-// jumpTarget returns the short_id to jump to from the active tab +
-// cursor. Comments tab never jumps. Events tab reads the payload's
-// peer short_id (to_short_id / issue_short_id); links tab reads the
-// link's To.ShortID, or From.ShortID when the link is incoming (the
-// link's To side matches the current issue) so Enter takes the user
-// to the other end of the relation.
-func (dm detailModel) jumpTarget() (string, bool) {
+// jumpTargetRef identifies a jump destination: the project the target
+// lives in (projectID for children, projectName for link peers; both zero
+// / empty means "the current detail project") and the ref to resolve
+// under that project.
+type jumpTargetRef struct {
+	projectID   int64
+	projectName string
+	ref         string
+}
+
+// jumpTarget returns the destination to jump to from the active tab +
+// cursor. Comments tab never jumps. Events tab reads the payload's peer
+// short_id (to_short_id / issue_short_id), which is a current-project ref.
+// Links tab reads the link's To peer, or the From peer when the link is
+// incoming (the link's To side is the current issue) so Enter takes the
+// user to the other end of the relation — carrying that peer's project so
+// a cross-project link resolves under the peer's own project.
+func (dm detailModel) jumpTarget() (jumpTargetRef, bool) {
 	current := ""
+	currentUID := ""
 	if dm.issue != nil {
 		current = dm.issue.ShortID
-	}
-	rejectCurrent := func(target string, ok bool) (string, bool) {
-		if !ok || target == "" || (current != "" && target == current) {
-			return "", false
-		}
-		return target, true
+		currentUID = dm.issue.UID
 	}
 	switch dm.activeTab {
 	case tabEvents:
-		return rejectCurrent(eventJumpTarget(dm.events, dm.tabCursor))
+		target, ok := eventJumpTarget(dm.events, dm.tabCursor)
+		if !ok || target == "" || (current != "" && target == current) {
+			return jumpTargetRef{}, false
+		}
+		return jumpTargetRef{ref: target}, true
 	case tabLinks:
-		return rejectCurrent(linkJumpTarget(dm.links, dm.tabCursor, current))
+		return linkJumpTarget(dm.links, dm.tabCursor, current, currentUID)
 	}
-	return "", false
+	return jumpTargetRef{}, false
 }
 
 // activeRowCount is the row count for the active tab.

@@ -150,7 +150,7 @@ func buildAuditRows(
 		}
 		_ = json.Unmarshal([]byte(ev.Payload), &parsed[i])
 	}
-	parentUIDToSID, err := resolveParentUIDs(ctx, cfg, in.ProjectID, parsed)
+	parentQualifiers, err := resolveParentQualifiers(ctx, cfg, parsed)
 	if err != nil {
 		return nil, err
 	}
@@ -212,8 +212,15 @@ func buildAuditRows(
 		}
 		switch {
 		case p.ParentUID != nil && *p.ParentUID != "":
-			if sid, ok := parentUIDToSID[*p.ParentUID]; ok {
-				row.Parent = sid
+			if q, ok := parentQualifiers[*p.ParentUID]; ok {
+				// Same-project parent renders bare; a foreign parent
+				// renders qualified ("project#short_id") so the ref is
+				// unambiguous and round-trips as a --parent filter.
+				if q.ProjectID == in.ProjectID {
+					row.Parent = q.ShortID
+				} else {
+					row.Parent = qualifiedID(q.ProjectName, q.ShortID)
+				}
 			} else if p.ParentShortID != nil {
 				// UID no longer resolves (parent purged). Fall back to
 				// the stored short_id as best-effort display; it may be
@@ -412,15 +419,16 @@ func loadLegacyParentsForCloseEvents(
 	return parents, nil
 }
 
-// resolveParentUIDs gathers every distinct, non-empty parent_uid across
-// the parsed close payloads and asks the db to resolve them to current
-// short_ids. The result map omits UIDs that no longer resolve (parent
-// purged); the audit projection falls back to the close-time
-// parent_short_id for those.
-func resolveParentUIDs(
-	ctx context.Context, cfg ServerConfig,
-	projectID int64, parsed []closeEventPayload,
-) (map[string]string, error) {
+// resolveParentQualifiers gathers every distinct, non-empty parent_uid
+// across the parsed close payloads and asks the db to resolve them to
+// their current project + short_id. Resolution is GLOBAL (not scoped to
+// the audited project) so a parent that lives in another project still
+// resolves — the caller renders it qualified ("project#short_id"). The
+// result map omits UIDs that no longer resolve (parent purged); the audit
+// projection falls back to the close-time parent_short_id for those.
+func resolveParentQualifiers(
+	ctx context.Context, cfg ServerConfig, parsed []closeEventPayload,
+) (map[string]db.IssueQualifier, error) {
 	seen := map[string]struct{}{}
 	uids := make([]string, 0, len(parsed))
 	for _, p := range parsed {
@@ -434,9 +442,9 @@ func resolveParentUIDs(
 		uids = append(uids, *p.ParentUID)
 	}
 	if len(uids) == 0 {
-		return map[string]string{}, nil
+		return map[string]db.IssueQualifier{}, nil
 	}
-	out, err := cfg.DB.ShortIDsByUIDs(ctx, projectID, uids)
+	out, err := cfg.DB.IssueQualifiersByUIDs(ctx, uids)
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
