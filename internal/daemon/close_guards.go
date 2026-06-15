@@ -37,8 +37,12 @@ const repeatedMessageWindow = 30 * time.Minute
 // issueID is the parent's rowid (driving the OpenChildrenOf query);
 // issueShortID is the user-facing ref quoted in the "kata show ... --json"
 // hint so the suggested command is something the user can actually run.
+// parentProjectID scopes the child-ref rendering: links may span projects,
+// so a child outside the parent's project is listed qualified
+// ("project#short_id") — a bare short_id is ambiguous across projects and
+// not actionable from the parent project.
 func CheckParentCloseCompleteness(
-	ctx context.Context, d db.Storage, issueID int64, issueShortID string,
+	ctx context.Context, d db.Storage, issueID int64, issueShortID string, parentProjectID int64,
 ) error {
 	children, total, err := d.OpenChildrenOf(ctx, issueID, openChildrenSampleLimit)
 	if err != nil {
@@ -47,9 +51,10 @@ func CheckParentCloseCompleteness(
 	if total == 0 {
 		return nil
 	}
+	renderer := newGuardRefRenderer(d, parentProjectID)
 	lines := make([]string, 0, len(children))
 	for _, c := range children {
-		lines = append(lines, fmt.Sprintf("  %s  %s", c.ShortID, c.Title))
+		lines = append(lines, fmt.Sprintf("  %s  %s", renderer.issueRef(ctx, c), c.Title))
 	}
 	suffix := ""
 	if total > openChildrenSampleLimit {

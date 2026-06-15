@@ -76,7 +76,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
 		}
-		if err := CheckParentCloseCompleteness(ctx, cfg.DB, issue.ID, issue.ShortID); err != nil {
+		if err := CheckParentCloseCompleteness(ctx, cfg.DB, issue.ID, issue.ShortID, issue.ProjectID); err != nil {
 			return nil, api.NewError(409, "parent_has_open_children", err.Error(), "", nil)
 		}
 		now := time.Now()
@@ -154,7 +154,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if errors.Is(err, db.ErrOpenChildren) {
 				detail := err.Error()
 				if listErr := CheckParentCloseCompleteness(ctx, cfg.DB,
-					issue.ID, issue.ShortID); listErr != nil {
+					issue.ID, issue.ShortID, issue.ProjectID); listErr != nil {
 					detail = listErr.Error()
 				}
 				return nil, api.NewError(409, "parent_has_open_children", detail, "", nil)
