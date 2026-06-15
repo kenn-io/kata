@@ -167,8 +167,11 @@ func (d *Store) EventsInWindow(ctx context.Context, p db.EventsInWindowParams) (
 //
 // Links are project-independent edges (storage v16), so the sibling cohort
 // is defined by the parent edge alone and spans projects: a child closed in
-// another project counts. Scoping to one project would let an actor bypass
-// the close guards by distributing sibling closes across projects.
+// another ACTIVE project counts. Scoping to one project would let an actor
+// bypass the close guards by distributing sibling closes across projects.
+// A sibling whose project is archived (projects.deleted_at IS NOT NULL) is
+// excluded, matching the child/ready/close queries: hidden archived work
+// must not refuse an active child's close.
 //
 // The same scoped projection used by EventsInWindow is sufficient here — the
 // guards only need id, issue_short_id, actor, payload, and created_at; the
@@ -185,12 +188,14 @@ func (d *Store) RecentSiblingCloses(
 	           FROM events e
 	           JOIN links l ON l.from_issue_id = e.issue_id
 	           JOIN issues i ON i.id = e.issue_id
+	           JOIN projects cp ON cp.id = i.project_id
 	           WHERE e.type = 'issue.closed'
 	             AND e.actor = ?
 	             AND e.created_at >= ?
 	             AND l.type = 'parent'
 	             AND l.to_issue_id = ?
 	             AND e.issue_id <> ?
+	             AND cp.deleted_at IS NULL
 	           ORDER BY e.created_at DESC`
 	rows, err := d.QueryContext(ctx, q,
 		actor, since.UTC().Format(sqliteTimeFormat),

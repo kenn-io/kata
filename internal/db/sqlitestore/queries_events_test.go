@@ -3,6 +3,7 @@ package sqlitestore_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -214,4 +215,32 @@ func TestPurgeResetCheck_PerProject(t *testing.T) {
 	gotA, err := d.PurgeResetCheck(ctx, 0, pa.ID)
 	require.NoError(t, err)
 	assert.Greater(t, gotA, int64(0))
+}
+
+// TestRecentSiblingCloses_ExcludesArchivedProjectSiblings: the sibling-close
+// throttle and repeated-message guards must not count a sibling closed in an
+// archived project. Links span projects (storage v16), so the sibling cohort
+// is the parent edge, but an archived-project sibling is hidden work and must
+// not refuse an active child's close.
+func TestRecentSiblingCloses_ExcludesArchivedProjectSiblings(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	pa := createProject(ctx, t, d, "alpha")
+	pb := createProject(ctx, t, d, "beta")
+	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")
+	localSibling := makeIssue(t, ctx, d, pa.ID, "local sibling", "agent")
+	archivedSibling := makeIssue(t, ctx, d, pb.ID, "archived sibling", "agent")
+	makeLink(ctx, t, d, localSibling.ID, parent.ID, "parent")
+	makeLink(ctx, t, d, archivedSibling.ID, parent.ID, "parent")
+	_, _, _, err := d.CloseIssue(ctx, localSibling.ID, "done", "agent", "shared message", nil)
+	require.NoError(t, err)
+	_, _, _, err = d.CloseIssue(ctx, archivedSibling.ID, "done", "agent", "shared message", nil)
+	require.NoError(t, err)
+	archiveProjectByID(ctx, t, d, pb.ID)
+
+	got, err := d.RecentSiblingCloses(ctx, parent.ID, 0, "agent", time.Time{})
+	require.NoError(t, err)
+	require.Len(t, got, 1, "archived-project sibling close must not count")
+	require.NotNil(t, got[0].IssueID)
+	assert.Equal(t, localSibling.ID, *got[0].IssueID)
 }
