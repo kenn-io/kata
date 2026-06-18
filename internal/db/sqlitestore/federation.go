@@ -329,7 +329,7 @@ func (d *Store) retryFederationQuarantine(ctx context.Context, p db.RetryFederat
 		return db.FederationQuarantine{}, err
 	}
 	if q.Direction != db.FederationQuarantineDirectionPush {
-		return db.FederationQuarantine{}, fmt.Errorf("retry federation quarantine: unsupported direction %q", q.Direction)
+		return db.FederationQuarantine{}, fmt.Errorf("%w: %s", db.ErrFederationQuarantineRetryUnsupportedDirection, q.Direction)
 	}
 	reason := strings.TrimSpace(p.Reason)
 	if reason == "" {

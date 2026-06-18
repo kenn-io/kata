@@ -352,6 +352,46 @@ func TestRetryFederationQuarantineLeavesPushCursorUnchanged(t *testing.T) {
 	assert.Equal(t, int64(3), binding.PushCursorEventID)
 }
 
+func TestRetryFederationQuarantineRejectsPullQuarantine(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 1,
+		PushEnabled:          true,
+		Actor:                "bound-actor",
+		PushCursorEventID:    3,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	recorded, err := d.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID:    p.ID,
+		Direction:    db.FederationQuarantineDirectionPull,
+		FirstEventID: 7,
+		LastEventID:  9,
+		EventUIDs:    []string{"evt-7", "evt-8", "evt-9"},
+		Error:        "hub replay failed",
+		CreatedAt:    time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+
+	_, err = d.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+		ID:        recorded.ID,
+		ProjectID: p.ID,
+		Actor:     "operator",
+		Reason:    "try pull",
+		Now:       time.Date(2026, 5, 24, 12, 2, 0, 0, time.UTC),
+	})
+
+	assert.ErrorIs(t, err, db.ErrFederationQuarantineRetryUnsupportedDirection)
+	active, err := d.ActiveFederationQuarantine(ctx, p.ID, db.FederationQuarantineDirectionPull)
+	require.NoError(t, err)
+	assert.Nil(t, active.SkippedAt)
+}
+
 func TestSkipFederationQuarantineRejectsWrongProject(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	other, err := d.CreateProject(ctx, "other")

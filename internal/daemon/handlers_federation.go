@@ -126,6 +126,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(http.StatusNotFound, "federation_quarantine_not_found", "federation quarantine not found", "", nil)
 		}
+		if errors.Is(err, db.ErrFederationQuarantineRetryUnsupportedDirection) {
+			return nil, api.NewError(http.StatusConflict, "federation_quarantine_retry_unsupported",
+				"federation quarantine retry only supports push quarantines", "", nil)
+		}
 		if err != nil {
 			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 		}

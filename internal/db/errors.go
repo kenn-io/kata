@@ -176,6 +176,11 @@ var (
 	// cannot proceed due to an active quarantine.
 	ErrFederationResetBlockedByQuarantine = errors.New("federation reset blocked by quarantine")
 
+	// ErrFederationQuarantineRetryUnsupportedDirection is returned when retry is
+	// requested for a non-push quarantine. Retry replays local outbound events
+	// and is only defined for push quarantines.
+	ErrFederationQuarantineRetryUnsupportedDirection = errors.New("federation quarantine retry unsupported direction")
+
 	// ErrFederationIngestValidation is returned by IngestFederationEvents when a
 	// batch fails validation.
 	ErrFederationIngestValidation = errors.New("federation ingest validation")

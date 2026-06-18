@@ -33,15 +33,15 @@ first event; `skip` would advance the cursor past it and strand that event.
 
 - Transient hub conditions (schema-too-new) must not create a permanent
   quarantine; push pauses and auto-retries on the next sync.
-- Provide a non-stranding operator recovery for any quarantine whose root cause
-  was fixed, kept distinct from `skip`.
+- Provide a non-stranding operator recovery for push quarantines whose root
+  cause was fixed, kept distinct from `skip`.
 - No schema migration. `db.CurrentSchemaVersion()` is also the federation ingest
   version, so bumping it would re-introduce the exact skew this change fixes.
 
 ## Non-goals
 
 - Clean resolution columns (`resolved_at`/`resolution`) — deferred to a later
-  migration.
+  schema cutover.
 - Decoupling the federation ingest/protocol version from
   `db.CurrentSchemaVersion()` — noted as follow-up.
 - Any change to `skip` semantics.
@@ -80,17 +80,22 @@ A new operation, separate from `skip`:
   by setting `skipped_at`, `skipped_by`, and `skip_reason = "retry: <reason>"`
   (reason defaulted when empty). It does **not** touch `push_cursor_event_id`.
   Mirrors `skipFederationQuarantine` minus the cursor `UPDATE`. Reuses the
-  existing columns to avoid a migration; the `retry:` reason prefix is the
-  resolution marker until a future migration adds explicit columns.
+  existing columns to avoid a schema bump; the `retry:` reason prefix is the
+  resolution marker until a future schema cutover adds explicit columns.
 - **API** — `POST /api/v1/projects/{project_id}/federation/quarantine/{quarantine_id}/retry`
-  in `handlers_federation.go`, mirroring the skip handler.
+  in `handlers_federation.go`, mirroring the skip handler. Retry is push-only:
+  attempting to retry an active pull quarantine returns `409
+  federation_quarantine_retry_unsupported`. Retrying a quarantine that is
+  missing or already resolved returns the existing `404
+  federation_quarantine_not_found`.
 - **CLI** — `kata federation quarantine retry <id>` in `cmd/kata/federation.go`,
   mirroring `skip`:
   - confirmation string `RETRY FEDERATION BATCH <id>` (distinct from skip's, to
     prevent mixups);
   - optional `--reason` flag;
-  - help text states explicitly that it leaves the push cursor unchanged so the
-    same events are resent on the next sync.
+  - help text states explicitly that retry applies to push quarantines and
+    leaves the push cursor unchanged so the same events are resent on the next
+    sync.
 
 After retry, the quarantine is inactive (`skipped_at` set), so
 `federation_sync.go:82` no longer short-circuits. The next sync re-attempts the
@@ -104,7 +109,9 @@ quarantine history, so this change does not add resolved-quarantine rendering to
 `kata federation status`. The retry command should print "released for retry"
 after a successful retry so operators do not confuse it with skip. If a future
 history view exposes resolved rows, it should label rows whose `skip_reason` has
-the `retry:` prefix as "released for retry" rather than "skipped".
+the `retry:` prefix as "released for retry" rather than "skipped". Rows without
+that prefix, including empty or manually edited reasons, must remain "skipped"
+unless a future schema cutover records an explicit resolution enum.
 
 ## Naming note
 
@@ -125,13 +132,18 @@ quarantine is not misread as always skipped/stranded.
 4. After retry, the next `SyncFederationOnce` performs a network push and
    advances the cursor normally (contrast with
    `TestSyncFederationOnceActiveQuarantineStopsPushBeforeNetwork`).
-5. CLI/API confirmation: a wrong or missing confirm string is rejected, and the
+5. Retrying a non-push quarantine returns `409
+   federation_quarantine_retry_unsupported` and leaves the quarantine active.
+6. CLI/API confirmation: a wrong or missing confirm string is rejected, and the
    retry and skip confirmation strings are not interchangeable.
+7. OpenAPI and generated client artifacts are regenerated and checked with the
+   daemon OpenAPI drift tests.
 
 ## Future work
 
-- Migration adding `resolved_at`, `resolved_by`, `resolution`,
-  `resolution_reason`; move off the overloaded `skip_*` columns.
+- Schema cutover adding `resolved_at`, `resolved_by`, `resolution`,
+  `resolution_reason`; update JSONL export/import so historical skipped and
+  retried rows round-trip with explicit resolution state.
 - A dedicated federation protocol version distinct from
   `db.CurrentSchemaVersion()`, so local schema changes do not gate federation
   compatibility.

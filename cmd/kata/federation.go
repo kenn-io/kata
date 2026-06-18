@@ -1376,7 +1376,7 @@ func federationQuarantineRetryCmd() *cobra.Command {
 	var reason string
 	cmd := &cobra.Command{
 		Use:   "retry <id>",
-		Short: "release a quarantined federation batch for retry",
+		Short: "release a quarantined federation push batch for retry",
 		Long: "Release a quarantined push batch without advancing the push cursor.\n" +
 			"The same local events remain pending and are sent again on the next sync.",
 		Args: cobra.ExactArgs(1),

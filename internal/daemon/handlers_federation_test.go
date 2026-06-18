@@ -1152,6 +1152,48 @@ func TestFederationQuarantineRetryRequiresConfirmAndLeavesCursor(t *testing.T) {
 	assert.Equal(t, "retry: hub upgraded", skipReason)
 }
 
+func TestFederationQuarantineRetryRejectsPullQuarantine(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 9,
+		PullCursorEventID:    12,
+		PushEnabled:          true,
+		Actor:                "tester",
+		PushCursorEventID:    0,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	q, err := env.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID:    project.ID,
+		Direction:    db.FederationQuarantineDirectionPull,
+		FirstEventID: 7,
+		LastEventID:  9,
+		EventUIDs:    []string{"evt-7"},
+		Error:        "hub replay failed",
+		CreatedAt:    time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/retry", project.ID, q.ID)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{
+		"actor":  "operator",
+		"reason": "try pull",
+	}, map[string]string{"X-Kata-Confirm": fmt.Sprintf("RETRY FEDERATION BATCH %d", q.ID)})
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federation_quarantine_retry_unsupported")
+	active, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPull)
+	require.NoError(t, err)
+	assert.Nil(t, active.SkippedAt)
+}
+
 func TestFederationQuarantineSkipIdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	ctx := context.Background()
