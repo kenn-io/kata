@@ -113,9 +113,12 @@ func discoverDaemon(ctx context.Context) (string, error) {
 		return v, nil
 	}
 	if flags.Daemon != "" {
-		baseURL, err := client.EnsureNamedRunning(ctx, flags.Daemon)
-		if err == nil {
+		baseURL, ok, err := client.DiscoverNamed(ctx, flags.Daemon)
+		if err == nil && ok {
 			return baseURL, nil
+		}
+		if err == nil {
+			return "", noDaemonRunningError()
 		}
 		return "", cliDaemonTargetError(err)
 	}
@@ -138,7 +141,11 @@ func discoverDaemon(ctx context.Context) (string, error) {
 	if url, ok := client.Discover(ctx, ns.DataDir); ok {
 		return url, nil
 	}
-	return "", &cliError{
+	return "", noDaemonRunningError()
+}
+
+func noDaemonRunningError() error {
+	return &cliError{
 		Message:  "no daemon running (start one with `kata daemon start`)",
 		Kind:     kindDaemonUnavail,
 		ExitCode: ExitDaemonUnavail,

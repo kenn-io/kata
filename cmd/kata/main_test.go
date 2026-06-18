@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -498,6 +500,29 @@ func TestHealth_DoesNotAutoStartDaemon(t *testing.T) {
 	assert.Equal(t, kindDaemonUnavail, ce.Kind)
 	assert.Contains(t, ce.Message, "no daemon running",
 		"hint must point the user at the right action")
+}
+
+func TestHealth_NamedLocalDaemonDoesNotAutoStart(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "local"
+local = true
+`), 0o600))
+	flags.Daemon = "local"
+
+	_, err := discoverDaemon(context.Background())
+
+	require.Error(t, err)
+	var ce *cliError
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, ExitDaemonUnavail, ce.ExitCode)
+	assert.Equal(t, kindDaemonUnavail, ce.Kind)
+	assert.Contains(t, ce.Message, "no daemon running",
+		"named local health must inspect existing runtime files, not auto-start")
 }
 
 // TestHealth_HonorsKataServer ensures a configured remote URL is
