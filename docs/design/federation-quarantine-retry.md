@@ -1,6 +1,6 @@
 # Federation push quarantine: classify transient errors + non-stranding retry
 
-Status: Proposed (2026-06-18)
+Status: Accepted (2026-06-18)
 Branch: `fix/federation-quarantine-retry`
 
 ## Problem
@@ -88,16 +88,20 @@ After retry, the quarantine is inactive (`skipped_at` set), so
 push from the unchanged cursor and, against a fixed hub, succeeds and advances
 normally.
 
-### 3. Status rendering
+### 3. Operator output
 
-Where quarantine rows are rendered, label a resolved row whose `skip_reason` has
-the `retry:` prefix as "released for retry" rather than "skipped". The active
-count is unaffected (resolved rows have `skipped_at` set).
+The current federation status API exposes only active quarantines, not
+quarantine history, so this change does not add resolved-quarantine rendering to
+`kata federation status`. The retry command should print "released for retry"
+after a successful retry so operators do not confuse it with skip. If a future
+history view exposes resolved rows, it should label rows whose `skip_reason` has
+the `retry:` prefix as "released for retry" rather than "skipped".
 
 ## Naming note
 
-`skipped_at`/`skipped_by`/`skip_reason` now serve as a generic "resolved"
-marker. Code comments and API docs must say so explicitly, so a resolved
+`skipped_at`/`skipped_by`/`skip_reason` now serve as the physical "resolved"
+marker even though their names still reflect the original skip-only operation.
+Code comments on the retry path must say this explicitly, so a retried
 quarantine is not misread as always skipped/stranded.
 
 ## Test plan (TDD — write first)

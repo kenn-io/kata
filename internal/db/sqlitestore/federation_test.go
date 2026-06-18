@@ -303,6 +303,55 @@ func TestSkipFederationQuarantineAdvancesPushCursor(t *testing.T) {
 	assert.Equal(t, int64(9), binding.PushCursorEventID)
 }
 
+func TestRetryFederationQuarantineLeavesPushCursorUnchanged(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            p.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:7373",
+		HubProjectID:         42,
+		HubProjectUID:        p.UID,
+		ReplayHorizonEventID: 1,
+		PushEnabled:          true,
+		Actor:                "bound-actor",
+		PushCursorEventID:    3,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	recorded, err := d.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID:    p.ID,
+		Direction:    db.FederationQuarantineDirectionPush,
+		FirstEventID: 7,
+		LastEventID:  9,
+		EventUIDs:    []string{"evt-7", "evt-8", "evt-9"},
+		Error:        "hub rejected batch",
+		CreatedAt:    time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	retriedAt := time.Date(2026, 5, 24, 12, 2, 0, 0, time.UTC)
+
+	retried, err := d.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+		ID:        recorded.ID,
+		ProjectID: p.ID,
+		Actor:     "operator",
+		Reason:    "hub upgraded",
+		Now:       retriedAt,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, retried.SkippedAt)
+	assertTimeEqual(t, retriedAt, *retried.SkippedAt)
+	require.NotNil(t, retried.SkippedBy)
+	assert.Equal(t, "operator", *retried.SkippedBy)
+	require.NotNil(t, retried.SkipReason)
+	assert.Equal(t, "retry: hub upgraded", *retried.SkipReason)
+	_, err = d.ActiveFederationQuarantine(ctx, p.ID, db.FederationQuarantineDirectionPush)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	binding, err := d.FederationBindingByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), binding.PushCursorEventID)
+}
+
 func TestSkipFederationQuarantineRejectsWrongProject(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	other, err := d.CreateProject(ctx, "other")

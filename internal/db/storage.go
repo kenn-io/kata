@@ -197,6 +197,7 @@ type Storage interface {
 	ActiveFederationQuarantinesByProject(ctx context.Context, projectID int64) ([]FederationQuarantine, error)
 	CountActiveFederationEnrollments(ctx context.Context, projectID int64) (int64, error)
 	SkipFederationQuarantine(ctx context.Context, p SkipFederationQuarantineParams) (FederationQuarantine, error)
+	RetryFederationQuarantine(ctx context.Context, p RetryFederationQuarantineParams) (FederationQuarantine, error)
 	UpsertFederationBinding(ctx context.Context, b FederationBinding) (FederationBinding, error)
 	LeaveFederationReplica(ctx context.Context, projectID int64) (LeaveFederationResult, error)
 	AdoptProjectIntoFederation(ctx context.Context, p AdoptProjectIntoFederationParams) (AdoptProjectIntoFederationResult, error)

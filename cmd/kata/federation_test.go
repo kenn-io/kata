@@ -170,6 +170,31 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 	assert.Equal(t, q.LastEventID, binding.PushCursorEventID)
 }
 
+func TestFederationQuarantineRetryCLI(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	ctx := context.Background()
+	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "federation", "quarantine", "retry", strconv.FormatInt(q.ID, 10),
+		"--confirm", "RETRY FEDERATION BATCH "+strconv.FormatInt(q.ID, 10),
+		"--reason", "hub upgraded")
+
+	assert.Contains(t, out, fmt.Sprintf("quarantine #%d released for retry", q.ID))
+	binding, err := env.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), binding.PushCursorEventID)
+	_, err = env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	var skipReason string
+	require.NoError(t, env.DB.QueryRow(`
+		SELECT skip_reason
+		  FROM federation_quarantine
+		 WHERE id = ?`,
+		q.ID).Scan(&skipReason))
+	assert.Equal(t, "retry: hub upgraded", skipReason)
+}
+
 func TestFederationHelpIsVisible(t *testing.T) {
 	rootHelp := string(executeRoot(t, newRootCmd(), "--help"))
 	assert.Contains(t, strings.ToLower(rootHelp), "federation")

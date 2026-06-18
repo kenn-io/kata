@@ -2801,6 +2801,16 @@ components:
       required:
         - actor
       type: object
+    RetryFederationQuarantineRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        reason:
+          type: string
+      required:
+        - actor
+      type: object
     RevokeFederationEnrollmentBody:
       additionalProperties: true
       properties:
@@ -3853,6 +3863,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProjectFederationBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/quarantine/{quarantine_id}/retry:
+    post:
+      operationId: retryFederationQuarantine
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: quarantine_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: X-Kata-Confirm
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetryFederationQuarantineRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationQuarantineSummary"
           description: OK
         default:
           content:

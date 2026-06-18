@@ -16,6 +16,8 @@ type EnableProjectFederationBody = EnableProjectFederationRequestBody
 
 type IngestFederationProjectEventsBody = FederationIngestEventsRequestBody
 
+type RetryFederationQuarantineBody = RetryFederationQuarantineRequestBody
+
 type SkipFederationQuarantineBody = SkipFederationQuarantineRequestBody
 
 type ImportIssuesBody = ImportRequestBody

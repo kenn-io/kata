@@ -298,6 +298,64 @@ func (d *Store) skipFederationQuarantine(ctx context.Context, p db.SkipFederatio
 	return updated, nil
 }
 
+// RetryFederationQuarantine marks a push quarantine resolved without advancing
+// the outbound cursor. The same local events remain pending and will be sent
+// again on the next sync. The existing skipped_* columns are the physical
+// resolved marker until a future schema adds explicit resolution columns.
+func (d *Store) RetryFederationQuarantine(ctx context.Context, p db.RetryFederationQuarantineParams) (db.FederationQuarantine, error) {
+	return retryWrite1(ctx, d, func() (db.FederationQuarantine, error) {
+		return d.retryFederationQuarantine(ctx, p)
+	})
+}
+
+func (d *Store) retryFederationQuarantine(ctx context.Context, p db.RetryFederationQuarantineParams) (db.FederationQuarantine, error) {
+	actor := strings.TrimSpace(p.Actor)
+	if actor == "" {
+		return db.FederationQuarantine{}, fmt.Errorf("retry federation quarantine: actor is required")
+	}
+	now := p.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.FederationQuarantine{}, fmt.Errorf("begin retry federation quarantine: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	q, err := scanFederationQuarantine(tx.QueryRowContext(ctx,
+		federationQuarantineSelect+` WHERE id = ? AND project_id = ? AND skipped_at IS NULL`,
+		p.ID, p.ProjectID))
+	if err != nil {
+		return db.FederationQuarantine{}, err
+	}
+	if q.Direction != db.FederationQuarantineDirectionPush {
+		return db.FederationQuarantine{}, fmt.Errorf("retry federation quarantine: unsupported direction %q", q.Direction)
+	}
+	reason := strings.TrimSpace(p.Reason)
+	if reason == "" {
+		reason = "operator requested retry"
+	}
+	reason = "retry: " + reason
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE federation_quarantine
+		   SET skipped_at = ?, skipped_by = ?, skip_reason = ?
+		 WHERE id = ?
+		   AND project_id = ?
+		   AND skipped_at IS NULL`,
+		now.UTC().Format(sqliteTimeFormat), actor, reason, p.ID, p.ProjectID); err != nil {
+		return db.FederationQuarantine{}, fmt.Errorf("mark federation quarantine retried: %w", err)
+	}
+	updated, err := scanFederationQuarantine(tx.QueryRowContext(ctx,
+		federationQuarantineSelect+` WHERE id = ? AND project_id = ?`, p.ID, p.ProjectID))
+	if err != nil {
+		return db.FederationQuarantine{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.FederationQuarantine{}, fmt.Errorf("commit retry federation quarantine: %w", err)
+	}
+	return updated, nil
+}
+
 func (d *Store) upsertFederationSyncTime(ctx context.Context, projectID int64, column string, at time.Time) error {
 	switch column {
 	case "last_pull_started_at", "last_pull_success_at",

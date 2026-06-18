@@ -67,6 +67,11 @@ type GetFederationProjectMetadataPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type RetryFederationQuarantinePath struct {
+	ProjectID    int64 `json:"project_id"`
+	QuarantineID int64 `json:"quarantine_id"`
+}
+
 type SkipFederationQuarantinePath struct {
 	ProjectID    int64 `json:"project_id"`
 	QuarantineID int64 `json:"quarantine_id"`

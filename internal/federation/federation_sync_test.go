@@ -643,6 +643,125 @@ func TestSyncFederationOncePushPoisonRecordsQuarantine(t *testing.T) {
 	assert.Contains(t, q.Error, "returned 409")
 }
 
+func TestSyncFederationOnceValidationBadRequestRecordsQuarantine(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          true,
+		Actor:                "tester",
+		PushCursorEventID:    0,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "pending local",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/42/federation/events:ingest" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			require.NoError(t, json.NewEncoder(w).Encode(api.ErrorEnvelope{
+				Status: http.StatusBadRequest,
+				Error: api.ErrorBody{
+					Code:    "validation",
+					Message: "invalid federation batch",
+				},
+			}))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+
+	require.Error(t, err)
+	q, err := spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+	assert.Equal(t, localEvent.ID, q.FirstEventID)
+	assert.Equal(t, localEvent.ID, q.LastEventID)
+	assert.Contains(t, q.Error, "returned 400")
+}
+
+func TestSyncFederationOnceUnsupportedSchemaDoesNotQuarantine(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          true,
+		Actor:                "tester",
+		PushCursorEventID:    0,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "pending local",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	requests := 0
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/42/federation/events:ingest" {
+			requests++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			require.NoError(t, json.NewEncoder(w).Encode(api.ErrorEnvelope{
+				Status: http.StatusBadRequest,
+				Error: api.ErrorBody{
+					Code:    "unsupported_federation_schema",
+					Message: "federation ingest schema_version 16 is newer than hub schema_version 14",
+				},
+			}))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, 1, requests)
+	_, err = spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), binding.PushCursorEventID)
+	pending, err := spoke.DB.PendingFederationPushEvents(ctx, project.ID, spoke.DB.InstanceUID(), 0, 10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, localEvent.ID, pending[0].ID)
+}
+
 func TestSyncFederationOnceActiveQuarantineStopsPushBeforeNetwork(t *testing.T) {
 	ctx := context.Background()
 	spoke := testenv.New(t)
@@ -687,6 +806,83 @@ func TestSyncFederationOnceActiveQuarantineStopsPushBeforeNetwork(t *testing.T) 
 
 	require.ErrorIs(t, err, ErrFederationPushQuarantined)
 	assert.Equal(t, 0, requests)
+}
+
+func TestSyncFederationOnceAfterQuarantineRetryPushesAgain(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub")
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          true,
+		Actor:                "tester",
+		PushCursorEventID:    0,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "pending local",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	recorded, err := spoke.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID:    project.ID,
+		Direction:    db.FederationQuarantineDirectionPush,
+		FirstEventID: localEvent.ID,
+		LastEventID:  localEvent.ID,
+		EventUIDs:    []string{localEvent.UID},
+		Error:        "hub rejected batch",
+		CreatedAt:    time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	_, err = spoke.DB.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+		ID:        recorded.ID,
+		ProjectID: project.ID,
+		Actor:     "operator",
+		Reason:    "hub upgraded",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	requests := 0
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events:ingest":
+			requests++
+			var body api.FederationIngestEventsRequestBody
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.Len(t, body.Events, 1)
+			assert.Equal(t, localEvent.ID, body.Events[0].EventID)
+			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
+				Accepted:          1,
+				PushCursorEventID: localEvent.ID,
+			}))
+		case "/api/v1/projects/42/federation/events":
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{NextAfterID: 49}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, requests)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, localEvent.ID, binding.PushCursorEventID)
 }
 
 func TestSyncFederationOnceResetBlockedByLocalEventCreatedDuringMetadataRefresh(t *testing.T) {

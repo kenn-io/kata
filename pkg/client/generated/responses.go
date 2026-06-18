@@ -121,6 +121,10 @@ type GetFederationProjectMetadataResponse = ProjectFederationBody
 
 type GetFederationProjectMetadataErrorResponse = ErrorEnvelope
 
+type RetryFederationQuarantineResponse = FederationQuarantineSummary
+
+type RetryFederationQuarantineErrorResponse = ErrorEnvelope
+
 type SkipFederationQuarantineResponse = FederationQuarantineSummary
 
 type SkipFederationQuarantineErrorResponse = ErrorEnvelope
@@ -491,6 +495,13 @@ type GetFederationProjectMetadataResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetFederationProjectMetadataResponse
+}
+
+type RetryFederationQuarantineResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RetryFederationQuarantineResponse
 }
 
 type SkipFederationQuarantineResp struct {

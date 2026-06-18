@@ -2610,6 +2610,15 @@ func (r RestoreRequestBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type RetryFederationQuarantineRequestBody struct {
+	Actor  string  `json:"actor" validate:"required"`
+	Reason *string `json:"reason,omitempty"`
+}
+
+func (r RetryFederationQuarantineRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type RevokeFederationEnrollmentBody struct {
 	ID      int64 `json:"id"`
 	Revoked bool  `json:"revoked"`

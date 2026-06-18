@@ -1337,7 +1337,7 @@ func federationQuarantineCmd() *cobra.Command {
 		Use:   "quarantine",
 		Short: "manage federation quarantines",
 	}
-	cmd.AddCommand(federationQuarantineSkipCmd())
+	cmd.AddCommand(federationQuarantineSkipCmd(), federationQuarantineRetryCmd())
 	return cmd
 }
 
@@ -1368,6 +1368,38 @@ func federationQuarantineSkipCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&confirm, "confirm", "", "exact confirmation string")
 	cmd.Flags().StringVar(&reason, "reason", "", "skip reason")
+	return cmd
+}
+
+func federationQuarantineRetryCmd() *cobra.Command {
+	var confirm string
+	var reason string
+	cmd := &cobra.Command{
+		Use:   "retry <id>",
+		Short: "release a quarantined federation batch for retry",
+		Long: "Release a quarantined push batch without advancing the push cursor.\n" +
+			"The same local events remain pending and are sent again on the next sync.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil || id <= 0 {
+				return &cliError{
+					Message:  "quarantine id must be a positive integer",
+					Kind:     kindValidation,
+					ExitCode: ExitValidation,
+				}
+			}
+			expected := fmt.Sprintf("RETRY FEDERATION BATCH %d", id)
+			confirm, err := resolveConfirm(cmd, confirm, expected,
+				fmt.Sprintf("Type %q to retry this federation batch: ", expected), confirmPromptFull)
+			if err != nil {
+				return err
+			}
+			return runFederationQuarantineRetry(cmd.Context(), cmd, id, confirm, reason)
+		},
+	}
+	cmd.Flags().StringVar(&confirm, "confirm", "", "exact confirmation string")
+	cmd.Flags().StringVar(&reason, "reason", "", "retry reason")
 	return cmd
 }
 
@@ -1423,6 +1455,61 @@ func runFederationQuarantineSkip(ctx context.Context, cmd *cobra.Command, id int
 		return err
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(), "quarantine #%d skipped\n", id)
+	return err
+}
+
+func runFederationQuarantineRetry(ctx context.Context, cmd *cobra.Command, id int64, confirm, reason string) error {
+	baseURL, err := ensureDaemon(ctx)
+	if err != nil {
+		return err
+	}
+	client, err := httpClientFor(ctx, baseURL)
+	if err != nil {
+		return err
+	}
+	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return apiErrFromBody(status, bs)
+	}
+	var body api.FederationStatusBody
+	if err := json.Unmarshal(bs, &body); err != nil {
+		return err
+	}
+	projectID, err := federationProjectForQuarantine(body, id)
+	if err != nil {
+		return err
+	}
+	actor, _ := resolveActor(ctx, flags.As, nil)
+	status, bs, err = httpDoJSONWithHeader(ctx, client, http.MethodPost,
+		fmt.Sprintf("%s/api/v1/projects/%d/federation/quarantine/%d/retry", baseURL, projectID, id),
+		map[string]string{"X-Kata-Confirm": confirm},
+		map[string]any{"actor": actor, "reason": reason})
+	if err != nil {
+		return err
+	}
+	if status >= 400 {
+		return apiErrFromBody(status, bs)
+	}
+	mode := currentOutputMode()
+	if mode == outputJSON {
+		var buf bytes.Buffer
+		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+		return err
+	}
+	if flags.Quiet {
+		return nil
+	}
+	if mode == outputAgent {
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK federation-quarantine-retry id=%d\n", id)
+		return err
+	}
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "quarantine #%d released for retry\n", id)
 	return err
 }
 

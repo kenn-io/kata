@@ -47,6 +47,19 @@ type SkipFederationQuarantineRequest struct {
 	}
 }
 
+// RetryFederationQuarantineRequest releases one quarantined push batch for
+// retry through the local/admin daemon auth surface. Unlike skip, retry leaves
+// the push cursor unchanged so the same events are sent again.
+type RetryFederationQuarantineRequest struct {
+	ProjectID    int64  `path:"project_id"`
+	QuarantineID int64  `path:"quarantine_id"`
+	Confirm      string `header:"X-Kata-Confirm"`
+	Body         struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason,omitempty"`
+	}
+}
+
 // FederationProjectMetadataRequest reads federation metadata through the
 // enrollment-authenticated transport surface.
 type FederationProjectMetadataRequest struct {
@@ -133,6 +146,11 @@ type FederationQuarantineSummary struct {
 
 // SkipFederationQuarantineResponse returns the skipped quarantine.
 type SkipFederationQuarantineResponse struct {
+	Body FederationQuarantineSummary
+}
+
+// RetryFederationQuarantineResponse returns the quarantine released for retry.
+type RetryFederationQuarantineResponse struct {
 	Body FederationQuarantineSummary
 }
 

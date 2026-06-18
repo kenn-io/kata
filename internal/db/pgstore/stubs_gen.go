@@ -738,6 +738,10 @@ func (s *Store) RestoreProject(_ context.Context, _ int64, _ string) (db.Project
 	return db.Project{}, nil, false, ErrNotImplementedPhase3
 }
 
+func (s *Store) RetryFederationQuarantine(_ context.Context, _ db.RetryFederationQuarantineParams) (db.FederationQuarantine, error) {
+	return db.FederationQuarantine{}, ErrNotImplementedPhase3
+}
+
 func (s *Store) RevokeAPIToken(_ context.Context, _ int64, _ string) (db.APIToken, db.Event, error) {
 	return db.APIToken{}, db.Event{}, ErrNotImplementedPhase3
 }

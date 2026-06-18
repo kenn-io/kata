@@ -105,6 +105,34 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 
 	huma.Register(humaAPI, huma.Operation{
+		OperationID: "retryFederationQuarantine",
+		Method:      "POST",
+		Path:        "/api/v1/projects/{project_id}/federation/quarantine/{quarantine_id}/retry",
+	}, func(ctx context.Context, in *api.RetryFederationQuarantineRequest) (*api.RetryFederationQuarantineResponse, error) {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateExactConfirm(in.Confirm, fmt.Sprintf("RETRY FEDERATION BATCH %d", in.QuarantineID)); err != nil {
+			return nil, err
+		}
+		q, err := cfg.DB.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+			ID:        in.QuarantineID,
+			ProjectID: in.ProjectID,
+			Actor:     actor,
+			Reason:    in.Body.Reason,
+			Now:       time.Now().UTC(),
+		})
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, api.NewError(http.StatusNotFound, "federation_quarantine_not_found", "federation quarantine not found", "", nil)
+		}
+		if err != nil {
+			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		}
+		return &api.RetryFederationQuarantineResponse{Body: federationQuarantineSummary(q)}, nil
+	})
+
+	huma.Register(humaAPI, huma.Operation{
 		OperationID: "getFederationProjectMetadata",
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/federation/metadata",

@@ -205,6 +205,9 @@ type ClientInterface interface {
 	GetFederationProjectMetadata(ctx context.Context, options *GetFederationProjectMetadataRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationProjectMetadataResponse, error)
 	GetFederationProjectMetadataWithResponse(ctx context.Context, options *GetFederationProjectMetadataRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetFederationProjectMetadataResp, error)
 
+	RetryFederationQuarantine(ctx context.Context, options *RetryFederationQuarantineRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RetryFederationQuarantineResponse, error)
+	RetryFederationQuarantineWithResponse(ctx context.Context, options *RetryFederationQuarantineRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RetryFederationQuarantineResp, error)
+
 	SkipFederationQuarantine(ctx context.Context, options *SkipFederationQuarantineRequestOptions, reqEditors ...runtime.RequestEditorFn) (*SkipFederationQuarantineResponse, error)
 	SkipFederationQuarantineWithResponse(ctx context.Context, options *SkipFederationQuarantineRequestOptions, reqEditors ...runtime.RequestEditorFn) (*SkipFederationQuarantineResp, error)
 
@@ -2195,6 +2198,69 @@ func (c *Client) GetFederationProjectMetadata(ctx context.Context, options *GetF
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/metadata")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) RetryFederationQuarantine(ctx context.Context, options *RetryFederationQuarantineRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RetryFederationQuarantineResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/federation/quarantine/{quarantine_id}/retry",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*RetryFederationQuarantineResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(RetryFederationQuarantineErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "RetryFederationQuarantineErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(RetryFederationQuarantineResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "RetryFederationQuarantineResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/federation/quarantine/{quarantine_id}/retry")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

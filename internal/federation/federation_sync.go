@@ -304,7 +304,18 @@ func isPoisonedFederationPushError(err error) bool {
 	if !errors.As(err, &statusErr) {
 		return false
 	}
+	if federationHubErrorCode(statusErr.Body) == "unsupported_federation_schema" {
+		return false
+	}
 	return statusErr.StatusCode == http.StatusBadRequest || statusErr.StatusCode == http.StatusConflict
+}
+
+func federationHubErrorCode(body string) string {
+	var envelope api.ErrorEnvelope
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		return ""
+	}
+	return envelope.Error.Code
 }
 
 func recordFederationPushQuarantine(

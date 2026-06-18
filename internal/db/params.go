@@ -490,6 +490,16 @@ type SkipFederationQuarantineParams struct {
 	Now       time.Time
 }
 
+// RetryFederationQuarantineParams resolves an active push quarantine without
+// advancing the cursor, so the quarantined batch is retried on the next sync.
+type RetryFederationQuarantineParams struct {
+	ID        int64
+	ProjectID int64
+	Actor     string
+	Reason    string
+	Now       time.Time
+}
+
 // AdoptProjectIntoFederationParams configures adoption of an existing local
 // project into a hub federation.
 type AdoptProjectIntoFederationParams struct {

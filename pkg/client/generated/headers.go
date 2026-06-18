@@ -23,6 +23,10 @@ type GetFederationProjectMetadataHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 
+type RetryFederationQuarantineHeaders struct {
+	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
+}
+
 type SkipFederationQuarantineHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
 }
