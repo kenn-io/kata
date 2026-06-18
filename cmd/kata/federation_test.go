@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -382,6 +383,44 @@ func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
 	require.Len(t, enrollments, 1)
 	require.NotNil(t, enrollments[0].ProjectID)
 	assert.Equal(t, hubProject.ID, *enrollments[0].ProjectID)
+	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
+}
+
+func TestFederationEnrollCLIUsesNamedSpokeCatalogAuthForAdoption(t *testing.T) {
+	resetFlags(t)
+	spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	ctx := context.Background()
+	_, err := spoke.DB.CreateProject(ctx, "fedlab")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(hub.Home, "config.toml"), []byte(`
+[[daemon]]
+name = "spoke"
+url = "`+spoke.URL+`"
+token = "spoke-token"
+`), 0o600))
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--daemon", "spoke",
+		"--project", "fedlab",
+		"federation", "enroll",
+		"--spoke-instance", spoke.DB.InstanceUID(),
+		"--hub-url", hub.URL,
+		"--actor", "wesm",
+	})
+
+	require.NoError(t, cmd.Execute())
+	out := buf.String()
+	assert.Contains(t, out, "--hub-url "+hub.URL)
+	assert.Contains(t, out, "--adopt-existing")
+
+	enrollments, err := hub.DB.ListFederationEnrollments(ctx)
+	require.NoError(t, err)
+	require.Len(t, enrollments, 1)
 	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 

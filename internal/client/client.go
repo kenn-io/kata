@@ -168,6 +168,10 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 				target.Name, target.BaseURL, strings.TrimRight(baseURL, "/"))
 		}
 		if !target.Local {
+			if globalAuthTokenOverrideSet() {
+				return NewHTTPClientForTarget(ctx, baseURL,
+					TargetAuth{Token: resolveAuthConfig().Token, AllowInsecure: target.AllowInsecure}, opts)
+			}
 			return NewHTTPClientForTarget(ctx, baseURL,
 				TargetAuth{Token: target.Token, AllowInsecure: target.AllowInsecure}, opts)
 		}

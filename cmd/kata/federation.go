@@ -261,9 +261,7 @@ func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance s
 	if err != nil {
 		return "", false
 	}
-	spokeClient, err := clientpkg.NewHTTPClientForTarget(ctx, spokeURL, clientpkg.TargetAuth{}, clientpkg.Opts{
-		Timeout: envHTTPTimeout(defaultHTTPTimeout),
-	})
+	spokeClient, err := federationSpokeHTTPClient(ctx, spokeURL)
 	if err != nil {
 		return "", false
 	}
@@ -274,6 +272,36 @@ func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance s
 		}
 	}
 	return federationSpokeProjectNameExists(ctx, spokeClient, spokeURL, projectName)
+}
+
+func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Client, error) {
+	opts := clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)}
+	if strings.TrimSpace(flags.Daemon) == "" {
+		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL, clientpkg.TargetAuth{}, opts)
+	}
+	cfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return nil, err
+	}
+	entry := catalogByName(cfg, flags.Daemon)
+	if entry == nil {
+		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL, clientpkg.TargetAuth{}, opts)
+	}
+	if !entry.Local {
+		entryURL, err := clientpkg.NormalizeRemoteURL(entry.URL, entry.AllowInsecure)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimRight(entryURL, "/") != strings.TrimRight(spokeURL, "/") {
+			return clientpkg.NewHTTPClientForTarget(ctx, spokeURL, clientpkg.TargetAuth{}, opts)
+		}
+	}
+	token, err := selectedCatalogToken(entry)
+	if err != nil {
+		return nil, err
+	}
+	return clientpkg.NewHTTPClientForTarget(ctx, spokeURL,
+		clientpkg.TargetAuth{Token: token, AllowInsecure: entry.AllowInsecure}, opts)
 }
 
 func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseURL string) (string, error) {

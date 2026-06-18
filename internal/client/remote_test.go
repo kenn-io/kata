@@ -234,6 +234,92 @@ token = "catalog-token"
 	assert.Equal(t, "Bearer catalog-token", gotAuth)
 }
 
+func TestNewHTTPClient_NamedRemoteAuthTokenEnvOverridesUnsetCatalogTokenEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "env-token")
+	t.Setenv("KATA_SHARED_TOKEN", "")
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ping":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":      true,
+				"service": "kata",
+				"version": "test",
+			})
+		case "/protected":
+			gotAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "shared"
+url = "`+srv.URL+`"
+token_env = "KATA_SHARED_TOKEN"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
+		Timeout:    time.Second,
+		DaemonName: "shared",
+	})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, "Bearer env-token", gotAuth)
+}
+
+func TestNewHTTPClient_NamedRemoteAuthTokenEnvSuppliesTokenlessCatalog(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "env-token")
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ping":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":      true,
+				"service": "kata",
+				"version": "test",
+			})
+		case "/protected":
+			gotAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "shared"
+url = "`+srv.URL+`"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
+		Timeout:    time.Second,
+		DaemonName: "shared",
+	})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/protected", nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, "Bearer env-token", gotAuth)
+}
+
 func TestNewHTTPClient_NamedLocalUsesCatalogToken(t *testing.T) {
 	home := setupKataEnv(t)
 	var gotAuth string

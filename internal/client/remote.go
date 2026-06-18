@@ -283,9 +283,13 @@ func namedDaemonTargetFromCatalog(
 		TokenEnv:      daemon.TokenEnv,
 		AllowInsecure: daemon.AllowInsecure,
 	}
-	token, err := resolveActiveRemoteTargetToken(target)
-	if err != nil {
-		return namedDaemonTarget{}, err
+	token := daemon.Token
+	if local || !globalAuthTokenOverrideSet() {
+		var err error
+		token, err = resolveActiveRemoteTargetToken(target)
+		if err != nil {
+			return namedDaemonTarget{}, err
+		}
 	}
 	return namedDaemonTarget{
 		Name:          daemon.Name,
