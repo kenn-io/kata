@@ -290,6 +290,7 @@ kata federation enrollments list
 kata federation revoke <enrollment-id>
 kata federation lease acquire <issue-ref> [--ttl 30m]
 kata federation lease release <issue-ref>
+kata federation quarantine retry <id> --confirm "RETRY FEDERATION BATCH <id>" --reason <text>
 kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --reason <text>
 ```
 

@@ -247,11 +247,33 @@ exporter keeps v11 on the legacy comment/event projections and the importer
 backfills those fields while loading the fresh schema-12 database.
 
 Federation push requests also carry a `schema_version` field in the wire body.
-The hub rejects requests that omit it or report a schema newer than the hub's
-own schema. This is intentionally conservative: an old hub must not blindly
-materialize events from a newer spoke whose payloads or fold semantics may have
-changed. Upgrade hubs before push-enabled spokes when rolling out a new
-federation schema.
+The hub rejects requests that omit it, send a non-positive value, or report a
+schema newer than the hub's own schema. This is intentionally conservative: an
+old hub must not blindly materialize events from a newer spoke whose payloads or
+fold semantics may have changed.
+
+### Forward And Backward Compatibility
+
+Federation compatibility is asymmetric during rolling upgrades:
+
+- **Older spoke, newer hub:** push is accepted when the spoke's
+  `schema_version` is positive and not newer than the hub. The hub remains
+  responsible for preserving ingest compatibility with older event envelopes and
+  payloads that it still accepts.
+- **Newer spoke, older hub:** push is rejected with
+  `unsupported_federation_schema`. The spoke treats that as transient version
+  skew: it records the sync error, leaves the push cursor unchanged, does not
+  create quarantine, and retries on later sync passes. Once the hub is upgraded,
+  the same pending events are sent again.
+- **Malformed schema declarations:** missing schema versions fail request
+  validation, and explicit non-positive versions fail with
+  `invalid_federation_schema`. These are protocol errors, not rolling-upgrade
+  skew.
+
+Upgrade hubs before push-enabled spokes when rolling out a new federation
+schema. If an older build already quarantined a batch because of transient
+schema skew, upgrade the hub and use the push-quarantine retry operation to
+release the local stop marker without advancing the push cursor.
 
 ## Pull Replication
 
@@ -406,7 +428,19 @@ A daemon with no federation bindings returns an empty status list and prints
 
 A spoke records an active quarantine when it sees a permanently poisoned push
 batch. Quarantine blocks further push and can block reset. Operators can inspect
-it with status and intentionally skip it:
+it with status and release it for retry after fixing the root cause:
+
+```bash
+kata federation quarantine retry <id> \
+  --confirm "RETRY FEDERATION BATCH <id>" \
+  --reason "hub upgraded"
+```
+
+Retry is only defined for push quarantines. It marks the quarantine resolved
+without advancing the push cursor, so the same local events are sent again on
+the next sync.
+
+Operators can also intentionally skip a quarantined batch:
 
 ```bash
 kata federation quarantine skip <id> \
@@ -603,10 +637,11 @@ time.
 
 ### Poisoned Push Batches Require Operator Choice
 
-A validation error, hash conflict, or schema divergence can quarantine a push
-batch. Until an operator fixes the data or skips the batch, push remains
-blocked and reset may be blocked. Skipping is explicit data divergence: the hub
-will not receive those local events.
+A validation error, hash conflict, or other permanently poisoned push batch can
+quarantine push. Until an operator fixes the data and retries the batch, or
+skips the batch, push remains blocked and reset may be blocked. Retrying is
+non-stranding: the same local events are re-sent. Skipping is explicit data
+divergence: the hub will not receive those local events.
 
 Use a shared daemon when local writes must either commit centrally or fail
 synchronously with no later operator reconciliation.

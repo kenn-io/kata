@@ -598,13 +598,47 @@ enrollment.
 pending push depth, sync timestamps, enrollment counts, lease counts,
 quarantine counts, reset blockers, and recent lease violations.
 
+## Compatibility and rolling upgrades
+
+Push requests declare the spoke's local storage schema version. A hub accepts
+older positive schema versions, but rejects a spoke schema newer than its own
+with `unsupported_federation_schema`. The spoke treats that error as transient
+version skew: it records the sync error, leaves the push cursor unchanged, does
+not create quarantine, and retries on later sync passes.
+
+Operationally, upgrade hubs before push-enabled spokes. If a spoke runs ahead
+of its hub, `kata federation status` will show pending push and the last
+schema-skew error until the hub catches up. After the hub is upgraded, the next
+sync retries the same pending events automatically.
+
+Malformed schema declarations are not rolling-upgrade skew. Missing schema
+versions fail request validation, and explicit non-positive schema versions
+return `invalid_federation_schema`.
+
+Older kata builds may already have quarantined a batch after a transient
+schema-skew rejection. After upgrading the hub, release that push quarantine
+with `kata federation quarantine retry <id>` so the spoke re-sends the same
+events without advancing its push cursor.
+
 ## Quarantine
 
 A spoke records active quarantine when it sees a permanently poisoned push
 batch. Quarantine blocks further push and can block reset.
 
-Inspect with status and intentionally skip when the operator accepts that local
-events will not be federated:
+Inspect with status and retry after fixing the root cause:
+
+```sh
+kata federation quarantine retry <id> \
+  --confirm "RETRY FEDERATION BATCH <id>" \
+  --reason "hub upgraded"
+```
+
+Retry is push-only. It marks the quarantine resolved without advancing the push
+cursor, so the same local events are sent again on the next sync. Retrying a
+pull quarantine returns `federation_quarantine_retry_unsupported`.
+
+Intentionally skip only when the operator accepts that local events will not be
+federated:
 
 ```sh
 kata federation quarantine skip <id> \
@@ -643,6 +677,8 @@ Federation has expected stale or deferred states:
   violations.
 - Poisoned push batches require operator choice.
 - Hub outages degrade lease acquisition, pull, push, and status freshness.
+- Future-schema push skew pauses push until the hub is upgraded; older builds
+  may require an operator retry if they already quarantined the batch.
 - Purge causes spoke re-bootstrap.
 - Enrollment creation uses normal daemon auth; the generated enrollment token
   only authorizes the spoke transport grant and is not a user daemon API token.
