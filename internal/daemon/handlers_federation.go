@@ -477,7 +477,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 func validateFederationIngestSchemaVersion(schemaVersion int) error {
 	current := db.CurrentSchemaVersion()
 	if schemaVersion <= 0 {
-		return api.NewError(http.StatusBadRequest, "unsupported_federation_schema",
+		return api.NewError(http.StatusBadRequest, "invalid_federation_schema",
 			"federation ingest schema_version is required", "", nil)
 	}
 	if schemaVersion > current {

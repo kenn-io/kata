@@ -1800,6 +1800,9 @@ func TestFederationIngestRejectsFutureSchemaVersion(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "future schema response: %s", raw)
 	assert.Contains(t, string(raw), "schema_version")
+	var errBody api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &errBody))
+	assert.Equal(t, "unsupported_federation_schema", errBody.Error.Code)
 	assert.Equal(t, beforeEvents, countEvents(t, env.DB))
 }
 
@@ -1824,6 +1827,39 @@ func TestFederationIngestRejectsMissingSchemaVersion(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "missing schema response: %s", raw)
 	assert.Contains(t, string(raw), "schema_version")
+	var errBody api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &errBody))
+	assert.Equal(t, "validation", errBody.Error.Code)
+	assert.Equal(t, beforeEvents, countEvents(t, env.DB))
+}
+
+func TestFederationIngestRejectsZeroSchemaVersion(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project := createFederatedHubProject(t, env, "hub")
+	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:            "zero-schema",
+		SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID:        &project.ID,
+		Capabilities:     "push",
+		Actor:            "tester",
+	})
+	require.NoError(t, err)
+	ev := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
+	body := map[string]any{
+		"schema_version": 0,
+		"events":         []any{federationIngestEnvelope(t, int64(17), ev)},
+	}
+	beforeEvents := countEvents(t, env.DB)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/events:ingest", body, bearer(created.Token))
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "zero schema response: %s", raw)
+	assert.Contains(t, string(raw), "schema_version")
+	var errBody api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &errBody))
+	assert.Equal(t, "invalid_federation_schema", errBody.Error.Code)
 	assert.Equal(t, beforeEvents, countEvents(t, env.DB))
 }
 

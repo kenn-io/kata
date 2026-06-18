@@ -53,7 +53,16 @@ first event; `skip` would advance the cursor past it and strand that event.
 In `isPoisonedFederationPushError` (`federation_sync.go`), when the error is a
 `*HubStatusError`, parse `Body` as `api.ErrorEnvelope` and treat
 `error.code == "unsupported_federation_schema"` as **not** poison. Match on the
-structured code, never on message text.
+structured code, never on message text. The hub must reserve that code for the
+transient "spoke schema is newer than hub schema" case.
+
+Malformed protocol requests are permanent errors, not transient skew:
+
+- missing `schema_version` is rejected by request validation as `validation`;
+- explicit non-positive `schema_version` is rejected as
+  `invalid_federation_schema`;
+- only `schema_version > db.CurrentSchemaVersion()` returns
+  `unsupported_federation_schema`.
 
 Non-poison errors already flow through `recordFederationSyncError` and are
 retried on the next sync, so no other change is needed: schema skew now pauses
@@ -106,10 +115,11 @@ quarantine is not misread as always skipped/stranded.
 
 ## Test plan (TDD — write first)
 
-1. `unsupported_federation_schema` `400` does **not** create a quarantine
-   (`isPoisonedFederationPushError` is false; no quarantine row after a push that
-   returns it).
-2. Generic validation `400` and `409` conflict **still** quarantine.
+1. Too-new `unsupported_federation_schema` `400` does **not** create a
+   quarantine (`isPoisonedFederationPushError` is false; no quarantine row after
+   a push that returns it).
+2. Generic validation `400`, zero-schema `invalid_federation_schema` `400`, and
+   `409` conflict **still** quarantine.
 3. `RetryFederationQuarantine` marks the active quarantine inactive **without**
    advancing `push_cursor_event_id`.
 4. After retry, the next `SyncFederationOnce` performs a network push and
