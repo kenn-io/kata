@@ -174,6 +174,8 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 		if target.Token != "" {
 			return NewHTTPClientWithBearer(ctx, baseURL, target.Token, opts)
 		}
+		auth := resolveAuthConfig()
+		return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
 	}
 	if auth, ok, err := activeRemoteTargetAuthForBaseURL(baseURL, opts.WorkspaceStart); err != nil {
 		return nil, err
