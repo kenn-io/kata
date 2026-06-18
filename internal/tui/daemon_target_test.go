@@ -312,6 +312,44 @@ func TestNewHTTPClientForTUILocalFallsBackToGlobalAuth(t *testing.T) {
 	assert.Equal(t, "Bearer global-token", gotAuth)
 }
 
+func TestNewHTTPClientForTUIExplicitLocalBypassesActiveDaemonAuth(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_REMOTE_TOKEN", "")
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+active_daemon = "remote"
+
+[auth]
+token = "global-token"
+
+[[daemon]]
+name = "local"
+local = true
+
+[[daemon]]
+name = "remote"
+url = "`+srv.URL+`"
+token_env = "KATA_REMOTE_TOKEN"
+`), 0o600))
+
+	hc, err := newHTTPClientForTUI(t.Context(), srv.URL,
+		daemonTarget{Name: "local", Local: true}, clientOptsNormal)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := hc.Do(req) //nolint:gosec // test request targets httptest.Server's loopback URL
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, "Bearer global-token", gotAuth)
+}
+
 func TestNewHTTPClientForTUIImplicitRemoteFallsBackToGlobalAuth(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	var gotAuth string

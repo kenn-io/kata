@@ -63,6 +63,9 @@ var (
 			if target.Token != "" {
 				return client.NewHTTPClientWithBearer(ctx, endpoint, target.Token, opts)
 			}
+			if target.Local && target.Name != "" {
+				opts.DaemonName = target.Name
+			}
 			return client.NewHTTPClient(ctx, endpoint, opts)
 		}
 		return client.NewHTTPClientForTarget(ctx, endpoint,
