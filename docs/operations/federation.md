@@ -616,9 +616,10 @@ versions fail request validation, and explicit non-positive schema versions
 return `invalid_federation_schema`.
 
 Older kata builds may already have quarantined a batch after a transient
-schema-skew rejection. After upgrading the hub, release that push quarantine
-with `kata federation quarantine retry <id>` so the spoke re-sends the same
-events without advancing its push cursor.
+schema-skew rejection. After upgrading the hub, upgrade and restart each spoke
+on a build with this compatibility behavior. The next sync auto-releases that
+legacy schema-skew quarantine and re-sends the same events without advancing
+the push cursor.
 
 ## Quarantine
 
@@ -635,7 +636,10 @@ kata federation quarantine retry <id> \
 
 Retry is push-only. It marks the quarantine resolved without advancing the push
 cursor, so the same local events are sent again on the next sync. Retrying a
-pull quarantine returns `federation_quarantine_retry_unsupported`.
+pull quarantine returns `federation_quarantine_retry_unsupported`. A stale push
+quarantine created by older builds for `unsupported_federation_schema` is
+released automatically on sync after the spoke runs a fixed build; manual retry
+is for other fixed push-quarantine root causes.
 
 Intentionally skip only when the operator accepts that local events will not be
 federated:
@@ -677,8 +681,9 @@ Federation has expected stale or deferred states:
   violations.
 - Poisoned push batches require operator choice.
 - Hub outages degrade lease acquisition, pull, push, and status freshness.
-- Future-schema push skew pauses push until the hub is upgraded; older builds
-  may require an operator retry if they already quarantined the batch.
+- Future-schema push skew pauses push until the hub is upgraded. Stale
+  schema-skew quarantines from older spoke builds auto-release after the spoke
+  is upgraded and restarted.
 - Purge causes spoke re-bootstrap.
 - Enrollment creation uses normal daemon auth; the generated enrollment token
   only authorizes the spoke transport grant and is not a user daemon API token.

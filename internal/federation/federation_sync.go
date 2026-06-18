@@ -79,8 +79,20 @@ func SyncFederationOnceWithPulledEvents(
 	runStartBinding := binding
 	if binding.PushEnabled {
 		for {
-			if _, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
+			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
+				if autoRetryLegacySchemaSkewQuarantine(q) {
+					if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
+						ID:        q.ID,
+						ProjectID: binding.ProjectID,
+						Actor:     binding.Actor,
+						Reason:    "auto-retry after transient schema skew",
+						Now:       time.Now().UTC(),
+					}); err != nil {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+					}
+				} else {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
+				}
 			} else if err != nil && !errors.Is(err, db.ErrNotFound) {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
@@ -316,6 +328,11 @@ func federationHubErrorCode(body string) string {
 		return ""
 	}
 	return envelope.Error.Code
+}
+
+func autoRetryLegacySchemaSkewQuarantine(q db.FederationQuarantine) bool {
+	return q.Direction == db.FederationQuarantineDirectionPush &&
+		strings.Contains(q.Error, `"code":"unsupported_federation_schema"`)
 }
 
 func recordFederationPushQuarantine(

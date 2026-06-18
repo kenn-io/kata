@@ -272,8 +272,9 @@ Federation compatibility is asymmetric during rolling upgrades:
 
 Upgrade hubs before push-enabled spokes when rolling out a new federation
 schema. If an older build already quarantined a batch because of transient
-schema skew, upgrade the hub and use the push-quarantine retry operation to
-release the local stop marker without advancing the push cursor.
+schema skew, upgrade the hub and then restart each spoke on a build with this
+compatibility behavior. The next sync auto-releases the stale schema-skew stop
+marker without advancing the push cursor, then re-sends the same events.
 
 ## Pull Replication
 
@@ -438,7 +439,9 @@ kata federation quarantine retry <id> \
 
 Retry is only defined for push quarantines. It marks the quarantine resolved
 without advancing the push cursor, so the same local events are sent again on
-the next sync.
+the next sync. Stale push quarantines whose stored error is the legacy
+`unsupported_federation_schema` response are released automatically on sync;
+operators use `retry` for other fixed push quarantines.
 
 Operators can also intentionally skip a quarantined batch:
 
