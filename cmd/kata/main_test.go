@@ -21,6 +21,7 @@ func TestRoot_HelpListsUniversalFlags(t *testing.T) {
 	assert.Contains(t, out, "--quiet")
 	assert.Contains(t, out, "--as")
 	assert.Contains(t, out, "--workspace")
+	assert.Contains(t, out, "--daemon")
 	assertNoFederationStorageInternals(t, out)
 }
 
@@ -93,6 +94,7 @@ func TestNewRootCmdResetsGlobalFlagState(t *testing.T) {
 	flags.JSON = true
 	flags.Agent = true
 	flags.Workspace = "/tmp/leaked"
+	flags.Daemon = "shared"
 
 	var out bytes.Buffer
 	cmd := newRootCmd()
@@ -105,6 +107,7 @@ func TestNewRootCmdResetsGlobalFlagState(t *testing.T) {
 	assert.False(t, flags.Agent)
 	assert.Empty(t, flags.FormatValues)
 	assert.Empty(t, flags.Workspace)
+	assert.Empty(t, flags.Daemon)
 }
 
 // TestExitCodeFor_PureMapping pins the exit-code decision logic so a future

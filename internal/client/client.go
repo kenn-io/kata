@@ -133,6 +133,7 @@ type Opts struct {
 	ResponseHeaderTimeout time.Duration
 	AllowInsecure         bool
 	WorkspaceStart        string
+	DaemonName            string
 }
 
 // TargetAuth is explicit per-target bearer configuration. It is used by
@@ -157,6 +158,23 @@ type TargetAuth struct {
 // from the first-party CLI/TUI without callers having to plumb the header
 // through every request site.
 func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client, error) {
+	if opts.DaemonName != "" {
+		target, err := resolveNamedDaemonTarget(ctx, opts.DaemonName)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimRight(baseURL, "/") != target.BaseURL {
+			return nil, fmt.Errorf("daemon %q resolved to %s, not %s",
+				target.Name, target.BaseURL, strings.TrimRight(baseURL, "/"))
+		}
+		if !target.Local {
+			return NewHTTPClientForTarget(ctx, baseURL,
+				TargetAuth{Token: target.Token, AllowInsecure: target.AllowInsecure}, opts)
+		}
+		if target.Token != "" {
+			return NewHTTPClientWithBearer(ctx, baseURL, target.Token, opts)
+		}
+	}
 	if auth, ok, err := activeRemoteTargetAuthForBaseURL(baseURL, opts.WorkspaceStart); err != nil {
 		return nil, err
 	} else if ok {

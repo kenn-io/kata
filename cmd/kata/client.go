@@ -47,10 +47,17 @@ func envHTTPTimeout(def time.Duration) time.Duration {
 // the .kata.local.toml walk so a workspace-local [server] override is
 // honored even when the user is invoking kata from outside the repo.
 //
-// If a remote is explicitly configured (via KATA_SERVER, .kata.local.toml,
-// or active_daemon) but does not respond, the CLI surfaces this as a
-// daemon-unavailable error so callers see a stable exit code and shape.
+// If a daemon is explicitly configured (via --daemon, KATA_SERVER,
+// .kata.local.toml, or active_daemon) but does not respond, the CLI surfaces
+// this as a daemon-unavailable error so callers see a stable exit code and shape.
 func ensureDaemon(ctx context.Context) (string, error) {
+	if flags.Daemon != "" {
+		baseURL, err := client.EnsureNamedRunning(ctx, flags.Daemon)
+		if err == nil {
+			return baseURL, nil
+		}
+		return "", cliDaemonTargetError(err)
+	}
 	workspaceStart := workspaceStartForRemote()
 	baseURL, err := client.EnsureRunningInWorkspace(ctx, workspaceStart)
 	if err == nil {
@@ -90,12 +97,13 @@ func workspaceStartForRemote() string {
 // with the rest of the CLI about which daemon is "the" daemon:
 //
 //  1. BaseURLKey on the context (test injection).
-//  2. Configured remote (KATA_SERVER env, .kata.local.toml [server].url,
+//  2. --daemon named catalog entry.
+//  3. Configured remote (KATA_SERVER env, .kata.local.toml [server].url,
 //     or active_daemon). When the remote is set but unreachable,
 //     surface that as ErrRemoteUnavailable so health reports the
 //     explicitly-selected daemon's actual state rather than silently
 //     falling through to a local one.
-//  3. Local Discover (runtime files).
+//  4. Local Discover (runtime files).
 //
 // Returns a kindDaemonUnavail cliError when no live daemon is found,
 // matching hammer-test finding #1's expectation that `kata health`
@@ -103,6 +111,13 @@ func workspaceStartForRemote() string {
 func discoverDaemon(ctx context.Context) (string, error) {
 	if v, ok := ctx.Value(client.BaseURLKey{}).(string); ok && v != "" {
 		return v, nil
+	}
+	if flags.Daemon != "" {
+		baseURL, err := client.EnsureNamedRunning(ctx, flags.Daemon)
+		if err == nil {
+			return baseURL, nil
+		}
+		return "", cliDaemonTargetError(err)
 	}
 	if url, ok, err := client.ResolveRemote(ctx, workspaceStartForRemote()); err != nil {
 		if errors.Is(err, client.ErrRemoteUnavailable) {
@@ -130,6 +145,24 @@ func discoverDaemon(ctx context.Context) (string, error) {
 	}
 }
 
+func cliDaemonTargetError(err error) error {
+	if errors.Is(err, client.ErrNamedDaemonNotFound) {
+		return &cliError{
+			Message:  err.Error(),
+			Kind:     kindValidation,
+			ExitCode: ExitValidation,
+		}
+	}
+	if errors.Is(err, client.ErrRemoteUnavailable) {
+		return &cliError{
+			Message:  err.Error(),
+			Kind:     kindDaemonUnavail,
+			ExitCode: ExitDaemonUnavail,
+		}
+	}
+	return err
+}
+
 // httpClientFor returns an *http.Client whose transport understands the
 // unix-socket base URL emitted by ensureDaemon. The TUI calls into
 // client directly; this wrapper exists only because every existing
@@ -141,6 +174,7 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 			Timeout:        envHTTPTimeout(defaultHTTPTimeout),
 			AllowInsecure:  client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart),
 			WorkspaceStart: workspaceStart,
+			DaemonName:     flags.Daemon,
 		})
 }
 
@@ -154,6 +188,7 @@ func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, erro
 		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
 		AllowInsecure:         client.RemoteAllowInsecureForBaseURL(baseURL, workspaceStart),
 		WorkspaceStart:        workspaceStart,
+		DaemonName:            flags.Daemon,
 	})
 }
 

@@ -9,6 +9,7 @@ current flag list in your installed binary.
 | --- | --- |
 | `--workspace <path>` | Resolve project context from a specific workspace. |
 | `--project <name>` | Select a project explicitly for project-scoped commands. |
+| `--daemon <name>` | Target a named daemon catalog entry for this command. |
 | `--as <actor>` | Override the actor for this command. |
 | `--agent` | Emit concise agent-readable text. |
 | `--json` | Emit machine-readable JSON. |

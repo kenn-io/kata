@@ -144,11 +144,12 @@ Or commit-free per-workspace:
    [server]
    url = "http://100.64.0.5:7777"
 
-KATA_SERVER wins over the file when both are set. If neither is set, clients
-next honor active_daemon in <KATA_HOME>/config.toml; otherwise they use the
-local daemon: Unix socket on Unix platforms, loopback TCP on Windows. A
-configured-but-down remote returns exit 7 (kata server not responding) — no
-silent fallback to spawning a local daemon.
+KATA_SERVER wins over the file when both are set unless a command passes
+--daemon <name>. If none of those are set, clients next honor active_daemon
+in <KATA_HOME>/config.toml; otherwise they use the local daemon: Unix socket
+on Unix platforms, loopback TCP on Windows. A configured-but-down remote
+returns exit 7 (kata server not responding) — no silent fallback to spawning
+a local daemon.
 `
 
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.

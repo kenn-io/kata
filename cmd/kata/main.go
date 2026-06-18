@@ -26,6 +26,7 @@ type globalFlags struct {
 	As           string
 	Workspace    string
 	Project      string
+	Daemon       string
 }
 
 var flags globalFlags
@@ -67,6 +68,7 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.As, "as", "", "override actor (default: $KATA_AUTHOR > $USER > git > anonymous)")
 	cmd.PersistentFlags().StringVar(&flags.Workspace, "workspace", "", "path used for project resolution (default: cwd)")
 	cmd.PersistentFlags().StringVar(&flags.Project, "project", "", "project name for project-scoped commands")
+	cmd.PersistentFlags().StringVar(&flags.Daemon, "daemon", "", "named daemon catalog entry to target for this command")
 	// Catch the cobra/pflag pitfall where a positional that looks like
 	// a negative integer (kata show -1, kata delete -1) is parsed as
 	// a flag and produces "unknown shorthand flag: '1' in -1" — useless

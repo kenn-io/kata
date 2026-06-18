@@ -39,12 +39,36 @@ type activeRemoteTarget struct {
 // of CLI-layer types so this package stays importable from the TUI.
 var ErrRemoteUnavailable = errors.New("kata server not responding")
 
+// ErrNamedDaemonNotFound marks a --daemon/catalog selection that does not
+// match any [[daemon]] entry in <KATA_HOME>/config.toml.
+var ErrNamedDaemonNotFound = errors.New("named daemon not found")
+
+type namedDaemonTarget struct {
+	Name          string
+	Local         bool
+	BaseURL       string
+	Token         string
+	AllowInsecure bool
+}
+
 // ResolveRemote is the exported view of resolveRemote so callers
 // outside client (e.g. cmd/kata health) can honor the same
 // KATA_SERVER / .kata.local.toml / active_daemon resolution rules without
 // auto-starting a local daemon.
 func ResolveRemote(ctx context.Context, workspaceStart string) (string, bool, error) {
 	return resolveRemote(ctx, workspaceStart)
+}
+
+// EnsureNamedRunning returns the base URL for a named daemon catalog entry,
+// auto-starting local entries and probing remote entries. It is an explicit
+// per-invocation selection and therefore ignores KATA_SERVER, .kata.local.toml,
+// and active_daemon.
+func EnsureNamedRunning(ctx context.Context, name string) (string, error) {
+	target, err := resolveNamedDaemonTarget(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	return target.BaseURL, nil
 }
 
 // NormalizeRemoteURL exposes kata's remote URL validation/canonicalization
@@ -130,6 +154,72 @@ func resolveActiveRemote(ctx context.Context) (string, bool, error) {
 			ErrRemoteUnavailable, target.BaseURL, daemonConfigSource(), target.Name)
 	}
 	return target.BaseURL, true, nil
+}
+
+func resolveNamedDaemonTarget(ctx context.Context, name string) (namedDaemonTarget, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return namedDaemonTarget{}, fmt.Errorf("%w: empty name", ErrNamedDaemonNotFound)
+	}
+	cfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return namedDaemonTarget{}, err
+	}
+	for _, daemon := range cfg.Daemons {
+		if daemon.Name != name {
+			continue
+		}
+		if daemon.Local {
+			baseURL, err := EnsureLocalRunning(ctx)
+			if err != nil {
+				return namedDaemonTarget{}, err
+			}
+			target := activeRemoteTarget{
+				Name:          daemon.Name,
+				Token:         daemon.Token,
+				TokenEnv:      daemon.TokenEnv,
+				AllowInsecure: daemon.AllowInsecure,
+			}
+			token, err := resolveActiveRemoteTargetToken(target)
+			if err != nil {
+				return namedDaemonTarget{}, err
+			}
+			return namedDaemonTarget{
+				Name:          daemon.Name,
+				Local:         true,
+				BaseURL:       baseURL,
+				Token:         token,
+				AllowInsecure: daemon.AllowInsecure,
+			}, nil
+		}
+		baseURL, err := normalizeRemoteURL(daemon.URL, daemon.AllowInsecure)
+		if err != nil {
+			return namedDaemonTarget{}, fmt.Errorf("%s daemon %q url %q: %w",
+				daemonConfigSource(), daemon.Name, daemon.URL, err)
+		}
+		target := activeRemoteTarget{
+			Name:          daemon.Name,
+			BaseURL:       baseURL,
+			Token:         daemon.Token,
+			TokenEnv:      daemon.TokenEnv,
+			AllowInsecure: daemon.AllowInsecure,
+		}
+		token, err := resolveActiveRemoteTargetToken(target)
+		if err != nil {
+			return namedDaemonTarget{}, err
+		}
+		if !probeRemote(ctx, baseURL) {
+			return namedDaemonTarget{}, fmt.Errorf("%w: %s (%s daemon %q)",
+				ErrRemoteUnavailable, baseURL, daemonConfigSource(), daemon.Name)
+		}
+		return namedDaemonTarget{
+			Name:          daemon.Name,
+			BaseURL:       baseURL,
+			Token:         token,
+			AllowInsecure: daemon.AllowInsecure,
+		}, nil
+	}
+	return namedDaemonTarget{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
 }
 
 func activeRemoteFromConfig() (activeRemoteTarget, bool, error) {

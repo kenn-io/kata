@@ -65,14 +65,16 @@ version = 1
 url = "http://100.64.0.5:7777"
 ```
 
-`KATA_SERVER` wins over the local file.
+`KATA_SERVER` wins over the local file unless a command passes
+`--daemon <name>`.
 
 Daemon target resolution order is:
 
-1. `KATA_SERVER`
-2. `.kata.local.toml` `[server].url`
-3. `active_daemon` in `<KATA_HOME>/config.toml`
-4. local daemon discovery or auto-start
+1. `--daemon <name>`
+2. `KATA_SERVER`
+3. `.kata.local.toml` `[server].url`
+4. `active_daemon` in `<KATA_HOME>/config.toml`
+5. local daemon discovery or auto-start
 
 Committed `.kata.toml` files bind the project name only; do not put daemon
 routing or tokens there.
