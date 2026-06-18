@@ -100,14 +100,21 @@ func activeDaemonTarget(targets []daemonTarget, active string) (daemonTarget, bo
 	return daemonTarget{}, false
 }
 
-func bootDaemonConnection(ctx context.Context, _ Options) (daemonConnection, error) {
+func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, error) {
 	cfg, err := readDaemonConfigForTUI()
 	if err != nil {
 		return daemonConnection{}, err
 	}
 	catalog := daemonTargetsFromConfig(cfg.Daemons)
-	target, ok := activeDaemonTarget(catalog, cfg.ActiveDaemon)
+	targetName := cfg.ActiveDaemon
+	if strings.TrimSpace(opts.DaemonName) != "" {
+		targetName = strings.TrimSpace(opts.DaemonName)
+	}
+	target, ok := activeDaemonTarget(catalog, targetName)
 	if !ok {
+		if targetName != "" {
+			return daemonConnection{}, fmt.Errorf("daemon %q is not in daemon catalog", targetName)
+		}
 		conn, err := connectImplicitDaemonTarget(ctx)
 		if err != nil {
 			return daemonConnection{}, err
@@ -115,7 +122,7 @@ func bootDaemonConnection(ctx context.Context, _ Options) (daemonConnection, err
 		conn.catalog = catalog
 		return conn, nil
 	}
-	conn, err := connectDaemonTarget(ctx, target)
+	conn, err := connectDaemonTargetForTUI(ctx, target)
 	if err != nil {
 		return daemonConnection{}, err
 	}

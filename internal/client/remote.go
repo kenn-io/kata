@@ -241,6 +241,27 @@ func resolveNamedDaemonTarget(ctx context.Context, name string) (namedDaemonTarg
 	return namedDaemonTarget{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
 }
 
+func namedDaemonTargetForBaseURL(name, baseURL string) (namedDaemonTarget, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return namedDaemonTarget{}, fmt.Errorf("%w: empty name", ErrNamedDaemonNotFound)
+	}
+	cfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return namedDaemonTarget{}, err
+	}
+	for _, d := range cfg.Daemons {
+		if d.Name != name {
+			continue
+		}
+		if d.Local {
+			return namedDaemonTargetFromCatalog(d, strings.TrimRight(baseURL, "/"), true)
+		}
+		return namedDaemonTargetFromCatalog(d, "", false)
+	}
+	return namedDaemonTarget{}, fmt.Errorf("%w: %q", ErrNamedDaemonNotFound, name)
+}
+
 func namedDaemonTargetFromCatalog(
 	daemon config.CatalogDaemonConfig,
 	localBaseURL string,

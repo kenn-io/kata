@@ -51,6 +51,7 @@ terminal text selection while mouse tracking is enabled.`,
 				Stdout:           cmd.OutOrStdout(),
 				Stderr:           cmd.ErrOrStderr(),
 				DisplayUIDFormat: uidFormat,
+				DaemonName:       flags.Daemon,
 				Mouse:            mouseEnabled,
 			})
 		},

@@ -159,7 +159,7 @@ type TargetAuth struct {
 // through every request site.
 func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client, error) {
 	if opts.DaemonName != "" {
-		target, err := resolveNamedDaemonTarget(ctx, opts.DaemonName)
+		target, err := namedDaemonTargetForBaseURL(opts.DaemonName, baseURL)
 		if err != nil {
 			return nil, err
 		}

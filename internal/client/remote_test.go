@@ -277,6 +277,36 @@ token = "local-token"
 	assert.Equal(t, "Bearer local-token", gotAuth)
 }
 
+func TestNewHTTPClient_NamedLocalUsesProvidedBaseURLWithoutStarting(t *testing.T) {
+	home := setupKataEnv(t)
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "local-auth"
+local = true
+token = "local-token"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
+		Timeout:    time.Second,
+		DaemonName: "local-auth",
+	})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, "Bearer local-token", gotAuth)
+}
+
 func TestResolveRemote_FileUnreachableErrors(t *testing.T) {
 	t.Setenv("KATA_SERVER", "")
 	dir := t.TempDir()

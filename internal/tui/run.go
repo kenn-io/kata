@@ -85,6 +85,7 @@ type Options struct {
 	Stdout           io.Writer // typically os.Stdout
 	Stderr           io.Writer // typically os.Stderr
 	DisplayUIDFormat string    // none, short, or full
+	DaemonName       string    // named daemon catalog entry for this run
 	Mouse            bool      // opt-in mouse capture and mouse-driven navigation
 }
 

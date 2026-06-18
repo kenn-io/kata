@@ -143,6 +143,37 @@ func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *t
 	assert.Equal(t, viewEmpty, conn.init.view)
 }
 
+func TestBootDaemonConnectionOptionsDaemonNameOverridesActiveDaemon(t *testing.T) {
+	oldRead := readDaemonConfigForTUI
+	oldConnect := connectDaemonTargetForTUI
+	t.Cleanup(func() {
+		readDaemonConfigForTUI = oldRead
+		connectDaemonTargetForTUI = oldConnect
+	})
+
+	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
+		return &config.DaemonConfig{
+			ActiveDaemon: "active",
+			Daemons: []config.CatalogDaemonConfig{
+				{Name: "active", URL: "https://active.example"},
+				{Name: "selected", URL: "https://selected.example"},
+			},
+		}, nil
+	}
+	var got daemonTarget
+	connectDaemonTargetForTUI = func(_ context.Context, target daemonTarget) (daemonConnection, error) {
+		got = target
+		return daemonConnection{target: target}, nil
+	}
+
+	conn, err := bootDaemonConnection(context.Background(), Options{DaemonName: "selected"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "selected", got.Name)
+	assert.Equal(t, "selected", conn.target.Name)
+	require.Len(t, conn.catalog, 2)
+}
+
 func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testing.T) {
 	oldRead := readDaemonConfigForTUI
 	oldEnsure := ensureRunningForTUI
