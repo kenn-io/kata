@@ -254,10 +254,14 @@ In `scripts/release_scripts_test.sh`, add checks that `.github/workflows/release
 
 - exists;
 - contains `permissions:` and `contents: write`;
+- has build jobs that upload artifacts instead of creating the release directly;
+- has a single dependent release job with `needs:` that downloads all build artifacts;
 - derives `TAG_NAME="${GITHUB_REF#refs/tags/}"`;
 - derives `VERSION="${TAG_NAME#v}"`;
 - calls `scripts/release-archive-name.sh "$VERSION" "$GOOS" "$GOARCH"`;
-- includes `SHA256SUMS`;
+- generates one aggregate `SHA256SUMS` after artifact download with every `kata_*` archive in the same directory;
+- creates the GitHub release exactly once from the dependent release job;
+- checks out with full tag history (`fetch-depth: 0` and tag fetching, or an explicit tag fetch) before reading annotated tag notes;
 - does not use `v${VERSION}` in archive names.
 
 Run: `bash scripts/release_scripts_test.sh`
@@ -271,7 +275,10 @@ Create `.github/workflows/release.yml`:
 - Trigger on `push.tags: ['v*']`.
 - Set `permissions: contents: write`.
 - Validate `^v[0-9]+\.[0-9]+\.[0-9]+$`.
-- Build matrix:
+- Use a two-stage workflow:
+  - matrix build jobs build and validate platform archives, then upload artifacts;
+  - a single dependent `release` job downloads all artifacts, generates one aggregate `SHA256SUMS`, reads tag notes, and creates the GitHub release once.
+- Build job matrix:
   - Linux `amd64` and `arm64` on Ubuntu runners.
   - macOS `amd64` and `arm64` on macOS.
   - Windows `amd64` and `arm64` only if runner/toolchain support is practical; otherwise start with `amd64` and document `arm64` as intentionally deferred in a workflow comment.
@@ -288,9 +295,19 @@ LDFLAGS="-s -w -X go.kenn.io/kata/internal/version.Version=${TAG_NAME} -X go.ken
 - Archive using `scripts/release-archive-name.sh "$VERSION" "$GOOS" "$GOARCH"`.
 - Validate archive contents.
 - Smoke-test native Linux `amd64` archive with `kata version` and grep for `$TAG_NAME`.
-- Generate `SHA256SUMS`.
-- Read annotated tag body.
-- Use a pinned release action or `gh release create` with `GH_TOKEN: ${{ github.token }}`.
+- Upload each archive with `actions/upload-artifact`.
+- In the release job, use checkout options that preserve annotated tag contents:
+
+```yaml
+with:
+  fetch-depth: 0
+  fetch-tags: true
+```
+
+If the pinned checkout action does not support `fetch-tags`, run an explicit `git fetch --force --tags`.
+- In the release job, download artifacts into one directory, then run `sha256sum kata_* > SHA256SUMS` so kit can find every asset checksum in one file.
+- Read annotated tag body into `notes.md`; if no body exists, fall back to generated release notes rather than publishing an empty release body.
+- Use one pinned release action or one `gh release create "$TAG_NAME" kata_* SHA256SUMS --notes-file notes.md` invocation with `GH_TOKEN: ${{ github.token }}` from the release job only.
 
 - [ ] **Step 3: Run tests**
 
@@ -371,6 +388,7 @@ Implement `newUpdateCmd()` with flags:
 - `--check`: check only, no install.
 - `--force`, `-f`: pass `selfupdate.CheckOptions{Force: true}` and permit replacing dev builds.
 - `--yes`, `-y`: skip confirmation prompt for install.
+- Do not declare local `--json` or `--agent` flags. Use the existing root persistent flags and `currentOutputMode()` from `output_mode.go`, the same way `version` does.
 
 Output contract:
 
@@ -570,7 +588,17 @@ make docs-check
 
 Expected: PASS.
 
-- [ ] **Step 4: Run broader relevant suite**
+- [ ] **Step 4: After first release, verify published update discovery**
+
+After cutting `v0.5.0`, run this from a binary older than `v0.5.0` or a dev build:
+
+```bash
+kata update --check
+```
+
+Expected: output reports `v0.5.0` as available and does not say "no release asset" or "no checksum". This is the end-to-end check that the published archive names and aggregate `SHA256SUMS` are discoverable by `selfupdate.Check`.
+
+- [ ] **Step 5: Run broader relevant suite**
 
 Run:
 
@@ -580,13 +608,13 @@ go test ./cmd/kata ./internal/tui ./internal/release
 
 Expected: PASS.
 
-- [ ] **Step 5: Check worktree**
+- [ ] **Step 6: Check worktree**
 
 Run: `git status --short`
 
 Expected: clean.
 
-- [ ] **Step 6: Update kata issue**
+- [ ] **Step 7: Update kata issue**
 
 Comment on `yevv` with:
 
