@@ -632,7 +632,7 @@ func TestNewHTTPClientForTargetAllowInsecureStillRefusesCrossOrigin(t *testing.T
 		called = true
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
 	})
-	rt, err := explicitBearerTransport(base, "target-token", "http://100.64.0.5:7373", true)
+	rt, err := explicitBearerTransport(base, "target-token", "http://100.64.0.5:7373", false, true)
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"http://100.64.0.6:7373/api/v1/ping", nil)

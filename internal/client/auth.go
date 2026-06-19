@@ -85,7 +85,8 @@ func authBearerTransport(
 func explicitBearerTransport(
 	base http.RoundTripper,
 	token, baseURL string,
+	trustPrivateNetwork bool,
 	allowInsecure bool,
 ) (http.RoundTripper, error) {
-	return authBearerTransport(base, token, baseURL, false, allowInsecure)
+	return authBearerTransport(base, token, baseURL, trustPrivateNetwork, allowInsecure)
 }

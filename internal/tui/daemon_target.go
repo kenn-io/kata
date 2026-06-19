@@ -13,13 +13,14 @@ import (
 )
 
 type daemonTarget struct {
-	Name          string
-	Local         bool
-	URL           string
-	Token         string
-	TokenEnv      string
-	AllowInsecure bool
-	Implicit      bool
+	Name                 string
+	Local                bool
+	URL                  string
+	Token                string
+	TokenEnv             string
+	AllowInsecure        bool
+	Implicit             bool
+	UseAuthTokenOverride bool
 }
 
 type daemonConnection struct {
@@ -68,8 +69,19 @@ var (
 			}
 			return client.NewHTTPClient(ctx, endpoint, opts)
 		}
+		auth := effectiveGlobalAuthForTUI()
+		token := target.Token
+		if target.UseAuthTokenOverride {
+			if envToken := authTokenEnvOverrideForTUI(); envToken != "" {
+				token = envToken
+			}
+		}
 		return client.NewHTTPClientForTarget(ctx, endpoint,
-			client.TargetAuth{Token: target.Token, AllowInsecure: target.AllowInsecure},
+			client.TargetAuth{
+				Token:               token,
+				AllowInsecure:       target.AllowInsecure,
+				TrustPrivateNetwork: auth.TrustPrivateNetwork,
+			},
 			opts)
 	}
 	bootResolveScopeForTUI    = bootResolveScope
@@ -144,6 +156,7 @@ func connectImplicitDaemonTarget(ctx context.Context) (daemonConnection, error) 
 
 func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnection, error) {
 	var err error
+	target.UseAuthTokenOverride = true
 	target, err = resolveDaemonTargetToken(target)
 	if err != nil {
 		return daemonConnection{}, err
@@ -156,6 +169,13 @@ func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnec
 }
 
 func resolveDaemonTargetToken(target daemonTarget) (daemonTarget, error) {
+	if target.UseAuthTokenOverride && !target.Local {
+		if token := authTokenEnvOverrideForTUI(); token != "" {
+			target.Token = token
+			target.TokenEnv = ""
+			return target, nil
+		}
+	}
 	if target.TokenEnv == "" {
 		return target, nil
 	}
@@ -241,15 +261,23 @@ func resolvedDaemonTarget(target daemonTarget, endpoint string) daemonTarget {
 }
 
 func effectiveGlobalAuthTokenForTUI() string {
-	envToken := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
-	if envToken != "" {
-		return envToken
-	}
+	return strings.TrimSpace(effectiveGlobalAuthForTUI().Token)
+}
+
+func effectiveGlobalAuthForTUI() config.AuthConfig {
 	auth, err := config.ReadAuthConfig()
 	if err != nil {
-		return ""
+		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
 	}
-	return strings.TrimSpace(auth.Token)
+	if token := authTokenEnvOverrideForTUI(); token != "" {
+		auth.Token = token
+	}
+	return auth
+}
+
+func authTokenEnvOverrideForTUI() string {
+	envToken := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
+	return envToken
 }
 
 func implicitDaemonTarget(endpoint string) daemonTarget {

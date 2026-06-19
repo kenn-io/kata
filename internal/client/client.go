@@ -141,8 +141,9 @@ type Opts struct {
 // process and therefore cannot rely on the package-global auth resolution
 // path.
 type TargetAuth struct {
-	Token         string
-	AllowInsecure bool
+	Token               string
+	AllowInsecure       bool
+	TrustPrivateNetwork bool
 }
 
 // NewHTTPClient returns an *http.Client whose transport matches baseURL —
@@ -169,8 +170,13 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 		}
 		if !target.Local {
 			if token := authTokenEnvOverride(); token != "" {
+				auth := resolveAuthConfig()
 				return NewHTTPClientForTarget(ctx, baseURL,
-					TargetAuth{Token: token, AllowInsecure: target.AllowInsecure}, opts)
+					TargetAuth{
+						Token:               token,
+						AllowInsecure:       target.AllowInsecure,
+						TrustPrivateNetwork: auth.TrustPrivateNetwork,
+					}, opts)
 			}
 			return NewHTTPClientForTarget(ctx, baseURL,
 				TargetAuth{Token: target.Token, AllowInsecure: target.AllowInsecure}, opts)
@@ -210,7 +216,8 @@ func NewHTTPClientForTarget(ctx context.Context, baseURL string, auth TargetAuth
 	if err != nil {
 		return nil, err
 	}
-	rt, err := explicitBearerTransport(c.Transport, auth.Token, baseURL, auth.AllowInsecure)
+	rt, err := explicitBearerTransport(c.Transport, auth.Token, baseURL,
+		auth.TrustPrivateNetwork, auth.AllowInsecure)
 	if err != nil {
 		return nil, err
 	}
