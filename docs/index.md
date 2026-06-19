@@ -16,8 +16,8 @@ The public shape is intentionally small:
 - export/import paths for backup and schema cutover;
 - opt-in private-network remote daemon and federation workflows.
 
-kata is in early public preview. The CLI, daemon, and TUI are usable, but
-command contracts and UI details can still change before a stable release.
+kata publishes versioned pre-1.0 releases. The CLI, daemon, and TUI are usable,
+but command contracts and UI details can still change before a stable release.
 
 ![kata TUI showing a simulated issue hierarchy](/assets/screenshots/tui/hero.svg)
 

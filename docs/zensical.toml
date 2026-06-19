@@ -24,6 +24,7 @@ nav = [
   ]},
   {"Reference" = [
     {"CLI" = "reference/cli.md"},
+    {"Changelog" = "reference/changelog.md"},
     {"Configuration" = "reference/configuration.md"},
     {"Agent output format" = "reference/agent-output.md"},
     {"HTTP API schema" = "reference/http-api.md"},

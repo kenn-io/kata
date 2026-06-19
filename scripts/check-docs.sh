@@ -11,6 +11,7 @@ required_files=(
   "docs/guide/workspaces-projects.md"
   "docs/guide/migrating-from-beads.md"
   "docs/reference/cli.md"
+  "docs/reference/changelog.md"
   "docs/workflows/agents.md"
   "docs/workflows/sharing.md"
   "docs/operations/remote-daemon.md"
@@ -137,8 +138,14 @@ require_line docs/zensical.toml 'docs_dir = "docs"'
 require_line docs/zensical.toml 'site_dir = "site"'
 require_line docs/zensical.toml 'scheme = "slate"'
 require_line docs/zensical.toml '{"Design" = ['
+require_line docs/zensical.toml '{"Changelog" = "reference/changelog.md"}'
 require_line docs/zensical.toml '{"Deploying docs" = "development/deploying-docs.md"}'
 require_line docs/index.md '# kata カタ: lightweight issue tracker for humans and agents'
+require_line docs/index.md 'kata publishes versioned pre-1.0 releases'
+require_line docs/get-started/install.md 'GitHub release binaries are available starting with `v0.5.0`.'
+require_line docs/get-started/install.md 'kata update --check'
+require_line docs/get-started/install.md 'kata update'
+require_line docs/reference/changelog.md '### v0.5.0'
 require_line docs/development/deploying-docs.md '| Root directory | `docs` |'
 require_line docs/development/deploying-docs.md 'Vercel should install with `uv sync --frozen --no-dev`'
 require_line docs/development/deploying-docs.md 'Vercel should build with `uv run --frozen bash ./vercel-build.sh`'

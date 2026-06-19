@@ -7,8 +7,9 @@ daemon it starts itself, and it stores data locally in SQLite.
 
 Install Go 1.26 or later from <https://go.dev/dl/>.
 
-Pre-built release binaries are not published yet. Install from source with
-`go install` or build from a clone.
+GitHub release binaries are available starting with `v0.5.0`. Installing with
+`go install` remains supported, and building from a clone is still useful for
+development builds.
 
 ## Install with `go install`
 
@@ -25,6 +26,24 @@ Check the install:
 ```sh
 kata version
 kata --help
+```
+
+## Install from a release
+
+Download the archive for your platform from the
+[GitHub releases](https://github.com/kenn-io/kata/releases) page, extract it,
+and place the `kata` binary on `PATH`.
+
+After installing a release build, check for newer releases:
+
+```sh
+kata update --check
+```
+
+Install an available release from GitHub release assets:
+
+```sh
+kata update
 ```
 
 ## Build from a clone
