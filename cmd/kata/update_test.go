@@ -1,0 +1,202 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/selfupdate"
+)
+
+type fakeUpdateClient struct {
+	checks       []selfupdate.CheckOptions
+	checkResults []*selfupdate.Info
+	checkErr     error
+	installed    []*selfupdate.Info
+	installErr   error
+}
+
+func (f *fakeUpdateClient) Check(_ context.Context, opts selfupdate.CheckOptions) (*selfupdate.Info, error) {
+	f.checks = append(f.checks, opts)
+	if f.checkErr != nil {
+		return nil, f.checkErr
+	}
+	if len(f.checkResults) == 0 {
+		return nil, nil
+	}
+	info := f.checkResults[0]
+	f.checkResults = f.checkResults[1:]
+	return info, nil
+}
+
+func (f *fakeUpdateClient) Install(_ context.Context, info *selfupdate.Info, _ selfupdate.InstallOptions) error {
+	f.installed = append(f.installed, info)
+	return f.installErr
+}
+
+func stubUpdateClient(t *testing.T, client updateClient) {
+	t.Helper()
+	orig := newSelfUpdateClient
+	newSelfUpdateClient = func(string) (updateClient, error) {
+		return client, nil
+	}
+	t.Cleanup(func() { newSelfUpdateClient = orig })
+}
+
+func TestUpdate_IsWiredOnRoot(t *testing.T) {
+	resetFlags(t)
+	root := newRootCmd()
+	_, _, err := root.Find([]string{"update"})
+	require.NoError(t, err)
+}
+
+func TestUpdateCheck_HumanUpToDate(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.5.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--check")
+
+	require.NoError(t, err)
+	assert.Equal(t, "kata is up to date (v0.5.0)\n", stdout)
+	assert.Len(t, fake.checks, 1)
+	assert.False(t, fake.checks[0].Force)
+	assert.Empty(t, fake.installed)
+}
+
+func TestUpdateCheck_HumanUpdateAvailable(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+		AssetName:      "kata_0.5.0_linux_amd64.tar.gz",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--check")
+
+	require.NoError(t, err)
+	assert.Equal(t, "update available: v0.4.0 -> v0.5.0\n", stdout)
+	assert.Empty(t, fake.installed)
+}
+
+func TestUpdateCheck_JSONOutput(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+		AssetName:      "kata_0.5.0_linux_amd64.tar.gz",
+		IsDevBuild:     true,
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "--json", "update", "--check")
+
+	require.NoError(t, err)
+	var got struct {
+		KataAPIVersion  int    `json:"kata_api_version"`
+		CurrentVersion  string `json:"current_version"`
+		LatestVersion   string `json:"latest_version"`
+		UpdateAvailable bool   `json:"update_available"`
+		AssetName       string `json:"asset_name"`
+		IsDevBuild      bool   `json:"is_dev_build"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, 1, got.KataAPIVersion)
+	assert.Equal(t, "v0.4.0", got.CurrentVersion)
+	assert.Equal(t, "v0.5.0", got.LatestVersion)
+	assert.True(t, got.UpdateAvailable)
+	assert.Equal(t, "kata_0.5.0_linux_amd64.tar.gz", got.AssetName)
+	assert.True(t, got.IsDevBuild)
+}
+
+func TestUpdateCheck_AgentOutput(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "--agent", "update", "--check")
+
+	require.NoError(t, err)
+	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0\n", stdout)
+}
+
+func TestUpdateInstall_RefetchesCachedInfoBeforeInstall(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	first := &selfupdate.Info{CurrentVersion: "v0.4.0", LatestVersion: "v0.5.0", AssetName: "kata_0.5.0_linux_amd64.tar.gz"}
+	second := &selfupdate.Info{CurrentVersion: "v0.4.0", LatestVersion: "v0.5.0", AssetName: "kata_0.5.0_linux_amd64.tar.gz", DownloadURL: "https://example.test/kata"}
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{first, second}}
+	stubUpdateClient(t, fake)
+
+	origNeedsRefetch := updateInfoNeedsRefetch
+	updateInfoNeedsRefetch = func(info *selfupdate.Info) bool { return info == first }
+	t.Cleanup(func() { updateInfoNeedsRefetch = origNeedsRefetch })
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--yes")
+
+	require.NoError(t, err)
+	assert.Equal(t, "installed kata v0.5.0\n", stdout)
+	require.Len(t, fake.checks, 2)
+	assert.False(t, fake.checks[0].Force)
+	assert.True(t, fake.checks[1].Force)
+	assert.Equal(t, []*selfupdate.Info{second}, fake.installed)
+}
+
+func TestUpdateInstall_WrapsInstallError(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{
+		checkResults: []*selfupdate.Info{{
+			CurrentVersion: "v0.4.0",
+			LatestVersion:  "v0.5.0",
+			AssetName:      "kata_0.5.0_linux_amd64.tar.gz",
+		}},
+		installErr: errors.New("permission denied"),
+	}
+	stubUpdateClient(t, fake)
+
+	_, _, err := executeRootCapture(t, context.Background(), "update", "--yes")
+
+	ce := requireCLIError(t, err, ExitInternal)
+	assert.Equal(t, kindInternal, ce.Kind)
+	assert.True(t, strings.HasPrefix(ce.Message, "install update: "))
+	assert.Contains(t, ce.Message, "permission denied")
+}
+
+func TestUpdate_DefaultClientConfiguration(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+
+	client, err := newSelfUpdateClient("v0.4.0")
+
+	require.NoError(t, err)
+	var got selfupdate.Client
+	switch c := client.(type) {
+	case selfupdate.Client:
+		got = c
+	case *selfupdate.Client:
+		got = *c
+	default:
+		t.Fatalf("newSelfUpdateClient returned %T, want selfupdate.Client", client)
+	}
+	assert.Equal(t, "kenn-io", got.Owner)
+	assert.Equal(t, "kata", got.Repo)
+	assert.Equal(t, "kata", got.BinaryName)
+	assert.Equal(t, "v0.4.0", got.CurrentVersion)
+	assert.Equal(t, filepath.Join(home, "cache", "update"), got.CacheDir)
+	assert.True(t, got.AllowUnsignedChecksums)
+}
