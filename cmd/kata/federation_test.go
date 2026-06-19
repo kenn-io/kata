@@ -424,6 +424,34 @@ token = "spoke-token"
 	assert.True(t, enrollments[0].AllowAdoptionSnapshotAuthors)
 }
 
+func TestFederationEnrollCLIExplicitDaemonResolutionFailureErrors(t *testing.T) {
+	resetFlags(t)
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	ctx := context.Background()
+	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--daemon", "missing-spoke",
+		"--project", "fedlab",
+		"federation", "enroll",
+		"--spoke-instance", "01HZNQ7VFPK1XGD8R5MABCD4EF",
+		"--hub-url", hub.URL,
+		"--actor", "operator",
+	})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing-spoke")
+	enrollments, listErr := hub.DB.ListFederationEnrollments(ctx)
+	require.NoError(t, listErr)
+	assert.Empty(t, enrollments)
+}
+
 func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t *testing.T) {
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))

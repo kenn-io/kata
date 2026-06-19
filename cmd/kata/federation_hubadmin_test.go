@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -216,4 +218,21 @@ func TestHubAdminClientNeverSendsGlobalTokenWithoutHubCredential(t *testing.T) {
 	_ = resp.Body.Close()
 
 	assert.Empty(t, got, "global daemon token must not be sent to the hub origin")
+}
+
+func TestHubAdminClientHonorsTrustPrivateNetwork(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[auth]
+trust_private_network = true
+`), 0o600))
+
+	hc, err := hubAdminClient(context.Background(), hubAdminAuth{
+		url:   "http://100.64.0.5:7373",
+		token: "hub-admin-token",
+	})
+
+	require.NoError(t, err)
+	assert.NotNil(t, hc)
 }

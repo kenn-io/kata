@@ -174,7 +174,11 @@ func federationEnrollCmd() *cobra.Command {
 			}
 			adoptExisting := adoptExistingFlag
 			if !adoptExisting && pushCapable {
-				if spokeUID, ok := federationSpokeProjectUID(ctx, metadata.ProjectName, spokeInstance); ok {
+				spokeUID, ok, err := federationSpokeProjectUID(ctx, metadata.ProjectName, spokeInstance)
+				if err != nil {
+					return err
+				}
+				if ok {
 					// A same-name spoke project is normally adopted — unless it
 					// already shares the hub project's UID (it previously left
 					// this federation). Then the join is a plain rejoin and
@@ -248,7 +252,7 @@ func federationEnrollHTTPClientError(err error) error {
 }
 
 func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstance string) bool {
-	_, ok := federationSpokeProjectUID(ctx, projectName, spokeInstance)
+	_, ok, _ := federationSpokeProjectUID(ctx, projectName, spokeInstance)
 	return ok
 }
 
@@ -256,22 +260,39 @@ func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstanc
 // instance matches spokeInstance) has a project named projectName, returning
 // that project's UID. The UID is "" when the daemon's list payload predates
 // uid, in which case callers should fall back to the adoption default.
-func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance string) (string, bool) {
+func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance string) (string, bool, error) {
+	explicitDaemon := strings.TrimSpace(flags.Daemon) != ""
 	spokeURL, err := ensureDaemon(ctx)
 	if err != nil {
-		return "", false
+		if explicitDaemon {
+			return "", false, err
+		}
+		return "", false, nil
 	}
 	spokeClient, err := federationSpokeHTTPClient(ctx, spokeURL)
 	if err != nil {
-		return "", false
+		if explicitDaemon {
+			return "", false, err
+		}
+		return "", false, nil
 	}
 	if strings.TrimSpace(spokeInstance) != "" {
 		uid, err := federationSpokeInstanceUID(ctx, spokeClient, spokeURL)
 		if err != nil || uid != strings.TrimSpace(spokeInstance) {
-			return "", false
+			if err != nil && explicitDaemon {
+				return "", false, err
+			}
+			return "", false, nil
 		}
 	}
-	return federationSpokeProjectNameExists(ctx, spokeClient, spokeURL, projectName)
+	uid, ok, err := federationSpokeProjectNameExists(ctx, spokeClient, spokeURL, projectName)
+	if err != nil && explicitDaemon {
+		return "", false, err
+	}
+	if err != nil {
+		return "", false, nil
+	}
+	return uid, ok, nil
 }
 
 func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Client, error) {
@@ -333,14 +354,17 @@ func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseUR
 	return strings.TrimSpace(body.InstanceUID), nil
 }
 
-func federationSpokeProjectNameExists(ctx context.Context, client *http.Client, baseURL, projectName string) (string, bool) {
+func federationSpokeProjectNameExists(ctx context.Context, client *http.Client, baseURL, projectName string) (string, bool, error) {
 	projectName = strings.TrimSpace(projectName)
 	if projectName == "" {
-		return "", false
+		return "", false, nil
 	}
 	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/projects", nil)
-	if err != nil || status >= 400 {
-		return "", false
+	if err != nil {
+		return "", false, err
+	}
+	if status >= 400 {
+		return "", false, apiErrFromBody(status, bs)
 	}
 	var body struct {
 		Projects []struct {
@@ -349,14 +373,14 @@ func federationSpokeProjectNameExists(ctx context.Context, client *http.Client, 
 		} `json:"projects"`
 	}
 	if err := json.Unmarshal(bs, &body); err != nil {
-		return "", false
+		return "", false, err
 	}
 	for _, project := range body.Projects {
 		if project.Name == projectName {
-			return project.UID, true
+			return project.UID, true, nil
 		}
 	}
-	return "", false
+	return "", false, nil
 }
 
 func federationEnrollmentsCmd() *cobra.Command {

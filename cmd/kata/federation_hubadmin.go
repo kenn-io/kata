@@ -152,10 +152,19 @@ func catalogByURL(cat *config.DaemonConfig, url string) *config.CatalogDaemonCon
 // hubAdminClient builds an HTTP client for the resolved hub admin auth.
 func hubAdminClient(ctx context.Context, a hubAdminAuth) (*http.Client, error) {
 	opts := clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout), AllowInsecure: a.allowInsecure}
+	auth, err := config.ReadAuthConfig()
+	if err != nil {
+		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
+	}
 	// Always NewHTTPClientForTarget: the supplied TargetAuth is the COMPLETE
 	// bearer policy for the hub origin. With no resolved hub credential the
 	// client is unauthenticated — never fall back to NewHTTPClient, which
 	// would attach the local daemon's global KATA_AUTH_TOKEN/[auth].token to
 	// the (stored, potentially hostile) hub URL.
-	return clientpkg.NewHTTPClientForTarget(ctx, a.url, clientpkg.TargetAuth{Token: strings.TrimSpace(a.token), AllowInsecure: a.allowInsecure}, opts)
+	return clientpkg.NewHTTPClientForTarget(ctx, a.url,
+		clientpkg.TargetAuth{
+			Token:               strings.TrimSpace(a.token),
+			AllowInsecure:       a.allowInsecure,
+			TrustPrivateNetwork: auth.TrustPrivateNetwork,
+		}, opts)
 }
