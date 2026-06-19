@@ -146,6 +146,8 @@ require_line docs/get-started/install.md 'GitHub release binaries are available 
 require_line docs/get-started/install.md 'kata update --check'
 require_line docs/get-started/install.md 'kata update'
 require_line docs/reference/changelog.md '### v0.5.0'
+require_line docs/reference/changelog.md '### 2026-W25 (Jun 15 - Jun 21, 2026)'
+require_line docs/reference/changelog.md '### 2026-W18 (Apr 27 - May 3, 2026)'
 require_line docs/development/deploying-docs.md '| Root directory | `docs` |'
 require_line docs/development/deploying-docs.md 'Vercel should install with `uv sync --frozen --no-dev`'
 require_line docs/development/deploying-docs.md 'Vercel should build with `uv run --frozen bash ./vercel-build.sh`'
