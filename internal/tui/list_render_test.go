@@ -133,8 +133,8 @@ func TestRenderLabelChips_RenderedTextSanitized(t *testing.T) {
 	}
 }
 
-// TestTitleBarLeft_SanitizeEmptyFallsBackToPlaceholder pins roborev
-// job 128: when sc.projectName sanitizes down to "" (control runes
+// TestTitleBarLeft_SanitizeEmptyFallsBackToPlaceholder pins the
+// regression where sc.projectName sanitizes down to "" (control runes
 // only, zero-width joiners only, etc.), the renderer must render
 // `Project: —` rather than the empty `Project: ` form, preserving
 // the "left side never blank" invariant.
@@ -164,6 +164,13 @@ func TestTitleBarShowsDaemonName(t *testing.T) {
 	got := renderTitleBar(100, scope{projectName: "kata"}, "dev", "shared")
 
 	assertContains(t, stripANSI(got), "Daemon: shared", "title bar missing configured daemon name")
+}
+
+func TestTitleBarShowsTaggedVersion(t *testing.T) {
+	useNoColor(t)
+	got := stripANSI(renderTitleBar(100, scope{projectName: "kata"}, "v0.5.0"))
+
+	assertContains(t, got, "kata カタ · v0.5.0", "title bar missing tagged version")
 }
 
 func TestTitleBarShowsDaemonHostFallback(t *testing.T) {
@@ -199,15 +206,20 @@ func TestDetailTitleBarShowsDaemon(t *testing.T) {
 
 	got := dm.View(100, 18, viewChrome{
 		scope:   scope{projectName: "kata"},
-		version: "dev",
+		version: "v0.5.0",
 		daemon:  "shared",
 	})
 
-	assertContains(t, stripANSI(got), "Daemon: shared", "detail title bar missing daemon label")
+	clean := stripANSI(got)
+	assertContains(t, clean, "Daemon: shared", "detail title bar missing daemon label")
+	assertContains(t, clean, "kata カタ · v0.5.0", "detail title bar missing tagged version")
 }
 
 func TestSplitTitleBarShowsDaemon(t *testing.T) {
 	useNoColor(t)
+	origVersion := kataVersion
+	kataVersion = "v0.5.0"
+	t.Cleanup(func() { kataVersion = origVersion })
 	m := resizeModel(newTestModel(), 130, 30)
 	m.layout = layoutSplit
 	m.activeDaemon = daemonTarget{Name: "shared"}
@@ -217,11 +229,13 @@ func TestSplitTitleBarShowsDaemon(t *testing.T) {
 
 	got := renderSplit(m)
 
-	assertContains(t, stripANSI(got), "Daemon: shared", "split title bar missing daemon label")
+	clean := stripANSI(got)
+	assertContains(t, clean, "Daemon: shared", "split title bar missing daemon label")
+	assertContains(t, clean, "kata カタ · v0.5.0", "split title bar missing tagged version")
 }
 
 // TestRenderLabelChips_LargeOverflowReservesActualWidth pins the
-// fix for roborev job 235: with >=100 labels dropped, the `+N` token
+// fix for a large-overflow regression: with >=100 labels dropped, the `+N` token
 // is `+100` (5 cells) — wider than the legacy hard-coded 4-cell
 // reserve. The render must compute reserve from len(clean) so the
 // final width never exceeds the budget.
