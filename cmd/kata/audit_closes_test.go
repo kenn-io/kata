@@ -507,7 +507,8 @@ func TestAuditCloses_FilterByParent_CrossProjectQualifierMatchesNothing(t *testi
 // The throttle there is a later retry against the same key, not a guard
 // the original close tripped — flagging it would mislead a reviewer.
 func TestAuditCloses_ThrottledFlagIgnoresLaterThrottle(t *testing.T) {
-	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
+	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
+		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	siblingA := createIssue(t, env, pid, "sibling a")
 	siblingB := createIssue(t, env, pid, "sibling b")
 	runCLI(t, env, dir, "edit", siblingA, "--parent", parent)
@@ -532,10 +533,12 @@ func TestAuditCloses_ThrottledFlagIgnoresLaterThrottle(t *testing.T) {
 	// repeated-message guard fires because siblingB's prior close used
 	// the same msg under the same parent. Event 4 ≈ close.throttled
 	// (siblingA, agent-a).
-	_, _, _ = runCLIWithErr(t, env, dir, "close", siblingA, "--as", "agent-a",
+	_, retryErr, err := runCLIWithErr(t, env, dir, "close", siblingA, "--as", "agent-a",
 		"--done",
 		"--message", msg,
 		"--commit", "abc1234")
+	require.Error(t, err)
+	assert.Contains(t, retryErr, "identical close message")
 
 	out := runCLI(t, env, dir, "audit", "closes", "--actor", "agent-a", "--json")
 	// The successful close of siblingA (event 2) must NOT carry a
