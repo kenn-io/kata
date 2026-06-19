@@ -50,6 +50,7 @@ func TestReleaseArchiveNameScriptMatchesAssetName(t *testing.T) {
 		{"windows", "arm64"},
 	} {
 		t.Run(tc.goos+"_"+tc.goarch, func(t *testing.T) {
+			//nolint:gosec // test executes the repository-local script with fixed args.
 			cmd := exec.Command("../../scripts/release-archive-name.sh", "0.5.0", tc.goos, tc.goarch)
 			out, err := cmd.CombinedOutput()
 			assert.NoError(t, err, string(out))
