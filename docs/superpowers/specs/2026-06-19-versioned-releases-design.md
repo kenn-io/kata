@@ -20,14 +20,16 @@ The missing pieces are the release scripts, release publishing workflow, update 
 
 Add `scripts/changelog.sh` and `scripts/release.sh`.
 
-`scripts/changelog.sh` will follow the existing sibling-project pattern:
+`scripts/changelog.sh` will use a self-contained variant of the existing local release-script pattern:
 
 - Accept `[version] [start_tag] [extra_instructions]`.
 - Default `version` to `NEXT`.
 - Auto-detect the previous tag when `start_tag` is empty or `-`.
 - If no tag exists, use the full commit history rather than excluding the first commit.
 - Feed commit subjects and diff stats to `codex exec` by default, with `CHANGELOG_AGENT=claude` as an alternate.
+- Provide a non-AI fallback mode that emits grouped commit subjects so release creation is not blocked when no agent CLI is installed.
 - Instruct the agent to output only concise, user-focused Markdown grouped into sections.
+- Avoid private repository or workspace names in prompts, tests, and generated fixtures.
 
 `scripts/release.sh` will:
 
@@ -49,8 +51,9 @@ The workflow will:
 
 - Validate tags match `vMAJOR.MINOR.PATCH`.
 - Build release archives for Linux, macOS, and Windows on supported `amd64` and `arm64` targets where runner support is practical.
-- Name assets with kit's default convention: `kata_${VERSION}_${GOOS}_${GOARCH}.tar.gz`, with `.zip` for Windows.
-- Set ldflags for `Version=v${VERSION}`, `Commit`, and `BuildDate`.
+- Declare `permissions: contents: write` because the workflow creates the GitHub release.
+- Derive `TAG_NAME` as the full `v0.5.0` tag and `VERSION` as the bare `0.5.0` semver. Name assets with kit's default convention using the bare semver: `kata_${VERSION}_${GOOS}_${GOARCH}.tar.gz`, with `.zip` for Windows.
+- Set ldflags for `Version=${TAG_NAME}`, `Commit`, and `BuildDate`. This intentionally differs from the Makefile, which sets only `Version` and lets Go VCS build info populate `Commit` and `BuildDate` for local builds.
 - Smoke-test at least native binaries with `kata version` and assert the tag appears.
 - Validate archive contents before publishing.
 - Generate `SHA256SUMS`.
@@ -65,11 +68,14 @@ Add a `kata update` command that uses `go.kenn.io/kit/selfupdate` instead of loc
 The command will:
 
 - Construct a `selfupdate.Client` with kata's release owner, repository, binary name, current version, and a kata cache directory.
+- Use the real GitHub release coordinate, `Owner: "kenn-io"` and `Repo: "kata"`; do not derive this from the Go module path.
 - Set `AllowUnsignedChecksums: true` initially because the release workflow will publish archives plus `SHA256SUMS`, not signed update metadata.
 - Support a `--check` mode that reports whether an update is available without installing.
 - Support `--force` so a development build can be replaced with the latest official release.
 - Refetch cached update metadata before installing when `Info.NeedsRefetch()` is true.
 - Print concise human output by default, JSON under `--json`, and stable agent output under `--agent`.
+- Define `--check` exit semantics explicitly: success means the check ran, regardless of whether an update is available; validation/network failures use existing kata error exit codes. Agent and JSON output carry the update-available boolean.
+- Surface non-writable install destinations as clear install errors. kit performs atomic replacement but does not escalate privileges.
 - Keep install prompts and command-line UX in kata; only discovery, verification, download, extraction, and install mechanics come from kit.
 
 The first implementation should not invent signing. Once release signing exists, the command can switch from unsigned checksum allowance to trusted public keys.
@@ -98,7 +104,7 @@ Add a script mode or companion helper to produce the retroactive history from co
 Use test-first changes for production behavior:
 
 - Script tests should exercise argument validation, no-tag changelog range handling, and dirty-worktree refusal where practical.
-- Release workflow syntax can be checked with targeted shell validation and smoke-tested locally for script behavior.
+- Release workflow syntax can be checked with targeted shell validation and smoke-tested locally for script behavior. Tests must pin the bare-semver asset name contract by comparing generated names with `selfupdate.DefaultAssetName(selfupdate.AssetRequest{BinaryName: "kata", Version: "0.5.0", ...})` for the published platforms.
 - `kata update` needs unit tests around check/install command behavior using fake HTTP servers or injected kit clients. Tests must not call live GitHub.
 - TUI version tests should render existing views with `v0.5.0` and assert title-bar output.
 - Existing build-version e2e tests continue to protect `make build` and `make install`.
@@ -106,7 +112,7 @@ Use test-first changes for production behavior:
 Before completing the implementation, run at least:
 
 - `go test ./cmd/kata ./internal/tui`
-- `go test ./internal/version ./e2e -run BuildVersion`
+- `go test ./e2e -run 'MakeBuild|MakeInstall'`
 - script-specific shell tests or dry-runs added with the implementation
 - `make docs-check` after documentation changes
 
