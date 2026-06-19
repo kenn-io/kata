@@ -261,7 +261,7 @@ func federationSpokeProjectExists(ctx context.Context, projectName, spokeInstanc
 // that project's UID. The UID is "" when the daemon's list payload predates
 // uid, in which case callers should fall back to the adoption default.
 func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance string) (string, bool, error) {
-	explicitDaemon := strings.TrimSpace(flags.Daemon) != ""
+	explicitDaemon := federationSpokeProbeExplicit(ctx)
 	spokeURL, err := ensureDaemon(ctx)
 	if err != nil {
 		if explicitDaemon {
@@ -293,6 +293,14 @@ func federationSpokeProjectUID(ctx context.Context, projectName, spokeInstance s
 		return "", false, nil
 	}
 	return uid, ok, nil
+}
+
+func federationSpokeProbeExplicit(ctx context.Context) bool {
+	if strings.TrimSpace(flags.Daemon) != "" {
+		return true
+	}
+	_, ok, err := clientpkg.ResolveRemote(ctx, workspaceStartForRemote())
+	return ok || err != nil
 }
 
 func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Client, error) {

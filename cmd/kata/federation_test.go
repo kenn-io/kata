@@ -452,6 +452,37 @@ func TestFederationEnrollCLIExplicitDaemonResolutionFailureErrors(t *testing.T) 
 	assert.Empty(t, enrollments)
 }
 
+func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {
+	resetFlags(t)
+	spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
+	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
+	t.Setenv("KATA_SERVER", spoke.URL)
+	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+	ctx := context.Background()
+	_, err := spoke.DB.CreateProject(ctx, "fedlab")
+	require.NoError(t, err)
+
+	cmd := newRootCmd()
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{
+		"--project", "fedlab",
+		"federation", "enroll",
+		"--spoke-instance", spoke.DB.InstanceUID(),
+		"--hub-url", hub.URL,
+		"--actor", "operator",
+	})
+
+	err = cmd.Execute()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Authorization bearer required")
+	enrollments, listErr := hub.DB.ListFederationEnrollments(ctx)
+	require.NoError(t, listErr)
+	assert.Empty(t, enrollments)
+}
+
 func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t *testing.T) {
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
