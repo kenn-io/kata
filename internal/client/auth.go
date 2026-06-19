@@ -26,13 +26,17 @@ func resolveAuthToken() string {
 }
 
 func resolveAuthConfig() config.AuthConfig {
-	envToken := strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
+	envToken := authTokenEnvOverride()
 	envTrust := config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
 	auth, err := config.ReadAuthConfig()
 	if err != nil {
 		return config.AuthConfig{Token: envToken, TrustPrivateNetwork: envTrust}
 	}
 	return auth
+}
+
+func authTokenEnvOverride() string {
+	return strings.TrimSpace(os.Getenv("KATA_AUTH_TOKEN"))
 }
 
 // withBearer wraps base with bearer-token injection when token is
