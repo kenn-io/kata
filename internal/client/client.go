@@ -169,8 +169,8 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 				target.Name, target.BaseURL, strings.TrimRight(baseURL, "/"))
 		}
 		if !target.Local {
+			auth := resolveAuthConfig()
 			if token := authTokenEnvOverride(); token != "" {
-				auth := resolveAuthConfig()
 				return NewHTTPClientForTarget(ctx, baseURL,
 					TargetAuth{
 						Token:               token,
@@ -179,7 +179,11 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 					}, opts)
 			}
 			return NewHTTPClientForTarget(ctx, baseURL,
-				TargetAuth{Token: target.Token, AllowInsecure: target.AllowInsecure}, opts)
+				TargetAuth{
+					Token:               target.Token,
+					AllowInsecure:       target.AllowInsecure,
+					TrustPrivateNetwork: auth.TrustPrivateNetwork,
+				}, opts)
 		}
 		if target.Token != "" {
 			return NewHTTPClientWithBearer(ctx, baseURL, target.Token, opts)
