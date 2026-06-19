@@ -239,8 +239,30 @@ func TestCloseDuplicateOf_AcceptsExistingTarget(t *testing.T) {
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "duplicate close: %s", string(bs))
 }
 
-func TestSiblingThrottle_FourthCloseUnderSameParentRefused(t *testing.T) {
+func TestSiblingThrottle_DefaultAllowsBurstWithDistinctEvidence(t *testing.T) {
 	env := testenv.New(t)
+	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	parent := createIssueViaHTTP(t, env, pid, "parent issue")
+	children := make([]int64, 0, 5)
+	for i := 0; i < 5; i++ {
+		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
+		postLink(t, env, pid, c, "parent", parent)
+		children = append(children, c)
+	}
+
+	for i, c := range children {
+		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
+			"done",
+			fmt.Sprintf("Implementation of child %d complete and tested.", i+1),
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+1)}})
+		require.Equalf(t, http.StatusOK, resp.StatusCode,
+			"default policy should allow distinct-evidence sibling close %d: %s",
+			i+1, string(bs))
+	}
+}
+
+func TestSiblingThrottle_FourthCloseUnderSameParentRefusedWhenEnabled(t *testing.T) {
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
@@ -255,7 +277,7 @@ func TestSiblingThrottle_FourthCloseUnderSameParentRefused(t *testing.T) {
 		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
 			"done",
 			fmt.Sprintf("Implementation of child %d complete and tested.", i+1),
-			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+1)}})
 		require.Equalf(t, http.StatusOK, resp.StatusCode,
 			"close child %d: %s", i+1, string(bs))
 	}
@@ -271,6 +293,7 @@ func TestSiblingThrottle_FourthCloseUnderSameParentRefused(t *testing.T) {
 	assert.Contains(t, body, "sibling-close throttle")
 	// The error should reference the parent issue short_id.
 	assert.Contains(t, body, refForIssue(t, env, parent))
+	assert.Contains(t, body, "last 60 sec")
 }
 
 // Parent links may span projects, so the sibling cohort can too. The
@@ -278,7 +301,7 @@ func TestSiblingThrottle_FourthCloseUnderSameParentRefused(t *testing.T) {
 // of which project each child lives in — distributing sibling closes across
 // projects must not reset the counter.
 func TestSiblingThrottle_CountsCrossProjectSiblings(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/example/hub-project.git")
 	pidB := mkProject(t, env, "github.com/example/spoke-project", "spoke-project")
 	parent := createIssueViaHTTP(t, env, pidA, "parent issue")
@@ -295,7 +318,7 @@ func TestSiblingThrottle_CountsCrossProjectSiblings(t *testing.T) {
 		closeResp, bs := closeIssueWithEvidence(t, env, pidB, c, "agent-a",
 			"done",
 			fmt.Sprintf("Implementation of spoke child %d complete and tested.", i+1),
-			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+1)}})
 		require.Equalf(t, http.StatusOK, closeResp.StatusCode,
 			"close spoke child %d: %s", i+1, string(bs))
 	}
@@ -344,7 +367,7 @@ func TestSiblingThrottle_CountsCrossProjectSiblings(t *testing.T) {
 // identical close message on a sibling in another project is still a
 // duplicate.
 func TestRepeatedMessageGuard_CountsCrossProjectSiblings(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pidA := initWorkspaceViaHTTP(t, env, "https://github.com/example/hub-project.git")
 	pidB := mkProject(t, env, "github.com/example/spoke-project", "spoke-project")
 	parent := createIssueViaHTTP(t, env, pidA, "parent issue")
@@ -366,7 +389,7 @@ func TestRepeatedMessageGuard_CountsCrossProjectSiblings(t *testing.T) {
 	postLinkAs(t, env, pidA, hubChild, "agent-a", "parent", parent)
 	closeResp, bs = closeIssueWithEvidence(t, env, pidA, hubChild, "agent-a",
 		"done", message,
-		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+		[]map[string]any{{"type": "commit", "sha": "def5678"}})
 	assertAPIError(t, closeResp.StatusCode, bs, http.StatusTooManyRequests, "duplicate_message")
 
 	// The prior close lives in another project: the refusal text and the
@@ -399,7 +422,7 @@ func TestRepeatedMessageGuard_CountsCrossProjectSiblings(t *testing.T) {
 }
 
 func TestSiblingThrottle_AllowsFourthCloseWhenOldestSiblingIsOutsideDefaultWindow(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
@@ -412,7 +435,7 @@ func TestSiblingThrottle_AllowsFourthCloseWhenOldestSiblingIsOutsideDefaultWindo
 	resp, bs := closeIssueWithEvidence(t, env, pid, children[0], "agent-a",
 		"done",
 		"Implementation of child 1 complete and tested.",
-		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+		[]map[string]any{{"type": "commit", "sha": "abc1231"}})
 	require.Equalf(t, http.StatusOK, resp.StatusCode,
 		"close child 1: %s", string(bs))
 
@@ -430,7 +453,7 @@ func TestSiblingThrottle_AllowsFourthCloseWhenOldestSiblingIsOutsideDefaultWindo
 		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
 			"done",
 			fmt.Sprintf("Implementation of child %d complete and tested.", i+2),
-			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+2)}})
 		require.Equalf(t, http.StatusOK, resp.StatusCode,
 			"close child %d: %s", i+2, string(bs))
 	}
@@ -444,32 +467,37 @@ func TestSiblingThrottle_AllowsFourthCloseWhenOldestSiblingIsOutsideDefaultWindo
 		string(bs))
 }
 
-// TestSiblingThrottle_DisabledByConfig pins that operators who opt out
-// via [close.throttle] enabled=false get unthrottled sibling closes:
-// the same scenario that 429s in the default-config test must succeed
-// on every close when the daemon is started with throttle disabled.
-func TestSiblingThrottle_DisabledByConfig(t *testing.T) {
-	env := testenv.New(t, testenv.WithCloseThrottleDisabled())
+func TestSiblingThrottle_UsesConfiguredWindowInRefusal(t *testing.T) {
+	env := testenv.New(t,
+		testenv.WithCloseThrottleEnabled(),
+		testenv.WithCloseThrottleWindow(2*time.Minute))
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
-	children := make([]int64, 0, 5)
-	for i := 0; i < 5; i++ {
+	children := make([]int64, 0, 4)
+	for i := 0; i < 4; i++ {
 		c := createIssueViaHTTP(t, env, pid, fmt.Sprintf("child %d", i+1))
 		postLink(t, env, pid, c, "parent", parent)
 		children = append(children, c)
 	}
-	for i, c := range children {
+	for i, c := range children[:3] {
 		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
 			"done",
 			fmt.Sprintf("Implementation of child %d complete and tested.", i+1),
-			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+1)}})
 		require.Equalf(t, http.StatusOK, resp.StatusCode,
-			"close child %d with throttle disabled: %s", i+1, string(bs))
+			"close child %d: %s", i+1, string(bs))
 	}
+
+	resp, bs := closeIssueWithEvidence(t, env, pid, children[3], "agent-a",
+		"done",
+		"Implementation of child 4 complete and tested.",
+		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(bs))
+	assert.Contains(t, string(bs), "last 2 min")
 }
 
 func TestSiblingThrottle_DifferentActorNotThrottled(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
@@ -484,7 +512,7 @@ func TestSiblingThrottle_DifferentActorNotThrottled(t *testing.T) {
 		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
 			"done",
 			fmt.Sprintf("Implementation of child %d complete and tested.", i+1),
-			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+1)}})
 		require.Equalf(t, http.StatusOK, resp.StatusCode,
 			"close child %d: %s", i+1, string(bs))
 	}
@@ -499,7 +527,7 @@ func TestSiblingThrottle_DifferentActorNotThrottled(t *testing.T) {
 }
 
 func TestSiblingThrottle_UnparentedIssuesNotThrottled(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	// Four issues with no parent link — the throttle only applies to siblings
 	// under a shared parent, so all four closes should succeed.
@@ -519,7 +547,7 @@ func TestSiblingThrottle_UnparentedIssuesNotThrottled(t *testing.T) {
 }
 
 func TestRepeatedMessageGuard_RefusesIdenticalSiblingMessage(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	a := createIssueViaHTTP(t, env, pid, "child a")
@@ -531,7 +559,7 @@ func TestRepeatedMessageGuard_RefusesIdenticalSiblingMessage(t *testing.T) {
 	// First close succeeds.
 	firstResp, firstBody := closeIssueWithEvidence(t, env, pid, a, "agent-a",
 		"audit-no-change", msg,
-		[]map[string]any{{"type": "no-change-audit", "rationale": "metadata"}})
+		[]map[string]any{{"type": "no-change-audit", "rationale": "metadata-a"}})
 	require.Equalf(t, http.StatusOK, firstResp.StatusCode,
 		"first close: %s", string(firstBody))
 
@@ -539,13 +567,39 @@ func TestRepeatedMessageGuard_RefusesIdenticalSiblingMessage(t *testing.T) {
 	// actor is refused with 429 duplicate_message.
 	resp, bs := closeIssueWithEvidence(t, env, pid, b, "agent-a",
 		"audit-no-change", msg,
-		[]map[string]any{{"type": "no-change-audit", "rationale": "metadata"}})
+		[]map[string]any{{"type": "no-change-audit", "rationale": "metadata-b"}})
 	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(bs))
 	assertAPIError(t, resp.StatusCode, bs, http.StatusTooManyRequests, "duplicate_message")
 	body := string(bs)
 	assert.Contains(t, body, "identical close message")
 	// The refusal should reference the prior close's issue short_id.
 	assert.Contains(t, body, refForIssue(t, env, a))
+}
+
+func TestDuplicateEvidenceGuard_RefusesIdenticalSiblingEvidence(t *testing.T) {
+	env := testenv.New(t)
+	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	parent := createIssueViaHTTP(t, env, pid, "parent issue")
+	a := createIssueViaHTTP(t, env, pid, "child a")
+	b := createIssueViaHTTP(t, env, pid, "child b")
+	postLink(t, env, pid, a, "parent", parent)
+	postLink(t, env, pid, b, "parent", parent)
+
+	firstResp, firstBody := closeIssueWithEvidence(t, env, pid, a, "agent-a",
+		"done",
+		"Implementation of child a complete and tested.",
+		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+	require.Equalf(t, http.StatusOK, firstResp.StatusCode,
+		"first close: %s", string(firstBody))
+
+	resp, bs := closeIssueWithEvidence(t, env, pid, b, "agent-a",
+		"done",
+		"Implementation of child b complete and tested.",
+		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(bs))
+	assertAPIError(t, resp.StatusCode, bs, http.StatusTooManyRequests, "duplicate_evidence")
+	assert.Contains(t, string(bs), "identical close evidence")
+	assert.Contains(t, string(bs), refForIssue(t, env, a))
 }
 
 func TestRepeatedMessageGuard_SkipsForWontfix(t *testing.T) {
@@ -632,7 +686,7 @@ func TestRepeatedMessageGuard_SkipsSelfAfterReopen(t *testing.T) {
 // reopen. Otherwise an actor could exhaust the limit by repeatedly
 // reopening one issue.
 func TestSiblingThrottle_SkipsSelfAfterReopen(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
@@ -648,7 +702,7 @@ func TestSiblingThrottle_SkipsSelfAfterReopen(t *testing.T) {
 		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
 			"done",
 			fmt.Sprintf("Implementation of child %d complete and verified.", i+1),
-			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+1)}})
 		require.Equalf(t, http.StatusOK, resp.StatusCode,
 			"close child %d: %s", i+1, string(bs))
 	}
@@ -704,7 +758,7 @@ func TestRepeatedMessageGuard_SkipsTUIBypassEmptyMessage(t *testing.T) {
 }
 
 func TestThrottle_EmitsCloseThrottledEvent_SiblingBurst(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
@@ -719,7 +773,7 @@ func TestThrottle_EmitsCloseThrottledEvent_SiblingBurst(t *testing.T) {
 		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
 			"done",
 			fmt.Sprintf("Implementation of child %d complete and tested.", i+1),
-			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+1)}})
 		require.Equalf(t, http.StatusOK, resp.StatusCode,
 			"close child %d: %s", i+1, string(bs))
 	}
@@ -769,7 +823,7 @@ func TestThrottle_EmitsCloseThrottledEvent_SiblingBurst(t *testing.T) {
 }
 
 func TestThrottle_EmitsCloseThrottledEvent_DuplicateMessage(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	a := createIssueViaHTTP(t, env, pid, "child a")
@@ -780,13 +834,13 @@ func TestThrottle_EmitsCloseThrottledEvent_DuplicateMessage(t *testing.T) {
 	msg := "Schema review complete; table remains metadata-only and unchanged."
 	firstResp, firstBody := closeIssueWithEvidence(t, env, pid, a, "agent-a",
 		"audit-no-change", msg,
-		[]map[string]any{{"type": "no-change-audit", "rationale": "metadata"}})
+		[]map[string]any{{"type": "no-change-audit", "rationale": "metadata-a"}})
 	require.Equalf(t, http.StatusOK, firstResp.StatusCode,
 		"first close: %s", string(firstBody))
 
 	resp, bs := closeIssueWithEvidence(t, env, pid, b, "agent-a",
 		"audit-no-change", msg,
-		[]map[string]any{{"type": "no-change-audit", "rationale": "metadata"}})
+		[]map[string]any{{"type": "no-change-audit", "rationale": "metadata-b"}})
 	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(bs))
 
 	events := fetchEvents(t, env, pid)
@@ -819,7 +873,7 @@ func TestThrottle_EmitsCloseThrottledEvent_DuplicateMessage(t *testing.T) {
 }
 
 func TestThrottle_DryRunDoesNotEmitEvent(t *testing.T) {
-	env := testenv.New(t)
+	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
@@ -832,7 +886,7 @@ func TestThrottle_DryRunDoesNotEmitEvent(t *testing.T) {
 		resp, bs := closeIssueWithEvidence(t, env, pid, c, "agent-a",
 			"done",
 			fmt.Sprintf("Implementation of child %d complete and tested.", i+1),
-			[]map[string]any{{"type": "commit", "sha": "abc1234"}})
+			[]map[string]any{{"type": "commit", "sha": fmt.Sprintf("abc123%d", i+1)}})
 		require.Equalf(t, http.StatusOK, resp.StatusCode,
 			"close child %d: %s", i+1, string(bs))
 	}

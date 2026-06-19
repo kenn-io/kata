@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,20 +16,25 @@ import (
 // suffix so the user knows to consult `kata show` for the rest.
 const openChildrenSampleLimit = 10
 
-// siblingThrottleWindow is the look-back period over which sibling closes by
-// the same actor under the same parent are counted. siblingThrottleLimit is
-// the threshold: at the Nth close (N == limit) the actor has already closed
-// (limit) prior siblings, and the next close is refused. Spec §3.9 fixes both
-// values at "3 closes in 60 seconds" for v1; neither is configurable.
+// defaultSiblingThrottleWindow is the default look-back period over which
+// sibling closes by the same actor under the same parent are counted when the
+// opt-in burst throttle is enabled. siblingThrottleLimit is the threshold: at
+// the Nth close (N == limit) the actor has already closed (limit) prior
+// siblings, and the next close is refused.
 const (
-	siblingThrottleWindow = 60 * time.Second
-	siblingThrottleLimit  = 3
+	defaultSiblingThrottleWindow = 60 * time.Second
+	siblingThrottleLimit         = 3
 )
 
 // repeatedMessageWindow is the look-back period for the repeated-message
 // guard (spec §3.10). Closes of sibling issues with an identical normalized
 // message by the same actor within this window are refused.
 const repeatedMessageWindow = 30 * time.Minute
+
+// duplicateEvidenceWindow is the look-back period for the duplicate-evidence
+// guard. It matches the repeated-message window because both guards look for
+// copy/paste close justification across sibling issues by one actor.
+const duplicateEvidenceWindow = 30 * time.Minute
 
 // CheckParentCloseCompleteness refuses a close on an issue with open
 // children. Implements spec §3.8: the close handler maps a non-nil return
@@ -147,15 +154,18 @@ func (r *guardRefRenderer) eventIssueRef(ctx context.Context, ev db.Event) (stri
 // the practical bound.
 func CheckSiblingCloseThrottle(
 	ctx context.Context, d db.Storage,
-	issue db.Issue, actor string, now time.Time,
+	issue db.Issue, actor string, now time.Time, window time.Duration,
 ) (parentRef string, cohort []string, refusal error) {
+	if window <= 0 {
+		window = defaultSiblingThrottleWindow
+	}
 	parentLink, err := d.ParentOf(ctx, issue.ID)
 	if err != nil {
 		// ErrNotFound = no parent set; any other error is treated as a soft
 		// failure rather than blocking the close.
 		return "", nil, nil
 	}
-	since := now.Add(-siblingThrottleWindow)
+	since := now.Add(-window)
 	siblings, err := d.RecentSiblingCloses(ctx, parentLink.ToIssueID, issue.ID, actor, since)
 	if err != nil {
 		return "", nil, nil
@@ -184,9 +194,60 @@ func CheckSiblingCloseThrottle(
 		"sibling-close throttle: you closed %d children of %s in the last %s:\n%s\n"+
 			"Slow down and review the scope of each remaining child before closing. "+
 			"Wait for the throttle window to clear, or ask a human reviewer to inspect and close",
-		len(siblings), parentRef, humanizeDuration(siblingThrottleWindow),
+		len(siblings), parentRef, humanizeDuration(window),
 		strings.Join(lines, "\n"))
 	return parentRef, refs, refusal
+}
+
+// CheckDuplicateEvidenceGuard refuses close attempts that reuse identical
+// evidence on a sibling issue under the same parent. This is the always-on
+// close safety net for agent workflows: burst closing is allowed by default
+// when each issue carries distinct evidence, but copy/pasted evidence is still
+// refused.
+func CheckDuplicateEvidenceGuard(
+	ctx context.Context, d db.Storage,
+	issue db.Issue,
+	actor, reason string, evidence []db.Evidence, now time.Time,
+) (priorRef, parentRef string, refusal error) {
+	if reason != "done" && reason != "audit-no-change" {
+		return "", "", nil
+	}
+	signature := evidenceSignature(evidence)
+	if signature == "" {
+		return "", "", nil
+	}
+	parentLink, err := d.ParentOf(ctx, issue.ID)
+	if err != nil {
+		return "", "", nil
+	}
+	siblings, err := d.RecentSiblingCloses(
+		ctx, parentLink.ToIssueID, issue.ID, actor, now.Add(-duplicateEvidenceWindow))
+	if err != nil {
+		return "", "", nil
+	}
+	var prior *db.Event
+	for i := range siblings {
+		if closeEventEvidenceSignature(siblings[i]) == signature {
+			prior = &siblings[i]
+			break
+		}
+	}
+	if prior == nil {
+		return "", "", nil
+	}
+	render := newGuardRefRenderer(d, issue.ProjectID)
+	if ref, ok := render.eventIssueRef(ctx, *prior); ok {
+		priorRef = ref
+	}
+	if parentIssue, perr := d.IssueByID(ctx, parentLink.ToIssueID); perr == nil {
+		parentRef = render.issueRef(ctx, parentIssue)
+	}
+	refusal = fmt.Errorf(
+		"refusing — identical close evidence to your close of %s at %s. "+
+			"Both issues share a parent, and each closure should carry evidence "+
+			"specific to its issue",
+		priorRef, prior.CreatedAt.Format("15:04:05"))
+	return priorRef, parentRef, refusal
 }
 
 // CheckRepeatedMessageGuard implements spec §3.10. When the close is allowed,
@@ -259,10 +320,58 @@ func CheckRepeatedMessageGuard(
 	return priorRef, parentRef, refusal
 }
 
-// humanizeDuration renders d as "N sec" under a minute and "N min" otherwise.
+func closeEventEvidenceSignature(ev db.Event) string {
+	var payload struct {
+		Evidence []db.Evidence `json:"evidence,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(ev.Payload), &payload); err != nil {
+		return ""
+	}
+	return evidenceSignature(payload.Evidence)
+}
+
+func evidenceSignature(evidence []db.Evidence) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+	items := make([]string, 0, len(evidence))
+	for _, e := range evidence {
+		items = append(items, evidenceItemSignature(e))
+	}
+	sort.Strings(items)
+	return strings.Join(items, "\x1f")
+}
+
+func evidenceItemSignature(e db.Evidence) string {
+	switch e.Type {
+	case "commit":
+		return e.Type + "\x00" + e.SHA
+	case "pr":
+		return e.Type + "\x00" + e.URL
+	case "test":
+		return e.Type + "\x00" + e.Command
+	case "no-change-audit":
+		return e.Type + "\x00" + e.Rationale
+	case "duplicate-of", "superseded-by":
+		return e.Type + "\x00" + e.IssueRef
+	case "reviewed-paths":
+		paths := append([]string(nil), e.Paths...)
+		sort.Strings(paths)
+		return e.Type + "\x00" + strings.Join(paths, "\x00")
+	default:
+		bs, err := json.Marshal(e)
+		if err != nil {
+			return e.Type
+		}
+		return string(bs)
+	}
+}
+
+// humanizeDuration renders d as "N sec" through one minute and "N min"
+// otherwise.
 // Used by the throttle error to describe how long ago each sibling closed.
 func humanizeDuration(d time.Duration) string {
-	if d < time.Minute {
+	if d <= time.Minute {
 		return fmt.Sprintf("%d sec", int(d.Seconds()))
 	}
 	return fmt.Sprintf("%d min", int(d.Minutes()))

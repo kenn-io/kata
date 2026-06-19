@@ -31,10 +31,10 @@ Use kata as the shared issue ledger for this workspace.
         --commit <sha>
 
    Close each issue as soon as its work is verified, not in a batch or a
-   single "close everything" pass at the end. The daemon throttles >3 sibling
-   closes by one actor under one parent in 60 seconds; close eagerly as each
-   issue is verified and you will not see the throttle. Operators can disable
-   it via [close.throttle] enabled = false in <KATA_HOME>/config.toml.
+   single "close everything" pass at the end. By default the daemon permits
+   sibling close bursts when each close has distinct evidence, but refuses
+   identical evidence on sibling closes. Operators can enable stricter burst
+   throttling via [close.throttle] enabled = true in <KATA_HOME>/config.toml.
 
    Other close forms:
 
@@ -158,7 +158,7 @@ Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.
 If work is incomplete, label needs-review and comment with what remains.
 Close only verified work with substantive prose and typed evidence.
-Close each verified issue promptly; batching sibling closes can trigger the 60-second throttle.
+Close each verified issue promptly; distinct evidence keeps sibling close bursts admissible by default.
 Do not run delete or purge unless explicitly asked for that exact action and issue ref.
 Poll kata events with a saved cursor; reset cached state on reset_required.
 `

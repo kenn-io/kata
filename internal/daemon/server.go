@@ -31,12 +31,9 @@ type ServerConfig struct {
 	Broadcaster    *EventBroadcaster
 	FederationWake func()
 	Hooks          hooks.Sink
-	// CloseThrottle controls whether the sibling-burst and repeated-
-	// message guards run on close. Zero-value (Enabled=false) is taken
-	// as "guards on" so handler tests and existing test harness setups
-	// keep the v1 default behavior without plumbing the policy through;
-	// the daemon entry point sets ThrottleDisabled=true only when the
-	// operator opts out via [close.throttle] in config.toml.
+	// CloseThrottle controls whether the opt-in sibling-burst and repeated-
+	// message guards run on close. Zero-value means "guards off" for burst
+	// throttling; duplicate-evidence protection is enforced separately.
 	CloseThrottle CloseThrottlePolicy
 
 	// Auth carries the bearer-token policy resolved at daemon start.
@@ -68,10 +65,10 @@ func (c ServerConfig) authPolicy() authPolicy {
 }
 
 // CloseThrottlePolicy is the runtime form of [close.throttle] in
-// <KATA_HOME>/config.toml. Using ThrottleDisabled (rather than Enabled)
-// makes the zero value match the v1 default: guards on.
+// <KATA_HOME>/config.toml.
 type CloseThrottlePolicy struct {
-	ThrottleDisabled bool
+	SiblingBurstEnabled bool
+	SiblingBurstWindow  time.Duration
 }
 
 // Server bundles the http handler and lifecycle.

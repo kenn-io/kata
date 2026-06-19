@@ -80,14 +80,27 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "parent_has_open_children", err.Error(), "", nil)
 		}
 		now := time.Now()
-		// Throttle/repeated-message guards run only when the operator
-		// hasn't disabled them in [close.throttle] of config.toml.
-		// Projects that rely on bulk-subagent close patterns opt out
-		// here; the substance/evidence gates (and the parent-close
-		// completeness guard above) still apply.
-		if !cfg.CloseThrottle.ThrottleDisabled {
+		dbEvidence := evidenceToDB(in.Body.Evidence)
+		if priorRef, parentRef, refusal := CheckDuplicateEvidenceGuard(
+			ctx, cfg.DB, issue,
+			actor, in.Body.Reason, dbEvidence, now); refusal != nil {
+			if !in.Body.DryRun {
+				if err := emitThrottledEvent(ctx, cfg, issue, actor,
+					db.CloseThrottledPayload{
+						Reason: db.CloseThrottleReasonDuplicateEvidence,
+						Parent: parentRef,
+						Prior:  &priorRef,
+					}); err != nil {
+					return nil, api.NewError(500, "internal", err.Error(), "", nil)
+				}
+			}
+			return nil, api.NewError(429, "duplicate_evidence", refusal.Error(), "", nil)
+		}
+		// Burst/prose throttles are opt-in via [close.throttle] enabled=true
+		// for operators who want stricter pacing than distinct evidence.
+		if cfg.CloseThrottle.SiblingBurstEnabled {
 			if parentRef, cohort, refusal := CheckSiblingCloseThrottle(
-				ctx, cfg.DB, issue, actor, now); refusal != nil {
+				ctx, cfg.DB, issue, actor, now, cfg.CloseThrottle.SiblingBurstWindow); refusal != nil {
 				// Dry-run is side-effect-free: surface the 429 but skip persisting
 				// an audit event so kata events --tail doesn't fill with would-be
 				// refusals from validation probes.
@@ -138,8 +151,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			evt = nil
 			events = nil
 			updated, events, changed, err = cfg.DB.CloseIssueWithEvents(ctx, issue.ID,
-				in.Body.Reason, actor, in.Body.Message,
-				evidenceToDB(in.Body.Evidence))
+				in.Body.Reason, actor, in.Body.Message, dbEvidence)
 			if len(events) > 0 {
 				evt = &events[0]
 			}

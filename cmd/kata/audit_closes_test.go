@@ -560,9 +560,9 @@ func TestAuditCloses_ThrottledFlagIgnoresLaterThrottle(t *testing.T) {
 }
 
 // TestAuditCloses_ThrottledFlagSurfaces verifies that a close that
-// previously hit the repeated-message guard (and thus emitted a
+// previously hit the duplicate-evidence guard (and thus emitted a
 // close.throttled event) is flagged "throttled" in the audit row once
-// the same actor retries successfully with a different message.
+// the same actor retries successfully with different evidence.
 func TestAuditCloses_ThrottledFlagSurfaces(t *testing.T) {
 	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
 	childA := createIssue(t, env, pid, "child a")
@@ -573,17 +573,17 @@ func TestAuditCloses_ThrottledFlagSurfaces(t *testing.T) {
 	runCLIAs(t, env, dir, "agent-a", "close", childA, "--audit-no-change",
 		"--message", msg,
 		"--evidence", "no-change-audit:metadata-only")
-	// Second close with identical message trips the repeated-message
+	// Second close with identical evidence trips the duplicate-evidence
 	// guard and emits a close.throttled event tagged with agent-a/childB.
 	_, _, _ = runCLIWithErr(t, env, dir, "close", childB, "--as", "agent-a",
 		"--audit-no-change",
 		"--message", msg,
 		"--evidence", "no-change-audit:metadata-only")
-	// Retry with a distinct message — the close succeeds; the prior
+	// Retry with distinct evidence — the close succeeds; the prior
 	// close.throttled event for agent-a/childB stays in the audit window.
 	runCLIAs(t, env, dir, "agent-a", "close", childB, "--audit-no-change",
 		"--message", "Reviewed sibling B; same conclusion under a fresh narrative.",
-		"--evidence", "no-change-audit:metadata-only")
+		"--evidence", "no-change-audit:sibling-b metadata-only")
 
 	out := runCLI(t, env, dir, "audit", "closes", "--actor", "agent-a", "--json")
 	assert.Contains(t, out, `"throttled"`)

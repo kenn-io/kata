@@ -38,7 +38,7 @@ start of each session for the agent contract; the short version:
   `kata close <ref> --done --message "<scope + verification>" --commit <sha>`.
   Use `--duplicate-of <ref>`, `--superseded-by <ref>`, `--audit-no-change`, or
   `--wontfix` when those reasons fit. The daemon refuses parent-close while
-  children are open and throttles sibling-close bursts.
+  children are open and sibling closes that reuse identical evidence.
 - Never `kata delete` or `kata purge` without explicit user authorization.
 
 For long-running work, `kata events --tail` streams NDJSON.
@@ -53,10 +53,10 @@ Instead:
     kata comment <ref> --body "what was attempted, what remains"
 
 Close each issue as soon as its work is verified, not at the end of a
-batch. The daemon throttles >3 sibling closes by one actor under one
-parent in 60 seconds; close eagerly and you will not see it. Operators
-can disable the throttle via `[close.throttle] enabled = false` in
-`<KATA_HOME>/config.toml`.
+batch. By default the daemon allows sibling close bursts when each close
+has distinct evidence, and refuses sibling closes that reuse identical
+evidence. Operators can enable stricter burst throttling via
+`[close.throttle] enabled = true` in `<KATA_HOME>/config.toml`.
 
 When the work IS done, close with substantive prose and typed
 `--evidence` so a reviewer can verify the claim later:

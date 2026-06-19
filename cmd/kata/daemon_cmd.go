@@ -357,6 +357,10 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	go runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
 	broadcaster := daemon.NewEventBroadcaster()
 	federationWake := startFederationRunner(ctx, store, broadcaster, disp, daemonLog)
+	closeThrottleWindow, err := dcfg.Close.Throttle.ThrottleWindow()
+	if err != nil {
+		return err
+	}
 
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:             store,
@@ -366,7 +370,8 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		Broadcaster:    broadcaster,
 		FederationWake: federationWake,
 		CloseThrottle: daemon.CloseThrottlePolicy{
-			ThrottleDisabled: !dcfg.Close.Throttle.ThrottleEnabled(),
+			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
+			SiblingBurstWindow:  closeThrottleWindow,
 		},
 		Auth:             dcfg.Auth,
 		InsecureReadonly: insecureReadonly,

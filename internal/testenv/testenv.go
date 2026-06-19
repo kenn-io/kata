@@ -33,15 +33,23 @@ type Env struct {
 
 // Option configures the test daemon. Applied to a ServerConfig before
 // daemon.NewServer; tests use options to opt into non-default policy
-// (e.g. throttle disabled) without forking the constructor.
+// (e.g. throttle enabled) without forking the constructor.
 type Option func(*daemon.ServerConfig)
 
-// WithCloseThrottleDisabled tells the test daemon to skip the close
-// throttle / repeated-message guards, mirroring [close.throttle]
-// enabled=false in <KATA_HOME>/config.toml.
-func WithCloseThrottleDisabled() Option {
+// WithCloseThrottleEnabled tells the test daemon to enforce the sibling-burst
+// close throttle, mirroring [close.throttle] enabled=true in
+// <KATA_HOME>/config.toml.
+func WithCloseThrottleEnabled() Option {
 	return func(cfg *daemon.ServerConfig) {
-		cfg.CloseThrottle.ThrottleDisabled = true
+		cfg.CloseThrottle.SiblingBurstEnabled = true
+	}
+}
+
+// WithCloseThrottleWindow tells the test daemon to use a non-default
+// sibling-burst close throttle window.
+func WithCloseThrottleWindow(window time.Duration) Option {
+	return func(cfg *daemon.ServerConfig) {
+		cfg.CloseThrottle.SiblingBurstWindow = window
 	}
 }
 

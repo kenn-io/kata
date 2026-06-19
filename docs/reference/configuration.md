@@ -151,30 +151,37 @@ actor from that token.
 ## Close throttle
 
 kata refuses structurally dangerous close patterns. The parent-completeness
-guard always refuses closing an issue while it has open children. Two further
-guards throttle close bursts by one actor under a shared parent:
+guard always refuses closing an issue while it has open children. The
+duplicate-evidence guard also runs by default: closing a second sibling with
+identical `done` or `audit-no-change` evidence within thirty minutes is
+refused.
 
-- sibling-burst: closing more than three sibling issues within 60 seconds is
-  refused;
+By default, kata does not throttle sibling close bursts when each close carries
+distinct evidence. Operators who want stricter pacing can enable two additional
+guards daemon-wide:
+
+- sibling-burst: closing more than three sibling issues within the configured
+  window is refused;
 - repeated-message: closing a second sibling with an identical `done` or
   `audit-no-change` message within thirty minutes is refused.
 
-Close each issue as soon as its work is verified. Batching closes at the end of
-a run is the pattern this guard is meant to catch, and it can push one actor
-over the sibling-burst limit even when each individual issue is legitimate.
-
-Operators can disable both throttles daemon-wide:
+Enable the optional throttles with:
 
 ```toml
 [close.throttle]
-enabled = false
+enabled = true
+window = "60s"
 ```
 
-`enabled = false` relaxes only the two sibling throttles. Normal CLI and API
-close paths still run the parent-completeness refusal, message-substance checks,
-and evidence checks. The TUI close path skips the message-substance and evidence
-checks because an interactive human confirms each close; the structural guards
-still apply.
+`enabled` defaults to `false`. `window` controls only the sibling-burst lookback
+and defaults to `"60s"`; use Go duration syntax such as `"30s"`, `"2m"`, or
+`"1h"`. When a sibling-burst close is refused, the error message reports the
+resolved window.
+
+Normal CLI and API close paths still run the parent-completeness refusal,
+message-substance checks, evidence checks, and duplicate-evidence guard. The TUI
+close path skips the message-substance and evidence checks because an
+interactive human confirms each close; the structural guards still apply.
 
 ## Telemetry
 

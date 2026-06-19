@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -98,25 +99,44 @@ type CloseConfig struct {
 	Throttle CloseThrottleConfig `toml:"throttle"`
 }
 
-// CloseThrottleConfig toggles the sibling-burst and repeated-message
-// guards. Enabled is a *bool so an absent key defaults to enabled —
-// disabling is opt-in. Projects that rely on bulk-subagent close
-// patterns can set `enabled = false` to skip the guards entirely.
+const defaultCloseThrottleWindow = 60 * time.Second
+
+// CloseThrottleConfig toggles the opt-in sibling-burst and repeated-message
+// guards. Enabled is a *bool so an absent key defaults to disabled; operators
+// who want burst throttling can set `enabled = true`.
 //
 // The on/off behavior is daemon-wide: every project served by this
 // daemon picks up the same policy. Per-project knobs would need a
 // project_settings table and are out of scope for v1.
 type CloseThrottleConfig struct {
-	Enabled *bool `toml:"enabled"`
+	Enabled *bool  `toml:"enabled"`
+	Window  string `toml:"window"`
 }
 
-// ThrottleEnabled returns the resolved policy: true when the key is
-// absent or explicitly set to true, false only when explicitly disabled.
+// ThrottleEnabled returns the resolved sibling-burst policy. Burst throttling
+// is off unless explicitly enabled.
 func (c CloseThrottleConfig) ThrottleEnabled() bool {
 	if c.Enabled == nil {
-		return true
+		return false
 	}
 	return *c.Enabled
+}
+
+// ThrottleWindow returns the resolved sibling-burst look-back window. The
+// default is 60 seconds; configured values use Go duration syntax, such as
+// "30s", "2m", or "1h".
+func (c CloseThrottleConfig) ThrottleWindow() (time.Duration, error) {
+	if strings.TrimSpace(c.Window) == "" {
+		return defaultCloseThrottleWindow, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(c.Window))
+	if err != nil {
+		return 0, fmt.Errorf("close.throttle.window: %w", err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("close.throttle.window must be positive")
+	}
+	return d, nil
 }
 
 // ReadDaemonConfig parses <KATA_HOME>/config.toml. Returns a zero-value
@@ -147,6 +167,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
 		cfg.Storage.DSN = strings.TrimSpace(cfg.Storage.DSN)
+		cfg.Close.Throttle.Window = strings.TrimSpace(cfg.Close.Throttle.Window)
 		trimDaemonCatalog(&cfg)
 	case errors.Is(err, os.ErrNotExist):
 		// Absent file: fall through with zero-value cfg. Env merge and
@@ -157,6 +178,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	}
 	applyDaemonConfigEnv(&cfg)
 	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
+		return nil, err
+	}
+	if _, err := cfg.Close.Throttle.ThrottleWindow(); err != nil {
 		return nil, err
 	}
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
