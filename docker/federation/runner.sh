@@ -111,10 +111,19 @@ expect_cli_failure() {
 log "verifying CLI enrollment creates a missing hub project"
 cli_project=federation-cli-enroll-missing
 cli_token=federation-cli-enroll-token
+cli_enroll_home=/data/kata/runner-cli-enroll
 spoke_a_uid=$(get "$spoke_a/api/v1/instance" | jq -r '.instance_uid')
+mkdir -p "$cli_enroll_home"
+cat >"$cli_enroll_home/config.toml" <<EOF
+[[daemon]]
+name = "spoke-a"
+url = "$spoke_a"
+token_env = "KATA_SPOKE_TOKEN"
+allow_insecure = true
+EOF
 cli_enroll_out=$(
-  KATA_HOME=/data/kata/runner-cli-enroll KATA_SERVER="$spoke_a" \
-    kata --project "$cli_project" federation enroll \
+  KATA_HOME="$cli_enroll_home" KATA_SPOKE_TOKEN="$hub_token" \
+    kata --daemon spoke-a --project "$cli_project" federation enroll \
       --spoke-instance "$spoke_a_uid" \
       --hub-url "$hub_hostname" \
       --capabilities pull,push \
@@ -157,7 +166,7 @@ fi
 get "$hub/api/v1/projects/$cli_project_id/federation" >/dev/null
 
 log "verifying CLI enrollment join command syncs over plaintext hostname"
-KATA_HOME=/data/kata/runner-cli-enroll KATA_SERVER="$spoke_a" bash -c "$cli_join_cmd" >/dev/null
+KATA_HOME="$cli_enroll_home" KATA_SERVER="$spoke_a" bash -c "$cli_join_cmd" >/dev/null
 cli_spoke_project_id=$(get "$spoke_a/api/v1/projects" | jq -r --arg name "$cli_project" '.projects[]? | select(.name == $name) | .id')
 if [[ -z "$cli_spoke_project_id" ]]; then
   log "CLI join did not create spoke project $cli_project"
