@@ -155,6 +155,11 @@ func federationEnrollCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
+			if !adoptExistingFlag && pushCapable {
+				if err := federationSpokeProbePreflight(ctx, spokeInstance); err != nil {
+					return err
+				}
+			}
 			hubBaseURL := strings.TrimRight(hubURL, "/")
 			hubClient, err := federationEnrollHTTPClient(ctx, hubBaseURL, allowInsecure)
 			if err != nil {
@@ -303,17 +308,33 @@ func federationSpokeProbeExplicit(ctx context.Context) bool {
 	return ok || err != nil
 }
 
+func federationSpokeProbePreflight(ctx context.Context, spokeInstance string) error {
+	if !federationSpokeProbeExplicit(ctx) {
+		return nil
+	}
+	spokeURL, err := ensureDaemon(ctx)
+	if err != nil {
+		return err
+	}
+	spokeClient, err := federationSpokeHTTPClient(ctx, spokeURL)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(spokeInstance) == "" {
+		return nil
+	}
+	_, err = federationSpokeInstanceUID(ctx, spokeClient, spokeURL)
+	return err
+}
+
 func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Client, error) {
 	opts := clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)}
 	if strings.TrimSpace(flags.Daemon) == "" {
-		workspaceStart := workspaceStartForRemote()
-		if remoteURL, ok, err := clientpkg.ResolveRemote(ctx, workspaceStart); err != nil {
+		auth, err := federationImplicitSpokeTargetAuth(ctx, spokeURL)
+		if err != nil {
 			return nil, err
-		} else if ok && strings.TrimRight(remoteURL, "/") == strings.TrimRight(spokeURL, "/") {
-			opts.WorkspaceStart = workspaceStart
-			return clientpkg.NewHTTPClient(ctx, spokeURL, opts)
 		}
-		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL, clientpkg.TargetAuth{}, opts)
+		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL, auth, opts)
 	}
 	cfg, err := config.ReadDaemonConfig()
 	if err != nil {
@@ -337,8 +358,8 @@ func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Clie
 		return nil, err
 	}
 	if strings.TrimSpace(token) == "" {
-		opts.DaemonName = strings.TrimSpace(flags.Daemon)
-		return clientpkg.NewHTTPClient(ctx, spokeURL, opts)
+		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL,
+			clientpkg.TargetAuth{AllowInsecure: entry.AllowInsecure}, opts)
 	}
 	auth, err := config.ReadAuthConfig()
 	if err != nil {
@@ -350,6 +371,49 @@ func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Clie
 			AllowInsecure:       entry.AllowInsecure,
 			TrustPrivateNetwork: auth.TrustPrivateNetwork,
 		}, opts)
+}
+
+func federationImplicitSpokeTargetAuth(ctx context.Context, spokeURL string) (clientpkg.TargetAuth, error) {
+	workspaceStart := workspaceStartForRemote()
+	if remoteURL, ok, err := clientpkg.ResolveRemote(ctx, workspaceStart); err != nil {
+		return clientpkg.TargetAuth{}, err
+	} else if !ok || strings.TrimRight(remoteURL, "/") != strings.TrimRight(spokeURL, "/") {
+		return clientpkg.TargetAuth{}, nil
+	}
+	if os.Getenv("KATA_SERVER") != "" {
+		return clientpkg.TargetAuth{}, nil
+	}
+	cfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return clientpkg.TargetAuth{}, err
+	}
+	if strings.TrimSpace(cfg.ActiveDaemon) == "" {
+		return clientpkg.TargetAuth{}, nil
+	}
+	entry := catalogByName(cfg, cfg.ActiveDaemon)
+	if entry == nil || entry.Local {
+		return clientpkg.TargetAuth{}, nil
+	}
+	entryURL, err := clientpkg.NormalizeRemoteURL(entry.URL, entry.AllowInsecure)
+	if err != nil {
+		return clientpkg.TargetAuth{}, err
+	}
+	if strings.TrimRight(entryURL, "/") != strings.TrimRight(spokeURL, "/") {
+		return clientpkg.TargetAuth{}, nil
+	}
+	token, err := selectedCatalogToken(entry)
+	if err != nil {
+		return clientpkg.TargetAuth{}, err
+	}
+	auth, err := config.ReadAuthConfig()
+	if err != nil {
+		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
+	}
+	return clientpkg.TargetAuth{
+		Token:               token,
+		AllowInsecure:       entry.AllowInsecure,
+		TrustPrivateNetwork: auth.TrustPrivateNetwork,
+	}, nil
 }
 
 func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseURL string) (string, error) {

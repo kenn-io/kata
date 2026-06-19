@@ -477,7 +477,9 @@ func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {
 	err = cmd.Execute()
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "token mismatch")
+	assert.Contains(t, err.Error(), "Authorization bearer required")
+	_, projectErr := hub.DB.ProjectByName(ctx, "fedlab")
+	assert.ErrorIs(t, projectErr, db.ErrNotFound)
 	enrollments, listErr := hub.DB.ListFederationEnrollments(ctx)
 	require.NoError(t, listErr)
 	assert.Empty(t, enrollments)
@@ -738,9 +740,9 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 	assert.Equal(t, []string{""}, seenAuth)
 }
 
-func TestFederationSpokeHTTPClientUsesKATAServerGlobalAuth(t *testing.T) {
+func TestFederationSpokeHTTPClientDoesNotUseKATAServerGlobalAuth(t *testing.T) {
 	resetFlags(t)
-	t.Setenv("KATA_AUTH_TOKEN", "spoke-token")
+	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 	var gotAuth string
 	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -765,10 +767,10 @@ func TestFederationSpokeHTTPClientUsesKATAServerGlobalAuth(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
-	assert.Equal(t, "Bearer spoke-token", gotAuth)
+	assert.Empty(t, gotAuth)
 }
 
-func TestFederationSpokeHTTPClientUsesNamedDaemonGlobalAuthFallback(t *testing.T) {
+func TestFederationSpokeHTTPClientDoesNotUseNamedDaemonGlobalAuthFallback(t *testing.T) {
 	resetFlags(t)
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -795,7 +797,7 @@ url = "`+spoke.URL+`"
 	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
-	assert.Equal(t, "Bearer env-token", gotAuth)
+	assert.Empty(t, gotAuth)
 }
 
 func TestFederationSpokeHTTPClientNamedDaemonTokenEnvHonorsTrustPrivateNetwork(t *testing.T) {
