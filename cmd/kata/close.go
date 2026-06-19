@@ -37,8 +37,8 @@ substantive message.
 
 Close each issue as soon as its work is verified, not in a batch at
 the end. By default the daemon allows sibling close bursts when each
-close has distinct evidence, but refuses identical evidence on sibling
-closes. Operators can enable stricter burst throttling via
+close has valid evidence and a substantive message. Operators can enable
+stricter burst/prose throttling via
 [close.throttle] enabled = true in <KATA_HOME>/config.toml.
 
 If you have not completed and tested this work, do not close it.

@@ -211,7 +211,8 @@ func TestAuditCloses_ParentFrozenAtCloseTime(t *testing.T) {
 // would keep stamping "throttled" on closes that have nothing to do
 // with the original refusal.
 func TestAuditCloses_ThrottledFlagDoesNotBleedAcrossReopenCycles(t *testing.T) {
-	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
+	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
+		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	childA := createIssue(t, env, pid, "child a")
 	childB := createIssue(t, env, pid, "child b")
 	runCLI(t, env, dir, "edit", childA, "--parent", parent)
@@ -329,7 +330,8 @@ func TestAuditCloses_FilterByParent_SoftDeletedParent(t *testing.T) {
 // reopen) must NOT inherit a stale flag from before the intervening
 // close.
 func TestAuditCloses_ThrottledFlag_DifferentActorEndsCycle(t *testing.T) {
-	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
+	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
+		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	childA := createIssue(t, env, pid, "child a")
 	childB := createIssue(t, env, pid, "child b")
 	runCLI(t, env, dir, "edit", childA, "--parent", parent)
@@ -405,7 +407,8 @@ func TestAuditCloses_ThrottledFlag_DifferentActorEndsCycle(t *testing.T) {
 // Lifting --actor to the row-emit pass keeps the marker walk
 // consistent regardless of which actor the caller filters on.
 func TestAuditCloses_ActorFilterDoesNotHideThrottleEndingClose(t *testing.T) {
-	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
+	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
+		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	childA := createIssue(t, env, pid, "child a")
 	childB := createIssue(t, env, pid, "child b")
 	runCLI(t, env, dir, "edit", childA, "--parent", parent)
@@ -560,11 +563,12 @@ func TestAuditCloses_ThrottledFlagIgnoresLaterThrottle(t *testing.T) {
 }
 
 // TestAuditCloses_ThrottledFlagSurfaces verifies that a close that
-// previously hit the duplicate-evidence guard (and thus emitted a
+// previously hit the repeated-message guard (and thus emitted a
 // close.throttled event) is flagged "throttled" in the audit row once
-// the same actor retries successfully with different evidence.
+// the same actor retries successfully with a different message.
 func TestAuditCloses_ThrottledFlagSurfaces(t *testing.T) {
-	env, dir, pid, parent := setupWorkspaceWithIssue(t, "parent issue")
+	env, dir, pid, parent := setupWorkspaceWithIssueOptions(
+		t, "parent issue", testenv.WithCloseThrottleEnabled())
 	childA := createIssue(t, env, pid, "child a")
 	childB := createIssue(t, env, pid, "child b")
 	runCLI(t, env, dir, "edit", childA, "--parent", parent)
@@ -573,13 +577,13 @@ func TestAuditCloses_ThrottledFlagSurfaces(t *testing.T) {
 	runCLIAs(t, env, dir, "agent-a", "close", childA, "--audit-no-change",
 		"--message", msg,
 		"--evidence", "no-change-audit:metadata-only")
-	// Second close with identical evidence trips the duplicate-evidence
+	// Second close with identical message trips the repeated-message
 	// guard and emits a close.throttled event tagged with agent-a/childB.
 	_, _, _ = runCLIWithErr(t, env, dir, "close", childB, "--as", "agent-a",
 		"--audit-no-change",
 		"--message", msg,
-		"--evidence", "no-change-audit:metadata-only")
-	// Retry with distinct evidence — the close succeeds; the prior
+		"--evidence", "no-change-audit:sibling-b metadata-only")
+	// Retry with a distinct message — the close succeeds; the prior
 	// close.throttled event for agent-a/childB stays in the audit window.
 	runCLIAs(t, env, dir, "agent-a", "close", childB, "--audit-no-change",
 		"--message", "Reviewed sibling B; same conclusion under a fresh narrative.",

@@ -151,14 +151,11 @@ actor from that token.
 ## Close throttle
 
 kata refuses structurally dangerous close patterns. The parent-completeness
-guard always refuses closing an issue while it has open children. The
-duplicate-evidence guard also runs by default: closing a second sibling with
-identical `done` or `audit-no-change` evidence within thirty minutes is
-refused.
+guard always refuses closing an issue while it has open children. Normal CLI
+and API close paths also require close evidence and a substantive message.
 
-By default, kata does not throttle sibling close bursts when each close carries
-distinct evidence. Operators who want stricter pacing can enable two additional
-guards daemon-wide:
+By default, kata does not throttle sibling close bursts. Operators who want
+stricter pacing can enable two additional guards daemon-wide:
 
 - sibling-burst: closing more than three sibling issues within the configured
   window is refused;
@@ -179,9 +176,9 @@ and defaults to `"60s"`; use Go duration syntax such as `"30s"`, `"2m"`, or
 resolved window.
 
 Normal CLI and API close paths still run the parent-completeness refusal,
-message-substance checks, evidence checks, and duplicate-evidence guard. The TUI
-close path skips the message-substance and evidence checks because an
-interactive human confirms each close; the structural guards still apply.
+message-substance checks, and evidence checks. The TUI close path skips the
+message-substance and evidence checks because an interactive human confirms each
+close; the structural guards still apply.
 
 ## Telemetry
 

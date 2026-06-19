@@ -576,7 +576,7 @@ func TestRepeatedMessageGuard_RefusesIdenticalSiblingMessage(t *testing.T) {
 	assert.Contains(t, body, refForIssue(t, env, a))
 }
 
-func TestDuplicateEvidenceGuard_RefusesIdenticalSiblingEvidence(t *testing.T) {
+func TestClose_DefaultAllowsSiblingClosesWithSameCommitEvidence(t *testing.T) {
 	env := testenv.New(t)
 	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
@@ -596,10 +596,7 @@ func TestDuplicateEvidenceGuard_RefusesIdenticalSiblingEvidence(t *testing.T) {
 		"done",
 		"Implementation of child b complete and tested.",
 		[]map[string]any{{"type": "commit", "sha": "abc1234"}})
-	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(bs))
-	assertAPIError(t, resp.StatusCode, bs, http.StatusTooManyRequests, "duplicate_evidence")
-	assert.Contains(t, string(bs), "identical close evidence")
-	assert.Contains(t, string(bs), refForIssue(t, env, a))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
 }
 
 func TestRepeatedMessageGuard_SkipsForWontfix(t *testing.T) {

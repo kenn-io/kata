@@ -32,8 +32,7 @@ type ServerConfig struct {
 	FederationWake func()
 	Hooks          hooks.Sink
 	// CloseThrottle controls whether the opt-in sibling-burst and repeated-
-	// message guards run on close. Zero-value means "guards off" for burst
-	// throttling; duplicate-evidence protection is enforced separately.
+	// message guards run on close. Zero-value means "guards off".
 	CloseThrottle CloseThrottlePolicy
 
 	// Auth carries the bearer-token policy resolved at daemon start.

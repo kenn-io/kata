@@ -196,5 +196,4 @@ Other close reasons are `--wontfix`, `--duplicate-of <ref>`,
 
 Close issues as soon as each one is complete and verified. Do not save a batch
 of sibling closes for the end of a run. By default the daemon allows sibling
-close bursts when each close carries distinct evidence, and refuses sibling
-closes that reuse identical evidence.
+close bursts when each close carries valid evidence and a substantive message.

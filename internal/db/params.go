@@ -108,9 +108,8 @@ type CreateCommentParams struct {
 // window; duplicate-message fires when an actor reuses identical close prose
 // across sibling issues.
 const (
-	CloseThrottleReasonSiblingBurst      = "sibling-burst"
-	CloseThrottleReasonDuplicateMessage  = "duplicate-message"
-	CloseThrottleReasonDuplicateEvidence = "duplicate-evidence"
+	CloseThrottleReasonSiblingBurst     = "sibling-burst"
+	CloseThrottleReasonDuplicateMessage = "duplicate-message"
 )
 
 // CloseThrottledPayload is the JSON wire shape persisted on close.throttled

@@ -390,13 +390,25 @@ func setupWorkspaceWithIssue(t *testing.T, issueTitle string) (*testenv.Env, str
 	return env, dir, pid, short
 }
 
+func setupWorkspaceWithIssueOptions(
+	t *testing.T, issueTitle string, opts ...testenv.Option,
+) (*testenv.Env, string, int64, string) {
+	env, dir, pid := setupCLIWorkspaceOptions(t, opts...)
+	short := createIssue(t, env, pid, issueTitle)
+	return env, dir, pid, short
+}
+
 // setupCLIWorkspace bundles resetFlags, testenv.New, initBoundWorkspace, and
 // project ID resolution into one call. Use for CLI tests that seed their own
 // issues; setupWorkspaceWithIssue is the one-issue convenience wrapper.
 func setupCLIWorkspace(t *testing.T) (*testenv.Env, string, int64) {
+	return setupCLIWorkspaceOptions(t)
+}
+
+func setupCLIWorkspaceOptions(t *testing.T, opts ...testenv.Option) (*testenv.Env, string, int64) {
 	t.Helper()
 	resetFlags(t)
-	env := testenv.New(t)
+	env := testenv.New(t, opts...)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	return env, dir, pid

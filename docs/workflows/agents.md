@@ -117,9 +117,9 @@ kata close abc4 --done \
 
 Close each issue as soon as its work is verified, not in a batch at the end of a
 run. By default the daemon allows sibling close bursts when each close carries
-distinct evidence, and refuses sibling closes that reuse identical evidence.
-Operators can enable stricter burst throttling when they want pacing in addition
-to evidence checks. Closing as you finish each issue leaves a better audit trail. See
+valid evidence and a substantive message. Operators can enable stricter
+burst/prose throttling when they want pacing in addition to evidence checks.
+Closing as you finish each issue leaves a better audit trail. See
 [Close throttle](../reference/configuration.md#close-throttle).
 
 If work is incomplete:

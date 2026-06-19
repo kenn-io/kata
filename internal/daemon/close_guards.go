@@ -2,9 +2,7 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -30,11 +28,6 @@ const (
 // guard (spec §3.10). Closes of sibling issues with an identical normalized
 // message by the same actor within this window are refused.
 const repeatedMessageWindow = 30 * time.Minute
-
-// duplicateEvidenceWindow is the look-back period for the duplicate-evidence
-// guard. It matches the repeated-message window because both guards look for
-// copy/paste close justification across sibling issues by one actor.
-const duplicateEvidenceWindow = 30 * time.Minute
 
 // CheckParentCloseCompleteness refuses a close on an issue with open
 // children. Implements spec §3.8: the close handler maps a non-nil return
@@ -199,57 +192,6 @@ func CheckSiblingCloseThrottle(
 	return parentRef, refs, refusal
 }
 
-// CheckDuplicateEvidenceGuard refuses close attempts that reuse identical
-// evidence on a sibling issue under the same parent. This is the always-on
-// close safety net for agent workflows: burst closing is allowed by default
-// when each issue carries distinct evidence, but copy/pasted evidence is still
-// refused.
-func CheckDuplicateEvidenceGuard(
-	ctx context.Context, d db.Storage,
-	issue db.Issue,
-	actor, reason string, evidence []db.Evidence, now time.Time,
-) (priorRef, parentRef string, refusal error) {
-	if reason != "done" && reason != "audit-no-change" {
-		return "", "", nil
-	}
-	signature := evidenceSignature(evidence)
-	if signature == "" {
-		return "", "", nil
-	}
-	parentLink, err := d.ParentOf(ctx, issue.ID)
-	if err != nil {
-		return "", "", nil
-	}
-	siblings, err := d.RecentSiblingCloses(
-		ctx, parentLink.ToIssueID, issue.ID, actor, now.Add(-duplicateEvidenceWindow))
-	if err != nil {
-		return "", "", nil
-	}
-	var prior *db.Event
-	for i := range siblings {
-		if closeEventEvidenceSignature(siblings[i]) == signature {
-			prior = &siblings[i]
-			break
-		}
-	}
-	if prior == nil {
-		return "", "", nil
-	}
-	render := newGuardRefRenderer(d, issue.ProjectID)
-	if ref, ok := render.eventIssueRef(ctx, *prior); ok {
-		priorRef = ref
-	}
-	if parentIssue, perr := d.IssueByID(ctx, parentLink.ToIssueID); perr == nil {
-		parentRef = render.issueRef(ctx, parentIssue)
-	}
-	refusal = fmt.Errorf(
-		"refusing — identical close evidence to your close of %s at %s. "+
-			"Both issues share a parent, and each closure should carry evidence "+
-			"specific to its issue",
-		priorRef, prior.CreatedAt.Format("15:04:05"))
-	return priorRef, parentRef, refusal
-}
-
 // CheckRepeatedMessageGuard implements spec §3.10. When the close is allowed,
 // all returns are zero. When refused, it returns the prior matching close's
 // display ref, the parent's display ref, and a descriptive error; the
@@ -318,53 +260,6 @@ func CheckRepeatedMessageGuard(
 			"`--superseded-by` instead",
 		priorRef, prior.CreatedAt.Format("15:04:05"))
 	return priorRef, parentRef, refusal
-}
-
-func closeEventEvidenceSignature(ev db.Event) string {
-	var payload struct {
-		Evidence []db.Evidence `json:"evidence,omitempty"`
-	}
-	if err := json.Unmarshal([]byte(ev.Payload), &payload); err != nil {
-		return ""
-	}
-	return evidenceSignature(payload.Evidence)
-}
-
-func evidenceSignature(evidence []db.Evidence) string {
-	if len(evidence) == 0 {
-		return ""
-	}
-	items := make([]string, 0, len(evidence))
-	for _, e := range evidence {
-		items = append(items, evidenceItemSignature(e))
-	}
-	sort.Strings(items)
-	return strings.Join(items, "\x1f")
-}
-
-func evidenceItemSignature(e db.Evidence) string {
-	switch e.Type {
-	case "commit":
-		return e.Type + "\x00" + e.SHA
-	case "pr":
-		return e.Type + "\x00" + e.URL
-	case "test":
-		return e.Type + "\x00" + e.Command
-	case "no-change-audit":
-		return e.Type + "\x00" + e.Rationale
-	case "duplicate-of", "superseded-by":
-		return e.Type + "\x00" + e.IssueRef
-	case "reviewed-paths":
-		paths := append([]string(nil), e.Paths...)
-		sort.Strings(paths)
-		return e.Type + "\x00" + strings.Join(paths, "\x00")
-	default:
-		bs, err := json.Marshal(e)
-		if err != nil {
-			return e.Type
-		}
-		return string(bs)
-	}
 }
 
 // humanizeDuration renders d as "N sec" through one minute and "N min"

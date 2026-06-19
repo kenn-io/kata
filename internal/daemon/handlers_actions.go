@@ -81,23 +81,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		now := time.Now()
 		dbEvidence := evidenceToDB(in.Body.Evidence)
-		if priorRef, parentRef, refusal := CheckDuplicateEvidenceGuard(
-			ctx, cfg.DB, issue,
-			actor, in.Body.Reason, dbEvidence, now); refusal != nil {
-			if !in.Body.DryRun {
-				if err := emitThrottledEvent(ctx, cfg, issue, actor,
-					db.CloseThrottledPayload{
-						Reason: db.CloseThrottleReasonDuplicateEvidence,
-						Parent: parentRef,
-						Prior:  &priorRef,
-					}); err != nil {
-					return nil, api.NewError(500, "internal", err.Error(), "", nil)
-				}
-			}
-			return nil, api.NewError(429, "duplicate_evidence", refusal.Error(), "", nil)
-		}
 		// Burst/prose throttles are opt-in via [close.throttle] enabled=true
-		// for operators who want stricter pacing than distinct evidence.
+		// for operators who want stricter pacing.
 		if cfg.CloseThrottle.SiblingBurstEnabled {
 			if parentRef, cohort, refusal := CheckSiblingCloseThrottle(
 				ctx, cfg.DB, issue, actor, now, cfg.CloseThrottle.SiblingBurstWindow); refusal != nil {
