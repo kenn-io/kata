@@ -679,6 +679,59 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 	assert.Equal(t, []string{""}, seenAuth)
 }
 
+func TestFederationSpokeHTTPClientUsesNamedDaemonGlobalAuthFallback(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_AUTH_TOKEN", "env-token")
+	flags.Daemon = "spoke"
+	var gotAuth string
+	spoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(spoke.Close)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "spoke"
+url = "`+spoke.URL+`"
+`), 0o600))
+
+	hc, err := federationSpokeHTTPClient(context.Background(), spoke.URL)
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, spoke.URL+"/probe", nil)
+	require.NoError(t, err)
+	resp, err := hc.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, "Bearer env-token", gotAuth)
+}
+
+func TestFederationSpokeHTTPClientNamedDaemonTokenEnvHonorsTrustPrivateNetwork(t *testing.T) {
+	resetFlags(t)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SPOKE_TOKEN", "spoke-token")
+	flags.Daemon = "spoke"
+	baseURL := "http://100.64.0.5:7373"
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[auth]
+trust_private_network = true
+
+[[daemon]]
+name = "spoke"
+url = "`+baseURL+`"
+token_env = "KATA_SPOKE_TOKEN"
+`), 0o600))
+
+	hc, err := federationSpokeHTTPClient(context.Background(), baseURL)
+
+	require.NoError(t, err)
+	assert.NotNil(t, hc)
+}
+
 func TestFederationSpokeProjectExistsUsesReadonlyGETProbe(t *testing.T) {
 	spokeUID := "01HZNQ7VFPK1XGD8R5MABCD4EF"
 	var seenMethods []string

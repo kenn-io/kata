@@ -359,9 +359,11 @@ func activeRemoteTargetAuthForBaseURL(baseURL, workspaceStart string) (TargetAut
 	if err != nil {
 		return TargetAuth{}, false, err
 	}
+	auth := resolveAuthConfig()
 	return TargetAuth{
-		Token:         token,
-		AllowInsecure: target.AllowInsecure,
+		Token:               token,
+		AllowInsecure:       target.AllowInsecure,
+		TrustPrivateNetwork: auth.TrustPrivateNetwork,
 	}, true, nil
 }
 

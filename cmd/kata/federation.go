@@ -300,8 +300,20 @@ func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Clie
 	if err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(token) == "" {
+		opts.DaemonName = strings.TrimSpace(flags.Daemon)
+		return clientpkg.NewHTTPClient(ctx, spokeURL, opts)
+	}
+	auth, err := config.ReadAuthConfig()
+	if err != nil {
+		auth.TrustPrivateNetwork = config.EnvTruthy("KATA_TRUST_PRIVATE_NETWORK")
+	}
 	return clientpkg.NewHTTPClientForTarget(ctx, spokeURL,
-		clientpkg.TargetAuth{Token: token, AllowInsecure: entry.AllowInsecure}, opts)
+		clientpkg.TargetAuth{
+			Token:               token,
+			AllowInsecure:       entry.AllowInsecure,
+			TrustPrivateNetwork: auth.TrustPrivateNetwork,
+		}, opts)
 }
 
 func federationSpokeInstanceUID(ctx context.Context, client *http.Client, baseURL string) (string, error) {

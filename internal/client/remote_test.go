@@ -409,6 +409,30 @@ token = "catalog-token"
 	assert.NotNil(t, c)
 }
 
+func TestNewHTTPClient_ActiveRemoteTokenEnvHonorsTrustPrivateNetwork(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_SHARED_TOKEN", "catalog-env-token")
+	baseURL := "http://100.64.0.5:7373"
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+active_daemon = "shared"
+
+[auth]
+trust_private_network = true
+
+[[daemon]]
+name = "shared"
+url = "`+baseURL+`"
+token_env = "KATA_SHARED_TOKEN"
+`), 0o600))
+
+	c, err := NewHTTPClient(context.Background(), baseURL, Opts{Timeout: time.Second})
+
+	require.NoError(t, err)
+	assert.NotNil(t, c)
+}
+
 func TestNewHTTPClient_NamedLocalUsesCatalogToken(t *testing.T) {
 	home := setupKataEnv(t)
 	var gotAuth string
