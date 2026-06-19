@@ -28,6 +28,24 @@ assert_not_contains() {
   fi
 }
 
+assert_file_contains() {
+  local file="$1"
+  local needle="$2"
+  local context="$3"
+  if ! grep -Fq "$needle" "$file"; then
+    fail "$context: expected $file to contain [$needle]"
+  fi
+}
+
+assert_file_not_contains() {
+  local file="$1"
+  local needle="$2"
+  local context="$3"
+  if grep -Fq "$needle" "$file"; then
+    fail "$context: did not expect $file to contain [$needle]"
+  fi
+}
+
 init_repo() {
   local dir="$1"
   mkdir -p "$dir"
@@ -132,11 +150,35 @@ test_release_creates_and_pushes_bare_semver_tag() {
   git -C "$remote" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null || fail "remote tag v0.5.0 missing"
 }
 
+test_release_workflow_contract() {
+  local workflow="$repo_root/.github/workflows/release.yml"
+  [[ -f "$workflow" ]] || fail "release workflow is missing"
+
+  assert_file_contains "$workflow" "permissions:" "workflow permissions"
+  assert_file_contains "$workflow" "contents: write" "workflow release permission"
+  assert_file_contains "$workflow" "actions/upload-artifact" "workflow build artifact upload"
+  assert_file_contains "$workflow" "actions/download-artifact" "workflow release artifact download"
+  assert_file_contains "$workflow" "needs: build" "workflow dependent release job"
+  assert_file_contains "$workflow" 'TAG_NAME="${GITHUB_REF#refs/tags/}"' "workflow tag derivation"
+  assert_file_contains "$workflow" 'VERSION="${TAG_NAME#v}"' "workflow bare version derivation"
+  assert_file_contains "$workflow" 'scripts/release-archive-name.sh "$VERSION" "$GOOS" "$GOARCH"' "workflow archive naming"
+  assert_file_contains "$workflow" 'sha256sum kata_* > SHA256SUMS' "workflow aggregate checksums"
+  assert_file_contains "$workflow" "fetch-depth: 0" "workflow annotated tag checkout"
+  assert_file_contains "$workflow" "fetch-tags: true" "workflow tag fetching"
+  assert_file_contains "$workflow" 'gh release create "$TAG_NAME" kata_* SHA256SUMS --notes-file notes.md' "workflow release create"
+  assert_file_not_contains "$workflow" 'kata_v${VERSION}' "workflow must not use v-prefixed archive names"
+
+  local release_create_count
+  release_create_count="$(grep -Fc 'gh release create "$TAG_NAME"' "$workflow")"
+  [[ "$release_create_count" == "1" ]] || fail "workflow should create the GitHub release exactly once, found $release_create_count"
+}
+
 test_release_rejects_missing_version
 test_release_rejects_v_prefixed_version
 test_release_rejects_non_semver_version
 test_release_refuses_dirty_worktree
 test_changelog_fallback_includes_first_commit_without_tags
 test_release_creates_and_pushes_bare_semver_tag
+test_release_workflow_contract
 
 printf 'release script tests passed\n'

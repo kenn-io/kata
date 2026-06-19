@@ -1,0 +1,171 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-24.04-arm
+          - goos: darwin
+            goarch: amd64
+            runner: macos-15
+          - goos: darwin
+            goarch: arm64
+            runner: macos-15
+          - goos: windows
+            goarch: amd64
+            runner: windows-latest
+          - goos: windows
+            goarch: arm64
+            runner: windows-11-arm
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG_NAME#v}"
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $TAG_NAME"
+            echo "Expected format: vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+          COMMIT="$(printf '%s' "$GITHUB_SHA" | cut -c1-8)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w -X go.kenn.io/kata/internal/version.Version=${TAG_NAME} -X go.kenn.io/kata/internal/version.Commit=${COMMIT} -X go.kenn.io/kata/internal/version.BuildDate=${BUILD_DATE}"
+
+          mkdir -p dist
+          ext=""
+          if [[ "$GOOS" == "windows" ]]; then
+            ext=".exe"
+          fi
+
+          go build -trimpath -buildvcs=false -ldflags="$LDFLAGS" -o "dist/kata${ext}" ./cmd/kata
+
+          if [[ "$GOOS" == "linux" && "$GOARCH" == "amd64" ]]; then
+            SMOKE_OUT="$(./dist/kata version 2>&1)"
+            echo "$SMOKE_OUT"
+            grep -q "$TAG_NAME" <<<"$SMOKE_OUT"
+          fi
+
+          archive="$(scripts/release-archive-name.sh "$VERSION" "$GOOS" "$GOARCH")"
+          if [[ "$GOOS" == "windows" ]]; then
+            powershell -NoProfile -Command "Compress-Archive -Path 'dist/kata.exe' -DestinationPath \"dist/${archive}\""
+            unzip -l "dist/${archive}" | grep -q "kata.exe"
+            rm "dist/kata.exe"
+          else
+            tar -C dist -czf "dist/${archive}" kata
+            tar -tzf "dist/${archive}" | grep -qx "kata"
+            rm "dist/kata"
+          fi
+
+      - name: Upload archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: kata-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Download archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Prepare release assets
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG_NAME#v}"
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $TAG_NAME"
+            echo "Expected format: vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+          cd artifacts
+          expected=(
+            "$(../scripts/release-archive-name.sh "$VERSION" linux amd64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" linux arm64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" darwin amd64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" darwin arm64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" windows amd64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" windows arm64)"
+          )
+          for archive in "${expected[@]}"; do
+            test -f "$archive" || { echo "missing release archive: $archive"; ls -la; exit 1; }
+          done
+          sha256sum kata_* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Read annotated tag notes
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [[ "$(git cat-file -t "$TAG_NAME")" == "tag" ]]; then
+            git tag -l --format='%(contents:body)' "$TAG_NAME" > artifacts/notes.md
+          else
+            : > artifacts/notes.md
+          fi
+
+          if [[ ! -s artifacts/notes.md ]]; then
+            {
+              echo "Release $TAG_NAME"
+              echo
+              echo "See the changelog for release details."
+            } > artifacts/notes.md
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          cd artifacts
+          gh release create "$TAG_NAME" kata_* SHA256SUMS --notes-file notes.md
