@@ -306,6 +306,13 @@ func federationSpokeProbeExplicit(ctx context.Context) bool {
 func federationSpokeHTTPClient(ctx context.Context, spokeURL string) (*http.Client, error) {
 	opts := clientpkg.Opts{Timeout: envHTTPTimeout(defaultHTTPTimeout)}
 	if strings.TrimSpace(flags.Daemon) == "" {
+		workspaceStart := workspaceStartForRemote()
+		if remoteURL, ok, err := clientpkg.ResolveRemote(ctx, workspaceStart); err != nil {
+			return nil, err
+		} else if ok && strings.TrimRight(remoteURL, "/") == strings.TrimRight(spokeURL, "/") {
+			opts.WorkspaceStart = workspaceStart
+			return clientpkg.NewHTTPClient(ctx, spokeURL, opts)
+		}
 		return clientpkg.NewHTTPClientForTarget(ctx, spokeURL, clientpkg.TargetAuth{}, opts)
 	}
 	cfg, err := config.ReadDaemonConfig()

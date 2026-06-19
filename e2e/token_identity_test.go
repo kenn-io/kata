@@ -168,7 +168,7 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 		"KATA_HTTP_TIMEOUT=10s",
 	)
 	spokeStderr := startDaemon(t, bin, spokeEnv)
-	spokeURL, _ := connectDaemon(t, spokeDirs, spokeStderr)
+	_, _ = connectDaemon(t, spokeDirs, spokeStderr)
 	spokeIdentityOut := runRemoteCmdOutput(t, bin, spokeDirs.repoDir, spokeEnv,
 		"--json", "federation", "identity")
 	var spokeIdentity struct {
@@ -179,7 +179,6 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 	require.NotEmpty(t, spokeIdentity.InstanceUID)
 
 	bootstrapEnrollEnv := append(spokeDirs.env(),
-		"KATA_SERVER="+spokeURL,
 		"KATA_AUTH_TOKEN="+identityBootstrapToken,
 		"KATA_AUTHOR=e2e-client",
 		"KATA_HTTP_TIMEOUT=10s",
@@ -193,7 +192,6 @@ func TestTokenIdentity_FederationPersonalTokenEnrollJoinAndPush(t *testing.T) {
 	assert.Contains(t, bootstrapOut, "bootstrap token cannot perform attributed writes")
 
 	enrollEnv := append(spokeDirs.env(),
-		"KATA_SERVER="+spokeURL,
 		"KATA_AUTH_TOKEN="+userToken,
 		"KATA_AUTHOR=e2e-client",
 		"KATA_HTTP_TIMEOUT=10s",
