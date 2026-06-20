@@ -1,0 +1,66 @@
+version: 2
+
+project_name: kata
+
+changelog:
+  disable: true
+
+release:
+  mode: keep-existing
+
+builds:
+  - id: kata
+    main: ./cmd/kata
+    binary: kata
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w
+      - -X go.kenn.io/kata/internal/version.Version=v{{ .Version }}
+      - -X go.kenn.io/kata/internal/version.Commit={{ .ShortCommit }}
+      - -X go.kenn.io/kata/internal/version.BuildDate={{ .Date }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: kata
+    ids:
+      - kata
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: SHA256SUMS
+
+nfpms:
+  - id: kata-linux-packages
+    ids:
+      - kata
+    package_name: kata
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_linux_{{ .Arch }}"
+    vendor: kata
+    homepage: https://katatracker.com
+    maintainer: kata contributors
+    description: Git-native issue tracking for agentic development.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin

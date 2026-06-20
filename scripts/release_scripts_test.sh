@@ -32,7 +32,7 @@ assert_file_contains() {
   local file="$1"
   local needle="$2"
   local context="$3"
-  if ! grep -Fq "$needle" "$file"; then
+  if ! grep -Fq -- "$needle" "$file"; then
     fail "$context: expected $file to contain [$needle]"
   fi
 }
@@ -41,7 +41,7 @@ assert_file_not_contains() {
   local file="$1"
   local needle="$2"
   local context="$3"
-  if grep -Fq "$needle" "$file"; then
+  if grep -Fq -- "$needle" "$file"; then
     fail "$context: did not expect $file to contain [$needle]"
   fi
 }
@@ -196,7 +196,9 @@ test_install_redirect_and_docs_contract() {
   assert_file_contains "$vercel" '"permanent": false' "vercel install redirect permanence"
   assert_file_contains "$repo_root/docs/get-started/install.md" 'curl -fsSL https://katatracker.com/install.sh | bash' "install docs curl path"
   assert_file_contains "$repo_root/docs/get-started/install.md" 'The installer verifies the downloaded archive against `SHA256SUMS` before installing it.' "install docs checksum explanation"
+  assert_file_contains "$repo_root/docs/get-started/install.md" 'Linux `.deb` and `.rpm` packages are also published for `amd64` and `arm64`.' "install docs Linux packages"
   assert_file_contains "$repo_root/README.md" 'curl -fsSL https://katatracker.com/install.sh | bash' "README curl path"
+  assert_file_contains "$repo_root/README.md" 'Linux `.deb` and `.rpm` packages are published for `amd64` and `arm64`.' "README Linux packages"
   assert_file_not_contains "$repo_root/README.md" 'Pre-built binaries are not published yet.' "README stale binary wording"
 }
 
@@ -218,47 +220,46 @@ test_release_creates_and_pushes_bare_semver_tag() {
 test_release_workflow_contract() {
   local workflow="$repo_root/.github/workflows/release.yml"
   local publish_workflow="$repo_root/.github/workflows/publish-release.yml"
+  local goreleaser="$repo_root/.goreleaser.yaml"
   [[ -f "$workflow" ]] || fail "release workflow is missing"
-  [[ -f "$publish_workflow" ]] || fail "publish release workflow is missing"
+  [[ ! -f "$publish_workflow" ]] || fail "publish release workflow should be replaced by GoReleaser release workflow"
+  [[ -f "$goreleaser" ]] || fail "GoReleaser config is missing"
 
   assert_file_contains "$workflow" "permissions:" "workflow permissions"
-  assert_file_contains "$workflow" "contents: read" "workflow read-only permission"
-  assert_file_contains "$workflow" "actions/upload-artifact" "workflow build artifact upload"
+  assert_file_contains "$workflow" "contents: write" "workflow release permission"
   assert_file_contains "$workflow" 'TAG_NAME="${GITHUB_REF#refs/tags/}"' "workflow tag derivation"
-  assert_file_contains "$workflow" 'VERSION="${TAG_NAME#v}"' "workflow bare version derivation"
-  assert_file_contains "$workflow" 'scripts/release-archive-name.sh "$VERSION" "$GOOS" "$GOARCH"' "workflow archive naming"
+  assert_file_contains "$workflow" 'version=${TAG_NAME#v}' "workflow bare version output"
+  assert_file_contains "$workflow" 'gh release create "$TAG_NAME"' "workflow creates GitHub release"
+  assert_file_contains "$workflow" "--notes-from-tag" "workflow uses annotated tag notes"
+  assert_file_contains "$workflow" "goreleaser/goreleaser-action" "workflow runs GoReleaser"
+  assert_file_contains "$workflow" "args: release --clean" "workflow GoReleaser release command"
+  assert_file_not_contains "$workflow" "actions/upload-artifact" "workflow must not use custom archive upload"
+  assert_file_not_contains "$workflow" "scripts/release-archive-name.sh" "workflow must not hand-build archive names"
   assert_file_not_contains "$workflow" "KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX" "tag workflow must not read signing secret"
   assert_file_not_contains "$workflow" "sign-release-checksums.go" "tag workflow must not sign assets"
-  assert_file_not_contains "$workflow" "gh release create" "tag workflow must not publish releases"
   assert_file_not_contains "$workflow" 'kata_v${VERSION}' "workflow must not use v-prefixed archive names"
 
-  assert_file_contains "$publish_workflow" "workflow_dispatch:" "publish workflow manual trigger"
-  assert_file_contains "$publish_workflow" "tag:" "publish workflow tag input"
-  assert_file_not_contains "$publish_workflow" "workflow_run:" "publish workflow must not auto-publish tag builds"
-  assert_file_not_contains "$publish_workflow" "github.event.workflow_run" "publish workflow must not trust tag-triggered workflow events"
-  assert_file_contains "$publish_workflow" "contents: write" "publish workflow release permission"
-  assert_file_contains "$publish_workflow" "actions: read" "publish workflow artifact permission"
-  assert_file_contains "$publish_workflow" "environment: release-signing" "publish workflow protected environment"
-  assert_file_contains "$publish_workflow" "fetch-depth: 0" "publish workflow annotated tag checkout"
-  assert_file_contains "$publish_workflow" "fetch-tags: true" "publish workflow tag fetching"
-  assert_file_contains "$publish_workflow" 'INPUT_TAG: ${{ inputs.tag }}' "publish workflow tag input env"
-  assert_file_contains "$publish_workflow" 'TAG_NAME="$INPUT_TAG"' "publish workflow tag env use"
-  assert_file_not_contains "$publish_workflow" 'TAG_NAME="${{ inputs.tag }}"' "publish workflow must not interpolate inputs in shell"
-  assert_file_contains "$publish_workflow" 'git rev-list -n1 "$TAG_NAME"' "publish workflow tag target lookup"
-  assert_file_contains "$publish_workflow" 'git merge-base --is-ancestor "$tag_sha" origin/main' "publish workflow protected branch verification"
-  assert_file_contains "$publish_workflow" 'actions/workflows/release.yml/runs?event=push&status=completed&per_page=100' "publish workflow release build lookup"
-  assert_file_contains "$publish_workflow" '.head_branch == \"$TAG_NAME\"' "publish workflow build tag filter"
-  assert_file_contains "$publish_workflow" '.head_sha == \"$tag_sha\"' "publish workflow build sha filter"
-  assert_file_contains "$publish_workflow" 'gh run download "$RUN_ID"' "publish workflow downloads build artifacts"
-  assert_file_contains "$publish_workflow" 'sha256sum "${archives[@]}" > SHA256SUMS' "publish workflow aggregate checksums"
-  assert_file_contains "$publish_workflow" "KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX" "publish workflow signing key secret"
-  assert_file_contains "$publish_workflow" "sign-release-checksums.go" "publish workflow checksum signature script"
-  assert_file_contains "$publish_workflow" 'signatures=( ./*.sha256.sig )' "publish workflow signature assets"
-  assert_file_contains "$publish_workflow" 'gh release create "$TAG_NAME" "${release_assets[@]}" ./SHA256SUMS "${signatures[@]}" --notes-file notes.md --verify-tag' "publish workflow release create"
-  assert_file_not_contains "$publish_workflow" 'gh release create "$TAG_NAME" ./kata_*' "publish workflow must not duplicate signature assets"
+  assert_file_contains "$goreleaser" "project_name: kata" "GoReleaser project name"
+  assert_file_contains "$goreleaser" "main: ./cmd/kata" "GoReleaser main package"
+  assert_file_contains "$goreleaser" "binary: kata" "GoReleaser binary name"
+  assert_file_contains "$goreleaser" "- CGO_ENABLED=0" "GoReleaser static builds"
+  assert_file_contains "$goreleaser" "go.kenn.io/kata/internal/version.Version=v{{ .Version }}" "GoReleaser version ldflag"
+  assert_file_contains "$goreleaser" "go.kenn.io/kata/internal/version.Commit={{ .ShortCommit }}" "GoReleaser commit ldflag"
+  assert_file_contains "$goreleaser" "go.kenn.io/kata/internal/version.BuildDate={{ .Date }}" "GoReleaser build date ldflag"
+  assert_file_contains "$goreleaser" "{{- .Version }}_" "GoReleaser bare semver archive names"
+  assert_file_contains "$goreleaser" "- linux" "GoReleaser linux target"
+  assert_file_contains "$goreleaser" "- darwin" "GoReleaser darwin target"
+  assert_file_contains "$goreleaser" "- windows" "GoReleaser windows target"
+  assert_file_contains "$goreleaser" "- amd64" "GoReleaser amd64 target"
+  assert_file_contains "$goreleaser" "- arm64" "GoReleaser arm64 target"
+  assert_file_contains "$goreleaser" "name_template: SHA256SUMS" "GoReleaser checksum file"
+  assert_file_contains "$goreleaser" "nfpms:" "GoReleaser Linux packages"
+  assert_file_contains "$goreleaser" "- deb" "GoReleaser deb package"
+  assert_file_contains "$goreleaser" "- rpm" "GoReleaser rpm package"
+  assert_file_not_contains "$goreleaser" ".sha256.sig" "GoReleaser must not publish signature assets"
 
   local release_create_count
-  release_create_count="$(grep -Fch 'gh release create "$TAG_NAME"' "$workflow" "$publish_workflow" | awk '{sum += $1} END {print sum + 0}')"
+  release_create_count="$(grep -Fch 'gh release create "$TAG_NAME"' "$workflow" | awk '{sum += $1} END {print sum + 0}')"
   [[ "$release_create_count" == "1" ]] || fail "workflows should create the GitHub release exactly once, found $release_create_count"
 }
 

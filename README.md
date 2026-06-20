@@ -102,7 +102,7 @@ curl -fsSL https://katatracker.com/install.sh | bash
 
 The installer downloads the latest GitHub release archive for your platform and
 verifies it against `SHA256SUMS` before installing. Release builds can update
-themselves with `kata update`.
+themselves with `kata update`. Linux `.deb` and `.rpm` packages are published for `amd64` and `arm64`.
 
 If you prefer to install from source, kata needs **Go 1.26 or later**:
 
@@ -113,8 +113,8 @@ go install go.kenn.io/kata/cmd/kata@latest
 Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin`
 (often `~/go/bin`); put that directory on your `PATH`. To build from a clone,
 run `make install` (it defaults to `~/.local/bin`). See
-[Install](docs/get-started/install.md) for manual release downloads,
-build-from-source, and Windows steps.
+[Install](docs/get-started/install.md) for package downloads, manual release
+downloads, build-from-source, and Windows steps.
 
 ## Documentation
 

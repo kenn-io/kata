@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -28,18 +26,13 @@ var newSelfUpdateClient = func(current string) (updateClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	trustedKeys, err := trustedUpdatePublicKeys()
-	if err != nil {
-		return nil, err
-	}
 	return selfupdate.Client{
-		Owner:             "kenn-io",
-		Repo:              "kata",
-		BinaryName:        "kata",
-		CurrentVersion:    current,
-		CacheDir:          filepath.Join(home, "cache", "update"),
-		TrustedPublicKeys: trustedKeys,
-		RequireSignature:  true,
+		Owner:                  "kenn-io",
+		Repo:                   "kata",
+		BinaryName:             "kata",
+		CurrentVersion:         current,
+		CacheDir:               filepath.Join(home, "cache", "update"),
+		AllowUnsignedChecksums: true,
 	}, nil
 }
 
@@ -205,15 +198,4 @@ func latestUpdateVersion(info *selfupdate.Info) string {
 		return info.LatestVersion
 	}
 	return ""
-}
-
-func trustedUpdatePublicKeys() ([]ed25519.PublicKey, error) {
-	key, err := hex.DecodeString(kataUpdatePublicKeyHex)
-	if err != nil {
-		return nil, fmt.Errorf("decode update public key: %w", err)
-	}
-	if len(key) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("decode update public key: got %d bytes, want %d", len(key), ed25519.PublicKeySize)
-	}
-	return []ed25519.PublicKey{ed25519.PublicKey(key)}, nil
 }

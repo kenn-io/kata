@@ -6,98 +6,75 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            runner: ubuntu-latest
-          - goos: linux
-            goarch: arm64
-            runner: ubuntu-24.04-arm
-          - goos: darwin
-            goarch: amd64
-            runner: macos-15
-          - goos: darwin
-            goarch: arm64
-            runner: macos-15
-          - goos: windows
-            goarch: amd64
-            runner: windows-latest
-          - goos: windows
-            goarch: arm64
-            runner: windows-11-arm
-
-    defaults:
-      run:
-        shell: bash
-
+  validate-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.validate.outputs.tag_name }}
+      version: ${{ steps.validate.outputs.version }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build archive
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
+      - name: Validate release tag
+        id: validate
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG_NAME#v}"
           if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release tag: $TAG_NAME"
             echo "Expected format: vMAJOR.MINOR.PATCH"
             exit 1
           fi
 
-          COMMIT="$(printf '%s' "$GITHUB_SHA" | cut -c1-8)"
-          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LDFLAGS="-s -w -X go.kenn.io/kata/internal/version.Version=${TAG_NAME} -X go.kenn.io/kata/internal/version.Commit=${COMMIT} -X go.kenn.io/kata/internal/version.BuildDate=${BUILD_DATE}"
+          {
+            echo "tag_name=$TAG_NAME"
+            echo "version=${TAG_NAME#v}"
+          } >> "$GITHUB_OUTPUT"
 
-          mkdir -p dist
-          ext=""
-          if [[ "$GOOS" == "windows" ]]; then
-            ext=".exe"
-          fi
-
-          go build -trimpath -buildvcs=false -ldflags="$LDFLAGS" -o "dist/kata${ext}" ./cmd/kata
-
-          if [[ "$GOOS" == "linux" && "$GOARCH" == "amd64" ]]; then
-            SMOKE_OUT="$(./dist/kata version 2>&1)"
-            echo "$SMOKE_OUT"
-            grep -q "$TAG_NAME" <<<"$SMOKE_OUT"
-          fi
-
-          archive="$(scripts/release-archive-name.sh "$VERSION" "$GOOS" "$GOARCH")"
-          if [[ "$GOOS" == "windows" ]]; then
-            powershell -NoProfile -Command "Compress-Archive -Path 'dist/kata.exe' -DestinationPath \"dist/${archive}\""
-            unzip -l "dist/${archive}" | grep -q "kata.exe"
-            rm "dist/kata.exe"
-          else
-            tar -C dist -czf "dist/${archive}" kata
-            tar -tzf "dist/${archive}" | grep -qx "kata"
-            rm "dist/kata"
-          fi
-
-      - name: Upload archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+  create-release:
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
-          name: kata-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            dist/*.tar.gz
-            dist/*.zip
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.validate-tag.outputs.tag_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists"
+            exit 0
+          fi
+
+          gh release create "$TAG_NAME" \
+            --verify-tag \
+            --title "$TAG_NAME" \
+            --notes-from-tag
+
+  goreleaser:
+    needs:
+      - create-release
+      - validate-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
+        with:
+          distribution: goreleaser
+          version: v2.16.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

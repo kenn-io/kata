@@ -21,7 +21,12 @@ It places `kata` in `/usr/local/bin` or `~/.local/bin`. Review
 the installer at <https://katatracker.com/install.sh> before running it if you
 prefer.
 
-After installing a release build, check for newer signed releases:
+Linux `.deb` and `.rpm` packages are also published for `amd64` and `arm64`.
+Download the package for your distribution from
+[GitHub releases](https://github.com/kenn-io/kata/releases), then install it
+with your system package tool.
+
+After installing a release build, check for newer releases:
 
 ```sh
 kata update --check
@@ -33,9 +38,9 @@ Install an available update from GitHub release assets:
 kata update
 ```
 
-`kata update` verifies signed update metadata before replacing the installed
-binary. Installing with `go install` remains supported, and building from a
-clone is still useful for development builds.
+`kata update` verifies the downloaded archive against `SHA256SUMS` before
+replacing the installed binary. Installing with `go install` remains supported,
+and building from a clone is still useful for development builds.
 
 ## Install with `go install`
 

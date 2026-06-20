@@ -264,9 +264,9 @@ func TestUpdate_DefaultClientConfiguration(t *testing.T) {
 	assert.Equal(t, "kata", got.BinaryName)
 	assert.Equal(t, "v0.4.0", got.CurrentVersion)
 	assert.Equal(t, filepath.Join(home, "cache", "update"), got.CacheDir)
-	assert.False(t, got.AllowUnsignedChecksums)
-	assert.True(t, got.RequireSignature)
-	assert.Len(t, got.TrustedPublicKeys, 1)
+	assert.True(t, got.AllowUnsignedChecksums)
+	assert.False(t, got.RequireSignature)
+	assert.Empty(t, got.TrustedPublicKeys)
 }
 
 //nolint:revive // test helper keeps t first to match the surrounding helper style.
