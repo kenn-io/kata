@@ -135,6 +135,42 @@ test_changelog_fallback_includes_first_commit_without_tags() {
   assert_contains "$output" "feat: add task list" "fallback changelog commit"
 }
 
+test_changelog_defaults_to_deterministic_fallback() {
+  local repo="$tmp_root/changelog-default"
+  local fake_bin="$tmp_root/fake-bin"
+  init_repo "$repo"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/codex" <<'EOF'
+#!/usr/bin/env bash
+echo "AI changelog was invoked"
+EOF
+  chmod +x "$fake_bin/codex"
+
+  local output
+  output="$(run_in_repo "$repo" env PATH="$fake_bin:$PATH" "$repo_root/scripts/changelog.sh" NEXT -)"
+
+  assert_contains "$output" "### Changes" "default changelog heading"
+  assert_contains "$output" "feat: add task list" "default changelog commit"
+  assert_not_contains "$output" "AI changelog was invoked" "default changelog must not invoke agent"
+}
+
+test_changelog_allows_explicit_agent_opt_in() {
+  local repo="$tmp_root/changelog-agent"
+  local fake_bin="$tmp_root/fake-bin-agent"
+  init_repo "$repo"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/codex" <<'EOF'
+#!/usr/bin/env bash
+echo "AI changelog was invoked"
+EOF
+  chmod +x "$fake_bin/codex"
+
+  local output
+  output="$(run_in_repo "$repo" env PATH="$fake_bin:$PATH" CHANGELOG_AGENT=codex "$repo_root/scripts/changelog.sh" NEXT -)"
+
+  assert_contains "$output" "AI changelog was invoked" "explicit changelog agent"
+}
+
 test_release_creates_and_pushes_bare_semver_tag() {
   local repo="$tmp_root/release"
   local remote="$tmp_root/origin.git"
@@ -167,18 +203,21 @@ test_release_workflow_contract() {
   assert_file_not_contains "$workflow" "gh release create" "tag workflow must not publish releases"
   assert_file_not_contains "$workflow" 'kata_v${VERSION}' "workflow must not use v-prefixed archive names"
 
-  assert_file_contains "$publish_workflow" "workflow_run:" "publish workflow trigger"
-  assert_file_contains "$publish_workflow" 'workflows: ["Release"]' "publish workflow follows release build"
+  assert_file_contains "$publish_workflow" "workflow_dispatch:" "publish workflow manual trigger"
+  assert_file_contains "$publish_workflow" "tag:" "publish workflow tag input"
+  assert_file_not_contains "$publish_workflow" "workflow_run:" "publish workflow must not auto-publish tag builds"
+  assert_file_not_contains "$publish_workflow" "github.event.workflow_run" "publish workflow must not trust tag-triggered workflow events"
   assert_file_contains "$publish_workflow" "contents: write" "publish workflow release permission"
   assert_file_contains "$publish_workflow" "actions: read" "publish workflow artifact permission"
   assert_file_contains "$publish_workflow" "environment: release-signing" "publish workflow protected environment"
   assert_file_contains "$publish_workflow" "fetch-depth: 0" "publish workflow annotated tag checkout"
   assert_file_contains "$publish_workflow" "fetch-tags: true" "publish workflow tag fetching"
-  assert_file_contains "$publish_workflow" 'RUN_ID="${{ github.event.workflow_run.id }}"' "publish workflow run id"
-  assert_file_contains "$publish_workflow" 'HEAD_SHA="${{ github.event.workflow_run.head_sha }}"' "publish workflow head sha"
+  assert_file_contains "$publish_workflow" 'TAG_NAME="${{ inputs.tag }}"' "publish workflow tag input use"
   assert_file_contains "$publish_workflow" 'git rev-list -n1 "$TAG_NAME"' "publish workflow tag target lookup"
-  assert_file_contains "$publish_workflow" '[[ "$tag_sha" == "$HEAD_SHA" ]]' "publish workflow tag sha verification"
   assert_file_contains "$publish_workflow" 'git merge-base --is-ancestor "$tag_sha" origin/main' "publish workflow protected branch verification"
+  assert_file_contains "$publish_workflow" 'actions/workflows/release.yml/runs?event=push&status=completed&per_page=100' "publish workflow release build lookup"
+  assert_file_contains "$publish_workflow" '.head_branch == \"$TAG_NAME\"' "publish workflow build tag filter"
+  assert_file_contains "$publish_workflow" '.head_sha == \"$tag_sha\"' "publish workflow build sha filter"
   assert_file_contains "$publish_workflow" 'gh run download "$RUN_ID"' "publish workflow downloads build artifacts"
   assert_file_contains "$publish_workflow" 'sha256sum "${archives[@]}" > SHA256SUMS' "publish workflow aggregate checksums"
   assert_file_contains "$publish_workflow" "KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX" "publish workflow signing key secret"
@@ -197,6 +236,8 @@ test_release_rejects_v_prefixed_version
 test_release_rejects_non_semver_version
 test_release_refuses_dirty_worktree
 test_changelog_fallback_includes_first_commit_without_tags
+test_changelog_defaults_to_deterministic_fallback
+test_changelog_allows_explicit_agent_opt_in
 test_release_creates_and_pushes_bare_semver_tag
 test_release_workflow_contract
 

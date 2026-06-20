@@ -1,10 +1,12 @@
 name: Publish Release
 
 on:
-  workflow_run:
-    workflows: ["Release"]
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.5.0
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -13,7 +15,6 @@ permissions:
 jobs:
   publish:
     name: Sign and publish release
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: release-signing
     defaults:
@@ -35,30 +36,35 @@ jobs:
           cache: true
 
       - name: Resolve and verify release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          RUN_ID="${{ github.event.workflow_run.id }}"
-          HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
-          TAG_NAME="${{ github.event.workflow_run.head_branch }}"
+          TAG_NAME="${{ inputs.tag }}"
 
           git fetch --force --tags origin main:refs/remotes/origin/main
 
           if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            TAG_NAME="$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
-          fi
-          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Unable to resolve a release tag for workflow run $RUN_ID"
+            echo "Invalid release tag: $TAG_NAME"
+            echo "Expected format: vMAJOR.MINOR.PATCH"
             exit 1
           fi
 
           tag_sha="$(git rev-list -n1 "$TAG_NAME")"
-          [[ "$tag_sha" == "$HEAD_SHA" ]] || {
-            echo "Tag $TAG_NAME resolves to $tag_sha, but workflow built $HEAD_SHA"
-            exit 1
-          }
           git merge-base --is-ancestor "$tag_sha" origin/main || {
             echo "Refusing to sign $TAG_NAME because $tag_sha is not on origin/main"
             exit 1
           }
+
+          RUN_ID="$(
+            gh api \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?event=push&status=completed&per_page=100" \
+              --jq ".workflow_runs[] | select(.head_branch == \"$TAG_NAME\" and .head_sha == \"$tag_sha\" and .conclusion == \"success\") | .id" \
+              | head -n1
+          )"
+          if [[ -z "$RUN_ID" ]]; then
+            echo "No successful Release workflow run found for $TAG_NAME at $tag_sha"
+            exit 1
+          fi
 
           {
             echo "RUN_ID=$RUN_ID"

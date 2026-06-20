@@ -40,11 +40,7 @@ fallback_changelog() {
 
 agent="${CHANGELOG_AGENT:-}"
 if [[ -z "$agent" ]]; then
-  if command -v codex >/dev/null 2>&1; then
-    agent="codex"
-  else
-    agent="none"
-  fi
+  agent="none"
 fi
 
 if [[ "$agent" == "none" ]]; then

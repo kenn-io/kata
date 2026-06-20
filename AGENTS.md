@@ -13,6 +13,8 @@
   to preserve a real name in a user-facing operational command.
 - No Testing/Verification Sections in PRs: Do not include a testing plan, test plan, verification,
   or verified section in pull request descriptions.
+- No Unrequested GitHub Comments: Do not comment on GitHub issues or pull
+  requests unless the user explicitly instructs you to post a comment.
 
 ## Project management
 
