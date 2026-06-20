@@ -24,7 +24,11 @@ func TestMakeBuildBakesGitDescribeVersion(t *testing.T) {
 
 	root := repoRoot(t)
 	expected := strings.TrimSpace(commandOutput(t, root, "git", "describe", "--tags", "--always", "--dirty"))
+	expectedCommit := strings.TrimSpace(commandOutput(t, root, "git", "rev-parse", "--short=7", "HEAD"))
+	expectedBuilt := strings.TrimSpace(commandOutput(t, root, "git", "show", "-s", "--format=%cI", "HEAD"))
 	require.NotEmpty(t, expected)
+	require.NotEmpty(t, expectedCommit)
+	require.NotEmpty(t, expectedBuilt)
 
 	bin := filepath.Join(root, "kata")
 	preserveExistingFile(t, bin)
@@ -34,9 +38,13 @@ func TestMakeBuildBakesGitDescribeVersion(t *testing.T) {
 	out := commandOutput(t, root, bin, "--json", "version")
 	var got struct {
 		Version string `json:"version"`
+		Commit  string `json:"commit"`
+		Built   string `json:"built"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got), "version output: %s", out)
 	assert.Equal(t, expected, got.Version)
+	assert.Equal(t, expectedCommit, got.Commit)
+	assert.Equal(t, expectedBuilt, got.Built)
 }
 
 func TestMakeInstallBakesGitDescribeVersion(t *testing.T) {

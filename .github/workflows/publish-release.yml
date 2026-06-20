@@ -38,8 +38,9 @@ jobs:
       - name: Resolve and verify release tag
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          TAG_NAME="${{ inputs.tag }}"
+          TAG_NAME="$INPUT_TAG"
 
           git fetch --force --tags origin main:refs/remotes/origin/main
 
