@@ -1,0 +1,136 @@
+name: Publish Release
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Sign and publish release
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: release-signing
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve and verify release tag
+        run: |
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
+          TAG_NAME="${{ github.event.workflow_run.head_branch }}"
+
+          git fetch --force --tags origin main:refs/remotes/origin/main
+
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            TAG_NAME="$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          fi
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unable to resolve a release tag for workflow run $RUN_ID"
+            exit 1
+          fi
+
+          tag_sha="$(git rev-list -n1 "$TAG_NAME")"
+          [[ "$tag_sha" == "$HEAD_SHA" ]] || {
+            echo "Tag $TAG_NAME resolves to $tag_sha, but workflow built $HEAD_SHA"
+            exit 1
+          }
+          git merge-base --is-ancestor "$tag_sha" origin/main || {
+            echo "Refusing to sign $TAG_NAME because $tag_sha is not on origin/main"
+            exit 1
+          }
+
+          {
+            echo "RUN_ID=$RUN_ID"
+            echo "TAG_NAME=$TAG_NAME"
+            echo "VERSION=${TAG_NAME#v}"
+          } >>"$GITHUB_ENV"
+
+      - name: Download build archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir artifacts
+          mkdir -p release-assets
+          find artifacts -type f \( -name 'kata_*.tar.gz' -o -name 'kata_*.zip' \) -exec cp {} release-assets/ \;
+
+      - name: Prepare signed release assets
+        env:
+          KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX: ${{ secrets.KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX }}
+        run: |
+          cd release-assets
+          expected=(
+            "$(../scripts/release-archive-name.sh "$VERSION" linux amd64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" linux arm64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" darwin amd64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" darwin arm64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" windows amd64)"
+            "$(../scripts/release-archive-name.sh "$VERSION" windows arm64)"
+          )
+          for archive in "${expected[@]}"; do
+            test -f "$archive" || { echo "missing release archive: $archive"; ls -la; exit 1; }
+          done
+
+          archives=( *.tar.gz *.zip )
+          if [[ "${#archives[@]}" -ne "${#expected[@]}" ]]; then
+            echo "expected ${#expected[@]} release archives, found ${#archives[@]}"
+            ls -la
+            exit 1
+          fi
+          sha256sum "${archives[@]}" > SHA256SUMS
+          cat SHA256SUMS
+          cd ..
+
+          go run ./scripts/sign-release-checksums.go \
+            --owner kenn-io \
+            --repo kata \
+            --version "$TAG_NAME" \
+            --checksums release-assets/SHA256SUMS
+
+      - name: Read annotated tag notes
+        run: |
+          if [[ "$(git cat-file -t "$TAG_NAME")" == "tag" ]]; then
+            git tag -l --format='%(contents:body)' "$TAG_NAME" > release-assets/notes.md
+          else
+            : > release-assets/notes.md
+          fi
+
+          if [[ ! -s release-assets/notes.md ]]; then
+            {
+              echo "Release $TAG_NAME"
+              echo
+              echo "See the changelog for release details."
+            } > release-assets/notes.md
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release-assets
+          release_assets=()
+          for archive in *.tar.gz *.zip; do
+            release_assets+=("./$archive")
+          done
+          signatures=( ./*.sha256.sig )
+          gh release create "$TAG_NAME" "${release_assets[@]}" ./SHA256SUMS "${signatures[@]}" --notes-file notes.md --verify-tag
