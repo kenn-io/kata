@@ -19,8 +19,6 @@ type updateClient interface {
 	Install(context.Context, *selfupdate.Info, selfupdate.InstallOptions) error
 }
 
-const kataUpdatePublicKeyHex = "7399163277a9a74cc83ac617e3c516820b37775b498483f025e393c7f54e3d9e"
-
 var newSelfUpdateClient = func(current string) (updateClient, error) {
 	home, err := config.KataHome()
 	if err != nil {
