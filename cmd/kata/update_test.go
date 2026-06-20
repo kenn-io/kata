@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -155,6 +156,71 @@ func TestUpdateInstall_RefetchesCachedInfoBeforeInstall(t *testing.T) {
 	assert.Equal(t, []*selfupdate.Info{second}, fake.installed)
 }
 
+func TestUpdateInstall_JSONRequiresConfirmation(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+		AssetName:      "kata_0.5.0_linux_amd64.tar.gz",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, stderr, err := executeRootCaptureWithInput(t, context.Background(), "n\n", "--json", "update")
+
+	ce := requireCLIError(t, err, ExitConfirm)
+	assert.Equal(t, kindConfirm, ce.Kind)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Install kata update v0.4.0 -> v0.5.0?")
+	assert.Empty(t, fake.installed)
+}
+
+func TestUpdateInstall_JSONOutputAfterConfirmation(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+		AssetName:      "kata_0.5.0_linux_amd64.tar.gz",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, stderr, err := executeRootCaptureWithInput(t, context.Background(), "y\n", "--json", "update")
+
+	require.NoError(t, err)
+	assert.Contains(t, stderr, "Install kata update v0.4.0 -> v0.5.0?")
+	var got struct {
+		KataAPIVersion  int    `json:"kata_api_version"`
+		CurrentVersion  string `json:"current_version"`
+		LatestVersion   string `json:"latest_version"`
+		UpdateAvailable bool   `json:"update_available"`
+		Installed       bool   `json:"installed"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, 1, got.KataAPIVersion)
+	assert.Equal(t, "v0.4.0", got.CurrentVersion)
+	assert.Equal(t, "v0.5.0", got.LatestVersion)
+	assert.True(t, got.UpdateAvailable)
+	assert.True(t, got.Installed)
+	assert.Len(t, fake.installed, 1)
+}
+
+func TestUpdateInstall_AgentOutputAfterYes(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, stderr, err := executeRootCapture(t, context.Background(), "--agent", "update", "--yes")
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Equal(t, "OK update installed=true current=v0.4.0 latest=v0.5.0\n", stdout)
+}
+
 func TestUpdateInstall_WrapsInstallError(t *testing.T) {
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
@@ -198,5 +264,25 @@ func TestUpdate_DefaultClientConfiguration(t *testing.T) {
 	assert.Equal(t, "kata", got.BinaryName)
 	assert.Equal(t, "v0.4.0", got.CurrentVersion)
 	assert.Equal(t, filepath.Join(home, "cache", "update"), got.CacheDir)
-	assert.True(t, got.AllowUnsignedChecksums)
+	assert.False(t, got.AllowUnsignedChecksums)
+	assert.True(t, got.RequireSignature)
+	assert.Len(t, got.TrustedPublicKeys, 1)
+}
+
+//nolint:revive // test helper keeps t first to match the surrounding helper style.
+func executeRootCaptureWithInput(t *testing.T, ctx context.Context, stdin string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	resetFlags(t)
+	cmd := newRootCmd()
+	var so, se bytes.Buffer
+	cmd.SetOut(&so)
+	cmd.SetErr(&se)
+	cmd.SetIn(strings.NewReader(stdin))
+	cmd.SetArgs(args)
+	cmd.SetContext(ctx)
+	err = cmd.Execute()
+	if err != nil {
+		emitRootError(&se, cmd, args, err, runEEntered)
+	}
+	return so.String(), se.String(), err
 }

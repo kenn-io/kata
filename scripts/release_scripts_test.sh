@@ -163,9 +163,12 @@ test_release_workflow_contract() {
   assert_file_contains "$workflow" 'VERSION="${TAG_NAME#v}"' "workflow bare version derivation"
   assert_file_contains "$workflow" 'scripts/release-archive-name.sh "$VERSION" "$GOOS" "$GOARCH"' "workflow archive naming"
   assert_file_contains "$workflow" 'sha256sum kata_* > SHA256SUMS' "workflow aggregate checksums"
+  assert_file_contains "$workflow" "KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX" "workflow signing key secret"
+  assert_file_contains "$workflow" "sign-release-checksums.go" "workflow checksum signature script"
+  assert_file_contains "$workflow" ".sha256.sig" "workflow signature assets"
   assert_file_contains "$workflow" "fetch-depth: 0" "workflow annotated tag checkout"
   assert_file_contains "$workflow" "fetch-tags: true" "workflow tag fetching"
-  assert_file_contains "$workflow" 'gh release create "$TAG_NAME" kata_* SHA256SUMS --notes-file notes.md' "workflow release create"
+  assert_file_contains "$workflow" 'gh release create "$TAG_NAME" ./kata_* ./SHA256SUMS ./*.sha256.sig --notes-file notes.md' "workflow release create"
   assert_file_not_contains "$workflow" 'kata_v${VERSION}' "workflow must not use v-prefixed archive names"
 
   local release_create_count

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -19,18 +21,25 @@ type updateClient interface {
 	Install(context.Context, *selfupdate.Info, selfupdate.InstallOptions) error
 }
 
+const kataUpdatePublicKeyHex = "7399163277a9a74cc83ac617e3c516820b37775b498483f025e393c7f54e3d9e"
+
 var newSelfUpdateClient = func(current string) (updateClient, error) {
 	home, err := config.KataHome()
 	if err != nil {
 		return nil, err
 	}
+	trustedKeys, err := trustedUpdatePublicKeys()
+	if err != nil {
+		return nil, err
+	}
 	return selfupdate.Client{
-		Owner:                  "kenn-io",
-		Repo:                   "kata",
-		BinaryName:             "kata",
-		CurrentVersion:         current,
-		CacheDir:               filepath.Join(home, "cache", "update"),
-		AllowUnsignedChecksums: true,
+		Owner:             "kenn-io",
+		Repo:              "kata",
+		BinaryName:        "kata",
+		CurrentVersion:    current,
+		CacheDir:          filepath.Join(home, "cache", "update"),
+		TrustedPublicKeys: trustedKeys,
+		RequireSignature:  true,
 	}, nil
 }
 
@@ -72,7 +81,7 @@ func newUpdateCmd() *cobra.Command {
 					return printUpdateResult(cmd, nil)
 				}
 			}
-			if !yes && currentOutputMode() == outputHuman {
+			if !yes {
 				if err := confirmUpdate(cmd, info); err != nil {
 					return err
 				}
@@ -84,8 +93,7 @@ func newUpdateCmd() *cobra.Command {
 					ExitCode: ExitInternal,
 				}
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "installed kata %s\n", latestUpdateVersion(info))
-			return err
+			return printUpdateInstallResult(cmd, info)
 		},
 	}
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "check for updates without installing")
@@ -95,7 +103,7 @@ func newUpdateCmd() *cobra.Command {
 }
 
 func confirmUpdate(cmd *cobra.Command, info *selfupdate.Info) error {
-	out := cmd.OutOrStdout()
+	out := cmd.ErrOrStderr()
 	if _, err := fmt.Fprintf(out, "Install kata update %s -> %s? [y/N] ", currentUpdateVersion(info), latestUpdateVersion(info)); err != nil {
 		return err
 	}
@@ -110,6 +118,36 @@ func confirmUpdate(cmd *cobra.Command, info *selfupdate.Info) error {
 			Kind:     kindConfirm,
 			ExitCode: ExitConfirm,
 		}
+	}
+}
+
+func printUpdateInstallResult(cmd *cobra.Command, info *selfupdate.Info) error {
+	out := cmd.OutOrStdout()
+	current := currentUpdateVersion(info)
+	latest := latestUpdateVersion(info)
+	switch currentOutputMode() {
+	case outputAgent:
+		_, err := fmt.Fprintf(out, "OK update installed=true current=%s latest=%s\n",
+			agentValue(current), agentValue(latest))
+		return err
+	case outputJSON:
+		var buf bytes.Buffer
+		payload := map[string]any{
+			"current_version":  current,
+			"latest_version":   latest,
+			"update_available": true,
+			"installed":        true,
+			"asset_name":       info.AssetName,
+			"is_dev_build":     info.IsDevBuild,
+		}
+		if err := emitJSON(&buf, payload); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(out, buf.String())
+		return err
+	default:
+		_, err := fmt.Fprintf(out, "installed kata %s\n", latest)
+		return err
 	}
 }
 
@@ -167,4 +205,15 @@ func latestUpdateVersion(info *selfupdate.Info) string {
 		return info.LatestVersion
 	}
 	return ""
+}
+
+func trustedUpdatePublicKeys() ([]ed25519.PublicKey, error) {
+	key, err := hex.DecodeString(kataUpdatePublicKeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("decode update public key: %w", err)
+	}
+	if len(key) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("decode update public key: got %d bytes, want %d", len(key), ed25519.PublicKeySize)
+	}
+	return []ed25519.PublicKey{ed25519.PublicKey(key)}, nil
 }

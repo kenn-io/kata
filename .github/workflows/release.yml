@@ -120,7 +120,15 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Prepare release assets
+        env:
+          KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX: ${{ secrets.KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX }}
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG_NAME#v}"
@@ -144,6 +152,12 @@ jobs:
           done
           sha256sum kata_* > SHA256SUMS
           cat SHA256SUMS
+          cd ..
+          go run ./scripts/sign-release-checksums.go \
+            --owner kenn-io \
+            --repo kata \
+            --version "$TAG_NAME" \
+            --checksums artifacts/SHA256SUMS
 
       - name: Read annotated tag notes
         run: |
@@ -168,4 +182,4 @@ jobs:
         run: |
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           cd artifacts
-          gh release create "$TAG_NAME" kata_* SHA256SUMS --notes-file notes.md
+          gh release create "$TAG_NAME" ./kata_* ./SHA256SUMS ./*.sha256.sig --notes-file notes.md
