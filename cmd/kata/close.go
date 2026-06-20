@@ -40,6 +40,8 @@ the end. By default the daemon allows sibling close bursts when each
 close has valid evidence and a substantive message. Operators can enable
 stricter burst/prose throttling via
 [close.throttle] enabled = true in <KATA_HOME>/config.toml.
+Each successful CLI close prints a reminder that the close is a completion
+claim and that the message and evidence should be specific to the issue.
 
 If you have not completed and tested this work, do not close it.
 Instead, label and comment:

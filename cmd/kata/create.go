@@ -443,6 +443,12 @@ func printMutation(cmd *cobra.Command, bs []byte) error {
 	return printMutationWithApplied(cmd, bs, nil, "")
 }
 
+const closeReminderText = "closing asserts this issue is complete; verify the message and evidence are specific to this issue."
+
+func shouldPrintCloseReminder(verb string, changed bool) bool {
+	return verb == "close" && changed
+}
+
 // printMutationWithApplied formats a mutation response with an optional
 // synthetic changes block for the create path. applied is a fallback `changes`
 // block used when the wire response carries none (create path); nil elsewhere.
@@ -465,6 +471,7 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	verb := commandLeaf(cmd)
 	if mode == outputJSON {
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
@@ -478,7 +485,6 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 		if err := json.Unmarshal(bs, &m); err != nil {
 			return err
 		}
-		verb := commandLeaf(cmd)
 		includeChangedTrue := verb == "edit"
 		return printAgentMutationDecoded(cmd.OutOrStdout(), verb, m, includeChangedTrue, func(w io.Writer, m agentIssueMutation) error {
 			if m.Issue.ClosedReason != nil {
@@ -489,6 +495,11 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 			if verb == "close" {
 				for _, evidence := range agentEvidenceSummaries(m) {
 					if err := writeAgentField(w, "Evidence", agentValue(evidence)); err != nil {
+						return err
+					}
+				}
+				if shouldPrintCloseReminder(verb, m.Changed) {
+					if err := writeAgentField(w, "Reminder", agentValue(closeReminderText)); err != nil {
 						return err
 					}
 				}
@@ -529,8 +540,14 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(cmd.OutOrStdout())
-	return err
+	if _, err := fmt.Fprintln(cmd.OutOrStdout()); err != nil {
+		return err
+	}
+	if shouldPrintCloseReminder(verb, changed) {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Reminder: %s\n", closeReminderText)
+		return err
+	}
+	return nil
 }
 
 // mutationChanges mirrors the wire `changes` block produced by `kata edit`

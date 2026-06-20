@@ -19,9 +19,11 @@ func TestCloseReopen_RoundTrip(t *testing.T) {
 		"--reason", "wontfix",
 		"--message", "Decided not to fix this; it doesn't match the current product direction.")
 	assert.Contains(t, out, "closed")
+	assert.Contains(t, out, "Reminder:")
 
 	out = runCLI(t, env, dir, "reopen", ref)
 	assert.Contains(t, out, "open")
+	assert.NotContains(t, out, "Reminder:")
 }
 
 func TestClose_AgentOutput(t *testing.T) {
@@ -36,6 +38,7 @@ func TestClose_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Status: closed")
 	assert.Contains(t, out, "Reason: done")
 	assert.Contains(t, out, "Evidence: commit:abc1234")
+	assert.Contains(t, out, "Reminder:")
 }
 
 func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
@@ -49,6 +52,7 @@ func TestClose_AgentDryRunSuppressesHumanBanner(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Regexp(t, `(?m)^OK close \S+`, stdout)
+	assert.NotContains(t, stdout, "Reminder:")
 	assert.Empty(t, stderr)
 }
 
