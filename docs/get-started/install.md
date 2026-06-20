@@ -7,9 +7,35 @@ daemon it starts itself, and it stores data locally in SQLite.
 
 Install Go 1.26 or later from <https://go.dev/dl/>.
 
-GitHub release binaries are available starting with `v0.5.0`. Installing with
-`go install` remains supported, and building from a clone is still useful for
-development builds.
+GitHub release binaries are available starting with `v0.5.0`. The recommended
+path for most users is the release installer:
+
+```sh
+curl -fsSL https://katatracker.com/install.sh | bash
+```
+
+The installer detects your OS and CPU architecture and downloads the latest
+archive from [GitHub releases](https://github.com/kenn-io/kata/releases).
+The installer verifies the downloaded archive against `SHA256SUMS` before installing it.
+It places `kata` in `/usr/local/bin` or `~/.local/bin`. Review
+the installer at <https://katatracker.com/install.sh> before running it if you
+prefer.
+
+After installing a release build, check for newer signed releases:
+
+```sh
+kata update --check
+```
+
+Install an available update from GitHub release assets:
+
+```sh
+kata update
+```
+
+`kata update` verifies signed update metadata before replacing the installed
+binary. Installing with `go install` remains supported, and building from a
+clone is still useful for development builds.
 
 ## Install with `go install`
 
@@ -28,23 +54,11 @@ kata version
 kata --help
 ```
 
-## Install from a release
+## Install from a release manually
 
 Download the archive for your platform from the
 [GitHub releases](https://github.com/kenn-io/kata/releases) page, extract it,
 and place the `kata` binary on `PATH`.
-
-After installing a release build, check for newer releases:
-
-```sh
-kata update --check
-```
-
-Install an available release from GitHub release assets:
-
-```sh
-kata update
-```
 
 ## Build from a clone
 

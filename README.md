@@ -18,7 +18,8 @@ contracts and UI details may still change before a stable release.
 ## Quick start
 
 ```sh
-go install go.kenn.io/kata/cmd/kata@latest   # or see Install below
+curl -fsSL https://katatracker.com/install.sh | bash
+# or: go install go.kenn.io/kata/cmd/kata@latest
 
 cd your-repo
 kata init                                    # bind this workspace to a kata project
@@ -93,18 +94,27 @@ into a kata project.
 ## Install
 
 kata is a single Go binary with no runtime dependencies, and builds on macOS,
-Linux, and Windows. It needs **Go 1.26 or later**. Pre-built binaries are not
-published yet.
+Linux, and Windows. Install the latest release binary:
+
+```sh
+curl -fsSL https://katatracker.com/install.sh | bash
+```
+
+The installer downloads the latest GitHub release archive for your platform and
+verifies it against `SHA256SUMS` before installing. Release builds can update
+themselves with `kata update`.
+
+If you prefer to install from source, kata needs **Go 1.26 or later**:
 
 ```sh
 go install go.kenn.io/kata/cmd/kata@latest
 ```
 
-Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin` (often
-`~/go/bin`); put that directory on your `PATH`. To build from a clone, run
-`make install` (it defaults to `~/.local/bin`). See
-[Install](docs/get-started/install.md) for build-from-source and Windows
-steps.
+Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin`
+(often `~/go/bin`); put that directory on your `PATH`. To build from a clone,
+run `make install` (it defaults to `~/.local/bin`). See
+[Install](docs/get-started/install.md) for manual release downloads,
+build-from-source, and Windows steps.
 
 ## Documentation
 

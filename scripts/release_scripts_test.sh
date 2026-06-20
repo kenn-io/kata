@@ -171,6 +171,35 @@ EOF
   assert_contains "$output" "AI changelog was invoked" "explicit changelog agent"
 }
 
+test_binary_install_script_contract() {
+  local installer="$repo_root/scripts/install.sh"
+  [[ -f "$installer" ]] || fail "binary install script is missing"
+
+  assert_file_contains "$installer" 'REPO="kenn-io/kata"' "installer repository"
+  assert_file_contains "$installer" 'BINARY_NAME="kata"' "installer binary name"
+  assert_file_contains "$installer" 'https://github.com/${REPO}/releases/latest' "installer latest release discovery"
+  assert_file_contains "$installer" 'filename="${BINARY_NAME}_${version#v}_${platform}.tar.gz"' "installer tar asset name"
+  assert_file_contains "$installer" 'filename="${BINARY_NAME}_${version#v}_${platform}.zip"' "installer windows asset name"
+  assert_file_contains "$installer" 'download "${base_url}/SHA256SUMS"' "installer checksum download"
+  assert_file_contains "$installer" 'verify_checksum "$archive_path" "$tmpdir/SHA256SUMS" "$filename"' "installer checksum verification"
+  assert_file_contains "$installer" 'KATA_SKIP_CHECKSUM=1' "installer checksum bypass escape hatch"
+  assert_file_contains "$installer" 'kata update --check' "installer update follow-up"
+  assert_file_contains "$installer" 'if [[ "${BASH_SOURCE[0]-}" == "${0}" || -z "${BASH_SOURCE[0]-}" ]]; then' "installer source guard"
+}
+
+test_install_redirect_and_docs_contract() {
+  local vercel="$repo_root/docs/vercel.json"
+  [[ -f "$vercel" ]] || fail "docs vercel config is missing"
+
+  assert_file_contains "$vercel" '"source": "/install.sh"' "vercel install redirect source"
+  assert_file_contains "$vercel" '"destination": "https://raw.githubusercontent.com/kenn-io/kata/main/scripts/install.sh"' "vercel install redirect destination"
+  assert_file_contains "$vercel" '"permanent": false' "vercel install redirect permanence"
+  assert_file_contains "$repo_root/docs/get-started/install.md" 'curl -fsSL https://katatracker.com/install.sh | bash' "install docs curl path"
+  assert_file_contains "$repo_root/docs/get-started/install.md" 'The installer verifies the downloaded archive against `SHA256SUMS` before installing it.' "install docs checksum explanation"
+  assert_file_contains "$repo_root/README.md" 'curl -fsSL https://katatracker.com/install.sh | bash' "README curl path"
+  assert_file_not_contains "$repo_root/README.md" 'Pre-built binaries are not published yet.' "README stale binary wording"
+}
+
 test_release_creates_and_pushes_bare_semver_tag() {
   local repo="$tmp_root/release"
   local remote="$tmp_root/origin.git"
@@ -238,6 +267,8 @@ test_release_refuses_dirty_worktree
 test_changelog_fallback_includes_first_commit_without_tags
 test_changelog_defaults_to_deterministic_fallback
 test_changelog_allows_explicit_agent_opt_in
+test_binary_install_script_contract
+test_install_redirect_and_docs_contract
 test_release_creates_and_pushes_bare_semver_tag
 test_release_workflow_contract
 
