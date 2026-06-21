@@ -263,6 +263,20 @@ test_release_workflow_contract() {
   [[ "$release_create_count" == "1" ]] || fail "workflows should create the GitHub release exactly once, found $release_create_count"
 }
 
+test_review_guidelines_release_contract() {
+  local config="$repo_root/.roborev.toml"
+  [[ -f "$config" ]] || fail "roborev config is missing"
+
+  assert_file_contains "$config" "## Release review posture" "roborev release guideline heading"
+  assert_file_contains "$config" "Signed update metadata is future work" "roborev unsigned checksum guidance"
+  assert_file_contains "$config" "finding solely because release assets use" "roborev checksum-only release guidance"
+  assert_file_contains "$config" '`SHA256SUMS` without detached' "roborev checksum-only release guidance"
+  assert_file_contains "$config" "Do not infer missing tag protection from the" "roborev tag protection guidance"
+  assert_file_contains "$config" "workflow diff alone" "roborev tag protection guidance"
+  assert_file_contains "$config" "A visible release during an in-progress or failed" "roborev empty release guidance"
+  assert_file_contains "$config" "GoReleaser run is an operational cleanup issue" "roborev empty release guidance"
+}
+
 test_release_rejects_missing_version
 test_release_rejects_v_prefixed_version
 test_release_rejects_non_semver_version
@@ -274,5 +288,6 @@ test_binary_install_script_contract
 test_install_redirect_and_docs_contract
 test_release_creates_and_pushes_bare_semver_tag
 test_release_workflow_contract
+test_review_guidelines_release_contract
 
 printf 'release script tests passed\n'
