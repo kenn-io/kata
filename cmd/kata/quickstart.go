@@ -54,6 +54,10 @@ Use kata as the shared issue ledger for this workspace.
    Use --json only when your script needs complete structured data, for
    example when piping into jq.
 
+   Use kata for real repository work only.
+   Do not create practice, tutorial, example, or scratchpad issues unless the user explicitly asks for them.
+   If the work belongs to another repository or project, use that project.
+
 3. Search before creating:
 
    kata search "login race" --agent
@@ -153,6 +157,7 @@ a local daemon.
 `
 
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
+Do not create practice, tutorial, example, or scratchpad issues.
 Search before creating or updating work.
 Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.

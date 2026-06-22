@@ -14,17 +14,29 @@ import (
 
 func newCommentCmd() *cobra.Command {
 	var src BodySources
+	var unsupportedRelationships commentRelationshipFlags
 	cmd := &cobra.Command{
 		Use:   "comment <issue-ref>",
 		Short: "append a comment to an issue",
 		Args:  cobra.ExactArgs(1),
 	}
-	cmd.Flags().StringVar(&src.Body, "body", "", "comment body")
+	cmd.Flags().StringVarP(&src.Body, "body", "m", "", "comment body")
 	cmd.Flags().StringVar(&src.File, "body-file", "", "read body from file")
 	cmd.Flags().BoolVar(&src.Stdin, "body-stdin", false, "read body from stdin")
+	cmd.Flags().StringVar(&unsupportedRelationships.Parent, "parent", "", "unsupported on comment; use edit")
+	cmd.Flags().StringVar(&unsupportedRelationships.Blocks, "blocks", "", "unsupported on comment; use edit")
+	cmd.Flags().StringVar(&unsupportedRelationships.BlockedBy, "blocked-by", "", "unsupported on comment; use edit")
+	cmd.Flags().StringVar(&unsupportedRelationships.Related, "related", "", "unsupported on comment; use edit")
+	_ = cmd.Flags().MarkHidden("parent")
+	_ = cmd.Flags().MarkHidden("blocks")
+	_ = cmd.Flags().MarkHidden("blocked-by")
+	_ = cmd.Flags().MarkHidden("related")
 
 	// RunE is set after flag registration so we can reference cmd.Flags().Changed.
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := unsupportedRelationships.err(cmd, args[0]); err != nil {
+			return err
+		}
 		src.BodySet = cmd.Flags().Changed("body")
 		src.FileSet = cmd.Flags().Changed("body-file")
 
@@ -77,4 +89,40 @@ func newCommentCmd() *cobra.Command {
 		return nil
 	}
 	return cmd
+}
+
+type commentRelationshipFlags struct {
+	Parent    string
+	Blocks    string
+	BlockedBy string
+	Related   string
+}
+
+func (f commentRelationshipFlags) err(cmd *cobra.Command, issueRef string) error {
+	for _, rel := range []struct {
+		flag  string
+		value string
+	}{
+		{flag: "parent", value: f.Parent},
+		{flag: "blocks", value: f.Blocks},
+		{flag: "blocked-by", value: f.BlockedBy},
+		{flag: "related", value: f.Related},
+	} {
+		if !cmd.Flags().Changed(rel.flag) {
+			continue
+		}
+		target := rel.value
+		if strings.TrimSpace(target) == "" {
+			target = "<target-ref>"
+		}
+		return &cliError{
+			Message: fmt.Sprintf(
+				"kata comment does not support --%s; use `kata edit %s --%s %s --comment \"...\"`",
+				rel.flag, issueRef, rel.flag, target,
+			),
+			Kind:     kindUsage,
+			ExitCode: ExitUsage,
+		}
+	}
+	return nil
 }

@@ -14,6 +14,7 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	out := string(executeRoot(t, newQuickstartCmd()))
 	assert.Contains(t, out, "kata agent quickstart")
 	assert.Contains(t, out, "Search before creating")
+	assert.Contains(t, out, "Do not create practice, tutorial, example, or scratchpad issues")
 	assert.Contains(t, out, "Do not run delete or purge")
 	assert.Contains(t, out, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, out, "Use --json only when your script needs complete structured data")
@@ -58,6 +59,7 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.NotContains(t, out, "Remote daemon")
 	assert.Contains(t, out, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, out, "Use --json only when your script needs complete structured data.")
+	assert.Contains(t, out, "Do not create practice, tutorial, example, or scratchpad issues.")
 	assert.Contains(t, out, "Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.")
 }
 
