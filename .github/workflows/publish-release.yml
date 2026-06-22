@@ -1,19 +1,21 @@
 name: Publish Release
 
 on:
-  workflow_run:
-    workflows:
-      - Release
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.5.0.
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   publish:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
@@ -23,28 +25,9 @@ jobs:
       - name: Resolve and verify release tag
         id: validate
         env:
-          EXPECTED_TAG_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          git fetch --force --tags origin \
-            '+refs/heads/main:refs/remotes/origin/main'
-
-          matches=()
-          while IFS= read -r tag_name; do
-            [[ "$tag_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-            tag_sha="$(git rev-parse -q --verify "${tag_name}^{commit}")"
-            if [[ "$tag_sha" == "$EXPECTED_TAG_SHA" ]]; then
-              matches+=("$tag_name")
-            fi
-          done < <(git for-each-ref refs/tags --format='%(refname:short)')
-
-          if [[ "${#matches[@]}" -ne 1 ]]; then
-            printf 'expected exactly one semver tag at workflow SHA %s, found %s\n' \
-              "$EXPECTED_TAG_SHA" "${#matches[@]}" >&2
-            printf '%s\n' "${matches[@]}" >&2
-            exit 1
-          fi
-
-          scripts/verify-release-tag.sh "${matches[0]}"
+          scripts/verify-release-tag.sh "$INPUT_TAG"
 
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
@@ -52,11 +35,27 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Re-verify release tag
+      - name: Re-verify release tag before publish
         env:
           TAG_NAME: ${{ steps.validate.outputs.tag_name }}
-          EXPECTED_TAG_SHA: ${{ steps.validate.outputs.tag_sha }}
-        run: scripts/verify-release-tag.sh "$TAG_NAME"
+          TAG_SHA: ${{ steps.validate.outputs.tag_sha }}
+        run: |
+          git fetch --force --tags origin \
+            "+refs/tags/${TAG_NAME}:refs/tags/${TAG_NAME}" \
+            '+refs/heads/main:refs/remotes/origin/main'
+
+          current_sha="$(git rev-parse -q --verify "${TAG_NAME}^{commit}")"
+          if [[ "$current_sha" != "$TAG_SHA" ]]; then
+            printf 'Release tag %s moved from %s to %s before publish\n' \
+              "$TAG_NAME" "$TAG_SHA" "$current_sha" >&2
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+            printf 'Release tag %s commit %s is not contained in origin/main\n' \
+              "$TAG_NAME" "$TAG_SHA" >&2
+            exit 1
+          fi
 
       - name: Create GitHub release
         env:
