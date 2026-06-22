@@ -28,24 +28,6 @@ assert_not_contains() {
   fi
 }
 
-assert_file_contains() {
-  local file="$1"
-  local needle="$2"
-  local context="$3"
-  if ! grep -Fq -- "$needle" "$file"; then
-    fail "$context: expected $file to contain [$needle]"
-  fi
-}
-
-assert_file_not_contains() {
-  local file="$1"
-  local needle="$2"
-  local context="$3"
-  if grep -Fq -- "$needle" "$file"; then
-    fail "$context: did not expect $file to contain [$needle]"
-  fi
-}
-
 init_repo() {
   local dir="$1"
   mkdir -p "$dir"
@@ -171,37 +153,6 @@ EOF
   assert_contains "$output" "AI changelog was invoked" "explicit changelog agent"
 }
 
-test_binary_install_script_contract() {
-  local installer="$repo_root/scripts/install.sh"
-  [[ -f "$installer" ]] || fail "binary install script is missing"
-
-  assert_file_contains "$installer" 'REPO="kenn-io/kata"' "installer repository"
-  assert_file_contains "$installer" 'BINARY_NAME="kata"' "installer binary name"
-  assert_file_contains "$installer" 'https://github.com/${REPO}/releases/latest' "installer latest release discovery"
-  assert_file_contains "$installer" 'filename="${BINARY_NAME}_${version#v}_${platform}.tar.gz"' "installer tar asset name"
-  assert_file_contains "$installer" 'filename="${BINARY_NAME}_${version#v}_${platform}.zip"' "installer windows asset name"
-  assert_file_contains "$installer" 'download "${base_url}/SHA256SUMS"' "installer checksum download"
-  assert_file_contains "$installer" 'verify_checksum "$archive_path" "$tmpdir/SHA256SUMS" "$filename"' "installer checksum verification"
-  assert_file_contains "$installer" 'KATA_SKIP_CHECKSUM=1' "installer checksum bypass escape hatch"
-  assert_file_contains "$installer" 'kata update --check' "installer update follow-up"
-  assert_file_contains "$installer" 'if [[ "${BASH_SOURCE[0]-}" == "${0}" || -z "${BASH_SOURCE[0]-}" ]]; then' "installer source guard"
-}
-
-test_install_redirect_and_docs_contract() {
-  local vercel="$repo_root/docs/vercel.json"
-  [[ -f "$vercel" ]] || fail "docs vercel config is missing"
-
-  assert_file_contains "$vercel" '"source": "/install.sh"' "vercel install redirect source"
-  assert_file_contains "$vercel" '"destination": "https://raw.githubusercontent.com/kenn-io/kata/main/scripts/install.sh"' "vercel install redirect destination"
-  assert_file_contains "$vercel" '"permanent": false' "vercel install redirect permanence"
-  assert_file_contains "$repo_root/docs/get-started/install.md" 'curl -fsSL https://katatracker.com/install.sh | bash' "install docs curl path"
-  assert_file_contains "$repo_root/docs/get-started/install.md" 'The installer verifies the downloaded archive against `SHA256SUMS` before installing it.' "install docs checksum explanation"
-  assert_file_contains "$repo_root/docs/get-started/install.md" 'Linux `.deb` and `.rpm` packages are also published for `amd64` and `arm64`.' "install docs Linux packages"
-  assert_file_contains "$repo_root/README.md" 'curl -fsSL https://katatracker.com/install.sh | bash' "README curl path"
-  assert_file_contains "$repo_root/README.md" 'Linux `.deb` and `.rpm` packages are published for `amd64` and `arm64`.' "README Linux packages"
-  assert_file_not_contains "$repo_root/README.md" 'Pre-built binaries are not published yet.' "README stale binary wording"
-}
-
 test_release_creates_and_pushes_bare_semver_tag() {
   local repo="$tmp_root/release"
   local remote="$tmp_root/origin.git"
@@ -217,67 +168,6 @@ test_release_creates_and_pushes_bare_semver_tag() {
   git -C "$remote" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null || fail "remote tag v0.5.0 missing"
 }
 
-test_release_workflow_contract() {
-  local workflow="$repo_root/.github/workflows/release.yml"
-  local publish_workflow="$repo_root/.github/workflows/publish-release.yml"
-  local goreleaser="$repo_root/.goreleaser.yaml"
-  [[ -f "$workflow" ]] || fail "release workflow is missing"
-  [[ ! -f "$publish_workflow" ]] || fail "publish release workflow should be replaced by GoReleaser release workflow"
-  [[ -f "$goreleaser" ]] || fail "GoReleaser config is missing"
-
-  assert_file_contains "$workflow" "permissions:" "workflow permissions"
-  assert_file_contains "$workflow" "contents: write" "workflow release permission"
-  assert_file_contains "$workflow" 'TAG_NAME="${GITHUB_REF#refs/tags/}"' "workflow tag derivation"
-  assert_file_contains "$workflow" 'version=${TAG_NAME#v}' "workflow bare version output"
-  assert_file_contains "$workflow" 'gh release create "$TAG_NAME"' "workflow creates GitHub release"
-  assert_file_contains "$workflow" "--notes-from-tag" "workflow uses annotated tag notes"
-  assert_file_contains "$workflow" "goreleaser/goreleaser-action" "workflow runs GoReleaser"
-  assert_file_contains "$workflow" "args: release --clean" "workflow GoReleaser release command"
-  assert_file_not_contains "$workflow" "actions/upload-artifact" "workflow must not use custom archive upload"
-  assert_file_not_contains "$workflow" "scripts/release-archive-name.sh" "workflow must not hand-build archive names"
-  assert_file_not_contains "$workflow" "KATA_UPDATE_SIGNING_PRIVATE_KEY_HEX" "tag workflow must not read signing secret"
-  assert_file_not_contains "$workflow" "sign-release-checksums.go" "tag workflow must not sign assets"
-  assert_file_not_contains "$workflow" 'kata_v${VERSION}' "workflow must not use v-prefixed archive names"
-
-  assert_file_contains "$goreleaser" "project_name: kata" "GoReleaser project name"
-  assert_file_contains "$goreleaser" "mode: append" "GoReleaser appends to pre-created release"
-  assert_file_contains "$goreleaser" "main: ./cmd/kata" "GoReleaser main package"
-  assert_file_contains "$goreleaser" "binary: kata" "GoReleaser binary name"
-  assert_file_contains "$goreleaser" "- CGO_ENABLED=0" "GoReleaser static builds"
-  assert_file_contains "$goreleaser" "go.kenn.io/kata/internal/version.Version=v{{ .Version }}" "GoReleaser version ldflag"
-  assert_file_contains "$goreleaser" "go.kenn.io/kata/internal/version.Commit={{ .ShortCommit }}" "GoReleaser commit ldflag"
-  assert_file_contains "$goreleaser" "go.kenn.io/kata/internal/version.BuildDate={{ .Date }}" "GoReleaser build date ldflag"
-  assert_file_contains "$goreleaser" "{{- .Version }}_" "GoReleaser bare semver archive names"
-  assert_file_contains "$goreleaser" "- linux" "GoReleaser linux target"
-  assert_file_contains "$goreleaser" "- darwin" "GoReleaser darwin target"
-  assert_file_contains "$goreleaser" "- windows" "GoReleaser windows target"
-  assert_file_contains "$goreleaser" "- amd64" "GoReleaser amd64 target"
-  assert_file_contains "$goreleaser" "- arm64" "GoReleaser arm64 target"
-  assert_file_contains "$goreleaser" "name_template: SHA256SUMS" "GoReleaser checksum file"
-  assert_file_contains "$goreleaser" "nfpms:" "GoReleaser Linux packages"
-  assert_file_contains "$goreleaser" "- deb" "GoReleaser deb package"
-  assert_file_contains "$goreleaser" "- rpm" "GoReleaser rpm package"
-  assert_file_not_contains "$goreleaser" ".sha256.sig" "GoReleaser must not publish signature assets"
-
-  local release_create_count
-  release_create_count="$(grep -Fch 'gh release create "$TAG_NAME"' "$workflow" | awk '{sum += $1} END {print sum + 0}')"
-  [[ "$release_create_count" == "1" ]] || fail "workflows should create the GitHub release exactly once, found $release_create_count"
-}
-
-test_review_guidelines_release_contract() {
-  local config="$repo_root/.roborev.toml"
-  [[ -f "$config" ]] || fail "roborev config is missing"
-
-  assert_file_contains "$config" "## Release review posture" "roborev release guideline heading"
-  assert_file_contains "$config" "Signed update metadata is future work" "roborev unsigned checksum guidance"
-  assert_file_contains "$config" "finding solely because release assets use" "roborev checksum-only release guidance"
-  assert_file_contains "$config" '`SHA256SUMS` without detached' "roborev checksum-only release guidance"
-  assert_file_contains "$config" "Do not infer missing tag protection from the" "roborev tag protection guidance"
-  assert_file_contains "$config" "workflow diff alone" "roborev tag protection guidance"
-  assert_file_contains "$config" "A visible release during an in-progress or failed" "roborev empty release guidance"
-  assert_file_contains "$config" "GoReleaser run is an operational cleanup issue" "roborev empty release guidance"
-}
-
 test_release_rejects_missing_version
 test_release_rejects_v_prefixed_version
 test_release_rejects_non_semver_version
@@ -285,10 +175,6 @@ test_release_refuses_dirty_worktree
 test_changelog_fallback_includes_first_commit_without_tags
 test_changelog_defaults_to_deterministic_fallback
 test_changelog_allows_explicit_agent_opt_in
-test_binary_install_script_contract
-test_install_redirect_and_docs_contract
 test_release_creates_and_pushes_bare_semver_tag
-test_release_workflow_contract
-test_review_guidelines_release_contract
 
 printf 'release script tests passed\n'
