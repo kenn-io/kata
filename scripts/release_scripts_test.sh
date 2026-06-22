@@ -240,6 +240,7 @@ test_release_workflow_contract() {
   assert_file_not_contains "$workflow" 'kata_v${VERSION}' "workflow must not use v-prefixed archive names"
 
   assert_file_contains "$goreleaser" "project_name: kata" "GoReleaser project name"
+  assert_file_contains "$goreleaser" "mode: append" "GoReleaser appends to pre-created release"
   assert_file_contains "$goreleaser" "main: ./cmd/kata" "GoReleaser main package"
   assert_file_contains "$goreleaser" "binary: kata" "GoReleaser binary name"
   assert_file_contains "$goreleaser" "- CGO_ENABLED=0" "GoReleaser static builds"

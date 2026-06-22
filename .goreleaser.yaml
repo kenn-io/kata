@@ -6,7 +6,7 @@ changelog:
   disable: true
 
 release:
-  mode: keep-existing
+  mode: append
 
 builds:
   - id: kata
