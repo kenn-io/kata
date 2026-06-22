@@ -243,6 +243,38 @@ test_verify_release_tag_rejects_workflow_sha_mismatch() {
   assert_contains "$output" "does not match completed workflow SHA" "workflow SHA mismatch"
 }
 
+test_verify_release_tag_rejects_tag_moved_after_validation() {
+  local repo="$tmp_root/release-tag-moved"
+  local remote="$tmp_root/release-tag-moved.git"
+  init_repo "$repo"
+  git -C "$repo" branch -M main
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" push -q -u origin main
+  git -C "$repo" tag -a v0.5.0 -m "Release 0.5.0"
+  git -C "$repo" push -q origin v0.5.0
+  local validated_sha
+  validated_sha="$(git -C "$repo" rev-parse v0.5.0^{commit})"
+
+  run_in_repo "$repo" env EXPECTED_TAG_SHA="$validated_sha" "$repo_root/scripts/verify-release-tag.sh" v0.5.0 >/dev/null
+
+  printf 'moved tag\n' >"$repo/moved.txt"
+  git -C "$repo" add moved.txt
+  git -C "$repo" commit -q -m "feat: move release tag"
+  git -C "$repo" push -q origin main
+  git -C "$repo" tag -f -a v0.5.0 -m "Moved release 0.5.0"
+  git -C "$repo" push -q --force origin v0.5.0
+
+  local output status
+  set +e
+  output="$(run_in_repo "$repo" env EXPECTED_TAG_SHA="$validated_sha" "$repo_root/scripts/verify-release-tag.sh" v0.5.0 2>&1)"
+  status=$?
+  set -e
+
+  [[ $status -ne 0 ]] || fail "release tag verifier should reject a tag moved after validation"
+  assert_contains "$output" "does not match completed workflow SHA" "moved release tag"
+}
+
 test_install_checksum_cannot_be_skipped() {
   local dir="$tmp_root/install-checksum"
   mkdir -p "$dir"
@@ -276,6 +308,7 @@ test_release_creates_and_pushes_bare_semver_tag
 test_verify_release_tag_rejects_tag_outside_origin_main
 test_verify_release_tag_accepts_tag_on_origin_main
 test_verify_release_tag_rejects_workflow_sha_mismatch
+test_verify_release_tag_rejects_tag_moved_after_validation
 test_install_checksum_cannot_be_skipped
 
 printf 'release script tests passed\n'

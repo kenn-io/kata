@@ -48,9 +48,15 @@ jobs:
 
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
-          ref: ${{ steps.validate.outputs.tag_name }}
+          ref: ${{ steps.validate.outputs.tag_sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Re-verify release tag
+        env:
+          TAG_NAME: ${{ steps.validate.outputs.tag_name }}
+          EXPECTED_TAG_SHA: ${{ steps.validate.outputs.tag_sha }}
+        run: scripts/verify-release-tag.sh "$TAG_NAME"
 
       - name: Create GitHub release
         env:
