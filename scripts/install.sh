@@ -83,11 +83,6 @@ verify_checksum() {
   local checksums_file="$2"
   local filename="$3"
 
-  if [[ "${KATA_SKIP_CHECKSUM:-0}" == "1" ]]; then
-    warn "Checksum verification skipped (KATA_SKIP_CHECKSUM=1)"
-    return 0
-  fi
-
   local expected
   expected="$(awk -v f="$filename" '{gsub(/^\*/, "", $2); if ($2==f) {print $1; exit}}' "$checksums_file")"
   if [[ -z "$expected" ]]; then
@@ -100,7 +95,7 @@ verify_checksum() {
   elif command -v shasum >/dev/null 2>&1; then
     actual="$(shasum -a 256 "$file" | cut -d' ' -f1)"
   else
-    error "No sha256 tool available. Install coreutils or set KATA_SKIP_CHECKSUM=1 to bypass."
+    error "No sha256 tool available. Install coreutils and retry."
   fi
 
   if [[ "$expected" != "$actual" ]]; then
@@ -180,12 +175,8 @@ install_from_release() {
   info "Downloading ${filename}..."
   download "${base_url}/${filename}" "$archive_path"
 
-  if [[ "${KATA_SKIP_CHECKSUM:-0}" != "1" ]]; then
-    download "${base_url}/SHA256SUMS" "$tmpdir/SHA256SUMS"
-    verify_checksum "$archive_path" "$tmpdir/SHA256SUMS" "$filename"
-  else
-    warn "Checksum verification skipped (KATA_SKIP_CHECKSUM=1)"
-  fi
+  download "${base_url}/SHA256SUMS" "$tmpdir/SHA256SUMS"
+  verify_checksum "$archive_path" "$tmpdir/SHA256SUMS" "$filename"
 
   info "Extracting..."
   extract_archive "$os" "$archive_path" "$tmpdir"

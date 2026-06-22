@@ -1,0 +1,82 @@
+name: Publish Release
+
+on:
+  workflow_run:
+    workflows:
+      - Release
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and verify release tag
+        id: validate
+        env:
+          EXPECTED_TAG_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch --force --tags origin \
+            '+refs/heads/main:refs/remotes/origin/main'
+
+          matches=()
+          while IFS= read -r tag_name; do
+            [[ "$tag_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+            tag_sha="$(git rev-parse -q --verify "${tag_name}^{commit}")"
+            if [[ "$tag_sha" == "$EXPECTED_TAG_SHA" ]]; then
+              matches+=("$tag_name")
+            fi
+          done < <(git for-each-ref refs/tags --format='%(refname:short)')
+
+          if [[ "${#matches[@]}" -ne 1 ]]; then
+            printf 'expected exactly one semver tag at workflow SHA %s, found %s\n' \
+              "$EXPECTED_TAG_SHA" "${#matches[@]}" >&2
+            printf '%s\n' "${matches[@]}" >&2
+            exit 1
+          fi
+
+          scripts/verify-release-tag.sh "${matches[0]}"
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          ref: ${{ steps.validate.outputs.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.validate.outputs.tag_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists"
+            exit 0
+          fi
+
+          gh release create "$TAG_NAME" \
+            --verify-tag \
+            --title "$TAG_NAME" \
+            --notes-from-tag
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89  # v7.2.2
+        with:
+          distribution: goreleaser
+          version: v2.16.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

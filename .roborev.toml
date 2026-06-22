@@ -48,16 +48,18 @@ installer or updater, asset names that no longer match kit's default
 self-update contract, missing assets in a successful release, or code/docs
 that claim signed updates exist before signing is implemented.
 
-Semver tag-triggered publishing through the GoReleaser workflow is an accepted
-release shape for this repository. Do not infer missing tag protection from the
-workflow diff alone. It is valid to flag shell injection in tag handling,
-publishing from non-semver tags, or workflow changes that make it impossible
-to use protected tags / maintainer-controlled tag pushes.
+Semver tag pushes run a read-only Release validator. The write-capable
+GoReleaser publication path lives in the default-branch Publish Release
+workflow, which independently verifies that the completed workflow SHA matches
+exactly one semver tag and that the tag target is contained in `origin/main`.
+It is valid to flag shell injection in tag handling, publishing from non-semver
+tags, or changes that move release-write credentials back into tag-controlled
+workflow code.
 
-The release workflow may create the GitHub release before GoReleaser finishes
-uploading artifacts. A visible release during an in-progress or failed
+The Publish Release workflow may create the GitHub release before GoReleaser
+finishes uploading artifacts. A visible release during an in-progress or failed
 GoReleaser run is an operational cleanup issue, not a supply-chain
-vulnerability. It is valid to flag a successful release run that leaves the
+vulnerability. It is valid to flag a successful publish run that leaves the
 release without the expected archives, packages, or `SHA256SUMS`.
 
 ## Tailscale/private-overlay hostnames

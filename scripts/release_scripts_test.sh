@@ -168,6 +168,103 @@ test_release_creates_and_pushes_bare_semver_tag() {
   git -C "$remote" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null || fail "remote tag v0.5.0 missing"
 }
 
+test_verify_release_tag_rejects_tag_outside_origin_main() {
+  local repo="$tmp_root/release-tag-policy"
+  local remote="$tmp_root/release-tag-policy.git"
+  init_repo "$repo"
+  git -C "$repo" branch -M main
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" push -q -u origin main
+
+  git -C "$repo" switch -q -c unreviewed
+  printf 'unreviewed\n' >"$repo/unreviewed.txt"
+  git -C "$repo" add unreviewed.txt
+  git -C "$repo" commit -q -m "feat: unreviewed release code"
+  git -C "$repo" tag -a v0.5.0 -m "Release 0.5.0"
+
+  local output status
+  set +e
+  output="$(run_in_repo "$repo" "$repo_root/scripts/verify-release-tag.sh" v0.5.0 2>&1)"
+  status=$?
+  set -e
+
+  [[ $status -ne 0 ]] || fail "release tag verifier should reject tags outside origin/main"
+  assert_contains "$output" "not contained in origin/main" "unreviewed release tag"
+}
+
+test_verify_release_tag_accepts_tag_on_origin_main() {
+  local repo="$tmp_root/release-tag-valid"
+  local remote="$tmp_root/release-tag-valid.git"
+  local github_output="$tmp_root/release-tag-valid-output"
+  init_repo "$repo"
+  git -C "$repo" branch -M main
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" push -q -u origin main
+  git -C "$repo" tag -a v0.5.0 -m "Release 0.5.0"
+  git -C "$repo" push -q origin v0.5.0
+  local tag_sha
+  tag_sha="$(git -C "$repo" rev-parse v0.5.0^{commit})"
+
+  local output
+  output="$(run_in_repo "$repo" env GITHUB_OUTPUT="$github_output" EXPECTED_TAG_SHA="$tag_sha" "$repo_root/scripts/verify-release-tag.sh" v0.5.0)"
+
+  assert_contains "$output" "Release tag v0.5.0 verified" "valid release tag"
+  assert_contains "$(cat "$github_output")" "tag_name=v0.5.0" "valid release tag outputs"
+  assert_contains "$(cat "$github_output")" "version=0.5.0" "valid release tag outputs"
+  assert_contains "$(cat "$github_output")" "tag_sha=$tag_sha" "valid release tag outputs"
+}
+
+test_verify_release_tag_rejects_workflow_sha_mismatch() {
+  local repo="$tmp_root/release-tag-sha"
+  local remote="$tmp_root/release-tag-sha.git"
+  init_repo "$repo"
+  git -C "$repo" branch -M main
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" push -q -u origin main
+  git -C "$repo" tag -a v0.5.0 -m "Release 0.5.0"
+
+  printf 'next\n' >"$repo/next.txt"
+  git -C "$repo" add next.txt
+  git -C "$repo" commit -q -m "feat: next change"
+  git -C "$repo" push -q origin main
+  local wrong_sha
+  wrong_sha="$(git -C "$repo" rev-parse HEAD)"
+
+  local output status
+  set +e
+  output="$(run_in_repo "$repo" env EXPECTED_TAG_SHA="$wrong_sha" "$repo_root/scripts/verify-release-tag.sh" v0.5.0 2>&1)"
+  status=$?
+  set -e
+
+  [[ $status -ne 0 ]] || fail "release tag verifier should reject workflow SHA mismatch"
+  assert_contains "$output" "does not match completed workflow SHA" "workflow SHA mismatch"
+}
+
+test_install_checksum_cannot_be_skipped() {
+  local dir="$tmp_root/install-checksum"
+  mkdir -p "$dir"
+  printf 'archive payload\n' >"$dir/kata_0.5.0_linux_amd64.tar.gz"
+  printf '%s  %s\n' \
+    "0000000000000000000000000000000000000000000000000000000000000000" \
+    "kata_0.5.0_linux_amd64.tar.gz" >"$dir/SHA256SUMS"
+
+  local output status
+  set +e
+  output="$(KATA_SKIP_CHECKSUM=1 bash -c '
+    source "$1"
+    verify_checksum "$2" "$3" kata_0.5.0_linux_amd64.tar.gz
+  ' bash "$repo_root/scripts/install.sh" "$dir/kata_0.5.0_linux_amd64.tar.gz" "$dir/SHA256SUMS" 2>&1)"
+  status=$?
+  set -e
+
+  [[ $status -ne 0 ]] || fail "installer checksum verification should fail even when KATA_SKIP_CHECKSUM=1 is set"
+  assert_contains "$output" "Checksum verification failed" "installer checksum enforcement"
+  assert_not_contains "$output" "Checksum verification skipped" "installer checksum enforcement"
+}
+
 test_release_rejects_missing_version
 test_release_rejects_v_prefixed_version
 test_release_rejects_non_semver_version
@@ -176,5 +273,9 @@ test_changelog_fallback_includes_first_commit_without_tags
 test_changelog_defaults_to_deterministic_fallback
 test_changelog_allows_explicit_agent_opt_in
 test_release_creates_and_pushes_bare_semver_tag
+test_verify_release_tag_rejects_tag_outside_origin_main
+test_verify_release_tag_accepts_tag_on_origin_main
+test_verify_release_tag_rejects_workflow_sha_mismatch
+test_install_checksum_cannot_be_skipped
 
 printf 'release script tests passed\n'
