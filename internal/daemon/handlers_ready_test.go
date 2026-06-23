@@ -47,7 +47,7 @@ func TestReady_FiltersBlocked(t *testing.T) {
 
 func TestReady_RespectsLimit(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	for i := 0; i < 3; i++ {
 		createIssueViaHTTP(t, env, pid, "x")
 	}
@@ -58,7 +58,7 @@ func TestReady_RespectsLimit(t *testing.T) {
 
 func TestReady_UnownedAndOwnerMutuallyExclusive(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 
 	status, _ := env.Get(t, projectPath(pid)+"/ready?unowned=true&owner=alice")
 	assert.Equal(t, 400, status)
@@ -127,7 +127,7 @@ func TestReadyGlobal_ExcludesArchivedProjects(t *testing.T) {
 
 func TestReadyGlobal_LimitCapsTotalRows(t *testing.T) {
 	env := testenv.New(t)
-	pid1 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid1 := initLocalWorkspace(t, env, "kata")
 	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
 	for i := 0; i < 3; i++ {
 		createIssueViaHTTP(t, env, pid1, "p1")

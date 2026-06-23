@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -121,16 +122,13 @@ func issueShortIDFromCreate(t *testing.T, bs []byte) string {
 	return out.Issue.ShortID
 }
 
-// bootstrapProject spins up a fresh server + git workspace and runs `kata
-// init` against it, returning the handle and the project rowid. Used as a
-// shared setup for every issue handler test. Optional serverOptions are
-// forwarded to newServerWithGitWorkspace (e.g. to install a hooks sink).
+// bootstrapProject spins up a fresh server with a local workspace binding,
+// returning the handle and the project rowid. Used as a shared setup for
+// handler tests that need a project, not the project-init path itself. Tests
+// for git/init behavior should use newServerWithGitWorkspace directly.
 func bootstrapProject(t *testing.T, opts ...serverOption) (*httptestServerHandle, int64) {
 	t.Helper()
-	h := newServerWithGitWorkspace(t, "https://github.com/wesm/kata.git", opts...)
-	_, bs := postJSON(t, h.ts.(*httptest.Server), "/api/v1/projects", map[string]any{"start_path": h.dir})
-	var resp struct{ Project struct{ ID int64 } }
-	require.NoError(t, json.Unmarshal(bs, &resp))
+	h, projectID := newServerWithLocalWorkspace(t, "kata", opts...)
 	// Register the handle so issueURL can look up issue.short_id at request
 	// time without each test passing the handle in. Tests in this package
 	// don't run in parallel, so a single pointer is enough; t.Cleanup
@@ -141,7 +139,7 @@ func bootstrapProject(t *testing.T, opts ...serverOption) (*httptestServerHandle
 			currentHandleForIssueURL = nil
 		}
 	})
-	return h, resp.Project.ID
+	return h, projectID
 }
 
 // bootstrapProjectWithIssue runs bootstrapProject and additionally posts a
@@ -246,6 +244,25 @@ func newServerWithGitWorkspace(t *testing.T, originURL string, opts ...serverOpt
 	}
 	ts := startTestServer(t, cfg)
 	return &httptestServerHandle{ts: ts, dir: dir, db: d.db}
+}
+
+func newServerWithLocalWorkspace(
+	t *testing.T, projectName string, opts ...serverOption,
+) (*httptestServerHandle, int64) {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, config.WriteProjectConfig(dir, projectName))
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(context.Background(), projectName)
+	require.NoError(t, err)
+	_, err = d.db.AttachAlias(context.Background(), project.ID, "local://"+dir, "local")
+	require.NoError(t, err)
+	cfg := daemon.ServerConfig{DB: d.db, StartedAt: d.now}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	ts := startTestServer(t, cfg)
+	return &httptestServerHandle{ts: ts, dir: dir, db: d.db}, project.ID
 }
 
 // resolveProjectID posts /api/v1/projects/resolve for the given workspace dir
@@ -533,4 +550,15 @@ func seedProject(t *testing.T, env *testenv.Env, name string) db.Project {
 	p, err := env.DB.CreateProject(t.Context(), name)
 	require.NoError(t, err)
 	return p
+}
+
+func TestBootstrapProjectUsesFastLocalBinding(t *testing.T) {
+	h, projectID := bootstrapProject(t)
+	require.NotZero(t, projectID)
+	require.NoDirExists(t, filepath.Join(h.dir, ".git"))
+
+	aliases, err := h.DB().ProjectAliases(context.Background(), projectID)
+	require.NoError(t, err)
+	require.Len(t, aliases, 1)
+	require.Equal(t, "local", aliases[0].AliasKind)
 }

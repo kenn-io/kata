@@ -111,7 +111,7 @@ func fetchDigest(t *testing.T, env *testenv.Env, projectID int64, since, until s
 // digest then surfaces per-actor totals and per-issue action sequences.
 func TestDigest_AggregatesByActor(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 
 	// Alice creates two issues, comments on the first twice, closes it.
 	a := createIssueAs(t, env, pid, "alice", "first")
@@ -165,7 +165,7 @@ func TestDigest_AggregatesByActor(t *testing.T) {
 // TestDigest_ActorFilter only returns events for the named actors.
 func TestDigest_ActorFilter(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	_ = createIssueAs(t, env, pid, "alice", "x")
 	_ = createIssueAs(t, env, pid, "bob", "y")
 
@@ -183,7 +183,7 @@ func TestDigest_ActorFilter(t *testing.T) {
 // bug --owner alice --blocks 7` activity.
 func TestDigest_CountsCreateTimeLabelsOwnerLinks(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 
 	// Seed a target issue alice's later issue can block.
 	target := createIssueAs(t, env, pid, "alice", "target")
@@ -237,7 +237,7 @@ func TestDigest_CountsCreateTimeLabelsOwnerLinks(t *testing.T) {
 // reversed.
 func TestDigest_CreateTimeBlockedByEmitsBlockedByAction(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 
 	blocker := createIssueAs(t, env, pid, "alice", "blocker")
 	blockerShortID := shortIDOf(t, env, blocker)
@@ -274,7 +274,7 @@ func TestDigest_CreateTimeBlockedByEmitsBlockedByAction(t *testing.T) {
 // Y with unblocking.
 func TestDigest_BlockedByRemovedIsPlainUnlink(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 
 	blocker := createIssueAs(t, env, pid, "alice", "blocker")
 	child := createIssueAs(t, env, pid, "alice", "blocked")
@@ -306,7 +306,7 @@ func TestDigest_BlockedByRemovedIsPlainUnlink(t *testing.T) {
 // applyEvent rather than falling into the Other bucket.
 func TestDigest_PriorityEvents(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	n := createIssueAs(t, env, pid, "alice", "p3 issue")
 
 	prio := int64(0)
@@ -328,7 +328,7 @@ func TestDigest_PriorityEvents(t *testing.T) {
 // TestDigest_RejectsBadSince validates the since parameter.
 func TestDigest_RejectsBadSince(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	resp := envDoJSON(t, env, "GET", projectPath(pid)+"/digest?since=not-a-time", nil, nil)
 	assert.Equal(t, 400, resp.StatusCode)
 }
@@ -336,7 +336,7 @@ func TestDigest_RejectsBadSince(t *testing.T) {
 // TestDigest_GlobalEndpoint covers the cross-project route.
 func TestDigest_GlobalEndpoint(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	_ = createIssueAs(t, env, pid, "alice", "x")
 
 	var body struct {

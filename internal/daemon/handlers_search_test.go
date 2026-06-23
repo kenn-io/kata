@@ -11,7 +11,7 @@ import (
 
 func TestSearchEndpoint_ReturnsHitsWithScores(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	createIssueViaHTTP(t, env, pid, "fix login crash on Safari")
 	createIssueViaHTTP(t, env, pid, "unrelated")
 
@@ -27,7 +27,7 @@ func TestSearchEndpoint_ReturnsHitsWithScores(t *testing.T) {
 
 func TestSearchEndpoint_EmptyQueryIsValidationError(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 
 	resp, bs := envGetRaw(t, env, projectPath(pid)+"/search?q=")
 	assertAPIError(t, resp.StatusCode, bs, 400, "validation")
@@ -46,7 +46,7 @@ func TestSearchEndpoint_UnknownProjectIs404(t *testing.T) {
 // emit null and break clients that assume an array.
 func TestSearchEndpoint_EmptyResultsIsArrayNotNull(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 
 	resp, bs := envGetRaw(t, env, projectPath(pid)+"/search?q=zxqyq-no-such-token")
 	require.Equal(t, 200, resp.StatusCode)

@@ -1379,7 +1379,7 @@ func TestCreateIssue_WithInitialState(t *testing.T) {
 
 func TestCreateIssue_InitialLinkToMissingTargetIs404(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	resp, _ := envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
 		"actor": "tester", "title": "child",
 		"links": []map[string]any{{"type": "parent", "to_ref": "zzzz"}},
@@ -1407,7 +1407,7 @@ func TestCreateIssue_RejectsArchivedProject(t *testing.T) {
 
 func TestCreateIssue_InvalidLabelIs400(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	resp, _ := envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
 		"actor": "tester", "title": "x",
 		"labels": []string{"BadCase"},
@@ -1421,7 +1421,7 @@ func TestCreateIssue_InvalidLabelIs400(t *testing.T) {
 // catches this via ErrSelfLink and the handler must map it.
 func TestCreateIssue_InitialSelfLinkIs400(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	resp, _ := envDoRaw(t, env, http.MethodPost, projectPath(pid)+"/issues", map[string]any{
 		"actor": "tester", "title": "self",
 		"links": []map[string]any{{"type": "parent", "to_number": 1}},
@@ -1899,7 +1899,7 @@ func TestCreate_IdempotencyWinsOverForceNew(t *testing.T) {
 // can render label chips without an extra fetch per row.
 func TestListIssues_HydratesLabels(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	first := createIssueViaHTTP(t, env, pid, "first")
 	second := createIssueViaHTTP(t, env, pid, "second")
 	postLabel(t, env, pid, first, "prio-1")
@@ -1926,7 +1926,7 @@ func TestListIssues_HydratesLabels(t *testing.T) {
 
 func TestListIssues_IncludesHierarchyMetadata(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent")
 	child := createIssueViaHTTP(t, env, pid, "child")
 	postLink(t, env, pid, child, "parent", parent)
@@ -1961,7 +1961,7 @@ func TestListIssues_IncludesHierarchyMetadata(t *testing.T) {
 
 func TestListIssues_IncludesBlockerMetadata(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	project, err := env.DB.ProjectByID(t.Context(), pid)
 	require.NoError(t, err)
 	blocker := createIssueViaHTTP(t, env, pid, "blocker")
@@ -2144,7 +2144,7 @@ func TestShowIssue_IncludesLinksAndLabels(t *testing.T) {
 
 func TestShowIssue_IncludesParentAndChildren(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent")
 	child := createIssueViaHTTP(t, env, pid, "child")
 	grandchild := createIssueViaHTTP(t, env, pid, "grandchild")

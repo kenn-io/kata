@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -167,6 +170,25 @@ func initWorkspaceViaHTTP(t *testing.T, env *testenv.Env, origin string) int64 {
 	return out.Project.ID
 }
 
+// initLocalWorkspace seeds the project state that most daemon handler tests
+// need without paying for git process startup or exercising project init.
+func initLocalWorkspace(t *testing.T, env *testenv.Env, projectName string) int64 {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, config.WriteProjectConfig(dir, projectName))
+	project, err := env.DB.CreateProject(context.Background(), projectName)
+	require.NoError(t, err)
+	_, err = env.DB.AttachAlias(context.Background(), project.ID, "local://"+dir, "local")
+	require.NoError(t, err)
+	currentEnvForIssuePath = env
+	t.Cleanup(func() {
+		if currentEnvForIssuePath == env {
+			currentEnvForIssuePath = nil
+		}
+	})
+	return project.ID
+}
+
 // mustRun runs a command in dir, failing the test on error.
 func mustRun(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
@@ -178,7 +200,7 @@ func mustRun(t *testing.T, dir, name string, args ...string) {
 // setupOneIssue creates a workspace + one issue, returns (project_id, issue_number).
 func setupOneIssue(t *testing.T, env *testenv.Env) (int64, int64) {
 	t.Helper()
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	n := createIssueViaHTTP(t, env, pid, "x")
 	return pid, n
 }
@@ -186,7 +208,7 @@ func setupOneIssue(t *testing.T, env *testenv.Env) (int64, int64) {
 // setupTwoIssues creates a workspace + two issues, returns (project_id, a_number, b_number).
 func setupTwoIssues(t *testing.T, env *testenv.Env) (int64, int64, int64) {
 	t.Helper()
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	a := createIssueViaHTTP(t, env, pid, "a")
 	b := createIssueViaHTTP(t, env, pid, "b")
 	return pid, a, b
@@ -492,4 +514,16 @@ func deleteLinkBlocksAs(t *testing.T, env *testenv.Env, projectID, fromNumber in
 		"?actor=" + url.QueryEscape(actor)
 	resp := envDoJSON(t, env, http.MethodDelete, delPath, nil, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestSetupOneIssueUsesFastLocalBinding(t *testing.T) {
+	env := testenv.New(t)
+	pid, issueID := setupOneIssue(t, env)
+	require.NotZero(t, issueID)
+
+	aliases, err := env.DB.ProjectAliases(context.Background(), pid)
+	require.NoError(t, err)
+	require.Len(t, aliases, 1)
+	require.Equal(t, "local", aliases[0].AliasKind)
+	require.NoDirExists(t, filepath.Join(strings.TrimPrefix(aliases[0].AliasIdentity, "local://"), ".git"))
 }

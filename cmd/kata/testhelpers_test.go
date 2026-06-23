@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -187,6 +188,21 @@ func initBoundWorkspace(t *testing.T, baseURL, origin string) string {
 	runGit(t, dir, "remote", "add", "origin", origin)
 	postJSONOK(t, baseURL+"/api/v1/projects", map[string]string{"start_path": dir})
 	return dir
+}
+
+// initLocalBoundWorkspace creates a workspace binding without shelling out to
+// git or exercising the daemon init endpoint. Most CLI tests only need a
+// resolved project; init/git-specific tests should keep using initBoundWorkspace.
+func initLocalBoundWorkspace(t *testing.T, env *testenv.Env, projectName string) (string, int64) {
+	t.Helper()
+	ctx := context.Background()
+	dir := t.TempDir()
+	require.NoError(t, config.WriteProjectConfig(dir, projectName))
+	project, err := env.DB.CreateProject(ctx, projectName)
+	require.NoError(t, err)
+	_, err = env.DB.AttachAlias(ctx, project.ID, "local://"+dir, "local")
+	require.NoError(t, err)
+	return dir, project.ID
 }
 
 // resolvePIDViaHTTP calls POST /api/v1/projects/resolve with start_path and
@@ -409,8 +425,7 @@ func setupCLIWorkspaceOptions(t *testing.T, opts ...testenv.Option) (*testenv.En
 	t.Helper()
 	resetFlags(t)
 	env := testenv.New(t, opts...)
-	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
-	pid := resolvePIDViaHTTP(t, env.URL, dir)
+	dir, pid := initLocalBoundWorkspace(t, env, "kata")
 	return env, dir, pid
 }
 
@@ -443,7 +458,7 @@ func setupCLIEnv(t *testing.T) (*testenv.Env, string) {
 	t.Helper()
 	resetFlags(t)
 	env := testenv.New(t)
-	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
+	dir, _ := initLocalBoundWorkspace(t, env, "kata")
 	return env, dir
 }
 
@@ -637,4 +652,17 @@ func (a *asyncCLI) stop() {
 func fetchIssueViaHTTP(t *testing.T, env *testenv.Env, pid int64, ref string) IssueResponse {
 	t.Helper()
 	return getJSON[IssueResponse](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues/"+ref)
+}
+
+func TestSetupCLIWorkspaceUsesFastLocalBinding(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	require.NotZero(t, pid)
+
+	require.NoDirExists(t, filepath.Join(dir, ".git"))
+	cfg, err := config.ReadProjectConfig(dir)
+	require.NoError(t, err)
+	require.Equal(t, "kata", cfg.Project.Name)
+
+	out := runCLI(t, env, dir, "--quiet", "create", "fast fixture issue")
+	require.NotEmpty(t, out)
 }

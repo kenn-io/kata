@@ -104,7 +104,7 @@ func closeIssueWithEvidence(
 
 func TestParentCloseCompleteness_RefusesWhenOpenChildrenExist(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	child := createIssueViaHTTP(t, env, pid, "first child")
 	postLink(t, env, pid, child, "parent", parent)
@@ -121,7 +121,7 @@ func TestParentCloseCompleteness_RefusesWhenOpenChildrenExist(t *testing.T) {
 
 func TestParentCloseCompleteness_AllowsWhenChildrenClosed(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent")
 	child := createIssueViaHTTP(t, env, pid, "child")
 	postLink(t, env, pid, child, "parent", parent)
@@ -143,7 +143,7 @@ func TestParentCloseCompleteness_AllowsWhenChildrenClosed(t *testing.T) {
 
 func TestParentCloseCompleteness_TruncatesLongChildList(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent with many children")
 	// Create more children than the sample limit (10) so the suffix renders.
 	const totalChildren = 12
@@ -171,7 +171,7 @@ func TestParentCloseCompleteness_TruncatesLongChildList(t *testing.T) {
 
 func TestCloseDuplicateOf_RejectsMissingTarget(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	issue := createIssueViaHTTP(t, env, pid, "issue")
 
 	// Target #999 does not exist in this project.
@@ -186,7 +186,7 @@ func TestCloseDuplicateOf_RejectsMissingTarget(t *testing.T) {
 
 func TestCloseDuplicateOf_RejectsSelfTarget(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	issue := createIssueViaHTTP(t, env, pid, "issue")
 
 	resp, bs := closeIssueWithEvidence(t, env, pid, issue, "tester",
@@ -200,7 +200,7 @@ func TestCloseDuplicateOf_RejectsSelfTarget(t *testing.T) {
 
 func TestCloseSupersededBy_RejectsMissingTarget(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	issue := createIssueViaHTTP(t, env, pid, "issue")
 
 	resp, bs := closeIssueWithEvidence(t, env, pid, issue, "tester",
@@ -214,7 +214,7 @@ func TestCloseSupersededBy_RejectsMissingTarget(t *testing.T) {
 
 func TestCloseSupersededBy_RejectsSelfTarget(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	issue := createIssueViaHTTP(t, env, pid, "issue")
 
 	resp, bs := closeIssueWithEvidence(t, env, pid, issue, "tester",
@@ -228,7 +228,7 @@ func TestCloseSupersededBy_RejectsSelfTarget(t *testing.T) {
 
 func TestCloseDuplicateOf_AcceptsExistingTarget(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	other := createIssueViaHTTP(t, env, pid, "real target")
 	issue := createIssueViaHTTP(t, env, pid, "duplicate of the other")
 
@@ -241,7 +241,7 @@ func TestCloseDuplicateOf_AcceptsExistingTarget(t *testing.T) {
 
 func TestSiblingThrottle_DefaultAllowsBurstWithDistinctEvidence(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 5)
 	for i := 0; i < 5; i++ {
@@ -263,7 +263,7 @@ func TestSiblingThrottle_DefaultAllowsBurstWithDistinctEvidence(t *testing.T) {
 
 func TestSiblingThrottle_FourthCloseUnderSameParentRefusedWhenEnabled(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
 	for i := 0; i < 4; i++ {
@@ -423,7 +423,7 @@ func TestRepeatedMessageGuard_CountsCrossProjectSiblings(t *testing.T) {
 
 func TestSiblingThrottle_AllowsFourthCloseWhenOldestSiblingIsOutsideDefaultWindow(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
 	for i := 0; i < 4; i++ {
@@ -471,7 +471,7 @@ func TestSiblingThrottle_UsesConfiguredWindowInRefusal(t *testing.T) {
 	env := testenv.New(t,
 		testenv.WithCloseThrottleEnabled(),
 		testenv.WithCloseThrottleWindow(2*time.Minute))
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
 	for i := 0; i < 4; i++ {
@@ -498,7 +498,7 @@ func TestSiblingThrottle_UsesConfiguredWindowInRefusal(t *testing.T) {
 
 func TestSiblingThrottle_DifferentActorNotThrottled(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
 	for i := 0; i < 4; i++ {
@@ -528,7 +528,7 @@ func TestSiblingThrottle_DifferentActorNotThrottled(t *testing.T) {
 
 func TestSiblingThrottle_UnparentedIssuesNotThrottled(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	// Four issues with no parent link — the throttle only applies to siblings
 	// under a shared parent, so all four closes should succeed.
 	issues := make([]int64, 0, 4)
@@ -548,7 +548,7 @@ func TestSiblingThrottle_UnparentedIssuesNotThrottled(t *testing.T) {
 
 func TestRepeatedMessageGuard_RefusesIdenticalSiblingMessage(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	a := createIssueViaHTTP(t, env, pid, "child a")
 	b := createIssueViaHTTP(t, env, pid, "child b")
@@ -578,7 +578,7 @@ func TestRepeatedMessageGuard_RefusesIdenticalSiblingMessage(t *testing.T) {
 
 func TestClose_DefaultAllowsSiblingClosesWithSameCommitEvidence(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	a := createIssueViaHTTP(t, env, pid, "child a")
 	b := createIssueViaHTTP(t, env, pid, "child b")
@@ -601,7 +601,7 @@ func TestClose_DefaultAllowsSiblingClosesWithSameCommitEvidence(t *testing.T) {
 
 func TestRepeatedMessageGuard_SkipsForWontfix(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	a := createIssueViaHTTP(t, env, pid, "child a")
 	b := createIssueViaHTTP(t, env, pid, "child b")
@@ -623,7 +623,7 @@ func TestRepeatedMessageGuard_SkipsForWontfix(t *testing.T) {
 
 func TestRepeatedMessageGuard_SkipsForUnparentedIssues(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	// Two issues with no parent link — the rule applies only to siblings
 	// under a shared parent, so identical messages should be allowed.
 	a := createIssueViaHTTP(t, env, pid, "standalone a")
@@ -650,7 +650,7 @@ func TestRepeatedMessageGuard_SkipsForUnparentedIssues(t *testing.T) {
 // issues, not to block a legitimate re-close of one issue.
 func TestRepeatedMessageGuard_SkipsSelfAfterReopen(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	a := createIssueViaHTTP(t, env, pid, "child a")
 	postLink(t, env, pid, a, "parent", parent)
@@ -684,7 +684,7 @@ func TestRepeatedMessageGuard_SkipsSelfAfterReopen(t *testing.T) {
 // reopening one issue.
 func TestSiblingThrottle_SkipsSelfAfterReopen(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
 	for i := 0; i < 4; i++ {
@@ -733,7 +733,7 @@ func TestSiblingThrottle_SkipsSelfAfterReopen(t *testing.T) {
 // as duplicate_message, breaking the interactive close keystroke.
 func TestRepeatedMessageGuard_SkipsTUIBypassEmptyMessage(t *testing.T) {
 	env := testenv.New(t)
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	a := createIssueViaHTTP(t, env, pid, "child a")
 	b := createIssueViaHTTP(t, env, pid, "child b")
@@ -756,7 +756,7 @@ func TestRepeatedMessageGuard_SkipsTUIBypassEmptyMessage(t *testing.T) {
 
 func TestThrottle_EmitsCloseThrottledEvent_SiblingBurst(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
 	for i := 0; i < 4; i++ {
@@ -821,7 +821,7 @@ func TestThrottle_EmitsCloseThrottledEvent_SiblingBurst(t *testing.T) {
 
 func TestThrottle_EmitsCloseThrottledEvent_DuplicateMessage(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	a := createIssueViaHTTP(t, env, pid, "child a")
 	b := createIssueViaHTTP(t, env, pid, "child b")
@@ -871,7 +871,7 @@ func TestThrottle_EmitsCloseThrottledEvent_DuplicateMessage(t *testing.T) {
 
 func TestThrottle_DryRunDoesNotEmitEvent(t *testing.T) {
 	env := testenv.New(t, testenv.WithCloseThrottleEnabled())
-	pid := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/kata.git")
+	pid := initLocalWorkspace(t, env, "kata")
 	parent := createIssueViaHTTP(t, env, pid, "parent issue")
 	children := make([]int64, 0, 4)
 	for i := 0; i < 4; i++ {
