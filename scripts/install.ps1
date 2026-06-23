@@ -133,20 +133,47 @@ function Test-ReleaseAsset {
 function Resolve-ReleaseArch {
     param([string]$DetectedArch, [string]$Version)
 
-    $candidates = @($DetectedArch)
-    if ($DetectedArch -eq 'arm64') {
-        $candidates += 'amd64'
-    }
-
     $versionNum = $Version.TrimStart('v')
-    foreach ($candidate in $candidates) {
-        $name = "kata_${versionNum}_windows_${candidate}.zip"
-        $url = "https://github.com/$repo/releases/download/$Version/$name"
-        if (Test-ReleaseAsset $url) {
-            return $candidate
-        }
+    $name = "kata_${versionNum}_windows_${DetectedArch}.zip"
+    $url = "https://github.com/$repo/releases/download/$Version/$name"
+    if (Test-ReleaseAsset $url) {
+        return $DetectedArch
     }
     return $null
+}
+
+function Verify-Checksum {
+    param([string]$ArchivePath, [string]$ChecksumFile, [string]$ArchiveName)
+
+    $matchingLines = @()
+    foreach ($line in Get-Content $ChecksumFile) {
+        if ($line -match '^\s*$') { continue }
+        $parts = $line -split '\s+', 2
+        if ($parts.Count -lt 2) { continue }
+        $hash = $parts[0]
+        $filename = $parts[1]
+        $filename = $filename -replace '^[\*]', ''
+        $filename = $filename -replace '^\.\/', ''
+        $filename = $filename -replace '^\.\\', ''
+        if ($filename -eq $ArchiveName) {
+            $matchingLines += $hash
+        }
+    }
+
+    if ($matchingLines.Count -eq 0) {
+        throw "Could not find checksum for $ArchiveName in SHA256SUMS"
+    }
+
+    if ($matchingLines.Count -gt 1) {
+        throw "Multiple checksum entries found for $ArchiveName"
+    }
+
+    $expectedHash = $matchingLines[0]
+    $actualHash = (Get-FileHash -Path $ArchivePath -Algorithm SHA256).Hash.ToLower()
+
+    if ($actualHash -ne $expectedHash.ToLower()) {
+        throw "Checksum verification failed! Expected: $expectedHash Got: $actualHash"
+    }
 }
 
 function Get-InstallDir {
@@ -197,10 +224,7 @@ function Install-Kata {
         Write-Err "See https://github.com/$repo for build-from-source instructions."
         exit 1
     }
-    if ($resolvedArch -ne $arch) {
-        Write-Warn "No native windows/$arch build for $version; installing windows/$resolvedArch (runs under emulation)."
-        $arch = $resolvedArch
-    }
+    $arch = $resolvedArch
 
     $versionNum = $version.TrimStart('v')
     $archiveName = "kata_${versionNum}_windows_${arch}.zip"
@@ -234,38 +258,10 @@ function Install-Kata {
             exit 1
         }
 
-        $matchingLines = @()
-        foreach ($line in Get-Content $checksumFile) {
-            if ($line -match '^\s*$') { continue }
-            $parts = $line -split '\s+', 2
-            if ($parts.Count -lt 2) { continue }
-            $hash = $parts[0]
-            $filename = $parts[1]
-            $filename = $filename -replace '^[\*]', ''
-            $filename = $filename -replace '^\.\/', ''
-            $filename = $filename -replace '^\.\\', ''
-            if ($filename -eq $archiveName) {
-                $matchingLines += $hash
-            }
-        }
-
-        if ($matchingLines.Count -eq 0) {
-            Write-Err "Error: Could not find checksum for $archiveName in SHA256SUMS"
-            exit 1
-        }
-
-        if ($matchingLines.Count -gt 1) {
-            Write-Err "Error: Multiple checksum entries found for $archiveName"
-            exit 1
-        }
-
-        $expectedHash = $matchingLines[0]
-        $actualHash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLower()
-
-        if ($actualHash -ne $expectedHash.ToLower()) {
-            Write-Err "Error: Checksum verification failed!"
-            Write-Err "Expected: $expectedHash"
-            Write-Err "Got:      $actualHash"
+        try {
+            Verify-Checksum -ArchivePath $archivePath -ChecksumFile $checksumFile -ArchiveName $archiveName
+        } catch {
+            Write-Err "Error: $_"
             exit 1
         }
         Write-Info "Checksum verified."
@@ -326,4 +322,6 @@ function Install-Kata {
     }
 }
 
-Install-Kata
+if ($MyInvocation.InvocationName -ne '.') {
+    Install-Kata
+}
