@@ -23,6 +23,47 @@ func TestAuthMiddleware_NoTokenConfigured_AllRequestsPass(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
+func TestAuthMiddleware_UnauthenticatedPrivateNetworkWrites_AllowsWritesAndEventStream(t *testing.T) {
+	mw := requireBearer(authPolicy{AllowUnauthenticatedPrivateNetworkWrites: true})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/projects", nil))
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	rr = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	h.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestAuthMiddleware_UnauthenticatedPrivateNetworkWrites_BlocksTokenAdmin(t *testing.T) {
+	mw := requireBearer(authPolicy{AllowUnauthenticatedPrivateNetworkWrites: true})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/api/v1/tokens"},
+		{method: http.MethodPost, path: "/api/v1/tokens"},
+		{method: http.MethodPost, path: "/api/v1/tokens/1/actions/revoke"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, nil))
+			assert.Equal(t, http.StatusUnauthorized, rr.Code)
+			assert.Contains(t, rr.Body.String(), `"auth_required"`)
+			assert.Contains(t, rr.Body.String(), "token administration")
+		})
+	}
+}
+
 func TestAuthMiddleware_TokenConfigured_MissingHeader_401(t *testing.T) {
 	mw := requireBearer(authPolicy{Token: "expected-token"})
 	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))

@@ -23,15 +23,17 @@ const (
 
 // authPolicy is the resolved auth posture at daemon start. Token == "" disables
 // bearer auth; TrustPrivateNetwork is the explicit operator opt-in that allows
-// token auth on non-loopback private-network TCP; InsecureReadonly is the dev
-// escape hatch that allows GETs on non-loopback TCP without a token. These
-// fields are also surfaced through ServerConfig; this struct exists so the
-// middleware itself does not depend on ServerConfig.
+// token auth on non-loopback private-network TCP; AllowUnauthenticatedPrivateNetworkWrites
+// moves the local no-token trust model onto a literal private IP bind; InsecureReadonly
+// is the dev escape hatch that allows GETs on non-loopback TCP without a token.
+// These fields are also surfaced through ServerConfig; this struct exists so
+// the middleware itself does not depend on ServerConfig.
 type authPolicy struct {
-	Token                string
-	TrustPrivateNetwork  bool
-	InsecureReadonly     bool
-	RequireTokenIdentity bool
+	Token                                    string
+	TrustPrivateNetwork                      bool
+	AllowUnauthenticatedPrivateNetworkWrites bool
+	InsecureReadonly                         bool
+	RequireTokenIdentity                     bool
 }
 
 // requireBearer returns an HTTP middleware that enforces bearer-token auth
@@ -64,6 +66,11 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				return
 			}
 			if p.Token == "" {
+				if p.AllowUnauthenticatedPrivateNetworkWrites && isTokenAdminPath(r.URL.Path) {
+					api.WriteEnvelope(w, http.StatusUnauthorized, "auth_required",
+						"token administration requires authentication; daemon allows unauthenticated private-network writes")
+					return
+				}
 				if !p.InsecureReadonly {
 					next.ServeHTTP(w, r)
 					return
@@ -203,10 +210,11 @@ func isFederationTransportRoute(method, path string) bool {
 // convention as runDaemonWithListen: "" means platform-default local
 // transport; "host:port" means TCP. The matrix on non-loopback TCP is:
 //
-//	Token != "" && TrustPrivateNetwork -> permit (operator accepts private-network confidentiality)
-//	Token != "" && !TrustPrivateNetwork -> REFUSE (token would travel in cleartext)
-//	Token == "" &&  InsecureReadonly   -> permit (dev-only GET access)
-//	Token == "" && !InsecureReadonly   -> REFUSE (would expose mutations to the LAN)
+//	Token != "" && TrustPrivateNetwork                 -> permit (operator accepts private-network confidentiality)
+//	Token != "" && !TrustPrivateNetwork                -> REFUSE (token would travel in cleartext)
+//	Token == "" && AllowUnauthenticatedPrivateNetworkWrites -> permit only on literal private IP binds
+//	Token == "" &&  InsecureReadonly                   -> permit (dev-only GET access)
+//	Token == "" && !InsecureReadonly                   -> REFUSE (would expose mutations to the LAN)
 //
 // The daemon does not terminate TLS, so a bearer token on plaintext non-
 // loopback HTTP is a passive-capture risk. Operators wanting cross-host
@@ -214,11 +222,27 @@ func isFederationTransportRoute(method, path string) bool {
 // daemon with a TLS-terminating reverse proxy and bind the daemon to a
 // Unix socket or 127.0.0.1.
 func checkAuthStartup(listen string, p authPolicy) error {
+	if p.AllowUnauthenticatedPrivateNetworkWrites && p.Token != "" {
+		return fmt.Errorf("allow_unauthenticated_private_network_writes requires no auth token")
+	}
+	if p.AllowUnauthenticatedPrivateNetworkWrites && p.RequireTokenIdentity {
+		return fmt.Errorf("allow_unauthenticated_private_network_writes cannot be combined with require_token_identity")
+	}
+	if p.AllowUnauthenticatedPrivateNetworkWrites && p.InsecureReadonly {
+		return fmt.Errorf("allow_unauthenticated_private_network_writes cannot be combined with --insecure-readonly")
+	}
 	if p.RequireTokenIdentity && p.Token == "" {
 		return fmt.Errorf("require_token_identity requires a bootstrap token")
 	}
 	if p.RequireTokenIdentity && p.InsecureReadonly {
 		return fmt.Errorf("require_token_identity cannot be combined with --insecure-readonly")
+	}
+	if p.AllowUnauthenticatedPrivateNetworkWrites {
+		if isLiteralPrivateNetworkTCP(listen) {
+			return nil
+		}
+		return fmt.Errorf("listen %q with unauthenticated writes requires a literal private IP bind "+
+			"(RFC1918, CGNAT, link-local, or ULA); hostnames, public IPs, and wildcard binds are not supported", listen)
 	}
 	if !isNonLoopbackTCP(listen) {
 		return nil
@@ -243,10 +267,11 @@ func checkAuthStartup(listen string, p authPolicy) error {
 // CheckAuthStartup is the exported form used by the CLI entry point.
 func CheckAuthStartup(listen string, auth config.AuthConfig, insecureReadonly bool) error {
 	return checkAuthStartup(listen, authPolicy{
-		Token:                auth.Token,
-		TrustPrivateNetwork:  auth.TrustPrivateNetwork,
-		InsecureReadonly:     insecureReadonly,
-		RequireTokenIdentity: auth.RequireTokenIdentity,
+		Token:                                    auth.Token,
+		TrustPrivateNetwork:                      auth.TrustPrivateNetwork,
+		AllowUnauthenticatedPrivateNetworkWrites: auth.AllowUnauthenticatedPrivateNetworkWrites,
+		InsecureReadonly:                         insecureReadonly,
+		RequireTokenIdentity:                     auth.RequireTokenIdentity,
 	})
 }
 
@@ -258,6 +283,18 @@ func TrustPrivateNetworkWarning(listen string, auth config.AuthConfig) (string, 
 	}
 	return "kata daemon: WARNING: listening on non-loopback TCP with bearer auth; " +
 		"operator has asserted private-network confidentiality.", true
+}
+
+// UnauthenticatedPrivateNetworkWritesWarning returns the startup warning shown
+// when the daemon is configured to accept writes from a private-network TCP bind
+// without bearer authentication.
+func UnauthenticatedPrivateNetworkWritesWarning(listen string, auth config.AuthConfig) (string, bool) {
+	if auth.Token != "" || !auth.AllowUnauthenticatedPrivateNetworkWrites || !isLiteralPrivateNetworkTCP(listen) {
+		return "", false
+	}
+	return "kata daemon: WARNING: listening on private-network TCP with unauthenticated writes; " +
+		"any device that can reach this address can mutate data, open the event stream, " +
+		"and assert client-supplied actors. Token administration remains blocked.", true
 }
 
 // isNonLoopbackTCP reports whether listen designates a TCP bind that's
@@ -290,4 +327,23 @@ func isNonLoopbackTCP(listen string) bool {
 	// DNS, so treat as non-loopback. Operators can use 127.0.0.1 / ::1
 	// explicitly if they want the loopback-only path.
 	return true
+}
+
+func isLiteralPrivateNetworkTCP(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() {
+		return false
+	}
+	return ip.IsPrivate() || ip.IsLinkLocalUnicast() || cgnatBlock.Contains(ip)
+}
+
+// cgnatBlock is RFC6598 100.64.0.0/10. Go's net.IP.IsPrivate() intentionally
+// excludes it, but private overlay networks commonly use this range.
+var cgnatBlock = &net.IPNet{
+	IP:   net.IPv4(100, 64, 0, 0),
+	Mask: net.CIDRMask(10, 32),
 }

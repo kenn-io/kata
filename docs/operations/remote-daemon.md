@@ -57,10 +57,10 @@ auto-start.
 
 ## Plain HTTP guardrails
 
-Mutable non-loopback HTTP requires both:
+Mutable non-loopback HTTP requires one of:
 
-- a daemon API token;
-- explicit trusted private-network opt-in.
+- a daemon API token plus explicit trusted private-network opt-in;
+- explicit unauthenticated private-network write opt-in on a literal private IP.
 
 Plain HTTP bearer-token targets must be literal non-public IPs: loopback,
 RFC1918, CGNAT, link-local, or ULA. Public IPs and DNS hostnames are rejected
@@ -83,6 +83,41 @@ allow_insecure = true
 
 Unix sockets, loopback HTTP, and HTTPS do not require the same private-network
 trust opt-in.
+
+## Tokenless private-network writes
+
+For a single-user private network where the network itself is the access
+boundary:
+
+```toml
+listen = "100.64.0.5:7777"
+
+[auth]
+allow_unauthenticated_private_network_writes = true
+```
+
+or:
+
+```sh
+KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES=1 \
+  kata daemon start --listen 100.64.0.5:7777
+```
+
+This moves kata's local no-token trust model onto the configured private IP:
+mutations and the event stream are accepted without a bearer token, and write
+actors come from the client request body just as they do on loopback and Unix
+sockets. Any device that can reach the bound address can assert any actor string,
+so use this only when tailnet or private-network membership is the intended
+trust boundary.
+
+The bind must be a literal private IP address: RFC1918, CGNAT, link-local, or
+ULA. Hostnames, public IPs, and wildcard binds such as `0.0.0.0:7777` or
+`:7777` are rejected for this mode. It cannot be combined with `token`,
+`require_token_identity = true`, or `--insecure-readonly`.
+
+Token administration remains authenticated-only in this mode. `/api/v1/tokens`
+requests are rejected rather than letting unauthenticated private-network
+clients mint, list, or revoke API tokens.
 
 ## Identity tokens
 

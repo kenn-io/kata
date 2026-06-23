@@ -323,6 +323,18 @@ func TestReadDaemonConfig_ReadsAuthTrustPrivateNetwork(t *testing.T) {
 	assert.True(t, cfg.Auth.TrustPrivateNetwork)
 }
 
+func TestReadDaemonConfig_ReadsAllowUnauthenticatedPrivateNetworkWrites(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[auth]\nallow_unauthenticated_private_network_writes = true\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.Auth.AllowUnauthenticatedPrivateNetworkWrites)
+}
+
 func TestReadDaemonConfig_ReadsRequireTokenIdentity(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
@@ -344,6 +356,18 @@ func TestReadDaemonConfig_AuthTrustPrivateNetworkEnvOverridesTOML(t *testing.T) 
 	cfg, err := config.ReadDaemonConfig()
 	require.NoError(t, err)
 	assert.True(t, cfg.Auth.TrustPrivateNetwork)
+}
+
+func TestReadDaemonConfig_AllowUnauthenticatedPrivateNetworkWritesEnvOverridesTOML(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES", "1")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[auth]\nallow_unauthenticated_private_network_writes = false\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.Auth.AllowUnauthenticatedPrivateNetworkWrites)
 }
 
 func TestReadDaemonConfig_AuthTokenEnvOverridesTOML(t *testing.T) {

@@ -56,10 +56,11 @@ type ServerConfig struct {
 // stays unaware of ServerConfig and config.AuthConfig.
 func (c ServerConfig) authPolicy() authPolicy {
 	return authPolicy{
-		Token:                c.Auth.Token,
-		TrustPrivateNetwork:  c.Auth.TrustPrivateNetwork,
-		InsecureReadonly:     c.InsecureReadonly,
-		RequireTokenIdentity: c.Auth.RequireTokenIdentity,
+		Token:                                    c.Auth.Token,
+		TrustPrivateNetwork:                      c.Auth.TrustPrivateNetwork,
+		AllowUnauthenticatedPrivateNetworkWrites: c.Auth.AllowUnauthenticatedPrivateNetworkWrites,
+		InsecureReadonly:                         c.InsecureReadonly,
+		RequireTokenIdentity:                     c.Auth.RequireTokenIdentity,
 	}
 }
 

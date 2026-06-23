@@ -14,6 +14,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
 | `KATA_AUTH_TOKEN` | Bearer token for daemon API auth. |
 | `KATA_TRUST_PRIVATE_NETWORK` | Set to `1` to permit trusted plaintext bearer use on private non-loopback HTTP. |
+| `KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES` | Set to `1` to permit tokenless writes and event streams on a literal private-IP daemon bind. |
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
 | `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
 | `KATA_HTTP_TIMEOUT` | Per-request CLI timeout for non-streaming daemon calls, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. |
@@ -116,6 +117,21 @@ The `kata daemon start --listen <host:port>` flag wins over the config file.
 Auto-started daemons also read the config-file listener value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
+
+For a single-user private network where the private IP itself is the access
+boundary, omit `token` and use:
+
+```toml
+listen = "100.64.0.5:7777"
+
+[auth]
+allow_unauthenticated_private_network_writes = true
+```
+
+This permits writes and event streams without bearer auth, with client-supplied
+actor attribution. It requires a literal private-IP bind and cannot be combined
+with `token`, `require_token_identity`, or `--insecure-readonly`; token
+administration endpoints remain blocked.
 
 Postgres DSNs may carry credentials. Although they are not selectable yet,
 runtime redaction handles both URL and libpq keyword forms defensively; userinfo

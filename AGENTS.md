@@ -123,8 +123,13 @@ A daemon can serve clients on other hosts over a private network:
 - Client: `export KATA_SERVER=http://100.64.0.5:7777` or commit a
   gitignored `.kata.local.toml` with `[server] url = "..."` next to
   `.kata.toml`. `KATA_SERVER` env wins.
-- Unauthenticated private-network mode is `--insecure-readonly`, which permits
-  GET requests only. Mutations and the event stream require bearer auth.
+- Unauthenticated read-only private-network mode is `--insecure-readonly`,
+  which permits GET requests only. Mutations and the event stream require
+  bearer auth unless the server explicitly sets
+  `[auth].allow_unauthenticated_private_network_writes = true` (or
+  `KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES=1`) on a literal private IP
+  bind. That writable tokenless mode treats the private network as the access
+  boundary, uses client-supplied actors, and blocks token administration.
 - Trusted plaintext bearer targets must be literal non-public IPs (loopback,
   RFC1918, CGNAT, link-local, ULA). Public IPs and DNS hostnames require HTTPS
   termination or an SSH tunnel.

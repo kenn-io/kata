@@ -112,7 +112,9 @@ The `kata` CLI resolves a project from your workspace, `.kata.toml`, or
 needed. The daemon owns a SQLite database under `KATA_HOME`, applies mutations,
 and records an event stream that both the CLI/TUI and hooks read. Your repo
 commits only the small `.kata.toml` binding, so issue history stays out of code
-history. See [Concepts](guide/concepts.md) and
+history. Private-network remote daemon modes are explicit: operators can use
+bearer auth on trusted private HTTP or opt a single-user private IP into
+tokenless writes. See [Concepts](guide/concepts.md) and
 [Architecture](design/architecture.md) for the full model.
 
 ## When to use kata

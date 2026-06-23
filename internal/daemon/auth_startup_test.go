@@ -70,6 +70,71 @@ func TestAuthStartupGuard_TrustPrivateNetworkWithoutToken_StillRefuses(t *testin
 	assert.Contains(t, err.Error(), "non-loopback TCP")
 }
 
+func TestAuthStartupGuard_UnauthenticatedPrivateNetworkWrites_PrivateLiteralIPPermitted(t *testing.T) {
+	p := authPolicy{AllowUnauthenticatedPrivateNetworkWrites: true}
+	for _, addr := range []string{
+		"10.1.2.3:7777",
+		"172.16.1.2:7777",
+		"192.168.1.20:7777",
+		"100.64.0.5:7777",
+		"169.254.1.2:7777",
+		"[fd00::1]:7777",
+		"[fe80::1]:7777",
+	} {
+		t.Run(addr, func(t *testing.T) {
+			require.NoError(t, checkAuthStartup(addr, p))
+		})
+	}
+}
+
+func TestAuthStartupGuard_UnauthenticatedPrivateNetworkWrites_RejectsUnsafeBinds(t *testing.T) {
+	p := authPolicy{AllowUnauthenticatedPrivateNetworkWrites: true}
+	for _, addr := range []string{
+		"",
+		"127.0.0.1:7777",
+		"[::1]:7777",
+		":7777",
+		"0.0.0.0:7777",
+		"[::]:7777",
+		"8.8.8.8:7777",
+		"example.internal:7777",
+	} {
+		t.Run(addr, func(t *testing.T) {
+			err := checkAuthStartup(addr, p)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "literal private")
+		})
+	}
+}
+
+func TestAuthStartupGuard_UnauthenticatedPrivateNetworkWrites_RejectsToken(t *testing.T) {
+	err := checkAuthStartup("100.64.0.5:7777", authPolicy{
+		Token:                                    "tok",
+		TrustPrivateNetwork:                      true,
+		AllowUnauthenticatedPrivateNetworkWrites: true,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token")
+}
+
+func TestAuthStartupGuard_UnauthenticatedPrivateNetworkWrites_RejectsIdentityMode(t *testing.T) {
+	err := checkAuthStartup("100.64.0.5:7777", authPolicy{
+		AllowUnauthenticatedPrivateNetworkWrites: true,
+		RequireTokenIdentity:                     true,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "require_token_identity")
+}
+
+func TestAuthStartupGuard_UnauthenticatedPrivateNetworkWrites_RejectsInsecureReadonly(t *testing.T) {
+	err := checkAuthStartup("100.64.0.5:7777", authPolicy{
+		AllowUnauthenticatedPrivateNetworkWrites: true,
+		InsecureReadonly:                         true,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "insecure-readonly")
+}
+
 func TestTrustPrivateNetworkWarning(t *testing.T) {
 	msg, ok := TrustPrivateNetworkWarning("100.64.0.5:7777",
 		config.AuthConfig{Token: "tok", TrustPrivateNetwork: true})
@@ -91,6 +156,36 @@ func TestTrustPrivateNetworkWarning_OnlyWhenEffective(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, ok := TrustPrivateNetworkWarning(tc.listen, tc.auth)
+			assert.False(t, ok)
+		})
+	}
+}
+
+func TestUnauthenticatedPrivateNetworkWritesWarning(t *testing.T) {
+	msg, ok := UnauthenticatedPrivateNetworkWritesWarning("100.64.0.5:7777",
+		config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true})
+	require.True(t, ok)
+	assert.Contains(t, msg, "WARNING")
+	assert.Contains(t, msg, "unauthenticated writes")
+	assert.Contains(t, msg, "any device")
+	assert.Contains(t, msg, "client-supplied actors")
+	assert.Contains(t, msg, "event stream")
+}
+
+func TestUnauthenticatedPrivateNetworkWritesWarning_OnlyWhenEffective(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		listen string
+		auth   config.AuthConfig
+	}{
+		{name: "loopback", listen: "127.0.0.1:7777", auth: config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}},
+		{name: "public ip", listen: "8.8.8.8:7777", auth: config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}},
+		{name: "wildcard", listen: "0.0.0.0:7777", auth: config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}},
+		{name: "token", listen: "100.64.0.5:7777", auth: config.AuthConfig{Token: "tok", TrustPrivateNetwork: true, AllowUnauthenticatedPrivateNetworkWrites: true}},
+		{name: "disabled", listen: "100.64.0.5:7777", auth: config.AuthConfig{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := UnauthenticatedPrivateNetworkWritesWarning(tc.listen, tc.auth)
 			assert.False(t, ok)
 		})
 	}
@@ -129,7 +224,7 @@ func TestAuthStartupGuard_RejectsIdentityModeWithoutBootstrapToken(t *testing.T)
 // TestAuthStartupGuard_WildcardBindWithoutToken_Refuses covers the listen
 // shapes that bind every interface in Go's net.Listen — :port (empty host),
 // 0.0.0.0:port, and [::]:port. Each is reachable from anywhere on the
-// network and so must require a token unless --insecure-readonly is set.
+// network and so must stay refused in the default no-token write posture.
 func TestAuthStartupGuard_WildcardBindWithoutToken_Refuses(t *testing.T) {
 	for _, addr := range []string{":7777", "0.0.0.0:7777", "[::]:7777"} {
 		t.Run(addr, func(t *testing.T) {
@@ -168,5 +263,6 @@ func TestServerConfig_AuthPolicyThreaded(t *testing.T) {
 	assert.Equal(t, "tok-123", got.Token)
 	assert.True(t, got.TrustPrivateNetwork)
 	assert.True(t, got.RequireTokenIdentity)
+	assert.False(t, got.AllowUnauthenticatedPrivateNetworkWrites)
 	assert.False(t, got.InsecureReadonly)
 }

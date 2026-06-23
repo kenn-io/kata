@@ -53,16 +53,20 @@ type StorageConfig struct {
 // AuthConfig is the [auth] block of <KATA_HOME>/config.toml. An empty
 // Token disables bearer auth — appropriate for Unix-socket and loopback-TCP
 // deployments; non-loopback TCP requires either --insecure-readonly with no
-// token, or a token plus TrustPrivateNetwork.
+// token, a token plus TrustPrivateNetwork, or the explicit
+// AllowUnauthenticatedPrivateNetworkWrites opt-in on a literal private IP bind.
 //
 // KATA_AUTH_TOKEN, when set, overrides the TOML value. Use it for
 // ephemeral or CI-only tokens that should never be persisted to disk.
 // KATA_TRUST_PRIVATE_NETWORK=1 is equivalent to trust_private_network = true.
+// KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES=1 is equivalent to
+// allow_unauthenticated_private_network_writes = true.
 type AuthConfig struct {
-	Token                string      `toml:"token"`
-	TrustPrivateNetwork  bool        `toml:"trust_private_network"`
-	RequireTokenIdentity bool        `toml:"require_token_identity"`
-	Proxy                ProxyConfig `toml:"proxy"`
+	Token                                    string      `toml:"token"`
+	TrustPrivateNetwork                      bool        `toml:"trust_private_network"`
+	AllowUnauthenticatedPrivateNetworkWrites bool        `toml:"allow_unauthenticated_private_network_writes"`
+	RequireTokenIdentity                     bool        `toml:"require_token_identity"`
+	Proxy                                    ProxyConfig `toml:"proxy"`
 }
 
 // ProxyConfig is the [auth.proxy] sub-table. Both keys empty/absent means
@@ -285,6 +289,9 @@ func applyDaemonConfigEnv(cfg *DaemonConfig) {
 	}
 	if EnvTruthy("KATA_TRUST_PRIVATE_NETWORK") {
 		cfg.Auth.TrustPrivateNetwork = true
+	}
+	if EnvTruthy("KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES") {
+		cfg.Auth.AllowUnauthenticatedPrivateNetworkWrites = true
 	}
 	if v := strings.TrimSpace(os.Getenv("KATA_TRUSTED_ACTOR_HEADER")); v != "" {
 		cfg.Auth.Proxy.TrustedActorHeader = v

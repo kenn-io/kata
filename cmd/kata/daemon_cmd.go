@@ -311,6 +311,9 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	if msg, ok := daemon.TrustPrivateNetworkWarning(listen, dcfg.Auth); ok {
 		fmt.Fprintln(os.Stderr, msg)
 	}
+	if msg, ok := daemon.UnauthenticatedPrivateNetworkWritesWarning(listen, dcfg.Auth); ok {
+		fmt.Fprintln(os.Stderr, msg)
+	}
 	if err := ns.EnsureDirs(); err != nil {
 		return err
 	}
