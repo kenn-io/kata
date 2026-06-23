@@ -41,8 +41,9 @@ screenshot workflow.
     powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
     ```
 
-The installer detects your OS and CPU architecture, downloads the latest release
-archive, and verifies it against `SHA256SUMS` before installing.
+The installer detects your OS and CPU architecture, downloads the latest GitHub
+release archive, and verifies it against `SHA256SUMS` before installing. Confirm
+the install with:
 
 ```sh
 kata version
