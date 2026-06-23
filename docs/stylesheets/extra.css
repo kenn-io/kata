@@ -48,3 +48,17 @@
 .md-grid {
   max-width: 1320px;
 }
+
+.md-typeset .kata-hero {
+  text-align: center;
+}
+
+.md-typeset .kata-hero > p {
+  max-width: 42rem;
+  margin-inline: auto;
+  text-align: left;
+}
+
+.md-typeset .kata-hero .md-button {
+  margin: 0.4rem 0.3rem 0;
+}
