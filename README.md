@@ -1,23 +1,23 @@
 # kata カタ
 
-Local-first issue tracking for humans and coding agents.
+The issue tracker built for coding agents and the humans steering them.
 
-kata gives agents a structured place to record tasks, decisions, links,
-comments, and state changes without turning GitHub Issues, markdown plans, or
-chat transcripts into the source of truth. The CLI is built for agents and
-automation: stable commands, JSON output, predictable failure modes. The TUI is
-built for people: browse, triage, edit, and supervise agent-written work without
-reading raw JSON. Both talk to the same local daemon and SQLite database.
+Coding agents need somewhere durable to track work: not a chat thread, not a
+markdown to-do list. kata gives them a local task ledger they can drive from the
+CLI: create, claim, relate, and close issues with evidence. Humans supervise the
+same work in a terminal UI. By default, issue state lives in a local SQLite
+database, so your repo stays clean and no hosted tracker is required.
 
-The documentation in [`docs/`](docs/) is the definitive guide,
-published with Zensical at <https://katatracker.com/>.
+The documentation in [`docs/`](docs/) is the definitive guide, published with
+Zensical at <https://katatracker.com/>.
 
-Status: early public preview. The CLI, daemon, and TUI are usable, but command
-contracts and UI details may still change before a stable release.
+> **Pre-1.0:** kata publishes versioned pre-1.0 releases. The CLI, daemon, and
+> TUI are usable, but command contracts and UI details can still change before a
+> stable release.
 
-## Quick start
+## Install
 
-Install the release binary:
+macOS or Linux:
 
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
@@ -29,49 +29,65 @@ Windows PowerShell:
 powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
 ```
 
-Then bind a workspace:
+The installer detects your OS and CPU architecture, downloads the latest GitHub
+release archive, and verifies it against `SHA256SUMS` before installing. Confirm
+the install with:
+
+```sh
+kata version
+```
+
+Release builds update themselves with `kata update`. Linux `.deb` and `.rpm`
+packages are published for `amd64` and `arm64`. Prefer to build from source?
+kata needs **Go 1.26 or later**:
+
+```sh
+go install go.kenn.io/kata/cmd/kata@latest
+```
+
+Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin` (often
+`~/go/bin`); put that directory on your `PATH`. See
+[Install](docs/get-started/install.md) for package downloads, manual release
+downloads, and build-from-source steps.
+
+## Quickstart
 
 ```sh
 cd your-repo
-kata init                                    # bind this workspace to a kata project
-kata create "fix login race"                 # returns the issue's short_id, e.g. abc4
-kata list                                    # list open issues
-kata show abc4                               # inspect by short_id
-kata close abc4 --done --message "Fixed the login race and verified the relevant tests pass." --commit <sha>
-kata tui                                     # browse and triage interactively
+kata init                              # bind this workspace to a kata project
+kata create "fix login race"           # prints a short id, e.g. abc4
+kata list                              # see open work
+kata show abc4                         # inspect by short id
+kata tui                               # browse and triage interactively
 ```
 
-`kata create` returns each issue's short_id; use it in later commands. In
-`kata tui`, press `v` to switch between nested and flat issue lists, `E` to
-expand or collapse all parents in nested view, and `?` for the full keybinding
-list.
+`kata create` prints each issue's short id; use it in later commands. Close only
+when the work is complete and verified:
 
-For agent-heavy workspaces, use `kata init --with-agents` to also write a
-managed kata briefing into agent guidance files. It refreshes existing real
-`AGENTS.md` and `CLAUDE.md` files, or creates `AGENTS.md` when neither exists,
-without overwriting the rest of either file.
+```sh
+kata close abc4 --done \
+  --message "Fixed the login race and verified the relevant tests pass." \
+  --commit <sha>
+```
 
-## What kata does
+For agent-heavy workspaces, `kata init --with-agents` also writes a managed kata
+briefing into agent guidance files. It refreshes existing real `AGENTS.md` and
+`CLAUDE.md` files, or creates `AGENTS.md` when neither exists, without
+overwriting the rest of either file.
 
-- Track issues per project, with short IDs derived from each issue's ULID
-  (`kata#abc4`).
-- Create, list, edit, close, reopen, comment, label, assign, and claim issues;
-  relate them with `--parent`/`--blocks`/`--blocked-by`/`--related`; search,
-  soft-delete, restore, and purge.
-- Browse and triage in a TUI (`kata tui`) over the same data.
-- Stream durable events for polling, live tailing, hooks, and TUI updates.
-- Back up and migrate with a git-friendly JSONL export and import.
-- Run a private-network remote daemon or opt-in federation when one local
-  daemon is not enough.
+## Why kata
 
-The priorities are agent ergonomics (stable commands, JSON-first workflows,
-search-before-create, idempotency keys), human oversight (a TUI over the same
-event stream), and auditability (append-only comments, event history, actor
-attribution, explicit destructive operations).
-
-Issue state lives in a user-local SQLite database under `KATA_HOME`, behind a
-daemon. A repository commits only a small, secret-free `.kata.toml` binding, so
-task state stays out of code history.
+- **Built for agents.** Stable short refs, `--json` and `--agent` output,
+  idempotent creates, a claim flow, and predictable failure modes agents can
+  script against.
+- **Made for humans too.** `kata tui` browses, triages, and supervises
+  agent-written work over the same data. No raw JSON required.
+- **Local-first, repo-clean.** One Go binary, no runtime dependencies. Issue
+  state lives in SQLite under `KATA_HOME`; your repo commits only a small,
+  secret-free `.kata.toml`.
+- **Auditable by design.** Closing an issue is an explicit completion claim with
+  a reason, message, evidence, and actor attribution, on top of append-only
+  comments and durable events.
 
 ## How kata compares
 
@@ -101,37 +117,6 @@ Moving from Beads? See
 [Migrating from Beads](docs/guide/migrating-from-beads.md).
 `kata import --source-format beads` drives the `bd` CLI and merges your issues
 into a kata project.
-
-## Install
-
-kata is a single Go binary with no runtime dependencies, and builds on macOS,
-Linux, and Windows. Install the latest release binary:
-
-```sh
-curl -fsSL https://katatracker.com/install.sh | bash
-```
-
-Windows PowerShell:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
-```
-
-The installers download the latest GitHub release archive for your platform and
-verify it against `SHA256SUMS` before installing. Release builds can update
-themselves with `kata update`. Linux `.deb` and `.rpm` packages are published for `amd64` and `arm64`.
-
-If you prefer to install from source, kata needs **Go 1.26 or later**:
-
-```sh
-go install go.kenn.io/kata/cmd/kata@latest
-```
-
-Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin`
-(often `~/go/bin`); put that directory on your `PATH`. To build from a clone,
-run `make install` (it defaults to `~/.local/bin`). See
-[Install](docs/get-started/install.md) for package downloads, manual release
-downloads, build-from-source, and Windows steps.
 
 ## Documentation
 
@@ -163,6 +148,6 @@ contract in long form.
 
 ## Contributing
 
-See [Contributing](docs/development/contributing.md) for the repository
-layout and local checks (`make test`, `make lint`, `make vet`, `make nilaway`).
+See [Contributing](docs/development/contributing.md) for the repository layout
+and local checks (`make test`, `make lint`, `make vet`, `make nilaway`).
 Licensed under the terms in [LICENSE](LICENSE).
