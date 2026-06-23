@@ -1,93 +1,139 @@
-# kata カタ: lightweight issue tracker for humans and agents
+---
+title: kata カタ
+description: Local-first issue tracking for humans and coding agents.
+---
 
-kata is a local-first issue tracker for humans and coding agents. It gives
-agents a durable task ledger for issues, comments, links, ownership, and state
-changes without making GitHub Issues, markdown plans, or chat transcripts the
-coordination system.
+<div class="kata-hero" markdown>
 
-The public shape is intentionally small:
+# kata カタ
 
-- a single `kata` CLI for automation and agent workflows;
-- a local daemon with an HTTP API over a Unix socket on Unix and loopback TCP
-  on Windows by default;
-- a SQLite database under `KATA_HOME`;
-- a TUI for human triage and supervision;
-- JSON, concise agent text, and human output modes;
-- export/import paths for backup and schema cutover;
-- opt-in private-network remote daemon and federation workflows.
+### The issue tracker built for coding agents and the humans steering them.
 
-kata publishes versioned pre-1.0 releases. The CLI, daemon, and TUI are usable,
-but command contracts and UI details can still change before a stable release.
+Coding agents need somewhere durable to track work: not a chat thread, not a
+markdown to-do list. kata gives them a local task ledger they can drive from the
+CLI: create, claim, relate, and close issues with evidence. Humans supervise the
+same work in a terminal UI. By default, issue state lives in a local SQLite
+database, so your repo stays clean and no hosted tracker is required.
+
+[Install](#install){ .md-button .md-button--primary }
+[Quickstart](#quickstart){ .md-button }
+
+</div>
 
 ![kata TUI showing a simulated issue hierarchy](/assets/screenshots/tui/hero.svg)
 
 The image above is generated from disposable simulated data by the docs
 screenshot workflow.
 
-## Why kata exists
+## Install
 
-Coding agents need more than a chat thread. They need a place to discover
-available work, claim it, record decisions, preserve context across compaction,
-and close only when the work has actually been verified. Humans need the same
-state in a form they can review without reading raw JSON.
+=== "macOS / Linux"
 
-kata treats issue state as operational data adjacent to workspaces, not as
-repository content. A repository usually commits only a small, secret-free
-`.kata.toml` binding. The actual ledger lives in the user's kata home behind
-the daemon.
+    ```sh
+    curl -fsSL https://katatracker.com/install.sh | bash
+    ```
 
-## What kata does today
+=== "Windows (PowerShell)"
 
-You can:
+    ```powershell
+    powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
+    ```
 
-- create, list, edit, close, reopen, comment, label, assign, and claim issues,
-  and relate them with `--parent`, `--blocks`, `--blocked-by`, and `--related`;
-- use short issue refs derived from ULIDs, such as `abc4` or `kata#abc4`;
-- search before creating and use idempotency keys for safe retries;
-- stream durable events for polling, live tailing, hooks, and TUI updates;
-- browse and edit issues in `kata tui`;
-- back up or migrate the local database with JSONL export/import;
-- run private-network remote daemon setups with bearer-token protection;
-- opt projects into hub-and-spoke federation when local-first replication is
-  more important than single-copy reads.
+The installer detects your OS and CPU architecture, downloads the latest release
+archive, and verifies it against `SHA256SUMS` before installing.
 
-## Architecture
+```sh
+kata version
+```
 
-The CLI resolves a project from the current workspace, `.kata.toml`, or an
-explicit `--project` value. It talks to a daemon, starting one automatically for
-local use when needed. The daemon owns the SQLite connection, applies
-mutations, records events, and serves both CLI/TUI reads and event streams.
+Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
+[Install](get-started/install.md).
 
-Local mode uses a Unix socket under `KATA_HOME/runtime` on Unix platforms and
-loopback TCP on Windows. Non-loopback TCP listeners are explicit and guarded
-because bearer tokens over plaintext non-loopback HTTP are only allowed for
-trusted private-network targets.
+!!! note "Pre-1.0"
+    kata publishes versioned pre-1.0 releases. The CLI, daemon, and TUI are
+    usable, but command contracts and UI details can still change before a
+    stable release.
 
-## When to use it
+## Why kata
 
-Use kata when you want a small, inspectable issue ledger that agents and humans
-can both operate:
+<div class="grid cards" markdown>
 
-- multi-agent work in one repo or across worktrees;
-- local project planning that should survive chat compaction;
-- issue close discipline with evidence and audit trails;
-- private team or lab workflows where a full SaaS issue tracker is unnecessary;
-- experimental federation where each participant keeps a local daemon.
+-   __Built for agents__
 
-Avoid treating kata as a full project-management suite, a CI scheduler, an
-agent worker pool, or an authorization platform. Shared-server authorization is
-still deliberately narrow.
+    Stable short refs, `--json` and `--agent` output, idempotent creates, a
+    claim flow, and predictable failure modes agents can script against.
 
-If the comparison is to Linear, Jira, GitHub Issues, ClickUp, or another hosted
-project-management system, start with the category boundary: kata is
-local-first, not software-as-a-service. See
-[Comparisons](guide/comparisons.md) for the practical trade-offs.
+-   __Made for humans too__
 
-## Start here
+    `kata tui` browses, triages, and supervises agent-written work over the same
+    data. No raw JSON required.
 
-Read the [Quickstart](get-started/quickstart.md), then skim
-[Concepts](guide/concepts.md), [Comparisons](guide/comparisons.md), and the
-[CLI reference](reference/cli.md). Agents should use the
-[Agent workflows](workflows/agents.md) page as their operating contract. Coming
-from Beads? See
-[Migrating from Beads](guide/migrating-from-beads.md).
+-   __Local-first, repo-clean__
+
+    One Go binary, no runtime dependencies. Issue state lives in SQLite under
+    `KATA_HOME`; your repo commits only a small, secret-free `.kata.toml`.
+
+-   __Auditable by design__
+
+    Closing an issue is an explicit completion claim with a reason, message,
+    evidence, and actor attribution, on top of append-only comments and durable
+    events.
+
+</div>
+
+## Quickstart
+
+```sh
+cd your-repo
+kata init                              # bind this workspace to a kata project
+kata create "fix login race"           # prints a short id, e.g. abc4
+kata list                              # see open work
+
+# close only when the work is verified
+kata close abc4 --done \
+  --message "Fixed the login race; tests pass." --commit <sha>
+
+kata tui                               # browse and triage interactively
+```
+
+`kata create` prints each issue's short id; use it in later commands. Working
+with coding agents? `kata init --with-agents` drops kata's operating contract
+into `AGENTS.md`/`CLAUDE.md`, and `kata quickstart` prints the full agent
+contract. See the [Quickstart](get-started/quickstart.md) for the complete
+walkthrough.
+
+## How it works
+
+The `kata` CLI resolves a project from your workspace, `.kata.toml`, or
+`--project`, then talks to a local daemon, starting one automatically when
+needed. The daemon owns a SQLite database under `KATA_HOME`, applies mutations,
+and records an event stream that both the CLI/TUI and hooks read. Your repo
+commits only the small `.kata.toml` binding, so issue history stays out of code
+history. See [Concepts](guide/concepts.md) and
+[Architecture](design/architecture.md) for the full model.
+
+## When to use kata
+
+Reach for kata when work should stay close to the machine doing it:
+
+- coding agents need to discover, claim, update, and close work from the CLI;
+- you want an instant terminal loop instead of a browser session;
+- work spans local clones, worktrees, experiments, or non-git directories;
+- task state should survive chat compaction without becoming a markdown plan;
+- closes should carry evidence and an audit trail.
+
+kata is not a SaaS issue tracker. Linear, Jira, GitHub Issues, and ClickUp are
+shared online systems for roadmaps, dashboards, and cross-team reporting; kata
+is a local ledger for the work itself. They coexist. See
+[Comparisons](guide/comparisons.md) for the trade-offs.
+
+## Next steps
+
+<div class="grid cards" markdown>
+
+-   [__Concepts__](guide/concepts.md). The data model and how the pieces fit.
+-   [__CLI reference__](reference/cli.md). Every command and flag.
+-   [__Agent workflows__](workflows/agents.md). The operating contract for agents.
+-   [__Comparisons__](guide/comparisons.md). kata vs. SaaS issue trackers.
+
+</div>
