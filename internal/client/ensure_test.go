@@ -70,10 +70,47 @@ func TestEnsureLocalRunningIgnoresRemoteOverride(t *testing.T) {
 	assert.Equal(t, 1, restore.startCalls)
 }
 
-func TestShouldRefuseAutoStartDaemonFromGoTestBinary(t *testing.T) {
-	assert.True(t, shouldRefuseAutoStartDaemon("/tmp/go-build123/b001/kata.test"))
-	assert.True(t, shouldRefuseAutoStartDaemon("/var/folders/x/go-build123/b001/kata"))
-	assert.False(t, shouldRefuseAutoStartDaemon("/usr/local/bin/kata"))
+func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
+	setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": currentVersionForEnsure(),
+		"pid":     os.Getpid(),
+	})
+
+	orig := startDetachedDaemonForEnsure
+	var got kitdaemon.StartDetachedOptions
+	startDetachedDaemonForEnsure = func(ctx context.Context, opts kitdaemon.StartDetachedOptions) error {
+		require.NoError(t, ctx.Err())
+		got = opts
+		_, err := fmt.Fprintln(opts.Stdout, "daemon stdout")
+		require.NoError(t, err)
+		_, err = fmt.Fprintln(opts.Stderr, "daemon stderr")
+		require.NoError(t, err)
+		_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+			PID:       os.Getpid(),
+			Address:   addr,
+			StartedAt: time.Now().UTC(),
+		})
+		return err
+	}
+	t.Cleanup(func() { startDetachedDaemonForEnsure = orig })
+
+	url, err := autoStart(context.Background(), ns.DataDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://"+addr, url)
+	assert.Equal(t, []string{"daemon", "start"}, got.Args)
+	assert.True(t, got.RefuseEphemeral)
+	assert.Contains(t, got.Env, daemon.AutoStartMarkerEnv+"=1")
+
+	logData, err := os.ReadFile(filepath.Join(ns.DataDir, "daemon.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(logData), "daemon stdout")
+	assert.Contains(t, string(logData), "daemon stderr")
 }
 
 func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {

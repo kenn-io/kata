@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/daemon"
@@ -26,10 +24,11 @@ const (
 )
 
 var (
-	currentVersionForEnsure     = func() string { return version.Version }
-	startDaemonForEnsure        = autoStart
-	stopRunningDaemonsForEnsure = stopRunningDaemons
-	signalDaemonStopForEnsure   = daemon.SignalDaemonStop
+	currentVersionForEnsure      = func() string { return version.Version }
+	startDaemonForEnsure         = autoStart
+	startDetachedDaemonForEnsure = kitdaemon.StartDetached
+	stopRunningDaemonsForEnsure  = stopRunningDaemons
+	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
 )
 
 // EnsureRunning returns a live daemon's base URL, auto-starting the daemon
@@ -167,15 +166,11 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 }
 
 func autoStart(ctx context.Context, dataDir string) (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
+	opts := kitdaemon.StartDetachedOptions{
+		Args:            []string{"daemon", "start"},
+		Env:             append(os.Environ(), daemon.AutoStartMarkerEnv+"=1"),
+		RefuseEphemeral: true,
 	}
-	if shouldRefuseAutoStartDaemon(exe) {
-		return "", fmt.Errorf("refusing to auto-start daemon from ephemeral binary %s", filepath.Base(exe))
-	}
-	//nolint:gosec // G204: exe is os.Executable()
-	cmd := exec.Command(exe, "daemon", "start")
 	// The auto-started daemon outlives this process, so it must not inherit
 	// our stdio. Inheriting the caller's stderr keeps that handle open after
 	// the daemon detaches, which hangs any parent that captures our output
@@ -184,23 +179,13 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 	// them nil so exec connects the child to the null device. Either way we
 	// never hand the daemon the caller's stderr.
 	if logw := daemonLogWriter(dataDir); logw != nil {
-		cmd.Stdout = logw
-		cmd.Stderr = logw
 		defer func() { _ = logw.Close() }() // child keeps its own handle after Start
+		opts.Stdout = logw
+		opts.Stderr = logw
 	}
-	// Mark the child as an implicit auto-start so it skips the PORT-env
-	// listen path (see listenFromPortEnv). The child inherits the
-	// parent's environment, so a stray PORT in a developer's shell would
-	// otherwise flip every implicit daemon onto wildcard TCP.
-	cmd.Env = append(os.Environ(), daemon.AutoStartMarkerEnv+"=1")
-	// Detach the child into its own process group so SIGINT delivered to the
-	// foreground caller (e.g. ctrl-C on `kata create` or `kata tui`) is not
-	// propagated to the daemon we just spawned.
-	detachChild(cmd)
-	if err := cmd.Start(); err != nil {
+	if err := startDetachedDaemonForEnsure(ctx, opts); err != nil {
 		return "", fmt.Errorf("auto-start daemon: %w", err)
 	}
-	go func() { _ = cmd.Wait() }()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if url, compatible, ok := discoverForEnsure(ctx, dataDir); ok && compatible {
@@ -229,12 +214,4 @@ func daemonLogWriter(dataDir string) *os.File {
 		return nil
 	}
 	return f
-}
-
-func shouldRefuseAutoStartDaemon(exe string) bool {
-	base := filepath.Base(exe)
-	// Normalize separators: on Windows the go-build temp dir is "\go-build…",
-	// but callers (and tests) may pass forward-slash paths. ToSlash makes the
-	// check work regardless of how the path was formed.
-	return strings.HasSuffix(base, ".test") || strings.Contains(filepath.ToSlash(exe), "/go-build")
 }
