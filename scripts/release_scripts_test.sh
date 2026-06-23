@@ -117,23 +117,34 @@ test_changelog_fallback_includes_first_commit_without_tags() {
   assert_contains "$output" "feat: add task list" "fallback changelog commit"
 }
 
-test_changelog_defaults_to_deterministic_fallback() {
+test_changelog_defaults_to_codex_agent() {
   local repo="$tmp_root/changelog-default"
   local fake_bin="$tmp_root/fake-bin"
   init_repo "$repo"
   mkdir -p "$fake_bin"
   cat >"$fake_bin/codex" <<'EOF'
 #!/usr/bin/env bash
-echo "AI changelog was invoked"
+out=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-o" ]]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+if [[ -n "$out" ]]; then
+  echo "AI changelog was invoked" >"$out"
+else
+  echo "AI changelog was invoked"
+fi
 EOF
   chmod +x "$fake_bin/codex"
 
   local output
   output="$(run_in_repo "$repo" env PATH="$fake_bin:$PATH" "$repo_root/scripts/changelog.sh" NEXT -)"
 
-  assert_contains "$output" "### Changes" "default changelog heading"
-  assert_contains "$output" "feat: add task list" "default changelog commit"
-  assert_not_contains "$output" "AI changelog was invoked" "default changelog must not invoke agent"
+  assert_contains "$output" "AI changelog was invoked" "default changelog agent"
+  assert_not_contains "$output" "### Changes" "default changelog should not use deterministic fallback"
 }
 
 test_changelog_allows_explicit_agent_opt_in() {
@@ -143,7 +154,19 @@ test_changelog_allows_explicit_agent_opt_in() {
   mkdir -p "$fake_bin"
   cat >"$fake_bin/codex" <<'EOF'
 #!/usr/bin/env bash
-echo "AI changelog was invoked"
+out=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-o" ]]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+if [[ -n "$out" ]]; then
+  echo "AI changelog was invoked" >"$out"
+else
+  echo "AI changelog was invoked"
+fi
 EOF
   chmod +x "$fake_bin/codex"
 
@@ -151,6 +174,20 @@ EOF
   output="$(run_in_repo "$repo" env PATH="$fake_bin:$PATH" CHANGELOG_AGENT=codex "$repo_root/scripts/changelog.sh" NEXT -)"
 
   assert_contains "$output" "AI changelog was invoked" "explicit changelog agent"
+}
+
+test_changelog_rejects_unknown_agent() {
+  local repo="$tmp_root/changelog-unknown-agent"
+  init_repo "$repo"
+
+  local output status
+  set +e
+  output="$(run_in_repo "$repo" env CHANGELOG_AGENT=example "$repo_root/scripts/changelog.sh" NEXT - 2>&1)"
+  status=$?
+  set -e
+
+  [[ $status -ne 0 ]] || fail "changelog.sh should reject unknown CHANGELOG_AGENT values"
+  assert_contains "$output" "unknown CHANGELOG_AGENT" "unknown changelog agent"
 }
 
 test_release_creates_and_pushes_bare_semver_tag() {
@@ -166,6 +203,39 @@ test_release_creates_and_pushes_bare_semver_tag() {
   assert_contains "$output" "Release v0.5.0" "release preview"
   git -C "$repo" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null || fail "local tag v0.5.0 missing"
   git -C "$remote" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null || fail "remote tag v0.5.0 missing"
+}
+
+test_release_uses_codex_changelog_by_default() {
+  local repo="$tmp_root/release-codex"
+  local remote="$tmp_root/release-codex-origin.git"
+  local fake_bin="$tmp_root/fake-bin-release"
+  init_repo "$repo"
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/codex" <<'EOF'
+#!/usr/bin/env bash
+out=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-o" ]]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+if [[ -n "$out" ]]; then
+  echo "AI release notes from codex" >"$out"
+else
+  echo "AI release notes from codex"
+fi
+EOF
+  chmod +x "$fake_bin/codex"
+
+  printf 'y\n' | run_in_repo "$repo" env PATH="$fake_bin:$PATH" "$repo_root/scripts/release.sh" 0.5.0 >/dev/null
+
+  local tag_message
+  tag_message="$(git -C "$repo" tag -l v0.5.0 --format='%(contents)')"
+  assert_contains "$tag_message" "AI release notes from codex" "release tag changelog"
 }
 
 test_verify_release_tag_rejects_tag_outside_origin_main() {
@@ -302,9 +372,11 @@ test_release_rejects_v_prefixed_version
 test_release_rejects_non_semver_version
 test_release_refuses_dirty_worktree
 test_changelog_fallback_includes_first_commit_without_tags
-test_changelog_defaults_to_deterministic_fallback
+test_changelog_defaults_to_codex_agent
 test_changelog_allows_explicit_agent_opt_in
+test_changelog_rejects_unknown_agent
 test_release_creates_and_pushes_bare_semver_tag
+test_release_uses_codex_changelog_by_default
 test_verify_release_tag_rejects_tag_outside_origin_main
 test_verify_release_tag_accepts_tag_on_origin_main
 test_verify_release_tag_rejects_workflow_sha_mismatch
