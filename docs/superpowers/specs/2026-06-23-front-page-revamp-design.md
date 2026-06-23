@@ -18,7 +18,7 @@ Windows, but neither the homepage nor the top of the page surfaces them.
 Turn the homepage into a marketing pitch + quickstart that:
 
 1. States what kata is and who it's for in the first screen (agent-first hook).
-2. Puts install commands for all three platforms above the fold.
+2. Surfaces install commands for all three platforms near the top of the page.
 3. Gives a minimal end-to-end quickstart on the page itself.
 4. Answers the two first objections ("where does state live?", "is this
    replacing Linear/Jira/GitHub Issues?") tightly, without becoming a guide.
@@ -105,7 +105,7 @@ Content tabs via `pymdownx.tabbed`:
 Then, tight prose + verify (no hard-coded version number — `kata version` only,
 confirmed to be the correct command; `kata --version` is not a valid flag):
 
-```markdown
+````markdown
 The installer detects your OS and CPU architecture, downloads the latest release
 archive, and verifies it against `SHA256SUMS` before installing.
 
@@ -115,7 +115,7 @@ kata version
 
 Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
 [Install](get-started/install.md).
-```
+````
 
 ### 3. Why kata — 4 grid cards
 
@@ -158,8 +158,11 @@ cd your-repo
 kata init                              # bind this workspace to a kata project
 kata create "fix login race"           # prints a short id, e.g. abc4
 kata list                              # see open work
-kata close abc4 --done \               # close only when the work is verified
+
+# close only when the work is verified
+kata close abc4 --done \
   --message "Fixed the login race; tests pass." --commit <sha>
+
 kata tui                               # browse and triage interactively
 ```
 
@@ -298,4 +301,3 @@ time, fall back to default left alignment — the rest of the page is unaffected
 - No nav restructure, logo/branding, or analytics.
 - No per-distro install tabs (the curl command is identical for macOS & Linux).
 - No heavy hero/banner CSS beyond the spacing/width/CTA rules above.
-```
