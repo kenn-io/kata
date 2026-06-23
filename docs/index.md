@@ -7,7 +7,7 @@ description: Local-first issue tracking for humans and coding agents.
 
 # kata カタ
 
-### The issue tracker built for coding agents and the humans steering them.
+<p class="kata-hero-tagline">The issue tracker built for coding agents and the humans steering them.</p>
 
 Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the

@@ -62,3 +62,12 @@
 .md-typeset .kata-hero .md-button {
   margin: 0.4rem 0.3rem 0;
 }
+
+.md-typeset .kata-hero p.kata-hero-tagline {
+  max-width: 36rem;
+  margin: 0.2rem auto 1.2rem;
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
