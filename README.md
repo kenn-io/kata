@@ -121,7 +121,8 @@ downloads, build-from-source, and Windows steps.
 The [docs site](docs/) is the definitive reference:
 
 - Get started: [Quickstart](docs/get-started/quickstart.md) ·
-  [Install](docs/get-started/install.md)
+  [Install](docs/get-started/install.md) ·
+  [Changelog](docs/changelog.md)
 - Guide: [Concepts](docs/guide/concepts.md) ·
   [Workspaces and projects](docs/guide/workspaces-projects.md) ·
   [Migrating from Beads](docs/guide/migrating-from-beads.md)
