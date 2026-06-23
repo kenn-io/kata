@@ -5,21 +5,32 @@ daemon it starts itself, and it stores data locally in SQLite.
 
 ## Requirements
 
-Install Go 1.26 or later from <https://go.dev/dl/>.
+The release installers below do not require Go. Install Go 1.26 or later from
+<https://go.dev/dl/> only when using `go install` or building from a clone.
 
 GitHub release binaries are available starting with `v0.5.0`. The recommended
-path for most users is the release installer:
+path for most users is the release installer for their platform.
+
+On macOS or Linux:
 
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
 
-The installer detects your OS and CPU architecture and downloads the latest
+On Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
+```
+
+The installers detect your OS and CPU architecture and download the latest
 archive from [GitHub releases](https://github.com/kenn-io/kata/releases).
-The installer verifies the downloaded archive against `SHA256SUMS` before installing it.
-It places `kata` in `/usr/local/bin` or `~/.local/bin`. Review
-the installer at <https://katatracker.com/install.sh> before running it if you
-prefer.
+They verify the downloaded archive against `SHA256SUMS` before installing it.
+The shell installer places `kata` in `/usr/local/bin` or `~/.local/bin`.
+The PowerShell installer places `kata.exe` in `%USERPROFILE%\.kata\bin` by
+default and adds that directory to the user `Path`. Review the installers at
+<https://katatracker.com/install.sh> and <https://katatracker.com/install.ps1>
+before running them if you prefer.
 
 Linux `.deb` and `.rpm` packages are also published for `amd64` and `arm64`.
 Download the package for your distribution from

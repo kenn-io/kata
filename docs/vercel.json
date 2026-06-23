@@ -9,6 +9,11 @@
       "source": "/install.sh",
       "destination": "https://raw.githubusercontent.com/kenn-io/kata/main/scripts/install.sh",
       "permanent": false
+    },
+    {
+      "source": "/install.ps1",
+      "destination": "https://raw.githubusercontent.com/kenn-io/kata/main/scripts/install.ps1",
+      "permanent": false
     }
   ]
 }

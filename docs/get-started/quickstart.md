@@ -4,13 +4,19 @@ Install kata, enter a workspace, bind it to a kata project, and create your
 first issue:
 
 ```sh
-go install go.kenn.io/kata/cmd/kata@latest
+curl -fsSL https://katatracker.com/install.sh | bash
 
 cd your-repo
 kata init
 kata create "fix login race"
 kata list
 kata show abc4
+```
+
+On Windows PowerShell, install the release binary with:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
 ```
 
 `kata create` prints the issue's short ID. Use that short ID in later commands.

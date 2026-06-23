@@ -367,6 +367,29 @@ test_install_checksum_cannot_be_skipped() {
   assert_not_contains "$output" "Checksum verification skipped" "installer checksum enforcement"
 }
 
+test_powershell_installer_parses() {
+  if ! command -v pwsh >/dev/null 2>&1; then
+    printf 'skipping PowerShell installer parser test: pwsh not found\n'
+    return
+  fi
+
+  local output status
+  set +e
+  output="$(KATA_INSTALL_PS1="$repo_root/scripts/install.ps1" pwsh -NoProfile -Command '
+    $tokens = $null
+    $errors = $null
+    [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw $env:KATA_INSTALL_PS1), [ref]$errors) > $null
+    if ($errors.Count -gt 0) {
+      $errors | ForEach-Object { Write-Error $_.Message }
+      exit 1
+    }
+  ' 2>&1)"
+  status=$?
+  set -e
+
+  [[ $status -eq 0 ]] || fail "PowerShell installer should parse: $output"
+}
+
 test_release_rejects_missing_version
 test_release_rejects_v_prefixed_version
 test_release_rejects_non_semver_version
@@ -382,5 +405,6 @@ test_verify_release_tag_accepts_tag_on_origin_main
 test_verify_release_tag_rejects_workflow_sha_mismatch
 test_verify_release_tag_rejects_tag_moved_after_validation
 test_install_checksum_cannot_be_skipped
+test_powershell_installer_parses
 
 printf 'release script tests passed\n'

@@ -17,10 +17,21 @@ contracts and UI details may still change before a stable release.
 
 ## Quick start
 
+Install the release binary:
+
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
-# or: go install go.kenn.io/kata/cmd/kata@latest
+```
 
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
+```
+
+Then bind a workspace:
+
+```sh
 cd your-repo
 kata init                                    # bind this workspace to a kata project
 kata create "fix login race"                 # returns the issue's short_id, e.g. abc4
@@ -100,8 +111,14 @@ Linux, and Windows. Install the latest release binary:
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
 
-The installer downloads the latest GitHub release archive for your platform and
-verifies it against `SHA256SUMS` before installing. Release builds can update
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
+```
+
+The installers download the latest GitHub release archive for your platform and
+verify it against `SHA256SUMS` before installing. Release builds can update
 themselves with `kata update`. Linux `.deb` and `.rpm` packages are published for `amd64` and `arm64`.
 
 If you prefer to install from source, kata needs **Go 1.26 or later**:

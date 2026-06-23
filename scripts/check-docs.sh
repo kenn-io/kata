@@ -25,6 +25,7 @@ required_files=(
   "docs/vercel.json"
   "docs/vercel-build.sh"
   "docs/zensical-docs.sh"
+  "docs/scripts/check_vercel_redirects.py"
   "scripts/update-docs.sh"
   "docs/pyproject.toml"
   "docs/uv.lock"
@@ -81,6 +82,8 @@ fi
 if [[ "$missing" -ne 0 ]]; then
   exit 1
 fi
+
+python3 docs/scripts/check_vercel_redirects.py
 
 stale_config="docs/.zensical-build.XXXXXX.toml"
 stale_docs="docs/zensical-public-docs.XXXXXX"
