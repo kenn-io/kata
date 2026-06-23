@@ -148,7 +148,9 @@ Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
 CLI: create, claim, relate, and close issues with evidence. Humans supervise the
 same work in a terminal UI. By default, issue state lives in a local SQLite
-database, so your repo stays clean and no hosted tracker is required.
+database, so your repo stays clean and no hosted tracker is required. When a team
+of humans and agents needs to share, you can opt into a remote daemon or
+federation.
 
 [Install](#install){ .md-button .md-button--primary }
 [Quickstart](#quickstart){ .md-button }
@@ -352,7 +354,9 @@ Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
 CLI: create, claim, relate, and close issues with evidence. Humans supervise the
 same work in a terminal UI. By default, issue state lives in a local SQLite
-database, so your repo stays clean and no hosted tracker is required.
+database, so your repo stays clean and no hosted tracker is required. When a team
+of humans and agents needs to share, you can opt into a remote daemon or
+federation.
 
 The documentation in [`docs/`](docs/) is the definitive guide, published with
 Zensical at <https://katatracker.com/>.
