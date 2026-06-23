@@ -19,9 +19,9 @@ Every task's requirements implicitly include this section.
   - macOS / Linux: `curl -fsSL https://katatracker.com/install.sh | bash`
   - Windows (PowerShell): `powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"`
 - Source-install floor is **Go 1.26 or later**.
-- `docs/index.md` may use Material features (tabs, grid cards, buttons, admonitions). `README.md` MUST NOT — it is plain GitHub markdown (no `=== "`, no `grid cards`, no `{ .md-button }`, no `!!!`).
+- `docs/index.md` may use Material features (tabs, grid cards, buttons, admonitions). `README.md` MUST NOT use them; it is plain GitHub markdown (no `=== "`, no `grid cards`, no `{ .md-button }`, no `!!!`).
 - Reuse the existing `/assets/screenshots/tui/hero.svg`. Do not generate new assets. Do not restructure nav.
-- Hero pitch paragraph copy is fixed (see Task 2) — do not reword.
+- Hero pitch paragraph copy is fixed (see Task 2). Do not reword.
 - `docs/site/` is build output and is NOT gitignored. NEVER `git add` it or `git add -A`. Stage only the named files. Remove `docs/site/` with `trash` after verification.
 - Commit at the end of every task that changes files. Always a NEW commit (never `--amend`). End commit messages with:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
@@ -38,7 +38,7 @@ Small additive rules that center the hero headline + CTA row and constrain the p
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: CSS contract for a `<div class="kata-hero">` wrapper — styles a centered block, its `> p` (pitch paragraph, left-aligned + width-capped), and `.md-button` children (spaced CTA row). Task 2 wraps the hero in exactly `<div class="kata-hero" markdown>`.
+- Produces: CSS contract for a `<div class="kata-hero">` wrapper. It styles a centered block, its `> p` (pitch paragraph, left-aligned + width-capped), and `.md-button` children (spaced CTA row). Task 2 wraps the hero in exactly `<div class="kata-hero" markdown>`.
 
 - [ ] **Step 1: Ensure the docs toolchain is installed**
 
@@ -142,7 +142,7 @@ hide:
 
 # kata カタ
 
-### The issue tracker built for coding agents — and the humans steering them.
+### The issue tracker built for coding agents and the humans steering them.
 
 Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
@@ -201,7 +201,7 @@ Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
 -   __Made for humans too__
 
     `kata tui` browses, triages, and supervises agent-written work over the same
-    data — no raw JSON required.
+    data. No raw JSON required.
 
 -   __Local-first, repo-clean__
 
@@ -240,7 +240,7 @@ walkthrough.
 ## How it works
 
 The `kata` CLI resolves a project from your workspace, `.kata.toml`, or
-`--project`, then talks to a local daemon — starting one automatically when
+`--project`, then talks to a local daemon, starting one automatically when
 needed. The daemon owns a SQLite database under `KATA_HOME`, applies mutations,
 and records an event stream that both the CLI/TUI and hooks read. Your repo
 commits only the small `.kata.toml` binding, so issue history stays out of code
@@ -266,10 +266,10 @@ is a local ledger for the work itself. They coexist. See
 
 <div class="grid cards" markdown>
 
--   [__Concepts__](guide/concepts.md) — the data model and how pieces fit.
--   [__CLI reference__](reference/cli.md) — every command and flag.
--   [__Agent workflows__](workflows/agents.md) — the operating contract for agents.
--   [__Comparisons__](guide/comparisons.md) — kata vs. SaaS issue trackers.
+-   [__Concepts__](guide/concepts.md). The data model and how the pieces fit.
+-   [__CLI reference__](reference/cli.md). Every command and flag.
+-   [__Agent workflows__](workflows/agents.md). The operating contract for agents.
+-   [__Comparisons__](guide/comparisons.md). kata vs. SaaS issue trackers.
 
 </div>
 `````
@@ -346,7 +346,7 @@ Write `README.md` with exactly this content:
 `````markdown
 # kata カタ
 
-The issue tracker built for coding agents — and the humans steering them.
+The issue tracker built for coding agents and the humans steering them.
 
 Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
@@ -427,7 +427,7 @@ overwriting the rest of either file.
   idempotent creates, a claim flow, and predictable failure modes agents can
   script against.
 - **Made for humans too.** `kata tui` browses, triages, and supervises
-  agent-written work over the same data — no raw JSON required.
+  agent-written work over the same data. No raw JSON required.
 - **Local-first, repo-clean.** One Go binary, no runtime dependencies. Issue
   state lives in SQLite under `KATA_HOME`; your repo commits only a small,
   secret-free `.kata.toml`.
@@ -534,11 +534,11 @@ Expected: one new commit.
 
 ### Task 4: Full-site verification and cleanup
 
-Final gate over the combined change. Verification only — commits nothing unless a fix is needed.
+Final gate over the combined change. Verification only. Commits nothing unless a fix is needed.
 
 **Files:** none (runs builds, then removes build output).
 
-**Interfaces:** consumes Tasks 1–3.
+**Interfaces:** consumes Tasks 1-3.
 
 - [ ] **Step 1: Strict build of the final state**
 
@@ -581,6 +581,6 @@ Expected: `git status --short` prints nothing (no stray `docs/site/`, no uncommi
 
 ## Self-Review
 
-- **Spec coverage:** Positioning/hero → Task 2 Step 2 hero block. Install tabs + `kata version` + source pointer → Task 2 (Install) and Task 3 (README). 4 feature cards → Task 2 "Why kata". On-page quickstart → Task 2 "Quickstart". How it works / When to use → Task 2. Next steps cards → Task 2. Pre-1.0 note → Task 2 admonition + README blockquote. `hide: [toc]` with fallback → Task 2 Step 4. CSS → Task 1. README alignment → Task 3. Verification (`make docs-build`, `make docs-check`, link/anchor resolution, visual) → Tasks 2–4. No new assets / no nav change / no new deps → Global Constraints. All spec sections map to a task.
-- **Placeholders:** none — every file's full content and every command is inline.
+- **Spec coverage:** Positioning/hero → Task 2 Step 2 hero block. Install tabs + `kata version` + source pointer → Task 2 (Install) and Task 3 (README). 4 feature cards → Task 2 "Why kata". On-page quickstart → Task 2 "Quickstart". How it works / When to use → Task 2. Next steps cards → Task 2. Pre-1.0 note → Task 2 admonition + README blockquote. `hide: [toc]` with fallback → Task 2 Step 4. CSS → Task 1. README alignment → Task 3. Verification (`make docs-build`, `make docs-check`, link/anchor resolution, visual) → Tasks 2-4. No new assets / no nav change / no new deps → Global Constraints. All spec sections map to a task.
+- **Placeholders:** none. Every file's full content and every command is inline.
 - **Type/name consistency:** the `.kata-hero` class (Task 1) matches the `<div class="kata-hero" markdown>` wrapper (Task 2); anchor ids `#install`/`#quickstart` match the `## Install`/`## Quickstart` headings the buttons link to; install commands and `kata version` are identical across `docs/index.md` and `README.md`.

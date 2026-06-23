@@ -30,7 +30,7 @@ intentional.
 ## Positioning
 
 Lead with the **agent-first hook**, immediately pulling in humans and
-local-first. Plain, factual language — no "powerful / seamless / comprehensive".
+local-first. Plain, factual language. No "powerful / seamless / comprehensive".
 
 ## Page structure (`docs/index.md`, top → bottom)
 
@@ -58,7 +58,7 @@ CSS can center the headline + button row and constrain the pitch width.
 ```markdown
 # kata カタ
 
-### The issue tracker built for coding agents — and the humans steering them.
+### The issue tracker built for coding agents and the humans steering them.
 
 Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
@@ -80,7 +80,7 @@ screenshot workflow.
 ```
 
 Note the precise local-first claim ("By default … no hosted tracker is
-required") — kata has opt-in remote-daemon and federation paths, so we do not
+required"). kata has opt-in remote-daemon and federation paths, so we do not
 claim state is *always* local.
 
 ### 2. Install (`#install`)
@@ -102,7 +102,7 @@ Content tabs via `pymdownx.tabbed`:
     ```
 ````
 
-Then, tight prose + verify (no hard-coded version number — `kata version` only,
+Then, tight prose + verify (no hard-coded version number, `kata version` only,
 confirmed to be the correct command; `kata --version` is not a valid flag):
 
 ````markdown
@@ -117,10 +117,10 @@ Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
 [Install](get-started/install.md).
 ````
 
-### 3. Why kata — 4 grid cards
+### 3. Why kata (4 grid cards)
 
 `## Why kata`, then a `grid cards` block (`attr_list` + `md_in_html`). Four
-cards mapping to the promise — agents, humans, local storage, evidence/audit:
+cards, mapping to the promise (agents, humans, local storage, evidence/audit):
 
 ```markdown
 <div class="grid cards" markdown>
@@ -133,7 +133,7 @@ cards mapping to the promise — agents, humans, local storage, evidence/audit:
 -   __Made for humans too__
 
     `kata tui` browses, triages, and supervises agent-written work over the same
-    data — no raw JSON required.
+    data. No raw JSON required.
 
 -   __Local-first, repo-clean__
 
@@ -178,12 +178,12 @@ through.
 
 ### 5. How it works (tight)
 
-`## How it works` — 2–3 sentences answering "where does state live?", preserving
+`## How it works`. 2-3 sentences answering "where does state live?", preserving
 the substance of today's "Architecture" section without the full detail:
 
 ```markdown
 The `kata` CLI resolves a project from your workspace, `.kata.toml`, or
-`--project`, then talks to a local daemon — starting one automatically when
+`--project`, then talks to a local daemon, starting one automatically when
 needed. The daemon owns a SQLite database under `KATA_HOME`, applies mutations,
 and records an event stream that both the CLI/TUI and hooks read. Your repo
 commits only the small `.kata.toml` binding, so issue history stays out of code
@@ -193,7 +193,7 @@ history. See [Concepts](guide/concepts.md) and
 
 ### 6. When to use kata (tight)
 
-`## When to use kata` — condensed bullets answering "is this replacing
+`## When to use kata`. Condensed bullets answering "is this replacing
 Linear/Jira/GitHub Issues?", ending in the Comparisons link:
 
 ```markdown
@@ -211,17 +211,17 @@ is a local ledger for the work itself. They coexist. See
 [Comparisons](guide/comparisons.md) for the trade-offs.
 ```
 
-### 7. Next steps — 4 link cards
+### 7. Next steps (4 link cards)
 
 `## Next steps`, grid cards linking out:
 
 ```markdown
 <div class="grid cards" markdown>
 
--   [__Concepts__](guide/concepts.md) — the data model and how pieces fit.
--   [__CLI reference__](reference/cli.md) — every command and flag.
--   [__Agent workflows__](workflows/agents.md) — the operating contract for agents.
--   [__Comparisons__](guide/comparisons.md) — kata vs. SaaS issue trackers.
+-   [__Concepts__](guide/concepts.md). The data model and how the pieces fit.
+-   [__CLI reference__](reference/cli.md). Every command and flag.
+-   [__Agent workflows__](workflows/agents.md). The operating contract for agents.
+-   [__Comparisons__](guide/comparisons.md). kata vs. SaaS issue trackers.
 
 </div>
 ```
@@ -242,7 +242,7 @@ under Install):
 
 Restructure `README.md` to the same story order: agent-first pitch → install
 (macOS/Linux + Windows) → short quickstart → why bullets → docs links → agent
-note → contributing. README is plain GitHub markdown — **no tabs, cards, or
+note → contributing. README is plain GitHub markdown. **No tabs, cards, or
 buttons** (they don't render on GitHub). Install commands, the hero paragraph,
 and positioning match the site. Keep the existing "How kata compares" and Beads
 paragraphs (they're already good); reorder so install sits high and the
@@ -250,7 +250,7 @@ agent-first hook leads. Use `kata version` for the verify step.
 
 ## CSS (additive, in `docs/stylesheets/extra.css`)
 
-Small and scoped — spacing, readable line length, CTA layout only. No heavy hero
+Small and scoped: spacing, readable line length, CTA layout only. No heavy hero
 graphics.
 
 ```css
@@ -272,24 +272,24 @@ graphics.
 Headline (`h1`) and tagline (`h3`) center via the wrapper; the pitch paragraph
 stays left-aligned inside a centered, width-constrained box; the two buttons
 center as a spaced row. If the centered headline does not scan well at build
-time, fall back to default left alignment — the rest of the page is unaffected.
+time, fall back to default left alignment; the rest of the page is unaffected.
 
 ## Technical notes
 
 - All primitives are pure markdown on **already-enabled** Zensical 0.0.43
-  extensions — verified rendering to correct Material classes via a build probe:
+  extensions, verified rendering to correct Material classes via a build probe:
   `pymdownx.tabbed` (`tabbed-set`), `attr_list` + `md_in_html` (`grid cards`,
   `md-button`), `admonition`. **No custom templates, no new dependencies.**
 - CTA buttons link to on-page anchors generated from the `## Install` and
   `## Quickstart` headings.
 - The spec lives under `docs/superpowers/`, which `zensical-docs.sh` excludes
-  from the build — it will not appear on the site or trip the strict build.
+  from the build, so it will not appear on the site or trip the strict build.
 
 ## Verification
 
-- `make docs-build` — strict Zensical build passes (no broken links, no orphan
+- `make docs-build`: strict Zensical build passes (no broken links, no orphan
   pages, valid nav).
-- `make docs-check` — repo docs-structure check + strict build pass.
+- `make docs-check`: repo docs-structure check + strict build pass.
 - Confirm the two hero buttons resolve to the on-page `#install` / `#quickstart`
   anchors, and that all internal links resolve.
 - README: confirm relative links resolve; it is plain markdown.
