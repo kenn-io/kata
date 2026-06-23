@@ -36,6 +36,15 @@ function Invoke-WebRequest {
 }
 
 . $script:InstallerPath
+$script:OriginalTestReleaseAsset = (Get-Command Test-ReleaseAsset).ScriptBlock
+
+function Set-ReleaseAssetMock([scriptblock]$Mock) {
+    Set-Item -Path function:script:Test-ReleaseAsset -Value $Mock
+}
+
+function Restore-ReleaseAssetMock {
+    Set-Item -Path function:script:Test-ReleaseAsset -Value $script:OriginalTestReleaseAsset
+}
 
 function Test-DotSourceLoadsHelpersWithoutInstalling {
     Assert-True (Get-Command Resolve-ReleaseArch -ErrorAction SilentlyContinue) "Resolve-ReleaseArch should be loaded"
@@ -44,7 +53,7 @@ function Test-DotSourceLoadsHelpersWithoutInstalling {
 
 function Test-ResolveReleaseArchUsesDetectedWindowsArm64Asset {
     $script:ReleaseAssetUrls = @()
-    function global:Test-ReleaseAsset {
+    Set-ReleaseAssetMock {
         param([string]$Url)
         $script:ReleaseAssetUrls += $Url
         return $true
@@ -57,13 +66,13 @@ function Test-ResolveReleaseArchUsesDetectedWindowsArm64Asset {
         Assert-Equal 1 $script:ReleaseAssetUrls.Count "arm64 asset selection URL count"
         Assert-True ($script:ReleaseAssetUrls[0].EndsWith('/kata_0.5.0_windows_arm64.zip')) "arm64 asset selection URL"
     } finally {
-        Remove-Item function:global:Test-ReleaseAsset -Force -ErrorAction SilentlyContinue
+        Restore-ReleaseAssetMock
     }
 }
 
 function Test-ResolveReleaseArchDoesNotFallbackFromArm64ToAmd64 {
     $script:ReleaseAssetUrls = @()
-    function global:Test-ReleaseAsset {
+    Set-ReleaseAssetMock {
         param([string]$Url)
         $script:ReleaseAssetUrls += $Url
         return $false
@@ -76,7 +85,7 @@ function Test-ResolveReleaseArchDoesNotFallbackFromArm64ToAmd64 {
         Assert-Equal 1 $script:ReleaseAssetUrls.Count "missing arm64 asset URL count"
         Assert-True ($script:ReleaseAssetUrls[0].EndsWith('/kata_0.5.0_windows_arm64.zip')) "missing arm64 asset URL"
     } finally {
-        Remove-Item function:global:Test-ReleaseAsset -Force -ErrorAction SilentlyContinue
+        Restore-ReleaseAssetMock
     }
 }
 
