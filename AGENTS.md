@@ -7,7 +7,8 @@
 - Do not commit rejected experiments. Revert them or ask before preserving them.
 - Test First: Write a failing test before the implementation, then make it pass, then refactor (red, green, refactor). Don't add production code without a failing test that requires it.
 - No Private Project Data: Do not use private project, workspace, customer,
-  host, or repository names in tests, docs, examples, PR text, or generated
+  host, or repository names in tests, docs, examples, planning documents,
+  design notes, issue or bug reports, review responses, PR text, or generated
   fixtures. Use neutral placeholders such as `spoke-project`, `hub-project`,
   `example-workspace`, or `daemon.example` unless the user explicitly asks
   to preserve a real name in a user-facing operational command.

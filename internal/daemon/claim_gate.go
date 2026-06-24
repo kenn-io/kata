@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -126,6 +127,9 @@ func isPendingSpokePushClaimStatusMiss(
 	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusNotFound {
 		return false, nil
 	}
+	if hubStatusErrorCode(statusErr) != "issue_not_found" {
+		return false, nil
+	}
 	if binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
 		return false, nil
 	}
@@ -134,6 +138,17 @@ func isPendingSpokePushClaimStatusMiss(
 		return false, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 	}
 	return pending, nil
+}
+
+func hubStatusErrorCode(err *claimHubStatusError) string {
+	if err == nil {
+		return ""
+	}
+	var env api.ErrorEnvelope
+	if json.Unmarshal([]byte(err.Body), &env) != nil {
+		return ""
+	}
+	return strings.TrimSpace(env.Error.Code)
 }
 
 func pendingPushMayMaterializeIssue(

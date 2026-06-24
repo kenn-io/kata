@@ -210,6 +210,29 @@ func TestClaimGateHelperSpokeHubNotFoundStillFailsAfterIssuePushed(t *testing.T)
 	assertClaimGateHelperAPIError(t, err, http.StatusNotFound, "hub_claim_failed")
 }
 
+func TestClaimGateHelperSpokeHubProjectNotFoundStillFailsForPendingPushIssue(t *testing.T) {
+	ctx := context.Background()
+	store := openClaimGateHelperDB(t)
+	project, issue := createClaimGateHelperIssue(t, store)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/projects/99/issues/"+issue.ShortID+"/lease", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": http.StatusNotFound,
+			"error": map[string]any{
+				"code":    "project_not_found",
+				"message": "project not found",
+			},
+		})
+	}))
+	t.Cleanup(hub.Close)
+	enableClaimGateHelperSpoke(t, store, project, hub.URL, 99)
+
+	err := requireFederatedIssueClaim(ctx, ServerConfig{DB: store}, project.ID, issue, "agent")
+
+	assertClaimGateHelperAPIError(t, err, http.StatusNotFound, "hub_claim_failed")
+}
+
 func TestClaimGateHelperPushSpokeUsesBoundActorForGate(t *testing.T) {
 	ctx := context.Background()
 	store := openClaimGateHelperDB(t)
