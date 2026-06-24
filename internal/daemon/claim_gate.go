@@ -100,12 +100,75 @@ func refreshSpokeClaimStatusForGate(
 		if isTransportClaimError(err) {
 			return nil
 		}
+		pending, pendingErr := isPendingSpokePushClaimStatusMiss(ctx, cfg, binding, issue, err)
+		if pendingErr != nil {
+			return pendingErr
+		}
+		if pending {
+			return nil
+		}
 		return claimForwardError(err)
 	}
 	if err := cfg.DB.ApplyClaimStatus(ctx, binding.ProjectID, issue.UID, claimStatusFromAPI(resp)); err != nil {
 		return claimAPIError(err)
 	}
 	return nil
+}
+
+func isPendingSpokePushClaimStatusMiss(
+	ctx context.Context,
+	cfg ServerConfig,
+	binding db.FederationBinding,
+	issue db.Issue,
+	err error,
+) (bool, error) {
+	var statusErr *claimHubStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusNotFound {
+		return false, nil
+	}
+	if binding.Role != db.FederationRoleSpoke || !binding.PushEnabled {
+		return false, nil
+	}
+	pending, err := pendingPushMayMaterializeIssue(ctx, cfg.DB, binding, issue.UID)
+	if err != nil {
+		return false, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+	}
+	return pending, nil
+}
+
+func pendingPushMayMaterializeIssue(
+	ctx context.Context,
+	store db.Storage,
+	binding db.FederationBinding,
+	issueUID string,
+) (bool, error) {
+	afterID := binding.PushCursorEventID
+	for {
+		events, err := store.PendingFederationPushEvents(ctx, binding.ProjectID, store.InstanceUID(), afterID, 1000)
+		if err != nil {
+			return false, err
+		}
+		if len(events) == 0 {
+			return false, nil
+		}
+		for _, ev := range events {
+			if pushEventMaterializesIssue(ev, issueUID) {
+				return true, nil
+			}
+		}
+		nextAfterID := events[len(events)-1].ID
+		if nextAfterID <= afterID {
+			return false, nil
+		}
+		afterID = nextAfterID
+	}
+}
+
+func pushEventMaterializesIssue(ev db.Event, issueUID string) bool {
+	if ev.Type != "issue.created" && ev.Type != "issue.snapshot" {
+		return false
+	}
+	return ev.IssueUID != nil && *ev.IssueUID == issueUID
 }
 
 func isOfflineClaimRefreshError(err error) bool {
