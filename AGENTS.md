@@ -25,6 +25,25 @@
   behavior coverage is not practical, document the manual check instead of
   adding a brittle shell content test.
 
+## Documentation and release PRs
+
+Update documentation as behavior lands whenever practical: CLI flags, config
+keys, operator workflows, installation paths, and user-facing contracts should
+not wait for a release-only sweep when they can be documented with the code.
+
+After a release is tagged and confirmed available, do a normal post-release
+documentation pass based on the release changelog. This final pass should add
+or refresh release notes, check overview/navigation paths, and make sure the
+public docs describe the shipped state accurately.
+
+When opening a post-release docs PR, describe it as standard release
+finalization. Do not frame the update as a surprising docs gap, a failure of
+prior work, or a problem caused by the release tag. Good framing:
+
+- "Finalizes the public docs for the 0.6.0 release using the tagged changelog."
+- "Adds the 0.6.0 changelog entry and updates overview links for the shipped
+  GitHub sync and Windows installer docs."
+
 ## Project management
 
 This project tracks its own work in **kata**. Run `kata quickstart` at the
