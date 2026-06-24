@@ -48,15 +48,26 @@ installer or updater, asset names that no longer match kit's default
 self-update contract, missing assets in a successful release, or code/docs
 that claim signed updates exist before signing is implemented.
 
-Semver tag pushes run a read-only Release validator. The write-capable
-GoReleaser publication path is an explicit default-branch Publish Release
-workflow_dispatch job gated by the `release` environment. It validates the
-operator-supplied semver tag, verifies the tag target is contained in
-`origin/main`, checks out the immutable validated commit SHA for packaging, and
-re-checks the tag immediately before creating the GitHub release. It is valid to
-flag shell injection in tag handling, publishing from non-semver tags, or
-changes that move release-write credentials back into tag-controlled workflow
-code.
+Semver tag pushes are the release publication mechanism. A repository writer
+who can push a semver release tag to a commit already contained in `origin/main`
+is trusted to initiate the GitHub release and GoReleaser artifact upload through
+the tag-triggered Release workflow. Do not raise a blocking finding merely
+because the tag-triggered release job has `contents: write`, lacks an additional
+`release` environment approval, or publishes with `GITHUB_TOKEN`.
+
+The release workflow must still validate the tag shape, verify the tag target is
+contained in `origin/main`, check out the immutable validated commit SHA for
+packaging, and re-check the tag immediately before creating the GitHub release.
+Valid findings remain: shell injection in tag handling, publishing from
+non-semver tags, publishing a tag whose target is not in `origin/main`, checking
+out a mutable ref for packaging after validation, skipping the immediate
+pre-publish tag re-check, or broadening write credentials beyond the release
+publication job.
+
+Stronger release provenance such as GPG tag verification, artifact signing, or
+SLSA-style attestations is future hardening work. Do not block current release
+changes solely because those mechanisms are absent unless the diff claims they
+already exist or weakens an existing verification step.
 
 The Publish Release workflow may create the GitHub release before GoReleaser
 finishes uploading artifacts. A visible release during an in-progress or failed
