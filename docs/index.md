@@ -140,6 +140,7 @@ is a local ledger for the work itself. They coexist. See
 
 -   [__Concepts__](guide/concepts.md). The data model and how the pieces fit.
 -   [__CLI reference__](reference/cli.md). Every command and flag.
+-   [__GitHub sync__](operations/github-sync.md). Bring GitHub issues into kata.
 -   [__Agent workflows__](workflows/agents.md). The operating contract for agents.
 -   [__Comparisons__](guide/comparisons.md). kata vs. SaaS issue trackers.
 

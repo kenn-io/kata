@@ -271,6 +271,9 @@ background daemon and returns after startup is confirmed. Use
 `daemon start --foreground` for service managers, hosted deployments, and any
 setup where the daemon process should stay attached to the terminal.
 `kata agent-instructions` is an alias for `kata quickstart`.
+For TCP listener auth modes, including trusted private-network bearer auth,
+read-only experiments, and explicit tokenless private-network writes, see
+[Remote daemon](../operations/remote-daemon.md).
 
 `kata tui` opens the interactive issue browser. In the issue list, `v` toggles
 between nested and flat views: nested groups children under parents, while flat

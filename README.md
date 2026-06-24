@@ -134,7 +134,8 @@ The [docs site](docs/) is the definitive reference:
   [Configuration](docs/reference/configuration.md)
 - Workflows: [Agent workflows](docs/workflows/agents.md) ·
   [Sharing models](docs/workflows/sharing.md)
-- Operations: [Remote daemon](docs/operations/remote-daemon.md) ·
+- Operations: [GitHub sync](docs/operations/github-sync.md) ·
+  [Remote daemon](docs/operations/remote-daemon.md) ·
   [Federation](docs/operations/federation.md) ·
   [Hosted mode](docs/operations/hosted-mode.md) ·
   [Backup and restore](docs/operations/backup-restore.md)
