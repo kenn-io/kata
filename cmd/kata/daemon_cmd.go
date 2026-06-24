@@ -233,17 +233,6 @@ func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
 	return kitdaemon.RuntimeRecord{}, false
 }
 
-func daemonStartExitError(err error, dataDir string) error {
-	msg := "daemon exited before startup completed"
-	if err != nil {
-		msg = fmt.Sprintf("%s: %v", msg, err)
-	}
-	if tail := daemonStartLogTail(dataDir); tail != "" {
-		msg = msg + "\n" + tail
-	}
-	return errors.New(msg)
-}
-
 func daemonStartTimeoutError(dataDir string) error {
 	msg := "daemon failed to start within 5s"
 	if tail := daemonStartLogTail(dataDir); tail != "" {
