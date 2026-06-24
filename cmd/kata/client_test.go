@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -26,6 +27,23 @@ func TestEnvHTTPTimeout(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			assertEnvDurationOverride(t, "KATA_HTTP_TIMEOUT", tc.env, def, tc.want, envHTTPTimeout)
 		})
+	}
+}
+
+func TestLongRunningClientForLeavesResponseHeadersUnbounded(t *testing.T) {
+	resetFlags(t)
+	t.Setenv("KATA_HOME", t.TempDir())
+
+	c, err := longRunningClientFor(context.Background(), "http://127.0.0.1:7373")
+	if err != nil {
+		t.Fatalf("longRunningClientFor: %v", err)
+	}
+
+	if c.Timeout != 0 {
+		t.Fatalf("long-running client timeout = %v, want no overall timeout", c.Timeout)
+	}
+	if tr, ok := c.Transport.(*http.Transport); ok && tr.ResponseHeaderTimeout != 0 {
+		t.Fatalf("response header timeout = %v, want no response-header cap", tr.ResponseHeaderTimeout)
 	}
 }
 
