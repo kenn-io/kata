@@ -276,6 +276,33 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 	assert.Empty(t, stderr)
 }
 
+func TestDaemonStart_ListenConflictWithExistingDaemon(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
+
+	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "daemon already running")
+	assert.Contains(t, err.Error(), "127.0.0.1:7777")
+	assert.Contains(t, err.Error(), "100.64.0.5:7777")
+	assert.Empty(t, out)
+}
+
+func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
+
+	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false)
+
+	require.NoError(t, err)
+	assert.Equal(t, "already_running", out.Action)
+	assert.Equal(t, os.Getpid(), out.PID)
+	assert.Equal(t, "100.64.0.5:7777", out.Address)
+}
+
 func TestDaemonStart_ForegroundKeepsCurrentProcess(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)

@@ -120,10 +120,14 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		return daemonStartOutput{}, err
 	}
 	if rec, ok := liveDaemonRecord(ns.DataDir, 0); ok {
+		address := rec.Endpoint().ConfigAddress()
+		if listen != "" && address != listen {
+			return daemonStartOutput{}, fmt.Errorf("daemon already running at %s; stop it before starting with --listen %s", address, listen)
+		}
 		return daemonStartOutput{
 			Action:  "already_running",
 			PID:     rec.PID,
-			Address: rec.Endpoint().ConfigAddress(),
+			Address: address,
 			DBPath:  rec.Metadata["db_path"],
 		}, nil
 	}
