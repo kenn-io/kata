@@ -877,6 +877,8 @@ type DigestTotals struct {
 	Unlinked        int64 `json:"unlinked"`
 }
 
+type DisableIssueSyncRequestBody = map[string]any
+
 type EditIssueRequestBody struct {
 	Actor         string      `json:"actor" validate:"required"`
 	Body          *string     `json:"body,omitempty"`
@@ -943,6 +945,12 @@ func (e EditIssueResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type EnableIssueSyncRequestBody struct {
+	Config          map[string]any `json:"config,omitempty"`
+	Interval        *string        `json:"interval,omitempty"`
+	IntervalSeconds *int64         `json:"interval_seconds,omitempty"`
 }
 
 type EnableProjectFederationRequestBody struct {
@@ -1679,6 +1687,71 @@ type IssueRef struct {
 }
 
 func (i IssueRef) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(i))
+}
+
+type IssueSyncBindingOut struct {
+	Config          map[string]any `json:"config,omitempty"`
+	CreatedAt       time.Time      `json:"created_at" validate:"required"`
+	DisplayName     string         `json:"display_name" validate:"required"`
+	Enabled         bool           `json:"enabled"`
+	ID              int64          `json:"id"`
+	IntervalSeconds int64          `json:"interval_seconds"`
+	LastCursorAt    *time.Time     `json:"last_cursor_at,omitempty"`
+	ProjectID       int64          `json:"project_id"`
+	Provider        string         `json:"provider" validate:"required"`
+	RemoteID        string         `json:"remote_id" validate:"required"`
+	SourceKey       string         `json:"source_key" validate:"required"`
+	UpdatedAt       time.Time      `json:"updated_at" validate:"required"`
+}
+
+func (i IssueSyncBindingOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(i))
+}
+
+type IssueSyncBody struct {
+	Binding *IssueSyncBindingOut `json:"binding,omitempty"`
+	Status  IssueSyncStatusOut   `json:"status"`
+}
+
+func (i IssueSyncBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if i.Binding != nil {
+		if v, ok := any(i.Binding).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Binding", err)
+			}
+		}
+	}
+	if v, ok := any(i.Status).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Status", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type IssueSyncStatusOut struct {
+	BindingID     int64      `json:"binding_id"`
+	Enabled       bool       `json:"enabled"`
+	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
+	LastComments  int64      `json:"last_comments"`
+	LastCreated   int64      `json:"last_created"`
+	LastError     *string    `json:"last_error,omitempty"`
+	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
+	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
+	LastUnchanged int64      `json:"last_unchanged"`
+	LastUpdated   int64      `json:"last_updated"`
+	ProjectID     int64      `json:"project_id"`
+	Provider      string     `json:"provider" validate:"required"`
+	State         string     `json:"state" validate:"required"`
+	SyncStartedAt *time.Time `json:"sync_started_at,omitempty"`
+}
+
+func (i IssueSyncStatusOut) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(i))
 }
 
@@ -2639,6 +2712,37 @@ func (r RevokeTokenResponseBody) Validate() error {
 	if v, ok := any(r.Token).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Token", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type RunIssueSyncOnceRequestBody = map[string]any
+
+type RunIssueSyncOnceResponseBody struct {
+	Binding IssueSyncBindingOut `json:"binding"`
+	Import  ImportBatchResult   `json:"import"`
+	Status  IssueSyncStatusOut  `json:"status"`
+}
+
+func (r RunIssueSyncOnceResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(r.Binding).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Binding", err)
+		}
+	}
+	if v, ok := any(r.Import).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Import", err)
+		}
+	}
+	if v, ok := any(r.Status).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Status", err)
 		}
 	}
 	if len(errors) == 0 {

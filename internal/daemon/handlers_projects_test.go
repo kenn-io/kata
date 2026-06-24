@@ -1326,6 +1326,31 @@ func TestMergeProject_ImportMappingCollisionReturns409(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, bs, 409, "project_merge_import_mapping_collision")
 }
 
+func TestMergeProject_IssueSyncBindingReturns409(t *testing.T) {
+	ts, h := startDefaultTestServer(t)
+	ctx := t.Context()
+	source, err := h.db.CreateProject(ctx, "source")
+	require.NoError(t, err)
+	target, err := h.db.CreateProject(ctx, "target")
+	require.NoError(t, err)
+	_, err = h.db.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID:       source.ID,
+		Provider:        "github",
+		SourceKey:       "github:R_merge_source",
+		RemoteID:        "R_merge_source",
+		DisplayName:     "example-org/example-repo",
+		Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
+		IntervalSeconds: 300,
+	})
+	require.NoError(t, err)
+
+	resp, bs := postJSON(t, ts, "/api/v1/projects/"+strconv.FormatInt(target.ID, 10)+"/merge", map[string]any{
+		"source_project_id": source.ID,
+	})
+
+	assertAPIError(t, resp.StatusCode, bs, 409, "project_merge_issue_sync_binding")
+}
+
 func TestInit_MergedKataTomlNameResolvesToSurvivingProject(t *testing.T) {
 	h := newServerWithGitWorkspace(t, "https://github.com/wesm/beta.git")
 	store := h.DB()

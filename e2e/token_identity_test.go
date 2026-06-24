@@ -269,7 +269,7 @@ func startIdentityDaemon(t *testing.T, bin string) (addr, serverHome string, sto
 		[]byte("[auth]\ntoken = \""+identityBootstrapToken+"\"\nrequire_token_identity = true\n"), 0o600))
 
 	stderr := &safeBuffer{}
-	cmd := exec.Command(bin, "daemon", "start", "--listen", addr) //nolint:gosec
+	cmd := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
 	cmd.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),

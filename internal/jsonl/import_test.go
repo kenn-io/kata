@@ -116,6 +116,43 @@ func TestImportFederationSyncStatus(t *testing.T) {
 	assert.Equal(t, "hub offline", *got.LastError)
 }
 
+func TestGitHubSyncDirectImportPreservesBindingAndStatus(t *testing.T) {
+	ctx := context.Background()
+	target := openImportTargetDB(t)
+	require.NoError(t, importJSONL(ctx, target,
+		validExportVersion,
+		`{"kind":"meta","data":{"key":"instance_uid","value":"01HZZZZZZZZZZZZZZZZZZZZZ10"}}`,
+		`{"kind":"project","data":{"id":1,"uid":"01HZZZZZZZZZZZZZZZZZZZZZ11","name":"example-project","metadata":{},"revision":1,"created_at":"2026-06-01T09:00:00.000Z"}}`,
+		`{"kind":"issue_sync_binding","data":{"id":7,"project_id":1,"provider":"github","source_key":"github:repo-node-example","remote_id":"repo-node-example","display_name":"example-org/example-repo","config":{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42},"enabled":false,"interval_seconds":900,"last_cursor_at":"2026-06-01T10:00:00.000Z","created_at":"2026-06-01T09:00:00.000Z","updated_at":"2026-06-01T10:01:00.000Z"}}`,
+		`{"kind":"issue_sync_status","data":{"binding_id":7,"project_id":1,"sync_started_at":"2026-06-01T09:58:00.000Z","last_attempt_at":"2026-06-01T09:58:00.000Z","last_success_at":"2026-06-01T10:00:00.000Z","last_error_at":"2026-06-01T10:02:00.000Z","last_error":"rate limited","last_created":2,"last_updated":3,"last_unchanged":4,"last_comments":5}}`,
+	))
+
+	binding, err := target.IssueSyncBindingByProject(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), binding.ID)
+	assert.Equal(t, "github", binding.Provider)
+	assert.Equal(t, "github:repo-node-example", binding.SourceKey)
+	assert.Equal(t, "repo-node-example", binding.RemoteID)
+	assert.Equal(t, "example-org/example-repo", binding.DisplayName)
+	assert.JSONEq(t, `{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`, string(binding.Config))
+	assert.False(t, binding.Enabled)
+	assert.Equal(t, 900, binding.IntervalSeconds)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T10:00:00.000Z"), binding.LastCursorAt)
+
+	status, err := target.IssueSyncStatusByProject(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), status.BindingID)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T09:58:00.000Z"), status.SyncStartedAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T09:58:00.000Z"), status.LastAttemptAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T10:00:00.000Z"), status.LastSuccessAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T10:02:00.000Z"), status.LastErrorAt)
+	assert.Equal(t, "rate limited", status.LastError)
+	assert.Equal(t, 2, status.LastCreated)
+	assert.Equal(t, 3, status.LastUpdated)
+	assert.Equal(t, 4, status.LastUnchanged)
+	assert.Equal(t, 5, status.LastComments)
+}
+
 func TestImportV11JSONLDefaultsWithoutFederationSyncStatus(t *testing.T) {
 	ctx := context.Background()
 	target := openImportTargetDB(t)

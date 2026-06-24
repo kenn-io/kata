@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 )
 
@@ -25,12 +26,15 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
-	DB             db.Storage
-	StartedAt      time.Time
-	Endpoint       *kitdaemon.Endpoint
-	Broadcaster    *EventBroadcaster
-	FederationWake func()
-	Hooks          hooks.Sink
+	DB                      db.Storage
+	StartedAt               time.Time
+	Endpoint                *kitdaemon.Endpoint
+	Broadcaster             *EventBroadcaster
+	FederationWake          func()
+	GitHubSyncFetcher       githubsync.Fetcher
+	GitHubSyncRunnerFactory GitHubSyncRunnerFactory
+	GitHubSyncWake          func()
+	Hooks                   hooks.Sink
 	// CloseThrottle controls whether the opt-in sibling-burst and repeated-
 	// message guards run on close. Zero-value means "guards off".
 	CloseThrottle CloseThrottlePolicy
@@ -69,6 +73,33 @@ func (c ServerConfig) authPolicy() authPolicy {
 type CloseThrottlePolicy struct {
 	SiblingBurstEnabled bool
 	SiblingBurstWindow  time.Duration
+}
+
+// GitHubSyncRunner runs one durable GitHub sync binding.
+type GitHubSyncRunner interface {
+	RunOnce(context.Context, int64) (githubsync.RunResult, error)
+}
+
+// GitHubSyncRunnerConfig is the daemon-side configuration passed to a runner
+// factory. Tests use this seam to replace the runner without replacing DB state.
+type GitHubSyncRunnerConfig struct {
+	Store     db.Storage
+	Fetcher   githubsync.Fetcher
+	EventSink func(context.Context, int64, []db.Event) error
+	Logger    *slog.Logger
+}
+
+// GitHubSyncRunnerFactory creates a runner for one daemon-side sync request.
+type GitHubSyncRunnerFactory func(GitHubSyncRunnerConfig) GitHubSyncRunner
+
+// NewDefaultGitHubSyncRunner adapts the public daemon seam to githubsync.Runner.
+func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
+	return githubsync.NewRunner(githubsync.RunnerConfig{
+		Store:     cfg.Store,
+		Fetcher:   cfg.Fetcher,
+		EventSink: cfg.EventSink,
+		Logger:    cfg.Logger,
+	})
 }
 
 // Server bundles the http handler and lifecycle.
@@ -227,6 +258,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerMove(humaAPI, cfg)
 	registerEventsHandlers(humaAPI, mux, cfg)
 	registerFederationHandlers(humaAPI, cfg)
+	registerIssueSyncHandlers(humaAPI, cfg)
 	registerClaimHandlers(humaAPI, cfg)
 	registerDigestHandlers(humaAPI, cfg)
 	registerAuditHandlers(humaAPI, cfg)

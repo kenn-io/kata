@@ -49,6 +49,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err := rejectFederatedProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
+	if err := rejectIssueSyncProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 
 	mappingCollisions, err := projectMergeImportMappingCollisions(ctx, tx, p.SourceProjectID, p.TargetProjectID)
 	if err != nil {
@@ -147,6 +150,19 @@ func rejectFederatedProjectMerge(ctx context.Context, tx *sql.Tx, sourceID, targ
 	}
 	if n > 0 {
 		return db.ErrProjectMergeFederationBinding
+	}
+	return nil
+}
+
+func rejectIssueSyncProjectMerge(ctx context.Context, tx *sql.Tx, sourceID, targetID int64) error {
+	var n int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM issue_sync_bindings WHERE project_id IN (?, ?)`,
+		sourceID, targetID).Scan(&n); err != nil {
+		return fmt.Errorf("check issue sync merge binding: %w", err)
+	}
+	if n > 0 {
+		return db.ErrProjectMergeIssueSyncBinding
 	}
 	return nil
 }

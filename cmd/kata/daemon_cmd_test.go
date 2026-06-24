@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -20,6 +21,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/githubsync"
+	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 	kitdaemon "go.kenn.io/kit/daemon"
@@ -244,6 +249,66 @@ func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) {
 	}
 }
 
+func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	oldStart := startDetachedDaemon
+	t.Cleanup(func() { startDetachedDaemon = oldStart })
+	var gotListen string
+	var gotInsecureReadonly bool
+	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly bool) (daemonStartOutput, error) {
+		gotListen = listen
+		gotInsecureReadonly = insecureReadonly
+		return daemonStartOutput{
+			Action:  "started",
+			PID:     1234,
+			Address: "127.0.0.1:7777",
+		}, nil
+	}
+
+	stdout, stderr, err := executeRootCapture(t, context.Background(),
+		"daemon", "start", "--listen", "127.0.0.1:7777", "--insecure-readonly")
+
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1:7777", gotListen)
+	assert.True(t, gotInsecureReadonly)
+	assert.Equal(t, "started pid=1234 address=127.0.0.1:7777\n", stdout)
+	assert.Empty(t, stderr)
+}
+
+func TestDaemonStart_ForegroundKeepsCurrentProcess(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	oldStart := startDetachedDaemon
+	oldRun := runDaemonForeground
+	t.Cleanup(func() {
+		startDetachedDaemon = oldStart
+		runDaemonForeground = oldRun
+	})
+	var detachedCalled bool
+	startDetachedDaemon = func(context.Context, string, bool) (daemonStartOutput, error) {
+		detachedCalled = true
+		return daemonStartOutput{}, nil
+	}
+	var gotListen string
+	var gotInsecureReadonly bool
+	runDaemonForeground = func(_ context.Context, listen string, insecureReadonly bool) error {
+		gotListen = listen
+		gotInsecureReadonly = insecureReadonly
+		return nil
+	}
+
+	stdout, stderr, err := executeRootCapture(t, context.Background(),
+		"daemon", "start", "--foreground", "--listen", "127.0.0.1:7777", "--insecure-readonly")
+
+	require.NoError(t, err)
+	assert.False(t, detachedCalled)
+	assert.Equal(t, "127.0.0.1:7777", gotListen)
+	assert.True(t, gotInsecureReadonly)
+	assert.Empty(t, stdout)
+	assert.Empty(t, stderr)
+}
+
 func TestDaemonStop_AgentReportsStoppedPID(t *testing.T) {
 	resetFlags(t)
 	tmp := setupKataEnv(t)
@@ -391,7 +456,7 @@ func TestDaemonStart_ListenFlagRejectsPublicAddress(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"daemon", "start", "--listen", "8.8.8.8:7777"})
+	cmd.SetArgs([]string{"daemon", "start", "--foreground", "--listen", "8.8.8.8:7777"})
 
 	err := cmd.ExecuteContext(context.Background())
 	require.Error(t, err)
@@ -407,7 +472,7 @@ func TestDaemonStart_ListenFlagRejectsMalformed(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"daemon", "start", "--listen", "not-a-host-port"})
+	cmd.SetArgs([]string{"daemon", "start", "--foreground", "--listen", "not-a-host-port"})
 
 	err := cmd.ExecuteContext(context.Background())
 	require.Error(t, err)
@@ -440,7 +505,7 @@ func TestListenFromPortEnv(t *testing.T) {
 }
 
 // TestDaemonStart_PortEnvBindsWildcard verifies that when the platform
-// injects PORT and the daemon is started explicitly (no auto-start
+// injects PORT and the daemon is started explicitly in the foreground (no auto-start
 // marker), with no --listen flag and no config value, the bind address
 // is derived from PORT as 0.0.0.0:$PORT. With no token configured, the
 // auth-startup guard refuses the non-loopback bind — and the refusal
@@ -459,7 +524,7 @@ func TestDaemonStart_PortEnvBindsWildcard(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"daemon", "start"})
+	cmd.SetArgs([]string{"daemon", "start", "--foreground"})
 
 	err := cmd.ExecuteContext(context.Background())
 	require.Error(t, err)
@@ -483,7 +548,7 @@ func TestDaemonStart_ConfigFileListenIsHonored(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"daemon", "start"})
+	cmd.SetArgs([]string{"daemon", "start", "--foreground"})
 
 	err := cmd.ExecuteContext(context.Background())
 	require.Error(t, err)
@@ -507,7 +572,7 @@ func TestDaemonStart_FlagWinsOverConfigFile(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetArgs([]string{"daemon", "start", "--listen", "8.8.8.8:7777"})
+	cmd.SetArgs([]string{"daemon", "start", "--foreground", "--listen", "8.8.8.8:7777"})
 
 	err := cmd.ExecuteContext(context.Background())
 	require.Error(t, err)
@@ -557,28 +622,38 @@ func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
+		var capturesMu sync.Mutex
 		captures := []time.Time{}
+		capturesSnapshot := func() []time.Time {
+			capturesMu.Lock()
+			defer capturesMu.Unlock()
+			return append([]time.Time(nil), captures...)
+		}
 
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
 			runDaemonTelemetryHeartbeat(ctx, func(context.Context) {
+				capturesMu.Lock()
 				captures = append(captures, time.Now())
+				capturesMu.Unlock()
 			})
 		}()
 
 		synctest.Wait()
-		require.Len(t, captures, 1)
-		first := captures[0]
+		got := capturesSnapshot()
+		require.Len(t, got, 1)
+		first := got[0]
 
 		time.Sleep(daemonTelemetryHeartbeatInterval - time.Nanosecond)
 		synctest.Wait()
-		require.Len(t, captures, 1)
+		require.Len(t, capturesSnapshot(), 1)
 
 		time.Sleep(time.Nanosecond)
 		synctest.Wait()
-		require.Len(t, captures, 2)
-		assert.Equal(t, first.Add(daemonTelemetryHeartbeatInterval), captures[1])
+		got = capturesSnapshot()
+		require.Len(t, got, 2)
+		assert.Equal(t, first.Add(daemonTelemetryHeartbeatInterval), got[1])
 
 		cancel()
 		synctest.Wait()
@@ -588,6 +663,138 @@ func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
 			t.Fatal("heartbeat goroutine did not exit after cancellation")
 		}
 	})
+}
+
+func TestGitHubSyncRunnerInterval(t *testing.T) {
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "")
+	assert.Equal(t, 5*time.Minute, githubSyncRunnerInterval())
+
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
+	assert.Equal(t, 25*time.Millisecond, githubSyncRunnerInterval())
+
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "0")
+	assert.Equal(t, 5*time.Minute, githubSyncRunnerInterval())
+
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "not-a-number")
+	assert.Equal(t, 5*time.Minute, githubSyncRunnerInterval())
+}
+
+func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *testing.T) {
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
+	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+	defer func() { _ = store.Close() }()
+	fetcher := &daemonGitHubSyncFetcher{}
+	bcast := daemon.NewEventBroadcaster()
+	runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
+	var configs []githubsync.RunnerConfig
+	orig := newGitHubSyncDaemonRunner
+	newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
+		configs = append(configs, cfg)
+		return runner
+	}
+	t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wake := startGitHubSyncRunner(ctx, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
+	defer cancel()
+
+	require.Eventually(t, func() bool {
+		return runner.wasRun()
+	}, time.Second, time.Millisecond)
+	require.Len(t, configs, 1)
+	assert.Same(t, store, configs[0].Store)
+	assert.Same(t, fetcher, configs[0].Fetcher)
+	assert.Equal(t, 25*time.Millisecond, configs[0].Interval)
+	assert.NotNil(t, configs[0].Wake)
+	assert.NotNil(t, configs[0].EventSink)
+	assert.NotNil(t, configs[0].Logger)
+	require.NotNil(t, wake)
+	require.NotPanics(t, wake)
+}
+
+func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing.T) {
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
+	store, project, binding := newDaemonGitHubSyncStore(t)
+	fetcher := newDaemonGitHubSyncFetcher(binding)
+	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
+	bcast := daemon.NewEventBroadcaster()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startGitHubSyncRunner(ctx, store, fetcher, bcast, hooks.NewNoop(), log.New(io.Discard, "", 0))
+
+	require.Eventually(t, func() bool {
+		got, err := store.IssueSyncBindingByID(context.Background(), binding.ID)
+		return err == nil && got.LastCursorAt != nil
+	}, time.Second, time.Millisecond)
+	status, err := store.IssueSyncStatusByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, status.LastCreated)
+	assert.Equal(t, int64(1), fetcher.repositoryCallCount())
+}
+
+func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
+	store, project, binding := newDaemonGitHubSyncStore(t)
+	fetcher := newDaemonGitHubSyncFetcher(binding)
+	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
+	bcast := daemon.NewEventBroadcaster()
+	sub := bcast.Subscribe(daemon.SubFilter{ProjectID: project.ID})
+	defer sub.Unsub()
+	hookSink := &recordingDaemonHookSink{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startGitHubSyncRunner(ctx, store, fetcher, bcast, hookSink, log.New(io.Discard, "", 0))
+
+	var msg daemon.StreamMsg
+	select {
+	case msg = <-sub.Ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for GitHub sync import event")
+	}
+	require.Equal(t, "event", msg.Kind)
+	require.NotNil(t, msg.Event)
+	assert.Equal(t, project.ID, msg.ProjectID)
+	assert.Equal(t, []int64{msg.Event.ID}, hookSink.eventIDs())
+
+	select {
+	case extra := <-sub.Ch:
+		t.Fatalf("unexpected duplicate GitHub sync event: %#v", extra)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testing.T) {
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "10")
+	store, _, binding := newDaemonGitHubSyncStore(t)
+	fetcher := newDaemonGitHubSyncFetcher(binding)
+	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "first issue")}
+	fetcher.blockRepository = make(chan struct{})
+	fetcher.releaseRepository = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wake := startGitHubSyncRunner(ctx, store, fetcher, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
+
+	select {
+	case <-fetcher.blockRepository:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for repository fetch")
+	}
+	for i := 0; i < 5; i++ {
+		wake()
+	}
+	require.Never(t, func() bool {
+		return fetcher.repositoryCallCount() > 1
+	}, 50*time.Millisecond, time.Millisecond)
+
+	close(fetcher.releaseRepository)
+	require.Eventually(t, func() bool {
+		got, err := store.IssueSyncBindingByID(context.Background(), binding.ID)
+		return err == nil && got.LastCursorAt != nil
+	}, time.Second, time.Millisecond)
+	assert.Equal(t, int64(1), fetcher.repositoryCallCount())
 }
 
 func TestDefaultEndpointForOS(t *testing.T) {
@@ -686,6 +893,142 @@ func TestEnsureDaemon_ReturnsExistingURL(t *testing.T) {
 	url, err := ensureDaemon(context.Background())
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(url, "http://"))
+}
+
+type recordingGitHubSyncDaemonRunner struct {
+	mu        sync.Mutex
+	runCalled chan struct{}
+	closed    bool
+}
+
+func (r *recordingGitHubSyncDaemonRunner) Run(ctx context.Context) error {
+	r.mu.Lock()
+	if !r.closed {
+		close(r.runCalled)
+		r.closed = true
+	}
+	r.mu.Unlock()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (r *recordingGitHubSyncDaemonRunner) wasRun() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
+}
+
+func newDaemonGitHubSyncStore(t *testing.T) (*sqlitestore.Store, db.Project, db.IssueSyncBinding) {
+	t.Helper()
+	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := context.Background()
+	project, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	binding, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID:       project.ID,
+		Provider:        "github",
+		SourceKey:       "github:R_example_repo",
+		RemoteID:        "R_example_repo",
+		DisplayName:     "example-owner/example-repo",
+		Config:          mustCmdGitHubSyncConfig(t, "github.com", "example-owner", "example-repo", 101),
+		IntervalSeconds: 300,
+	})
+	require.NoError(t, err)
+	return store, project, binding
+}
+
+type daemonGitHubSyncFetcher struct {
+	mu                sync.Mutex
+	repo              githubsync.Repository
+	issues            []githubsync.Issue
+	comments          map[int][]githubsync.Comment
+	repositoryCalls   int64
+	blockRepository   chan struct{}
+	releaseRepository chan struct{}
+	blockOnce         sync.Once
+}
+
+func newDaemonGitHubSyncFetcher(binding db.IssueSyncBinding) *daemonGitHubSyncFetcher {
+	return &daemonGitHubSyncFetcher{
+		repo: githubsync.Repository{
+			NodeID:   binding.RemoteID,
+			ID:       101,
+			FullName: binding.DisplayName,
+		},
+		comments: map[int][]githubsync.Comment{},
+	}
+}
+
+func (f *daemonGitHubSyncFetcher) Repository(ctx context.Context, _, _, _ string) (githubsync.Repository, error) {
+	f.mu.Lock()
+	f.repositoryCalls++
+	f.mu.Unlock()
+	if f.blockRepository != nil {
+		f.blockOnce.Do(func() {
+			f.blockRepository <- struct{}{}
+			select {
+			case <-ctx.Done():
+			case <-f.releaseRepository:
+			}
+		})
+	}
+	return f.repo, nil
+}
+
+func (f *daemonGitHubSyncFetcher) Issues(_ context.Context, _ githubsync.Binding, _ *time.Time) ([]githubsync.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]githubsync.Issue(nil), f.issues...), nil
+}
+
+func (f *daemonGitHubSyncFetcher) Comments(_ context.Context, _ githubsync.Binding, issueNumber int) ([]githubsync.Comment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]githubsync.Comment(nil), f.comments[issueNumber]...), nil
+}
+
+func (f *daemonGitHubSyncFetcher) repositoryCallCount() int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.repositoryCalls
+}
+
+func daemonGitHubSyncIssue(id int64, number int, title string) githubsync.Issue {
+	ts := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
+	return githubsync.Issue{
+		ID:        id,
+		NodeID:    "I_example",
+		Number:    number,
+		HTMLURL:   "https://github.com/example-owner/example-repo/issues/1",
+		Title:     title,
+		Body:      "body",
+		State:     "open",
+		User:      &githubsync.User{Login: "author"},
+		CreatedAt: &ts,
+		UpdatedAt: &ts,
+	}
+}
+
+type recordingDaemonHookSink struct {
+	mu     sync.Mutex
+	events []db.Event
+}
+
+func (s *recordingDaemonHookSink) Enqueue(evt db.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, evt)
+}
+
+func (s *recordingDaemonHookSink) eventIDs() []int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]int64, 0, len(s.events))
+	for _, evt := range s.events {
+		out = append(out, evt.ID)
+	}
+	return out
 }
 
 func startSleepProcess(t *testing.T) *exec.Cmd {

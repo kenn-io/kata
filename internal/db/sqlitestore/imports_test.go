@@ -367,6 +367,56 @@ func TestImportBatch_LocalNewerIssueUnchangedButMissingCommentsMerge(t *testing.
 	assert.Len(t, comments, 1)
 }
 
+func TestImportBatch_SameSourceVersionCanCorrectOwnedPresentationTitle(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	sourceTime := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{{ExternalID: "issue-id:101", Title: "Original title", Body: "body", Author: "alice", Status: "open", CreatedAt: sourceTime.Add(-time.Minute), UpdatedAt: sourceTime}}})
+	require.NoError(t, err)
+	m, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:101")
+	require.NoError(t, err)
+
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{{ExternalID: "issue-id:101", Title: "[GitHub #1] Original title", Body: "body", Author: "alice", Status: "open", CreatedAt: sourceTime.Add(-time.Minute), UpdatedAt: sourceTime}}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Updated)
+	require.Len(t, events, 1)
+	assert.Equal(t, "issue.updated", events[0].Type)
+	payload := unmarshalPayload[struct {
+		Title    string `json:"title"`
+		OldTitle string `json:"old_title"`
+	}](t, events[0].Payload)
+	assert.Equal(t, "[GitHub #1] Original title", payload.Title)
+	assert.Equal(t, "Original title", payload.OldTitle)
+
+	after, err := d.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+	assert.Equal(t, "[GitHub #1] Original title", after.Title)
+	assert.True(t, after.UpdatedAt.Equal(sourceTime))
+}
+
+func TestImportBatch_SameSourceVersionTitleCorrectionDoesNotClobberLocalEdit(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	sourceTime := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{{ExternalID: "issue-id:101", Title: "Original title", Body: "body", Author: "alice", Status: "open", CreatedAt: sourceTime.Add(-time.Minute), UpdatedAt: sourceTime}}})
+	require.NoError(t, err)
+	m, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:101")
+	require.NoError(t, err)
+	localTitle := "local title"
+	_, _, _, err = d.EditIssue(ctx, db.EditIssueParams{IssueID: *m.IssueID, Title: &localTitle, Actor: "local"})
+	require.NoError(t, err)
+
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{{ExternalID: "issue-id:101", Title: "[GitHub #1] Original title", Body: "body", Author: "alice", Status: "open", CreatedAt: sourceTime.Add(-time.Minute), UpdatedAt: sourceTime}}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Unchanged)
+	assert.Empty(t, events)
+
+	after, err := d.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+	assert.Equal(t, "local title", after.Title)
+	assert.True(t, after.UpdatedAt.After(sourceTime))
+}
+
 func TestImportBatch_SourceOwnedLabelsLinksReconcileLocalRemain(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
@@ -449,6 +499,169 @@ func TestImportBatch_DoesNotAdoptPreExistingLocalLink(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestImportBatch_ReimportCorrectsStoredCreatedAtAheadOfClosedAt(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	// First import stores a synthetic, late created_at (e.g. an older sync
+	// that fell back to syncStartedAt when GitHub omitted created_at).
+	synthetic := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	realCreated := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	realClosed := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "open", Body: "body", Author: "alice", Status: "open", CreatedAt: synthetic, UpdatedAt: synthetic},
+	}})
+	require.NoError(t, err)
+	m, err := d.ImportMappingBySource(ctx, p.ID, "github", "issue", "issue-id:1")
+	require.NoError(t, err)
+	stored, err := d.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+	require.True(t, stored.CreatedAt.Equal(synthetic))
+
+	// A later sync recovers the real (earlier) created_at and a real
+	// closed_at that precedes the previously stored synthetic created_at.
+	res, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "closed", Body: "body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Updated)
+
+	updated, err := d.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.ClosedAt)
+	assert.True(t, updated.ClosedAt.Equal(realClosed))
+	assert.True(t, updated.CreatedAt.Equal(realCreated),
+		"created_at should move earlier to the corrected source timestamp, got %s", updated.CreatedAt)
+	assert.False(t, updated.CreatedAt.After(*updated.ClosedAt),
+		"persisted created_at %s must not be after closed_at %s", updated.CreatedAt, *updated.ClosedAt)
+}
+
+func TestImportBatch_ReimportDoesNotPushStoredCreatedAtLater(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	realCreated := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	syntheticLater := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "old", Body: "body", Author: "alice", Status: "open", CreatedAt: realCreated, UpdatedAt: realCreated},
+	}})
+	require.NoError(t, err)
+	m, err := d.ImportMappingBySource(ctx, p.ID, "github", "issue", "issue-id:1")
+	require.NoError(t, err)
+
+	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "new", Body: "body", Author: "alice", Status: "open", CreatedAt: syntheticLater, UpdatedAt: newer},
+	}})
+	require.NoError(t, err)
+
+	updated, err := d.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+	assert.True(t, updated.CreatedAt.Equal(realCreated),
+		"created_at must not move later than the originally stored timestamp, got %s", updated.CreatedAt)
+}
+
+func TestImportBatch_ReimportSameVersionHealsInvertedCreatedAt(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	realCreated := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	realClosed := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	synthetic := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+
+	// First import stores a synthetic, late created_at.
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "real-title", Body: "body", Author: "alice", Status: "open", CreatedAt: synthetic, UpdatedAt: newer},
+	}})
+	require.NoError(t, err)
+	m, err := d.ImportMappingBySource(ctx, p.ID, "github", "issue", "issue-id:1")
+	require.NoError(t, err)
+
+	// Simulate the pre-patch damage: an older update path wrote the corrected
+	// closed_at but left the synthetic late created_at, producing a row whose
+	// created_at is after its closed_at.
+	_, err = d.ExecContext(ctx, `UPDATE issues SET status='closed', closed_reason='done', closed_at=? WHERE id=?`, realClosed, *m.IssueID)
+	require.NoError(t, err)
+	damaged, err := d.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+	require.NotNil(t, damaged.ClosedAt)
+	require.True(t, damaged.CreatedAt.After(*damaged.ClosedAt), "precondition: row created_at is inverted past closed_at")
+
+	// Reimport the SAME source version (updated_at unchanged) carrying the real,
+	// earlier created_at. The source is not newer overall, so the regular update
+	// path is skipped, but created_at must still heal earlier. Other fields from
+	// the stale source item (title) must not overwrite the stored row.
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "stale-title", Body: "body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Updated)
+
+	healed, err := d.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+	assert.True(t, healed.CreatedAt.Equal(realCreated),
+		"created_at should heal to corrected source timestamp, got %s", healed.CreatedAt)
+	require.NotNil(t, healed.ClosedAt)
+	assert.False(t, healed.CreatedAt.After(*healed.ClosedAt),
+		"persisted created_at %s must not be after closed_at %s", healed.CreatedAt, *healed.ClosedAt)
+	assert.Equal(t, "real-title", healed.Title, "heal must not overwrite other fields from a stale source item")
+
+	var repair *db.Event
+	for i := range events {
+		if events[i].Type == "issue.updated" {
+			repair = &events[i]
+		}
+	}
+	require.NotNil(t, repair, "heal must emit an issue.updated event")
+	assertEventCarriesCreatedAt(t, *repair, healed)
+}
+
+func TestImportBatch_ReimportSameVersionDoesNotEmitWhenCreatedAtUnchanged(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "t", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+	}})
+	require.NoError(t, err)
+
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "t", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Unchanged)
+	assert.Empty(t, events, "unchanged reimport must not emit events")
+}
+
+func TestImportBatch_NewerReimportCarriesCreatedAtInPayload(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	synthetic := time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC)
+	realCreated := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	realClosed := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "open", Body: "body", Author: "alice", Status: "open", CreatedAt: synthetic, UpdatedAt: synthetic},
+	}})
+	require.NoError(t, err)
+	m, err := d.ImportMappingBySource(ctx, p.ID, "github", "issue", "issue-id:1")
+	require.NoError(t, err)
+
+	_, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", Title: "closed", Body: "body", Author: "alice", Status: "closed", ClosedReason: strPtr("done"), CreatedAt: realCreated, UpdatedAt: newer, ClosedAt: &realClosed},
+	}})
+	require.NoError(t, err)
+	updated, err := d.IssueByID(ctx, *m.IssueID)
+	require.NoError(t, err)
+
+	var repair *db.Event
+	for i := range events {
+		if events[i].Type == "issue.updated" {
+			repair = &events[i]
+		}
+	}
+	require.NotNil(t, repair, "newer reimport must emit an issue.updated event")
+	assertEventCarriesCreatedAt(t, *repair, updated)
+}
+
 func TestImportBatch_ReimportRecreatesLinkWhenMappingReferencesStaleLink(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
@@ -507,6 +720,54 @@ func TestImportBatch_MissingLinkTargetRejectsTransaction(t *testing.T) {
 	_, err = d.ImportMappingBySource(ctx, p.ID, "beads", "issue", "a")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	assertRowCount(ctx, t, d, 0, "issue insert rolled back", `SELECT COUNT(*) FROM issues WHERE project_id = ?`, p.ID)
+}
+
+func TestImportBatch_AdoptsLegacyExternalIDMapping(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+
+	// A pre-upgrade sync keyed issues and comments by node_id.
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue:I_node", Title: "Issue", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1,
+			Comments: []db.ImportComment{{ExternalID: "comment:C_node", Author: "alice", Body: "note", CreatedAt: t1}}},
+	}})
+	require.NoError(t, err)
+	legacyIssue, err := d.ImportMappingBySource(ctx, p.ID, "github", "issue", "issue:I_node")
+	require.NoError(t, err)
+	require.NotNil(t, legacyIssue.IssueID)
+	originalIssueID := *legacyIssue.IssueID
+	legacyComment, err := d.ImportMappingBySource(ctx, p.ID, "github", "comment", "comment:C_node")
+	require.NoError(t, err)
+	require.NotNil(t, legacyComment.CommentID)
+	originalCommentID := *legacyComment.CommentID
+
+	// After upgrade the REST id is canonical; the node_id key is supplied as a
+	// legacy alias so the existing rows are adopted instead of duplicated.
+	res, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "issue-id:1", LegacyExternalIDs: []string{"issue:I_node"}, Title: "Issue", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1,
+			Comments: []db.ImportComment{{ExternalID: "comment-id:2", LegacyExternalIDs: []string{"comment:C_node"}, Author: "alice", Body: "note", CreatedAt: t1}}},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Created, "legacy mapping must be adopted, not recreated")
+	assert.Equal(t, 1, res.Unchanged)
+	assert.Equal(t, 0, res.Comments, "legacy comment mapping must be adopted, not recreated")
+
+	assertRowCount(ctx, t, d, 1, "no duplicate issue", `SELECT COUNT(*) FROM issues WHERE project_id = ?`, p.ID)
+	assertRowCount(ctx, t, d, 1, "no duplicate comment", `SELECT COUNT(*) FROM comments WHERE issue_id = ?`, originalIssueID)
+
+	canonicalIssue, err := d.ImportMappingBySource(ctx, p.ID, "github", "issue", "issue-id:1")
+	require.NoError(t, err)
+	require.NotNil(t, canonicalIssue.IssueID)
+	assert.Equal(t, originalIssueID, *canonicalIssue.IssueID)
+	_, err = d.ImportMappingBySource(ctx, p.ID, "github", "issue", "issue:I_node")
+	assert.ErrorIs(t, err, db.ErrNotFound, "legacy issue mapping should be re-keyed, not left behind")
+
+	canonicalComment, err := d.ImportMappingBySource(ctx, p.ID, "github", "comment", "comment-id:2")
+	require.NoError(t, err)
+	require.NotNil(t, canonicalComment.CommentID)
+	assert.Equal(t, originalCommentID, *canonicalComment.CommentID)
+	_, err = d.ImportMappingBySource(ctx, p.ID, "github", "comment", "comment:C_node")
+	assert.ErrorIs(t, err, db.ErrNotFound, "legacy comment mapping should be re-keyed, not left behind")
 }
 
 func TestImportBatch_ValidationErrors(t *testing.T) {

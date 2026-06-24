@@ -10,7 +10,7 @@ Start the daemon on a literal non-public IP address:
 
 ```sh
 KATA_AUTH_TOKEN=change-me KATA_TRUST_PRIVATE_NETWORK=1 \
-  kata daemon start --listen 100.64.0.5:7777
+  kata daemon start --foreground --listen 100.64.0.5:7777
 ```
 
 Or configure it persistently in `<KATA_HOME>/config.toml`:
@@ -248,7 +248,7 @@ not permission**: it does not add per-operation or per-actor authorization.
 For unauthenticated experiments:
 
 ```sh
-kata daemon start --listen 100.64.0.5:7777 --insecure-readonly
+kata daemon start --foreground --listen 100.64.0.5:7777 --insecure-readonly
 ```
 
 This permits GET requests only. Mutations and the event stream still require

@@ -12,6 +12,7 @@ constraints that are too detailed for the main documentation.
 - [Architecture and design principles](architecture.md)
 - [Data model and durability](data-model.md)
 - [Federation technical notes](federation.md)
+- [GitHub sync](github-sync.md)
 - [Hosted mode technical notes](hosted-mode.md)
 
 These notes are the curated home for kata's design rationale. Earlier planning

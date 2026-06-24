@@ -55,3 +55,73 @@ func TestIssueOutWithoutParentValidatesAndOmitsParent(t *testing.T) {
 	require.NotContains(t, roundTrip, "parent",
 		"absent parent must not marshal as an empty object")
 }
+
+// A project with no issue sync binding returns status only. The generated
+// client must keep IssueSyncBody.Binding optional so callers can represent
+// the not_enabled state without inventing an empty binding object.
+func TestIssueSyncBodyWithoutBindingValidatesAndOmitsBinding(t *testing.T) {
+	body := generated.IssueSyncBody{
+		Status: generated.IssueSyncStatusOut{
+			ProjectID: 42,
+			Provider:  "github",
+			State:     "not_enabled",
+		},
+	}
+	require.NoError(t, body.Validate(),
+		"a not-enabled issue sync status must validate without a binding")
+
+	out, err := json.Marshal(body)
+	require.NoError(t, err)
+	var roundTrip map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(out, &roundTrip))
+	require.NotContains(t, roundTrip, "binding",
+		"absent issue sync binding must not marshal as an empty object")
+}
+
+// The run-once endpoint accepts an empty request object and returns a sync
+// result object. The generated request options must point at the request-body
+// schema so callers can naturally send {} without constructing a response
+// body containing binding/status/import fields.
+func TestRunIssueSyncOnceRequestOptionsUsesRequestBody(t *testing.T) {
+	body := generated.RunIssueSyncOnceRequestBody{}
+	opts := generated.RunIssueSyncOnceRequestOptions{
+		PathParams: &generated.RunIssueSyncOncePath{ProjectID: 42, Provider: "github"},
+		Body:       &body,
+	}
+	require.NoError(t, opts.Validate())
+	require.Same(t, &body, opts.GetBody())
+}
+
+func TestIssueSyncConfigSupportsOpaqueProviderValues(t *testing.T) {
+	request := generated.EnableIssueSyncRequestBody{
+		Config: map[string]any{
+			"host":    "github.com",
+			"owner":   "example-org",
+			"repo":    "example-repo",
+			"repo_id": float64(12345),
+		},
+	}
+	opts := generated.EnableIssueSyncRequestOptions{
+		PathParams: &generated.EnableIssueSyncPath{ProjectID: 42, Provider: "github"},
+		Body:       &request,
+	}
+	require.NoError(t, opts.Validate())
+
+	responseJSON := []byte(`{
+		"config":{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":12345},
+		"created_at":"2026-06-23T00:00:00Z",
+		"display_name":"example-org/example-repo",
+		"enabled":true,
+		"id":1,
+		"interval_seconds":300,
+		"project_id":42,
+		"provider":"github",
+		"remote_id":"R_exampleNode",
+		"source_key":"github:R_exampleNode",
+		"updated_at":"2026-06-23T00:00:00Z"
+	}`)
+	var binding generated.IssueSyncBindingOut
+	require.NoError(t, json.Unmarshal(responseJSON, &binding))
+	require.Equal(t, "example-org", binding.Config["owner"])
+	require.Equal(t, float64(12345), binding.Config["repo_id"])
+}

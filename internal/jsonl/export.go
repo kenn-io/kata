@@ -53,6 +53,34 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 	if err := exportProjectAliases(ctx, d, enc, opts); err != nil {
 		return err
 	}
+	if sourceSchemaVersion >= 19 {
+		if err := exportIssueSyncBindings(ctx, d, enc, opts); err != nil {
+			return err
+		}
+		if err := exportIssueSyncStatus(ctx, d, enc, opts); err != nil {
+			return err
+		}
+	} else if sourceSchemaVersion >= 17 {
+		hasLegacyGitHubSync, err := tableHasColumn(ctx, d, "github_sync_bindings", "repo_node_id")
+		if err != nil {
+			return err
+		}
+		if hasLegacyGitHubSync {
+			if err := exportLegacyGitHubSyncBindings(ctx, d, enc, opts); err != nil {
+				return err
+			}
+			if err := exportLegacyGitHubSyncStatus(ctx, d, enc, opts); err != nil {
+				return err
+			}
+		} else {
+			if err := exportIssueSyncBindings(ctx, d, enc, opts); err != nil {
+				return err
+			}
+			if err := exportIssueSyncStatus(ctx, d, enc, opts); err != nil {
+				return err
+			}
+		}
+	}
 	if sourceSchemaVersion >= 10 {
 		if err := exportRecurrences(ctx, d, enc, opts); err != nil {
 			return err
@@ -381,6 +409,193 @@ func exportProjectAliases(ctx context.Context, d exportQuerier, enc *Encoder, op
 		var rec record
 		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.AliasIdentity, &rec.AliasKind,
 			&rec.CreatedAt)
+		return rec, err
+	})
+}
+
+func exportIssueSyncBindings(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
+	query := `SELECT id, project_id, provider, source_key, remote_id,
+	                 display_name, config_json, enabled, interval_seconds,
+	                 CAST(last_cursor_at AS TEXT),
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT)
+	          FROM issue_sync_bindings`
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export issue_sync_bindings: %w", err)
+	}
+	return scanRecords(rows, KindIssueSyncBinding, enc, func(rows *sql.Rows) (db.IssueSyncBindingExport, error) {
+		var rec db.IssueSyncBindingExport
+		var enabled int
+		var config string
+		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.Provider, &rec.SourceKey,
+			&rec.RemoteID, &rec.DisplayName, &config, &enabled,
+			&rec.IntervalSeconds, &rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt)
+		rec.Config = json.RawMessage(config)
+		rec.Enabled = enabled == 1
+		return rec, err
+	})
+}
+
+func exportLegacyGitHubSyncBindings(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
+	query := `SELECT id, project_id, source_key, host, owner, repo,
+	                 repo_node_id, repo_id, enabled, interval_seconds,
+	                 CAST(last_cursor_at AS TEXT),
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT)
+	          FROM github_sync_bindings`
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export github_sync_bindings: %w", err)
+	}
+	return scanRecords(rows, KindIssueSyncBinding, enc, func(rows *sql.Rows) (db.IssueSyncBindingExport, error) {
+		var rec db.IssueSyncBindingExport
+		var host, owner, repo, repoNodeID string
+		var repoID int64
+		var enabled int
+		err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.SourceKey, &host,
+			&owner, &repo, &repoNodeID, &repoID, &enabled,
+			&rec.IntervalSeconds, &rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt)
+		rec.Provider = "github"
+		rec.RemoteID = repoNodeID
+		rec.DisplayName = owner + "/" + repo
+		rec.Config = mustMarshalGitHubSyncConfig(host, owner, repo, repoID)
+		rec.Enabled = enabled == 1
+		return rec, err
+	})
+}
+
+func mustMarshalGitHubSyncConfig(host, owner, repo string, repoID int64) json.RawMessage {
+	bs, err := json.Marshal(map[string]any{
+		"host":    host,
+		"owner":   owner,
+		"repo":    repo,
+		"repo_id": repoID,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return bs
+}
+
+func exportIssueSyncStatus(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
+	// The v18 schema replaced the pre-cutover counter columns with a
+	// created/updated/unchanged breakdown. Detect the actual column shape
+	// instead of trusting schema_version: a cutover source may carry the
+	// legacy columns, so reading last_created blindly would fail.
+	hasBreakdown, err := tableHasColumn(ctx, d, "issue_sync_status", "last_created")
+	if err != nil {
+		return err
+	}
+	if !hasBreakdown {
+		return exportIssueSyncStatusV17(ctx, d, enc, opts)
+	}
+	query := `SELECT binding_id, project_id,
+	                 CAST(sync_started_at AS TEXT), CAST(last_attempt_at AS TEXT),
+	                 CAST(last_success_at AS TEXT), CAST(last_error_at AS TEXT),
+	                 last_error, last_created, last_updated, last_unchanged,
+	                 last_comments
+	            FROM issue_sync_status`
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY binding_id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export issue_sync_status: %w", err)
+	}
+	return scanRecords(rows, KindIssueSyncStatus, enc, func(rows *sql.Rows) (db.IssueSyncStatusExport, error) {
+		var rec db.IssueSyncStatusExport
+		err := rows.Scan(&rec.BindingID, &rec.ProjectID, &rec.SyncStartedAt,
+			&rec.LastAttemptAt, &rec.LastSuccessAt, &rec.LastErrorAt,
+			&rec.LastError, &rec.LastCreated, &rec.LastUpdated,
+			&rec.LastUnchanged, &rec.LastComments)
+		return rec, err
+	})
+}
+
+func exportLegacyGitHubSyncStatus(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
+	hasBreakdown, err := tableHasColumn(ctx, d, "github_sync_status", "last_created")
+	if err != nil {
+		return err
+	}
+	if !hasBreakdown {
+		return exportIssueSyncStatusFromTableV17(ctx, d, enc, opts, "github_sync_status")
+	}
+	return exportIssueSyncStatusFromTable(ctx, d, enc, opts, "github_sync_status")
+}
+
+func exportIssueSyncStatusFromTable(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, table string) error {
+	query := `SELECT binding_id, project_id,
+	                 CAST(sync_started_at AS TEXT), CAST(last_attempt_at AS TEXT),
+	                 CAST(last_success_at AS TEXT), CAST(last_error_at AS TEXT),
+	                 last_error, last_created, last_updated, last_unchanged,
+	                 last_comments
+	            FROM ` + table
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY binding_id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export %s: %w", table, err)
+	}
+	return scanRecords(rows, KindIssueSyncStatus, enc, func(rows *sql.Rows) (db.IssueSyncStatusExport, error) {
+		var rec db.IssueSyncStatusExport
+		err := rows.Scan(&rec.BindingID, &rec.ProjectID, &rec.SyncStartedAt,
+			&rec.LastAttemptAt, &rec.LastSuccessAt, &rec.LastErrorAt,
+			&rec.LastError, &rec.LastCreated, &rec.LastUpdated,
+			&rec.LastUnchanged, &rec.LastComments)
+		return rec, err
+	})
+}
+
+// exportIssueSyncStatusV17 reads the pre-v18 issue_sync_status shape, whose
+// counters were last_issue_count / last_comment_count / last_import_event_count.
+// The v18 schema replaced them with a created/updated/unchanged breakdown plus
+// last_comments. Comment counts map directly; the single legacy issue count
+// cannot be decomposed into created/updated/unchanged, and last_import_event_count
+// has no successor, so those export as zero. These counters are last-run display
+// telemetry that the next sync overwrites, so resetting them loses nothing durable.
+func exportIssueSyncStatusV17(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
+	return exportIssueSyncStatusFromTableV17(ctx, d, enc, opts, "issue_sync_status")
+}
+
+func exportIssueSyncStatusFromTableV17(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions, table string) error {
+	query := `SELECT binding_id, project_id,
+	                 CAST(sync_started_at AS TEXT), CAST(last_attempt_at AS TEXT),
+	                 CAST(last_success_at AS TEXT), CAST(last_error_at AS TEXT),
+	                 last_error, last_comment_count
+	            FROM ` + table
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY binding_id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export %s: %w", table, err)
+	}
+	return scanRecords(rows, KindIssueSyncStatus, enc, func(rows *sql.Rows) (db.IssueSyncStatusExport, error) {
+		var rec db.IssueSyncStatusExport
+		err := rows.Scan(&rec.BindingID, &rec.ProjectID, &rec.SyncStartedAt,
+			&rec.LastAttemptAt, &rec.LastSuccessAt, &rec.LastErrorAt,
+			&rec.LastError, &rec.LastComments)
 		return rec, err
 	})
 }

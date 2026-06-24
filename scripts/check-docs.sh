@@ -15,6 +15,7 @@ required_files=(
   "docs/workflows/agents.md"
   "docs/workflows/sharing.md"
   "docs/operations/remote-daemon.md"
+  "docs/operations/github-sync.md"
   "docs/operations/federation.md"
   "docs/operations/hosted-mode.md"
   "docs/operations/backup-restore.md"
@@ -119,7 +120,7 @@ mkdir -p "$missing_assets_docs_root/docs"
     -cf - .
 ) | (cd "$missing_assets_docs_root/docs" && tar -xf -)
 missing_assets_log="$missing_assets_docs_root/vercel-build.log"
-if (cd "$missing_assets_docs_root/docs" && bash ./vercel-build.sh >"$missing_assets_log" 2>&1); then
+if (cd "$missing_assets_docs_root/docs" && uv run --frozen bash ./vercel-build.sh >"$missing_assets_log" 2>&1); then
   printf 'docs Vercel build without hydrated screenshots should fail\n' >&2
   exit 1
 fi
@@ -141,9 +142,9 @@ mkdir -p "$vercel_docs_root/docs"
     --exclude './.mypy_cache' \
     -cf - .
 ) | (cd "$vercel_docs_root/docs" && tar -xf -)
-(cd "$vercel_docs_root/docs" && bash ./vercel-build.sh)
+(cd "$vercel_docs_root/docs" && uv run --frozen bash ./vercel-build.sh)
 
-docs/zensical-docs.sh build
+(cd docs && uv run --frozen bash ./zensical-docs.sh build)
 
 for generated in \
   docs/site/.env.local \

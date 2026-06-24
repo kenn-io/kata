@@ -3,8 +3,10 @@
 Hosted mode is the `$PORT` convention used by platforms such as Cloud Run,
 Render, Fly.io, Railway, App Engine, and Heroku-style runtimes.
 
-When no `--listen` flag and no config `listen` are set, a foreground daemon
-binds `0.0.0.0:$PORT` if `PORT` is in the environment.
+When no `--listen` flag and no config `listen` are set, `kata daemon start
+--foreground` binds `0.0.0.0:$PORT` if `PORT` is in the environment. Plain
+`kata daemon start` is for local operator use: it starts a background daemon and
+returns after startup is confirmed.
 
 Auto-started local child daemons set `KATA_AUTOSTART=1`, so a stray `PORT` on a
 developer machine does not flip implicit local daemons onto wildcard TCP.

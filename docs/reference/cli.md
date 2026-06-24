@@ -189,6 +189,44 @@ kata ready --all
 Filters combine with AND logic. `--all` lists ready issues across every
 non-archived project and cannot be combined with those filters or `--project`.
 
+## External sync
+
+```sh
+kata sync github enable [--repo example-org/example-repo] [--host github.com] [--interval 5m] [--title-prefix=false]
+kata sync github disable
+kata sync github status
+kata sync github once
+```
+
+`kata sync github enable` configures one-way GitHub issue sync for the current
+project. When `--repo` is omitted, kata tries to infer the GitHub repository
+from the project's git aliases; pass `--repo owner/repo` when inference is
+missing or ambiguous. v1 accepts `github.com` and exact GitHub Enterprise
+hostnames listed in `KATA_GITHUB_SYNC_ALLOWED_HOSTS`; `--host` selects one of
+those hosts, and `--interval` sets the daemon polling interval. Imported issue
+titles are prefixed as `[GitHub #123] Original title` by default; pass
+`--title-prefix=false` to preserve GitHub titles without the prefix.
+
+GitHub sync is daemon-side. The daemon host must have `gh` installed and
+authenticated for the configured host because the daemon runs `gh api` for
+validation and fetching. In remote-client mode, the remote daemon's `gh`
+environment is the one that matters, not the client workstation's.
+JSONL restore imports issue sync bindings as disabled until they are
+re-enabled locally.
+
+Synced issues are GitHub-owned for title, body, state, labels, owner, and
+imported GitHub comments. Treat those fields as read-mostly in kata: local
+edits are not written back to GitHub and can be overwritten by newer GitHub
+state. Only the first GitHub assignee maps to the kata owner.
+
+`disable` stops polling but preserves the binding and import mappings.
+`status` reports the current binding and last sync outcome. `once` runs an
+immediate sync through the daemon and requires an enabled binding.
+
+V1 does not write back to GitHub, import timeline events, import pull requests,
+propagate deleted or transferred issues, or propagate edited or deleted GitHub
+comments.
+
 ## Events and audit
 
 ```sh
@@ -216,7 +254,7 @@ kata projects detach <alias-identity>
 ## Daemon and diagnostics
 
 ```sh
-kata daemon start [--listen <host:port>] [--insecure-readonly]
+kata daemon start [--foreground] [--listen <host:port>] [--insecure-readonly]
 kata daemon status
 kata daemon stop
 kata daemon reload
@@ -228,9 +266,11 @@ kata version
 kata tui
 ```
 
-Local commands auto-start the daemon when appropriate. `daemon start` runs in
-the foreground and is used for explicit service setups. `kata agent-instructions`
-is an alias for `kata quickstart`.
+Local commands auto-start the daemon when appropriate. `daemon start` starts a
+background daemon and returns after startup is confirmed. Use
+`daemon start --foreground` for service managers, hosted deployments, and any
+setup where the daemon process should stay attached to the terminal.
+`kata agent-instructions` is an alias for `kata quickstart`.
 
 `kata tui` opens the interactive issue browser. In the issue list, `v` toggles
 between nested and flat views: nested groups children under parents, while flat

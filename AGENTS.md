@@ -117,7 +117,7 @@ A daemon can serve clients on other hosts over a private network:
 - Server: for mutable remote access, set `[auth].token` plus
   `[auth].trust_private_network = true` in `<KATA_HOME>/config.toml`, or
   export `KATA_AUTH_TOKEN` plus `KATA_TRUST_PRIVATE_NETWORK=1`, then run
-  `kata daemon start --listen 100.64.0.5:7777`. Set
+  `kata daemon start --foreground --listen 100.64.0.5:7777`. Set
   `listen = "100.64.0.5:7777"` in `<KATA_HOME>/config.toml` so every
   daemon (including the auto-started one) binds TCP.
 - Client: `export KATA_SERVER=http://100.64.0.5:7777` or commit a

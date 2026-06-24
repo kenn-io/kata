@@ -36,7 +36,7 @@ func TestPortEnvBind_ServesAndShutsDownCleanly(t *testing.T) {
 
 	stderr := &safeBuffer{}
 	//nolint:gosec // G204: bin is buildKataBinary's output
-	cmd := exec.Command(bin, "daemon", "start")
+	cmd := exec.Command(bin, "daemon", "start", "--foreground")
 	cmd.Env = append(os.Environ(),
 		"KATA_HOME="+home,
 		"KATA_DB="+filepath.Join(home, "kata.db"),

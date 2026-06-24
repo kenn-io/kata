@@ -311,6 +311,59 @@ CREATE TABLE federation_sync_status (
   last_reset_at           DATETIME
 );
 
+CREATE TABLE issue_sync_bindings (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id       INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+  provider         TEXT NOT NULL,
+  source_key       TEXT NOT NULL,
+  remote_id        TEXT NOT NULL,
+  display_name     TEXT NOT NULL,
+  config_json      TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(config_json)),
+  enabled          INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  interval_seconds INTEGER NOT NULL,
+  last_cursor_at   DATETIME,
+  created_at       DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at       DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  CHECK (length(trim(provider)) > 0),
+  CHECK (length(trim(source_key)) > 0),
+  CHECK (length(trim(remote_id)) > 0),
+  CHECK (length(trim(display_name)) > 0),
+  CHECK (interval_seconds > 0)
+);
+CREATE INDEX idx_issue_sync_bindings_due
+  ON issue_sync_bindings(enabled, project_id, interval_seconds);
+
+CREATE TABLE issue_sync_status (
+  binding_id              INTEGER PRIMARY KEY REFERENCES issue_sync_bindings(id) ON DELETE CASCADE,
+  project_id              INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  sync_started_at         DATETIME,
+  last_attempt_at         DATETIME,
+  last_success_at         DATETIME,
+  last_error_at           DATETIME,
+  last_error              TEXT,
+  last_created           INTEGER NOT NULL DEFAULT 0,
+  last_updated           INTEGER NOT NULL DEFAULT 0,
+  last_unchanged         INTEGER NOT NULL DEFAULT 0,
+  last_comments          INTEGER NOT NULL DEFAULT 0,
+  CHECK (last_created >= 0),
+  CHECK (last_updated >= 0),
+  CHECK (last_unchanged >= 0),
+  CHECK (last_comments >= 0)
+);
+CREATE INDEX idx_issue_sync_status_project
+  ON issue_sync_status(project_id);
+CREATE INDEX idx_issue_sync_status_due
+  ON issue_sync_status(sync_started_at, last_attempt_at);
+
+CREATE TRIGGER trg_issue_sync_identity_immutable
+BEFORE UPDATE OF provider, source_key, remote_id ON issue_sync_bindings
+FOR EACH ROW BEGIN
+  SELECT RAISE(ABORT, 'issue_sync_bindings provider/source_key/remote_id are immutable')
+  WHERE NEW.provider <> OLD.provider
+     OR NEW.source_key <> OLD.source_key
+     OR NEW.remote_id <> OLD.remote_id;
+END;
+
 CREATE TABLE federation_quarantine (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id     INTEGER NOT NULL REFERENCES projects(id),

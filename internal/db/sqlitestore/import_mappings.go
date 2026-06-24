@@ -47,6 +47,41 @@ func upsertImportMapping(ctx context.Context, e execQuerier, p db.ImportMappingP
 	return importMappingBySource(ctx, e, p.ProjectID, p.Source, p.ObjectType, p.ExternalID)
 }
 
+// adoptImportMapping resolves the mapping for externalID, adopting a mapping
+// stored under one of legacyExternalIDs when none exists under the canonical
+// key. A prior version may have keyed the same object differently (e.g. GitHub
+// import keyed issues by node_id before the REST id became canonical); on a
+// legacy hit the row is re-keyed onto externalID so future syncs upsert
+// idempotently rather than inserting a duplicate. found is false only when no
+// canonical or legacy mapping exists.
+func adoptImportMapping(ctx context.Context, e execQuerier, projectID int64, source, objectType, externalID string, legacyExternalIDs []string) (db.ImportMapping, bool, error) {
+	mapping, err := importMappingBySource(ctx, e, projectID, source, objectType, externalID)
+	if err == nil {
+		return mapping, true, nil
+	}
+	if !errors.Is(err, db.ErrNotFound) {
+		return db.ImportMapping{}, false, err
+	}
+	for _, legacy := range legacyExternalIDs {
+		if legacy == "" || legacy == externalID {
+			continue
+		}
+		legacyMapping, err := importMappingBySource(ctx, e, projectID, source, objectType, legacy)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return db.ImportMapping{}, false, err
+		}
+		if _, err := e.ExecContext(ctx, `UPDATE import_mappings SET external_id = ? WHERE id = ?`, externalID, legacyMapping.ID); err != nil {
+			return db.ImportMapping{}, false, fmt.Errorf("adopt legacy import mapping: %w", err)
+		}
+		legacyMapping.ExternalID = externalID
+		return legacyMapping, true, nil
+	}
+	return db.ImportMapping{}, false, nil
+}
+
 // ImportMappingBySource fetches one mapping by source identity.
 func (d *Store) ImportMappingBySource(ctx context.Context, projectID int64, source, objectType, externalID string) (db.ImportMapping, error) {
 	return importMappingBySource(ctx, d.DB, projectID, source, objectType, externalID)

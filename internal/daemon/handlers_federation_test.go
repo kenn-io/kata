@@ -63,6 +63,33 @@ func TestFederationEnableAndMetadata(t *testing.T) {
 	assert.Equal(t, enabled, got)
 }
 
+func TestFederationEnableAllowsGitHubSyncedProject(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID:       project.ID,
+		Provider:        "github",
+		SourceKey:       "github:R_example_repo_1",
+		RemoteID:        "R_example_repo_1",
+		DisplayName:     "example-org/example-repo",
+		Config:          mustDaemonGitHubSyncConfig(t, "github.com", "example-org", "example-repo", 1001),
+		IntervalSeconds: 300,
+	})
+	require.NoError(t, err)
+
+	var enabled api.ProjectFederationBody
+	resp := envDoJSON(t, env, http.MethodPost,
+		projectPath(project.ID)+"/federation/enable",
+		map[string]any{"actor": "tester"}, &enabled)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, project.ID, enabled.ProjectID)
+	assert.Equal(t, project.UID, enabled.ProjectUID)
+	assertFederationEventCount(t, env.DB, "project.federation_enabled", 1)
+}
+
 func TestFederationEnableIdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	ctx := context.Background()
@@ -165,6 +192,36 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:7373", creds.Projects[out.Project.UID].HubURL)
 	assert.Equal(t, int64(42), creds.Projects[out.Project.UID].HubProjectID)
 	assert.Equal(t, "wesm", creds.Projects[out.Project.UID].Actor)
+}
+
+func TestFederationReplicaRejectsIssueSyncedLocalProject(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID:       project.ID,
+		Provider:        "github",
+		SourceKey:       "github:R_example_repo_1",
+		RemoteID:        "R_example_repo_1",
+		DisplayName:     "example-org/example-repo",
+		Config:          mustDaemonGitHubSyncConfig(t, "github.com", "example-org", "example-repo", 1001),
+		IntervalSeconds: 300,
+	})
+	require.NoError(t, err)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "http://127.0.0.1:7373",
+		"hub_project_id":          42,
+		"hub_project_uid":         project.UID,
+		"project_name":            project.Name,
+		"replay_horizon_event_id": 9,
+		"actor":                   "tester",
+	}, nil)
+
+	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "issue_sync_federation_conflict")
+	assert.Contains(t, string(raw), "run GitHub sync on the federation hub")
+	assert.Contains(t, string(raw), "spoke")
 }
 
 func TestFederationReplicaSetupIsIdempotentAndUsesJSONTags(t *testing.T) {

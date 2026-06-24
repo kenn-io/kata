@@ -71,6 +71,22 @@ func TestImportRecordValidate(t *testing.T) {
 			},
 			wantErr: "",
 		},
+		{
+			name: "valid issue_sync_binding",
+			rec: db.ImportRecord{
+				Kind:             db.ImportKindIssueSyncBinding,
+				IssueSyncBinding: &db.IssueSyncBindingExport{ID: 1},
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid issue_sync_status",
+			rec: db.ImportRecord{
+				Kind:            db.ImportKindIssueSyncStatus,
+				IssueSyncStatus: &db.IssueSyncStatusExport{BindingID: 1},
+			},
+			wantErr: "",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,6 +102,120 @@ func TestImportRecordValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestImportReplayInsertsGitHubSyncState(t *testing.T) {
+	ctx := context.Background()
+	target := openTestDB(t)
+	recs := []db.ImportRecord{
+		{
+			Kind: db.ImportKindProject,
+			Project: &db.ProjectExport{
+				ID:        1,
+				UID:       "01HZZZZZZZZZZZZZZZZZZZZZ11",
+				Name:      "example-project",
+				CreatedAt: "2026-06-01T09:00:00.000Z",
+				Metadata:  []byte(`{}`),
+				Revision:  1,
+			},
+		},
+		{
+			Kind: db.ImportKindIssueSyncBinding,
+			IssueSyncBinding: &db.IssueSyncBindingExport{
+				ID:              7,
+				ProjectID:       1,
+				Provider:        "github",
+				SourceKey:       "github:repo-node-example",
+				RemoteID:        "repo-node-example",
+				DisplayName:     "example-org/example-repo",
+				Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
+				Enabled:         true,
+				IntervalSeconds: 900,
+				LastCursorAt:    strPtr("2026-06-01T10:00:00.000Z"),
+				CreatedAt:       "2026-06-01T09:00:00.000Z",
+				UpdatedAt:       "2026-06-01T10:01:00.000Z",
+			},
+		},
+		{
+			Kind: db.ImportKindIssueSyncStatus,
+			IssueSyncStatus: &db.IssueSyncStatusExport{
+				BindingID:     7,
+				ProjectID:     1,
+				SyncStartedAt: strPtr("2026-06-01T09:58:00.000Z"),
+				LastAttemptAt: strPtr("2026-06-01T09:58:00.000Z"),
+				LastSuccessAt: strPtr("2026-06-01T10:00:00.000Z"),
+				LastErrorAt:   strPtr("2026-06-01T10:02:00.000Z"),
+				LastError:     strPtr("rate limited"),
+				LastCreated:   2,
+				LastUpdated:   3,
+				LastUnchanged: 4,
+				LastComments:  5,
+			},
+		},
+	}
+	require.NoError(t, target.ImportReplay(ctx, recs, db.ImportOptions{}))
+
+	binding, err := target.IssueSyncBindingByProject(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), binding.ID)
+	assert.Equal(t, "github", binding.Provider)
+	assert.Equal(t, "github:repo-node-example", binding.SourceKey)
+	assert.Equal(t, "repo-node-example", binding.RemoteID)
+	assert.Equal(t, "example-org/example-repo", binding.DisplayName)
+	assert.JSONEq(t, `{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`, string(binding.Config))
+	assert.False(t, binding.Enabled, "imported issue sync bindings must be re-enabled locally")
+	require.NotNil(t, binding.LastCursorAt)
+	assert.Equal(t, "2026-06-01T10:00:00.000Z", binding.LastCursorAt.UTC().Format("2006-01-02T15:04:05.000Z"))
+
+	status, err := target.IssueSyncStatusByProject(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), status.BindingID)
+	assert.Equal(t, "rate limited", status.LastError)
+	assert.Equal(t, 2, status.LastCreated)
+	assert.Equal(t, 3, status.LastUpdated)
+	assert.Equal(t, 4, status.LastUnchanged)
+	assert.Equal(t, 5, status.LastComments)
+	require.NotNil(t, status.LastErrorAt)
+	assert.Equal(t, "2026-06-01T10:02:00.000Z", status.LastErrorAt.UTC().Format("2006-01-02T15:04:05.000Z"))
+}
+
+func TestImportReplayCanPreserveIssueSyncBindingEnabledForTrustedCutover(t *testing.T) {
+	ctx := context.Background()
+	target := openTestDB(t)
+	recs := []db.ImportRecord{
+		{
+			Kind: db.ImportKindProject,
+			Project: &db.ProjectExport{
+				ID:        1,
+				UID:       "01HZZZZZZZZZZZZZZZZZZZZZ11",
+				Name:      "example-project",
+				CreatedAt: "2026-06-01T09:00:00.000Z",
+				Metadata:  []byte(`{}`),
+				Revision:  1,
+			},
+		},
+		{
+			Kind: db.ImportKindIssueSyncBinding,
+			IssueSyncBinding: &db.IssueSyncBindingExport{
+				ID:              7,
+				ProjectID:       1,
+				Provider:        "github",
+				SourceKey:       "github:repo-node-example",
+				RemoteID:        "repo-node-example",
+				DisplayName:     "example-org/example-repo",
+				Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
+				Enabled:         true,
+				IntervalSeconds: 900,
+				CreatedAt:       "2026-06-01T09:00:00.000Z",
+				UpdatedAt:       "2026-06-01T10:01:00.000Z",
+			},
+		},
+	}
+	require.NoError(t, target.ImportReplay(ctx, recs, db.ImportOptions{PreserveIssueSyncBindingEnabled: true}))
+
+	binding, err := target.IssueSyncBindingByProject(ctx, 1)
+	require.NoError(t, err)
+	assert.True(t, binding.Enabled)
 }
 
 // TestImportReplayInsertsEveryEntity is the smoke test for the round-trip.
@@ -254,6 +384,16 @@ func collectImportRecords(t *testing.T, ctx context.Context, d *sqlitestore.Stor
 		v := rec
 		recs = append(recs, db.ImportRecord{Kind: "project_alias", Alias: &v})
 	}
+	for rec, err := range d.ExportIssueSyncBindings(ctx, db.ExportFilter{IncludeDeleted: true}) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: db.ImportKindIssueSyncBinding, IssueSyncBinding: &v})
+	}
+	for rec, err := range d.ExportIssueSyncStatus(ctx, db.ExportFilter{IncludeDeleted: true}) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: db.ImportKindIssueSyncStatus, IssueSyncStatus: &v})
+	}
 	for rec, err := range d.ExportRecurrences(ctx, db.ExportFilter{IncludeDeleted: true}) {
 		require.NoError(t, err)
 		v := rec
@@ -354,6 +494,16 @@ func collectImportRecordsForProject(t *testing.T, ctx context.Context, d *sqlite
 		require.NoError(t, err)
 		v := rec
 		recs = append(recs, db.ImportRecord{Kind: "project", Project: &v})
+	}
+	for rec, err := range d.ExportIssueSyncBindings(ctx, f) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: db.ImportKindIssueSyncBinding, IssueSyncBinding: &v})
+	}
+	for rec, err := range d.ExportIssueSyncStatus(ctx, f) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: db.ImportKindIssueSyncStatus, IssueSyncStatus: &v})
 	}
 	for rec, err := range d.ExportIssues(ctx, f) {
 		require.NoError(t, err)

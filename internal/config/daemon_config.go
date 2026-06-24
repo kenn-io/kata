@@ -153,7 +153,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		return nil, err
 	}
 	var cfg DaemonConfig
-	data, err := os.ReadFile(path) //nolint:gosec // path is derived from KATA_HOME, not user input
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
 	switch {
 	case err == nil:
 		meta, err := toml.Decode(string(data), &cfg)
@@ -202,7 +202,7 @@ func ReadAuthConfig() (AuthConfig, error) {
 		return AuthConfig{}, err
 	}
 	var cfg DaemonConfig
-	data, err := os.ReadFile(path) //nolint:gosec // path is derived from KATA_HOME, not user input
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
 	switch {
 	case err == nil:
 		meta, err := toml.Decode(string(data), &cfg)

@@ -21,6 +21,11 @@ type ImportOptions struct {
 	// future federation loop-detector can tell which events came from the
 	// cloned-from instance versus the new local one.
 	NewInstance bool
+
+	// PreserveIssueSyncBindingEnabled is for trusted local schema cutover.
+	// External JSONL restores leave sync bindings disabled until re-enabled
+	// locally so restored provider config cannot use daemon credentials.
+	PreserveIssueSyncBindingEnabled bool
 }
 
 // Import reads JSONL records from r and inserts them into store.
@@ -74,6 +79,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		NewInstance:                     opts.NewInstance,
 		DedupeLegacyActivePendingClaims: exportVersion < 12,
 		RecomputeEventContentHash:       exportVersion < db.CurrentSchemaVersion(),
+		PreserveIssueSyncBindingEnabled: opts.PreserveIssueSyncBindingEnabled,
 	})
 }
 
@@ -94,6 +100,22 @@ type projectImport struct {
 type issueImport struct {
 	db.IssueExport
 	Number int64 `json:"number,omitempty"`
+}
+
+type legacyGitHubSyncBindingImport struct {
+	ID              int64   `json:"id"`
+	ProjectID       int64   `json:"project_id"`
+	SourceKey       string  `json:"source_key"`
+	Host            string  `json:"host"`
+	Owner           string  `json:"owner"`
+	Repo            string  `json:"repo"`
+	RepoNodeID      string  `json:"repo_node_id"`
+	RepoID          int64   `json:"repo_id"`
+	Enabled         bool    `json:"enabled"`
+	IntervalSeconds int     `json:"interval_seconds"`
+	LastCursorAt    *string `json:"last_cursor_at,omitempty"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 // eventImport embeds EventExport and adds the legacy `project_identity` field
@@ -178,6 +200,42 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return db.ImportRecord{}, err
 		}
 		return db.ImportRecord{Kind: string(KindProjectAlias), Alias: &rec}, nil
+	case KindIssueSyncBinding:
+		var rec db.IssueSyncBindingExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeIssueSyncBindingTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindIssueSyncBinding), IssueSyncBinding: &rec}, nil
+	case KindGitHubSyncBinding:
+		rec, err := decodeLegacyGitHubSyncBinding(env)
+		if err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeIssueSyncBindingTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindIssueSyncBinding), IssueSyncBinding: &rec}, nil
+	case KindIssueSyncStatus:
+		var rec db.IssueSyncStatusExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeIssueSyncStatusTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindIssueSyncStatus), IssueSyncStatus: &rec}, nil
+	case KindGitHubSyncStatus:
+		var rec db.IssueSyncStatusExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeIssueSyncStatusTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindIssueSyncStatus), IssueSyncStatus: &rec}, nil
 	case KindRecurrence:
 		var rec db.RecurrenceExport
 		if err := decodeData(env, &rec); err != nil {
@@ -371,6 +429,36 @@ func decodeData(env Envelope, dst any) error {
 		return fmt.Errorf("decode %s data: %w", env.Kind, err)
 	}
 	return nil
+}
+
+func decodeLegacyGitHubSyncBinding(env Envelope) (db.IssueSyncBindingExport, error) {
+	var old legacyGitHubSyncBindingImport
+	if err := decodeData(env, &old); err != nil {
+		return db.IssueSyncBindingExport{}, err
+	}
+	config, err := json.Marshal(map[string]any{
+		"host":    old.Host,
+		"owner":   old.Owner,
+		"repo":    old.Repo,
+		"repo_id": old.RepoID,
+	})
+	if err != nil {
+		return db.IssueSyncBindingExport{}, fmt.Errorf("encode legacy github sync config: %w", err)
+	}
+	return db.IssueSyncBindingExport{
+		ID:              old.ID,
+		ProjectID:       old.ProjectID,
+		Provider:        "github",
+		SourceKey:       old.SourceKey,
+		RemoteID:        old.RepoNodeID,
+		DisplayName:     old.Owner + "/" + old.Repo,
+		Config:          config,
+		Enabled:         old.Enabled,
+		IntervalSeconds: old.IntervalSeconds,
+		LastCursorAt:    old.LastCursorAt,
+		CreatedAt:       old.CreatedAt,
+		UpdatedAt:       old.UpdatedAt,
+	}, nil
 }
 
 func fillProjectUID(rec *projectImport, exportVersion int) error {
@@ -630,6 +718,29 @@ func normalizeProjectTimes(rec *db.ProjectExport) error {
 
 func normalizeAliasTimes(rec *db.AliasExport) error {
 	return normalizeImportTime("project_alias.created_at", &rec.CreatedAt)
+}
+
+func normalizeIssueSyncBindingTimes(rec *db.IssueSyncBindingExport) error {
+	if err := normalizeImportTime("issue_sync_binding.last_cursor_at", rec.LastCursorAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue_sync_binding.created_at", &rec.CreatedAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("issue_sync_binding.updated_at", &rec.UpdatedAt)
+}
+
+func normalizeIssueSyncStatusTimes(rec *db.IssueSyncStatusExport) error {
+	if err := normalizeImportTime("issue_sync_status.sync_started_at", rec.SyncStartedAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue_sync_status.last_attempt_at", rec.LastAttemptAt); err != nil {
+		return err
+	}
+	if err := normalizeImportTime("issue_sync_status.last_success_at", rec.LastSuccessAt); err != nil {
+		return err
+	}
+	return normalizeImportTime("issue_sync_status.last_error_at", rec.LastErrorAt)
 }
 
 func normalizeRecurrenceTimes(rec *db.RecurrenceExport) error {

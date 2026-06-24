@@ -734,7 +734,7 @@ func TestSyncFederationOnceUnsupportedSchemaDoesNotQuarantine(t *testing.T) {
 				Status: http.StatusBadRequest,
 				Error: api.ErrorBody{
 					Code:    "unsupported_federation_schema",
-					Message: "federation ingest schema_version 16 is newer than hub schema_version 14",
+					Message: "federation ingest schema_version 17 is newer than hub schema_version 14",
 				},
 			}))
 			return
@@ -840,7 +840,7 @@ func TestSyncFederationOnceAutoRetriesLegacySchemaSkewQuarantine(t *testing.T) {
 		LastEventID:  localEvent.ID,
 		EventUIDs:    []string{localEvent.UID},
 		Error: `hub /api/v1/projects/42/federation/events:ingest returned 400: ` +
-			`{"status":400,"error":{"code":"unsupported_federation_schema","message":"federation ingest schema_version 16 is newer than hub schema_version 14"}}`,
+			`{"status":400,"error":{"code":"unsupported_federation_schema","message":"federation ingest schema_version 17 is newer than hub schema_version 14"}}`,
 		CreatedAt: time.Now().UTC(),
 	})
 	require.NoError(t, err)

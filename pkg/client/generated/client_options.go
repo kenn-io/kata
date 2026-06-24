@@ -1462,6 +1462,209 @@ func (o *ImportIssuesRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
+// DisableIssueSyncRequestOptions is the options needed to make a request to DisableIssueSync.
+type DisableIssueSyncRequestOptions struct {
+	PathParams *DisableIssueSyncPath
+	Body       *DisableIssueSyncBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *DisableIssueSyncRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *DisableIssueSyncRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *DisableIssueSyncRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *DisableIssueSyncRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *DisableIssueSyncRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// EnableIssueSyncRequestOptions is the options needed to make a request to EnableIssueSync.
+type EnableIssueSyncRequestOptions struct {
+	PathParams *EnableIssueSyncPath
+	Body       *EnableIssueSyncBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *EnableIssueSyncRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *EnableIssueSyncRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *EnableIssueSyncRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *EnableIssueSyncRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *EnableIssueSyncRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// RunIssueSyncOnceRequestOptions is the options needed to make a request to RunIssueSyncOnce.
+type RunIssueSyncOnceRequestOptions struct {
+	PathParams *RunIssueSyncOncePath
+	Body       *RunIssueSyncOnceBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *RunIssueSyncOnceRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *RunIssueSyncOnceRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *RunIssueSyncOnceRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *RunIssueSyncOnceRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *RunIssueSyncOnceRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// GetIssueSyncStatusRequestOptions is the options needed to make a request to GetIssueSyncStatus.
+type GetIssueSyncStatusRequestOptions struct {
+	PathParams *GetIssueSyncStatusPath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *GetIssueSyncStatusRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *GetIssueSyncStatusRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *GetIssueSyncStatusRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *GetIssueSyncStatusRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *GetIssueSyncStatusRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // ListIssuesRequestOptions is the options needed to make a request to ListIssues.
 type ListIssuesRequestOptions struct {
 	PathParams *ListIssuesPath

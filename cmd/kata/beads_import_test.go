@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/importlabels"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -309,10 +310,10 @@ func TestParseBeadsExportAndBuildImportRequest(t *testing.T) {
 }
 
 func TestNormalizeKataLabel(t *testing.T) {
-	assert.Equal(t, "needs-review", normalizeKataLabel("Needs Review!"))
-	assert.Equal(t, "imported", normalizeKataLabel("!!!"))
-	assert.Equal(t, "source:beads", normalizeKataLabel("source:beads"))
-	long := normalizeKataLabel(strings.Repeat("x", 100))
+	assert.Equal(t, "needs-review", importlabels.Normalize("Needs Review!"))
+	assert.Equal(t, "imported", importlabels.Normalize("!!!"))
+	assert.Equal(t, "source:beads", importlabels.Normalize("source:beads"))
+	long := importlabels.Normalize(strings.Repeat("x", 100))
 	assert.LessOrEqual(t, len(long), 64)
 	assert.Regexp(t, `^[a-z0-9._:-]+$`, long)
 }

@@ -110,6 +110,10 @@ func (s *Store) ChildrenOfIssue(_ context.Context, _ int64) ([]db.Issue, error) 
 	return nil, ErrNotImplementedPhase3
 }
 
+func (s *Store) ClaimIssueSyncBinding(_ context.Context, _ int64, _ string, _ time.Time, _ time.Time) (db.IssueSyncBinding, bool, error) {
+	return db.IssueSyncBinding{}, false, ErrNotImplementedPhase3
+}
+
 func (s *Store) ClaimOwner(_ context.Context, _ int64, _ string, _ bool) (db.ClaimResult, error) {
 	return db.ClaimResult{}, ErrNotImplementedPhase3
 }
@@ -214,6 +218,10 @@ func (s *Store) DetachProjectAlias(_ context.Context, _ db.DetachAliasParams) (d
 	return db.ProjectAlias{}, nil, ErrNotImplementedPhase3
 }
 
+func (s *Store) DisableIssueSyncBinding(_ context.Context, _ int64) (db.IssueSyncBinding, error) {
+	return db.IssueSyncBinding{}, ErrNotImplementedPhase3
+}
+
 func (s *Store) EditIssue(_ context.Context, _ db.EditIssueParams) (db.Issue, *db.Event, bool, error) {
 	return db.Issue{}, nil, false, ErrNotImplementedPhase3
 }
@@ -309,6 +317,18 @@ func (s *Store) ExportIssueClaims(_ context.Context, _ db.ExportFilter) iter.Seq
 func (s *Store) ExportIssueLabels(_ context.Context, _ db.ExportFilter) iter.Seq2[db.IssueLabelExport, error] {
 	return func(yield func(db.IssueLabelExport, error) bool) {
 		yield(db.IssueLabelExport{}, ErrNotImplementedPhase3)
+	}
+}
+
+func (s *Store) ExportIssueSyncBindings(_ context.Context, _ db.ExportFilter) iter.Seq2[db.IssueSyncBindingExport, error] {
+	return func(yield func(db.IssueSyncBindingExport, error) bool) {
+		yield(db.IssueSyncBindingExport{}, ErrNotImplementedPhase3)
+	}
+}
+
+func (s *Store) ExportIssueSyncStatus(_ context.Context, _ db.ExportFilter) iter.Seq2[db.IssueSyncStatusExport, error] {
+	return func(yield func(db.IssueSyncStatusExport, error) bool) {
+		yield(db.IssueSyncStatusExport{}, ErrNotImplementedPhase3)
 	}
 }
 
@@ -438,6 +458,18 @@ func (s *Store) IssueQualifiersByUIDs(_ context.Context, _ []string) (map[string
 	return nil, ErrNotImplementedPhase3
 }
 
+func (s *Store) IssueSyncBindingByID(_ context.Context, _ int64) (db.IssueSyncBinding, error) {
+	return db.IssueSyncBinding{}, ErrNotImplementedPhase3
+}
+
+func (s *Store) IssueSyncBindingByProject(_ context.Context, _ int64) (db.IssueSyncBinding, error) {
+	return db.IssueSyncBinding{}, ErrNotImplementedPhase3
+}
+
+func (s *Store) IssueSyncStatusByProject(_ context.Context, _ int64) (db.IssueSyncStatus, error) {
+	return db.IssueSyncStatus{}, ErrNotImplementedPhase3
+}
+
 func (s *Store) IssueUIDPrefixMatch(_ context.Context, _ string, _ int, _ db.IncludeDeleted) ([]db.Issue, error) {
 	return nil, ErrNotImplementedPhase3
 }
@@ -487,6 +519,10 @@ func (s *Store) ListAPITokens(_ context.Context) ([]db.APIToken, error) {
 }
 
 func (s *Store) ListAllIssues(_ context.Context, _ db.ListAllIssuesParams) ([]db.Issue, error) {
+	return nil, ErrNotImplementedPhase3
+}
+
+func (s *Store) ListDueIssueSyncBindings(_ context.Context, _ string, _ time.Time, _ time.Time, _ int) ([]db.IssueSyncBinding, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
@@ -674,6 +710,18 @@ func (s *Store) RecordFederationSyncReset(_ context.Context, _ int64, _ time.Tim
 	return ErrNotImplementedPhase3
 }
 
+func (s *Store) RecordIssueSyncError(_ context.Context, _ db.IssueSyncErrorParams) (db.IssueSyncStatus, error) {
+	return db.IssueSyncStatus{}, ErrNotImplementedPhase3
+}
+
+func (s *Store) RecordIssueSyncSuccess(_ context.Context, _ db.IssueSyncSuccessParams) (db.IssueSyncStatus, error) {
+	return db.IssueSyncStatus{}, ErrNotImplementedPhase3
+}
+
+func (s *Store) RefreshIssueSyncBinding(_ context.Context, _ db.IssueSyncBindingUpdateParams) (db.IssueSyncBinding, error) {
+	return db.IssueSyncBinding{}, ErrNotImplementedPhase3
+}
+
 func (s *Store) RefreshProjectFederationBaseline(_ context.Context, _ int64, _ string) (db.FederationBinding, bool, error) {
 	return db.FederationBinding{}, false, ErrNotImplementedPhase3
 }
@@ -800,4 +848,8 @@ func (s *Store) UpsertFederationBinding(_ context.Context, _ db.FederationBindin
 
 func (s *Store) UpsertImportMapping(_ context.Context, _ db.ImportMappingParams) (db.ImportMapping, error) {
 	return db.ImportMapping{}, ErrNotImplementedPhase3
+}
+
+func (s *Store) UpsertIssueSyncBinding(_ context.Context, _ db.UpsertIssueSyncBindingParams) (db.IssueSyncBinding, error) {
+	return db.IssueSyncBinding{}, ErrNotImplementedPhase3
 }

@@ -213,6 +213,10 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(409, "project_merge_federation_binding",
 				"cannot merge federated projects", "", nil)
 		}
+		if errors.Is(err, db.ErrProjectMergeIssueSyncBinding) {
+			return nil, api.NewError(409, "project_merge_issue_sync_binding",
+				"cannot merge projects with issue sync bindings", "", nil)
+		}
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}

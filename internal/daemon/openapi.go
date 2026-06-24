@@ -268,6 +268,12 @@ func applyJSONBlobSchemaOverridesTo(componentName string, schema *huma.Schema, s
 			schema.Properties[name] = jsonObjectSchema()
 		case "template_labels":
 			schema.Properties[name] = jsonStringArraySchema()
+		case "config":
+			if componentName == "EnableIssueSyncRequestBody" || componentName == "IssueSyncBindingOut" {
+				schema.Properties[name] = jsonObjectSchema()
+				continue
+			}
+			applyJSONBlobSchemaOverridesTo("", prop, seen)
 		default:
 			applyJSONBlobSchemaOverridesTo("", prop, seen)
 		}

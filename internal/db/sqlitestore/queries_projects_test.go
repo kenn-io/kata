@@ -549,6 +549,34 @@ func TestMergeProjects_RejectsFederationBinding(t *testing.T) {
 	require.NoError(t, lookupErr)
 }
 
+func TestMergeProjects_RejectsSourceIssueSyncBinding(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	source := createProject(ctx, t, d, "source-project")
+	target := createProject(ctx, t, d, "target-project")
+	_ = mustUpsertIssueSyncBinding(ctx, t, d, source.ID)
+
+	_, err := d.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.ID, TargetProjectID: target.ID})
+	require.ErrorIs(t, err, db.ErrProjectMergeIssueSyncBinding)
+
+	_, lookupErr := d.ProjectByID(ctx, source.ID)
+	require.NoError(t, lookupErr)
+}
+
+func TestMergeProjects_RejectsTargetIssueSyncBinding(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	source := createProject(ctx, t, d, "source-project")
+	target := createProject(ctx, t, d, "target-project")
+	_ = mustUpsertIssueSyncBinding(ctx, t, d, target.ID)
+
+	_, err := d.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.ID, TargetProjectID: target.ID})
+	require.ErrorIs(t, err, db.ErrProjectMergeIssueSyncBinding)
+
+	_, lookupErr := d.ProjectByID(ctx, source.ID)
+	require.NoError(t, lookupErr)
+}
+
 func TestBatchProjectStats_EmptyProjectReturnsZeroes(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()

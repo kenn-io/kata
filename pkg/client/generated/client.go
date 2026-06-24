@@ -217,6 +217,18 @@ type ClientInterface interface {
 	ImportIssues(ctx context.Context, options *ImportIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ImportIssuesResponse, error)
 	ImportIssuesWithResponse(ctx context.Context, options *ImportIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ImportIssuesResp, error)
 
+	DisableIssueSync(ctx context.Context, options *DisableIssueSyncRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DisableIssueSyncResponse, error)
+	DisableIssueSyncWithResponse(ctx context.Context, options *DisableIssueSyncRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DisableIssueSyncResp, error)
+
+	EnableIssueSync(ctx context.Context, options *EnableIssueSyncRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EnableIssueSyncResponse, error)
+	EnableIssueSyncWithResponse(ctx context.Context, options *EnableIssueSyncRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EnableIssueSyncResp, error)
+
+	RunIssueSyncOnce(ctx context.Context, options *RunIssueSyncOnceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RunIssueSyncOnceResponse, error)
+	RunIssueSyncOnceWithResponse(ctx context.Context, options *RunIssueSyncOnceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RunIssueSyncOnceResp, error)
+
+	GetIssueSyncStatus(ctx context.Context, options *GetIssueSyncStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetIssueSyncStatusResponse, error)
+	GetIssueSyncStatusWithResponse(ctx context.Context, options *GetIssueSyncStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetIssueSyncStatusResp, error)
+
 	ListIssues(ctx context.Context, options *ListIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListIssuesResponse, error)
 	ListIssuesWithResponse(ctx context.Context, options *ListIssuesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListIssuesResp, error)
 
@@ -2449,6 +2461,257 @@ func (c *Client) ImportIssues(ctx context.Context, options *ImportIssuesRequestO
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/imports")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) DisableIssueSync(ctx context.Context, options *DisableIssueSyncRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DisableIssueSyncResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issue-sync/{provider}/disable",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*DisableIssueSyncResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(DisableIssueSyncErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "DisableIssueSyncErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(DisableIssueSyncResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "DisableIssueSyncResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issue-sync/{provider}/disable")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) EnableIssueSync(ctx context.Context, options *EnableIssueSyncRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EnableIssueSyncResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issue-sync/{provider}/enable",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*EnableIssueSyncResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(EnableIssueSyncErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "EnableIssueSyncErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(EnableIssueSyncResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "EnableIssueSyncResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issue-sync/{provider}/enable")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) RunIssueSyncOnce(ctx context.Context, options *RunIssueSyncOnceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RunIssueSyncOnceResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issue-sync/{provider}/once",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*RunIssueSyncOnceResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(RunIssueSyncOnceErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "RunIssueSyncOnceErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(RunIssueSyncOnceResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "RunIssueSyncOnceResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issue-sync/{provider}/once")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) GetIssueSyncStatus(ctx context.Context, options *GetIssueSyncStatusRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetIssueSyncStatusResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issue-sync/{provider}/status",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*GetIssueSyncStatusResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(GetIssueSyncStatusErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "GetIssueSyncStatusErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(GetIssueSyncStatusResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "GetIssueSyncStatusResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issue-sync/{provider}/status")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

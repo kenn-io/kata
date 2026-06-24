@@ -167,7 +167,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 
 func autoStart(ctx context.Context, dataDir string) (string, error) {
 	opts := kitdaemon.StartDetachedOptions{
-		Args:            []string{"daemon", "start"},
+		Args:            []string{"daemon", "start", "--foreground"},
 		Env:             append(os.Environ(), daemon.AutoStartMarkerEnv+"=1"),
 		RefuseEphemeral: true,
 	}
@@ -214,4 +214,10 @@ func daemonLogWriter(dataDir string) *os.File {
 		return nil
 	}
 	return f
+}
+
+// DaemonLogWriter opens the shared daemon.log file for daemon subprocess
+// stdout/stderr. It returns nil when the log cannot be opened.
+func DaemonLogWriter(dataDir string) *os.File {
+	return daemonLogWriter(dataDir)
 }

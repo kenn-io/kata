@@ -28,6 +28,12 @@ type ImportOptions struct {
 	// JSONL streams whose source schema lacked the final portable event fields.
 	// Current streams leave this false so a mismatched supplied hash is refused.
 	RecomputeEventContentHash bool
+
+	// PreserveIssueSyncBindingEnabled keeps imported issue sync bindings in
+	// their source enabled/disabled state. This is only for trusted local
+	// schema cutover; normal JSONL restore leaves restored bindings disabled
+	// until a local operator re-enables them.
+	PreserveIssueSyncBindingEnabled bool
 }
 
 // ImportRecord is one normalized, current-shape import row: a Kind discriminator
@@ -39,6 +45,8 @@ type ImportRecord struct {
 	Meta                 *MetaKV
 	Project              *ProjectExport
 	Alias                *AliasExport
+	IssueSyncBinding     *IssueSyncBindingExport
+	IssueSyncStatus      *IssueSyncStatusExport
 	Recurrence           *RecurrenceExport
 	Issue                *IssueExport
 	Comment              *CommentExport
@@ -64,6 +72,8 @@ const (
 	ImportKindMeta                 = "meta"
 	ImportKindProject              = "project"
 	ImportKindProjectAlias         = "project_alias"
+	ImportKindIssueSyncBinding     = "issue_sync_binding"
+	ImportKindIssueSyncStatus      = "issue_sync_status"
 	ImportKindRecurrence           = "recurrence"
 	ImportKindIssue                = "issue"
 	ImportKindComment              = "comment"
@@ -92,6 +102,8 @@ func (r ImportRecord) Validate() error {
 		{ImportKindMeta, r.Meta != nil},
 		{ImportKindProject, r.Project != nil},
 		{ImportKindProjectAlias, r.Alias != nil},
+		{ImportKindIssueSyncBinding, r.IssueSyncBinding != nil},
+		{ImportKindIssueSyncStatus, r.IssueSyncStatus != nil},
 		{ImportKindRecurrence, r.Recurrence != nil},
 		{ImportKindIssue, r.Issue != nil},
 		{ImportKindComment, r.Comment != nil},
@@ -137,39 +149,57 @@ func (r ImportRecord) Validate() error {
 // import, the source identifier (e.g. "beads"), the actor recorded on emitted
 // events, and the normalized issue items to upsert.
 type ImportBatchParams struct {
-	ProjectID int64
-	Source    string
-	Actor     string
-	Items     []ImportItem
+	ProjectID      int64
+	Source         string
+	Actor          string
+	IssueSyncGuard *IssueSyncImportGuard
+	Items          []ImportItem
+}
+
+// IssueSyncImportGuard binds an ImportBatch call to a specific claimed
+// issue-sync run. Stores that support issue sync verify the binding is still
+// enabled, still claimed by StartedAt, and still federation-compatible in the
+// same transaction as the import writes.
+type IssueSyncImportGuard struct {
+	BindingID int64
+	Provider  string
+	StartedAt time.Time
 }
 
 // ImportItem is one normalized issue in an import batch. ExternalID is the
 // source-side identifier used for upsert via import_mappings; CreatedAt and
 // UpdatedAt drive timestamp fidelity and source-vs-local conflict resolution.
 type ImportItem struct {
-	ExternalID   string
-	Title        string
-	Body         string
-	Author       string
-	Owner        *string
-	Priority     *int64
-	Status       string
-	ClosedReason *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	ClosedAt     *time.Time
-	Labels       []string
-	Comments     []ImportComment
-	Links        []ImportLink
+	ExternalID string
+	// LegacyExternalIDs are alternate keys a prior version may have used for
+	// this same object. When no mapping exists under ExternalID, import upsert
+	// adopts a mapping found under one of these and re-keys it onto ExternalID,
+	// so a canonical-key change does not duplicate already-imported issues.
+	LegacyExternalIDs []string
+	Title             string
+	Body              string
+	Author            string
+	Owner             *string
+	Priority          *int64
+	Status            string
+	ClosedReason      *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	ClosedAt          *time.Time
+	Labels            []string
+	Comments          []ImportComment
+	Links             []ImportLink
 }
 
 // ImportComment is one normalized comment attached to an ImportItem. ExternalID
 // is the source-side comment identifier used for upsert via import_mappings.
 type ImportComment struct {
 	ExternalID string
-	Author     string
-	Body       string
-	CreatedAt  time.Time
+	// LegacyExternalIDs mirrors ImportItem.LegacyExternalIDs for comments.
+	LegacyExternalIDs []string
+	Author            string
+	Body              string
+	CreatedAt         time.Time
 }
 
 // ImportLink is one normalized outgoing link from an ImportItem. TargetExternalID

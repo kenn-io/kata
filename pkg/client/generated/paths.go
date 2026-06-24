@@ -85,6 +85,42 @@ type ImportIssuesPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type DisableIssueSyncPath struct {
+	ProjectID int64  `json:"project_id"`
+	Provider  string `json:"provider" validate:"required"`
+}
+
+func (d DisableIssueSyncPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
+type EnableIssueSyncPath struct {
+	ProjectID int64  `json:"project_id"`
+	Provider  string `json:"provider" validate:"required"`
+}
+
+func (e EnableIssueSyncPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(e))
+}
+
+type RunIssueSyncOncePath struct {
+	ProjectID int64  `json:"project_id"`
+	Provider  string `json:"provider" validate:"required"`
+}
+
+func (r RunIssueSyncOncePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type GetIssueSyncStatusPath struct {
+	ProjectID int64  `json:"project_id"`
+	Provider  string `json:"provider" validate:"required"`
+}
+
+func (g GetIssueSyncStatusPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
+}
+
 type ListIssuesPath struct {
 	ProjectID int64 `json:"project_id"`
 }

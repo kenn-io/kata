@@ -683,6 +683,9 @@ components:
         - restored
         - other
       type: object
+    DisableIssueSyncRequestBody:
+      additionalProperties: false
+      type: object
     EditIssueRequestBody:
       additionalProperties: false
       properties:
@@ -723,6 +726,18 @@ components:
         - issue
         - event
         - changed
+      type: object
+    EnableIssueSyncRequestBody:
+      additionalProperties: false
+      properties:
+        config:
+          additionalProperties: true
+          type: object
+        interval:
+          type: string
+        interval_seconds:
+          format: int64
+          type: integer
       type: object
     EnableProjectFederationRequestBody:
       additionalProperties: false
@@ -1741,6 +1756,111 @@ components:
         - title
         - status
       type: object
+    IssueSyncBindingOut:
+      properties:
+        config:
+          additionalProperties: true
+          type: object
+        created_at:
+          format: date-time
+          type: string
+        display_name:
+          type: string
+        enabled:
+          type: boolean
+        id:
+          format: int64
+          type: integer
+        interval_seconds:
+          format: int64
+          type: integer
+        last_cursor_at:
+          format: date-time
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        provider:
+          type: string
+        remote_id:
+          type: string
+        source_key:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - id
+        - project_id
+        - provider
+        - source_key
+        - remote_id
+        - display_name
+        - enabled
+        - interval_seconds
+        - created_at
+        - updated_at
+      type: object
+    IssueSyncBody:
+      properties:
+        binding:
+          $ref: "#/components/schemas/IssueSyncBindingOut"
+        status:
+          $ref: "#/components/schemas/IssueSyncStatusOut"
+      required:
+        - status
+      type: object
+    IssueSyncStatusOut:
+      properties:
+        binding_id:
+          format: int64
+          type: integer
+        enabled:
+          type: boolean
+        last_attempt_at:
+          format: date-time
+          type: string
+        last_comments:
+          format: int64
+          type: integer
+        last_created:
+          format: int64
+          type: integer
+        last_error:
+          type: string
+        last_error_at:
+          format: date-time
+          type: string
+        last_success_at:
+          format: date-time
+          type: string
+        last_unchanged:
+          format: int64
+          type: integer
+        last_updated:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        provider:
+          type: string
+        state:
+          type: string
+        sync_started_at:
+          format: date-time
+          type: string
+      required:
+        - binding_id
+        - project_id
+        - provider
+        - enabled
+        - state
+        - last_created
+        - last_updated
+        - last_unchanged
+        - last_comments
+      type: object
     LabelCount:
       properties:
         count:
@@ -2700,6 +2820,22 @@ components:
       required:
         - token
         - event
+      type: object
+    RunIssueSyncOnceRequestBody:
+      additionalProperties: false
+      type: object
+    RunIssueSyncOnceResponseBody:
+      properties:
+        binding:
+          $ref: "#/components/schemas/IssueSyncBindingOut"
+        import:
+          $ref: "#/components/schemas/ImportBatchResult"
+        status:
+          $ref: "#/components/schemas/IssueSyncStatusOut"
+      required:
+        - binding
+        - status
+        - import
       type: object
     SearchHit:
       properties:
@@ -3838,6 +3974,136 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ImportBatchResult"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issue-sync/{provider}/disable:
+    post:
+      operationId: disableIssueSync
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisableIssueSyncRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueSyncBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issue-sync/{provider}/enable:
+    post:
+      operationId: enableIssueSync
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnableIssueSyncRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueSyncBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issue-sync/{provider}/once:
+    post:
+      operationId: runIssueSyncOnce
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunIssueSyncOnceRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunIssueSyncOnceResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issue-sync/{provider}/status:
+    get:
+      operationId: getIssueSyncStatus
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: provider
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueSyncBody"
           description: OK
         default:
           content:

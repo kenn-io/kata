@@ -137,6 +137,22 @@ type ImportIssuesResponse = ImportBatchResult
 
 type ImportIssuesErrorResponse = ErrorEnvelope
 
+type DisableIssueSyncResponse = IssueSyncBody
+
+type DisableIssueSyncErrorResponse = ErrorEnvelope
+
+type EnableIssueSyncResponse = IssueSyncBody
+
+type EnableIssueSyncErrorResponse = ErrorEnvelope
+
+type RunIssueSyncOnceResponse = RunIssueSyncOnceResponseBody
+
+type RunIssueSyncOnceErrorResponse = ErrorEnvelope
+
+type GetIssueSyncStatusResponse = IssueSyncBody
+
+type GetIssueSyncStatusErrorResponse = ErrorEnvelope
+
 type ListIssuesResponse = ListIssuesResponseBody
 
 type ListIssuesErrorResponse = ErrorEnvelope
@@ -523,6 +539,34 @@ type ImportIssuesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ImportIssuesResponse
+}
+
+type DisableIssueSyncResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *DisableIssueSyncResponse
+}
+
+type EnableIssueSyncResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *EnableIssueSyncResponse
+}
+
+type RunIssueSyncOnceResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RunIssueSyncOnceResponse
+}
+
+type GetIssueSyncStatusResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetIssueSyncStatusResponse
 }
 
 type ListIssuesResp struct {

@@ -117,6 +117,32 @@ func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
 	assert.Len(t, contentHash, 64)
 }
 
+func TestAutoCutoverUpgradesLegacyV17GitHubStatus(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	writeLegacyV17GitHubStatusDB(t, path)
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	upgraded, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	assertCurrentSchemaVersion(t, path)
+
+	project, err := upgraded.ProjectByName(ctx, "legacy-github")
+	require.NoError(t, err)
+	binding, err := upgraded.IssueSyncBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.True(t, binding.Enabled, "trusted local cutover must preserve enabled sync bindings")
+	status, err := upgraded.IssueSyncStatusByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "rate limited", status.LastError)
+	assert.Equal(t, 5, status.LastComments, "legacy last_comment_count survives cutover")
+	assert.Equal(t, 0, status.LastCreated)
+	assert.Equal(t, 0, status.LastUpdated)
+	assert.Equal(t, 0, status.LastUnchanged)
+}
+
 func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")

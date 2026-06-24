@@ -59,6 +59,30 @@ func TestFoldIssueUpdatedAppliesReplayCompleteScalars(t *testing.T) {
 	assert.Equal(t, "2026-05-23T12:00:06.000Z", issue.UpdatedAt)
 }
 
+func TestFoldIssueUpdatedHealsCreatedAtEarlier(t *testing.T) {
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-10T10:00:00.000Z","updated_at":"2026-05-15T10:00:00.000Z"}`),
+		testEvent("issue.updated", 2, `{"created_at":"2026-05-01T10:00:00.000Z","updated_at":"2026-05-15T10:00:00.000Z"}`),
+	}
+
+	got := FoldEvents(events)
+	issue := got.Issues["issue-1"]
+	assert.Equal(t, "2026-05-01T10:00:00.000Z", issue.CreatedAt,
+		"issue.updated must heal created_at to the earlier corrected timestamp")
+}
+
+func TestFoldIssueUpdatedDoesNotPushCreatedAtLater(t *testing.T) {
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-01T10:00:00.000Z","updated_at":"2026-05-15T10:00:00.000Z"}`),
+		testEvent("issue.updated", 2, `{"created_at":"2026-05-10T10:00:00.000Z","updated_at":"2026-05-15T10:00:00.000Z"}`),
+	}
+
+	got := FoldEvents(events)
+	issue := got.Issues["issue-1"]
+	assert.Equal(t, "2026-05-01T10:00:00.000Z", issue.CreatedAt,
+		"issue.updated must not push created_at later than the recorded creation time")
+}
+
 func TestFold_LifecycleOwnerPriorityLabelsLinksAndComments(t *testing.T) {
 	events := []FoldEvent{
 		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),

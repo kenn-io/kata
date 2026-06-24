@@ -117,6 +117,29 @@ var (
 	// ErrProjectMergeFederationBinding is returned when either side of a
 	// project merge has a federation binding.
 	ErrProjectMergeFederationBinding = errors.New("project merge federation binding")
+
+	// ErrProjectMergeIssueSyncBinding is returned when either side of a
+	// project merge has an issue sync binding.
+	ErrProjectMergeIssueSyncBinding = errors.New("project merge issue sync binding")
+)
+
+// Issue sync sentinels.
+var (
+	// ErrIssueSyncNotEnabled is returned when issue sync state is required
+	// but the project has no enabled binding.
+	ErrIssueSyncNotEnabled = errors.New("issue sync not enabled")
+
+	// ErrIssueSyncAlreadyRunning is returned when a sync claim finds a
+	// non-stale in-flight run.
+	ErrIssueSyncAlreadyRunning = errors.New("issue sync already running")
+
+	// ErrIssueSyncProjectAlreadyBound is returned when a project is already
+	// bound to a different provider source.
+	ErrIssueSyncProjectAlreadyBound = errors.New("issue sync project already bound")
+
+	// ErrIssueSyncFederationBinding is returned when issue sync conflicts with
+	// a federation spoke binding. Issue sync may run on federation hubs.
+	ErrIssueSyncFederationBinding = errors.New("issue sync federation binding")
 )
 
 // Import sentinel.

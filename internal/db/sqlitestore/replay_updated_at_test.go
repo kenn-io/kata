@@ -28,6 +28,21 @@ func assertEventCarriesUpdatedAt(t *testing.T, evt db.Event, issue db.Issue) {
 		"%s payload updated_at must equal the issue row's updated_at", evt.Type)
 }
 
+// assertEventCarriesCreatedAt checks that an event records the created_at it
+// wrote to the issue row, so fold/replay reproduces a healed creation time
+// instead of keeping a stale synthetic value.
+func assertEventCarriesCreatedAt(t *testing.T, evt db.Event, issue db.Issue) {
+	t.Helper()
+	var p map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(evt.Payload), &p))
+	raw, ok := p["created_at"]
+	require.Truef(t, ok, "%s payload missing created_at: %s", evt.Type, evt.Payload)
+	var got string
+	require.NoError(t, json.Unmarshal(raw, &got))
+	assert.Equalf(t, issue.CreatedAt.UTC().Format(updatedAtLayout), got,
+		"%s payload created_at must equal the issue row's created_at", evt.Type)
+}
+
 func issueByID(ctx context.Context, t *testing.T, d *sqlitestore.Store, id int64) db.Issue {
 	t.Helper()
 	issue, err := d.IssueByID(ctx, id)

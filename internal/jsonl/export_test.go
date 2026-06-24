@@ -34,6 +34,160 @@ func TestExportWritesOrderedRecordsWithSequenceLast(t *testing.T) {
 	assertKindOrder(t, records)
 }
 
+func TestIssueSyncCurrentExportOrderAndProjectFilter(t *testing.T) {
+	ctx := context.Background()
+	d := openExportTestDB(t)
+	project, err := d.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	attachAlias(ctx, t, d, project.ID, "github.com/example-org/example-repo", "git", "/tmp/example-project")
+	binding, err := d.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID:       project.ID,
+		Provider:        "github",
+		SourceKey:       "github:repo-node-example",
+		RemoteID:        "repo-node-example",
+		DisplayName:     "example-org/example-repo",
+		Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
+		IntervalSeconds: 900,
+	})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		UPDATE issue_sync_bindings
+		   SET enabled = 0,
+		       last_cursor_at = '2026-06-01T10:00:00.000Z',
+		       created_at = '2026-06-01T09:00:00.000Z',
+		       updated_at = '2026-06-01T10:01:00.000Z'
+		 WHERE id = ?`, binding.ID)
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		UPDATE issue_sync_status
+		   SET sync_started_at = '2026-06-01T09:58:00.000Z',
+		       last_attempt_at = '2026-06-01T09:58:00.000Z',
+		       last_success_at = '2026-06-01T10:00:00.000Z',
+		       last_error_at = '2026-06-01T10:02:00.000Z',
+		       last_error = 'rate limited',
+		       last_created = 2,
+		       last_updated = 3,
+		       last_unchanged = 4,
+		       last_comments = 5
+		 WHERE binding_id = ?`, binding.ID)
+	require.NoError(t, err)
+	issue := createTesterIssue(ctx, t, d, project.ID, "example issue", "")
+
+	other, err := d.CreateProject(ctx, "other-example-project")
+	require.NoError(t, err)
+	_, err = d.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID:       other.ID,
+		Provider:        "github",
+		SourceKey:       "github:other-repo-node",
+		RemoteID:        "other-repo-node",
+		DisplayName:     "example-org/other-example-repo",
+		Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"other-example-repo","repo_id":43}`),
+		IntervalSeconds: 900,
+	})
+	require.NoError(t, err)
+
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{IncludeDeleted: true})
+	assertKindOrder(t, records)
+	aliasIndex := firstKindIndex(records, "project_alias")
+	bindingIndex := firstKindIndex(records, "issue_sync_binding")
+	statusIndex := firstKindIndex(records, "issue_sync_status")
+	issueIndex := firstKindIndex(records, "issue")
+	require.NotEqual(t, -1, aliasIndex)
+	require.NotEqual(t, -1, bindingIndex)
+	require.NotEqual(t, -1, statusIndex)
+	require.NotEqual(t, -1, issueIndex)
+	assert.Less(t, aliasIndex, bindingIndex)
+	assert.Less(t, bindingIndex, statusIndex)
+	assert.Less(t, statusIndex, issueIndex)
+
+	bindingData := records[bindingIndex]["data"].(map[string]any)
+	assert.Equal(t, float64(binding.ID), bindingData["id"])
+	assert.Equal(t, "github", bindingData["provider"])
+	assert.Equal(t, "repo-node-example", bindingData["remote_id"])
+	assert.Equal(t, "example-org/example-repo", bindingData["display_name"])
+	assert.Equal(t, map[string]any{
+		"host":    "github.com",
+		"owner":   "example-org",
+		"repo":    "example-repo",
+		"repo_id": float64(42),
+	}, bindingData["config"])
+	assert.Equal(t, false, bindingData["enabled"])
+	assert.Equal(t, "2026-06-01T10:00:00.000Z", bindingData["last_cursor_at"])
+
+	statusData := records[statusIndex]["data"].(map[string]any)
+	assert.Equal(t, float64(binding.ID), statusData["binding_id"])
+	assert.Equal(t, "rate limited", statusData["last_error"])
+	assert.Equal(t, float64(2), statusData["last_created"])
+	assert.Equal(t, float64(3), statusData["last_updated"])
+	assert.Equal(t, float64(4), statusData["last_unchanged"])
+	assert.Equal(t, float64(5), statusData["last_comments"])
+
+	scoped := exportAndDecode(ctx, t, d, jsonl.ExportOptions{ProjectID: project.ID, IncludeDeleted: true})
+	var scopedBindings, scopedStatuses int
+	for _, rec := range scoped {
+		data, _ := rec["data"].(map[string]any)
+		switch rec["kind"] {
+		case "issue_sync_binding":
+			scopedBindings++
+			assert.Equal(t, float64(project.ID), data["project_id"])
+			assert.Equal(t, "example-org/example-repo", data["display_name"])
+		case "issue_sync_status":
+			scopedStatuses++
+			assert.Equal(t, float64(project.ID), data["project_id"])
+		case "issue":
+			assert.Equal(t, float64(issue.ID), data["id"])
+		}
+	}
+	assert.Equal(t, 1, scopedBindings)
+	assert.Equal(t, 1, scopedStatuses)
+	assertRecordsDoNotContain(t, scoped, "other-example-repo")
+}
+
+func TestExportReadOnlyLegacyV17GitHubStatusMapsCounts(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	writeLegacyV17GitHubStatusDB(t, path)
+	assertLegacyTableExists(t, path, "github_sync_bindings")
+	assertLegacyTableExists(t, path, "github_sync_status")
+	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = source.Close() })
+
+	var out bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, source, &out, jsonl.ExportOptions{IncludeDeleted: true}))
+	records := decodeJSONLLines(t, out.Bytes())
+
+	bindingIndex := firstKindIndex(records, "issue_sync_binding")
+	require.NotEqual(t, -1, bindingIndex, "expected legacy github_sync_bindings export")
+	bindingData := records[bindingIndex]["data"].(map[string]any)
+	assert.Equal(t, "github", bindingData["provider"])
+	assert.Equal(t, "github:legacy-repo-node", bindingData["source_key"])
+	assert.Equal(t, "legacy-repo-node", bindingData["remote_id"])
+	assert.Equal(t, "example-org/legacy-repo", bindingData["display_name"])
+
+	statusIndex := firstKindIndex(records, "issue_sync_status")
+	require.NotEqual(t, -1, statusIndex, "expected legacy issue_sync_status export")
+	statusData := records[statusIndex]["data"].(map[string]any)
+	assert.Equal(t, "rate limited", statusData["last_error"])
+	assert.Equal(t, float64(5), statusData["last_comments"],
+		"legacy last_comment_count maps to last_comments")
+	assert.Equal(t, float64(0), statusData["last_created"],
+		"legacy last_issue_count cannot be decomposed; counters reset")
+	assert.Equal(t, float64(0), statusData["last_updated"])
+	assert.Equal(t, float64(0), statusData["last_unchanged"])
+}
+
+func assertLegacyTableExists(t *testing.T, path, table string) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+	var name string
+	err = raw.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+	require.NoError(t, err)
+	assert.Equal(t, table, name)
+}
+
 func TestExportReadOnlyLegacySQLiteUsesVersionAwareExporter(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -729,6 +883,91 @@ func writeLegacyV13FederationDB(t *testing.T, path string) {
 	require.NoError(t, current.Close())
 }
 
+// writeLegacyV17GitHubStatusDB builds a schema_version=17 database with the
+// pre-neutral-storage github_sync_* tables. The version-aware exporter must
+// read those legacy tables and emit current issue_sync_* records.
+func writeLegacyV17GitHubStatusDB(t *testing.T, path string) {
+	t.Helper()
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	current, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	project, err := current.CreateProject(ctx, "legacy-github")
+	require.NoError(t, err)
+	binding, err := current.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID:       project.ID,
+		Provider:        "github",
+		SourceKey:       "github:legacy-repo-node",
+		RemoteID:        "legacy-repo-node",
+		DisplayName:     "example-org/legacy-repo",
+		Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"legacy-repo","repo_id":7}`),
+		IntervalSeconds: 900,
+	})
+	require.NoError(t, err)
+	require.NoError(t, current.Close())
+
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+	_, err = raw.Exec(`
+		PRAGMA foreign_keys = OFF;
+
+		CREATE TABLE github_sync_bindings (
+		  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+		  project_id              INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		  source_key              TEXT NOT NULL,
+		  host                    TEXT NOT NULL,
+		  owner                   TEXT NOT NULL,
+		  repo                    TEXT NOT NULL,
+		  repo_node_id            TEXT NOT NULL,
+		  repo_id                 INTEGER NOT NULL,
+		  enabled                 INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+		  interval_seconds        INTEGER NOT NULL,
+		  last_cursor_at          DATETIME,
+		  created_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  updated_at              DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		);
+		INSERT INTO github_sync_bindings(
+		  id, project_id, source_key, host, owner, repo, repo_node_id, repo_id,
+		  enabled, interval_seconds, last_cursor_at, created_at, updated_at
+		)
+		VALUES(
+		  ?, ?, 'github:legacy-repo-node', 'github.com', 'example-org',
+		  'legacy-repo', 'legacy-repo-node', 7, 1, 900, NULL,
+		  '2026-06-01T09:00:00.000Z', '2026-06-01T10:01:00.000Z'
+		);
+
+		CREATE TABLE github_sync_status (
+		  binding_id              INTEGER PRIMARY KEY REFERENCES github_sync_bindings(id) ON DELETE CASCADE,
+		  project_id              INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+		  sync_started_at         DATETIME,
+		  last_attempt_at         DATETIME,
+		  last_success_at         DATETIME,
+		  last_error_at           DATETIME,
+		  last_error              TEXT,
+		  last_issue_count        INTEGER NOT NULL DEFAULT 0,
+		  last_comment_count      INTEGER NOT NULL DEFAULT 0,
+		  last_import_event_count INTEGER NOT NULL DEFAULT 0,
+		  CHECK (last_issue_count >= 0),
+		  CHECK (last_comment_count >= 0),
+		  CHECK (last_import_event_count >= 0)
+		);
+		INSERT INTO github_sync_status(
+		  binding_id, project_id, sync_started_at, last_attempt_at,
+		  last_success_at, last_error_at, last_error,
+		  last_issue_count, last_comment_count, last_import_event_count
+		)
+		VALUES(
+		  ?, ?, NULL, '2026-06-01T09:58:00.000Z',
+		  '2026-06-01T10:00:00.000Z', '2026-06-01T10:02:00.000Z',
+		  'rate limited', 9, 5, 14
+		);
+
+		UPDATE meta SET value = '17' WHERE key = 'schema_version'`, binding.ID, project.ID, binding.ID, project.ID)
+	require.NoError(t, err)
+	require.Positive(t, binding.ID)
+}
+
 // newExportEnv opens a fresh test DB and seeds the canonical "kata" project
 // used by most export tests.
 func newExportEnv(t *testing.T) (context.Context, *sqlitestore.Store, db.Project) {
@@ -810,14 +1049,24 @@ func ptrToStringValue(t *testing.T, v any) *string {
 	return &s
 }
 
+func firstKindIndex(records []map[string]any, kind string) int {
+	for i, rec := range records {
+		if rec["kind"] == kind {
+			return i
+		}
+	}
+	return -1
+}
+
 func assertKindOrder(t *testing.T, records []map[string]any) {
 	t.Helper()
 	order := map[string]int{
-		"meta": 0, "project": 1, "project_alias": 2, "recurrence": 3,
-		"issue": 4, "comment": 5, "issue_label": 6, "link": 7,
-		"import_mapping": 8, "federation_binding": 9, "federation_sync_status": 10,
-		"federation_quarantine": 11, "federation_enrollment": 12, "issue_claim": 13,
-		"pending_claim_request": 14, "event": 15, "purge_log": 16, "sqlite_sequence": 17,
+		"meta": 0, "project": 1, "project_alias": 2, "issue_sync_binding": 3,
+		"issue_sync_status": 4, "recurrence": 5, "issue": 6, "comment": 7,
+		"issue_label": 8, "link": 9, "import_mapping": 10, "federation_binding": 11,
+		"federation_sync_status": 12, "federation_quarantine": 13, "federation_enrollment": 14,
+		"issue_claim": 15, "pending_claim_request": 16, "event": 17, "purge_log": 18,
+		"sqlite_sequence": 19,
 	}
 	last := -1
 	for _, rec := range records {

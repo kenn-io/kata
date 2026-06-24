@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +11,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/importlabels"
 )
 
 const (
@@ -95,11 +93,6 @@ type beadsImportLinkInput struct {
 	Type             string `json:"type"`
 	TargetExternalID string `json:"target_external_id"`
 }
-
-var (
-	invalidLabelChar = regexp.MustCompile(`[^a-z0-9._:-]+`)
-	repeatedDash     = regexp.MustCompile(`-+`)
-)
 
 type beadsImportSummary struct {
 	Source    string `json:"source"`
@@ -340,16 +333,16 @@ func buildBeadsImportRequest(r io.Reader, comments map[string][]beadsComment, ac
 
 		labels := []string{"source:beads", beadsIDLabel(b.ID)}
 		seenLabels := map[string]struct{}{}
-		labels = appendNormalizedLabels(nil, seenLabels, labels...)
+		labels = importlabels.AppendNormalized(nil, seenLabels, labels...)
 		// Preserve the original beads status as a label whenever the
 		// raw value isn't trivially "open" or "closed" — keeps the
 		// "blocked"/"in_progress"/etc. distinction visible after the
 		// kata-side status collapse to open/closed.
 		if rawStatus != "" && rawStatus != "open" && rawStatus != "closed" {
-			labels = appendNormalizedLabels(labels, seenLabels, "beads-status:"+rawStatus)
+			labels = importlabels.AppendNormalized(labels, seenLabels, "beads-status:"+rawStatus)
 		}
 		for _, label := range b.Labels {
-			labels = appendNormalizedLabels(labels, seenLabels, label)
+			labels = importlabels.AppendNormalized(labels, seenLabels, label)
 		}
 
 		var owner *string
@@ -425,50 +418,9 @@ func buildBeadsImportRequest(r io.Reader, comments map[string][]beadsComment, ac
 	return req, nil
 }
 
-func appendNormalizedLabels(out []string, seen map[string]struct{}, labels ...string) []string {
-	for _, label := range labels {
-		normalized := normalizeKataLabel(label)
-		if _, ok := seen[normalized]; ok {
-			continue
-		}
-		seen[normalized] = struct{}{}
-		out = append(out, normalized)
-	}
-	return out
-}
-
-func normalizeKataLabel(s string) string {
-	return normalizeKataLabelMax(s, 64)
-}
-
-func normalizeKataLabelMax(s string, maxLen int) string {
-	normalized := strings.ToLower(strings.TrimSpace(s))
-	normalized = strings.Join(strings.Fields(normalized), "-")
-	normalized = invalidLabelChar.ReplaceAllString(normalized, "-")
-	normalized = repeatedDash.ReplaceAllString(normalized, "-")
-	normalized = strings.Trim(normalized, "-._:")
-	if normalized == "" {
-		normalized = "imported"
-	}
-	if len(normalized) <= maxLen {
-		return normalized
-	}
-	sum := sha256.Sum256([]byte(normalized))
-	suffix := hex.EncodeToString(sum[:])[:8]
-	prefixLen := maxLen - len(suffix) - 1
-	if prefixLen < 1 {
-		return suffix[:maxLen]
-	}
-	prefix := strings.TrimRight(normalized[:prefixLen], "-._:")
-	if prefix == "" {
-		prefix = "imported"
-	}
-	return prefix + "-" + suffix
-}
-
 func beadsIDLabel(id string) string {
 	const prefix = "beads-id:"
-	return prefix + normalizeKataLabelMax(id, 64-len(prefix))
+	return prefix + importlabels.NormalizeMax(id, 64-len(prefix))
 }
 
 func mapBeadsCloseReason(reason string) string {

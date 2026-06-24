@@ -85,6 +85,37 @@ type AliasExport struct {
 	CreatedAt     string `json:"created_at"`
 }
 
+// IssueSyncBindingExport is one issue_sync_bindings row in export shape.
+type IssueSyncBindingExport struct {
+	ID              int64           `json:"id"`
+	ProjectID       int64           `json:"project_id"`
+	Provider        string          `json:"provider"`
+	SourceKey       string          `json:"source_key"`
+	RemoteID        string          `json:"remote_id"`
+	DisplayName     string          `json:"display_name"`
+	Config          json.RawMessage `json:"config"`
+	Enabled         bool            `json:"enabled"`
+	IntervalSeconds int             `json:"interval_seconds"`
+	LastCursorAt    *string         `json:"last_cursor_at,omitempty"`
+	CreatedAt       string          `json:"created_at"`
+	UpdatedAt       string          `json:"updated_at"`
+}
+
+// IssueSyncStatusExport is one issue_sync_status row in export shape.
+type IssueSyncStatusExport struct {
+	BindingID     int64   `json:"binding_id"`
+	ProjectID     int64   `json:"project_id"`
+	SyncStartedAt *string `json:"sync_started_at,omitempty"`
+	LastAttemptAt *string `json:"last_attempt_at,omitempty"`
+	LastSuccessAt *string `json:"last_success_at,omitempty"`
+	LastErrorAt   *string `json:"last_error_at,omitempty"`
+	LastError     *string `json:"last_error,omitempty"`
+	LastCreated   int     `json:"last_created"`
+	LastUpdated   int     `json:"last_updated"`
+	LastUnchanged int     `json:"last_unchanged"`
+	LastComments  int     `json:"last_comments"`
+}
+
 // CommentExport is one comment row in export shape.
 type CommentExport struct {
 	ID        int64  `json:"id"`

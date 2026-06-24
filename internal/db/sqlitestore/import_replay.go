@@ -134,6 +134,10 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 		return linkSkipNone, importProject(ctx, tx, r.Project)
 	case db.ImportKindProjectAlias:
 		return linkSkipNone, importAlias(ctx, tx, r.Alias)
+	case db.ImportKindIssueSyncBinding:
+		return linkSkipNone, importIssueSyncBinding(ctx, tx, r.IssueSyncBinding, opts.PreserveIssueSyncBindingEnabled)
+	case db.ImportKindIssueSyncStatus:
+		return linkSkipNone, importIssueSyncStatus(ctx, tx, r.IssueSyncStatus)
 	case db.ImportKindRecurrence:
 		return linkSkipNone, importRecurrence(ctx, tx, r.Recurrence)
 	case db.ImportKindIssue:
@@ -245,6 +249,37 @@ func importAlias(ctx context.Context, tx *sql.Tx, a *db.AliasExport) error {
 		 VALUES(?, ?, ?, ?, ?)`,
 		a.ID, a.ProjectID, a.AliasIdentity, a.AliasKind, a.CreatedAt)
 	return wrapImportErr(db.ImportKindProjectAlias, err)
+}
+
+func importIssueSyncBinding(ctx context.Context, tx *sql.Tx, b *db.IssueSyncBindingExport, preserveEnabled bool) error {
+	enabled := 0
+	if preserveEnabled && b.Enabled {
+		enabled = 1
+	}
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO issue_sync_bindings(
+		   id, project_id, provider, source_key, remote_id, display_name, config_json,
+		   enabled, interval_seconds, last_cursor_at, created_at, updated_at
+		 )
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		b.ID, b.ProjectID, b.Provider, b.SourceKey, b.RemoteID, b.DisplayName,
+		string(b.Config), enabled, b.IntervalSeconds, b.LastCursorAt, b.CreatedAt,
+		b.UpdatedAt)
+	return wrapImportErr(db.ImportKindIssueSyncBinding, err)
+}
+
+func importIssueSyncStatus(ctx context.Context, tx *sql.Tx, s *db.IssueSyncStatusExport) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO issue_sync_status(
+		   binding_id, project_id, sync_started_at, last_attempt_at,
+		   last_success_at, last_error_at, last_error,
+		   last_created, last_updated, last_unchanged, last_comments
+		 )
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.BindingID, s.ProjectID, s.SyncStartedAt, s.LastAttemptAt,
+		s.LastSuccessAt, s.LastErrorAt, s.LastError, s.LastCreated,
+		s.LastUpdated, s.LastUnchanged, s.LastComments)
+	return wrapImportErr(db.ImportKindIssueSyncStatus, err)
 }
 
 func importRecurrence(ctx context.Context, tx *sql.Tx, rc *db.RecurrenceExport) error {
@@ -895,7 +930,7 @@ func upsertSequence(ctx context.Context, tx *sql.Tx, name string, seq int64) err
 }
 
 func reconcileSequences(ctx context.Context, tx *sql.Tx) error {
-	for _, table := range []string{"projects", "project_aliases", "issues", "comments", "links", "import_mappings", "events", "purge_log", "api_tokens", "federation_enrollments"} {
+	for _, table := range []string{"projects", "project_aliases", "issue_sync_bindings", "issues", "comments", "links", "import_mappings", "events", "purge_log", "api_tokens", "federation_enrollments"} {
 		var maxID int64
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(MAX(id), 0) FROM `+table).Scan(&maxID); err != nil {

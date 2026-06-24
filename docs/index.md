@@ -110,7 +110,9 @@ walkthrough.
 The `kata` CLI resolves a project from your workspace, `.kata.toml`, or
 `--project`, then talks to a local daemon, starting one automatically when
 needed. The daemon owns a SQLite database under `KATA_HOME`, applies mutations,
-and records an event stream that both the CLI/TUI and hooks read. Your repo
+and records an event stream that both the CLI/TUI and hooks read. Optional
+[GitHub sync](operations/github-sync.md) can mirror upstream GitHub issues into
+kata, and federation can replicate selected projects through a hub. Your repo
 commits only the small `.kata.toml` binding, so issue history stays out of code
 history. Private-network remote daemon modes are explicit: operators can use
 bearer auth on trusted private HTTP or opt a single-user private IP into

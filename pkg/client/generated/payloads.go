@@ -22,6 +22,12 @@ type SkipFederationQuarantineBody = SkipFederationQuarantineRequestBody
 
 type ImportIssuesBody = ImportRequestBody
 
+type DisableIssueSyncBody = DisableIssueSyncRequestBody
+
+type EnableIssueSyncBody = EnableIssueSyncRequestBody
+
+type RunIssueSyncOnceBody = RunIssueSyncOnceRequestBody
+
 type CreateIssueBody = CreateIssueRequestBody
 
 type EditIssueBody = EditIssueRequestBody

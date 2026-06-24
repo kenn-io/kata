@@ -10,7 +10,7 @@ services:
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
-    command: ["daemon", "start", "--listen", "0.0.0.0:7373"]
+    command: ["daemon", "start", "--foreground", "--listen", "0.0.0.0:7373"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7373/api/v1/health"]
       interval: 1s
@@ -28,7 +28,7 @@ services:
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
-    command: ["daemon", "start", "--listen", "0.0.0.0:7374"]
+    command: ["daemon", "start", "--foreground", "--listen", "0.0.0.0:7374"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7374/api/v1/health"]
       interval: 1s
@@ -46,7 +46,7 @@ services:
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
-    command: ["daemon", "start", "--listen", "0.0.0.0:7375"]
+    command: ["daemon", "start", "--foreground", "--listen", "0.0.0.0:7375"]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7375/api/v1/health"]
       interval: 1s

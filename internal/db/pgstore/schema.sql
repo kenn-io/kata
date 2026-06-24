@@ -362,6 +362,68 @@ CREATE TABLE federation_sync_status (
   last_reset_at           TEXT
 );
 
+CREATE TABLE issue_sync_bindings (
+  id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  project_id       BIGINT NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+  provider         TEXT NOT NULL,
+  source_key       TEXT NOT NULL,
+  remote_id        TEXT NOT NULL,
+  display_name     TEXT NOT NULL,
+  config_json      TEXT NOT NULL DEFAULT '{}' CHECK(config_json IS JSON),
+  enabled          INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+  interval_seconds INTEGER NOT NULL,
+  last_cursor_at   TEXT,
+  created_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  updated_at       TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  CHECK (length(trim(provider)) > 0),
+  CHECK (length(trim(source_key)) > 0),
+  CHECK (length(trim(remote_id)) > 0),
+  CHECK (length(trim(display_name)) > 0),
+  CHECK (interval_seconds > 0)
+);
+CREATE INDEX idx_issue_sync_bindings_due
+  ON issue_sync_bindings(enabled, project_id, interval_seconds);
+
+CREATE TABLE issue_sync_status (
+  binding_id              BIGINT PRIMARY KEY REFERENCES issue_sync_bindings(id) ON DELETE CASCADE,
+  project_id              BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  sync_started_at         TEXT,
+  last_attempt_at         TEXT,
+  last_success_at         TEXT,
+  last_error_at           TEXT,
+  last_error              TEXT,
+  last_created           INTEGER NOT NULL DEFAULT 0,
+  last_updated           INTEGER NOT NULL DEFAULT 0,
+  last_unchanged         INTEGER NOT NULL DEFAULT 0,
+  last_comments          INTEGER NOT NULL DEFAULT 0,
+  CHECK (last_created >= 0),
+  CHECK (last_updated >= 0),
+  CHECK (last_unchanged >= 0),
+  CHECK (last_comments >= 0)
+);
+CREATE INDEX idx_issue_sync_status_project
+  ON issue_sync_status(project_id);
+CREATE INDEX idx_issue_sync_status_due
+  ON issue_sync_status(sync_started_at, last_attempt_at);
+
+CREATE OR REPLACE FUNCTION enforce_issue_sync_binding_immutable()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.provider <> OLD.provider THEN
+    RAISE EXCEPTION 'issue_sync_bindings.provider is immutable';
+  END IF;
+  IF NEW.source_key <> OLD.source_key THEN
+    RAISE EXCEPTION 'issue_sync_bindings.source_key is immutable';
+  END IF;
+  IF NEW.remote_id <> OLD.remote_id THEN
+    RAISE EXCEPTION 'issue_sync_bindings.remote_id is immutable';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_issue_sync_binding_immutable
+BEFORE UPDATE OF provider, source_key, remote_id ON issue_sync_bindings
+FOR EACH ROW EXECUTE FUNCTION enforce_issue_sync_binding_immutable();
+
 CREATE TABLE federation_quarantine (
   id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   project_id     BIGINT NOT NULL REFERENCES projects(id),

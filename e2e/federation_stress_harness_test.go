@@ -710,7 +710,7 @@ func startFederationStressTCPDaemon(
 	addr string,
 ) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(bin, "daemon", "start", "--listen", addr) //nolint:gosec // test-built binary and loopback address
+	cmd := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec // test-built binary and loopback address
 	cmd.Env = append(dirs.env(), federationStressPullIntervalEnv())
 	cmd.Dir = dirs.repoDir
 	cmd.Stdout = io.Discard
@@ -740,7 +740,7 @@ func startFederationStressSpoke(t federationStressTB, bin string) federationStre
 
 func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eDirs, stderr *safeBuffer) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(bin, "daemon", "start") //nolint:gosec // test-built binary
+	cmd := exec.Command(bin, "daemon", "start", "--foreground") //nolint:gosec // test-built binary
 	cmd.Env = append(dirs.env(), federationStressPullIntervalEnv())
 	cmd.Dir = dirs.repoDir
 	cmd.Stdout = io.Discard

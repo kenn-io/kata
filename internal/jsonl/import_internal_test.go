@@ -109,6 +109,35 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			},
 		},
 		{
+			name: "github sync binding",
+			kind: KindIssueSyncBinding,
+			data: `{"id":1,"project_id":1,"source_key":"github:repo-node-example","host":"github.com","owner":"example-org","repo":"example-repo","repo_node_id":"repo-node-example","repo_id":42,"enabled":false,"interval_seconds":900,"last_cursor_at":"` + legacy + `","created_at":"` + legacy + `","updated_at":"` + legacy + `"}`,
+			assert: func(t *testing.T, rec db.ImportRecord) {
+				require.NotNil(t, rec.IssueSyncBinding)
+				assert.Equal(t, canonical, *rec.IssueSyncBinding.LastCursorAt)
+				assert.Equal(t, canonical, rec.IssueSyncBinding.CreatedAt)
+				assert.Equal(t, canonical, rec.IssueSyncBinding.UpdatedAt)
+			},
+		},
+		{
+			name: "github sync status",
+			kind: KindIssueSyncStatus,
+			data: `{"binding_id":1,"project_id":1,"sync_started_at":"` + legacy + `","last_attempt_at":"` + legacy + `","last_success_at":"` + legacy + `","last_error_at":"` + legacy + `","last_error":"rate limited","last_created":2,"last_updated":3,"last_unchanged":4,"last_comments":5}`,
+			assert: func(t *testing.T, rec db.ImportRecord) {
+				require.NotNil(t, rec.IssueSyncStatus)
+				assert.Equal(t, canonical, *rec.IssueSyncStatus.SyncStartedAt)
+				assert.Equal(t, canonical, *rec.IssueSyncStatus.LastAttemptAt)
+				assert.Equal(t, canonical, *rec.IssueSyncStatus.LastSuccessAt)
+				assert.Equal(t, canonical, *rec.IssueSyncStatus.LastErrorAt)
+				require.NotNil(t, rec.IssueSyncStatus.LastError)
+				assert.Equal(t, "rate limited", *rec.IssueSyncStatus.LastError)
+				assert.Equal(t, 2, rec.IssueSyncStatus.LastCreated)
+				assert.Equal(t, 3, rec.IssueSyncStatus.LastUpdated)
+				assert.Equal(t, 4, rec.IssueSyncStatus.LastUnchanged)
+				assert.Equal(t, 5, rec.IssueSyncStatus.LastComments)
+			},
+		},
+		{
 			name: "federation quarantine",
 			kind: KindFederationQuarantine,
 			data: `{"id":1,"project_id":1,"direction":"pull","first_event_id":1,"last_event_id":1,"event_uids":[],"error":"bad","created_at":"` + legacy + `","skipped_at":"` + legacy + `","skipped_by":"tester","skip_reason":"done"}`,
@@ -177,6 +206,12 @@ func TestToImportRecordNormalizesTimestampFields(t *testing.T) {
 			tt.assert(t, rec)
 		})
 	}
+}
+
+func TestKindOrderPlacesGitHubSyncAfterProjectAlias(t *testing.T) {
+	assert.Equal(t, kindOrder[KindProjectAlias]+1, kindOrder[KindIssueSyncBinding])
+	assert.Equal(t, kindOrder[KindIssueSyncBinding]+1, kindOrder[KindIssueSyncStatus])
+	assert.Equal(t, kindOrder[KindIssueSyncStatus]+1, kindOrder[KindRecurrence])
 }
 
 func stringOf(s string, n int) string {

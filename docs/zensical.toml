@@ -35,6 +35,7 @@ nav = [
   ]},
   {"Operations" = [
     {"Remote daemon" = "operations/remote-daemon.md"},
+    {"GitHub sync" = "operations/github-sync.md"},
     {"Federation" = "operations/federation.md"},
     {"Hosted mode" = "operations/hosted-mode.md"},
     {"Backup and restore" = "operations/backup-restore.md"},

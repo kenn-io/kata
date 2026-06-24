@@ -103,7 +103,7 @@ func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "http://"+addr, url)
-	assert.Equal(t, []string{"daemon", "start"}, got.Args)
+	assert.Equal(t, []string{"daemon", "start", "--foreground"}, got.Args)
 	assert.True(t, got.RefuseEphemeral)
 	assert.Contains(t, got.Env, daemon.AutoStartMarkerEnv+"=1")
 

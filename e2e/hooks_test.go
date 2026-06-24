@@ -168,7 +168,7 @@ func buildKataBinary(t *testing.T) string {
 	return bin
 }
 
-// startDaemon spawns `kata daemon start` in its own process group and
+// startDaemon spawns `kata daemon start --foreground` in its own process group and
 // registers a t.Cleanup that SIGTERMs (then SIGKILLs after 2s) so a
 // stuck daemon never leaks across tests. The captured stderr buffer is
 // returned so failure paths can include daemon logs in their messages.
@@ -176,7 +176,7 @@ func startDaemon(t *testing.T, bin string, env []string) *safeBuffer {
 	t.Helper()
 	stderr := &safeBuffer{}
 	//nolint:gosec // G204: bin is buildKataBinary's output
-	cmd := exec.Command(bin, "daemon", "start")
+	cmd := exec.Command(bin, "daemon", "start", "--foreground")
 	cmd.Env = env
 	cmd.Stderr = stderr
 	cmd.Stdout = io.Discard

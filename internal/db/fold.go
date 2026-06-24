@@ -199,6 +199,13 @@ func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]json.
 	if deletedAt, ok := optionalString(payload["deleted_at"]); ok {
 		issue.DeletedAt = deletedAt
 	}
+	// created_at only ever heals earlier: an import repair carries the recovered
+	// genuine creation time, but a later value must never push it forward.
+	if v, ok := stringValue(payload["created_at"]); ok && v != "" {
+		if issue.CreatedAt == "" || v < issue.CreatedAt {
+			issue.CreatedAt = v
+		}
+	}
 	updatedAt := e.CreatedAt
 	if v, ok := stringValue(payload["updated_at"]); ok {
 		updatedAt = v

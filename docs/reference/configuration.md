@@ -18,6 +18,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
 | `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
 | `KATA_HTTP_TIMEOUT` | Per-request CLI timeout for non-streaming daemon calls, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. |
+| `KATA_GITHUB_SYNC_ALLOWED_HOSTS` | Comma-separated exact GitHub Enterprise hostnames trusted for GitHub sync and git-remote inference. `github.com` is always trusted. |
 | `KATA_FEDERATION_PULL_INTERVAL_MS` | Federation runner poll interval for tests or latency-sensitive private deployments. |
 | `PORT` | Hosted-mode listener port when no explicit listener is configured and the daemon is not an auto-start child. |
 | `XDG_RUNTIME_DIR` | Runtime socket parent on Unix when applicable. |
@@ -114,7 +115,10 @@ trust_private_network = true
 ```
 
 The `kata daemon start --listen <host:port>` flag wins over the config file.
-Auto-started daemons also read the config-file listener value.
+Plain `kata daemon start` starts the daemon in the background and returns after
+startup is confirmed; use `kata daemon start --foreground` for service-manager
+and hosted deployments. Auto-started daemons also read the config-file listener
+value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
 

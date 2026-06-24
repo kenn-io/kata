@@ -153,7 +153,7 @@ token = "$DEMO_HUB_AUTH_VALUE"
 trust_private_network = true
 EOF
 
-KATA_HOME="$HUB_HOME" "$KATA_BIN" daemon start --listen 127.0.0.1:0 >"$HUB_LOG" 2>&1 &
+KATA_HOME="$HUB_HOME" "$KATA_BIN" daemon start --foreground --listen 127.0.0.1:0 >"$HUB_LOG" 2>&1 &
 HUB_PID=$!
 wait_for_log "$HUB_LOG" "kata daemon: listening on"
 HUB_BOUND="$(sed -n 's/.*kata daemon: listening on //p' "$HUB_LOG" | tail -n 1)"

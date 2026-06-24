@@ -194,6 +194,75 @@ func TestFederationSyncStatusRoundTrip(t *testing.T) {
 	assert.Equal(t, "poll failed", *got.LastError)
 }
 
+func TestGitHubSyncRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	srcDB := openExportTestDB(t)
+	p, err := srcDB.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	binding, err := srcDB.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID:       p.ID,
+		Provider:        "github",
+		SourceKey:       "github:repo-node-example",
+		RemoteID:        "repo-node-example",
+		DisplayName:     "example-org/example-repo",
+		Config:          []byte(`{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`),
+		IntervalSeconds: 900,
+	})
+	require.NoError(t, err)
+	_, err = srcDB.ExecContext(ctx, `
+		UPDATE issue_sync_bindings
+		   SET enabled = 0,
+		       last_cursor_at = '2026-06-01T10:00:00.000Z',
+		       created_at = '2026-06-01T09:00:00.000Z',
+		       updated_at = '2026-06-01T10:01:00.000Z'
+		 WHERE id = ?`, binding.ID)
+	require.NoError(t, err)
+	_, err = srcDB.ExecContext(ctx, `
+		UPDATE issue_sync_status
+		   SET sync_started_at = '2026-06-01T09:58:00.000Z',
+		       last_attempt_at = '2026-06-01T09:58:00.000Z',
+		       last_success_at = '2026-06-01T10:00:00.000Z',
+		       last_error_at = '2026-06-01T10:02:00.000Z',
+		       last_error = 'rate limited',
+		       last_created = 2,
+		       last_updated = 3,
+		       last_unchanged = 4,
+		       last_comments = 5
+		 WHERE binding_id = ?`, binding.ID)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, jsonl.Export(ctx, srcDB, &buf, jsonl.ExportOptions{}))
+
+	dstDB := openImportTargetDB(t)
+	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
+
+	gotBinding, err := dstDB.IssueSyncBindingByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, binding.ID, gotBinding.ID)
+	assert.Equal(t, "github", gotBinding.Provider)
+	assert.Equal(t, "github:repo-node-example", gotBinding.SourceKey)
+	assert.Equal(t, "repo-node-example", gotBinding.RemoteID)
+	assert.Equal(t, "example-org/example-repo", gotBinding.DisplayName)
+	assert.JSONEq(t, `{"host":"github.com","owner":"example-org","repo":"example-repo","repo_id":42}`, string(gotBinding.Config))
+	assert.False(t, gotBinding.Enabled)
+	assert.Equal(t, 900, gotBinding.IntervalSeconds)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T10:00:00.000Z"), gotBinding.LastCursorAt)
+
+	gotStatus, err := dstDB.IssueSyncStatusByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, binding.ID, gotStatus.BindingID)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T09:58:00.000Z"), gotStatus.SyncStartedAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T09:58:00.000Z"), gotStatus.LastAttemptAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T10:00:00.000Z"), gotStatus.LastSuccessAt)
+	assertTimePtrEqual(t, mustParseTime(t, "2026-06-01T10:02:00.000Z"), gotStatus.LastErrorAt)
+	assert.Equal(t, "rate limited", gotStatus.LastError)
+	assert.Equal(t, 2, gotStatus.LastCreated)
+	assert.Equal(t, 3, gotStatus.LastUpdated)
+	assert.Equal(t, 4, gotStatus.LastUnchanged)
+	assert.Equal(t, 5, gotStatus.LastComments)
+}
+
 func TestFederationQuarantineRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	srcDB := openExportTestDB(t)

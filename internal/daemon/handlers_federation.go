@@ -603,6 +603,9 @@ func adoptExistingReplica(
 					AllowInsecure:        in.Body.AllowInsecure,
 				})
 				if err != nil {
+					if errors.Is(err, db.ErrIssueSyncFederationBinding) {
+						return db.AdoptProjectIntoFederationResult{}, false, issueSyncFederationConflict()
+					}
 					return db.AdoptProjectIntoFederationResult{}, false, api.NewError(500, "internal", err.Error(), "", nil)
 				}
 				return result, true, nil
@@ -656,6 +659,9 @@ func adoptExistingReplica(
 		AllowInsecure:        in.Body.AllowInsecure,
 	})
 	if err != nil {
+		if errors.Is(err, db.ErrIssueSyncFederationBinding) {
+			return db.AdoptProjectIntoFederationResult{}, true, issueSyncFederationConflict()
+		}
 		return db.AdoptProjectIntoFederationResult{}, true, api.NewError(500, "internal", err.Error(), "", nil)
 	}
 	return result, true, nil
@@ -751,6 +757,9 @@ func ensureReplicaBinding(
 		Enabled:              true,
 	})
 	if err != nil {
+		if errors.Is(err, db.ErrIssueSyncFederationBinding) {
+			return db.Project{}, db.FederationBinding{}, issueSyncFederationConflict()
+		}
 		return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
 	}
 	return project, binding, nil
@@ -1102,5 +1111,15 @@ func federationError(err error) error {
 	if errors.Is(err, db.ErrNotFound) {
 		return api.NewError(404, "federation_not_found", "federation metadata not found", "", nil)
 	}
+	if errors.Is(err, db.ErrIssueSyncFederationBinding) {
+		return issueSyncFederationConflict()
+	}
 	return api.NewError(500, "internal", err.Error(), "", nil)
+}
+
+// issueSyncFederationConflict reports a 409 for the lifecycle rule that an
+// issue-synced project cannot become a federation spoke.
+func issueSyncFederationConflict() error {
+	return api.NewError(409, "issue_sync_federation_conflict",
+		"project has issue sync enabled; run GitHub sync on the federation hub, or disable issue sync before joining this project as a spoke", "", nil)
 }

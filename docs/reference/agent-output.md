@@ -175,6 +175,5 @@ Safari can double-submit the callback.
 - Agent mode does not change daemon API responses — it is purely a CLI rendering
   of the same data.
 - Agent mode is not the default.
-- Interactive and foreground commands (`kata tui`, `kata daemon start`) have no
-  meaningful final transcript line and reject agent mode with a usage error
-  rather than launching.
+- Interactive commands (`kata tui`) and daemon startup (`kata daemon start`)
+  reject agent mode with a usage error rather than launching.

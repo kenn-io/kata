@@ -252,6 +252,56 @@ func (d *Store) ExportProjectAliases(ctx context.Context, f db.ExportFilter) ite
 		})
 }
 
+// ExportIssueSyncBindings streams issue_sync_bindings ordered by id, scoped
+// to f.ProjectID when set.
+func (d *Store) ExportIssueSyncBindings(ctx context.Context, f db.ExportFilter) iter.Seq2[db.IssueSyncBindingExport, error] {
+	query := `SELECT id, project_id, provider, source_key, remote_id,
+	                 display_name, config_json, enabled, interval_seconds,
+	                 CAST(last_cursor_at AS TEXT),
+	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT)
+	          FROM issue_sync_bindings`
+	query, args := withProjectIDFilter(query, f, "project_id")
+	query += ` ORDER BY id ASC`
+	return streamRows(ctx, d.readQ, "issue_sync_bindings", query, args,
+		func(rows *sql.Rows) (db.IssueSyncBindingExport, error) {
+			var rec db.IssueSyncBindingExport
+			var enabled int
+			var config string
+			if err := rows.Scan(&rec.ID, &rec.ProjectID, &rec.Provider, &rec.SourceKey,
+				&rec.RemoteID, &rec.DisplayName, &config, &enabled, &rec.IntervalSeconds,
+				&rec.LastCursorAt, &rec.CreatedAt, &rec.UpdatedAt); err != nil {
+				return db.IssueSyncBindingExport{}, scanError("issue_sync_binding", err)
+			}
+			rec.Config = json.RawMessage(config)
+			rec.Enabled = enabled == 1
+			return rec, nil
+		})
+}
+
+// ExportIssueSyncStatus streams issue_sync_status rows ordered by binding_id,
+// scoped to f.ProjectID when set.
+func (d *Store) ExportIssueSyncStatus(ctx context.Context, f db.ExportFilter) iter.Seq2[db.IssueSyncStatusExport, error] {
+	query := `SELECT binding_id, project_id,
+	                 CAST(sync_started_at AS TEXT), CAST(last_attempt_at AS TEXT),
+	                 CAST(last_success_at AS TEXT), CAST(last_error_at AS TEXT),
+	                 last_error, last_created, last_updated, last_unchanged,
+	                 last_comments
+	            FROM issue_sync_status`
+	query, args := withProjectIDFilter(query, f, "project_id")
+	query += ` ORDER BY binding_id ASC`
+	return streamRows(ctx, d.readQ, "issue_sync_status", query, args,
+		func(rows *sql.Rows) (db.IssueSyncStatusExport, error) {
+			var rec db.IssueSyncStatusExport
+			if err := rows.Scan(&rec.BindingID, &rec.ProjectID, &rec.SyncStartedAt,
+				&rec.LastAttemptAt, &rec.LastSuccessAt, &rec.LastErrorAt,
+				&rec.LastError, &rec.LastCreated, &rec.LastUpdated,
+				&rec.LastUnchanged, &rec.LastComments); err != nil {
+				return db.IssueSyncStatusExport{}, scanError("issue_sync_status", err)
+			}
+			return rec, nil
+		})
+}
+
 // ExportComments streams comments ordered by id, scoped via the parent issue
 // (project + soft-delete rides on issues).
 func (d *Store) ExportComments(ctx context.Context, f db.ExportFilter) iter.Seq2[db.CommentExport, error] {

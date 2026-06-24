@@ -14,10 +14,12 @@ import (
 )
 
 type importIssueState struct {
-	item        db.ImportItem
-	issue       db.Issue
-	created     bool
-	sourceNewer bool
+	item                db.ImportItem
+	issue               db.Issue
+	created             bool
+	sourceNewer         bool
+	healed              bool
+	presentationUpdated bool
 }
 
 // ImportBatch imports external issues atomically. Issues and comments are
@@ -53,6 +55,9 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 	if err := ensureProjectWritableTx(ctx, tx, p.ProjectID); err != nil {
 		return db.ImportBatchResult{}, nil, err
 	}
+	if err := validateIssueSyncImportGuardTx(ctx, tx, p); err != nil {
+		return db.ImportBatchResult{}, nil, err
+	}
 	p, err = d.normalizeBoundFederationImportActorTx(ctx, tx, p)
 	if err != nil {
 		return db.ImportBatchResult{}, nil, err
@@ -74,7 +79,7 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 		switch {
 		case state.created:
 			result.Created++
-		case state.sourceNewer:
+		case state.sourceNewer, state.healed, state.presentationUpdated:
 			result.Updated++
 		default:
 			result.Unchanged++
@@ -82,7 +87,7 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 		status := "unchanged"
 		if state.created {
 			status = "created"
-		} else if state.sourceNewer {
+		} else if state.sourceNewer || state.healed || state.presentationUpdated {
 			status = "updated"
 		}
 		result.Items = append(result.Items, db.ImportItemResult{ExternalID: item.ExternalID, IssueShortID: state.issue.ShortID, Status: status})
@@ -131,6 +136,56 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 		return db.ImportBatchResult{}, nil, fmt.Errorf("commit import: %w", err)
 	}
 	return result, events, nil
+}
+
+func validateIssueSyncImportGuardTx(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams) error {
+	if p.IssueSyncGuard == nil {
+		return nil
+	}
+	g := p.IssueSyncGuard
+	provider := strings.TrimSpace(g.Provider)
+	if g.BindingID <= 0 || provider == "" || g.StartedAt.IsZero() {
+		return fmt.Errorf("%w: invalid issue sync import guard", db.ErrImportValidation)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE issue_sync_status SET binding_id = binding_id WHERE binding_id = ?`,
+		g.BindingID); err != nil {
+		return fmt.Errorf("lock issue sync import guard: %w", err)
+	}
+	if err := rejectFederationSpokeIssueSyncProject(ctx, tx, p.ProjectID); err != nil {
+		return err
+	}
+	var id int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT b.id
+		  FROM issue_sync_bindings b
+		  JOIN issue_sync_status s ON s.binding_id = b.id
+		  JOIN projects p ON p.id = b.project_id
+		 WHERE b.id = ?
+		   AND b.project_id = ?
+		   AND b.provider = ?
+		   AND b.enabled = 1
+		   AND p.deleted_at IS NULL
+		   AND s.sync_started_at = ?`,
+		g.BindingID, p.ProjectID, provider, g.StartedAt.UTC().Format(sqliteTimeFormat)).
+		Scan(&id)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check issue sync import guard: %w", err)
+	}
+	binding, bindingErr := issueSyncBindingByID(ctx, tx, g.BindingID)
+	if errors.Is(bindingErr, db.ErrNotFound) {
+		return db.ErrIssueSyncNotEnabled
+	}
+	if bindingErr != nil {
+		return bindingErr
+	}
+	if binding.ProjectID != p.ProjectID || binding.Provider != provider || !binding.Enabled {
+		return db.ErrIssueSyncNotEnabled
+	}
+	return db.ErrIssueSyncAlreadyRunning
 }
 
 func (d *Store) normalizeBoundFederationImportActorTx(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams) (db.ImportBatchParams, error) {
@@ -218,11 +273,11 @@ func validateImportBatch(p db.ImportBatchParams) error {
 }
 
 func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, projectName, projectUID string) (*importIssueState, *db.Event, error) {
-	mapping, err := importMappingBySource(ctx, tx, p.ProjectID, p.Source, "issue", item.ExternalID)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
+	mapping, found, err := adoptImportMapping(ctx, tx, p.ProjectID, p.Source, "issue", item.ExternalID, item.LegacyExternalIDs)
+	if err != nil {
 		return nil, nil, err
 	}
-	if errors.Is(err, db.ErrNotFound) {
+	if !found {
 		issue, evt, err := d.insertImportedIssue(ctx, tx, p, item, projectName, projectUID)
 		if err != nil {
 			return nil, nil, err
@@ -251,11 +306,45 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 		}
 		return &importIssueState{item: item, issue: updated, sourceNewer: true}, &evt, nil
 	}
+	// The source is not newer overall, but a corrected earlier created_at must
+	// still heal a row whose stored created_at was synthesized late by an older
+	// sync (and may have left created_at after closed_at). Heal created_at only,
+	// without overwriting other fields from this stale source item.
+	if item.CreatedAt.Before(existing.CreatedAt) {
+		healed, evt, err := d.healImportedCreatedAt(ctx, tx, p, item, existing, projectName)
+		if err != nil {
+			return nil, nil, err
+		}
+		_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &healed.ID, SourceUpdatedAt: &item.UpdatedAt})
+		if err != nil {
+			return nil, nil, err
+		}
+		return &importIssueState{item: item, issue: healed, healed: true}, &evt, nil
+	}
+	if importOwnsSameSourceVersionTitle(mapping, existing, item) {
+		updated, evt, err := d.updateImportedPresentationTitle(ctx, tx, p, item, existing, projectName)
+		if err != nil {
+			return nil, nil, err
+		}
+		_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &updated.ID, SourceUpdatedAt: &item.UpdatedAt})
+		if err != nil {
+			return nil, nil, err
+		}
+		return &importIssueState{item: item, issue: updated, presentationUpdated: true}, &evt, nil
+	}
 	_, err = upsertImportMapping(ctx, tx, db.ImportMappingParams{Source: p.Source, ExternalID: item.ExternalID, ObjectType: "issue", ProjectID: p.ProjectID, IssueID: &existing.ID, SourceUpdatedAt: &item.UpdatedAt})
 	if err != nil {
 		return nil, nil, err
 	}
 	return &importIssueState{item: item, issue: existing}, nil, nil
+}
+
+func importOwnsSameSourceVersionTitle(mapping db.ImportMapping, existing db.Issue, item db.ImportItem) bool {
+	if item.Title == existing.Title || mapping.SourceUpdatedAt == nil {
+		return false
+	}
+	return sameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt) &&
+		sameImportTimestamp(existing.UpdatedAt, item.UpdatedAt)
 }
 
 func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, projectName, projectUID string) (db.Issue, db.Event, error) {
@@ -319,9 +408,17 @@ func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 }
 
 func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, existing db.Issue, projectName string) (db.Issue, db.Event, error) {
+	// created_at only ever moves earlier. A corrected source timestamp heals
+	// rows whose stored created_at was synthesized late by an older sync (and
+	// could otherwise outrun a freshly written closed_at); a later synthetic
+	// value never pushes the genuine creation time forward.
+	createdAt := existing.CreatedAt
+	if item.CreatedAt.Before(createdAt) {
+		createdAt = item.CreatedAt
+	}
 	_, err := tx.ExecContext(ctx, `UPDATE issues
-		SET title = ?, body = ?, status = ?, closed_reason = ?, owner = ?, updated_at = ?, closed_at = ?, priority = ?
-		WHERE id = ?`, item.Title, item.Body, item.Status, item.ClosedReason, normalizeOwner(item.Owner), item.UpdatedAt, item.ClosedAt, item.Priority, existing.ID)
+		SET title = ?, body = ?, status = ?, closed_reason = ?, owner = ?, created_at = ?, updated_at = ?, closed_at = ?, priority = ?
+		WHERE id = ?`, item.Title, item.Body, item.Status, item.ClosedReason, normalizeOwner(item.Owner), createdAt, item.UpdatedAt, item.ClosedAt, item.Priority, existing.ID)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported issue: %w", err)
 	}
@@ -340,15 +437,88 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	return updated, evt, nil
 }
 
+func (d *Store) updateImportedPresentationTitle(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, existing db.Issue, projectName string) (db.Issue, db.Event, error) {
+	_, err := tx.ExecContext(ctx, `UPDATE issues SET title = ? WHERE id = ?`, item.Title, existing.ID)
+	if err != nil {
+		return db.Issue{}, db.Event{}, fmt.Errorf("update imported title: %w", err)
+	}
+	payload, err := importedPresentationTitlePayload(p.Source, item.ExternalID, existing, item)
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
+	evt, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: p.ProjectID, ProjectName: projectName, IssueID: &existing.ID, Type: "issue.updated", Actor: p.Actor, Payload: payload})
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
+	updated, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, existing.ID))
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
+	return updated, evt, nil
+}
+
+func importedPresentationTitlePayload(source, externalID string, existing db.Issue, item db.ImportItem) (string, error) {
+	payload := map[string]any{
+		"source":      source,
+		"external_id": externalID,
+		"updated_at":  item.UpdatedAt.UTC().Format(sqliteTimeFormat),
+		"title":       item.Title,
+		"old_title":   existing.Title,
+	}
+	bs, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal import title payload: %w", err)
+	}
+	return string(bs), nil
+}
+
+// healImportedCreatedAt repairs a row whose stored created_at is later than the
+// corrected source timestamp, without touching any other field. It emits an
+// issue.updated event carrying only created_at so event-folded and federated
+// projections heal the same way the local row does.
+func (d *Store) healImportedCreatedAt(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, existing db.Issue, projectName string) (db.Issue, db.Event, error) {
+	_, err := tx.ExecContext(ctx, `UPDATE issues SET created_at = ? WHERE id = ?`, item.CreatedAt, existing.ID)
+	if err != nil {
+		return db.Issue{}, db.Event{}, fmt.Errorf("heal imported created_at: %w", err)
+	}
+	payload, err := importedCreatedAtHealedPayload(p.Source, item.ExternalID, existing, item)
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
+	evt, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: p.ProjectID, ProjectName: projectName, IssueID: &existing.ID, Type: "issue.updated", Actor: p.Actor, Payload: payload})
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
+	healed, err := scanIssue(tx.QueryRowContext(ctx, issueSelect+` WHERE i.id = ?`, existing.ID))
+	if err != nil {
+		return db.Issue{}, db.Event{}, err
+	}
+	return healed, evt, nil
+}
+
+func importedCreatedAtHealedPayload(source, externalID string, existing db.Issue, item db.ImportItem) (string, error) {
+	payload := map[string]any{
+		"source":      source,
+		"external_id": externalID,
+		"created_at":  item.CreatedAt.UTC().Format(sqliteTimeFormat),
+		"updated_at":  existing.UpdatedAt.UTC().Format(sqliteTimeFormat),
+	}
+	bs, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal created_at heal payload: %w", err)
+	}
+	return string(bs), nil
+}
+
 func (d *Store) importComments(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, item db.ImportItem, projectName string) ([]db.Event, int, error) {
 	events := []db.Event{}
 	created := 0
 	for _, c := range item.Comments {
-		mapping, err := importMappingBySource(ctx, tx, p.ProjectID, p.Source, "comment", c.ExternalID)
-		if err != nil && !errors.Is(err, db.ErrNotFound) {
+		mapping, found, err := adoptImportMapping(ctx, tx, p.ProjectID, p.Source, "comment", c.ExternalID, c.LegacyExternalIDs)
+		if err != nil {
 			return nil, 0, err
 		}
-		if err == nil {
+		if found {
 			if mapping.IssueID != nil && *mapping.IssueID != issue.ID {
 				return nil, 0, fmt.Errorf("%w: comment %q is mapped to a different issue", db.ErrImportValidation, c.ExternalID)
 			}
@@ -682,6 +852,11 @@ func importedIssueUpdatedPayload(source, externalID string, existing db.Issue, i
 	if !timePtrEqual(existing.ClosedAt, item.ClosedAt) {
 		payload["closed_at"] = stringPtrPayload(formatOptionalSQLiteTime(item.ClosedAt))
 	}
+	// created_at only heals earlier; emit it so projections fold the corrected
+	// creation time instead of keeping a stale synthetic value.
+	if item.CreatedAt.Before(existing.CreatedAt) {
+		payload["created_at"] = item.CreatedAt.UTC().Format(sqliteTimeFormat)
+	}
 	bs, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal import event payload: %w", err)
@@ -706,6 +881,10 @@ func timePtrEqual(a, b *time.Time) bool {
 	if a == nil || b == nil {
 		return false
 	}
+	return a.UTC().Format(sqliteTimeFormat) == b.UTC().Format(sqliteTimeFormat)
+}
+
+func sameImportTimestamp(a, b time.Time) bool {
 	return a.UTC().Format(sqliteTimeFormat) == b.UTC().Format(sqliteTimeFormat)
 }
 

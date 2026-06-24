@@ -82,6 +82,60 @@ func TestRemoveProject_ForceOverridesOpenIssues(t *testing.T) {
 		`SELECT COUNT(*) FROM issues WHERE project_id = ? AND status = 'open'`, p.ID)
 }
 
+func TestRemoveProject_DisablesIssueSyncBinding(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p, err := d.CreateProject(ctx, "archive-sync")
+	require.NoError(t, err)
+	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
+	require.True(t, binding.Enabled)
+
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	got, err := d.IssueSyncBindingByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.False(t, got.Enabled)
+}
+
+func TestRemoveProject_RefusedArchiveLeavesGitHubSyncEnabled(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p, err := d.CreateProject(ctx, "refuse-sync-archive")
+	require.NoError(t, err)
+	binding := mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
+	require.True(t, binding.Enabled)
+	_, _, err = d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID, Title: "still open", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.ErrorIs(t, err, db.ErrProjectHasOpenIssues)
+
+	got, err := d.IssueSyncBindingByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.True(t, got.Enabled)
+}
+
+func TestRestoreProject_LeavesGitHubSyncDisabled(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	p, err := d.CreateProject(ctx, "restore-sync-disabled")
+	require.NoError(t, err)
+	_ = mustUpsertIssueSyncBinding(ctx, t, d, p.ID)
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	_, _, changed, err := d.RestoreProject(ctx, p.ID, "tester")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	got, err := d.IssueSyncBindingByProject(ctx, p.ID)
+	require.NoError(t, err)
+	assert.False(t, got.Enabled)
+}
+
 // TestCountOpenIssues pins the non-mutating preflight count used by the
 // federation leave route: it returns the number of open, non-deleted issues
 // and does not archive or otherwise mutate the project.

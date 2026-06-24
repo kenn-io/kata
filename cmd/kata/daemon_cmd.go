@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -15,11 +16,13 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/version"
@@ -38,14 +41,35 @@ var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
 }
 
+type githubSyncDaemonRunner interface {
+	Run(context.Context) error
+}
+
+var newGitHubSyncDaemonRunner = func(config githubsync.RunnerConfig) githubSyncDaemonRunner {
+	return githubsync.NewRunner(config)
+}
+
+type daemonStartOutput struct {
+	Action  string `json:"action"`
+	PID     int    `json:"pid"`
+	Address string `json:"address"`
+	DBPath  string `json:"db_path,omitempty"`
+}
+
+var (
+	startDetachedDaemon = defaultStartDetachedDaemon
+	runDaemonForeground = runDaemonWithListen
+)
+
 func daemonStartCmd() *cobra.Command {
 	var (
 		listen           string
 		insecureReadonly bool
+		foreground       bool
 	)
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "start the daemon in foreground",
+		Short: "start the daemon",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if currentOutputMode() == outputAgent {
 				return &cliError{
@@ -54,11 +78,29 @@ func daemonStartCmd() *cobra.Command {
 					ExitCode: ExitUsage,
 				}
 			}
-			ctx, cancel := context.WithCancel(cmd.Context())
-			defer cancel()
-			return runDaemonWithListen(ctx, listen, insecureReadonly)
+			if foreground {
+				ctx, cancel := context.WithCancel(cmd.Context())
+				defer cancel()
+				return runDaemonForeground(ctx, listen, insecureReadonly)
+			}
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly)
+			if err != nil {
+				return err
+			}
+			if currentOutputMode() == outputJSON {
+				return emitJSON(cmd.OutOrStdout(), out)
+			}
+			switch out.Action {
+			case "already_running":
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "daemon already running pid=%d address=%s\n", out.PID, out.Address)
+			default:
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "started pid=%d address=%s\n", out.PID, out.Address)
+			}
+			return err
 		},
 	}
+	cmd.Flags().BoolVar(&foreground, "foreground", false,
+		"run the daemon in the current process instead of starting it in the background")
 	cmd.Flags().StringVar(&listen, "listen", "",
 		"bind TCP at host:port (admin-only; non-public addresses only). "+
 			"Falls back to $KATA_HOME/config.toml's `listen` value when "+
@@ -67,6 +109,127 @@ func daemonStartCmd() *cobra.Command {
 		"permit unauthenticated GETs on non-loopback TCP when no token "+
 			"is configured (DEV ONLY — production must use a token).")
 	return cmd
+}
+
+func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly bool) (daemonStartOutput, error) {
+	ns, err := daemon.NewNamespace()
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	if err := ns.EnsureDirs(); err != nil {
+		return daemonStartOutput{}, err
+	}
+	if rec, ok := liveDaemonRecord(ns.DataDir, 0); ok {
+		return daemonStartOutput{
+			Action:  "already_running",
+			PID:     rec.PID,
+			Address: rec.Endpoint().ConfigAddress(),
+			DBPath:  rec.Metadata["db_path"],
+		}, nil
+	}
+
+	args := []string{"daemon", "start", "--foreground"}
+	if listen != "" {
+		args = append(args, "--listen", listen)
+	}
+	if insecureReadonly {
+		args = append(args, "--insecure-readonly")
+	}
+	opts := kitdaemon.StartDetachedOptions{
+		Args:            args,
+		Env:             os.Environ(),
+		RefuseEphemeral: true,
+	}
+	if logw := client.DaemonLogWriter(ns.DataDir); logw != nil {
+		opts.Stdout = logw
+		opts.Stderr = logw
+		defer func() { _ = logw.Close() }()
+	}
+	var childProcess *os.Process
+	var pid int
+	opts.AfterStart = func(cmd *exec.Cmd) {
+		childProcess = cmd.Process
+		pid = cmd.Process.Pid
+	}
+	if err := kitdaemon.StartDetached(ctx, opts); err != nil {
+		return daemonStartOutput{}, fmt.Errorf("start daemon: %w", err)
+	}
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
+		if rec, ok := liveDaemonRecord(ns.DataDir, pid); ok {
+			return daemonStartOutput{
+				Action:  "started",
+				PID:     rec.PID,
+				Address: rec.Endpoint().ConfigAddress(),
+				DBPath:  rec.Metadata["db_path"],
+			}, nil
+		}
+		select {
+		case <-ctx.Done():
+			if childProcess != nil {
+				_ = childProcess.Kill()
+			}
+			return daemonStartOutput{}, ctx.Err()
+		case <-deadline.C:
+			if childProcess != nil {
+				_ = childProcess.Kill()
+			}
+			return daemonStartOutput{}, daemonStartTimeoutError(ns.DataDir)
+		case <-tick.C:
+		}
+	}
+}
+
+func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
+	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false
+	}
+	for _, rec := range recs {
+		if pid != 0 && rec.PID != pid {
+			continue
+		}
+		if kitdaemon.ProcessAlive(rec.PID) {
+			return rec, true
+		}
+	}
+	return kitdaemon.RuntimeRecord{}, false
+}
+
+func daemonStartExitError(err error, dataDir string) error {
+	msg := "daemon exited before startup completed"
+	if err != nil {
+		msg = fmt.Sprintf("%s: %v", msg, err)
+	}
+	if tail := daemonStartLogTail(dataDir); tail != "" {
+		msg = msg + "\n" + tail
+	}
+	return errors.New(msg)
+}
+
+func daemonStartTimeoutError(dataDir string) error {
+	msg := "daemon failed to start within 5s"
+	if tail := daemonStartLogTail(dataDir); tail != "" {
+		msg = msg + "\n" + tail
+	}
+	return errors.New(msg)
+}
+
+func daemonStartLogTail(dataDir string) string {
+	body, err := os.ReadFile(filepath.Join(dataDir, "daemon.log")) //nolint:gosec // G304: dataDir is the daemon namespace, filename is fixed.
+	if err != nil {
+		return ""
+	}
+	const maxTail = 4096
+	if len(body) > maxTail {
+		body = body[len(body)-maxTail:]
+	}
+	return strings.TrimSpace(string(body))
 }
 
 func daemonStatusCmd() *cobra.Command {
@@ -255,9 +418,9 @@ type daemonReloadOutput struct {
 	PID    int    `json:"pid"`
 }
 
-// runDaemon is the foreground daemon entry point. Used by `kata daemon start`
-// with the platform default endpoint and by the auto-start child process
-// spawned by ensureDaemon.
+// runDaemon is the foreground daemon entry point. Used by `kata daemon start
+// --foreground` with the platform default endpoint and by the auto-start child
+// process spawned by ensureDaemon.
 func runDaemon(ctx context.Context) error {
 	return runDaemonWithListen(ctx, "", false)
 }
@@ -276,7 +439,7 @@ func redactRuntimeDSN(dsn string) string {
 	return dsn
 }
 
-// runDaemonWithListen is the variant used by `kata daemon start --listen`.
+// runDaemonWithListen is the variant used by `kata daemon start --foreground --listen`.
 // An empty listen string uses the platform default unless
 // <KATA_HOME>/config.toml has a `listen = "..."` entry, in which case the
 // config value is used. CLI flag always wins over config.
@@ -360,18 +523,22 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	go runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
 	broadcaster := daemon.NewEventBroadcaster()
 	federationWake := startFederationRunner(ctx, store, broadcaster, disp, daemonLog)
+	gitHubSyncFetcher := githubsync.NewGHFetcher(nil)
+	gitHubSyncWake := startGitHubSyncRunner(ctx, store, gitHubSyncFetcher, broadcaster, disp, daemonLog)
 	closeThrottleWindow, err := dcfg.Close.Throttle.ThrottleWindow()
 	if err != nil {
 		return err
 	}
 
 	srv := daemon.NewServer(daemon.ServerConfig{
-		DB:             store,
-		StartedAt:      time.Now().UTC(),
-		Endpoint:       &endpoint,
-		Hooks:          disp,
-		Broadcaster:    broadcaster,
-		FederationWake: federationWake,
+		DB:                store,
+		StartedAt:         time.Now().UTC(),
+		Endpoint:          &endpoint,
+		Hooks:             disp,
+		Broadcaster:       broadcaster,
+		FederationWake:    federationWake,
+		GitHubSyncFetcher: gitHubSyncFetcher,
+		GitHubSyncWake:    gitHubSyncWake,
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,
@@ -539,6 +706,73 @@ func federationRunnerInterval() time.Duration {
 	ms, err := strconv.Atoi(raw)
 	if err != nil || ms <= 0 {
 		return 30 * time.Second
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func startGitHubSyncRunner(
+	ctx context.Context,
+	store db.Storage,
+	fetcher githubsync.Fetcher,
+	bcast *daemon.EventBroadcaster,
+	hookSink hooks.Sink,
+	daemonLog *log.Logger,
+) func() {
+	wake := make(chan struct{}, 1)
+	wakeRunner := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	if fetcher == nil {
+		fetcher = githubsync.NewGHFetcher(nil)
+	}
+	if bcast == nil {
+		bcast = daemon.NewEventBroadcaster()
+	}
+	if hookSink == nil {
+		hookSink = hooks.NewNoop()
+	}
+	logger := slog.Default()
+	if daemonLog != nil {
+		logger = slog.New(slog.NewTextHandler(daemonLog.Writer(), nil))
+	}
+	runner := newGitHubSyncDaemonRunner(githubsync.RunnerConfig{
+		Store:    store,
+		Fetcher:  fetcher,
+		Logger:   logger,
+		Interval: githubSyncRunnerInterval(),
+		Wake:     wake,
+		EventSink: func(_ context.Context, projectID int64, events []db.Event) error {
+			for i := range events {
+				event := events[i]
+				bcast.Broadcast(daemon.StreamMsg{Kind: "event", Event: &event, ProjectID: projectID})
+				hookSink.Enqueue(event)
+			}
+			return nil
+		},
+	})
+	go func() {
+		if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			if daemonLog != nil {
+				daemonLog.Printf("github sync: %v", err)
+			} else {
+				slog.Warn("github sync", "err", err)
+			}
+		}
+	}()
+	return wakeRunner
+}
+
+func githubSyncRunnerInterval() time.Duration {
+	raw := os.Getenv("KATA_GITHUB_SYNC_INTERVAL_MS")
+	if raw == "" {
+		return 5 * time.Minute
+	}
+	ms, err := strconv.Atoi(raw)
+	if err != nil || ms <= 0 {
+		return 5 * time.Minute
 	}
 	return time.Duration(ms) * time.Millisecond
 }

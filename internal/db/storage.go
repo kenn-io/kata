@@ -147,6 +147,18 @@ type Storage interface {
 	ImportMappingsByProjectSource(ctx context.Context, projectID int64, source string) ([]ImportMapping, error)
 	ImportReplay(ctx context.Context, recs []ImportRecord, opts ImportOptions) error
 
+	// GitHub sync
+	UpsertIssueSyncBinding(ctx context.Context, p UpsertIssueSyncBindingParams) (IssueSyncBinding, error)
+	DisableIssueSyncBinding(ctx context.Context, projectID int64) (IssueSyncBinding, error)
+	IssueSyncBindingByProject(ctx context.Context, projectID int64) (IssueSyncBinding, error)
+	IssueSyncBindingByID(ctx context.Context, bindingID int64) (IssueSyncBinding, error)
+	IssueSyncStatusByProject(ctx context.Context, projectID int64) (IssueSyncStatus, error)
+	ListDueIssueSyncBindings(ctx context.Context, provider string, now, staleBefore time.Time, limit int) ([]IssueSyncBinding, error)
+	ClaimIssueSyncBinding(ctx context.Context, bindingID int64, provider string, now, staleBefore time.Time) (IssueSyncBinding, bool, error)
+	RecordIssueSyncSuccess(ctx context.Context, p IssueSyncSuccessParams) (IssueSyncStatus, error)
+	RecordIssueSyncError(ctx context.Context, p IssueSyncErrorParams) (IssueSyncStatus, error)
+	RefreshIssueSyncBinding(ctx context.Context, p IssueSyncBindingUpdateParams) (IssueSyncBinding, error)
+
 	// API tokens / system project
 	EnsureSystemProject(ctx context.Context) error
 	SystemProject(ctx context.Context) (Project, error)
@@ -218,6 +230,8 @@ type Storage interface {
 	ExportMeta(ctx context.Context) iter.Seq2[MetaKV, error]
 	ExportProjects(ctx context.Context, f ExportFilter) iter.Seq2[ProjectExport, error]
 	ExportProjectAliases(ctx context.Context, f ExportFilter) iter.Seq2[AliasExport, error]
+	ExportIssueSyncBindings(ctx context.Context, f ExportFilter) iter.Seq2[IssueSyncBindingExport, error]
+	ExportIssueSyncStatus(ctx context.Context, f ExportFilter) iter.Seq2[IssueSyncStatusExport, error]
 	ExportRecurrences(ctx context.Context, f ExportFilter) iter.Seq2[RecurrenceExport, error]
 	ExportIssues(ctx context.Context, f ExportFilter) iter.Seq2[IssueExport, error]
 	ExportComments(ctx context.Context, f ExportFilter) iter.Seq2[CommentExport, error]

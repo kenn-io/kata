@@ -47,7 +47,7 @@ func TestRemoteClient_DaemonOnTCPClientViaKATA_SERVER(t *testing.T) {
 	serverHome := t.TempDir()
 
 	daemonStderr := &safeBuffer{}
-	daemon := exec.Command(bin, "daemon", "start", "--listen", addr) //nolint:gosec
+	daemon := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
 	daemon.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),
@@ -129,7 +129,7 @@ func TestRemoteInit_PathFreeWireShape(t *testing.T) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	serverHome := t.TempDir()
 	daemonStderr := &safeBuffer{}
-	daemon := exec.Command(bin, "daemon", "start", "--listen", addr) //nolint:gosec
+	daemon := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
 	daemon.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),
@@ -210,7 +210,7 @@ func TestRemoteResolve_PathFreeWireShape(t *testing.T) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	serverHome := t.TempDir()
 	daemonStderr := &safeBuffer{}
-	daemon := exec.Command(bin, "daemon", "start", "--listen", addr) //nolint:gosec
+	daemon := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
 	daemon.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),

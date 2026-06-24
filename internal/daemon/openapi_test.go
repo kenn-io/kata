@@ -210,6 +210,8 @@ func TestOpenAPIDocumentJSONBlobShapes(t *testing.T) {
 	assertSchemaPropertyType(t, doc, "Recurrence", "template_labels", huma.TypeArray)
 	assertSchemaPropertyType(t, doc, "Recurrence", "template_metadata", huma.TypeObject)
 	assertSchemaPropertyType(t, doc, "RecurrenceTemplateUpdateInput", "metadata", huma.TypeObject)
+	assertSchemaPropertyType(t, doc, "EnableIssueSyncRequestBody", "config", huma.TypeObject)
+	assertSchemaPropertyType(t, doc, "IssueSyncBindingOut", "config", huma.TypeObject)
 
 	labels := doc.Components.Schemas.Map()["Recurrence"].Properties["template_labels"]
 	if labels.Items == nil || labels.Items.Type != huma.TypeString {
@@ -218,6 +220,12 @@ func TestOpenAPIDocumentJSONBlobShapes(t *testing.T) {
 	updateMetadata := doc.Components.Schemas.Map()["RecurrenceTemplateUpdateInput"].Properties["metadata"]
 	if !updateMetadata.Nullable {
 		t.Fatal("RecurrenceTemplateUpdateInput.metadata must allow null")
+	}
+	for _, schemaName := range []string{"EnableIssueSyncRequestBody", "IssueSyncBindingOut"} {
+		config := doc.Components.Schemas.Map()[schemaName].Properties["config"]
+		if config.AdditionalProperties != true {
+			t.Fatalf("%s.config additionalProperties = %#v, want true", schemaName, config.AdditionalProperties)
+		}
 	}
 }
 

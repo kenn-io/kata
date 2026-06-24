@@ -404,6 +404,12 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if b.Role == db.FederationRoleSpoke {
+		if err := rejectIssueSyncedFederationProject(ctx, tx, b.ProjectID); err != nil {
+			return db.FederationBinding{}, err
+		}
+	}
+
 	allowInsecure := 0
 	if b.AllowInsecure {
 		allowInsecure = 1
@@ -1928,6 +1934,10 @@ func (d *Store) adoptProjectIntoFederation(
 	}
 	if project.DeletedAt != nil {
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("adopt project into federation: project %d is archived", p.ProjectID)
+	}
+
+	if err := rejectIssueSyncedFederationProject(ctx, tx, p.ProjectID); err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
 	}
 
 	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,

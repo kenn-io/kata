@@ -64,6 +64,12 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 	if err := streamExport(enc, KindProjectAlias, store.ExportProjectAliases(ctx, f)); err != nil {
 		return err
 	}
+	if err := streamExport(enc, KindIssueSyncBinding, store.ExportIssueSyncBindings(ctx, f)); err != nil {
+		return err
+	}
+	if err := streamExport(enc, KindIssueSyncStatus, store.ExportIssueSyncStatus(ctx, f)); err != nil {
+		return err
+	}
 	if err := streamExport(enc, KindRecurrence, store.ExportRecurrences(ctx, f)); err != nil {
 		return err
 	}
