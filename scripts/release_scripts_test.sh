@@ -345,6 +345,36 @@ test_verify_release_tag_rejects_tag_moved_after_validation() {
   assert_contains "$output" "does not match completed workflow SHA" "moved release tag"
 }
 
+test_tag_push_release_workflow_publishes_artifacts() {
+  ruby -ryaml -e '
+    workflow = YAML.load_file(ARGV.fetch(0))
+    trigger = workflow.fetch("on", workflow[true])
+    tags = trigger.fetch("push").fetch("tags")
+    raise "release workflow must run on v* tag pushes" unless tags.include?("v*")
+
+    permissions = workflow.fetch("permissions")
+    unless permissions.fetch("contents") == "write"
+      raise "tag-triggered release workflow needs contents: write to publish artifacts"
+    end
+
+    jobs = workflow.fetch("jobs")
+    has_goreleaser = jobs.values.any? do |job|
+      Array(job["steps"]).any? do |step|
+        step.fetch("uses", "").start_with?("goreleaser/goreleaser-action@") &&
+          step.fetch("with", {}).fetch("args", nil) == "release --clean"
+      end
+    end
+    raise "tag-triggered release workflow must run GoReleaser" unless has_goreleaser
+
+    creates_release = jobs.values.any? do |job|
+      Array(job["steps"]).any? do |step|
+        step["name"] == "Create GitHub release"
+      end
+    end
+    raise "tag-triggered release workflow must create the GitHub release" unless creates_release
+  ' "$repo_root/.github/workflows/release.yml"
+}
+
 test_install_checksum_cannot_be_skipped() {
   local dir="$tmp_root/install-checksum"
   mkdir -p "$dir"
@@ -396,6 +426,7 @@ test_verify_release_tag_rejects_tag_outside_origin_main
 test_verify_release_tag_accepts_tag_on_origin_main
 test_verify_release_tag_rejects_workflow_sha_mismatch
 test_verify_release_tag_rejects_tag_moved_after_validation
+test_tag_push_release_workflow_publishes_artifacts
 test_install_checksum_cannot_be_skipped
 test_powershell_installer
 
