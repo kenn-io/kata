@@ -353,25 +353,35 @@ test_tag_push_release_workflow_publishes_artifacts() {
     raise "release workflow must run on v* tag pushes" unless tags.include?("v*")
 
     permissions = workflow.fetch("permissions")
-    unless permissions.fetch("contents") == "write"
-      raise "tag-triggered release workflow needs contents: write to publish artifacts"
+    unless permissions.fetch("contents") == "read"
+      raise "tag-triggered release workflow must keep workflow-level contents permission read-only"
     end
 
     jobs = workflow.fetch("jobs")
-    has_goreleaser = jobs.values.any? do |job|
-      Array(job["steps"]).any? do |step|
+    validate_job = jobs.fetch("validate-tag")
+    validate_checkout = Array(validate_job["steps"]).find do |step|
+      step.fetch("uses", "").start_with?("actions/checkout@")
+    end
+    unless validate_checkout && validate_checkout.fetch("with", {}).fetch("ref", nil) == "${{ github.event.repository.default_branch }}"
+      raise "validate-tag must run trusted default-branch validation code"
+    end
+
+    publish_job = jobs.fetch("publish")
+    publish_permissions = publish_job.fetch("permissions")
+    unless publish_permissions.fetch("contents") == "write"
+      raise "publish job needs contents: write to publish artifacts"
+    end
+
+    has_goreleaser = Array(publish_job["steps"]).any? do |step|
         step.fetch("uses", "").start_with?("goreleaser/goreleaser-action@") &&
           step.fetch("with", {}).fetch("args", nil) == "release --clean"
-      end
     end
-    raise "tag-triggered release workflow must run GoReleaser" unless has_goreleaser
+    raise "tag-triggered publish job must run GoReleaser" unless has_goreleaser
 
-    creates_release = jobs.values.any? do |job|
-      Array(job["steps"]).any? do |step|
-        step["name"] == "Create GitHub release"
-      end
+    creates_release = Array(publish_job["steps"]).any? do |step|
+      step["name"] == "Create GitHub release"
     end
-    raise "tag-triggered release workflow must create the GitHub release" unless creates_release
+    raise "tag-triggered publish job must create the GitHub release" unless creates_release
   ' "$repo_root/.github/workflows/release.yml"
 }
 

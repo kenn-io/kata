@@ -56,13 +56,15 @@ because the tag-triggered release job has `contents: write`, lacks an additional
 `release` environment approval, or publishes with `GITHUB_TOKEN`.
 
 The release workflow must still validate the tag shape, verify the tag target is
-contained in `origin/main`, check out the immutable validated commit SHA for
-packaging, and re-check the tag immediately before creating the GitHub release.
-Valid findings remain: shell injection in tag handling, publishing from
-non-semver tags, publishing a tag whose target is not in `origin/main`, checking
-out a mutable ref for packaging after validation, skipping the immediate
-pre-publish tag re-check, or broadening write credentials beyond the release
-publication job.
+contained in `origin/main`, run that validation without release-write
+permissions and from trusted default-branch code, check out the immutable
+validated commit SHA for packaging, and re-check the tag immediately before
+creating the GitHub release. Valid findings remain: shell injection in tag
+handling, publishing from non-semver tags, publishing a tag whose target is not
+in `origin/main`, running validation from tag-controlled code before containment
+is proven, checking out a mutable ref for packaging after validation, skipping
+the immediate pre-publish tag re-check, or broadening write credentials beyond
+the release publication job.
 
 Stronger release provenance such as GPG tag verification, artifact signing, or
 SLSA-style attestations is future hardening work. Do not block current release
