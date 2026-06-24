@@ -217,6 +217,29 @@ func TestDaemonSwitchSuccessResetsDaemonLocalState(t *testing.T) {
 	assert.True(t, restarted)
 }
 
+func TestDaemonSwitchToEmptyDaemonEscReturnsToSelector(t *testing.T) {
+	m := setupDaemonView()
+	conn := daemonConnection{
+		api:     &Client{},
+		target:  daemonTarget{Name: "empty", URL: "https://empty.example"},
+		catalog: m.daemonTargets,
+		init: bootInit{
+			view:  viewEmpty,
+			scope: scope{empty: true},
+		},
+	}
+
+	out, cmd := updateModel(m, daemonSwitchResultMsg{conn: conn})
+	require.Nil(t, cmd)
+	require.Equal(t, viewEmpty, out.view)
+
+	out, cmd = updateModel(out, tea.KeyMsg{Type: tea.KeyEsc})
+
+	require.Nil(t, cmd)
+	assert.Equal(t, viewDaemons, out.view)
+	assert.Equal(t, "empty", out.activeDaemon.Name)
+}
+
 func TestDaemonSwitchFailureKeepsCurrentSession(t *testing.T) {
 	m := setupDaemonViewSource()
 	m.connGen = 2

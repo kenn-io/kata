@@ -1649,6 +1649,10 @@ func (m Model) routeGlobalKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return next, cmd, true
 	}
 	if m.view == viewEmpty {
+		if msg.Type == tea.KeyEsc && m.prevView == viewDaemons {
+			m.view = viewDaemons
+			return m, nil, true
+		}
 		return m, nil, true
 	}
 	if m.keymap.Help.matches(msg) {

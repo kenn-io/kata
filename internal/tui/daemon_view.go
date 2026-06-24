@@ -126,6 +126,7 @@ func (m Model) handleDaemonSwitchResult(msg daemonSwitchResultMsg) (Model, tea.C
 
 func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	actor := m.list.actor
+	previousView := m.view
 	m.connGen++
 	m.api = conn.api
 	m.activeDaemon = conn.target
@@ -134,7 +135,11 @@ func (m Model) installDaemonConnection(conn daemonConnection) (Model, tea.Cmd) {
 	}
 	m.scope = conn.init.scope
 	m.view = conn.init.view
-	m.prevView = viewList
+	if previousView == viewDaemons && conn.init.view == viewEmpty {
+		m.prevView = viewDaemons
+	} else {
+		m.prevView = viewList
+	}
 	m.focus = focusList
 	m.list = newListModel()
 	m.list.actor = actor
