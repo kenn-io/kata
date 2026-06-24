@@ -88,6 +88,26 @@ func TestUpdateCheck_HumanUpdateAvailable(t *testing.T) {
 	assert.Empty(t, fake.installed)
 }
 
+func TestUpdateCheck_DevBuildForcesFreshCheckAndShowsOfficialRelease(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.5.0-9-gcf994f5", "cf994f5", "2026-06-24T15:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.5.0-9-gcf994f5",
+		LatestVersion:  "v0.6.0",
+		AssetName:      "kata_0.6.0_linux_amd64.tar.gz",
+		IsDevBuild:     true,
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--check")
+
+	require.NoError(t, err)
+	assert.Equal(t, "dev build: v0.5.0-9-gcf994f5\nlatest official release: v0.6.0\nUse 'kata update --force' to install the latest official release.\n", stdout)
+	require.Len(t, fake.checks, 1)
+	assert.True(t, fake.checks[0].Force)
+	assert.Empty(t, fake.installed)
+}
+
 func TestUpdateCheck_JSONOutput(t *testing.T) {
 	resetFlags(t)
 	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
@@ -132,6 +152,70 @@ func TestUpdateCheck_AgentOutput(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0\n", stdout)
+}
+
+func TestUpdateInstall_HumanShowsDownloadDetailsBeforeConfirmation(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+		DownloadURL:    "https://example.test/kata_0.5.0_linux_amd64.tar.gz",
+		AssetName:      "kata_0.5.0_linux_amd64.tar.gz",
+		Size:           2048,
+		Checksum:       "abc123checksum",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, stderr, err := executeRootCaptureWithInput(t, context.Background(), "n\n", "update")
+
+	ce := requireCLIError(t, err, ExitConfirm)
+	assert.Equal(t, kindConfirm, ce.Kind)
+	assert.Equal(t, "\nCurrent version: v0.4.0\nLatest version:  v0.5.0\n\nUpdate available.\n\nDownload:\n  URL:    https://example.test/kata_0.5.0_linux_amd64.tar.gz\n  Size:   2.0 KB\n  SHA256: abc123checksum\n\n", stdout)
+	assert.Contains(t, stderr, "Install kata update v0.4.0 -> v0.5.0?")
+	assert.Empty(t, fake.installed)
+}
+
+func TestUpdateInstall_DevBuildRequiresForce(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.5.0-9-gcf994f5", "cf994f5", "2026-06-24T15:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.5.0-9-gcf994f5",
+		LatestVersion:  "v0.6.0",
+		DownloadURL:    "https://example.test/kata_0.6.0_linux_amd64.tar.gz",
+		AssetName:      "kata_0.6.0_linux_amd64.tar.gz",
+		Size:           4096,
+		Checksum:       "def456checksum",
+		IsDevBuild:     true,
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, stderr, err := executeRootCapture(t, context.Background(), "update")
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Equal(t, "\nCurrent version: v0.5.0-9-gcf994f5\nLatest version:  v0.6.0\n\nYou're running a dev build. Latest official release available.\n\nDownload:\n  URL:    https://example.test/kata_0.6.0_linux_amd64.tar.gz\n  Size:   4.0 KB\n  SHA256: def456checksum\n\nUse 'kata update --force' to install the latest official release.\n", stdout)
+	require.Len(t, fake.checks, 1)
+	assert.True(t, fake.checks[0].Force)
+	assert.Empty(t, fake.installed)
+}
+
+func TestUpdateInstall_DevBuildForceInstalls(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.5.0-9-gcf994f5", "cf994f5", "2026-06-24T15:00:00Z")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.5.0-9-gcf994f5",
+		LatestVersion:  "v0.6.0",
+		AssetName:      "kata_0.6.0_linux_amd64.tar.gz",
+		IsDevBuild:     true,
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--force", "--yes")
+
+	require.NoError(t, err)
+	assert.Equal(t, "installed kata v0.6.0\n", stdout)
+	assert.Len(t, fake.installed, 1)
 }
 
 func TestUpdateInstall_RefetchesCachedInfoBeforeInstall(t *testing.T) {
