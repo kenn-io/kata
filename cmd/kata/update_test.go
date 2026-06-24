@@ -167,7 +167,7 @@ func TestUpdateInstall_HumanShowsDownloadDetailsBeforeConfirmation(t *testing.T)
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, stderr, err := executeRootCaptureWithInput(t, context.Background(), "n\n", "update")
+	stdout, stderr, err := executeRootCaptureWithInput(context.Background(), t, "n\n", "update")
 
 	ce := requireCLIError(t, err, ExitConfirm)
 	assert.Equal(t, kindConfirm, ce.Kind)
