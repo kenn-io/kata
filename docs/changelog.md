@@ -6,6 +6,65 @@ description: Release history for kata
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
+## 0.6.0
+<small>2026-06-24</small>
+
+kata 0.6.0 expands kata's release and sharing surface: GitHub Issues can now
+feed a kata project, private-network daemon deployments have an explicit
+tokenless write mode for trusted single-user networks, and Windows users have a
+hosted release installer.
+
+**New features**
+
+- Added one-way GitHub issue sync with `kata sync github`, backed by
+  daemon-owned bindings, cursors, import mappings, status, and a poller. The
+  first provider imports GitHub issues and issue comments through the daemon's
+  `gh api` environment, skips pull requests, prefixes imported titles by
+  default, and keeps GitHub as the source of truth for synced fields.
+- Added provider-neutral issue-sync API/storage foundations so GitHub sync
+  state participates in backup, restore, JSONL cutover, and daemon status
+  flows. Restored sync bindings come back disabled until explicitly re-enabled
+  on the new host.
+- Added support for running GitHub sync on federation hubs, so GitHub-origin
+  kata events can replicate to spokes while direct GitHub sync on spokes stays
+  rejected.
+- Added explicitly enabled tokenless writes and event streams for daemons bound
+  to literal private IP addresses. Operators can opt in with
+  `[auth].allow_unauthenticated_private_network_writes = true` or
+  `KATA_ALLOW_UNAUTHENTICATED_PRIVATE_NETWORK_WRITES=1`; token administration
+  remains blocked without authentication.
+- Added a hosted Windows PowerShell release installer at
+  `https://katatracker.com/install.ps1`, including release-asset selection,
+  checksum verification, user-local install, and user `Path` updates.
+
+**Improvements**
+
+- Improved local-first federation resilience by preserving relationship writes
+  to newly created local issues while their create or snapshot events are still
+  pending push to the hub. Once the hub has acknowledged the materializing
+  event, later missing-issue responses remain visible errors.
+- Tightened the pending-push federation exception to `issue_not_found` errors
+  so broader hub route or project misconfiguration is not hidden.
+- Changed explicit `kata daemon start` to start a background daemon by default
+  and return after startup is confirmed; `kata daemon start --foreground`
+  remains the service-manager and hosted-deployment mode.
+- Sped up Windows development and release validation by moving broad CLI and
+  daemon handler fixtures off slower git/init paths when tests only need a
+  seeded project.
+- Revamped the README and docs front page into a clearer landing page with
+  direct install, quickstart, and feature-orientation paths.
+- Expanded the 0.5.0 changelog into a fuller first-release history.
+
+**Bug fixes**
+
+- Restored TUI daemon selection recovery when switching from the daemon
+  selector to a daemon with no registered projects. Escape now returns to the
+  selector for that switch path while direct empty-daemon startup still shows
+  the onboarding state.
+- Preserved the federation trust boundary for delayed push scenarios without
+  hiding real broken mappings or missing hub state after the pending local
+  issue has materialized.
+
 ## 0.5.0
 <small>2026-06-22</small>
 

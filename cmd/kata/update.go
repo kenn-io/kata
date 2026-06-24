@@ -47,11 +47,12 @@ func newUpdateCmd() *cobra.Command {
 		Short: "check for and install kata updates",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			currentIsDevBuild := selfupdate.IsDevBuildVersion(version.Version)
 			client, err := newSelfUpdateClient(version.Version)
 			if err != nil {
 				return err
 			}
-			opts := selfupdate.CheckOptions{Force: force}
+			opts := selfupdate.CheckOptions{Force: force || currentIsDevBuild}
 			info, err := client.Check(cmd.Context(), opts)
 			if err != nil {
 				return err
@@ -72,6 +73,14 @@ func newUpdateCmd() *cobra.Command {
 					return printUpdateResult(cmd, nil)
 				}
 			}
+			if currentOutputMode() == outputHuman && !yes {
+				if err := printUpdateSummary(cmd, info); err != nil {
+					return err
+				}
+			}
+			if info.IsDevBuild && !force {
+				return printDevBuildForceHint(cmd, info)
+			}
 			if !yes {
 				if err := confirmUpdate(cmd, info); err != nil {
 					return err
@@ -91,6 +100,57 @@ func newUpdateCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "force a fresh update check")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install without prompting")
 	return cmd
+}
+
+func printUpdateSummary(cmd *cobra.Command, info *selfupdate.Info) error {
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(out, "\nCurrent version: %s\nLatest version:  %s\n",
+		currentUpdateVersion(info), latestUpdateVersion(info)); err != nil {
+		return err
+	}
+	if info.IsDevBuild {
+		if _, err := fmt.Fprintln(out, "\nYou're running a dev build. Latest official release available."); err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintln(out, "\nUpdate available."); err != nil {
+		return err
+	}
+	if info.DownloadURL == "" && info.Size == 0 && info.Checksum == "" {
+		_, err := fmt.Fprintln(out)
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "\nDownload:"); err != nil {
+		return err
+	}
+	if info.DownloadURL != "" {
+		if _, err := fmt.Fprintf(out, "  URL:    %s\n", info.DownloadURL); err != nil {
+			return err
+		}
+	}
+	if info.Size > 0 {
+		if _, err := fmt.Fprintf(out, "  Size:   %s\n", selfupdate.FormatSize(info.Size)); err != nil {
+			return err
+		}
+	}
+	if info.Checksum != "" {
+		if _, err := fmt.Fprintf(out, "  SHA256: %s\n", info.Checksum); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(out)
+	return err
+}
+
+func printDevBuildForceHint(cmd *cobra.Command, info *selfupdate.Info) error {
+	switch currentOutputMode() {
+	case outputHuman:
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "Use 'kata update --force' to install the latest official release.")
+		return err
+	case outputAgent, outputJSON:
+		return printUpdateResult(cmd, info)
+	default:
+		return nil
+	}
 }
 
 func confirmUpdate(cmd *cobra.Command, info *selfupdate.Info) error {
@@ -175,6 +235,10 @@ func printUpdateResult(cmd *cobra.Command, info *selfupdate.Info) error {
 		_, err := fmt.Fprint(out, buf.String())
 		return err
 	default:
+		if info != nil && info.IsDevBuild {
+			_, err := fmt.Fprintf(out, "dev build: %s\nlatest official release: %s\nUse 'kata update --force' to install the latest official release.\n", current, latest)
+			return err
+		}
 		if info == nil {
 			_, err := fmt.Fprintf(out, "kata is up to date (%s)\n", current)
 			return err
