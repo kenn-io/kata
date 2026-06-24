@@ -119,10 +119,14 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 	if err := ns.EnsureDirs(); err != nil {
 		return daemonStartOutput{}, err
 	}
+	effectiveListen, err := effectiveDaemonListen(listen)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
 	if rec, ok := liveDaemonRecord(ns.DataDir, 0); ok {
 		address := rec.Endpoint().ConfigAddress()
-		if listen != "" && address != listen {
-			return daemonStartOutput{}, fmt.Errorf("daemon already running at %s; stop it before starting with --listen %s", address, listen)
+		if effectiveListen != "" && address != effectiveListen {
+			return daemonStartOutput{}, fmt.Errorf("daemon already running at %s; stop it before starting with listener %s", address, effectiveListen)
 		}
 		return daemonStartOutput{
 			Action:  "already_running",
@@ -187,6 +191,27 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		case <-tick.C:
 		}
 	}
+}
+
+func effectiveDaemonListen(listen string) (string, error) {
+	dcfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return "", err
+	}
+	return effectiveDaemonListenWithConfig(listen, dcfg), nil
+}
+
+func effectiveDaemonListenWithConfig(listen string, dcfg *config.DaemonConfig) string {
+	if listen != "" {
+		return listen
+	}
+	if dcfg.Listen != "" {
+		return dcfg.Listen
+	}
+	if addr, ok := listenFromPortEnv(); ok {
+		return addr
+	}
+	return ""
 }
 
 func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
@@ -453,13 +478,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	if err != nil {
 		return err
 	}
-	if listen == "" {
-		if listen = dcfg.Listen; listen == "" {
-			if addr, ok := listenFromPortEnv(); ok {
-				listen = addr
-			}
-		}
-	}
+	listen = effectiveDaemonListenWithConfig(listen, dcfg)
 	ns, err := daemon.NewNamespace()
 	if err != nil {
 		return err

@@ -303,6 +303,37 @@ func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) {
 	assert.Equal(t, "100.64.0.5:7777", out.Address)
 }
 
+func TestDaemonStart_ConfigListenConflictWithExistingDaemon(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte(`listen = "100.64.0.5:7777"`+"\n"), 0o600))
+
+	out, err := defaultStartDetachedDaemon(context.Background(), "", false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "daemon already running")
+	assert.Contains(t, err.Error(), "127.0.0.1:7777")
+	assert.Contains(t, err.Error(), "100.64.0.5:7777")
+	assert.Empty(t, out)
+}
+
+func TestDaemonStart_PortListenConflictWithExistingDaemon(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "8080")
+	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
+
+	out, err := defaultStartDetachedDaemon(context.Background(), "", false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "daemon already running")
+	assert.Contains(t, err.Error(), "127.0.0.1:7777")
+	assert.Contains(t, err.Error(), "0.0.0.0:8080")
+	assert.Empty(t, out)
+}
+
 func TestDaemonStart_ForegroundKeepsCurrentProcess(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
