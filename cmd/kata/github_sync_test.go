@@ -172,6 +172,18 @@ func TestIssueSyncStatusDisableAndOnceUseDaemonEndpointsAndOutputModes(t *testin
 	assert.False(t, disabled.Enabled)
 }
 
+func TestGitHubSyncOnceAllowsLongRunningRequest(t *testing.T) {
+	f := newGitHubSyncCLIFixture(t)
+	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo")
+	f.runner.delay = 250 * time.Millisecond
+	t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
+
+	out := runCLI(t, f.env, f.dir, "sync", "github", "once")
+
+	assert.Contains(t, out, "GitHub sync ran")
+	assert.Equal(t, int64(1), f.runner.runs)
+}
+
 func TestRootRegistersSyncGitHub(t *testing.T) {
 	syncCmd, ok := rootSubcommands()["sync"]
 	require.True(t, ok, "root command should register sync")
@@ -233,11 +245,19 @@ func (f *fakeGitHubSyncCLIFetcher) Comments(context.Context, githubsync.Binding,
 }
 
 type fakeGitHubSyncCLIRunner struct {
-	runs int64
+	runs  int64
+	delay time.Duration
 }
 
 func (r *fakeGitHubSyncCLIRunner) RunOnce(ctx context.Context, bindingID int64) (githubsync.RunResult, error) {
 	r.runs++
+	if r.delay > 0 {
+		select {
+		case <-time.After(r.delay):
+		case <-ctx.Done():
+			return githubsync.RunResult{}, ctx.Err()
+		}
+	}
 	now := time.Now().UTC()
 	return githubsync.RunResult{
 		Binding: db.IssueSyncBinding{

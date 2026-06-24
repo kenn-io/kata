@@ -303,6 +303,20 @@ func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) {
 	assert.Equal(t, "100.64.0.5:7777", out.Address)
 }
 
+func TestDaemonStart_ExplicitListenMatchIgnoresMalformedConfig(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("listen =\n"), 0o600))
+
+	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false)
+
+	require.NoError(t, err)
+	assert.Equal(t, "already_running", out.Action)
+	assert.Equal(t, os.Getpid(), out.PID)
+	assert.Equal(t, "100.64.0.5:7777", out.Address)
+}
+
 func TestDaemonStart_ConfigListenConflictWithExistingDaemon(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)

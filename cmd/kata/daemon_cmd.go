@@ -194,6 +194,9 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 }
 
 func effectiveDaemonListen(listen string) (string, error) {
+	if listen != "" {
+		return listen, nil
+	}
 	dcfg, err := config.ReadDaemonConfig()
 	if err != nil {
 		return "", err

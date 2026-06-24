@@ -131,6 +131,23 @@ func TestRunnerEventSinkErrorIsNonFatal(t *testing.T) {
 	assert.Empty(t, status.LastError)
 }
 
+func TestRunnerSuccessCleanupIgnoresCallerCancellation(t *testing.T) {
+	h := newRunnerHarness(t)
+	ctx, cancel := context.WithCancel(h.ctx)
+	h.runner.config.EventSink = func(context.Context, int64, []db.Event) error {
+		cancel()
+		return nil
+	}
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+
+	result, err := h.runner.RunOnce(ctx, h.binding.ID)
+
+	require.NoError(t, err)
+	assert.NoError(t, h.store.successCtxErr)
+	assert.Equal(t, 1, result.Import.Created)
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+}
+
 func TestRunnerIncrementalUsesCursorMinusOverlap(t *testing.T) {
 	h := newRunnerHarness(t)
 	lastCursor := h.now.Add(-10 * time.Minute)
@@ -278,6 +295,26 @@ func TestRunnerFetchFailureClearsInFlightAndLeavesCursorUnchanged(t *testing.T) 
 	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
 	require.ErrorContains(t, err, "github unavailable")
 
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	status, err := h.db.IssueSyncStatusByProject(h.ctx, h.project.ID)
+	require.NoError(t, err)
+	assert.Nil(t, status.SyncStartedAt)
+	require.NotNil(t, status.LastErrorAt)
+	assert.Contains(t, status.LastError, "github unavailable")
+}
+
+func TestRunnerErrorCleanupIgnoresCallerCancellation(t *testing.T) {
+	h := newRunnerHarness(t)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	ctx, cancel := context.WithCancel(h.ctx)
+	h.fetcher.beforeIssuesReturn = cancel
+	h.fetcher.issuesErr = errors.New("github unavailable")
+
+	_, err := h.runner.RunOnce(ctx, h.binding.ID)
+
+	require.ErrorContains(t, err, "github unavailable")
+	assert.NoError(t, h.store.errorCtxErr)
 	assertCursorAt(h.ctx, t, h.db, h.binding.ID, lastCursor)
 	status, err := h.db.IssueSyncStatusByProject(h.ctx, h.project.ID)
 	require.NoError(t, err)
@@ -644,6 +681,8 @@ type spyStorage struct {
 	importCalls      int
 	importItemCounts []int
 	lastImportGuard  *db.IssueSyncImportGuard
+	successCtxErr    error
+	errorCtxErr      error
 }
 
 func (s *spyStorage) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
@@ -656,23 +695,34 @@ func (s *spyStorage) ImportBatch(ctx context.Context, p db.ImportBatchParams) (d
 	return s.Storage.ImportBatch(ctx, p)
 }
 
+func (s *spyStorage) RecordIssueSyncSuccess(ctx context.Context, p db.IssueSyncSuccessParams) (db.IssueSyncStatus, error) {
+	s.successCtxErr = ctx.Err()
+	return s.Storage.RecordIssueSyncSuccess(ctx, p)
+}
+
+func (s *spyStorage) RecordIssueSyncError(ctx context.Context, p db.IssueSyncErrorParams) (db.IssueSyncStatus, error) {
+	s.errorCtxErr = ctx.Err()
+	return s.Storage.RecordIssueSyncError(ctx, p)
+}
+
 type fakeRunnerFetcher struct {
-	mu                sync.Mutex
-	repo              Repository
-	repos             map[string]Repository
-	repoErr           error
-	repoErrs          map[string]error
-	issues            []Issue
-	issuesByRepo      map[string][]Issue
-	issuesErr         error
-	comments          map[int][]Comment
-	commentsErr       error
-	repoCalls         []string
-	issueCalls        []fakeIssueCall
-	commentCalls      []int
-	blockRepository   chan struct{}
-	releaseRepository chan struct{}
-	blockOnce         sync.Once
+	mu                 sync.Mutex
+	repo               Repository
+	repos              map[string]Repository
+	repoErr            error
+	repoErrs           map[string]error
+	issues             []Issue
+	issuesByRepo       map[string][]Issue
+	issuesErr          error
+	beforeIssuesReturn func()
+	comments           map[int][]Comment
+	commentsErr        error
+	repoCalls          []string
+	issueCalls         []fakeIssueCall
+	commentCalls       []int
+	blockRepository    chan struct{}
+	releaseRepository  chan struct{}
+	blockOnce          sync.Once
 }
 
 func (f *fakeRunnerFetcher) Repository(_ context.Context, _, _ string, repo string) (Repository, error) {
@@ -706,6 +756,9 @@ func (f *fakeRunnerFetcher) Issues(_ context.Context, binding Binding, since *ti
 	f.mu.Lock()
 	f.issueCalls = append(f.issueCalls, fakeIssueCall{binding: binding, since: sinceCopy})
 	f.mu.Unlock()
+	if f.beforeIssuesReturn != nil {
+		f.beforeIssuesReturn()
+	}
 	if f.issuesErr != nil {
 		return nil, f.issuesErr
 	}

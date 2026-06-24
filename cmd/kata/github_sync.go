@@ -174,7 +174,11 @@ func newGitHubSyncOnceCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			client, baseURL, projectID, err := githubSyncProjectClient(ctx)
+			_, baseURL, projectID, err := githubSyncProjectClient(ctx)
+			if err != nil {
+				return err
+			}
+			client, err := longRunningClientFor(ctx, baseURL)
 			if err != nil {
 				return err
 			}

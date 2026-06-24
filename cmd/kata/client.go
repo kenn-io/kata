@@ -185,11 +185,11 @@ func httpClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 		})
 }
 
-// streamingClientFor builds the SSE-friendly variant: no overall
-// Client.Timeout (so long-lived bodies don't get torn down) but a transport
-// ResponseHeaderTimeout so a stalled handshake can't hang forever. Body
-// cancellation comes from the request context.
-func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
+// longRunningClientFor builds a variant with no overall Client.Timeout for
+// commands whose response body is expected to stay open or whose request may
+// legitimately take longer than the default CLI request budget. The transport
+// still has a ResponseHeaderTimeout so a stalled server cannot hang forever.
+func longRunningClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
 	workspaceStart := workspaceStartForRemote()
 	return client.NewHTTPClient(ctx, baseURL, client.Opts{
 		ResponseHeaderTimeout: client.SSEHandshakeTimeout,
@@ -197,6 +197,12 @@ func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, erro
 		WorkspaceStart:        workspaceStart,
 		DaemonName:            flags.Daemon,
 	})
+}
+
+// streamingClientFor builds the SSE-friendly variant. Body cancellation comes
+// from the request context.
+func streamingClientFor(ctx context.Context, baseURL string) (*http.Client, error) {
+	return longRunningClientFor(ctx, baseURL)
 }
 
 // resolvedIssueRef captures everything a CLI command needs after parsing a

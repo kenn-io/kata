@@ -18,7 +18,10 @@ const (
 	DefaultInitialBatchSize = 5000
 )
 
-const runnerDueLimit = 100
+const (
+	runnerDueLimit       = 100
+	runnerCleanupTimeout = 10 * time.Second
+)
 
 // Runner runs durable GitHub sync bindings through the import pipeline.
 type Runner struct {
@@ -184,7 +187,9 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, importResult)
 	}
-	status, err := r.config.Store.RecordIssueSyncSuccess(ctx, db.IssueSyncSuccessParams{
+	cleanupCtx, cleanupCancel := r.cleanupContext()
+	defer cleanupCancel()
+	status, err := r.config.Store.RecordIssueSyncSuccess(cleanupCtx, db.IssueSyncSuccessParams{
 		BindingID:     binding.ID,
 		StartedAt:     syncStartedAt,
 		At:            r.now(),
@@ -285,8 +290,10 @@ func (r *Runner) emitEvents(ctx context.Context, projectID int64, events []db.Ev
 	}
 }
 
-func (r *Runner) recordError(ctx context.Context, binding db.IssueSyncBinding, startedAt time.Time, cause error, importResult db.ImportBatchResult) (RunResult, error) {
-	status, recordErr := r.config.Store.RecordIssueSyncError(ctx, db.IssueSyncErrorParams{
+func (r *Runner) recordError(_ context.Context, binding db.IssueSyncBinding, startedAt time.Time, cause error, importResult db.ImportBatchResult) (RunResult, error) {
+	cleanupCtx, cleanupCancel := r.cleanupContext()
+	defer cleanupCancel()
+	status, recordErr := r.config.Store.RecordIssueSyncError(cleanupCtx, db.IssueSyncErrorParams{
 		BindingID: binding.ID,
 		StartedAt: startedAt,
 		At:        r.now(),
@@ -296,6 +303,10 @@ func (r *Runner) recordError(ctx context.Context, binding db.IssueSyncBinding, s
 		return RunResult{Binding: binding, Import: importResult}, recordErr
 	}
 	return RunResult{Binding: binding, Status: status, Import: importResult}, cause
+}
+
+func (r *Runner) cleanupContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), runnerCleanupTimeout)
 }
 
 func (r *Runner) now() time.Time {
