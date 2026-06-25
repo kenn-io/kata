@@ -275,6 +275,36 @@ CREATE INDEX idx_purge_log_origin_instance ON purge_log(origin_instance_uid);
 CREATE INDEX idx_purge_log_short_id
   ON purge_log(project_id, short_id) WHERE short_id IS NOT NULL;
 
+CREATE TABLE project_purge_log (
+  id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid                         TEXT NOT NULL UNIQUE,
+  origin_instance_uid         TEXT NOT NULL,
+  project_id                  INTEGER NOT NULL,   -- snapshot; no FK so audit survives the delete
+  project_uid                 TEXT,               -- snapshot; project row is gone after purge
+  project_name                TEXT NOT NULL,      -- snapshot of projects.name at purge time
+  issue_count                 INTEGER NOT NULL,
+  event_count                 INTEGER NOT NULL,   -- project-local events deleted (project_id = B)
+  alias_count                 INTEGER NOT NULL,
+  comment_count               INTEGER NOT NULL,
+  link_count                  INTEGER NOT NULL,
+  label_count                 INTEGER NOT NULL,
+  claim_count                 INTEGER NOT NULL,
+  pending_claim_request_count INTEGER NOT NULL,
+  events_deleted_min_id       INTEGER,            -- min events.id deleted; NULL if none
+  events_deleted_max_id       INTEGER,            -- max events.id deleted; NULL if none
+  purge_reset_after_event_id  INTEGER,            -- SSE reset cursor; subscribers with cursor < this must reset
+  actor                       TEXT NOT NULL,
+  reason                      TEXT,
+  purged_at                   DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  CHECK (length(trim(actor)) > 0),
+  CHECK (length(uid) = 26),
+  CHECK (length(origin_instance_uid) = 26)
+);
+CREATE INDEX idx_project_purge_log_reset
+  ON project_purge_log(purge_reset_after_event_id) WHERE purge_reset_after_event_id IS NOT NULL;
+CREATE INDEX idx_project_purge_log_project_reset
+  ON project_purge_log(project_id, purge_reset_after_event_id) WHERE purge_reset_after_event_id IS NOT NULL;
+
 CREATE TABLE federation_bindings (
   project_id              INTEGER PRIMARY KEY REFERENCES projects(id),
   role                    TEXT NOT NULL CHECK(role IN ('hub','spoke')),

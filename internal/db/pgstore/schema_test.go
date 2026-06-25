@@ -31,6 +31,7 @@ var expectedTables = []string{
 	"meta",
 	"pending_claim_requests",
 	"project_aliases",
+	"project_purge_log",
 	"projects",
 	"purge_log",
 	"recurrences",

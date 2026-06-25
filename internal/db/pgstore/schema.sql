@@ -324,6 +324,36 @@ CREATE INDEX idx_purge_log_origin_instance ON purge_log(origin_instance_uid);
 CREATE INDEX idx_purge_log_short_id
   ON purge_log(project_id, short_id) WHERE short_id IS NOT NULL;
 
+CREATE TABLE project_purge_log (
+  id                          BIGSERIAL PRIMARY KEY,
+  uid                         TEXT NOT NULL UNIQUE,
+  origin_instance_uid         TEXT NOT NULL,
+  project_id                  BIGINT NOT NULL,   -- snapshot; no FK so audit survives the delete
+  project_uid                 TEXT,               -- snapshot; project row is gone after purge
+  project_name                TEXT NOT NULL,      -- snapshot of projects.name at purge time
+  issue_count                 BIGINT NOT NULL,
+  event_count                 BIGINT NOT NULL,   -- project-local events deleted (project_id = B)
+  alias_count                 BIGINT NOT NULL,
+  comment_count               BIGINT NOT NULL,
+  link_count                  BIGINT NOT NULL,
+  label_count                 BIGINT NOT NULL,
+  claim_count                 BIGINT NOT NULL,
+  pending_claim_request_count BIGINT NOT NULL,
+  events_deleted_min_id       BIGINT,            -- min events.id deleted; NULL if none
+  events_deleted_max_id       BIGINT,            -- max events.id deleted; NULL if none
+  purge_reset_after_event_id  BIGINT,            -- SSE reset cursor; subscribers with cursor < this must reset
+  actor                       TEXT NOT NULL,
+  reason                      TEXT,
+  purged_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (length(trim(actor)) > 0),
+  CHECK (length(uid) = 26),
+  CHECK (length(origin_instance_uid) = 26)
+);
+CREATE INDEX idx_project_purge_log_reset
+  ON project_purge_log(purge_reset_after_event_id) WHERE purge_reset_after_event_id IS NOT NULL;
+CREATE INDEX idx_project_purge_log_project_reset
+  ON project_purge_log(project_id, purge_reset_after_event_id) WHERE purge_reset_after_event_id IS NOT NULL;
+
 -- ----------------------------------------------------------------------
 -- Federation tables.
 -- ----------------------------------------------------------------------
