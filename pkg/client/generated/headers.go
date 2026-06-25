@@ -11,6 +11,10 @@ type LeaveFederationReplicaHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
 }
 
+type PurgeProjectHeaders struct {
+	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
+}
+
 type PollFederationProjectEventsHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }

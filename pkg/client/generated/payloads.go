@@ -12,6 +12,8 @@ type ResolveProjectBody = ResolveProjectRequestBody
 
 type RenameProjectBody = RenameProjectRequestBody
 
+type PurgeProjectBody = ProjectPurgeRequestBody
+
 type EnableProjectFederationBody = EnableProjectFederationRequestBody
 
 type IngestFederationProjectEventsBody = FederationIngestEventsRequestBody

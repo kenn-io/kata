@@ -2402,6 +2402,59 @@ func (p ProjectOut) Validate() error {
 	return errors
 }
 
+type ProjectPurgeLog struct {
+	Actor                    string    `json:"actor" validate:"required"`
+	AliasCount               int64     `json:"alias_count"`
+	ClaimCount               int64     `json:"claim_count"`
+	CommentCount             int64     `json:"comment_count"`
+	EventCount               int64     `json:"event_count"`
+	EventsDeletedMaxID       *int64    `json:"events_deleted_max_id,omitempty"`
+	EventsDeletedMinID       *int64    `json:"events_deleted_min_id,omitempty"`
+	ID                       int64     `json:"id"`
+	IssueCount               int64     `json:"issue_count"`
+	LabelCount               int64     `json:"label_count"`
+	LinkCount                int64     `json:"link_count"`
+	OriginInstanceUID        string    `json:"origin_instance_uid" validate:"required"`
+	PendingClaimRequestCount int64     `json:"pending_claim_request_count"`
+	ProjectID                int64     `json:"project_id"`
+	ProjectName              string    `json:"project_name" validate:"required"`
+	ProjectUID               *string   `json:"project_uid,omitempty"`
+	PurgeResetAfterEventID   *int64    `json:"purge_reset_after_event_id,omitempty"`
+	PurgedAt                 time.Time `json:"purged_at" validate:"required"`
+	Reason                   *string   `json:"reason,omitempty"`
+	UID                      string    `json:"uid" validate:"required"`
+}
+
+func (p ProjectPurgeLog) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
+type ProjectPurgeRequestBody struct {
+	Actor  string  `json:"actor" validate:"required"`
+	Reason *string `json:"reason,omitempty"`
+}
+
+func (p ProjectPurgeRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
+type ProjectPurgeResponseBody struct {
+	ProjectPurgeLog ProjectPurgeLog `json:"project_purge_log"`
+}
+
+func (p ProjectPurgeResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(p.ProjectPurgeLog).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("ProjectPurgeLog", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type ProjectResolveBody struct {
 	Alias         ProjectAlias `json:"alias"`
 	Project       ProjectOut   `json:"project"`

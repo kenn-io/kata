@@ -2551,6 +2551,98 @@ components:
         - revision
         - created_at
       type: object
+    ProjectPurgeLog:
+      additionalProperties: true
+      properties:
+        actor:
+          type: string
+        alias_count:
+          format: int64
+          type: integer
+        claim_count:
+          format: int64
+          type: integer
+        comment_count:
+          format: int64
+          type: integer
+        event_count:
+          format: int64
+          type: integer
+        events_deleted_max_id:
+          format: int64
+          type: integer
+        events_deleted_min_id:
+          format: int64
+          type: integer
+        id:
+          format: int64
+          type: integer
+        issue_count:
+          format: int64
+          type: integer
+        label_count:
+          format: int64
+          type: integer
+        link_count:
+          format: int64
+          type: integer
+        origin_instance_uid:
+          type: string
+        pending_claim_request_count:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        purge_reset_after_event_id:
+          format: int64
+          type: integer
+        purged_at:
+          format: date-time
+          type: string
+        reason:
+          type: string
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - origin_instance_uid
+        - project_id
+        - project_name
+        - issue_count
+        - event_count
+        - alias_count
+        - comment_count
+        - link_count
+        - label_count
+        - claim_count
+        - pending_claim_request_count
+        - actor
+        - purged_at
+      type: object
+    ProjectPurgeRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        reason:
+          type: string
+      required:
+        - actor
+      type: object
+    ProjectPurgeResponseBody:
+      additionalProperties: true
+      properties:
+        project_purge_log:
+          $ref: "#/components/schemas/ProjectPurgeLog"
+      required:
+        - project_purge_log
+      type: object
     ProjectResolveBody:
       additionalProperties: true
       properties:
@@ -3734,6 +3826,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ShowProjectResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/actions/purge:
+    post:
+      operationId: purgeProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: X-Kata-Confirm
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectPurgeRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPurgeResponseBody"
           description: OK
         default:
           content:

@@ -89,6 +89,10 @@ type RenameProjectResponse = ShowProjectResponseBody
 
 type RenameProjectErrorResponse = ErrorEnvelope
 
+type PurgeProjectResponse = ProjectPurgeResponseBody
+
+type PurgeProjectErrorResponse = ErrorEnvelope
+
 type DetachProjectAliasResponse = DetachProjectAliasResponseBody
 
 type DetachProjectAliasErrorResponse = ErrorEnvelope
@@ -455,6 +459,13 @@ type RenameProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RenameProjectResponse
+}
+
+type PurgeProjectResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PurgeProjectResponse
 }
 
 type DetachProjectAliasResp struct {
