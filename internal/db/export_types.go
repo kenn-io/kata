@@ -281,6 +281,30 @@ type PurgeLogExport struct {
 	PurgedAt               string  `json:"purged_at"`
 }
 
+// ProjectPurgeLogExport is one project_purge_log row in export shape.
+type ProjectPurgeLogExport struct {
+	ID                       int64   `json:"id"`
+	UID                      string  `json:"uid"`
+	OriginInstanceUID        string  `json:"origin_instance_uid"`
+	ProjectID                int64   `json:"project_id"`
+	ProjectUID               *string `json:"project_uid"`
+	ProjectName              string  `json:"project_name"`
+	IssueCount               int64   `json:"issue_count"`
+	EventCount               int64   `json:"event_count"`
+	AliasCount               int64   `json:"alias_count"`
+	CommentCount             int64   `json:"comment_count"`
+	LinkCount                int64   `json:"link_count"`
+	LabelCount               int64   `json:"label_count"`
+	ClaimCount               int64   `json:"claim_count"`
+	PendingClaimRequestCount int64   `json:"pending_claim_request_count"`
+	EventsDeletedMinID       *int64  `json:"events_deleted_min_id"`
+	EventsDeletedMaxID       *int64  `json:"events_deleted_max_id"`
+	PurgeResetAfterEventID   *int64  `json:"purge_reset_after_event_id"`
+	Actor                    string  `json:"actor"`
+	Reason                   *string `json:"reason"`
+	PurgedAt                 string  `json:"purged_at"`
+}
+
 // EventExport is one event row in export shape. ProjectUID is marshaled as
 // `json:"-"` because it is used only to compute the content hash and is not
 // part of the wire envelope. related_issue_id/uid are scrubbed to NULL when

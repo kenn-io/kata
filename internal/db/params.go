@@ -303,6 +303,13 @@ type RemoveProjectParams struct {
 	Force     bool
 }
 
+// PurgeProjectParams are the inputs to Storage.PurgeProject.
+type PurgeProjectParams struct {
+	ProjectID int64
+	Actor     string
+	Reason    *string
+}
+
 // DetachAliasParams identifies a single alias to drop. ProjectID scopes the
 // lookup to a specific project so a stale handler preflight cannot resolve
 // to one project_id and then race a reassignment that points alias_id at a

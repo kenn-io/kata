@@ -513,3 +513,28 @@ type PurgeLog struct {
 	Reason                 *string   `json:"reason,omitempty"`
 	PurgedAt               time.Time `json:"purged_at"`
 }
+
+// ProjectPurgeLog is the durable audit tombstone written when a project is
+// permanently purged. No FK to projects: the row outlives the deleted project.
+type ProjectPurgeLog struct {
+	ID                       int64     `json:"id"`
+	UID                      string    `json:"uid"`
+	OriginInstanceUID        string    `json:"origin_instance_uid"`
+	ProjectID                int64     `json:"project_id"`
+	ProjectUID               *string   `json:"project_uid,omitempty"`
+	ProjectName              string    `json:"project_name"`
+	IssueCount               int64     `json:"issue_count"`
+	EventCount               int64     `json:"event_count"`
+	AliasCount               int64     `json:"alias_count"`
+	CommentCount             int64     `json:"comment_count"`
+	LinkCount                int64     `json:"link_count"`
+	LabelCount               int64     `json:"label_count"`
+	ClaimCount               int64     `json:"claim_count"`
+	PendingClaimRequestCount int64     `json:"pending_claim_request_count"`
+	EventsDeletedMinID       *int64    `json:"events_deleted_min_id,omitempty"`
+	EventsDeletedMaxID       *int64    `json:"events_deleted_max_id,omitempty"`
+	PurgeResetAfterEventID   *int64    `json:"purge_reset_after_event_id,omitempty"`
+	Actor                    string    `json:"actor"`
+	Reason                   *string   `json:"reason,omitempty"`
+	PurgedAt                 time.Time `json:"purged_at"`
+}

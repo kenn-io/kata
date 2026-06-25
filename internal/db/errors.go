@@ -90,6 +90,9 @@ var (
 	// project whose deleted_at is already set.
 	ErrProjectAlreadyArchived = errors.New("project already archived")
 
+	// ErrProjectNotArchived is returned when a project is not archived but purge requires it.
+	ErrProjectNotArchived = errors.New("project is not archived")
+
 	// ErrProjectHasOpenIssues is returned when RemoveProject is called without
 	// Force on a project that still has at least one open, non-deleted issue.
 	ErrProjectHasOpenIssues = errors.New("project has open issues")
@@ -239,6 +242,16 @@ func (e *ProjectHasOpenIssuesError) Error() string {
 }
 
 func (e *ProjectHasOpenIssuesError) Unwrap() error { return ErrProjectHasOpenIssues }
+
+// ProjectFederatedError reports that a project still has a federation binding
+// and must be detached before it can be purged.
+type ProjectFederatedError struct {
+	Role FederationRole
+}
+
+func (e *ProjectFederatedError) Error() string {
+	return fmt.Sprintf("project is federated (role=%s)", e.Role)
+}
 
 // ProjectMergeImportMappingCollision identifies one import mapping identity
 // that already exists on the target project.
