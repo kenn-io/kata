@@ -689,6 +689,27 @@ type RemoveProjectResponse struct {
 	}
 }
 
+// ProjectPurgeRequest is POST /api/v1/projects/{project_id}/actions/purge.
+// Confirm gates the irreversible removal via the X-Kata-Confirm header
+// ("PURGE <project_name>"); Reason is an optional audit note.
+type ProjectPurgeRequest struct {
+	ProjectID int64  `path:"project_id" required:"true"`
+	Confirm   string `header:"X-Kata-Confirm"`
+	Body      struct {
+		Actor  string `json:"actor" required:"true"`
+		Reason string `json:"reason,omitempty"`
+	}
+}
+
+// ProjectPurgeResponse carries the durable project-purge tombstone so the
+// caller sees the captured counts and reserved SSE reset cursor without a
+// follow-up GET.
+type ProjectPurgeResponse struct {
+	Body struct {
+		ProjectPurgeLog db.ProjectPurgeLog `json:"project_purge_log"`
+	}
+}
+
 // RestoreProjectRequest is POST /api/v1/projects/{id}/restore. The action is
 // idempotent: already-active projects return changed=false with no event.
 type RestoreProjectRequest struct {

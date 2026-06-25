@@ -280,6 +280,67 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 
 	huma.Register(humaAPI, huma.Operation{
+		OperationID: "purgeProject",
+		Method:      "POST",
+		Path:        "/api/v1/projects/{project_id}/actions/purge",
+	}, func(ctx context.Context, in *api.ProjectPurgeRequest) (*api.ProjectPurgeResponse, error) {
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
+			return nil, err
+		}
+		// Archived-inclusive lookup: purge requires an archived project, so
+		// activeProjectByID (which 404s archived rows) must not be used.
+		project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
+		}
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		if err := validateExactConfirm(in.Confirm, "PURGE "+project.Name); err != nil {
+			return nil, err
+		}
+		var reasonPtr *string
+		if in.Body.Reason != "" {
+			r := in.Body.Reason
+			reasonPtr = &r
+		}
+		pl, err := cfg.DB.PurgeProject(ctx, db.PurgeProjectParams{
+			ProjectID: in.ProjectID, Actor: actor, Reason: reasonPtr,
+		})
+		switch {
+		case errors.Is(err, db.ErrNotFound):
+			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
+		case errors.Is(err, db.ErrProjectNotArchived):
+			return nil, api.NewError(409, "project_not_archived",
+				"project is not archived",
+				"run `kata projects remove "+project.Name+"` first", nil)
+		}
+		var fedErr *db.ProjectFederatedError
+		if errors.As(err, &fedErr) {
+			hint := "run `kata federation leave " + project.Name + "` first"
+			if fedErr.Role == db.FederationRoleHub {
+				hint = "remove federation before purging (hub teardown is not yet supported)"
+			}
+			return nil, api.NewError(409, "project_federated",
+				fedErr.Error(), hint, map[string]any{"role": string(fedErr.Role)})
+		}
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		if pl.PurgeResetAfterEventID != nil {
+			cfg.Broadcaster.Broadcast(StreamMsg{
+				Kind:      "reset",
+				ResetID:   *pl.PurgeResetAfterEventID,
+				ProjectID: in.ProjectID,
+			})
+		}
+		out := &api.ProjectPurgeResponse{}
+		out.Body.ProjectPurgeLog = pl
+		return out, nil
+	})
+
+	huma.Register(humaAPI, huma.Operation{
 		OperationID: "restoreProject",
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/restore",
