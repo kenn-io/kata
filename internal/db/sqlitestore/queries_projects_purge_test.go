@@ -146,6 +146,30 @@ func TestPurgeProject_DetachesMovedInIssueEvents(t *testing.T) {
 // rows have no FK to projects so prior-purge audit history must survive a
 // project purge. A future stray `DELETE FROM purge_log` in the cascade would
 // flip this assertion.
+func TestPurgeProject_ReservesResetCursorForBothStreams(t *testing.T) {
+	ctx := context.Background()
+	d := openTestDB(t)
+	p, err := d.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "x", Author: "tester"})
+	require.NoError(t, err)
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester", Force: true})
+	require.NoError(t, err)
+
+	pl, err := d.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+	require.NotNil(t, pl.PurgeResetAfterEventID)
+
+	// Global stream sees the cursor.
+	global, err := d.PurgeResetCheck(ctx, 0, 0)
+	require.NoError(t, err)
+	assert.Equal(t, *pl.PurgeResetAfterEventID, global)
+	// Purged project's own stream sees it too (defensive SSE check uses subscriber projectID).
+	scoped, err := d.PurgeResetCheck(ctx, 0, p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, *pl.PurgeResetAfterEventID, scoped)
+}
+
 func TestPurgeProject_PreservesIssuePurgeLog(t *testing.T) {
 	ctx := context.Background()
 	d := openTestDB(t)

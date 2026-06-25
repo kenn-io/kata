@@ -317,18 +317,29 @@ func (d *Store) MaxFederationBaselineEventID(ctx context.Context, projectID, sin
 
 // PurgeResetCheck returns the maximum purge_reset_after_event_id strictly
 // greater than afterID, optionally constrained to a project. Returns 0 when
-// no matching purge_log row exists. The strict > semantics align with the
-// spec §2.6 reservation: every reserved cursor is greater than every real
-// events.id at the moment of the purge, so cursor == reservedID means the
-// client is already past it and does not need a reset.
+// no matching row exists in either purge_log or project_purge_log. The strict
+// > semantics align with the spec §2.6 reservation: every reserved cursor is
+// greater than every real events.id at the moment of the purge, so cursor ==
+// reservedID means the client is already past it and does not need a reset.
 //
 // projectID == 0 = cross-project (no filter).
 func (d *Store) PurgeResetCheck(ctx context.Context, afterID, projectID int64) (int64, error) {
-	q := `SELECT MAX(purge_reset_after_event_id) FROM purge_log
-	      WHERE purge_reset_after_event_id IS NOT NULL AND purge_reset_after_event_id > ?`
+	pf := purgeResetProjectFilter(projectID)
+	q := `SELECT MAX(c) FROM (
+	        SELECT MAX(purge_reset_after_event_id) AS c FROM purge_log
+	         WHERE purge_reset_after_event_id IS NOT NULL AND purge_reset_after_event_id > ?` +
+		pf + `
+	        UNION ALL
+	        SELECT MAX(purge_reset_after_event_id) AS c FROM project_purge_log
+	         WHERE purge_reset_after_event_id IS NOT NULL AND purge_reset_after_event_id > ?` +
+		pf + `
+	      )`
 	args := []any{afterID}
 	if projectID != 0 {
-		q += ` AND project_id = ?`
+		args = append(args, projectID)
+	}
+	args = append(args, afterID)
+	if projectID != 0 {
 		args = append(args, projectID)
 	}
 	var n sql.NullInt64
@@ -339,4 +350,14 @@ func (d *Store) PurgeResetCheck(ctx context.Context, afterID, projectID int64) (
 		return 0, nil
 	}
 	return n.Int64, nil
+}
+
+// purgeResetProjectFilter returns a SQL fragment that filters purge_log or
+// project_purge_log rows by project_id when projectID != 0, or an empty
+// string for a cross-project (global) query.
+func purgeResetProjectFilter(projectID int64) string {
+	if projectID == 0 {
+		return ""
+	}
+	return ` AND project_id = ?`
 }
