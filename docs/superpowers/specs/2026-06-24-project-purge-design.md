@@ -267,7 +267,10 @@ Storage (`queries_projects_purge_test.go`):
   events detached.
 - tombstone counts correct; `purge_reset_after_event_id` reserved; existing
   `purge_log` rows preserved.
-- `PurgeResetCheck` (global, `projectID == 0`) returns the project cursor.
+- `PurgeResetCheck` returns the project cursor for **both** the global stream
+  (`projectID == 0`) **and** the purged project (`projectID == B`) — the latter
+  backs the defensive check in the live SSE loop (`handlers_events.go:450`) when a
+  wakeup races the reset broadcast.
 
 Cutover: `project_purge_log` JSONL export→import round-trip; completeness tests
 green (sqlitestore + pgstore); **v19 DB auto-cutover** regression (opens a v19
