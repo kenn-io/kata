@@ -87,6 +87,29 @@ func TestPurgeProject_RefusesFederated(t *testing.T) {
 	assert.Equal(t, db.FederationRoleHub, fed.Role)
 }
 
+func TestPurgeProject_RefusesFederatedSpoke(t *testing.T) {
+	ctx := context.Background()
+	d := openTestDB(t)
+	p, err := d.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+	// A spoke binding must also block purge, with a role-aware error. Federation
+	// must be torn down (kata federation leave) before the project can be purged.
+	// Spoke rows require a non-empty hub_url and a positive hub_project_id (schema
+	// CHECKs), unlike hub rows where those default to empty/zero.
+	_, err = d.ExecContext(ctx,
+		`INSERT INTO federation_bindings(
+		   project_id, role, hub_url, hub_project_id, hub_project_uid, enabled, push_enabled)
+		 VALUES(?, 'spoke', 'https://hub.example', 1, '0000000000000000000000000A', 1, 0)`, p.ID)
+	require.NoError(t, err)
+
+	_, err = d.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: p.ID, Actor: "tester"})
+	var fed *db.ProjectFederatedError
+	require.ErrorAs(t, err, &fed)
+	assert.Equal(t, db.FederationRoleSpoke, fed.Role)
+}
+
 func TestPurgeProject_DetachesMovedInIssueEvents(t *testing.T) {
 	ctx := context.Background()
 	d := openTestDB(t)
