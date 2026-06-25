@@ -248,8 +248,21 @@ kata projects rename <project> <name>
 kata projects merge <source> <target> [--rename-target NAME]
 kata projects remove <project> [--force]
 kata projects restore <project>
+kata projects purge <project> --force --confirm "PURGE <project>" [--reason TEXT] [--json]
 kata projects detach <alias-identity>
 ```
+
+`projects remove` archives a project (reversible with `restore`). The name
+stays reserved while archived.
+
+`projects purge` permanently deletes an archived project and frees its name.
+The project must be archived first; purging an active project fails with
+`project_not_archived`. Both `--force` and an exact `--confirm "PURGE
+<project>"` string are required. Pass `--reason` to record a note in the audit
+tombstone. Pass `--json` to receive the tombstone with row counts.
+
+A project that has a federation binding cannot be purged. Spokes must run
+`kata federation leave <project>` first. Hub purge is not currently supported.
 
 ## Daemon and diagnostics
 
