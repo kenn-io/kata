@@ -6,6 +6,11 @@
   "outputDirectory": "site",
   "redirects": [
     {
+      "source": "/get-started/quickstart.md",
+      "destination": "/get-started/quickstart/",
+      "permanent": true
+    },
+    {
       "source": "/install.sh",
       "destination": "https://raw.githubusercontent.com/kenn-io/kata/main/scripts/install.sh",
       "permanent": false

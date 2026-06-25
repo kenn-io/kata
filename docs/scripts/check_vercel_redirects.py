@@ -15,6 +15,10 @@ TEMPORARY = {
     "/install.ps1": "https://raw.githubusercontent.com/kenn-io/kata/main/scripts/install.ps1",
 }
 
+PERMANENT = {
+    "/get-started/quickstart.md": "/get-started/quickstart/",
+}
+
 
 def fail(message: str) -> None:
     print(f"FAIL: {message}", file=sys.stderr)
@@ -103,6 +107,13 @@ def main() -> None:
             fail(f"missing temporary redirect {source}")
         if item.get("destination") != destination or item.get("permanent") is not False:
             fail(f"incorrect temporary redirect {source}")
+
+    for source, destination in PERMANENT.items():
+        item = redirects.get(source)
+        if not item:
+            fail(f"missing permanent redirect {source}")
+        if item.get("destination") != destination or item.get("permanent") is not True:
+            fail(f"incorrect permanent redirect {source}")
 
     print("vercel redirect checks passed")
 
