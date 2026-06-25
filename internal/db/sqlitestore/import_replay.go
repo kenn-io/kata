@@ -166,6 +166,8 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 		return linkSkipNone, importEvent(ctx, tx, r.Event, opts)
 	case db.ImportKindPurgeLog:
 		return linkSkipNone, importPurgeLog(ctx, tx, r.PurgeLog)
+	case db.ImportKindProjectPurgeLog:
+		return linkSkipNone, importProjectPurgeLog(ctx, tx, r.ProjectPurgeLog)
 	case db.ImportKindSQLiteSequence:
 		return linkSkipNone, upsertSequence(ctx, tx, r.Sequence.Name, r.Sequence.Seq)
 	default:
@@ -646,6 +648,27 @@ func importPurgeLog(ctx context.Context, tx *sql.Tx, pl *db.PurgeLogExport) erro
 	return wrapImportErr(db.ImportKindPurgeLog, err)
 }
 
+// importProjectPurgeLog inserts one project_purge_log tombstone. Unlike
+// importPurgeLog there are no COALESCE issue/project lookups: the purged
+// project row is gone, so the snapshot columns (project_uid, project_name) are
+// inserted verbatim. project_purge_log has no FK to projects, so the row stands
+// on its own.
+func importProjectPurgeLog(ctx context.Context, tx *sql.Tx, pl *db.ProjectPurgeLogExport) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO project_purge_log(id, uid, origin_instance_uid, project_id, project_uid, project_name,
+		                               issue_count, event_count, alias_count, comment_count, link_count, label_count,
+		                               claim_count, pending_claim_request_count,
+		                               events_deleted_min_id, events_deleted_max_id, purge_reset_after_event_id,
+		                               actor, reason, purged_at)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		pl.ID, pl.UID, pl.OriginInstanceUID, pl.ProjectID, stringPtrValue(pl.ProjectUID), pl.ProjectName,
+		pl.IssueCount, pl.EventCount, pl.AliasCount, pl.CommentCount, pl.LinkCount, pl.LabelCount,
+		pl.ClaimCount, pl.PendingClaimRequestCount,
+		pl.EventsDeletedMinID, pl.EventsDeletedMaxID, pl.PurgeResetAfterEventID,
+		pl.Actor, pl.Reason, pl.PurgedAt)
+	return wrapImportErr(db.ImportKindProjectPurgeLog, err)
+}
+
 // removeAutoSystemProject deletes the system project row that db.Open inserts on
 // every fresh DB so an imported source's system project can take its place
 // without colliding on (uid, name). If no row was imported, ensureSystemProject
@@ -930,7 +953,7 @@ func upsertSequence(ctx context.Context, tx *sql.Tx, name string, seq int64) err
 }
 
 func reconcileSequences(ctx context.Context, tx *sql.Tx) error {
-	for _, table := range []string{"projects", "project_aliases", "issue_sync_bindings", "issues", "comments", "links", "import_mappings", "events", "purge_log", "api_tokens", "federation_enrollments"} {
+	for _, table := range []string{"projects", "project_aliases", "issue_sync_bindings", "issues", "comments", "links", "import_mappings", "events", "purge_log", "project_purge_log", "api_tokens", "federation_enrollments"} {
 		var maxID int64
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(MAX(id), 0) FROM `+table).Scan(&maxID); err != nil {

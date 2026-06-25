@@ -117,6 +117,33 @@ func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
 	assert.Len(t, contentHash, 64)
 }
 
+// TestAutoCutoverUpgradesLegacyV19DB proves the project_purge_log export gate:
+// a v19 source has no project_purge_log table, so an ungated legacy export
+// would fail with "no such table" during cutover. AutoCutover must skip the
+// table on the v19 source and land the upgraded DB at the current schema with
+// an empty project_purge_log.
+func TestAutoCutoverUpgradesLegacyV19DB(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kata.db")
+	d := openCutoverTargetDB(t, ctx, path)
+	_, err := d.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+
+	trimCurrentDBToV19Shape(t, path)
+
+	require.NoError(t, jsonl.AutoCutover(ctx, path))
+
+	upgraded, err := sqlitestore.Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	assertCurrentSchemaVersion(t, path)
+	var n int
+	require.NoError(t, upgraded.QueryRowContext(ctx,
+		`SELECT count(*) FROM project_purge_log`).Scan(&n))
+	assert.Equal(t, 0, n)
+}
+
 func TestAutoCutoverUpgradesLegacyV17GitHubStatus(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -885,4 +912,26 @@ func trimCurrentDBToV11Shape(t *testing.T, path string) {
 		"issue_id", "issue_uid", "related_issue_id", "related_issue_uid",
 		"type", "actor", "payload", "created_at",
 	})
+}
+
+// trimCurrentDBToV19Shape reshapes a current-schema DB back to the v19 schema:
+// project_purge_log (added at v20) is dropped and schema_version is set to 19.
+// A v19 DB has no project_purge_log table, so the cutover export must skip it.
+func trimCurrentDBToV19Shape(t *testing.T, path string) {
+	t.Helper()
+	ctx := context.Background()
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+
+	_, err = raw.ExecContext(ctx, `
+		DROP TABLE project_purge_log;
+		UPDATE meta SET value='19' WHERE key='schema_version';
+	`)
+	require.NoError(t, err)
+
+	var n int
+	require.NoError(t, raw.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='project_purge_log'`).Scan(&n))
+	require.Equal(t, 0, n, "v19 shape must not have a project_purge_log table")
 }

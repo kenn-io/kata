@@ -395,6 +395,15 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		}
 		pl := rec.PurgeLogExport
 		return db.ImportRecord{Kind: string(KindPurgeLog), PurgeLog: &pl}, nil
+	case KindProjectPurgeLog:
+		var rec db.ProjectPurgeLogExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		if err := normalizeProjectPurgeLogTimes(&rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindProjectPurgeLog), ProjectPurgeLog: &rec}, nil
 	case KindSQLiteSequence:
 		var rec db.SequenceExport
 		if err := decodeData(env, &rec); err != nil {
@@ -863,4 +872,8 @@ func normalizeEventTimes(rec *db.EventExport) error {
 
 func normalizePurgeLogTimes(rec *db.PurgeLogExport) error {
 	return normalizeImportTime("purge_log.purged_at", &rec.PurgedAt)
+}
+
+func normalizeProjectPurgeLogTimes(rec *db.ProjectPurgeLogExport) error {
+	return normalizeImportTime("project_purge_log.purged_at", &rec.PurgedAt)
 }

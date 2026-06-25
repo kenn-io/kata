@@ -245,6 +245,77 @@ func TestImportReplayInsertsEveryEntity(t *testing.T) {
 	}
 }
 
+// TestImportReplayRoundTripsProjectPurgeLog pins the project_purge_log cutover
+// wiring: a purged project leaves a tombstone row that survives export →
+// import into a fresh DB byte-for-byte on the columns that matter (uid, the
+// snapshot identity, the counts, and the SSE reset cursor).
+func TestImportReplayRoundTripsProjectPurgeLog(t *testing.T) {
+	ctx := context.Background()
+	src := openTestDB(t)
+	project, err := src.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, _, err := src.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "doomed", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = src.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "bye",
+	})
+	require.NoError(t, err)
+	_, err = src.AddLabel(ctx, issue.ID, "urgent", "tester")
+	require.NoError(t, err)
+
+	// Archive then purge so a tombstone with non-zero counts exists to export.
+	_, _, err = src.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester", Force: true})
+	require.NoError(t, err)
+	reason := "cleanup"
+	want, err := src.PurgeProject(ctx, db.PurgeProjectParams{
+		ProjectID: project.ID, Actor: "tester", Reason: &reason,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), want.IssueCount, "fixture must record a non-zero issue count")
+
+	recs := collectImportRecords(t, ctx, src)
+	dst := openTestDB(t)
+	require.NoError(t, dst.ImportReplay(ctx, recs, db.ImportOptions{}))
+
+	require.Equal(t, 1, tableCount(t, ctx, dst, "project_purge_log"))
+	got, err := scanRoundTripProjectPurgeLog(ctx, dst, want.ID)
+	require.NoError(t, err)
+	assert.Equal(t, want.UID, got.UID)
+	assert.Equal(t, want.OriginInstanceUID, got.OriginInstanceUID)
+	assert.Equal(t, want.ProjectID, got.ProjectID)
+	require.NotNil(t, got.ProjectUID)
+	assert.Equal(t, project.UID, *got.ProjectUID)
+	assert.Equal(t, "spoke-project", got.ProjectName)
+	assert.Equal(t, want.IssueCount, got.IssueCount)
+	assert.Equal(t, want.EventCount, got.EventCount)
+	assert.Equal(t, want.CommentCount, got.CommentCount)
+	assert.Equal(t, want.LabelCount, got.LabelCount)
+	assert.Equal(t, want.AliasCount, got.AliasCount)
+	require.NotNil(t, got.PurgeResetAfterEventID)
+	require.NotNil(t, want.PurgeResetAfterEventID)
+	assert.Equal(t, *want.PurgeResetAfterEventID, *got.PurgeResetAfterEventID)
+	assert.Equal(t, want.Actor, got.Actor)
+	require.NotNil(t, got.Reason)
+	assert.Equal(t, reason, *got.Reason)
+}
+
+func scanRoundTripProjectPurgeLog(ctx context.Context, d *sqlitestore.Store, id int64) (db.ProjectPurgeLogExport, error) {
+	var pl db.ProjectPurgeLogExport
+	err := d.QueryRowContext(ctx,
+		`SELECT id, uid, origin_instance_uid, project_id, project_uid, project_name,
+		        issue_count, event_count, alias_count, comment_count, link_count, label_count,
+		        claim_count, pending_claim_request_count,
+		        purge_reset_after_event_id, actor, reason
+		   FROM project_purge_log WHERE id = ?`, id).Scan(
+		&pl.ID, &pl.UID, &pl.OriginInstanceUID, &pl.ProjectID, &pl.ProjectUID, &pl.ProjectName,
+		&pl.IssueCount, &pl.EventCount, &pl.AliasCount, &pl.CommentCount, &pl.LinkCount, &pl.LabelCount,
+		&pl.ClaimCount, &pl.PendingClaimRequestCount,
+		&pl.PurgeResetAfterEventID, &pl.Actor, &pl.Reason)
+	return pl, err
+}
+
 // TestImportReplay_SkipsDanglingCrossProjectLink pins the missing-peer rule:
 // a project-filtered envelope can carry a link whose peer issue is omitted;
 // import skips it (reported, not fatal) instead of failing the FK pass, and
@@ -463,6 +534,11 @@ func collectImportRecords(t *testing.T, ctx context.Context, d *sqlitestore.Stor
 		require.NoError(t, err)
 		v := rec
 		recs = append(recs, db.ImportRecord{Kind: "purge_log", PurgeLog: &v})
+	}
+	for rec, err := range d.ExportProjectPurgeLog(ctx, db.ExportFilter{IncludeDeleted: true}) {
+		require.NoError(t, err)
+		v := rec
+		recs = append(recs, db.ImportRecord{Kind: db.ImportKindProjectPurgeLog, ProjectPurgeLog: &v})
 	}
 	for rec, err := range d.ExportSequences(ctx) {
 		require.NoError(t, err)

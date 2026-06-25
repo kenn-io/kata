@@ -137,6 +137,15 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 	if err := exportPurgeLog(ctx, d, enc, opts, sourceSchemaVersion); err != nil {
 		return err
 	}
+	// project_purge_log was introduced at schema v20. A legacy cutover from an
+	// older source must not SELECT from a table that does not exist there, so
+	// gate the export on the source version; the table only ever holds rows at
+	// v20+ anyway.
+	if sourceSchemaVersion >= 20 {
+		if err := exportProjectPurgeLog(ctx, d, enc, opts); err != nil {
+			return err
+		}
+	}
 	if err := exportSQLiteSequence(ctx, d, enc); err != nil {
 		return err
 	}
@@ -1762,6 +1771,59 @@ func exportPurgeLog(ctx context.Context, d exportQuerier, enc *Encoder, opts Exp
 			&rec.LinkCount, &rec.LabelCount, &rec.EventCount, &rec.EventsDeletedMinID,
 			&rec.EventsDeletedMaxID, &rec.PurgeResetAfterEventID, &rec.Actor, &rec.Reason,
 			&rec.PurgedAt)
+		return rec, err
+	})
+}
+
+// exportProjectPurgeLog emits the current project_purge_log projection. The
+// table was added at schema v20, so there is no sub-version handling: callers
+// gate this on sourceSchemaVersion >= 20.
+func exportProjectPurgeLog(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportOptions) error {
+	type record struct {
+		ID                       int64   `json:"id"`
+		UID                      string  `json:"uid"`
+		OriginInstanceUID        string  `json:"origin_instance_uid"`
+		ProjectID                int64   `json:"project_id"`
+		ProjectUID               *string `json:"project_uid"`
+		ProjectName              string  `json:"project_name"`
+		IssueCount               int64   `json:"issue_count"`
+		EventCount               int64   `json:"event_count"`
+		AliasCount               int64   `json:"alias_count"`
+		CommentCount             int64   `json:"comment_count"`
+		LinkCount                int64   `json:"link_count"`
+		LabelCount               int64   `json:"label_count"`
+		ClaimCount               int64   `json:"claim_count"`
+		PendingClaimRequestCount int64   `json:"pending_claim_request_count"`
+		EventsDeletedMinID       *int64  `json:"events_deleted_min_id"`
+		EventsDeletedMaxID       *int64  `json:"events_deleted_max_id"`
+		PurgeResetAfterEventID   *int64  `json:"purge_reset_after_event_id"`
+		Actor                    string  `json:"actor"`
+		Reason                   *string `json:"reason"`
+		PurgedAt                 string  `json:"purged_at"`
+	}
+	query := `SELECT id, uid, origin_instance_uid, project_id, project_uid, project_name,
+	                 issue_count, event_count, alias_count, comment_count, link_count, label_count,
+	                 claim_count, pending_claim_request_count,
+	                 events_deleted_min_id, events_deleted_max_id, purge_reset_after_event_id,
+	                 actor, reason, CAST(purged_at AS TEXT)
+	          FROM project_purge_log`
+	args := []any{}
+	if opts.ProjectID > 0 {
+		query += ` WHERE project_id = ?`
+		args = append(args, opts.ProjectID)
+	}
+	query += ` ORDER BY id ASC`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export project_purge_log: %w", err)
+	}
+	return scanRecords(rows, KindProjectPurgeLog, enc, func(rows *sql.Rows) (record, error) {
+		var rec record
+		err := rows.Scan(&rec.ID, &rec.UID, &rec.OriginInstanceUID, &rec.ProjectID, &rec.ProjectUID,
+			&rec.ProjectName, &rec.IssueCount, &rec.EventCount, &rec.AliasCount, &rec.CommentCount,
+			&rec.LinkCount, &rec.LabelCount, &rec.ClaimCount, &rec.PendingClaimRequestCount,
+			&rec.EventsDeletedMinID, &rec.EventsDeletedMaxID, &rec.PurgeResetAfterEventID,
+			&rec.Actor, &rec.Reason, &rec.PurgedAt)
 		return rec, err
 	})
 }

@@ -362,6 +362,12 @@ func (s *Store) ExportProjectAliases(_ context.Context, _ db.ExportFilter) iter.
 	}
 }
 
+func (s *Store) ExportProjectPurgeLog(_ context.Context, _ db.ExportFilter) iter.Seq2[db.ProjectPurgeLogExport, error] {
+	return func(yield func(db.ProjectPurgeLogExport, error) bool) {
+		yield(db.ProjectPurgeLogExport{}, ErrNotImplementedPhase3)
+	}
+}
+
 func (s *Store) ExportProjects(_ context.Context, _ db.ExportFilter) iter.Seq2[db.ProjectExport, error] {
 	return func(yield func(db.ProjectExport, error) bool) {
 		yield(db.ProjectExport{}, ErrNotImplementedPhase3)

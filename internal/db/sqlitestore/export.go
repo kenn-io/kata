@@ -566,6 +566,32 @@ func (d *Store) ExportPurgeLog(ctx context.Context, f db.ExportFilter) iter.Seq2
 		})
 }
 
+// ExportProjectPurgeLog streams project_purge_log rows ordered by id, scoped to
+// f.ProjectID when set. There is no soft-delete clause on project_purge_log.
+func (d *Store) ExportProjectPurgeLog(ctx context.Context, f db.ExportFilter) iter.Seq2[db.ProjectPurgeLogExport, error] {
+	query := `SELECT project_purge_log.id, project_purge_log.uid, project_purge_log.origin_instance_uid,
+	                 project_purge_log.project_id, project_uid, project_purge_log.project_name,
+	                 issue_count, event_count, alias_count, comment_count, link_count, label_count,
+	                 claim_count, pending_claim_request_count,
+	                 events_deleted_min_id, events_deleted_max_id, purge_reset_after_event_id,
+	                 actor, reason, CAST(purged_at AS TEXT)
+	          FROM project_purge_log`
+	query, args := withProjectIDFilter(query, f, "project_purge_log.project_id")
+	query += ` ORDER BY project_purge_log.id ASC`
+	return streamRows(ctx, d.readQ, "project_purge_log", query, args,
+		func(rows *sql.Rows) (db.ProjectPurgeLogExport, error) {
+			var rec db.ProjectPurgeLogExport
+			if err := rows.Scan(&rec.ID, &rec.UID, &rec.OriginInstanceUID, &rec.ProjectID,
+				&rec.ProjectUID, &rec.ProjectName, &rec.IssueCount, &rec.EventCount, &rec.AliasCount,
+				&rec.CommentCount, &rec.LinkCount, &rec.LabelCount, &rec.ClaimCount, &rec.PendingClaimRequestCount,
+				&rec.EventsDeletedMinID, &rec.EventsDeletedMaxID, &rec.PurgeResetAfterEventID,
+				&rec.Actor, &rec.Reason, &rec.PurgedAt); err != nil {
+				return db.ProjectPurgeLogExport{}, scanError("project_purge_log", err)
+			}
+			return rec, nil
+		})
+}
+
 // ExportEvents streams events ordered by id, reproducing the orphan filter and
 // related-id scrub from the v10 jsonl export. The subject join matches by row
 // id / UID alone — kata move rehomes the issue row while its historical

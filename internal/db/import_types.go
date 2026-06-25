@@ -61,6 +61,7 @@ type ImportRecord struct {
 	PendingClaimRequest  *PendingClaimRequestExport
 	Event                *EventExport
 	PurgeLog             *PurgeLogExport
+	ProjectPurgeLog      *ProjectPurgeLogExport
 	Sequence             *SequenceExport
 }
 
@@ -88,6 +89,7 @@ const (
 	ImportKindPendingClaimRequest  = "pending_claim_request"
 	ImportKindEvent                = "event"
 	ImportKindPurgeLog             = "purge_log"
+	ImportKindProjectPurgeLog      = "project_purge_log"
 	ImportKindSQLiteSequence       = "sqlite_sequence"
 )
 
@@ -118,6 +120,7 @@ func (r ImportRecord) Validate() error {
 		{ImportKindPendingClaimRequest, r.PendingClaimRequest != nil},
 		{ImportKindEvent, r.Event != nil},
 		{ImportKindPurgeLog, r.PurgeLog != nil},
+		{ImportKindProjectPurgeLog, r.ProjectPurgeLog != nil},
 		{ImportKindSQLiteSequence, r.Sequence != nil},
 	}
 	known := false

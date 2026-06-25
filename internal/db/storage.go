@@ -251,6 +251,7 @@ type Storage interface {
 	ExportPendingClaimRequests(ctx context.Context, f ExportFilter) iter.Seq2[PendingClaimRequestExport, error]
 	ExportEvents(ctx context.Context, f ExportFilter) iter.Seq2[EventExport, error]
 	ExportPurgeLog(ctx context.Context, f ExportFilter) iter.Seq2[PurgeLogExport, error]
+	ExportProjectPurgeLog(ctx context.Context, f ExportFilter) iter.Seq2[ProjectPurgeLogExport, error]
 	ExportSequences(ctx context.Context) iter.Seq2[SequenceExport, error]
 
 	// federation: push + ingest

@@ -32,6 +32,7 @@ const (
 	KindPendingClaimRequest  Kind = "pending_claim_request"
 	KindEvent                Kind = "event"
 	KindPurgeLog             Kind = "purge_log"
+	KindProjectPurgeLog      Kind = "project_purge_log"
 	KindSQLiteSequence       Kind = "sqlite_sequence"
 )
 
@@ -64,7 +65,8 @@ var kindOrder = map[Kind]int{
 	KindPendingClaimRequest:  16,
 	KindEvent:                17,
 	KindPurgeLog:             18,
-	KindSQLiteSequence:       19,
+	KindProjectPurgeLog:      19,
+	KindSQLiteSequence:       20,
 }
 
 // Envelope is one NDJSON record.

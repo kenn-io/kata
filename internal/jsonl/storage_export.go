@@ -112,6 +112,9 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 	if err := streamExport(enc, KindPurgeLog, store.ExportPurgeLog(ctx, f)); err != nil {
 		return err
 	}
+	if err := streamExport(enc, KindProjectPurgeLog, store.ExportProjectPurgeLog(ctx, f)); err != nil {
+		return err
+	}
 	return streamExport(enc, KindSQLiteSequence, store.ExportSequences(ctx))
 }
 
