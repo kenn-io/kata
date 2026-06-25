@@ -34,6 +34,27 @@ func TestExportWritesOrderedRecordsWithSequenceLast(t *testing.T) {
 	assertKindOrder(t, records)
 }
 
+// TestExportIncludesProjectPurgeLog covers the project_purge_log kind end to end
+// through the JSONL export path. The tombstone has no FK to projects, so it must
+// be exported even though the project row is gone — and it must sort between
+// purge_log and sqlite_sequence.
+func TestExportIncludesProjectPurgeLog(t *testing.T) {
+	ctx, d, p := newExportEnv(t)
+	createTesterIssue(ctx, t, d, p.ID, "doomed", "")
+	_, _, err := d.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester", Force: true})
+	require.NoError(t, err)
+	_, err = d.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	records := exportAndDecode(ctx, t, d, jsonl.ExportOptions{IncludeDeleted: true})
+	assertKindOrder(t, records)
+	idx := firstKindIndex(records, "project_purge_log")
+	require.NotEqual(t, -1, idx, "export must include the project_purge_log tombstone")
+	data, ok := records[idx]["data"].(map[string]any)
+	require.True(t, ok, "project_purge_log record data should be an object")
+	assert.Equal(t, p.Name, data["project_name"])
+}
+
 func TestIssueSyncCurrentExportOrderAndProjectFilter(t *testing.T) {
 	ctx := context.Background()
 	d := openExportTestDB(t)
@@ -1066,7 +1087,7 @@ func assertKindOrder(t *testing.T, records []map[string]any) {
 		"issue_label": 8, "link": 9, "import_mapping": 10, "federation_binding": 11,
 		"federation_sync_status": 12, "federation_quarantine": 13, "federation_enrollment": 14,
 		"issue_claim": 15, "pending_claim_request": 16, "event": 17, "purge_log": 18,
-		"sqlite_sequence": 19,
+		"project_purge_log": 19, "sqlite_sequence": 20,
 	}
 	last := -1
 	for _, rec := range records {

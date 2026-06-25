@@ -239,6 +239,9 @@ func TestProjects_PurgeRequiresForce(t *testing.T) {
 
 func TestProjects_PurgeNoConfirmNonTTYFails(t *testing.T) {
 	env := testenv.New(t)
+	// Force non-TTY so resolveConfirm rejects with confirm_required instead of
+	// prompting; otherwise a TTY stdin would yield confirm_mismatch.
+	stubIsTTY(t, false)
 	ctx := context.Background()
 	p, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)

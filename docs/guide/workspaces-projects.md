@@ -113,8 +113,10 @@ Pass `--json` to receive the audit tombstone with row counts as JSON.
   must be handled manually before the project can be purged.
 
 !!! warning
-    `projects purge` cannot be undone. Run `kata projects show <project>` and
-    confirm you have the right project before proceeding.
+    `projects purge` cannot be undone. Confirm you have the right project with
+    `kata projects show <project>` *before* you `kata projects remove` it
+    (`projects show` resolves active projects only). Once archived, the
+    `PURGE <project>` confirmation string is your last check before deletion.
 
 Detach one alias when a workspace identity was attached to the wrong project:
 

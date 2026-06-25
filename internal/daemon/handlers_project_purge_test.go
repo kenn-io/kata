@@ -93,6 +93,30 @@ func TestPurgeProjectHandler_PurgesArchived(t *testing.T) {
 			map[string]any{"actor": "tester"})
 		assertAPIError(t, resp.status, resp.body, 412, "confirm_mismatch")
 	})
+
+	t.Run("federated project returns 409 with role detail", func(t *testing.T) {
+		h, pid := bootstrapProject(t)
+		ts := h.ts.(*httptest.Server)
+		archiveProject(t, h, pid, false)
+		// A federation binding blocks purge with a role-aware error.
+		_, err := h.DB().ExecContext(context.Background(),
+			`INSERT INTO federation_bindings(project_id, role, hub_project_uid, enabled, push_enabled)
+			 VALUES(?, 'hub', '0000000000000000000000000A', 1, 0)`, pid)
+		require.NoError(t, err)
+
+		resp := postWithHeader(t, ts, purgeProjectPath(pid),
+			map[string]string{"X-Kata-Confirm": "PURGE kata"},
+			map[string]any{"actor": "tester"})
+		assertAPIError(t, resp.status, resp.body, 409, "project_federated")
+
+		var envelope struct {
+			Error struct {
+				Data map[string]any `json:"data"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(resp.body, &envelope), string(resp.body))
+		assert.Equal(t, "hub", envelope.Error.Data["role"])
+	})
 }
 
 // TestPurgeProjectHandler_BroadcastsResetToScopedSubscribers locks in the
