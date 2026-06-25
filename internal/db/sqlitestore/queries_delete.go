@@ -514,5 +514,5 @@ func purgeEventsCleanupWhere(issue db.Issue) (string, []any) {
 // PurgeProject is not yet implemented; the real implementation lands in a later
 // task. The method exists here only to satisfy db.Storage so the package compiles.
 func (d *Store) PurgeProject(_ context.Context, _ db.PurgeProjectParams) (db.ProjectPurgeLog, error) {
-	panic("PurgeProject: not yet implemented in sqlitestore")
+	return db.ProjectPurgeLog{}, errors.New("sqlitestore: PurgeProject not yet implemented")
 }
