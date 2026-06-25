@@ -211,6 +211,40 @@ func TestProjects_MergeReportsShortIDExtensions(t *testing.T) {
 	assert.Equal(t, srcUID, got.ShortIDExtensions[0]["uid"])
 }
 
+func TestProjects_PurgeArchivedFreesName(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "projects", "purge", "spoke-project",
+		"--force", "--confirm", "PURGE spoke-project")
+	assert.Contains(t, out, "purged")
+	assert.Contains(t, out, "name is now free")
+
+	_, err = env.DB.ProjectByID(ctx, p.ID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestProjects_PurgeRequiresForce(t *testing.T) {
+	env := testenv.New(t)
+	_, err := runCmdOutput(t, env, "projects", "purge", "spoke-project")
+	require.Error(t, err)
+}
+
+func TestProjects_PurgeNoConfirmNonTTYFails(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+	_, err = runCmdOutput(t, env, "projects", "purge", "spoke-project", "--force")
+	require.Error(t, err) // confirm_required (ExitConfirm) in non-TTY test runs
+}
+
 // TestProjects_MergeHumanOutputReportsExtensions covers the non-JSON path: the
 // merged-project summary line drops the legacy `next #N` clause and gains a
 // per-extension `extended <project>#<short> from <pre> to <post>` line.

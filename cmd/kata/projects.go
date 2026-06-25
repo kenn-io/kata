@@ -46,7 +46,8 @@ type shortIDExtensionItem struct {
 func newProjectsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "projects", Short: "list and inspect kata projects"}
 	cmd.AddCommand(projectsListCmd(), projectsShowCmd(), projectsRenameCmd(),
-		projectsMergeCmd(), projectsRemoveCmd(), projectsRestoreCmd(), projectsDetachCmd())
+		projectsMergeCmd(), projectsRemoveCmd(), projectsRestoreCmd(),
+		projectsDetachCmd(), projectsPurgeCmd())
 	return cmd
 }
 
