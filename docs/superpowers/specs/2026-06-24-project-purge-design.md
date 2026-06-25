@@ -149,33 +149,89 @@ purge_reset_after_event_id,
 actor, reason, purged_at
 ```
 
+Indexes (mirror `purge_log`'s reset indexes so `PurgeResetCheck` doesn't table-scan,
+review Finding 5), in both sqlite and pg schema:
+
+```sql
+CREATE INDEX idx_project_purge_log_reset
+  ON project_purge_log(purge_reset_after_event_id)
+  WHERE purge_reset_after_event_id IS NOT NULL;
+CREATE INDEX idx_project_purge_log_project_reset
+  ON project_purge_log(project_id, purge_reset_after_event_id)
+  WHERE purge_reset_after_event_id IS NOT NULL;
+```
+
 New `db.ProjectPurgeLog` type in `internal/db/types.go`.
 
 `currentSchemaVersion` 19 → 20 (`internal/db/schema_version.go`). Existing DBs take
-the established JSONL cutover on next open; the new table has no v19 rows to migrate.
-Wire it through the cutover so round-trips stay complete and the guardrail tests
-pass:
+the established JSONL cutover on next open; the new table has no pre-v20 rows.
 
-- `ProjectPurgeLogExport` (`export_types.go`), `ExportProjectPurgeLog` (`export.go`)
-- `importProjectPurgeLog` + `ImportKindProjectPurgeLog` (`import_replay.go`,
-  `import_types.go`); add to the import sequence-reset table list
-- register the table in `schema_completeness_test.go` (sqlitestore + pgstore)
-- add the table to `pgstore/schema.sql`
+Cutover wiring spans two export paths plus the importer (review Finding 3):
+
+- **Legacy version-gated export** `internal/jsonl/export.go` (`exportSnapshot`):
+  add `exportProjectPurgeLog`, **gated `if sourceSchemaVersion >= 20`** — a v19
+  source has no such table, so an ungated `SELECT` would fail the cutover.
+- **Current-schema export** `internal/jsonl/storage_export.go`: add a
+  `streamExport(enc, KindProjectPurgeLog, store.ExportProjectPurgeLog(ctx, f))`
+  line; add `Store.ExportProjectPurgeLog` + `ProjectPurgeLogExport` shape
+  (`sqlitestore/export.go`, `export_types.go`).
+- **Kind + min-version** in `internal/jsonl/types.go` (`KindProjectPurgeLog`,
+  version 20).
+- **Import**: `importProjectPurgeLog` + `ImportKindProjectPurgeLog`
+  (`sqlitestore/import_replay.go`, `internal/db/import_types.go`); add to the
+  import sequence-reset table list.
+- register the table in `schema_completeness_test.go` (sqlitestore + pgstore);
+  add the table to `pgstore/schema.sql`.
+
+Regression test: a synthetic v19 DB opened through `storeopen` must auto-cutover
+to v20 cleanly (no "no such table: project_purge_log"), with the v19 export
+skipping the gated table.
+
+## Code generation (OpenAPI + client)
+
+The new `POST .../actions/purge` route changes the daemon's API surface, which is
+drift-checked. After adding the route, run `make api-generate` (Makefile:23) to
+regenerate `api/openapi.yaml`, `pkg/client/openapi.yaml`, and
+`pkg/client/generated/*`, and commit them. `make api-check` (the drift gate) must
+pass; CI fails if these artifacts are stale (review Finding 4).
 
 ## SSE reset
 
-Deletions are scoped to `project_id = B`, so only the (now-gone) project-B stream
-and the global stream are affected. Extend `PurgeResetCheck`
-(`queries_events.go:326`) to take `MAX(purge_reset_after_event_id)` across **both**
-`purge_log` and `project_purge_log` (the `projectID == 0` global stream sees the
-project tombstone's cursor). No broadcaster change (purge emits no event, exactly
-like `PurgeIssue`; clients discover the reset via `PurgeResetCheck` on resume).
+Two mechanisms, mirroring issue purge (`handlers_destructive.go:145-154`):
 
-Documented residual (same scope as today's issue purge): a client subscribed
-*only* to the per-project stream of a project that was the **origin** of a
-moved-in, then-purged issue may keep a stale local copy until its next full sync.
-External event rows are detached (not deleted), so per-project resume by id stays
-valid.
+- **Live push.** When the tombstone has a non-nil `purge_reset_after_event_id`,
+  the *purge handler* (not the store) calls
+  `Broadcaster.Broadcast(StreamMsg{Kind:"reset", ResetID: cursor, ProjectID: B})`
+  after commit. Per `broadcaster.go`, that frame reaches **global** subscribers
+  (filter `ProjectID == 0` matches everything) and **project-B** subscribers.
+  Live consumers write a reset frame and disconnect (`handlers_events.go:435`).
+  (Unlike issue purge, no `refreshFederationBaselineAfterPurge` — the project is
+  being deleted and federation was refused as a precondition.)
+- **Resume backstop.** Extend `PurgeResetCheck` (`queries_events.go:326`) to take
+  `MAX(purge_reset_after_event_id)` across **both** `purge_log` and
+  `project_purge_log`, so a client resuming from an old `Last-Event-ID` on the
+  global stream gets `sync.reset_required`.
+
+**Cross-project events — accepted, tested limitation (review Finding 2).**
+Purging issues that were *moved in* from another project mutates event rows that
+physically live in the **origin** project (the detach `UPDATE`s above). Those
+rows are not in project B's stream, and the reset broadcast/`PurgeResetCheck` are
+scoped to B + global, so origin-project subscribers are **not** reset: a live or
+cached origin-project subscriber keeps event payloads whose `issue_id` is now
+`NULL` until its next full resync. This is the **same reset scope issue purge has
+today** (its handler also broadcasts only `in.ProjectID`). We accept it rather
+than build per-affected-project reset, and assert the exact behavior in a test
+(detach happened, origin-project stream was *not* reset). Rows are detached, not
+deleted, so origin-project resume-by-id has no missing ids — only stale payloads.
+
+**Open question — resolved: null both columns.** Detach NULLs both the FK id and
+its uid (`issue_id`+`issue_uid`, `related_issue_id`+`related_issue_uid`), matching
+`purgeCascade`'s existing `related_issue_id = NULL, related_issue_uid = NULL`
+detach. The event's *payload* JSON is left untouched, so any uid reference there
+survives as an orphan snapshot — consistent with the kata#1 design call quoted in
+`queries_delete.go`. A dangling `issue_uid` with a NULL `issue_id` would be a row
+state nothing else produces; nulling both keeps the column invariant clean while
+the payload preserves audit readability.
 
 ## Federation policy (refuse + document)
 
@@ -214,26 +270,42 @@ Storage (`queries_projects_purge_test.go`):
 - `PurgeResetCheck` (global, `projectID == 0`) returns the project cursor.
 
 Cutover: `project_purge_log` JSONL export→import round-trip; completeness tests
-green (sqlitestore + pgstore).
+green (sqlitestore + pgstore); **v19 DB auto-cutover** regression (opens a v19
+fixture via `storeopen`, asserts clean upgrade to v20 with the gated export
+skipped).
 
 Daemon (`handlers_*_test.go`): route resolves archived project; confirm-header
-required / validated; error codes / status.
+required / validated; error codes / status. **Live SSE**: after a purge that
+reserves a cursor, a global subscriber and a project-B subscriber each receive a
+reset frame; an origin-project subscriber (moved-in-issue case) does **not** —
+locking in the accepted Finding-2 scope.
 
 CLI (`projects_test.go`): `--force` / `--confirm` TTY + non-TTY; mismatch; `--json`
 shape; archived-only message; "name freed" end-to-end.
 
+Generated artifacts: `make api-check` passes (OpenAPI + client regenerated and
+committed).
+
 ## Files touched (summary)
 
-- `cmd/kata/projects.go` (+ purge command, printer), possibly a new
+- CLI: `cmd/kata/projects.go` (+ purge command + dedicated printer), possibly a new
   `cmd/kata/projects_purge.go`
-- `internal/api/types.go` (request / response)
-- `internal/daemon/handlers_projects.go` (route + handler)
-- `internal/db/storage.go` (+ `PurgeProject`), `internal/db/types.go`
-  (+ `ProjectPurgeLog`), `internal/db/params.go` (params + errors)
-- `internal/db/sqlitestore/queries_projects_purge.go` (impl),
-  `queries_events.go` (`PurgeResetCheck`), `schema.sql` (+ table),
-  `export.go` / `export_types.go` / `import_replay.go` / `import_types.go`
-  (cutover), `schema_completeness_test.go`
-- `internal/db/schema_version.go` (19 → 20)
-- `internal/db/pgstore/schema.sql`, `internal/db/pgstore/stubs_gen.go` (regen stub)
+- API/daemon: `internal/api/types.go` (request / response);
+  `internal/daemon/handlers_projects.go` (route, handler, **reset broadcast** on
+  non-nil cursor)
+- DB interface/types: `internal/db/storage.go` (+ `PurgeProject`),
+  `internal/db/types.go` (+ `ProjectPurgeLog`), `internal/db/params.go`
+  (params + errors), `internal/db/import_types.go` (+ import kind)
+- sqlitestore: `queries_projects_purge.go` (impl), `queries_events.go`
+  (`PurgeResetCheck` across both tables), `schema.sql` (+ table + reset indexes),
+  `export.go`/`export_types.go` (`ExportProjectPurgeLog`), `import_replay.go`
+  (`importProjectPurgeLog` + sequence-reset table list),
+  `schema_completeness_test.go`; `internal/db/schema_version.go` (19 → 20)
+- cutover: `internal/jsonl/export.go` (gated `>= 20`),
+  `internal/jsonl/storage_export.go`, `internal/jsonl/types.go` (kind + version)
+- pgstore: `internal/db/pgstore/schema.sql` (+ table + indexes),
+  `internal/db/pgstore/stubs_gen.go` (regen stub via `go run ./stubgen`),
+  `internal/db/pgstore/schema_test.go`
+- generated (via `make api-generate`): `api/openapi.yaml`,
+  `pkg/client/openapi.yaml`, `pkg/client/generated/*`
 - docs: CLI reference / projects guide updated as the feature lands (not pre-emptively)
