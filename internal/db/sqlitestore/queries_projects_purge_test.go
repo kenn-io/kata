@@ -141,11 +141,10 @@ func TestPurgeProject_DetachesMovedInIssueEvents(t *testing.T) {
 	assert.Equal(t, 0, violations)
 }
 
-// TestPurgeProject_PreservesIssuePurgeLog guards the deliberate spec decision
-// that purging a project does NOT delete purge_log (issue tombstones): those
-// rows have no FK to projects so prior-purge audit history must survive a
-// project purge. A future stray `DELETE FROM purge_log` in the cascade would
-// flip this assertion.
+// TestPurgeProject_ReservesResetCursorForBothStreams checks that the project
+// purge cursor is visible to the SSE reset backstop on both the global stream
+// (projectID 0) and the purged project's own stream (projectID == p.ID), so a
+// resuming subscriber discovers the reset regardless of its subscription scope.
 func TestPurgeProject_ReservesResetCursorForBothStreams(t *testing.T) {
 	ctx := context.Background()
 	d := openTestDB(t)
@@ -170,6 +169,11 @@ func TestPurgeProject_ReservesResetCursorForBothStreams(t *testing.T) {
 	assert.Equal(t, *pl.PurgeResetAfterEventID, scoped)
 }
 
+// TestPurgeProject_PreservesIssuePurgeLog guards the deliberate spec decision
+// that purging a project does NOT delete purge_log (issue tombstones): those
+// rows have no FK to projects so prior-purge audit history must survive a
+// project purge. A future stray `DELETE FROM purge_log` in the cascade would
+// flip this assertion.
 func TestPurgeProject_PreservesIssuePurgeLog(t *testing.T) {
 	ctx := context.Background()
 	d := openTestDB(t)
