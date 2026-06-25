@@ -230,8 +230,11 @@ func TestProjects_PurgeArchivedFreesName(t *testing.T) {
 
 func TestProjects_PurgeRequiresForce(t *testing.T) {
 	env := testenv.New(t)
+	// No project created: the --force gate must fire before any daemon lookup,
+	// so the error is the validation error, not a not-found.
 	_, err := runCmdOutput(t, env, "projects", "purge", "spoke-project")
-	require.Error(t, err)
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, ce.Message, "--force")
 }
 
 func TestProjects_PurgeNoConfirmNonTTYFails(t *testing.T) {
@@ -242,7 +245,8 @@ func TestProjects_PurgeNoConfirmNonTTYFails(t *testing.T) {
 	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
 	require.NoError(t, err)
 	_, err = runCmdOutput(t, env, "projects", "purge", "spoke-project", "--force")
-	require.Error(t, err) // confirm_required (ExitConfirm) in non-TTY test runs
+	ce := requireCLIError(t, err, ExitConfirm)
+	assert.Equal(t, "confirm_required", ce.Code)
 }
 
 // TestProjects_MergeHumanOutputReportsExtensions covers the non-JSON path: the
