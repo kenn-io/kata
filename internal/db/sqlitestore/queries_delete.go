@@ -510,3 +510,9 @@ func purgeEventsCleanupWhere(issue db.Issue) (string, []any) {
 	args := []any{issue.ID, issue.ID}
 	return clause, args
 }
+
+// PurgeProject is not yet implemented; the real implementation lands in a later
+// task. The method exists here only to satisfy db.Storage so the package compiles.
+func (d *Store) PurgeProject(_ context.Context, _ db.PurgeProjectParams) (db.ProjectPurgeLog, error) {
+	panic("PurgeProject: not yet implemented in sqlitestore")
+}

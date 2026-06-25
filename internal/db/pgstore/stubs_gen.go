@@ -658,6 +658,10 @@ func (s *Store) PurgeIssue(_ context.Context, _ int64, _ string, _ *string) (db.
 	return db.PurgeLog{}, ErrNotImplementedPhase3
 }
 
+func (s *Store) PurgeProject(_ context.Context, _ db.PurgeProjectParams) (db.ProjectPurgeLog, error) {
+	return db.ProjectPurgeLog{}, ErrNotImplementedPhase3
+}
+
 func (s *Store) PurgeResetCheck(_ context.Context, _ int64, _ int64) (int64, error) {
 	return 0, ErrNotImplementedPhase3
 }
