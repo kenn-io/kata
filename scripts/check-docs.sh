@@ -27,6 +27,9 @@ required_files=(
   "docs/vercel-build.sh"
   "docs/zensical-docs.sh"
   "docs/scripts/check_vercel_redirects.py"
+  "docs/scripts/check_public_markdown_sources.py"
+  "docs/scripts/copy_public_markdown_sources.py"
+  "docs/scripts/public_markdown_sources.py"
   "scripts/update-docs.sh"
   "docs/pyproject.toml"
   "docs/uv.lock"
@@ -143,8 +146,10 @@ mkdir -p "$vercel_docs_root/docs"
     -cf - .
 ) | (cd "$vercel_docs_root/docs" && tar -xf -)
 (cd "$vercel_docs_root/docs" && uv run --frozen bash ./vercel-build.sh)
+(cd "$vercel_docs_root/docs" && python3 scripts/check_public_markdown_sources.py)
 
 (cd docs && uv run --frozen bash ./zensical-docs.sh build)
+(cd docs && python3 scripts/check_public_markdown_sources.py)
 
 for generated in \
   docs/site/.env.local \

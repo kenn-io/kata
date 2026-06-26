@@ -22,6 +22,11 @@ Vercel should install with `uv sync --frozen --no-dev`.
 Vercel should build with `uv run --frozen bash ./vercel-build.sh`.
 Vercel should publish the generated `site/` directory.
 
+The build wrapper also copies every nav-listed Markdown document into `site/`.
+That keeps source-form docs available from the same deployment as the rendered
+page: for example, `/get-started/quickstart.md` serves the Markdown source that
+generated `/get-started/quickstart/`.
+
 ## Repository config
 
 Prefer committing the deployment settings instead of relying only on dashboard
