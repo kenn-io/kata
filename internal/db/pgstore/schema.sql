@@ -12,7 +12,7 @@
 --   x NOT GLOB '*pat*'                 -> x NOT LIKE '%pat%'
 --   x NOT GLOB '*[^...]*'              -> x !~ '[^...]'                     (POSIX regex)
 --   json_extract(p, '$.k')             -> (p::jsonb ->> 'k')
---   FTS5 virtual table + 5 triggers    -> issues_search table + 4 triggers + FK CASCADE
+--   FTS5 virtual table + 6 triggers    -> issues_search table + 5 triggers + FK CASCADE
 --   SQLite RAISE(ABORT, msg) trigger   -> PL/pgSQL function + trigger
 --
 -- Table order is FK-dependency: parents before children. recurrences appears
@@ -553,7 +553,7 @@ CREATE UNIQUE INDEX uniq_pending_claim_active
   WHERE rejected_at IS NULL AND resolved_at IS NULL;
 
 -- ----------------------------------------------------------------------
--- FTS surface: issues_search table + rebuild function + 4 sync triggers.
+-- FTS surface: issues_search table + rebuild function + 5 sync triggers.
 -- FK CASCADE replaces SQLite's issue-delete FTS trigger.
 -- ----------------------------------------------------------------------
 
@@ -600,6 +600,12 @@ BEGIN
   RETURN NULL;
 END $$;
 
+CREATE OR REPLACE FUNCTION issues_search_trigger_on_comment_update() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM rebuild_issue_search(NEW.issue_id);
+  RETURN NULL;
+END $$;
+
 CREATE OR REPLACE FUNCTION issues_search_trigger_on_comment_delete() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM rebuild_issue_search(OLD.issue_id);
@@ -617,6 +623,10 @@ CREATE TRIGGER issues_search_after_issue_update
 CREATE TRIGGER issues_search_after_comment_insert
   AFTER INSERT ON comments
   FOR EACH ROW EXECUTE FUNCTION issues_search_trigger_on_comment_insert();
+
+CREATE TRIGGER issues_search_after_comment_update
+  AFTER UPDATE OF body ON comments
+  FOR EACH ROW EXECUTE FUNCTION issues_search_trigger_on_comment_update();
 
 CREATE TRIGGER issues_search_after_comment_delete
   AFTER DELETE ON comments

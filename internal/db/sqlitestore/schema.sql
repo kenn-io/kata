@@ -506,7 +506,7 @@ CREATE VIRTUAL TABLE issues_fts USING fts5(
 
 -- FTS5 sync triggers. The issues_fts table uses content='' so each delete must
 -- provide the previously indexed column values; we stay in sync by routing every
--- title/body/comments mutation through one of the five triggers below. comments
+-- title/body/comments mutation through one of the six triggers below. comments
 -- is stored as a single space-separated aggregate built from the comments table
 -- at trigger time.
 --
@@ -565,6 +565,31 @@ CREATE TRIGGER comments_ai_fts AFTER INSERT ON comments BEGIN
     )), '')
   );
   -- Post-insert state (what FTS should hold) includes it.
+  INSERT INTO issues_fts(rowid, title, body, comments) VALUES (
+    NEW.issue_id,
+    (SELECT title FROM issues WHERE id = NEW.issue_id),
+    (SELECT body  FROM issues WHERE id = NEW.issue_id),
+    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
+      SELECT body FROM comments WHERE issue_id = NEW.issue_id ORDER BY id
+    )), '')
+  );
+END;
+
+CREATE TRIGGER comments_au_fts AFTER UPDATE OF body ON comments BEGIN
+  -- Pre-update state (what FTS currently holds) contained OLD.body at OLD.id.
+  INSERT INTO issues_fts(issues_fts, rowid, title, body, comments) VALUES (
+    'delete',
+    OLD.issue_id,
+    (SELECT title FROM issues WHERE id = OLD.issue_id),
+    (SELECT body  FROM issues WHERE id = OLD.issue_id),
+    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
+      SELECT id, body FROM comments WHERE issue_id = OLD.issue_id AND id <> OLD.id
+      UNION ALL
+      SELECT OLD.id, OLD.body
+      ORDER BY id
+    )), '')
+  );
+  -- Post-update state (what FTS should hold) includes NEW.body.
   INSERT INTO issues_fts(rowid, title, body, comments) VALUES (
     NEW.issue_id,
     (SELECT title FROM issues WHERE id = NEW.issue_id),

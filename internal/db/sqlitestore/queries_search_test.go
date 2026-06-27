@@ -43,6 +43,25 @@ func TestFTS_CommentInsertReindexes(t *testing.T) {
 		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'watermelon'`)
 }
 
+func TestFTS_CommentUpdateReindexes(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "boring", "body")
+	comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "leakedtoken",
+	})
+	require.NoError(t, err)
+
+	_, _, _, err = d.EditComment(ctx, db.EditCommentParams{
+		IssueID: issue.ID, CommentUID: comment.UID, Actor: "tester", Body: "redactedtoken",
+	})
+	require.NoError(t, err)
+
+	assertRowCount(ctx, t, d, 0, "old comment tokens must be gone after edit",
+		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'leakedtoken'`)
+	assertRowCount(ctx, t, d, 1, "new comment tokens must be searchable after edit",
+		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'redactedtoken'`)
+}
+
 func TestSearchFTS_RanksByBM25(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 

@@ -51,6 +51,7 @@ var expectedTriggers = []string{
 	"issues_search_after_issue_insert",
 	"issues_search_after_issue_update",
 	"issues_search_after_comment_insert",
+	"issues_search_after_comment_update",
 	"issues_search_after_comment_delete",
 }
 
@@ -160,13 +161,14 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 		assert.Equal(t, want, n, "fk count mismatch on %s", table)
 	}
 
-	// --- 3 PL/pgSQL trigger functions exist ---
+	// --- PL/pgSQL trigger functions exist ---
 	for _, fn := range []string{
 		"enforce_links_uid_consistency",
 		"enforce_uid_immutable",
 		"rebuild_issue_search",
 		"issues_search_trigger_on_issue",
 		"issues_search_trigger_on_comment_insert",
+		"issues_search_trigger_on_comment_update",
 		"issues_search_trigger_on_comment_delete",
 	} {
 		var name string
