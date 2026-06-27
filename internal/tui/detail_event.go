@@ -37,6 +37,7 @@ var eventDescribers = map[string]eventDescriber{
 	"issue.closed":           func(e EventLogEntry) string { return "closed" + reasonSuffix(e) },
 	"issue.reopened":         staticDesc("reopened"),
 	"issue.commented":        staticDesc("added comment"),
+	"issue.comment_edited":   staticDesc("edited comment"),
 	"issue.labeled":          payloadDesc("labeled", "label"),
 	"issue.unlabeled":        payloadDesc("unlabeled", "label"),
 	"issue.linked":           func(e EventLogEntry) string { return "linked " + linkPayloadDesc(e) },

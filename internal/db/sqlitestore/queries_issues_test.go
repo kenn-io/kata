@@ -364,6 +364,49 @@ func TestCreateComment_EmitsEvent(t *testing.T) {
 	assert.NotEmpty(t, payload.CreatedAt)
 }
 
+func TestEditComment_UpdatesBodyOnlyAndEmitsEvent(t *testing.T) {
+	d, ctx, p, issue := setupTestIssue(t)
+
+	cmt, _, err := d.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "agent", Body: "token=leaked",
+	})
+	require.NoError(t, err)
+	originalAuthor := cmt.Author
+	originalCreatedAt := cmt.CreatedAt
+
+	updated, evt, changed, err := d.EditComment(ctx, db.EditCommentParams{
+		IssueID: issue.ID, CommentUID: cmt.UID, Actor: "redactor", Body: "[redacted]",
+	})
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, cmt.ID, updated.ID)
+	assert.Equal(t, cmt.UID, updated.UID)
+	assert.Equal(t, originalAuthor, updated.Author)
+	assert.Equal(t, originalCreatedAt, updated.CreatedAt)
+	assert.Equal(t, "[redacted]", updated.Body)
+	require.NotNil(t, evt)
+	assert.Equal(t, "issue.comment_edited", evt.Type)
+	assert.Equal(t, "redactor", evt.Actor)
+	assert.Equal(t, p.UID, evt.ProjectUID)
+	require.NotNil(t, evt.IssueUID)
+	assert.Equal(t, issue.UID, *evt.IssueUID)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(evt.Payload), &payload))
+	assert.Equal(t, cmt.UID, payload["comment_uid"])
+	assert.Equal(t, "[redacted]", payload["body"])
+	assert.NotEmpty(t, payload["edited_at"])
+	assert.NotContains(t, payload, "author")
+	assert.NotContains(t, payload, "created_at")
+
+	comments, err := d.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "[redacted]", comments[0].Body)
+	assert.Equal(t, originalAuthor, comments[0].Author)
+	assert.Equal(t, originalCreatedAt, comments[0].CreatedAt)
+}
+
 func TestCloseIssue_SetsStatusAndEmitsEvent(t *testing.T) {
 	d, ctx, _, issue := setupTestIssue(t)
 

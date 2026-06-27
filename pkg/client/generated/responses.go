@@ -217,6 +217,10 @@ type CreateCommentResponse = CommentResponseBody
 
 type CreateCommentErrorResponse = ErrorEnvelope
 
+type EditCommentResponse = CommentResponseBody
+
+type EditCommentErrorResponse = ErrorEnvelope
+
 type AddLabelResponse = AddLabelResponseBody
 
 type AddLabelErrorResponse = ErrorEnvelope
@@ -688,6 +692,13 @@ type CreateCommentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateCommentResponse
+}
+
+type EditCommentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *EditCommentResponse
 }
 
 type AddLabelResp struct {

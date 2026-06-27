@@ -320,7 +320,9 @@ For federated projects, ordinary edits of existing issues are local-first and
 converge by LWW. Creating new issues is also local-first. A lease is optional
 coordination: when another holder has a live lease on an affected existing
 issue, non-comment mutations are denied until the lease is released or expires.
-Comments bypass leases because they are append-only.
+Comment creation and comment body edits bypass leases because they remain
+comment-level collaboration and maintenance actions rather than leased issue
+work.
 
 Spokes refresh cached lease state before checking exclusivity when online.
 When offline, cached hard leases can still be used as a continuity hint, but
@@ -572,7 +574,8 @@ preserve. Ordinary edits are therefore always local-first and converge by LWW. A
 lease adds only temporary exclusivity against *conflicting* non-comment work by
 another holder while it is live — the hub guarantees at most one live holder.
 Unleased work is normal and is never a violation; pending or expired leases do
-not block edits; and comments always pass because they are append-only.
+not block edits; and comment creation or body edits always pass as comment-level
+work.
 
 Because the hub cannot reject a mutation that already happened offline, it does
 not try to. When pushed work conflicts with another holder's live lease the hub

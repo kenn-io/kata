@@ -18,8 +18,9 @@ idempotency keys with fingerprints, structured error envelopes, and no implicit
 never silently writes into the wrong namespace.
 
 **Auditability.** Every state change appends to an immutable event log with the
-actor recorded. Comments are append-only. Deletion has a reversible soft tier
-and an irreversible hard tier, each gated behind explicit confirmation.
+actor recorded. Comments can be appended and body-edited while preserving their
+identity and original attribution. Deletion has a reversible soft tier and an
+irreversible hard tier, each gated behind explicit confirmation.
 
 **A small, sharp surface.** Issue lifecycle, three relationship types
 (`parent`, `blocks`, `related`, with `blocked_by` as the inverse of `blocks`),

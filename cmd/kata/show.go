@@ -79,8 +79,8 @@ func newShowCmd() *cobra.Command {
 					return err
 				}
 				for _, c := range b.Comments {
-					if _, err := fmt.Fprintf(out, "%s: %s\n",
-						textsafe.Line(c.Author), textsafe.Block(c.Body)); err != nil {
+					if _, err := fmt.Fprintf(out, "%s %s: %s\n",
+						textsafe.Line(c.UID), textsafe.Line(c.Author), textsafe.Block(c.Body)); err != nil {
 						return err
 					}
 				}
@@ -128,6 +128,7 @@ type showResponseForCLI struct {
 		Priority *int64  `json:"priority"`
 	} `json:"issue"`
 	Comments []struct {
+		UID       string `json:"uid"`
 		Author    string `json:"author"`
 		Body      string `json:"body"`
 		CreatedAt string `json:"created_at"`
@@ -192,6 +193,7 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject string) er
 		}
 		for _, c := range b.Comments {
 			if err := writeAgentKVRow(w,
+				agentRowField("uid", c.UID),
 				agentRowField("author", c.Author),
 				agentRowField("created_at", c.CreatedAt),
 			); err != nil {

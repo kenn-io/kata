@@ -277,6 +277,9 @@ type ClientInterface interface {
 	CreateComment(ctx context.Context, options *CreateCommentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateCommentResponse, error)
 	CreateCommentWithResponse(ctx context.Context, options *CreateCommentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateCommentResp, error)
 
+	EditComment(ctx context.Context, options *EditCommentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EditCommentResponse, error)
+	EditCommentWithResponse(ctx context.Context, options *EditCommentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EditCommentResp, error)
+
 	AddLabel(ctx context.Context, options *AddLabelRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddLabelResponse, error)
 	AddLabelWithResponse(ctx context.Context, options *AddLabelRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddLabelResp, error)
 
@@ -3736,6 +3739,69 @@ func (c *Client) CreateComment(ctx context.Context, options *CreateCommentReques
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/comments")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) EditComment(ctx context.Context, options *EditCommentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EditCommentResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/comments/{comment_ref}",
+		Method:      "PATCH",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*EditCommentResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(EditCommentErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "EditCommentErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(EditCommentResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "EditCommentResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/comments/{comment_ref}")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

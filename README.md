@@ -88,7 +88,7 @@ overwriting the rest of either file.
   state lives in SQLite under `KATA_HOME`; your repo commits only a small,
   secret-free `.kata.toml`.
 - **Auditable by design.** Closing an issue is an explicit completion claim with
-  a reason, message, evidence, and actor attribution, on top of append-only
+  a reason, message, evidence, and actor attribution, on top of editable
   comments and durable events.
 
 ## How kata compares

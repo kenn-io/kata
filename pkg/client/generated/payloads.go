@@ -56,6 +56,8 @@ type UnassignIssueBody = UnassignRequestBody
 
 type CreateCommentBody = CommentRequestBody
 
+type EditCommentBody = EditCommentRequestBody
+
 type AddLabelBody = AddLabelRequestBody
 
 type AcquireIssueLeaseBody = ClaimActionBody

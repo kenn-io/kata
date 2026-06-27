@@ -102,6 +102,20 @@ If you build against this schema and hit a gap, please open an issue — the
 contract is meant to be useful to external clients, and feedback shapes how far
 the compatibility guarantees are taken.
 
+## Comment Endpoints
+
+Comments can be appended with `POST
+/api/v1/projects/{project_id}/issues/{ref}/comments` and edited in place with
+`PATCH /api/v1/projects/{project_id}/issues/{ref}/comments/{comment_ref}`.
+Use the comment UID as `comment_ref`; numeric comment IDs are local storage
+artifacts.
+
+Editing a comment overwrites the current comment body while preserving the
+original author, UID, creation time, and thread position. This is the supported
+primitive for redacting comment text before enrolling a project in federation.
+It is not a purge mechanism for data that has already crossed into another
+federated event log.
+
 ## Issue Sync Endpoints
 
 Issue sync endpoints are project-scoped and provider-qualified. They configure
@@ -199,7 +213,7 @@ The shared response body contains:
 Synced issues are GitHub-owned for title, body, state, labels, owner, and
 imported GitHub comments. API clients should treat those fields as read-mostly
 in kata: kata does not write back to GitHub, and newer GitHub updates can
-overwrite local edits to those fields.
+overwrite local issue or comment edits to those fields.
 
 V1 does not support GitHub write-back, timeline events, pull requests, deleted
 or transferred issue propagation, edited or deleted comment propagation, or

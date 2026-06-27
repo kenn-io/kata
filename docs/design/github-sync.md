@@ -125,8 +125,8 @@ GitHub sync v1 intentionally excludes several features:
   filtered out.
 - No propagation for deleted or transferred GitHub issues. Imported issues can
   remain in kata until a future reconciliation feature exists.
-- No propagation for edited or deleted GitHub comments. Imported comments are
-  append-only.
+- No propagation for edited or deleted GitHub comments. Local edits to imported
+  comment bodies are not written back to GitHub.
 - No multiple external issue sources per kata project.
 - No co-assignee fan-out. Only the first GitHub assignee maps to the kata owner.
 

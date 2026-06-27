@@ -240,6 +240,11 @@ func applyEvent(e db.Event, totals, grand *api.DigestTotals, acc *issueAccum) {
 		if acc != nil {
 			acc.Edited = true
 		}
+	case "issue.comment_edited":
+		bump(&totals.Edited, &grand.Edited)
+		if acc != nil {
+			acc.Edited = true
+		}
 	case "issue.assigned":
 		bump(&totals.Assigned, &grand.Assigned)
 		if acc != nil {

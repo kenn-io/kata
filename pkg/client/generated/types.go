@@ -879,6 +879,15 @@ type DigestTotals struct {
 
 type DisableIssueSyncRequestBody = map[string]any
 
+type EditCommentRequestBody struct {
+	Actor string `json:"actor" validate:"required"`
+	Body  string `json:"body" validate:"required"`
+}
+
+func (e EditCommentRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(e))
+}
+
 type EditIssueRequestBody struct {
 	Actor         string      `json:"actor" validate:"required"`
 	Body          *string     `json:"body,omitempty"`

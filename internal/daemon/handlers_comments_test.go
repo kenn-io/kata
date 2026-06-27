@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,28 @@ func TestCommentEndpoint_AppendsAndEmitsEvent(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode, string(bs))
 	assert.Contains(t, string(bs), `"body":"first comment"`)
 	assert.Contains(t, string(bs), `"type":"issue.commented"`)
+}
+
+func TestCommentEndpoint_EditsCommentAndEmitsEvent(t *testing.T) {
+	_, ts, pid, num := bootstrapProjectWithIssue(t)
+
+	resp, bs := postJSON(t, ts, issueURL(pid, num, "comments"),
+		map[string]any{"actor": "agent", "body": "token=leaked"})
+	require.Equal(t, 200, resp.StatusCode, string(bs))
+	var created struct {
+		Comment struct {
+			UID string `json:"uid"`
+		} `json:"comment"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &created))
+	require.NotEmpty(t, created.Comment.UID)
+
+	editResp, editBS := patchJSON(t, ts, issueURL(pid, num, "comments/"+created.Comment.UID),
+		map[string]any{"actor": "redactor", "body": "[redacted]"})
+	require.Equal(t, 200, editResp.StatusCode, string(editBS))
+	assert.Contains(t, string(editBS), `"body":"[redacted]"`)
+	assert.Contains(t, string(editBS), `"type":"issue.comment_edited"`)
+	assert.NotContains(t, string(editBS), "token=leaked")
 }
 
 func TestActionsClose_ReopenRoundtrip(t *testing.T) {

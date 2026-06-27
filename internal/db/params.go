@@ -103,6 +103,14 @@ type CreateCommentParams struct {
 	Body    string
 }
 
+// EditCommentParams carries inputs for editing one existing comment body.
+type EditCommentParams struct {
+	IssueID    int64
+	CommentUID string
+	Actor      string
+	Body       string
+}
+
 // CloseThrottleReason values for CloseThrottledPayload.Reason. Sibling-burst
 // fires when an actor closes too many siblings under one parent in a short
 // window; duplicate-message fires when an actor reuses identical close prose

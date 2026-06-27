@@ -222,6 +222,10 @@ func (s *Store) DisableIssueSyncBinding(_ context.Context, _ int64) (db.IssueSyn
 	return db.IssueSyncBinding{}, ErrNotImplementedPhase3
 }
 
+func (s *Store) EditComment(_ context.Context, _ db.EditCommentParams) (db.Comment, *db.Event, bool, error) {
+	return db.Comment{}, nil, false, ErrNotImplementedPhase3
+}
+
 func (s *Store) EditIssue(_ context.Context, _ db.EditIssueParams) (db.Issue, *db.Event, bool, error) {
 	return db.Issue{}, nil, false, ErrNotImplementedPhase3
 }

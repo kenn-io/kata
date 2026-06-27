@@ -40,16 +40,9 @@ func newCommentCmd() *cobra.Command {
 		src.BodySet = cmd.Flags().Changed("body")
 		src.FileSet = cmd.Flags().Changed("body-file")
 
-		body, err := resolveBody(src, cmd.InOrStdin())
+		body, err := resolveCommentBody(cmd, src)
 		if err != nil {
-			code := ExitValidation
-			if strings.HasPrefix(err.Error(), "must pass exactly one of") {
-				code = ExitUsage
-			}
-			return &cliError{Message: err.Error(), Kind: kindForExit(code), ExitCode: code}
-		}
-		if strings.TrimSpace(body) == "" {
-			return &cliError{Message: "comment body is required (--body, --body-file, --body-stdin)", Kind: kindValidation, ExitCode: ExitValidation}
+			return err
 		}
 		ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
 		if err != nil {
@@ -88,7 +81,85 @@ func newCommentCmd() *cobra.Command {
 		}
 		return nil
 	}
+	cmd.AddCommand(newCommentEditCmd())
 	return cmd
+}
+
+func newCommentEditCmd() *cobra.Command {
+	var src BodySources
+	cmd := &cobra.Command{
+		Use:   "edit <issue-ref> <comment-uid>",
+		Short: "edit a comment body",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			src.BodySet = cmd.Flags().Changed("body")
+			src.FileSet = cmd.Flags().Changed("body-file")
+			body, err := resolveCommentBody(cmd, src)
+			if err != nil {
+				return err
+			}
+			commentRef := strings.TrimSpace(args[1])
+			if commentRef == "" {
+				return &cliError{Message: "comment uid is required", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			ctx, baseURL, pid, issue, err := resolveIssueRefForCommand(cmd, args[0])
+			if err != nil {
+				return err
+			}
+			actor, _ := resolveActor(ctx, flags.As, nil)
+			client, err := httpClientFor(ctx, baseURL)
+			if err != nil {
+				return err
+			}
+			status, bs, err := httpDoJSON(ctx, client, http.MethodPatch,
+				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/comments/%s",
+					baseURL, pid, url.PathEscape(issue.RefForAPI), url.PathEscape(commentRef)),
+				map[string]any{"actor": actor, "body": body})
+			if err != nil {
+				return err
+			}
+			if status >= 400 {
+				return apiErrFromBody(status, bs)
+			}
+			switch currentOutputMode() {
+			case outputJSON:
+				var buf bytes.Buffer
+				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+					return err
+				}
+				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+				return err
+			case outputAgent:
+				return printAgentMutation(cmd, "comment", bs, func(w io.Writer, _ agentIssueMutation) error {
+					return writeAgentField(w, "Comment", "edited")
+				})
+			}
+			if !flags.Quiet {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), "comment edited")
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&src.Body, "body", "m", "", "comment body")
+	cmd.Flags().StringVar(&src.File, "body-file", "", "read body from file")
+	cmd.Flags().BoolVar(&src.Stdin, "body-stdin", false, "read body from stdin")
+	return cmd
+}
+
+func resolveCommentBody(cmd *cobra.Command, src BodySources) (string, error) {
+	body, err := resolveBody(src, cmd.InOrStdin())
+	if err != nil {
+		code := ExitValidation
+		if strings.HasPrefix(err.Error(), "must pass exactly one of") {
+			code = ExitUsage
+		}
+		return "", &cliError{Message: err.Error(), Kind: kindForExit(code), ExitCode: code}
+	}
+	if strings.TrimSpace(body) == "" {
+		return "", &cliError{Message: "comment body is required (--body, --body-file, --body-stdin)", Kind: kindValidation, ExitCode: ExitValidation}
+	}
+	return body, nil
 }
 
 type commentRelationshipFlags struct {

@@ -79,7 +79,7 @@ Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
 -   __Auditable by design__
 
     Closing an issue is an explicit completion claim with a reason, message,
-    evidence, and actor attribution, on top of append-only comments and durable
+    evidence, and actor attribution, on top of editable comments and durable
     events.
 
 </div>

@@ -118,6 +118,8 @@ Comment:
 
 ```sh
 kata comment <ref> [--body TEXT | --body-file PATH | --body-stdin]
+kata comment edit <ref> <comment-uid> \
+  [--body TEXT | --body-file PATH | --body-stdin]
 ```
 
 Close:
@@ -216,8 +218,8 @@ re-enabled locally.
 
 Synced issues are GitHub-owned for title, body, state, labels, owner, and
 imported GitHub comments. Treat those fields as read-mostly in kata: local
-edits are not written back to GitHub and can be overwritten by newer GitHub
-state. Only the first GitHub assignee maps to the kata owner.
+issue or comment edits are not written back to GitHub and can be overwritten by
+newer GitHub state. Only the first GitHub assignee maps to the kata owner.
 
 `disable` stops polling but preserves the binding and import mappings.
 `status` reports the current binding and last sync outcome. `once` runs an

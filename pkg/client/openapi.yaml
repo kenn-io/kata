@@ -686,6 +686,17 @@ components:
     DisableIssueSyncRequestBody:
       additionalProperties: false
       type: object
+    EditCommentRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        body:
+          type: string
+      required:
+        - actor
+        - body
+      type: object
     EditIssueRequestBody:
       additionalProperties: false
       properties:
@@ -4786,6 +4797,45 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CommentRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommentResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/comments/{comment_ref}:
+    patch:
+      operationId: editComment
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: comment_ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditCommentRequestBody"
         required: true
       responses:
         "200":

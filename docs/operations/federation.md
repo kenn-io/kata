@@ -555,7 +555,9 @@ For federated projects, ordinary issue edits are local-first and converge by
 LWW. Creating new issues also stays local-first. A lease is optional
 coordination: when another holder has a live lease on an affected existing
 issue, non-comment mutations are denied until the lease is released or expires.
-Comments bypass leases because they are append-only.
+Comment creation and comment body edits bypass leases because they remain
+comment-level collaboration and maintenance actions rather than leased issue
+work.
 
 Spokes refresh cached lease state before checking exclusivity when online.
 When offline, cached hard leases can still be used as a continuity hint, but

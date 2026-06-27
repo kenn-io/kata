@@ -290,3 +290,18 @@ func TestFold_CommentDuplicateKeepsFirstAndWarns(t *testing.T) {
 	assert.Equal(t, "first", got.Comments["comment-1"].Body)
 	require.Len(t, got.Warnings, 1)
 }
+
+func TestFold_CommentEditOverwritesBodyOnly(t *testing.T) {
+	events := []FoldEvent{
+		testEvent("issue.created", 1, `{"uid":"issue-1","short_id":"abcd","title":"t","body":"","author":"agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
+		testEvent("issue.commented", 2, `{"comment_uid":"comment-1","author":"agent","body":"token=leaked","created_at":"2026-05-23T12:00:01.000Z"}`),
+		testEvent("issue.comment_edited", 3, `{"comment_uid":"comment-1","body":"[redacted]","edited_at":"2026-05-23T12:00:02.000Z"}`),
+	}
+
+	got := FoldEvents(events)
+	comment := got.Comments["comment-1"]
+	assert.Equal(t, "agent", comment.Author)
+	assert.Equal(t, "[redacted]", comment.Body)
+	assert.Equal(t, "2026-05-23T12:00:01.000Z", comment.CreatedAt)
+	assert.Empty(t, got.Warnings)
+}

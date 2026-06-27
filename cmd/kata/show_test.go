@@ -62,7 +62,7 @@ func TestShow_AgentOutputRendersIssueBodyLabelsAndComments(t *testing.T) {
 	assert.Contains(t, out, "Labels: bug,safari\n")
 	assert.Contains(t, out, "Priority: 2\n")
 	assert.Contains(t, out, "Body:\n```text\nSafari can double-submit the callback.\n```\n")
-	assert.Regexp(t, regexp.MustCompile(`(?m)^- author=tester created_at=[^ \n]+$`), out)
+	assert.Regexp(t, regexp.MustCompile(`(?m)^- uid=[0-9A-HJKMNP-TV-Z]{26} author=tester created_at=[^ \n]+$`), out)
 	assert.Contains(t, out, "\n```text\nReproduced on macOS.\n```")
 	assert.NotContains(t, out, "Owner:")
 }

@@ -250,6 +250,16 @@ func (c CreateCommentPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type EditCommentPath struct {
+	ProjectID  int64  `json:"project_id"`
+	Ref        string `json:"ref" validate:"required"`
+	CommentRef string `json:"comment_ref" validate:"required"`
+}
+
+func (e EditCommentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(e))
+}
+
 type AddLabelPath struct {
 	ProjectID int64  `json:"project_id"`
 	Ref       string `json:"ref" validate:"required"`

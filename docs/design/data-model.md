@@ -33,7 +33,9 @@ State changes are not just stored; they are recorded. Three rules follow:
 - The **events** table is append-only and is the authoritative record of every
   state change. Each event carries the actor, a stable event `uid`, the
   originating instance UID, and a payload with the field-level diff.
-- The **comments** table is append-only — no edit, no delete short of purge.
+- The **comments** table stores current comment bodies. Comment bodies can be
+  edited in place for redaction while preserving UID, author, and creation
+  time; there is no comment delete short of issue purge.
 - Issues themselves are mutable current-state rows, but every mutation emits an
   event, so the current row is always reconstructable from history.
 

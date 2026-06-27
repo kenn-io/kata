@@ -28,6 +28,27 @@ func TestComment_MessageShorthandAppendsToIssue(t *testing.T) {
 	assert.Equal(t, "looks good", issue.Comments[0].Body)
 }
 
+func TestComment_EditUpdatesExistingCommentByUID(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	short := createIssue(t, env, pid, "x")
+	runCLI(t, env, dir, "comment", short, "--body", "token=leaked")
+	issue := fetchIssueViaHTTPWithComments(t, env, pid, short)
+	require.Len(t, issue.Comments, 1)
+	commentUID := issue.Comments[0].UID
+	require.NotEmpty(t, commentUID)
+
+	out := runCLI(t, env, dir, "comment", "edit", short, commentUID, "--body", "[redacted]")
+	assert.True(t, strings.Contains(out, "comment edited") || strings.Contains(out, "comment"))
+
+	updated := fetchIssueViaHTTPWithComments(t, env, pid, short)
+	require.Len(t, updated.Comments, 1)
+	assert.Equal(t, commentUID, updated.Comments[0].UID)
+	assert.Equal(t, "[redacted]", updated.Comments[0].Body)
+	assert.NotContains(t, runCLI(t, env, dir, "show", short), "token=leaked")
+	assert.Contains(t, runCLI(t, env, dir, "show", short), commentUID)
+	assert.Contains(t, runCLI(t, env, dir, "--agent", "show", short), "uid="+commentUID)
+}
+
 func TestComment_RelationshipFlagSuggestsEditCommentComposition(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)

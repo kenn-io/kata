@@ -997,6 +997,34 @@ var readCreatedComment = func(ctx context.Context, d *Store, commentID int64) (d
 	return c, nil
 }
 
+func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, commentUID string) (db.Comment, error) {
+	var c db.Comment
+	err := tx.QueryRowContext(ctx,
+		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ? AND uid = ?`,
+		issueID, commentUID).Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.Comment{}, db.ErrNotFound
+	}
+	if err != nil {
+		return db.Comment{}, fmt.Errorf("lookup comment: %w", err)
+	}
+	return c, nil
+}
+
+func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment, error) {
+	var c db.Comment
+	err := tx.QueryRowContext(ctx,
+		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE id = ?`,
+		commentID).Scan(&c.ID, &c.UID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.Comment{}, db.ErrNotFound
+	}
+	if err != nil {
+		return db.Comment{}, fmt.Errorf("read comment: %w", err)
+	}
+	return c, nil
+}
+
 // CreateComment appends a comment + issue.commented event in one tx, bumping
 // issues.updated_at.
 func (d *Store) CreateComment(ctx context.Context, p db.CreateCommentParams) (db.Comment, db.Event, error) {
@@ -1090,6 +1118,91 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (in
 		return 0, db.Event{}, err
 	}
 	return commentID, evt, nil
+}
+
+// EditComment overwrites one comment body in place and emits
+// issue.comment_edited. Author and created_at are preserved so redaction keeps
+// the thread position and attribution intact.
+func (d *Store) EditComment(ctx context.Context, p db.EditCommentParams) (db.Comment, *db.Event, bool, error) {
+	return retryWrite3(ctx, d, func() (db.Comment, *db.Event, bool, error) {
+		return d.editComment(ctx, p)
+	})
+}
+
+func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Comment, *db.Event, bool, error) {
+	p.CommentUID = strings.TrimSpace(p.CommentUID)
+	if p.CommentUID == "" {
+		return db.Comment{}, nil, false, db.ErrNotFound
+	}
+	if strings.TrimSpace(p.Body) == "" {
+		return db.Comment{}, nil, false, fmt.Errorf("comment body is required")
+	}
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.Comment{}, nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	issue, projectName, err := lookupIssueForEvent(ctx, tx, p.IssueID)
+	if err != nil {
+		return db.Comment{}, nil, false, err
+	}
+	actor, err := d.effectiveLocalMutationActorTx(ctx, tx, issue.ProjectID, p.Actor)
+	if err != nil {
+		return db.Comment{}, nil, false, err
+	}
+	comment, err := commentByUIDForIssueTx(ctx, tx, p.IssueID, p.CommentUID)
+	if err != nil {
+		return db.Comment{}, nil, false, err
+	}
+	if comment.Body == p.Body {
+		if err := tx.Commit(); err != nil {
+			return db.Comment{}, nil, false, err
+		}
+		return comment, nil, false, nil
+	}
+
+	editedAt := nowTimestamp()
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE comments SET body = ? WHERE id = ?`, p.Body, comment.ID); err != nil {
+		return db.Comment{}, nil, false, fmt.Errorf("update comment: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE issues SET updated_at = ? WHERE id = ?`, editedAt, p.IssueID); err != nil {
+		return db.Comment{}, nil, false, fmt.Errorf("touch issue: %w", err)
+	}
+	payloadBytes, err := json.Marshal(struct {
+		CommentUID string `json:"comment_uid"`
+		Body       string `json:"body"`
+		EditedAt   string `json:"edited_at"`
+	}{
+		CommentUID: comment.UID,
+		Body:       p.Body,
+		EditedAt:   editedAt,
+	})
+	if err != nil {
+		return db.Comment{}, nil, false, fmt.Errorf("marshal comment edit payload: %w", err)
+	}
+	evt, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID:   issue.ProjectID,
+		ProjectName: projectName,
+		IssueID:     &issue.ID,
+		Type:        "issue.comment_edited",
+		Actor:       actor,
+		Payload:     string(payloadBytes),
+		CreatedAt:   editedAt,
+	})
+	if err != nil {
+		return db.Comment{}, nil, false, err
+	}
+	updated, err := commentByIDTx(ctx, tx, comment.ID)
+	if err != nil {
+		return db.Comment{}, nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.Comment{}, nil, false, err
+	}
+	return updated, &evt, true, nil
 }
 
 // CommentsByIssue returns every comment on issueID in chronological order

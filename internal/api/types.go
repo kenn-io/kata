@@ -582,6 +582,17 @@ type CommentRequest struct {
 	}
 }
 
+// EditCommentRequest is PATCH /api/v1/projects/{id}/issues/{ref}/comments/{comment_ref}.
+type EditCommentRequest struct {
+	ProjectID  int64  `path:"project_id" required:"true"`
+	Ref        string `path:"ref" required:"true"`
+	CommentRef string `path:"comment_ref" required:"true"`
+	Body       struct {
+		Actor string `json:"actor" required:"true"`
+		Body  string `json:"body" required:"true"`
+	}
+}
+
 // CommentResponse mirrors MutationResponse but adds the new comment row.
 type CommentResponse struct {
 	Body struct {

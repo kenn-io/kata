@@ -563,6 +563,7 @@ type IssueResponse struct {
 		To   linkPeerTest `json:"to"`
 	} `json:"links"`
 	Comments []struct {
+		UID    string `json:"uid"`
 		Author string `json:"author"`
 		Body   string `json:"body"`
 	} `json:"comments"`

@@ -808,6 +808,54 @@ func TestAdoptProjectIntoFederationPreservesSnapshotPayloadAuthors(t *testing.T)
 	assert.Equal(t, "bob", payload.Comments[0].Author)
 }
 
+func TestAdoptProjectIntoFederationSnapshotsEditedCommentWithoutLeakedBody(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "redaction target",
+		Author:    "agent",
+	})
+	require.NoError(t, err)
+	comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID,
+		Author:  "agent",
+		Body:    "token=leaked",
+	})
+	require.NoError(t, err)
+	_, _, changed, err := d.EditComment(ctx, db.EditCommentParams{
+		IssueID: issue.ID, CommentUID: comment.UID, Actor: "redactor", Body: "[redacted]",
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	_, err = d.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID:            p.ID,
+		HubURL:               "http://hub:7373",
+		HubProjectID:         42,
+		HubProjectUID:        newTestUID(t),
+		ReplayHorizonEventID: 10,
+		Actor:                "bound-actor",
+	})
+	require.NoError(t, err)
+
+	events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
+	require.NoError(t, err)
+	var snapshot *db.Event
+	for i := range events {
+		assert.NotContains(t, events[i].Payload, "token=leaked")
+		assert.NotEqual(t, "issue.commented", events[i].Type)
+		assert.NotEqual(t, "issue.comment_edited", events[i].Type)
+		if events[i].Type == "issue.snapshot" {
+			snapshot = &events[i]
+		}
+	}
+	require.NotNil(t, snapshot)
+	payload := unmarshalPayload[federationSnapshotPayload](t, snapshot.Payload)
+	require.Len(t, payload.Comments, 1)
+	assert.Equal(t, comment.UID, payload.Comments[0].CommentUID)
+	assert.Equal(t, "[redacted]", payload.Comments[0].Body)
+}
+
 func TestFederationBindingPhase1StyleDefaultsPushState(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 
@@ -1557,6 +1605,35 @@ func TestIngestFederationEvents(t *testing.T) {
 		issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
 		assert.Equal(t, "spoke work", issue.Title)
+	})
+
+	t.Run("accepts comment edit and updates projection", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: p.ID,
+			Title:     "known",
+			Author:    "agent",
+		})
+		require.NoError(t, err)
+		comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: issue.ID,
+			Author:  "agent",
+			Body:    "token=leaked",
+		})
+		require.NoError(t, err)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issue.UID, nil,
+			"issue.comment_edited", 100,
+			`{"comment_uid":"`+comment.UID+`","body":"[redacted]","edited_at":"2026-05-23T12:00:01.000Z"}`)
+
+		got, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, ev))
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, got.Accepted)
+		comments, err := d.CommentsByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		require.Len(t, comments, 1)
+		assert.Equal(t, comment.UID, comments[0].UID)
+		assert.Equal(t, "[redacted]", comments[0].Body)
 	})
 
 	t.Run("accepts stale project name after hub rename", func(t *testing.T) {

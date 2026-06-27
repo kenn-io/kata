@@ -489,7 +489,7 @@ func validateFederationProjectEvent(
 	case "issue.updated", "issue.assigned", "issue.unassigned",
 		"issue.priority_set", "issue.priority_cleared",
 		"issue.closed", "issue.reopened", "issue.soft_deleted", "issue.restored",
-		"issue.commented", "issue.labeled", "issue.unlabeled",
+		"issue.commented", "issue.comment_edited", "issue.labeled", "issue.unlabeled",
 		"issue.linked", "issue.unlinked", "issue.links_changed", "issue.metadata_updated":
 		if issueUID == "" {
 			return fmt.Errorf("%w: %s missing issue uid", db.ErrFederationIngestValidation, ev.Type)

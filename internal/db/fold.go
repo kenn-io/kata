@@ -48,6 +48,8 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		p.applyRestored(e, payload)
 	case "issue.commented":
 		p.applyComment(e, payload)
+	case "issue.comment_edited":
+		p.applyCommentEdited(e, payload)
 	case "issue.labeled":
 		p.applyLabel(e, payload, true)
 	case "issue.unlabeled":
@@ -318,6 +320,24 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]json.RawMe
 	p.touchIssue(uid, createdAt)
 }
 
+func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json.RawMessage) {
+	commentUID, ok := stringValue(payload["comment_uid"])
+	if !ok || commentUID == "" {
+		return
+	}
+	body, ok := stringValue(payload["body"])
+	if !ok {
+		return
+	}
+	uid := issueUID(e, payload)
+	p.editCommentBody(commentUID, uid, body, clockOf(e))
+	editedAt := e.CreatedAt
+	if v, ok := stringValue(payload["edited_at"]); ok && v != "" {
+		editedAt = v
+	}
+	p.touchIssue(uid, editedAt)
+}
+
 func (p *FoldProjection) setComment(commentUID, issueUID, author, body, createdAt string, clock FoldClock) {
 	if commentUID == "" {
 		return
@@ -332,6 +352,22 @@ func (p *FoldProjection) setComment(commentUID, issueUID, author, body, createdA
 		}
 		return
 	}
+	p.Comments[commentUID] = comment
+}
+
+func (p *FoldProjection) editCommentBody(commentUID, issueUID, body string, clock FoldClock) {
+	if commentUID == "" {
+		return
+	}
+	comment, exists := p.Comments[commentUID]
+	if !exists {
+		comment = FoldComment{UID: commentUID, IssueUID: issueUID, Clock: clock}
+	}
+	if comment.IssueUID == "" {
+		comment.IssueUID = issueUID
+	}
+	comment.Body = body
+	comment.Clock = clock
 	p.Comments[commentUID] = comment
 }
 
