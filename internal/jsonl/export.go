@@ -1246,16 +1246,19 @@ func exportFederationEnrollments(
 	sourceSchemaVersion int,
 ) error {
 	type record struct {
-		ID                           int64   `json:"id"`
-		TokenHash                    string  `json:"token_hash"`
-		SpokeInstanceUID             string  `json:"spoke_instance_uid"`
-		ProjectID                    *int64  `json:"project_id,omitempty"`
-		Capabilities                 string  `json:"capabilities"`
-		Actor                        string  `json:"bound_actor,omitempty"`
-		AllowAdoptionSnapshotAuthors bool    `json:"allow_adoption_snapshot_authors,omitempty"`
-		CreatedAt                    string  `json:"created_at"`
-		UpdatedAt                    string  `json:"updated_at"`
-		RevokedAt                    *string `json:"revoked_at,omitempty"`
+		ID                                int64   `json:"id"`
+		TokenHash                         string  `json:"token_hash"`
+		SpokeInstanceUID                  string  `json:"spoke_instance_uid"`
+		ProjectID                         *int64  `json:"project_id,omitempty"`
+		Capabilities                      string  `json:"capabilities"`
+		Actor                             string  `json:"bound_actor,omitempty"`
+		AllowAdoptionSnapshotAuthors      bool    `json:"allow_adoption_snapshot_authors,omitempty"`
+		AdoptionBaselineOpen              bool    `json:"adoption_baseline_open,omitempty"`
+		AdoptionBaselineNextSourceEventID int64   `json:"adoption_baseline_next_source_event_id,omitempty"`
+		AdoptionBaselineEndSourceEventID  int64   `json:"adoption_baseline_end_source_event_id,omitempty"`
+		CreatedAt                         string  `json:"created_at"`
+		UpdatedAt                         string  `json:"updated_at"`
+		RevokedAt                         *string `json:"revoked_at,omitempty"`
 	}
 	actorSelect := `''`
 	if sourceSchemaVersion >= 13 {
@@ -1265,8 +1268,18 @@ func exportFederationEnrollments(
 	if sourceSchemaVersion >= 14 {
 		allowAdoptionSnapshotAuthorsSelect = `allow_adoption_snapshot_authors`
 	}
+	adoptionBaselineOpenSelect := `0`
+	adoptionBaselineNextSourceEventIDSelect := `0`
+	adoptionBaselineEndSourceEventIDSelect := `0`
+	if sourceSchemaVersion >= 22 {
+		adoptionBaselineOpenSelect = `adoption_baseline_open`
+		adoptionBaselineNextSourceEventIDSelect = `adoption_baseline_next_source_event_id`
+		adoptionBaselineEndSourceEventIDSelect = `adoption_baseline_end_source_event_id`
+	}
 	query := `SELECT id, token_hash, spoke_instance_uid, project_id, capabilities,
 	                 ` + actorSelect + `, ` + allowAdoptionSnapshotAuthorsSelect + `,
+	                 ` + adoptionBaselineOpenSelect + `, ` + adoptionBaselineNextSourceEventIDSelect + `,
+	                 ` + adoptionBaselineEndSourceEventIDSelect + `,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT)
 	          FROM federation_enrollments`
 	args := []any{}
@@ -1282,10 +1295,14 @@ func exportFederationEnrollments(
 	return scanRecords(rows, KindFederationEnrollment, enc, func(rows *sql.Rows) (record, error) {
 		var rec record
 		var allowAdoptionSnapshotAuthors int
+		var adoptionBaselineOpen int
 		err := rows.Scan(&rec.ID, &rec.TokenHash, &rec.SpokeInstanceUID, &rec.ProjectID,
-			&rec.Capabilities, &rec.Actor, &allowAdoptionSnapshotAuthors, &rec.CreatedAt,
+			&rec.Capabilities, &rec.Actor, &allowAdoptionSnapshotAuthors,
+			&adoptionBaselineOpen, &rec.AdoptionBaselineNextSourceEventID,
+			&rec.AdoptionBaselineEndSourceEventID, &rec.CreatedAt,
 			&rec.UpdatedAt, &rec.RevokedAt)
 		rec.AllowAdoptionSnapshotAuthors = allowAdoptionSnapshotAuthors != 0
+		rec.AdoptionBaselineOpen = adoptionBaselineOpen != 0
 		return rec, err
 	})
 }

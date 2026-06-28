@@ -583,13 +583,14 @@ type FederationIngestEvent struct {
 // FederationIngestParams is the all-or-nothing DB ingest boundary used by the
 // hub transport handler.
 type FederationIngestParams struct {
-	ProjectID                       int64
-	FederationEnrollmentID          int64
-	SpokeInstanceUID                string
-	BoundActor                      string
-	AllowSnapshotAuthorPreservation bool
-	AdoptionBaseline                string
-	Events                          []FederationIngestEvent
+	ProjectID                        int64
+	FederationEnrollmentID           int64
+	SpokeInstanceUID                 string
+	BoundActor                       string
+	AllowSnapshotAuthorPreservation  bool
+	AdoptionBaseline                 string
+	AdoptionBaselineEndSourceEventID int64
+	Events                           []FederationIngestEvent
 }
 
 // Federation adoption baseline markers describe whether an ingest batch is a

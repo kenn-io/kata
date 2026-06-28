@@ -1792,6 +1792,8 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 	require.NoError(t, err)
 	var requestSizes []int
 	var baselineStages []string
+	var baselineEndEventIDs []int64
+	var baselineLastEventIDs []int64
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -1799,7 +1801,10 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 			requestSizes = append(requestSizes, len(raw))
 			var body api.FederationIngestEventsRequestBody
 			require.NoError(t, json.Unmarshal(raw, &body))
+			require.NotEmpty(t, body.Events)
 			baselineStages = append(baselineStages, body.AdoptionBaseline)
+			baselineEndEventIDs = append(baselineEndEventIDs, body.AdoptionBaselineEndEventID)
+			baselineLastEventIDs = append(baselineLastEventIDs, body.Events[len(body.Events)-1].EventID)
 		}
 		req, err := http.NewRequestWithContext(r.Context(), r.Method, hub.URL+r.URL.RequestURI(), bytes.NewReader(raw)) //nolint:gosec // test proxy forwards only to the local httptest hub.
 		require.NoError(t, err)
@@ -1886,6 +1891,12 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 		assert.Equal(t, api.FederationAdoptionBaselineOpen, stage)
 	}
 	assert.Equal(t, api.FederationAdoptionBaselineComplete, baselineStages[len(baselineStages)-1])
+	require.Len(t, baselineEndEventIDs, len(baselineStages))
+	require.Len(t, baselineLastEventIDs, len(baselineStages))
+	terminalEndEventID := baselineLastEventIDs[len(baselineLastEventIDs)-1]
+	for _, endEventID := range baselineEndEventIDs {
+		assert.Equal(t, terminalEndEventID, endEventID)
+	}
 
 	for _, issueUID := range issueUIDs {
 		pushed, err := hub.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
@@ -2230,7 +2241,7 @@ func TestNextFederationPushIngestBatchRejectsOversizedAdoptionSnapshotBaseline(t
 				`","author":"historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
 	}
 
-	_, _, err := nextFederationPushIngestBatch(events)
+	_, _, _, err := nextFederationPushIngestBatch(events)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "adoption snapshot baseline")
@@ -2244,11 +2255,12 @@ func TestNextFederationPushIngestBatchMarksSingleSnapshotBaselineComplete(t *tes
 			`{"uid":"`+issueUID+`","short_id":"`+shortIDForSyncTest(issueUID)+`","title":"terminal","body":"","author":"historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
 	}
 
-	batch, adoptionBaseline, err := nextFederationPushIngestBatch(events)
+	batch, adoptionBaseline, adoptionBaselineEndEventID, err := nextFederationPushIngestBatch(events)
 
 	require.NoError(t, err)
 	require.Len(t, batch, 1)
 	assert.Equal(t, api.FederationAdoptionBaselineComplete, adoptionBaseline)
+	assert.Equal(t, int64(1), adoptionBaselineEndEventID)
 }
 
 func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {

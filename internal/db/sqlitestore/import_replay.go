@@ -487,11 +487,16 @@ func importFederationEnrollment(ctx context.Context, tx *sql.Tx, e *db.Federatio
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO federation_enrollments(
 		   id, token_hash, spoke_instance_uid, project_id, capabilities,
-		   bound_actor, allow_adoption_snapshot_authors, created_at, updated_at, revoked_at
+		   bound_actor, allow_adoption_snapshot_authors,
+		   adoption_baseline_open, adoption_baseline_next_source_event_id,
+		   adoption_baseline_end_source_event_id,
+		   created_at, updated_at, revoked_at
 		 )
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.TokenHash, e.SpokeInstanceUID, e.ProjectID, e.Capabilities,
-		actor, e.AllowAdoptionSnapshotAuthors, e.CreatedAt, e.UpdatedAt, e.RevokedAt)
+		actor, e.AllowAdoptionSnapshotAuthors, e.AdoptionBaselineOpen,
+		e.AdoptionBaselineNextSourceEventID, e.AdoptionBaselineEndSourceEventID,
+		e.CreatedAt, e.UpdatedAt, e.RevokedAt)
 	return wrapImportErr(db.ImportKindFederationEnrollment, err)
 }
 

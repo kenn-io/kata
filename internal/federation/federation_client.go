@@ -75,7 +75,8 @@ func (c *Client) IngestProjectEvents(
 
 // IngestProjectEventsOptions carries optional metadata for federation ingest.
 type IngestProjectEventsOptions struct {
-	AdoptionBaseline string
+	AdoptionBaseline           string
+	AdoptionBaselineEndEventID int64
 }
 
 // IngestProjectEventsWithOptions pushes local spoke events with optional
@@ -90,9 +91,10 @@ func (c *Client) IngestProjectEventsWithOptions(
 	err := c.postJSON(ctx,
 		fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProjectID),
 		api.FederationIngestEventsRequestBody{
-			SchemaVersion:    db.CurrentSchemaVersion(),
-			AdoptionBaseline: opts.AdoptionBaseline,
-			Events:           events,
+			SchemaVersion:              db.CurrentSchemaVersion(),
+			AdoptionBaseline:           opts.AdoptionBaseline,
+			AdoptionBaselineEndEventID: opts.AdoptionBaselineEndEventID,
+			Events:                     events,
 		}, &body)
 	return body, err
 }

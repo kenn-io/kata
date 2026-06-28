@@ -532,10 +532,11 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 		INSERT INTO federation_enrollments(
 			token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
 			allow_adoption_snapshot_authors, adoption_baseline_open,
-			adoption_baseline_next_source_event_id
+			adoption_baseline_next_source_event_id,
+			adoption_baseline_end_source_event_id
 		)
-		VALUES(?, ?, ?, ?, ?, 1, 1, 2)`,
-		tokenHash, "01HZZZZZZZZZZZZZZZZZZZZZ02", p.ID, "pull,push", "wesm")
+		VALUES(?, ?, ?, ?, ?, 1, 1, 2, 7)`,
+		tokenHash, "01HZZZZZZZZZZZZZZZZZZZZZ02", p.ID, "pull,push", "agent")
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -543,25 +544,32 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 	assert.Contains(t, buf.String(), tokenHash)
 	assert.NotContains(t, buf.String(), plaintextToken)
 	assert.Contains(t, buf.String(), `"allow_adoption_snapshot_authors":true`)
-	assert.NotContains(t, buf.String(), "adoption_baseline_open")
-	assert.NotContains(t, buf.String(), "adoption_baseline_next_source_event_id")
+	assert.Contains(t, buf.String(), `"adoption_baseline_open":true`)
+	assert.Contains(t, buf.String(), `"adoption_baseline_next_source_event_id":2`)
+	assert.Contains(t, buf.String(), `"adoption_baseline_end_source_event_id":7`)
 
 	dstDB := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
 
 	var gotHash, gotSpoke, gotCapabilities, gotActor string
 	var gotProjectID int64
-	var gotAdoptionMarker int
+	var gotAdoptionMarker, gotBaselineOpen int
+	var gotNextSourceEventID, gotEndSourceEventID int64
 	require.NoError(t, dstDB.QueryRowContext(ctx, `
 		SELECT token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
-		       allow_adoption_snapshot_authors
-		  FROM federation_enrollments`).Scan(&gotHash, &gotSpoke, &gotProjectID, &gotCapabilities, &gotActor, &gotAdoptionMarker))
+		       allow_adoption_snapshot_authors, adoption_baseline_open,
+		       adoption_baseline_next_source_event_id, adoption_baseline_end_source_event_id
+		  FROM federation_enrollments`).Scan(&gotHash, &gotSpoke, &gotProjectID, &gotCapabilities, &gotActor,
+		&gotAdoptionMarker, &gotBaselineOpen, &gotNextSourceEventID, &gotEndSourceEventID))
 	assert.Equal(t, tokenHash, gotHash)
 	assert.Equal(t, "01HZZZZZZZZZZZZZZZZZZZZZ02", gotSpoke)
 	assert.Equal(t, p.ID, gotProjectID)
 	assert.Equal(t, "pull,push", gotCapabilities)
-	assert.Equal(t, "wesm", gotActor)
+	assert.Equal(t, "agent", gotActor)
 	assert.Equal(t, 1, gotAdoptionMarker)
+	assert.Equal(t, 1, gotBaselineOpen)
+	assert.Equal(t, int64(2), gotNextSourceEventID)
+	assert.Equal(t, int64(7), gotEndSourceEventID)
 }
 
 // TestRoundtrip_IssueEnvelopeCarriesShortID pins spec §8.1: the JSONL issue

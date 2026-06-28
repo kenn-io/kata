@@ -300,9 +300,10 @@ type FederationIngestEventsRequest struct {
 
 // FederationIngestEventsRequestBody carries an all-or-nothing push batch.
 type FederationIngestEventsRequestBody struct {
-	SchemaVersion    int                             `json:"schema_version"`
-	AdoptionBaseline string                          `json:"adoption_baseline,omitempty"`
-	Events           []FederationIngestEventEnvelope `json:"events,omitempty"`
+	SchemaVersion              int                             `json:"schema_version"`
+	AdoptionBaseline           string                          `json:"adoption_baseline,omitempty"`
+	AdoptionBaselineEndEventID int64                           `json:"adoption_baseline_end_event_id,omitempty"`
+	Events                     []FederationIngestEventEnvelope `json:"events,omitempty"`
 }
 
 // Federation adoption baseline markers describe whether a push ingest request

@@ -168,6 +168,8 @@ func federationEnrollmentByIDTx(ctx context.Context, tx *sql.Tx, id int64) (db.F
 
 const federationEnrollmentSelect = `SELECT id, token_hash, spoke_instance_uid, project_id,
        capabilities, bound_actor, allow_adoption_snapshot_authors,
+       adoption_baseline_open, adoption_baseline_next_source_event_id,
+       adoption_baseline_end_source_event_id,
        created_at, updated_at, revoked_at
   FROM federation_enrollments`
 
@@ -176,10 +178,12 @@ func scanFederationEnrollment(r rowScanner) (db.FederationEnrollment, error) {
 		e         db.FederationEnrollment
 		projectID sql.NullInt64
 		allow     int
+		open      int
 		revokedAt sql.NullTime
 	)
 	err := r.Scan(&e.ID, &e.TokenHash, &e.SpokeInstanceUID, &projectID,
-		&e.Capabilities, &e.Actor, &allow,
+		&e.Capabilities, &e.Actor, &allow, &open,
+		&e.AdoptionBaselineNextSourceEventID, &e.AdoptionBaselineEndSourceEventID,
 		&e.CreatedAt, &e.UpdatedAt, &revokedAt)
 	if err == nil {
 		if projectID.Valid {
@@ -187,6 +191,7 @@ func scanFederationEnrollment(r rowScanner) (db.FederationEnrollment, error) {
 			e.ProjectID = &v
 		}
 		e.AllowAdoptionSnapshotAuthors = allow != 0
+		e.AdoptionBaselineOpen = open != 0
 		if revokedAt.Valid {
 			e.RevokedAt = &revokedAt.Time
 		}

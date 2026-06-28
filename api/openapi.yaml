@@ -1124,6 +1124,9 @@ components:
       properties:
         adoption_baseline:
           type: string
+        adoption_baseline_end_event_id:
+          format: int64
+          type: integer
         events:
           items:
             $ref: "#/components/schemas/FederationIngestEventEnvelope"

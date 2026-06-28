@@ -197,16 +197,19 @@ type FederationQuarantineExport struct {
 
 // FederationEnrollmentExport is one federation_enrollments row in export shape.
 type FederationEnrollmentExport struct {
-	ID                           int64   `json:"id"`
-	TokenHash                    string  `json:"token_hash"`
-	SpokeInstanceUID             string  `json:"spoke_instance_uid"`
-	ProjectID                    *int64  `json:"project_id,omitempty"`
-	Capabilities                 string  `json:"capabilities"`
-	Actor                        string  `json:"bound_actor,omitempty"`
-	AllowAdoptionSnapshotAuthors bool    `json:"allow_adoption_snapshot_authors,omitempty"`
-	CreatedAt                    string  `json:"created_at"`
-	UpdatedAt                    string  `json:"updated_at"`
-	RevokedAt                    *string `json:"revoked_at,omitempty"`
+	ID                                int64   `json:"id"`
+	TokenHash                         string  `json:"token_hash"`
+	SpokeInstanceUID                  string  `json:"spoke_instance_uid"`
+	ProjectID                         *int64  `json:"project_id,omitempty"`
+	Capabilities                      string  `json:"capabilities"`
+	Actor                             string  `json:"bound_actor,omitempty"`
+	AllowAdoptionSnapshotAuthors      bool    `json:"allow_adoption_snapshot_authors,omitempty"`
+	AdoptionBaselineOpen              bool    `json:"adoption_baseline_open,omitempty"`
+	AdoptionBaselineNextSourceEventID int64   `json:"adoption_baseline_next_source_event_id,omitempty"`
+	AdoptionBaselineEndSourceEventID  int64   `json:"adoption_baseline_end_source_event_id,omitempty"`
+	CreatedAt                         string  `json:"created_at"`
+	UpdatedAt                         string  `json:"updated_at"`
+	RevokedAt                         *string `json:"revoked_at,omitempty"`
 }
 
 // IssueClaimExport is one issue_claims row in export shape.

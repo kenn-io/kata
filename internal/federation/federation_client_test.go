@@ -75,11 +75,16 @@ func TestFederationClientIngestProjectEvents(t *testing.T) {
 
 	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	got, err := client.IngestProjectEvents(context.Background(), 42, events)
+	got, err := client.IngestProjectEventsWithOptions(context.Background(), 42, events, IngestProjectEventsOptions{
+		AdoptionBaseline:           api.FederationAdoptionBaselineOpen,
+		AdoptionBaselineEndEventID: 8,
+	})
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bearer hub-token", gotAuth)
 	assert.Equal(t, db.CurrentSchemaVersion(), gotBody.SchemaVersion)
+	assert.Equal(t, api.FederationAdoptionBaselineOpen, gotBody.AdoptionBaseline)
+	assert.Equal(t, int64(8), gotBody.AdoptionBaselineEndEventID)
 	require.Len(t, gotBody.Events, 1)
 	assert.Equal(t, events[0].EventID, gotBody.Events[0].EventID)
 	assert.Equal(t, events[0].EventUID, gotBody.Events[0].EventUID)

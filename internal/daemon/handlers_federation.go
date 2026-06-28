@@ -449,17 +449,18 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := validateFederationIngestSchemaVersion(in.Body.SchemaVersion); err != nil {
 			return nil, err
 		}
-		if err := validateFederationAdoptionBaseline(in.Body.AdoptionBaseline); err != nil {
+		if err := validateFederationAdoptionBaseline(in.Body.AdoptionBaseline, in.Body.AdoptionBaselineEndEventID); err != nil {
 			return nil, err
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
-			ProjectID:                       in.ProjectID,
-			FederationEnrollmentID:          principal.EnrollmentID,
-			SpokeInstanceUID:                principal.SpokeInstanceUID,
-			BoundActor:                      principal.Actor,
-			AllowSnapshotAuthorPreservation: principal.AllowAdoptionSnapshotAuthors,
-			AdoptionBaseline:                in.Body.AdoptionBaseline,
-			Events:                          federationIngestEventsToDB(in.Body.Events),
+			ProjectID:                        in.ProjectID,
+			FederationEnrollmentID:           principal.EnrollmentID,
+			SpokeInstanceUID:                 principal.SpokeInstanceUID,
+			BoundActor:                       principal.Actor,
+			AllowSnapshotAuthorPreservation:  principal.AllowAdoptionSnapshotAuthors,
+			AdoptionBaseline:                 in.Body.AdoptionBaseline,
+			AdoptionBaselineEndSourceEventID: in.Body.AdoptionBaselineEndEventID,
+			Events:                           federationIngestEventsToDB(in.Body.Events),
 		})
 		if err != nil {
 			return nil, federationIngestError(err)
@@ -496,9 +497,19 @@ func validateFederationIngestSchemaVersion(schemaVersion int) error {
 	return nil
 }
 
-func validateFederationAdoptionBaseline(adoptionBaseline string) error {
+func validateFederationAdoptionBaseline(adoptionBaseline string, endEventID int64) error {
 	switch adoptionBaseline {
-	case "", api.FederationAdoptionBaselineOpen, api.FederationAdoptionBaselineComplete:
+	case "":
+		if endEventID != 0 {
+			return api.NewError(http.StatusBadRequest, "invalid_adoption_baseline",
+				"federation ingest adoption_baseline_end_event_id requires adoption_baseline", "", nil)
+		}
+		return nil
+	case api.FederationAdoptionBaselineOpen, api.FederationAdoptionBaselineComplete:
+		if endEventID <= 0 {
+			return api.NewError(http.StatusBadRequest, "invalid_adoption_baseline",
+				"federation ingest adoption_baseline_end_event_id must be positive", "", nil)
+		}
 		return nil
 	default:
 		return api.NewError(http.StatusBadRequest, "invalid_adoption_baseline",

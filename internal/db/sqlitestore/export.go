@@ -453,6 +453,8 @@ func (d *Store) ExportFederationQuarantine(ctx context.Context, f db.ExportFilte
 func (d *Store) ExportFederationEnrollments(ctx context.Context, f db.ExportFilter) iter.Seq2[db.FederationEnrollmentExport, error] {
 	query := `SELECT id, token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
 	                 allow_adoption_snapshot_authors,
+	                 adoption_baseline_open, adoption_baseline_next_source_event_id,
+	                 adoption_baseline_end_source_event_id,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT)
 	          FROM federation_enrollments`
 	query, args := withProjectIDFilter(query, f, "project_id")
@@ -461,12 +463,15 @@ func (d *Store) ExportFederationEnrollments(ctx context.Context, f db.ExportFilt
 		func(rows *sql.Rows) (db.FederationEnrollmentExport, error) {
 			var rec db.FederationEnrollmentExport
 			var allow int
+			var baselineOpen int
 			if err := rows.Scan(&rec.ID, &rec.TokenHash, &rec.SpokeInstanceUID, &rec.ProjectID,
-				&rec.Capabilities, &rec.Actor, &allow,
+				&rec.Capabilities, &rec.Actor, &allow, &baselineOpen,
+				&rec.AdoptionBaselineNextSourceEventID, &rec.AdoptionBaselineEndSourceEventID,
 				&rec.CreatedAt, &rec.UpdatedAt, &rec.RevokedAt); err != nil {
 				return db.FederationEnrollmentExport{}, scanError("federation_enrollment", err)
 			}
 			rec.AllowAdoptionSnapshotAuthors = allow != 0
+			rec.AdoptionBaselineOpen = baselineOpen != 0
 			return rec, nil
 		})
 }
