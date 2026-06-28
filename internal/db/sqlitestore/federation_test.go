@@ -1904,6 +1904,36 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assertIngestedEventCount(ctx, t, d, p.ID, 0)
 	})
 
+	t.Run("rejects bound actor issue.created embedded link author mismatch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		peerUID := newTestUID(t)
+		peer := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &peerUID, nil,
+			"issue.created", 100,
+			`{"uid":"`+peerUID+`","short_id":"`+shortID(peerUID)+`","title":"peer","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		peer.Actor = "bound-agent"
+		peer.ContentHash = remoteEventHash(t, peer)
+		issueUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.created", 101,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"bad","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+peerUID+`","author":"spoofed-agent"}]}`)
+		ev.Actor = "bound-agent"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "bound-agent",
+			Events: []db.FederationIngestEvent{
+				{SourceEventID: 1, Event: peer},
+				{SourceEventID: 2, Event: ev},
+			},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assertIngestedEventCount(ctx, t, d, p.ID, 0)
+	})
+
 	t.Run("rejects bound actor issue.commented payload author mismatch", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -2028,6 +2058,52 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		require.Len(t, comments, 1)
 		assert.Equal(t, commentUID, comments[0].UID)
 		assert.Equal(t, "historical-commenter", comments[0].Author)
+	})
+
+	t.Run("allows bound actor issue.snapshot bootstrap historical link author", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token:                        "snapshot-adoption-link-token",
+			SpokeInstanceUID:             spokeUID,
+			ProjectID:                    &p.ID,
+			Capabilities:                 "push",
+			Actor:                        "bound-agent",
+			AllowAdoptionSnapshotAuthors: true,
+		})
+		require.NoError(t, err)
+		peerUID := newTestUID(t)
+		subjectUID := newTestUID(t)
+		peer := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &peerUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+peerUID+`","short_id":"`+shortID(peerUID)+`","title":"peer","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		peer.Actor = "bound-agent"
+		peer.ContentHash = remoteEventHash(t, peer)
+		subject := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &subjectUID, nil,
+			"issue.snapshot", 101,
+			`{"uid":"`+subjectUID+`","short_id":"`+shortID(subjectUID)+`","title":"subject","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+peerUID+`","author":"historical-linker"}]}`)
+		subject.Actor = "bound-agent"
+		subject.ContentHash = remoteEventHash(t, subject)
+
+		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                       p.ID,
+			FederationEnrollmentID:          created.Enrollment.ID,
+			SpokeInstanceUID:                spokeUID,
+			BoundActor:                      "bound-agent",
+			AllowSnapshotAuthorPreservation: true,
+			Events: []db.FederationIngestEvent{
+				{SourceEventID: 1, Event: peer},
+				{SourceEventID: 2, Event: subject},
+			},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, 2, res.Accepted)
+		subjectIssue, err := d.IssueByUID(ctx, subjectUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		links, err := d.LinksByIssue(ctx, subjectIssue.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
+		assert.Equal(t, "historical-linker", links[0].Author)
 	})
 
 	t.Run("allows adoption project metadata before historical author snapshots", func(t *testing.T) {
@@ -2185,6 +2261,39 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
 			"issue.snapshot", 101,
 			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"forged","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","comments":[{"comment_uid":"`+commentUID+`","author":"spoofed-agent","body":"forged comment","created_at":"2026-05-23T12:00:00.000Z"}]}`)
+		ev.Actor = "bound-agent"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "bound-agent",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 2, Event: ev}},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assertIngestedEventCount(ctx, t, d, p.ID, 1)
+	})
+
+	t.Run("rejects later bound actor issue.snapshot embedded link author mismatch", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		peerUID := newTestUID(t)
+		peer := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, peerUID, 100)
+		peer.Actor = "bound-agent"
+		peer.Payload = json.RawMessage(`{"uid":"` + peerUID + `","short_id":"` + shortID(peerUID) + `","title":"known","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		peer.ContentHash = remoteEventHash(t, peer)
+		_, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:        p.ID,
+			SpokeInstanceUID: spokeUID,
+			BoundActor:       "bound-agent",
+			Events:           []db.FederationIngestEvent{{SourceEventID: 1, Event: peer}},
+		})
+		require.NoError(t, err)
+		issueUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.snapshot", 101,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"forged","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+peerUID+`","author":"spoofed-agent"}]}`)
 		ev.Actor = "bound-agent"
 		ev.ContentHash = remoteEventHash(t, ev)
 

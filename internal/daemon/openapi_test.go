@@ -187,6 +187,12 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	}
 }
 
+func TestAPISchemaVersionReflectsRewriteAuthorEndpointMove(t *testing.T) {
+	if APISchemaVersion != "0.3.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.3.0 for rewrite-author endpoint move", APISchemaVersion)
+	}
+}
+
 func TestOpenAPIDocumentIncludesEventsStream(t *testing.T) {
 	doc := OpenAPIDocument()
 	path := doc.Paths["/api/v1/events/stream"]

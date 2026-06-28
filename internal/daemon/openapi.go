@@ -12,7 +12,7 @@ import (
 // (info.version). It tracks the HTTP API contract, not the build version, so
 // the committed schema artifact stays stable across builds and is bumped
 // deliberately when the wire contract changes.
-const APISchemaVersion = "0.2.0"
+const APISchemaVersion = "0.3.0"
 
 // OpenAPIDocument builds the daemon's complete OpenAPI model by wiring every
 // route through NewServer with a zero ServerConfig. It binds no listener and

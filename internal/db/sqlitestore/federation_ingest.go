@@ -201,12 +201,18 @@ func validateFederationBoundActorPayload(
 		if err := validateFederationPayloadAuthor(ev, boundActor); err != nil {
 			return err
 		}
-		return validateFederationPayloadCommentAuthors(ev, boundActor)
+		if err := validateFederationPayloadCommentAuthors(ev, boundActor); err != nil {
+			return err
+		}
+		return validateFederationPayloadLinkAuthors(ev, boundActor)
 	case "issue.created":
 		if err := validateFederationPayloadAuthor(ev, boundActor); err != nil {
 			return err
 		}
-		return validateFederationPayloadCommentAuthors(ev, boundActor)
+		if err := validateFederationPayloadCommentAuthors(ev, boundActor); err != nil {
+			return err
+		}
+		return validateFederationPayloadLinkAuthors(ev, boundActor)
 	case "issue.commented":
 		return validateFederationPayloadAuthor(ev, boundActor)
 	}
@@ -343,6 +349,29 @@ func validateFederationPayloadCommentAuthors(ev db.RemoteEvent, boundActor strin
 		if strings.TrimSpace(comment.Author) != boundActor {
 			return fmt.Errorf("%w: event %s %s comment payload author %q does not match bound actor",
 				db.ErrFederationIngestValidation, ev.EventUID, ev.Type, comment.Author)
+		}
+	}
+	return nil
+}
+
+func validateFederationPayloadLinkAuthors(ev db.RemoteEvent, boundActor string) error {
+	var payload struct {
+		Links []struct {
+			Author string `json:"author"`
+		} `json:"links"`
+	}
+	if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+		return fmt.Errorf("%w: event %s %s payload is invalid JSON",
+			db.ErrFederationIngestValidation, ev.EventUID, ev.Type)
+	}
+	for _, link := range payload.Links {
+		author := strings.TrimSpace(link.Author)
+		if author == "" {
+			continue
+		}
+		if author != boundActor {
+			return fmt.Errorf("%w: event %s %s link payload author %q does not match bound actor",
+				db.ErrFederationIngestValidation, ev.EventUID, ev.Type, link.Author)
 		}
 	}
 	return nil
