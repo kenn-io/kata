@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1827,6 +1828,81 @@ func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []int{1000, 1}, batchSizes)
+}
+
+func TestSyncFederationOnceSplitsLargePushRequestsBeforePull(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 1,
+		PushEnabled:          true,
+		Actor:                "agent",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	largeBody := strings.Repeat("example issue body\n", 1536)
+	for i := range 40 {
+		_, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID,
+			Title:     "pending issue " + strconv.Itoa(i),
+			Body:      largeBody,
+			Author:    "agent",
+		})
+		require.NoError(t, err)
+	}
+	var batchSizes []int
+	var requestSizes []int
+	polled := false
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events:ingest":
+			assert.False(t, polled, "push batches must drain before pull")
+			raw, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			requestSizes = append(requestSizes, len(raw))
+			var body api.FederationIngestEventsRequestBody
+			require.NoError(t, json.Unmarshal(raw, &body))
+			batchSizes = append(batchSizes, len(body.Events))
+			require.NotEmpty(t, body.Events)
+			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
+				Accepted:          len(body.Events),
+				Duplicates:        0,
+				PushCursorEventID: body.Events[len(body.Events)-1].EventID,
+			}))
+		case "/api/v1/projects/42/federation/events":
+			polled = true
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+				Events:      []api.EventEnvelope{},
+				NextAfterID: 1,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+	require.NoError(t, err)
+	require.Greater(t, len(batchSizes), 1)
+	pushed := 0
+	for _, batchSize := range batchSizes {
+		pushed += batchSize
+	}
+	assert.Equal(t, 40, pushed)
+	for _, requestSize := range requestSizes {
+		assert.LessOrEqual(t, requestSize, maxFederationPushIngestBodyBytes)
+	}
 }
 
 func TestFederationRunnerNoBindingsMakesNoRequests(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +16,11 @@ import (
 )
 
 const federationPollLimit = 1000
+
+// Keep spoke push requests below Huma's default 1 MiB mutation body cap so
+// large baseline snapshots are split before the hub rejects them at transport.
+const maxFederationPushIngestBodyBytes = 768 << 10
+
 const defaultClientTimeout = 5 * time.Second
 
 // ErrFederationResetRequired reports a hub that still requires reset after the
@@ -104,31 +110,38 @@ func SyncFederationOnceWithPulledEvents(
 			if len(pending) == 0 {
 				break
 			}
-			ack, err := client.IngestProjectEvents(ctx, hubProjectID, federationIngestEnvelopes(pending))
-			if err != nil {
-				if isPoisonedFederationPushError(err) {
-					if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, pending, err); qErr != nil {
-						return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))
-					}
+			for len(pending) > 0 {
+				batch, err := nextFederationPushIngestBatch(pending)
+				if err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				ack, err := client.IngestProjectEvents(ctx, hubProjectID, federationIngestEnvelopes(batch))
+				if err != nil {
+					if isPoisonedFederationPushError(err) {
+						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
+							return recordFederationSyncError(ctx, store, binding.ProjectID, errors.Join(err, qErr))
+						}
+					}
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				if ack.PushCursorEventID <= binding.PushCursorEventID {
+					return recordFederationSyncError(ctx, store, binding.ProjectID,
+						errors.New("federation push cursor did not advance"))
+				}
+				lastSubmittedEventID := batch[len(batch)-1].ID
+				if ack.PushCursorEventID > lastSubmittedEventID {
+					return recordFederationSyncError(ctx, store, binding.ProjectID,
+						errors.New("federation push cursor advanced beyond submitted batch"))
+				}
+				if err := federationFailpoint("before_spoke_push_cursor_advance"); err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, ack.PushCursorEventID); err != nil {
+					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+				}
+				binding.PushCursorEventID = ack.PushCursorEventID
+				pending = pendingFederationEventsAfterCursor(pending, ack.PushCursorEventID)
 			}
-			if ack.PushCursorEventID <= binding.PushCursorEventID {
-				return recordFederationSyncError(ctx, store, binding.ProjectID,
-					errors.New("federation push cursor did not advance"))
-			}
-			lastSubmittedEventID := pending[len(pending)-1].ID
-			if ack.PushCursorEventID > lastSubmittedEventID {
-				return recordFederationSyncError(ctx, store, binding.ProjectID,
-					errors.New("federation push cursor advanced beyond submitted batch"))
-			}
-			if err := federationFailpoint("before_spoke_push_cursor_advance"); err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-			}
-			if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, ack.PushCursorEventID); err != nil {
-				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
-			}
-			binding.PushCursorEventID = ack.PushCursorEventID
 		}
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
@@ -291,24 +304,66 @@ func shouldDeliverDuplicatePulledEvent(
 func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnvelope {
 	out := make([]api.FederationIngestEventEnvelope, 0, len(events))
 	for _, ev := range events {
-		out = append(out, api.FederationIngestEventEnvelope{
-			EventID:           ev.ID,
-			EventUID:          ev.UID,
-			OriginInstanceUID: ev.OriginInstanceUID,
-			ProjectUID:        ev.ProjectUID,
-			ProjectName:       ev.ProjectName,
-			IssueUID:          ev.IssueUID,
-			RelatedIssueUID:   ev.RelatedIssueUID,
-			Type:              ev.Type,
-			Actor:             ev.Actor,
-			HLCPhysicalMS:     ev.HLCPhysicalMS,
-			HLCCounter:        ev.HLCCounter,
-			ContentHash:       ev.ContentHash,
-			Payload:           json.RawMessage(ev.Payload),
-			CreatedAt:         ev.CreatedAt,
-		})
+		out = append(out, federationIngestEnvelope(ev))
 	}
 	return out
+}
+
+func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, error) {
+	if len(events) <= 1 {
+		return events, nil
+	}
+	envelopes := make([]api.FederationIngestEventEnvelope, 0, len(events))
+	for i, ev := range events {
+		envelopes = append(envelopes, federationIngestEnvelope(ev))
+		size, err := federationIngestRequestSize(envelopes)
+		if err != nil {
+			return nil, err
+		}
+		if size > maxFederationPushIngestBodyBytes && i > 0 {
+			return events[:i], nil
+		}
+	}
+	return events, nil
+}
+
+func pendingFederationEventsAfterCursor(events []db.Event, cursor int64) []db.Event {
+	for i, ev := range events {
+		if ev.ID > cursor {
+			return events[i:]
+		}
+	}
+	return nil
+}
+
+func federationIngestRequestSize(events []api.FederationIngestEventEnvelope) (int, error) {
+	body, err := json.Marshal(api.FederationIngestEventsRequestBody{
+		SchemaVersion: db.CurrentSchemaVersion(),
+		Events:        events,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("marshal federation ingest batch for size check: %w", err)
+	}
+	return len(body), nil
+}
+
+func federationIngestEnvelope(ev db.Event) api.FederationIngestEventEnvelope {
+	return api.FederationIngestEventEnvelope{
+		EventID:           ev.ID,
+		EventUID:          ev.UID,
+		OriginInstanceUID: ev.OriginInstanceUID,
+		ProjectUID:        ev.ProjectUID,
+		ProjectName:       ev.ProjectName,
+		IssueUID:          ev.IssueUID,
+		RelatedIssueUID:   ev.RelatedIssueUID,
+		Type:              ev.Type,
+		Actor:             ev.Actor,
+		HLCPhysicalMS:     ev.HLCPhysicalMS,
+		HLCCounter:        ev.HLCCounter,
+		ContentHash:       ev.ContentHash,
+		Payload:           json.RawMessage(ev.Payload),
+		CreatedAt:         ev.CreatedAt,
+	}
 }
 
 func isPoisonedFederationPushError(err error) bool {
