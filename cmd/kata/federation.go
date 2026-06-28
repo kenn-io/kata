@@ -37,7 +37,6 @@ func newFederationCmd() *cobra.Command {
 		federationRevokeCmd(),
 		federationStatusCmd(),
 		federationQuarantineCmd(),
-		federationRewriteAuthorCmd(),
 		newFederationLeaseCmd(),
 	)
 	return cmd
@@ -122,83 +121,6 @@ func federationEnableCmd() *cobra.Command {
 			return printFederationEnable(cmd, metadata)
 		},
 	}
-	return cmd
-}
-
-func federationRewriteAuthorCmd() *cobra.Command {
-	var from string
-	var to string
-	cmd := &cobra.Command{
-		Use:   "rewrite-author [project]",
-		Short: "rewrite one author identity before federation enrollment",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(from) == "" {
-				return &cliError{Message: "--from is required", Kind: kindValidation, ExitCode: ExitValidation}
-			}
-			if strings.TrimSpace(to) == "" {
-				return &cliError{Message: "--to is required", Kind: kindValidation, ExitCode: ExitValidation}
-			}
-			ctx := cmd.Context()
-			baseURL, err := ensureDaemon(ctx)
-			if err != nil {
-				return err
-			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			project, err := resolveFederationProject(ctx, client, baseURL, args, false)
-			if err != nil {
-				return err
-			}
-			actor, _ := resolveActor(ctx, flags.As, nil)
-			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-				fmt.Sprintf("%s/api/v1/projects/%d/federation/rewrite-author", baseURL, project.ID),
-				map[string]any{
-					"actor": actor,
-					"from":  from,
-					"to":    to,
-				})
-			if err != nil {
-				return err
-			}
-			if status >= 400 {
-				return apiErrFromBody(status, bs)
-			}
-			var result db.RewriteAuthorIdentityResult
-			if err := json.Unmarshal(bs, &result); err != nil {
-				return err
-			}
-			switch currentOutputMode() {
-			case outputJSON:
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, result); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
-				return err
-			case outputAgent:
-				return writeAgentKVRow(cmd.OutOrStdout(),
-					agentRowField("changed", strconv.FormatBool(result.Changed)),
-					agentRowField("issue_authors", strconv.FormatInt(result.IssueAuthors, 10)),
-					agentRowField("issue_owners", strconv.FormatInt(result.IssueOwners, 10)),
-					agentRowField("comment_authors", strconv.FormatInt(result.CommentAuthors, 10)),
-					agentRowField("link_authors", strconv.FormatInt(result.LinkAuthors, 10)),
-					agentRowField("total", strconv.FormatInt(result.Total(), 10)),
-				)
-			}
-			if flags.Quiet {
-				return nil
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(),
-				"author identity rewritten\nissue authors: %d\nissue owners: %d\ncomment authors: %d\nlink authors: %d\ntotal: %d\n",
-				result.IssueAuthors, result.IssueOwners, result.CommentAuthors, result.LinkAuthors, result.Total())
-			return err
-		},
-	}
-	cmd.Flags().StringVar(&from, "from", "", "author identity to replace")
-	cmd.Flags().StringVar(&to, "to", "", "replacement author identity")
 	return cmd
 }
 

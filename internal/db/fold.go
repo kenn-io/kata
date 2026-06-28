@@ -167,7 +167,11 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		if link.Incoming && link.Type == "blocks" {
 			from, to = to, from
 		}
-		p.setLink(from, to, link.Type, true, clockOf(e), link.Author)
+		author := link.Author
+		if author == "" {
+			author = e.Actor
+		}
+		p.setLink(from, to, link.Type, true, clockOf(e), author)
 	}
 	for _, comment := range in.Comments {
 		p.setComment(comment.CommentUID, uid, comment.Author, comment.Body, comment.CreatedAt, clockOf(e))
@@ -452,15 +456,20 @@ func (p *FoldProjection) applyAuthorRewritten(e FoldEvent, payload map[string]js
 		if e.ProjectUID != "" && issue.ProjectUID != e.ProjectUID {
 			continue
 		}
+		changed := false
 		if issue.Author == from {
 			issue.Author = to
+			changed = true
 		}
 		if issue.Owner != nil && *issue.Owner == from {
 			owner := to
 			issue.Owner = &owner
+			changed = true
 		}
-		advanceIssueUpdatedAt(&issue, issueUpdatedAt(e, payload))
-		p.Issues[uid] = issue
+		if changed {
+			advanceIssueUpdatedAt(&issue, issueUpdatedAt(e, payload))
+			p.Issues[uid] = issue
+		}
 	}
 	for uid, comment := range p.Comments {
 		if e.ProjectUID != "" {

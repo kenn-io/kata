@@ -116,16 +116,16 @@ primitive for redacting comment text before enrolling a project in federation.
 It is not a purge mechanism for data that has already crossed into another
 federated event log.
 
-## Federation Hygiene Endpoints
+## Project Hygiene Endpoints
 
-`POST /api/v1/projects/{project_id}/federation/rewrite-author` rewrites one
-exact author identity in the project's current rows before federation
-enrollment. The request body carries `actor`, `from`, and `to`; `to` must be
-non-empty. The daemon updates issue authors, issue owners, comment authors, and
-link authors that exactly match `from`, emits one `project.author_rewritten`
-event when anything changed, and returns per-field counts. The endpoint refuses
-already-federated projects because it is a pre-enrollment current-state hygiene
-operation, not a federated history rewrite.
+`POST /api/v1/projects/{project_id}/actions/rewrite-author` rewrites one exact
+author identity in the project's current rows. The request body carries
+`actor`, `from`, and `to`; `to` must be non-empty. The daemon updates issue
+authors, issue owners, comment authors, and link authors that exactly match
+`from`, emits one `project.author_rewritten` event when anything changed, and
+returns per-field counts. The endpoint refuses already-federated projects
+because it is a current-state hygiene operation for local project rows, not a
+federated history rewrite.
 
 ## Issue Sync Endpoints
 

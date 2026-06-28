@@ -272,6 +272,7 @@ func registerHealth(humaAPI huma.API, cfg ServerConfig) {
 // registerProjects registers project-scoped routes (resolve, init, list, show).
 func registerProjects(humaAPI huma.API, cfg ServerConfig) {
 	registerProjectsHandlers(humaAPI, cfg)
+	registerAuthorRewriteHandlers(humaAPI, cfg)
 }
 
 // registerIssues registers issue CRUD routes (create/list/show/edit).

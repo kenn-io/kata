@@ -14,6 +14,8 @@ type RenameProjectBody = RenameProjectRequestBody
 
 type PurgeProjectBody = ProjectPurgeRequestBody
 
+type RewriteAuthorIdentityBody = RewriteAuthorIdentityRequestBody
+
 type EnableProjectFederationBody = EnableProjectFederationRequestBody
 
 type IngestFederationProjectEventsBody = FederationIngestEventsRequestBody
@@ -21,8 +23,6 @@ type IngestFederationProjectEventsBody = FederationIngestEventsRequestBody
 type RetryFederationQuarantineBody = RetryFederationQuarantineRequestBody
 
 type SkipFederationQuarantineBody = SkipFederationQuarantineRequestBody
-
-type RewriteAuthorIdentityBody = RewriteAuthorIdentityRequestBody
 
 type ImportIssuesBody = ImportRequestBody
 

@@ -135,6 +135,12 @@ func TestRewriteAuthorIdentity_ReplayKeepsRewrittenAuthors(t *testing.T) {
 		Author:    "peer-agent",
 	})
 	require.NoError(t, err)
+	untouched, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "untouched",
+		Author:    "keep-agent",
+	})
+	require.NoError(t, err)
 	comment, _, err := d.CreateComment(ctx, db.CreateCommentParams{
 		IssueID: issue.ID,
 		Author:  from,
@@ -175,6 +181,43 @@ func TestRewriteAuthorIdentity_ReplayKeepsRewrittenAuthors(t *testing.T) {
 	foldedComment := folded.Comments[comment.UID]
 	assert.Equal(t, to, foldedComment.Author)
 	foldedLink := folded.Links[db.FoldLinkKey{FromUID: issue.UID, ToUID: peer.UID, Type: "blocks"}]
+	assert.Equal(t, to, foldedLink.Author)
+	assert.Equal(t,
+		untouched.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		folded.Issues[untouched.UID].UpdatedAt,
+	)
+}
+
+func TestRewriteAuthorIdentity_ReplayRewritesInitialLinkAuthors(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	from, to := "old-agent", "new-agent"
+	peer, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "initial link peer",
+		Author:    "peer-agent",
+	})
+	require.NoError(t, err)
+	subject, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: p.ID,
+		Title:     "initial link subject",
+		Author:    from,
+		Links: []db.InitialLink{{
+			Type:     "blocks",
+			ToNumber: peer.ID,
+		}},
+	})
+	require.NoError(t, err)
+
+	_, err = d.RewriteAuthorIdentity(ctx, db.RewriteAuthorIdentityParams{
+		ProjectID: p.ID,
+		Actor:     "operator",
+		From:      from,
+		To:        to,
+	})
+	require.NoError(t, err)
+
+	folded := db.FoldEvents(loadFoldEventsForProject(ctx, t, d, p.ID))
+	foldedLink := folded.Links[db.FoldLinkKey{FromUID: subject.UID, ToUID: peer.UID, Type: "blocks"}]
 	assert.Equal(t, to, foldedLink.Author)
 }
 

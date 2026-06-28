@@ -93,6 +93,10 @@ type PurgeProjectResponse = ProjectPurgeResponseBody
 
 type PurgeProjectErrorResponse = ErrorEnvelope
 
+type RewriteAuthorIdentityResponse = RewriteAuthorIdentityResult
+
+type RewriteAuthorIdentityErrorResponse = ErrorEnvelope
+
 type DetachProjectAliasResponse = DetachProjectAliasResponseBody
 
 type DetachProjectAliasErrorResponse = ErrorEnvelope
@@ -132,10 +136,6 @@ type RetryFederationQuarantineErrorResponse = ErrorEnvelope
 type SkipFederationQuarantineResponse = FederationQuarantineSummary
 
 type SkipFederationQuarantineErrorResponse = ErrorEnvelope
-
-type RewriteAuthorIdentityResponse = RewriteAuthorIdentityResult
-
-type RewriteAuthorIdentityErrorResponse = ErrorEnvelope
 
 type GetProjectFederationStatusResponse = FederationStatusBody
 
@@ -476,6 +476,13 @@ type PurgeProjectResp struct {
 	JSON200      *PurgeProjectResponse
 }
 
+type RewriteAuthorIdentityResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RewriteAuthorIdentityResponse
+}
+
 type DetachProjectAliasResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -544,13 +551,6 @@ type SkipFederationQuarantineResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *SkipFederationQuarantineResponse
-}
-
-type RewriteAuthorIdentityResp struct {
-	HTTPResponse *http.Response
-	Body         []byte
-	StatusCode   int
-	JSON200      *RewriteAuthorIdentityResponse
 }
 
 type GetProjectFederationStatusResp struct {

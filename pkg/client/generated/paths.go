@@ -38,6 +38,10 @@ type PurgeProjectPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type RewriteAuthorIdentityPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type DetachProjectAliasPath struct {
 	ProjectID int64 `json:"project_id"`
 	AliasID   int64 `json:"alias_id"`
@@ -79,10 +83,6 @@ type RetryFederationQuarantinePath struct {
 type SkipFederationQuarantinePath struct {
 	ProjectID    int64 `json:"project_id"`
 	QuarantineID int64 `json:"quarantine_id"`
-}
-
-type RewriteAuthorIdentityPath struct {
-	ProjectID int64 `json:"project_id"`
 }
 
 type GetProjectFederationStatusPath struct {

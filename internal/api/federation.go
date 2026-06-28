@@ -21,7 +21,7 @@ type ProjectFederationRequest struct {
 }
 
 // RewriteAuthorIdentityRequest rewrites one exact author identity across a
-// non-federated project's current rows before baseline snapshots are created.
+// non-federated project's current rows.
 type RewriteAuthorIdentityRequest struct {
 	ProjectID int64 `path:"project_id"`
 	Body      struct {

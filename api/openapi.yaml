@@ -3920,6 +3920,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/actions/rewrite-author:
+    post:
+      operationId: rewriteAuthorIdentity
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RewriteAuthorIdentityRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RewriteAuthorIdentityResult"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/aliases/{alias_id}:
     delete:
       operationId: detachProjectAlias
@@ -4260,35 +4289,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FederationQuarantineSummary"
-          description: OK
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
-          description: Error
-  /api/v1/projects/{project_id}/federation/rewrite-author:
-    post:
-      operationId: rewriteAuthorIdentity
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema:
-            format: int64
-            type: integer
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RewriteAuthorIdentityRequestBody"
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RewriteAuthorIdentityResult"
           description: OK
         default:
           content:

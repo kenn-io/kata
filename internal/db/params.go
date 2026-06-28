@@ -111,7 +111,7 @@ type EditCommentParams struct {
 	Body       string
 }
 
-// RewriteAuthorIdentityParams carries a scoped pre-federation identity rewrite.
+// RewriteAuthorIdentityParams carries a scoped project identity rewrite.
 // It rewrites exact author/owner values in one project only; it is not a
 // historical event redaction primitive.
 type RewriteAuthorIdentityParams struct {

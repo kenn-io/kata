@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/textsafe"
 )
 
@@ -47,7 +48,7 @@ func newProjectsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "projects", Short: "list and inspect kata projects"}
 	cmd.AddCommand(projectsListCmd(), projectsShowCmd(), projectsRenameCmd(),
 		projectsMergeCmd(), projectsRemoveCmd(), projectsRestoreCmd(),
-		projectsDetachCmd(), projectsPurgeCmd())
+		projectsDetachCmd(), projectsPurgeCmd(), projectsRewriteAuthorCmd())
 	return cmd
 }
 
@@ -193,6 +194,83 @@ func projectsRenameCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+func projectsRewriteAuthorCmd() *cobra.Command {
+	var from string
+	var to string
+	cmd := &cobra.Command{
+		Use:   "rewrite-author [project]",
+		Short: "rewrite one author identity in a project",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(from) == "" {
+				return &cliError{Message: "--from is required", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if strings.TrimSpace(to) == "" {
+				return &cliError{Message: "--to is required", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			ctx := cmd.Context()
+			baseURL, err := ensureDaemon(ctx)
+			if err != nil {
+				return err
+			}
+			client, err := httpClientFor(ctx, baseURL)
+			if err != nil {
+				return err
+			}
+			project, err := resolveProjectArgFlagOrWorkspace(ctx, client, baseURL, args)
+			if err != nil {
+				return err
+			}
+			actor, _ := resolveActor(ctx, flags.As, nil)
+			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
+				fmt.Sprintf("%s/api/v1/projects/%d/actions/rewrite-author", baseURL, project.ID),
+				map[string]any{
+					"actor": actor,
+					"from":  from,
+					"to":    to,
+				})
+			if err != nil {
+				return err
+			}
+			if status >= 400 {
+				return apiErrFromBody(status, bs)
+			}
+			var result db.RewriteAuthorIdentityResult
+			if err := json.Unmarshal(bs, &result); err != nil {
+				return err
+			}
+			switch currentOutputMode() {
+			case outputJSON:
+				var buf bytes.Buffer
+				if err := emitJSON(&buf, result); err != nil {
+					return err
+				}
+				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+				return err
+			case outputAgent:
+				return writeAgentKVRow(cmd.OutOrStdout(),
+					agentRowField("changed", strconv.FormatBool(result.Changed)),
+					agentRowField("issue_authors", strconv.FormatInt(result.IssueAuthors, 10)),
+					agentRowField("issue_owners", strconv.FormatInt(result.IssueOwners, 10)),
+					agentRowField("comment_authors", strconv.FormatInt(result.CommentAuthors, 10)),
+					agentRowField("link_authors", strconv.FormatInt(result.LinkAuthors, 10)),
+					agentRowField("total", strconv.FormatInt(result.Total(), 10)),
+				)
+			}
+			if flags.Quiet {
+				return nil
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(),
+				"author identity rewritten\nissue authors: %d\nissue owners: %d\ncomment authors: %d\nlink authors: %d\ntotal: %d\n",
+				result.IssueAuthors, result.IssueOwners, result.CommentAuthors, result.LinkAuthors, result.Total())
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&from, "from", "", "author identity to replace")
+	cmd.Flags().StringVar(&to, "to", "", "replacement author identity")
+	return cmd
 }
 
 func projectsMergeCmd() *cobra.Command {
@@ -423,6 +501,29 @@ func resolveProjectSelector(ctx context.Context, client *http.Client, baseURL, s
 		return projectRef{}, err
 	}
 	return resolveProjectSelectorFromRefs(selector, projects)
+}
+
+func resolveProjectArgFlagOrWorkspace(
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+	args []string,
+) (projectRef, error) {
+	if len(args) > 0 {
+		return resolveProjectSelector(ctx, client, baseURL, args[0])
+	}
+	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
+		return resolveProjectSelector(ctx, client, baseURL, projectName)
+	}
+	start, err := resolveStartPath(flags.Workspace)
+	if err != nil {
+		return projectRef{}, err
+	}
+	id, name, err := resolveProjectIDAndNameWithClient(ctx, client, baseURL, start)
+	if err != nil {
+		return projectRef{}, err
+	}
+	return projectRef{ID: id, Name: name}, nil
 }
 
 func resolveProjectSelectorIncludingArchived(ctx context.Context, client *http.Client, baseURL, selector string) (projectRef, error) {

@@ -257,6 +257,7 @@ kata projects remove <project> [--force]
 kata projects restore <project>
 kata projects purge <project> --force --confirm "PURGE <project>" [--reason TEXT] [--json]
 kata projects detach <alias-identity>
+kata projects rewrite-author [<project>] --from <old-author> --to <new-author>
 ```
 
 `projects remove` archives a project (reversible with `restore`). The name
@@ -270,6 +271,13 @@ tombstone. Pass `--json` to receive the tombstone with row counts.
 
 A project that has a federation binding cannot be purged. Spokes must run
 `kata federation leave <project>` first. Hub purge is not currently supported.
+
+`projects rewrite-author` rewrites exact matches in the current issue author,
+issue owner, comment author, and link author fields. It is project-scoped,
+idempotent, and intended for current-state identity hygiene before exporting,
+sharing, or enrolling a project in federation; it is not a historical event
+redaction tool. If `<project>` is omitted, kata resolves the project from
+`--project` or the current workspace.
 
 ## Daemon and diagnostics
 
@@ -349,7 +357,6 @@ kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> \
   --hub-project-id <id> --token <token> --actor <actor> --push --adopt-existing
-kata federation rewrite-author --project <project> --from <old-author> --to <new-author>
 kata federation status
 kata federation enrollments list
 kata federation revoke <enrollment-id>
@@ -373,7 +380,7 @@ pre-adoption event history from the live event stream and queues fresh snapshots
 for federation. Run `kata --project <project> export --output <path>.jsonl`
 first if you need to retain that local event timeline.
 
-Before enrolling a project, `kata federation rewrite-author --project <project>
+Before enrolling a project, `kata projects rewrite-author <project>
 --from <old-author> --to <new-author>` rewrites exact matches in the current
 issue author, issue owner, comment author, and link author fields. It is
 project-scoped, idempotent, and intended for current-state identity hygiene

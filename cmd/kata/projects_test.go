@@ -172,6 +172,92 @@ func TestProjects_ResetCounterCommandIsAbsent(t *testing.T) {
 	}
 }
 
+func TestProjectsRewriteAuthorCLIReportsCounts(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ctx := context.Background()
+	from, to := "old-agent", "new-agent"
+	owner := from
+	subject, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: pid,
+		Title:     "rewrite subject",
+		Author:    from,
+		Owner:     &owner,
+	})
+	require.NoError(t, err)
+	peer, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: pid,
+		Title:     "rewrite peer",
+		Author:    "peer-agent",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: subject.ID,
+		Author:  from,
+		Body:    "rewrite comment",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: subject.ID,
+		ToIssueID:   peer.ID,
+		Type:        "blocks",
+		Author:      from,
+	})
+	require.NoError(t, err)
+
+	out := runCLI(t, env, dir, "projects", "rewrite-author",
+		"--from", from, "--to", to)
+
+	assert.Contains(t, out, "author identity rewritten")
+	assert.Contains(t, out, "issue authors: 1")
+	assert.Contains(t, out, "issue owners: 1")
+	assert.Contains(t, out, "comment authors: 1")
+	assert.Contains(t, out, "link authors: 1")
+	updated, err := env.DB.IssueByID(ctx, subject.ID)
+	require.NoError(t, err)
+	assert.Equal(t, to, updated.Author)
+}
+
+func TestProjectsRewriteAuthorCLIJSONCounts(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ctx := context.Background()
+	from, to := "old-agent", "new-agent"
+	_, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: pid,
+		Title:     "rewrite subject",
+		Author:    from,
+	})
+	require.NoError(t, err)
+
+	out := runCLI(t, env, dir, "--json", "projects", "rewrite-author",
+		"--from", from, "--to", to)
+
+	var got struct {
+		Changed        bool  `json:"changed"`
+		IssueAuthors   int64 `json:"issue_authors"`
+		IssueOwners    int64 `json:"issue_owners"`
+		CommentAuthors int64 `json:"comment_authors"`
+		LinkAuthors    int64 `json:"link_authors"`
+		Total          int64 `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.True(t, got.Changed)
+	assert.Equal(t, int64(1), got.IssueAuthors)
+	assert.Equal(t, int64(0), got.IssueOwners)
+	assert.Equal(t, int64(0), got.CommentAuthors)
+	assert.Equal(t, int64(0), got.LinkAuthors)
+	assert.Equal(t, int64(1), got.Total)
+}
+
+func TestProjectsRewriteAuthorCLIRejectsEmptyTo(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+
+	_, err := runCLICapture(t, env, dir, "projects", "rewrite-author",
+		"--from", "old-agent", "--to", "   ")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--to is required")
+}
+
 // TestProjects_MergeReportsShortIDExtensions exercises the auto-extension
 // reporting path on `kata projects merge`. The two issues share the
 // length-4 short_id `d4ex`, so the merge extends the source-side row to
