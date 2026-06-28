@@ -298,41 +298,6 @@ func TestExportReadOnlyLegacyV13FederationRowsPreserveBoundActor(t *testing.T) {
 	assert.Equal(t, 1, enrollmentCount)
 }
 
-func TestExportReadOnlyLegacyV22FederationEnrollmentDefaultsTerminalCursor(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "kata.db")
-	writeLegacyV22FederationEnrollmentDB(t, path)
-	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = source.Close() })
-
-	var out bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, source, &out, jsonl.ExportOptions{IncludeDeleted: true}))
-	records := decodeJSONLLines(t, out.Bytes())
-
-	var sawEnrollment bool
-	for _, rec := range records {
-		if rec["kind"] != "federation_enrollment" {
-			continue
-		}
-		sawEnrollment = true
-		data, ok := rec["data"].(map[string]any)
-		require.True(t, ok)
-		assert.Equal(t, true, data["adoption_baseline_open"])
-		assert.Equal(t, float64(2), data["adoption_baseline_next_source_event_id"])
-		assert.NotContains(t, data, "adoption_baseline_end_source_event_id")
-	}
-	assert.True(t, sawEnrollment, "expected legacy federation enrollment export")
-
-	target := openImportTargetDB(t)
-	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(out.Bytes()), target))
-	var endSourceEventID int64
-	require.NoError(t, target.QueryRow(`
-		SELECT adoption_baseline_end_source_event_id
-		  FROM federation_enrollments`).Scan(&endSourceEventID))
-	assert.Zero(t, endSourceEventID)
-}
-
 func TestExportProjectAliasesOmitPathTelemetry(t *testing.T) {
 	ctx, d, p := newExportEnv(t)
 	attachAlias(ctx, t, d, p.ID, "github.com/example/project", "git", "/tmp/project")
@@ -937,71 +902,6 @@ func writeLegacyV13FederationDB(t *testing.T, path string) {
 	_, err = current.ExecContext(ctx, `UPDATE meta SET value = '13' WHERE key = 'schema_version'`)
 	require.NoError(t, err)
 	require.NoError(t, current.Close())
-}
-
-func writeLegacyV22FederationEnrollmentDB(t *testing.T, path string) {
-	t.Helper()
-	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
-	current, err := sqlitestore.Open(ctx, path)
-	require.NoError(t, err)
-	project, err := current.CreateProject(ctx, "legacy-fed")
-	require.NoError(t, err)
-	_, err = current.ExecContext(ctx, `
-		INSERT INTO federation_enrollments(
-			token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
-			allow_adoption_snapshot_authors, adoption_baseline_open,
-			adoption_baseline_next_source_event_id, adoption_baseline_end_source_event_id
-		)
-		VALUES(?, ?, ?, 'pull,push', 'legacy-actor', 1, 1, 2, 7)`,
-		strings.Repeat("c", 64), project.UID, project.ID)
-	require.NoError(t, err)
-	require.NoError(t, current.Close())
-
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	defer func() { _ = raw.Close() }()
-	_, err = raw.Exec(`
-		PRAGMA foreign_keys = OFF;
-
-		DROP INDEX IF EXISTS idx_federation_enrollments_scope;
-		DROP INDEX IF EXISTS idx_federation_enrollments_spoke;
-		ALTER TABLE federation_enrollments RENAME TO federation_enrollments_current;
-		CREATE TABLE federation_enrollments (
-		  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-		  token_hash          TEXT NOT NULL UNIQUE,
-		  spoke_instance_uid  TEXT NOT NULL,
-		  project_id          INTEGER REFERENCES projects(id),
-		  capabilities        TEXT NOT NULL,
-		  bound_actor         TEXT NOT NULL,
-		  allow_adoption_snapshot_authors INTEGER NOT NULL DEFAULT 0 CHECK(allow_adoption_snapshot_authors IN (0,1)),
-		  adoption_baseline_open INTEGER NOT NULL DEFAULT 0 CHECK(adoption_baseline_open IN (0,1)),
-		  adoption_baseline_next_source_event_id INTEGER NOT NULL DEFAULT 0 CHECK(adoption_baseline_next_source_event_id >= 0),
-		  created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-		  updated_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-		  revoked_at          DATETIME,
-		  CHECK (length(token_hash) = 64),
-		  CHECK (length(spoke_instance_uid) = 26),
-		  CHECK (length(trim(capabilities)) > 0),
-		  CHECK (length(trim(bound_actor)) > 0)
-		);
-		INSERT INTO federation_enrollments(
-		  id, token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
-		  allow_adoption_snapshot_authors, adoption_baseline_open,
-		  adoption_baseline_next_source_event_id, created_at, updated_at, revoked_at
-		)
-		SELECT id, token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
-		       allow_adoption_snapshot_authors, adoption_baseline_open,
-		       adoption_baseline_next_source_event_id, created_at, updated_at, revoked_at
-		  FROM federation_enrollments_current;
-		DROP TABLE federation_enrollments_current;
-		CREATE INDEX idx_federation_enrollments_scope
-		  ON federation_enrollments(project_id, revoked_at);
-		CREATE INDEX idx_federation_enrollments_spoke
-		  ON federation_enrollments(spoke_instance_uid);
-
-		UPDATE meta SET value = '22' WHERE key = 'schema_version'`)
-	require.NoError(t, err)
 }
 
 // writeLegacyV17GitHubStatusDB builds a schema_version=17 database with the

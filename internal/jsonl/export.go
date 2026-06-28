@@ -1274,8 +1274,6 @@ func exportFederationEnrollments(
 	if sourceSchemaVersion >= 22 {
 		adoptionBaselineOpenSelect = `adoption_baseline_open`
 		adoptionBaselineNextSourceEventIDSelect = `adoption_baseline_next_source_event_id`
-	}
-	if sourceSchemaVersion >= 23 {
 		adoptionBaselineEndSourceEventIDSelect = `adoption_baseline_end_source_event_id`
 	}
 	query := `SELECT id, token_hash, spoke_instance_uid, project_id, capabilities,
