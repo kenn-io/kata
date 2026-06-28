@@ -73,10 +73,13 @@ func (c *Client) IngestProjectEvents(
 	return c.IngestProjectEventsWithOptions(ctx, hubProjectID, events, IngestProjectEventsOptions{})
 }
 
+// IngestProjectEventsOptions carries optional metadata for federation ingest.
 type IngestProjectEventsOptions struct {
 	AdoptionBaseline string
 }
 
+// IngestProjectEventsWithOptions pushes local spoke events with optional
+// transport metadata used by chunked adoption baselines.
 func (c *Client) IngestProjectEventsWithOptions(
 	ctx context.Context,
 	hubProjectID int64,

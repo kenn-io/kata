@@ -1797,10 +1797,10 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 			require.NoError(t, json.Unmarshal(raw, &body))
 			baselineStages = append(baselineStages, body.AdoptionBaseline)
 		}
-		req, err := http.NewRequestWithContext(r.Context(), r.Method, hub.URL+r.URL.RequestURI(), bytes.NewReader(raw))
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, hub.URL+r.URL.RequestURI(), bytes.NewReader(raw)) //nolint:gosec // test proxy forwards only to the local httptest hub.
 		require.NoError(t, err)
 		req.Header = r.Header.Clone()
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //nolint:gosec // test proxy forwards only to the local httptest hub.
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 		for key, values := range resp.Header {
@@ -1946,10 +1946,10 @@ func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T
 				return
 			}
 		}
-		req, err := http.NewRequestWithContext(r.Context(), r.Method, hub.URL+r.URL.RequestURI(), bytes.NewReader(raw))
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, hub.URL+r.URL.RequestURI(), bytes.NewReader(raw)) //nolint:gosec // test proxy forwards only to the local httptest hub.
 		require.NoError(t, err)
 		req.Header = r.Header.Clone()
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //nolint:gosec // test proxy forwards only to the local httptest hub.
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 		for key, values := range resp.Header {

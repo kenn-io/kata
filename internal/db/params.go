@@ -592,8 +592,12 @@ type FederationIngestParams struct {
 	Events                          []FederationIngestEvent
 }
 
+// Federation adoption baseline markers describe whether an ingest batch is a
+// non-terminal or terminal chunk of an adoption snapshot baseline.
 const (
-	FederationAdoptionBaselineOpen     = "open"
+	// FederationAdoptionBaselineOpen marks a non-terminal adoption baseline chunk.
+	FederationAdoptionBaselineOpen = "open"
+	// FederationAdoptionBaselineComplete marks the terminal adoption baseline chunk.
 	FederationAdoptionBaselineComplete = "complete"
 )
 
