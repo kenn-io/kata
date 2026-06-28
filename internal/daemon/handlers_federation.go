@@ -162,6 +162,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if _, err := db.CanonicalFederationCapabilities(in.Body.Capabilities); err != nil {
 			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
 		}
+		if in.Body.AllowAdoptionSnapshotAuthors && in.Body.ProjectID == nil {
+			return nil, api.NewError(http.StatusBadRequest, "validation",
+				"allow_adoption_snapshot_authors requires project_id", "", nil)
+		}
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err

@@ -1031,6 +1031,21 @@ func TestFederationEnrollmentCreateStoresAdoptionSnapshotAuthorMarker(t *testing
 	assert.Equal(t, 1, stored)
 }
 
+func TestFederationEnrollmentCreateRejectsWildcardAdoptionSnapshotAuthorMarker(t *testing.T) {
+	d, ctx, _ := setupTestProject(t)
+
+	_, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token:                        "wildcard-adoption-marker-token",
+		SpokeInstanceUID:             newTestUID(t),
+		Capabilities:                 "pull,push",
+		Actor:                        "transport-actor",
+		AllowAdoptionSnapshotAuthors: true,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "project-scoped")
+}
+
 func TestFederationEnrollmentCreateRequiresActor(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
@@ -2694,6 +2709,42 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		assert.Contains(t, err.Error(), "outside recorded baseline boundary")
+		assertIngestedEventCount(ctx, t, d, p.ID, 1)
+	})
+
+	t.Run("ignores legacy wildcard open adoption marker for project push", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		token := strings.Join([]string{"wildcard", "adoption", "open", "marker"}, "-")
+		_, err := d.ExecContext(ctx, `
+			INSERT INTO federation_enrollments(
+			  token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
+			  allow_adoption_snapshot_authors, adoption_baseline_open,
+			  adoption_baseline_next_source_event_id, adoption_baseline_end_source_event_id
+			)
+			VALUES(?, ?, NULL, 'push', 'bound-agent', 1, 1, 2, 3)`,
+			db.FederationTokenHash(token), spokeUID)
+		require.NoError(t, err)
+		authorized, err := d.AuthorizeFederationToken(ctx, token, p.ID, "push")
+		require.NoError(t, err)
+		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
+
+		issueUID := newTestUID(t)
+		ev := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, issueUID, 101)
+		ev.Actor = "bound-agent"
+		ev.Payload = json.RawMessage(`{"uid":"` + issueUID + `","short_id":"` + shortID(issueUID) + `","title":"normal","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		res, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                       p.ID,
+			FederationEnrollmentID:          authorized.ID,
+			SpokeInstanceUID:                spokeUID,
+			BoundActor:                      authorized.Actor,
+			AllowSnapshotAuthorPreservation: authorized.AllowAdoptionSnapshotAuthors,
+			Events:                          []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, res.Accepted)
 		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
 

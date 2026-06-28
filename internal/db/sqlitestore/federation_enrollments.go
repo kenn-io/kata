@@ -45,6 +45,9 @@ func (d *Store) createFederationEnrollment(
 	if err := db.ValidateTokenActor(actor); err != nil {
 		return db.CreatedFederationEnrollment{}, fmt.Errorf("federation enrollment actor: %w", err)
 	}
+	if p.AllowAdoptionSnapshotAuthors && p.ProjectID == nil {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf("allow adoption snapshot authors requires project-scoped enrollment")
+	}
 	var projectID any
 	if p.ProjectID != nil {
 		projectID = *p.ProjectID
@@ -136,7 +139,7 @@ func (d *Store) AuthorizeFederationToken(
 	if !db.IsSupportedFederationCapability(capability) {
 		return db.FederationEnrollment{}, db.ErrNotFound
 	}
-	return scanFederationEnrollment(d.QueryRowContext(ctx, federationEnrollmentSelect+`
+	enrollment, err := scanFederationEnrollment(d.QueryRowContext(ctx, federationEnrollmentSelect+`
 		 WHERE token_hash = ?
 		   AND revoked_at IS NULL
 		   AND instr(',' || capabilities || ',', ',' || ? || ',') > 0
@@ -151,6 +154,16 @@ func (d *Store) AuthorizeFederationToken(
 		        AND enabled = 1
 		   )`,
 		db.FederationTokenHash(token), capability, projectID, projectID))
+	if err != nil {
+		return db.FederationEnrollment{}, err
+	}
+	if enrollment.ProjectID == nil {
+		enrollment.AllowAdoptionSnapshotAuthors = false
+		enrollment.AdoptionBaselineOpen = false
+		enrollment.AdoptionBaselineNextSourceEventID = 0
+		enrollment.AdoptionBaselineEndSourceEventID = 0
+	}
+	return enrollment, nil
 }
 
 func generateFederationToken() (string, error) {

@@ -1480,7 +1480,7 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 		"capabilities":                    "push,pull",
 		"token":                           "explicit-enrollment-token",
 		"actor":                           "alice",
-		"allow_adoption_snapshot_authors": true,
+		"allow_adoption_snapshot_authors": false,
 	}, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "create enrollment response: %s", raw)
 	assert.NotContains(t, string(raw), "token_hash")
@@ -1516,7 +1516,23 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 	assert.False(t, projectID.Valid)
 	assert.Equal(t, "pull,push", capabilities)
 	assert.Equal(t, "alice", actor)
-	assert.Equal(t, 1, allowMarker)
+	assert.Equal(t, 0, allowMarker)
+}
+
+func TestFederationEnrollmentRejectsWildcardAdoptionSnapshotAuthorMarker(t *testing.T) {
+	env := testenv.New(t)
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
+		"spoke_instance_uid":              federationTestSpokeUID,
+		"project_id":                      nil,
+		"capabilities":                    "push,pull",
+		"token":                           "wildcard-adoption-token",
+		"actor":                           "alice",
+		"allow_adoption_snapshot_authors": true,
+	}, nil)
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "create enrollment response: %s", raw)
+	assert.Contains(t, string(raw), "project_id")
 }
 
 func TestFederationEnrollmentIdentityModeUsesTokenActor(t *testing.T) {

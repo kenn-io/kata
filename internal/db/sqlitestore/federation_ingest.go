@@ -535,7 +535,7 @@ func federationIngestAdoptionSnapshotAuthorMarkerState(
 			 WHERE id = ?
 			   AND spoke_instance_uid = ?
 			   AND revoked_at IS NULL
-			   AND (project_id = ? OR project_id IS NULL)`,
+			   AND project_id = ?`,
 		enrollmentID, spokeInstanceUID, projectID).Scan(
 		&allow, &baselineOpen, &state.nextSourceEventID, &state.endSourceEventID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -592,7 +592,7 @@ func consumeFederationAdoptionSnapshotAuthorMarker(
 		 WHERE id = ?
 		   AND spoke_instance_uid = ?
 		   AND revoked_at IS NULL
-		   AND (project_id = ? OR project_id IS NULL)
+		   AND project_id = ?
 		   AND allow_adoption_snapshot_authors = 1`,
 		enrollmentID, spokeInstanceUID, projectID)
 	if err != nil {
@@ -622,7 +622,7 @@ func recordFederationAdoptionBaselineProgress(
 		 WHERE id = ?
 		   AND spoke_instance_uid = ?
 		   AND revoked_at IS NULL
-		   AND (project_id = ? OR project_id IS NULL)
+		   AND project_id = ?
 		   AND allow_adoption_snapshot_authors = 1`,
 		nextSourceEventID, endSourceEventID, enrollmentID, spokeInstanceUID, projectID)
 	if err != nil {
