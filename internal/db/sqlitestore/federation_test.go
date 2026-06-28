@@ -2320,6 +2320,75 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
 
+	t.Run("preserves adoption authors across chunked snapshot baseline", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		markerValue := strings.Join([]string{"snapshot", "adoption", "chunked", "marker"}, "-")
+		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token:                        markerValue,
+			SpokeInstanceUID:             spokeUID,
+			ProjectID:                    &p.ID,
+			Capabilities:                 "push",
+			Actor:                        "bound-agent",
+			AllowAdoptionSnapshotAuthors: true,
+		})
+		require.NoError(t, err)
+		firstUID := newTestUID(t)
+		secondUID := newTestUID(t)
+		first := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &firstUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+firstUID+`","short_id":"`+shortID(firstUID)+`","title":"first","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"related","to_issue_uid":"`+secondUID+`","author":"historical-linker"}]}`)
+		first.Actor = "bound-agent"
+		first.ContentHash = remoteEventHash(t, first)
+		second := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &secondUID, nil,
+			"issue.snapshot", 101,
+			`{"uid":"`+secondUID+`","short_id":"`+shortID(secondUID)+`","title":"second","body":"","author":"second-historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		second.Actor = "bound-agent"
+		second.ContentHash = remoteEventHash(t, second)
+
+		firstRes, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                       p.ID,
+			FederationEnrollmentID:          created.Enrollment.ID,
+			SpokeInstanceUID:                spokeUID,
+			BoundActor:                      "bound-agent",
+			AllowSnapshotAuthorPreservation: true,
+			AdoptionBaseline:                db.FederationAdoptionBaselineOpen,
+			Events:                          []db.FederationIngestEvent{{SourceEventID: 1, Event: first}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, firstRes.Accepted)
+		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
+		require.NoError(t, err)
+		assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
+		firstIssue, err := d.IssueByUID(ctx, firstUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "historical-agent", firstIssue.Author)
+		links, err := d.LinksByIssue(ctx, firstIssue.ID)
+		require.NoError(t, err)
+		assert.Empty(t, links)
+
+		secondRes, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                       p.ID,
+			FederationEnrollmentID:          created.Enrollment.ID,
+			SpokeInstanceUID:                spokeUID,
+			BoundActor:                      "bound-agent",
+			AllowSnapshotAuthorPreservation: true,
+			AdoptionBaseline:                db.FederationAdoptionBaselineComplete,
+			Events:                          []db.FederationIngestEvent{{SourceEventID: 2, Event: second}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, secondRes.Accepted)
+		authorized, err = d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
+		require.NoError(t, err)
+		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
+		secondIssue, err := d.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "second-historical-agent", secondIssue.Author)
+		links, err = d.LinksByIssue(ctx, firstIssue.ID)
+		require.NoError(t, err)
+		require.Len(t, links, 1)
+		assert.Equal(t, "historical-linker", links[0].Author)
+	})
+
 	t.Run("consumes adoption author marker on first accepted non-snapshot ingest", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		markerValue := strings.Join([]string{"snapshot", "adoption", "normal", "marker"}, "-")

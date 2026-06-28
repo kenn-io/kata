@@ -300,9 +300,15 @@ type FederationIngestEventsRequest struct {
 
 // FederationIngestEventsRequestBody carries an all-or-nothing push batch.
 type FederationIngestEventsRequestBody struct {
-	SchemaVersion int                             `json:"schema_version"`
-	Events        []FederationIngestEventEnvelope `json:"events,omitempty"`
+	SchemaVersion    int                             `json:"schema_version"`
+	AdoptionBaseline string                          `json:"adoption_baseline,omitempty"`
+	Events           []FederationIngestEventEnvelope `json:"events,omitempty"`
 }
+
+const (
+	FederationAdoptionBaselineOpen     = "open"
+	FederationAdoptionBaselineComplete = "complete"
+)
 
 // FederationIngestEventEnvelope is the portable event shape accepted from a
 // spoke. Source EventID is the spoke-local row cursor; local hub IDs and

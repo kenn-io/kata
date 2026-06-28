@@ -588,8 +588,14 @@ type FederationIngestParams struct {
 	SpokeInstanceUID                string
 	BoundActor                      string
 	AllowSnapshotAuthorPreservation bool
+	AdoptionBaseline                string
 	Events                          []FederationIngestEvent
 }
+
+const (
+	FederationAdoptionBaselineOpen     = "open"
+	FederationAdoptionBaselineComplete = "complete"
+)
 
 // FederationIngestResult summarizes an accepted batch. InsertedEventUIDs lists
 // only fresh events, including generated claim audit events in insertion order,

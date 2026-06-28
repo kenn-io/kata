@@ -70,12 +70,26 @@ func (c *Client) IngestProjectEvents(
 	hubProjectID int64,
 	events []api.FederationIngestEventEnvelope,
 ) (api.FederationIngestEventsBody, error) {
+	return c.IngestProjectEventsWithOptions(ctx, hubProjectID, events, IngestProjectEventsOptions{})
+}
+
+type IngestProjectEventsOptions struct {
+	AdoptionBaseline string
+}
+
+func (c *Client) IngestProjectEventsWithOptions(
+	ctx context.Context,
+	hubProjectID int64,
+	events []api.FederationIngestEventEnvelope,
+	opts IngestProjectEventsOptions,
+) (api.FederationIngestEventsBody, error) {
 	var body api.FederationIngestEventsBody
 	err := c.postJSON(ctx,
 		fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProjectID),
 		api.FederationIngestEventsRequestBody{
-			SchemaVersion: db.CurrentSchemaVersion(),
-			Events:        events,
+			SchemaVersion:    db.CurrentSchemaVersion(),
+			AdoptionBaseline: opts.AdoptionBaseline,
+			Events:           events,
 		}, &body)
 	return body, err
 }

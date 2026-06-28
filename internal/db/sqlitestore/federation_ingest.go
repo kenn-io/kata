@@ -60,7 +60,7 @@ func (d *Store) ingestFederationEventsOnce(
 	}
 	adoptionSnapshotAuthorState, err := computeFederationIngestAdoptionSnapshotAuthorState(ctx, tx,
 		p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID,
-		p.AllowSnapshotAuthorPreservation, p.Events)
+		p.AllowSnapshotAuthorPreservation, p.AdoptionBaseline, p.Events)
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
@@ -80,7 +80,8 @@ func (d *Store) ingestFederationEventsOnce(
 		if len(ev.Payload) == 0 {
 			ev.Payload = json.RawMessage(`{}`)
 		}
-		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs, batchCreateSnapshotUIDs); err != nil {
+		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev,
+			knownIssueUIDs, batchCreateSnapshotUIDs, adoptionSnapshotAuthorState.allowFutureSnapshotLinks); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if boundActor != "" && ev.Actor != boundActor {
@@ -222,8 +223,9 @@ func validateFederationBoundActorPayload(
 }
 
 type federationIngestAdoptionSnapshotAuthorState struct {
-	allowAuthorPreservation bool
-	shouldDeferMarker       bool
+	allowAuthorPreservation  bool
+	allowFutureSnapshotLinks bool
+	shouldDeferMarker        bool
 }
 
 func computeFederationIngestAdoptionSnapshotAuthorState(
@@ -233,14 +235,15 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	enrollmentID int64,
 	spokeInstanceUID string,
 	allowExplicit bool,
+	adoptionBaseline string,
 	events []db.FederationIngestEvent,
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	// Adoption emits an initial baseline: optional project metadata followed by
 	// issue.snapshot events that preserve historical issue/comment authors. That
 	// exception must be explicitly attached to the enrollment token and is
-	// consumed with the accepted baseline batch. Spokes keep adoption metadata
-	// and following snapshots in one request; without an explicit snapshot in
-	// the batch, the hub treats metadata-only adoption as terminal.
+	// consumed with the accepted baseline. Chunk-aware spokes mark non-terminal
+	// baseline chunks so the hub can keep the one-time marker open until the
+	// terminal chunk arrives.
 	state := federationIngestAdoptionSnapshotAuthorState{}
 	if !allowExplicit || enrollmentID <= 0 {
 		return state, nil
@@ -253,6 +256,16 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 		projectID, enrollmentID, spokeInstanceUID)
 	if err != nil || !marker {
 		return state, err
+	}
+	switch adoptionBaseline {
+	case db.FederationAdoptionBaselineOpen:
+		state.shouldDeferMarker = true
+		state.allowFutureSnapshotLinks = true
+		state.allowAuthorPreservation = baselineShape.hasSnapshot
+		return state, nil
+	case db.FederationAdoptionBaselineComplete:
+		state.allowAuthorPreservation = baselineShape.hasSnapshot
+		return state, nil
 	}
 	prior, err := federationIngestHasPriorEvents(ctx, tx, projectID, spokeInstanceUID)
 	if err != nil {
@@ -529,6 +542,7 @@ func validateFederationProjectEvent(
 	ev db.RemoteEvent,
 	knownIssueUIDs map[string]struct{},
 	batchCreateSnapshotUIDs map[string]struct{},
+	allowFutureSnapshotLinks bool,
 ) error {
 	if ev.ProjectUID != projectUID {
 		return fmt.Errorf("%w: event %s targets project %s", db.ErrFederationIngestValidation, ev.EventUID, ev.ProjectUID)
@@ -586,6 +600,9 @@ func validateFederationProjectEvent(
 		}
 		if _, ok := knownIssueUIDs[ref]; !ok {
 			if _, deferred := deferredSnapshotLinks[ref]; deferred {
+				continue
+			}
+			if allowFutureSnapshotLinks && ev.Type == "issue.snapshot" {
 				continue
 			}
 			return fmt.Errorf("%w: event %s references unknown issue %s", db.ErrFederationIngestValidation, ev.EventUID, ref)

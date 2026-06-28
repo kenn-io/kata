@@ -1122,6 +1122,8 @@ components:
     FederationIngestEventsRequestBody:
       additionalProperties: false
       properties:
+        adoption_baseline:
+          type: string
         events:
           items:
             $ref: "#/components/schemas/FederationIngestEventEnvelope"

@@ -1786,6 +1786,33 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 	require.NoError(t, err)
 	hubBinding, err := hub.DB.FederationBindingByProject(ctx, hubProject.ID)
 	require.NoError(t, err)
+	var requestSizes []int
+	var baselineStages []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProject.ID) {
+			requestSizes = append(requestSizes, len(raw))
+			var body api.FederationIngestEventsRequestBody
+			require.NoError(t, json.Unmarshal(raw, &body))
+			baselineStages = append(baselineStages, body.AdoptionBaseline)
+		}
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, hub.URL+r.URL.RequestURI(), bytes.NewReader(raw))
+		require.NoError(t, err)
+		req.Header = r.Header.Clone()
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		for key, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, err = io.Copy(w, resp.Body)
+		require.NoError(t, err)
+	}))
+	t.Cleanup(proxy.Close)
 
 	localProject, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -1823,7 +1850,7 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 
 	var replica api.CreateFederationReplicaBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
-		"hub_url":                 hub.URL,
+		"hub_url":                 proxy.URL,
 		"hub_project_id":          hubProject.ID,
 		"hub_project_uid":         hubProject.UID,
 		"project_name":            localProject.Name,
@@ -1840,12 +1867,21 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 	binding, err := spoke.DB.FederationBindingByProject(ctx, replica.Project.ID)
 	require.NoError(t, err)
 	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
-		HubURL:       hub.URL,
+		HubURL:       proxy.URL,
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
 		Capabilities: "pull,push",
 	})
 	require.NoError(t, err)
+	require.Greater(t, len(requestSizes), 1)
+	for _, requestSize := range requestSizes {
+		assert.LessOrEqual(t, requestSize, maxFederationPushIngestBodyBytes)
+	}
+	require.NotEmpty(t, baselineStages)
+	for _, stage := range baselineStages[:len(baselineStages)-1] {
+		assert.Equal(t, api.FederationAdoptionBaselineOpen, stage)
+	}
+	assert.Equal(t, api.FederationAdoptionBaselineComplete, baselineStages[len(baselineStages)-1])
 
 	for _, issueUID := range issueUIDs {
 		pushed, err := hub.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
@@ -1868,6 +1904,124 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 		 WHERE project_id = ? AND direction = 'push' AND skipped_at IS NULL`,
 		hubProject.ID).Scan(&quarantineCount))
 	assert.Zero(t, quarantineCount)
+	require.NoError(t, assertHubOriginEventCount(ctx, hub.DB, hubProject.ID, spoke.DB.InstanceUID(), len(issueUIDs)))
+}
+
+func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T) {
+	ctx := context.Background()
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+
+	hubProject := createFederatedHubForPush(t, hub)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token:                        "resume-split-adopt-token",
+		SpokeInstanceUID:             spoke.DB.InstanceUID(),
+		ProjectID:                    &hubProject.ID,
+		Capabilities:                 "pull,push",
+		Actor:                        "agent",
+		AllowAdoptionSnapshotAuthors: true,
+	})
+	require.NoError(t, err)
+	hubBinding, err := hub.DB.FederationBindingByProject(ctx, hubProject.ID)
+	require.NoError(t, err)
+
+	var ingestCount int
+	var firstAcceptedCursor int64
+	failSecondIngest := true
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProject.ID) {
+			ingestCount++
+			var body api.FederationIngestEventsRequestBody
+			require.NoError(t, json.Unmarshal(raw, &body))
+			require.NotEmpty(t, body.Events)
+			if ingestCount == 1 {
+				firstAcceptedCursor = body.Events[len(body.Events)-1].EventID
+				assert.Equal(t, api.FederationAdoptionBaselineOpen, body.AdoptionBaseline)
+			}
+			if failSecondIngest && ingestCount == 2 {
+				assert.Equal(t, api.FederationAdoptionBaselineOpen, body.AdoptionBaseline)
+				http.Error(w, "temporary proxy failure", http.StatusBadGateway)
+				return
+			}
+		}
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, hub.URL+r.URL.RequestURI(), bytes.NewReader(raw))
+		require.NoError(t, err)
+		req.Header = r.Header.Clone()
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		for key, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, err = io.Copy(w, resp.Body)
+		require.NoError(t, err)
+	}))
+	t.Cleanup(proxy.Close)
+
+	localProject, err := spoke.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	largeBody := strings.Repeat("example adopted issue body\n", 1536)
+	issueUIDs := make([]string, 0, 40)
+	for i := range 40 {
+		issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: localProject.ID,
+			Title:     "adopted issue " + strconv.Itoa(i),
+			Body:      largeBody,
+			Author:    "historical-author",
+		})
+		require.NoError(t, err)
+		issueUIDs = append(issueUIDs, issue.UID)
+	}
+
+	var replica api.CreateFederationReplicaBody
+	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 proxy.URL,
+		"hub_project_id":          hubProject.ID,
+		"hub_project_uid":         hubProject.UID,
+		"project_name":            localProject.Name,
+		"replay_horizon_event_id": hubBinding.ReplayHorizonEventID,
+		"token":                   created.Token,
+		"capabilities":            "pull,push",
+		"actor":                   "agent",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}, &replica)
+	require.True(t, replica.Adopted)
+
+	binding, err := spoke.DB.FederationBindingByProject(ctx, replica.Project.ID)
+	require.NoError(t, err)
+	creds := config.FederationCredential{
+		HubURL:       proxy.URL,
+		HubProjectID: hubProject.ID,
+		Token:        created.Token,
+		Capabilities: "pull,push",
+	}
+	err = SyncFederationOnce(ctx, spoke.DB, binding, creds)
+	require.Error(t, err)
+	require.Positive(t, firstAcceptedCursor)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, replica.Project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, firstAcceptedCursor, binding.PushCursorEventID)
+	authorized, err := hub.DB.AuthorizeFederationToken(ctx, created.Token, hubProject.ID, "push")
+	require.NoError(t, err)
+	assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
+
+	failSecondIngest = false
+	err = SyncFederationOnce(ctx, spoke.DB, binding, creds)
+	require.NoError(t, err)
+	for _, issueUID := range issueUIDs {
+		pushed, err := hub.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "historical-author", pushed.Author)
+	}
+	authorized, err = hub.DB.AuthorizeFederationToken(ctx, created.Token, hubProject.ID, "push")
+	require.NoError(t, err)
+	assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 	require.NoError(t, assertHubOriginEventCount(ctx, hub.DB, hubProject.ID, spoke.DB.InstanceUID(), len(issueUIDs)))
 }
 
@@ -2072,7 +2226,7 @@ func TestNextFederationPushIngestBatchRejectsOversizedAdoptionSnapshotBaseline(t
 				`","author":"historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
 	}
 
-	_, err := nextFederationPushIngestBatch(events)
+	_, _, err := nextFederationPushIngestBatch(events)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "adoption snapshot baseline")
