@@ -2009,7 +2009,11 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, fmt.Errorf("insert adoption federation binding: %w", err)
 	}
 
-	if len(project.Metadata) > 0 && string(project.Metadata) != "{}" {
+	emitMetadataBaseline := len(project.Metadata) > 0 && string(project.Metadata) != "{}"
+	if !emitMetadataBaseline && len(issues) == 0 {
+		emitMetadataBaseline = true
+	}
+	if emitMetadataBaseline {
 		payload, err := projectMetadataAdoptionPayload(project.Metadata)
 		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err

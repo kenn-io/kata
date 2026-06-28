@@ -259,14 +259,6 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 		return state, err
 	}
 	if prior {
-		priorIsBaseline, err := federationIngestPriorEventsAreAdoptionBaseline(ctx, tx, projectID, spokeInstanceUID)
-		if err != nil {
-			return state, err
-		}
-		if !priorIsBaseline || !baselineShape.hasSnapshot {
-			return state, nil
-		}
-		state.allowAuthorPreservation = true
 		return state, nil
 	}
 
@@ -325,30 +317,6 @@ func federationIngestAdoptionSnapshotAuthorMarker(
 		return false, fmt.Errorf("lookup federation adoption snapshot author marker: %w", err)
 	}
 	return marker != 0, nil
-}
-
-func federationIngestPriorEventsAreAdoptionBaseline(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	spokeInstanceUID string,
-) (bool, error) {
-	var one int
-	err := tx.QueryRowContext(ctx, `
-		SELECT 1
-		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?
-		   AND type NOT IN ('project.metadata_updated', 'issue.snapshot')
-		 LIMIT 1`,
-		projectID, spokeInstanceUID).Scan(&one)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("lookup prior federation ingest baseline events: %w", err)
-	}
-	return false, nil
 }
 
 func federationIngestHasPriorEvents(
