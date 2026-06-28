@@ -3060,6 +3060,49 @@ components:
         - token
         - event
       type: object
+    RewriteAuthorIdentityRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+      required:
+        - from
+        - to
+      type: object
+    RewriteAuthorIdentityResult:
+      additionalProperties: true
+      properties:
+        changed:
+          type: boolean
+        comment_authors:
+          format: int64
+          type: integer
+        event:
+          $ref: "#/components/schemas/Event"
+        issue_authors:
+          format: int64
+          type: integer
+        issue_owners:
+          format: int64
+          type: integer
+        link_authors:
+          format: int64
+          type: integer
+        total:
+          format: int64
+          type: integer
+      required:
+        - changed
+        - issue_authors
+        - issue_owners
+        - comment_authors
+        - link_authors
+        - total
+      type: object
     RunIssueSyncOnceRequestBody:
       additionalProperties: false
       type: object
@@ -4217,6 +4260,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FederationQuarantineSummary"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/federation/rewrite-author:
+    post:
+      operationId: rewriteAuthorIdentity
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RewriteAuthorIdentityRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RewriteAuthorIdentityResult"
           description: OK
         default:
           content:

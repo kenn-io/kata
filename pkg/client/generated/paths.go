@@ -81,6 +81,10 @@ type SkipFederationQuarantinePath struct {
 	QuarantineID int64 `json:"quarantine_id"`
 }
 
+type RewriteAuthorIdentityPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type GetProjectFederationStatusPath struct {
 	ProjectID int64 `json:"project_id"`
 }

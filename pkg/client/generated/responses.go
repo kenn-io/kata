@@ -133,6 +133,10 @@ type SkipFederationQuarantineResponse = FederationQuarantineSummary
 
 type SkipFederationQuarantineErrorResponse = ErrorEnvelope
 
+type RewriteAuthorIdentityResponse = RewriteAuthorIdentityResult
+
+type RewriteAuthorIdentityErrorResponse = ErrorEnvelope
+
 type GetProjectFederationStatusResponse = FederationStatusBody
 
 type GetProjectFederationStatusErrorResponse = ErrorEnvelope
@@ -540,6 +544,13 @@ type SkipFederationQuarantineResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *SkipFederationQuarantineResponse
+}
+
+type RewriteAuthorIdentityResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RewriteAuthorIdentityResponse
 }
 
 type GetProjectFederationStatusResp struct {

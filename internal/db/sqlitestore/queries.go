@@ -638,6 +638,7 @@ type createdLinkOut struct {
 	ToShortID  string `json:"to_short_id,omitempty"`
 	ToIssueUID string `json:"to_issue_uid,omitempty"`
 	Incoming   bool   `json:"incoming,omitempty"`
+	Author     string `json:"author,omitempty"`
 }
 
 type issueSnapshotComment struct {

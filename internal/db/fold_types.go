@@ -82,4 +82,5 @@ type FoldLinkKey struct {
 type FoldElementState struct {
 	Present bool
 	Clock   FoldClock
+	Author  string
 }

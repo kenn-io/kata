@@ -183,6 +183,15 @@ the printed `--project <hub-project>` with `--project <spoke-project>`, and
 create the enrollment with `kata federation enroll --adopt-existing` so the
 token is marked for adoption snapshots.
 
+Before enrollment, clean current-state data that should not appear in baseline
+snapshots. Use `kata comment edit <ref> <comment-uid> --body ...` to replace
+comment text while preserving the comment's UID, author, and timestamp. Use
+`kata federation rewrite-author --project <project> --from <old-author> --to
+<new-author>` to rewrite exact current-row author identities across issue
+authors, issue owners, comment authors, and link authors. These are
+pre-federation hygiene tools; they do not redact historical event logs that
+have already been exported or shared.
+
 Step 3: run the printed join command against the spoke daemon:
 
 ```sh
@@ -583,6 +592,7 @@ kata federation join --project <project> --hub-url <http-hostname-url> \
   --hub-project-id <id> --token <token> --actor <actor> --allow-insecure [--push]
 kata federation join --project <existing-project> --hub-url <url> \
   --hub-project-id <id> --token <token> --actor <actor> --push --adopt-existing
+kata federation rewrite-author --project <project> --from <old-author> --to <new-author>
 kata federation enrollments list
 kata federation revoke <enrollment-id>
 kata federation leave <project> [--delete [--force]] [--local-only] [--hub <name>]

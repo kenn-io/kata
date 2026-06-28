@@ -22,6 +22,8 @@ type RetryFederationQuarantineBody = RetryFederationQuarantineRequestBody
 
 type SkipFederationQuarantineBody = SkipFederationQuarantineRequestBody
 
+type RewriteAuthorIdentityBody = RewriteAuthorIdentityRequestBody
+
 type ImportIssuesBody = ImportRequestBody
 
 type DisableIssueSyncBody = DisableIssueSyncRequestBody

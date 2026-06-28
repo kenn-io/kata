@@ -20,6 +20,17 @@ type ProjectFederationRequest struct {
 	ProjectID int64 `path:"project_id"`
 }
 
+// RewriteAuthorIdentityRequest rewrites one exact author identity across a
+// non-federated project's current rows before baseline snapshots are created.
+type RewriteAuthorIdentityRequest struct {
+	ProjectID int64 `path:"project_id"`
+	Body      struct {
+		Actor string `json:"actor,omitempty"`
+		From  string `json:"from"`
+		To    string `json:"to"`
+	}
+}
+
 // FederationStatusRequest reads status for all locally bound federation
 // projects through the normal local/admin daemon auth surface.
 // include=archived also surfaces bindings whose project is archived, so a
@@ -80,6 +91,11 @@ type ProjectFederationBody struct {
 // ProjectFederationResponse wraps ProjectFederationBody.
 type ProjectFederationResponse struct {
 	Body ProjectFederationBody
+}
+
+// RewriteAuthorIdentityResponse returns per-field rewrite counts.
+type RewriteAuthorIdentityResponse struct {
+	Body db.RewriteAuthorIdentityResult
 }
 
 // FederationStatusResponse wraps FederationStatusBody.

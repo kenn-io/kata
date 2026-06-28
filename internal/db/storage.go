@@ -90,6 +90,7 @@ type Storage interface {
 	// comments
 	CreateComment(ctx context.Context, p CreateCommentParams) (Comment, Event, error)
 	EditComment(ctx context.Context, p EditCommentParams) (Comment, *Event, bool, error)
+	RewriteAuthorIdentity(ctx context.Context, p RewriteAuthorIdentityParams) (RewriteAuthorIdentityResult, error)
 	CommentBodyByID(ctx context.Context, id int64) (string, error)
 	CommentsByIssue(ctx context.Context, issueID int64) ([]Comment, error)
 

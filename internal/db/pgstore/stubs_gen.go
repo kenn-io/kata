@@ -812,6 +812,10 @@ func (s *Store) RevokeFederationEnrollment(_ context.Context, _ int64) error {
 	return ErrNotImplementedPhase3
 }
 
+func (s *Store) RewriteAuthorIdentity(_ context.Context, _ db.RewriteAuthorIdentityParams) (db.RewriteAuthorIdentityResult, error) {
+	return db.RewriteAuthorIdentityResult{}, ErrNotImplementedPhase3
+}
+
 func (s *Store) SearchFTS(_ context.Context, _ int64, _ string, _ int, _ bool) ([]db.SearchCandidate, error) {
 	return nil, ErrNotImplementedPhase3
 }

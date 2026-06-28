@@ -111,6 +111,36 @@ type EditCommentParams struct {
 	Body       string
 }
 
+// RewriteAuthorIdentityParams carries a scoped pre-federation identity rewrite.
+// It rewrites exact author/owner values in one project only; it is not a
+// historical event redaction primitive.
+type RewriteAuthorIdentityParams struct {
+	ProjectID int64
+	Actor     string
+	From      string
+	To        string
+}
+
+// RewriteAuthorIdentityResult reports the row counts changed by a scoped
+// author identity rewrite.
+type RewriteAuthorIdentityResult struct {
+	Changed        bool   `json:"changed"`
+	IssueAuthors   int64  `json:"issue_authors"`
+	IssueOwners    int64  `json:"issue_owners"`
+	CommentAuthors int64  `json:"comment_authors"`
+	LinkAuthors    int64  `json:"link_authors"`
+	TotalCount     int64  `json:"total"`
+	Event          *Event `json:"event,omitempty"`
+}
+
+// Total returns the sum of changed row counts.
+func (r RewriteAuthorIdentityResult) Total() int64 {
+	if r.TotalCount != 0 {
+		return r.TotalCount
+	}
+	return r.IssueAuthors + r.IssueOwners + r.CommentAuthors + r.LinkAuthors
+}
+
 // CloseThrottleReason values for CloseThrottledPayload.Reason. Sibling-burst
 // fires when an actor closes too many siblings under one parent in a short
 // window; duplicate-message fires when an actor reuses identical close prose

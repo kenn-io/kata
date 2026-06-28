@@ -3025,6 +3025,7 @@ type federationSnapshotPayload struct {
 	Links        []struct {
 		Type       string `json:"type"`
 		ToIssueUID string `json:"to_issue_uid"`
+		Author     string `json:"author"`
 	} `json:"links"`
 	Comments []struct {
 		CommentUID string `json:"comment_uid"`

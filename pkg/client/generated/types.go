@@ -2782,6 +2782,41 @@ func (r RevokeTokenResponseBody) Validate() error {
 	return errors
 }
 
+type RewriteAuthorIdentityRequestBody struct {
+	Actor *string `json:"actor,omitempty"`
+	From  string  `json:"from" validate:"required"`
+	To    string  `json:"to" validate:"required"`
+}
+
+func (r RewriteAuthorIdentityRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type RewriteAuthorIdentityResult struct {
+	Changed        bool   `json:"changed"`
+	CommentAuthors int64  `json:"comment_authors"`
+	Event          *Event `json:"event,omitempty"`
+	IssueAuthors   int64  `json:"issue_authors"`
+	IssueOwners    int64  `json:"issue_owners"`
+	LinkAuthors    int64  `json:"link_authors"`
+	Total          int64  `json:"total"`
+}
+
+func (r RewriteAuthorIdentityResult) Validate() error {
+	var errors runtime.ValidationErrors
+	if r.Event != nil {
+		if v, ok := any(r.Event).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Event", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type RunIssueSyncOnceRequestBody = map[string]any
 
 type RunIssueSyncOnceResponseBody struct {

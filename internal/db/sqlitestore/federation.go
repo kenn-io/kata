@@ -1258,7 +1258,7 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 
 func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLinkOut, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT l.type, peer.short_id, peer.uid
+		SELECT l.type, peer.short_id, peer.uid, l.author
 		  FROM links l
 		  JOIN issues peer ON peer.id = l.to_issue_id
 		 WHERE l.from_issue_id = ?
@@ -1270,7 +1270,7 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 	var out []createdLinkOut
 	for rows.Next() {
 		var link createdLinkOut
-		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID); err != nil {
+		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Author); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot link: %w", err)
 		}
 		out = append(out, link)
@@ -1715,6 +1715,7 @@ type federatedLinkRow struct {
 	fromUID string
 	toUID   string
 	typ     string
+	author  string
 }
 
 func (r federatedLinkRow) key() db.FoldLinkKey {
@@ -1743,6 +1744,7 @@ func reconcileFederatedLinks(ctx context.Context, tx *sql.Tx, projectID int64, i
 		return keys[i].Type < keys[j].Type
 	})
 	for _, key := range keys {
+		state := projection.Links[key]
 		fromID, fromOK := issueIDs[key.FromUID]
 		toID, toOK := issueIDs[key.ToUID]
 		if !fromOK || !toOK {
@@ -1762,6 +1764,7 @@ func reconcileFederatedLinks(ctx context.Context, tx *sql.Tx, projectID int64, i
 			fromUID: fromUID,
 			toUID:   toUID,
 			typ:     key.Type,
+			author:  state.Author,
 		}
 		desired[row.key()] = row
 	}
@@ -1775,23 +1778,23 @@ func reconcileFederatedLinks(ctx context.Context, tx *sql.Tx, projectID int64, i
 	}
 	for key, row := range desired {
 		if existingRow, ok := existing[key]; ok {
-			if existingRow.fromID == row.fromID && existingRow.toID == row.toID {
+			if existingRow.fromID == row.fromID && existingRow.toID == row.toID && existingRow.author == nonEmptyAuthor(row.author) {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE links
 				   SET from_issue_id = ?, to_issue_id = ?,
-				       from_issue_uid = ?, to_issue_uid = ?, type = ?
+				       from_issue_uid = ?, to_issue_uid = ?, type = ?, author = ?
 				 WHERE id = ?`,
-				row.fromID, row.toID, row.fromUID, row.toUID, row.typ, existingRow.id); err != nil {
+				row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author), existingRow.id); err != nil {
 				return fmt.Errorf("update federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 			}
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-			VALUES(?, ?, ?, ?, ?, 'federation')`,
-			row.fromID, row.toID, row.fromUID, row.toUID, row.typ); err != nil {
+			VALUES(?, ?, ?, ?, ?, ?)`,
+			row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author)); err != nil {
 			return fmt.Errorf("insert federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
 		}
 	}
@@ -1804,7 +1807,7 @@ func reconcileFederatedLinks(ctx context.Context, tx *sql.Tx, projectID int64, i
 // into the same shadow project, so both endpoints sit in projectID.
 func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectID int64) (map[db.FoldLinkKey]federatedLinkRow, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type
+		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type, l.author
 		  FROM links l
 		  JOIN issues f ON f.id = l.from_issue_id
 		  JOIN issues t ON t.id = l.to_issue_id
@@ -1816,7 +1819,7 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectID int64) (map[db
 	out := map[db.FoldLinkKey]federatedLinkRow{}
 	for rows.Next() {
 		var row federatedLinkRow
-		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ); err != nil {
+		if err := rows.Scan(&row.id, &row.fromID, &row.toID, &row.fromUID, &row.toUID, &row.typ, &row.author); err != nil {
 			return nil, fmt.Errorf("scan federated link: %w", err)
 		}
 		out[row.key()] = row
