@@ -2342,7 +2342,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		first.Actor = "bound-agent"
 		first.ContentHash = remoteEventHash(t, first)
 		second := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &secondUID, nil,
-			"issue.snapshot", 101,
+			"issue.snapshot", 100,
 			`{"uid":"`+secondUID+`","short_id":"`+shortID(secondUID)+`","title":"second","body":"","author":"second-historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		second.Actor = "bound-agent"
 		second.ContentHash = remoteEventHash(t, second)
@@ -2427,7 +2427,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, 1, firstRes.Accepted)
 
 		second := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &secondUID, nil,
-			"issue.snapshot", 101,
+			"issue.snapshot", 100,
 			`{"uid":"`+secondUID+`","short_id":"`+shortID(secondUID)+`","title":"second","body":"","author":"second-historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		second.Actor = "bound-agent"
 		second.ContentHash = remoteEventHash(t, second)
@@ -2484,7 +2484,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, 1, firstRes.Accepted)
 
 		metadata := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, nil, nil,
-			"project.metadata_updated", 101,
+			"project.metadata_updated", 100,
 			`{"project_uid":"`+p.UID+`","metadata":{"area":"docs"}}`)
 		metadata.Actor = "bound-agent"
 		metadata.ContentHash = remoteEventHash(t, metadata)
@@ -2547,7 +2547,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		require.NoError(t, err)
 
 		second := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &secondUID, nil,
-			"issue.snapshot", 101,
+			"issue.snapshot", 100,
 			`{"uid":"`+secondUID+`","short_id":"`+shortID(secondUID)+`","title":"second","body":"","author":"second-historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		second.Actor = "bound-agent"
 		second.ContentHash = remoteEventHash(t, second)
@@ -2642,9 +2642,9 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
 
-	t.Run("rejects adoption open chunk with oversized terminal source cursor", func(t *testing.T) {
+	t.Run("rejects adoption continuation outside original baseline boundary", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
-		markerValue := strings.Join([]string{"snapshot", "adoption", "oversized", "cursor"}, "-")
+		markerValue := strings.Join([]string{"snapshot", "adoption", "boundary", "marker"}, "-")
 		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 			Token:                        markerValue,
 			SpokeInstanceUID:             spokeUID,
@@ -2668,14 +2668,33 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 			BoundActor:                       "bound-agent",
 			AllowSnapshotAuthorPreservation:  true,
 			AdoptionBaseline:                 db.FederationAdoptionBaselineOpen,
-			AdoptionBaselineEndSourceEventID: db.FederationAdoptionBaselineMaxSourceEvents + 1,
+			AdoptionBaselineEndSourceEventID: 3,
 			Events:                           []db.FederationIngestEvent{{SourceEventID: 1, Event: first}},
+		})
+		require.NoError(t, err)
+
+		forgedUID := newTestUID(t)
+		forged := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &forgedUID, nil,
+			"issue.snapshot", 101,
+			`{"uid":"`+forgedUID+`","short_id":"`+shortID(forgedUID)+`","title":"outside-boundary","body":"","author":"spoofed-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		forged.Actor = "bound-agent"
+		forged.ContentHash = remoteEventHash(t, forged)
+
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                        p.ID,
+			FederationEnrollmentID:           created.Enrollment.ID,
+			SpokeInstanceUID:                 spokeUID,
+			BoundActor:                       "bound-agent",
+			AllowSnapshotAuthorPreservation:  true,
+			AdoptionBaseline:                 db.FederationAdoptionBaselineOpen,
+			AdoptionBaselineEndSourceEventID: 3,
+			Events:                           []db.FederationIngestEvent{{SourceEventID: 2, Event: forged}},
 		})
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
-		assert.Contains(t, err.Error(), "too many source events")
-		assertIngestedEventCount(ctx, t, d, p.ID, 0)
+		assert.Contains(t, err.Error(), "outside recorded baseline boundary")
+		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
 
 	t.Run("rejects adoption open chunk at terminal source cursor", func(t *testing.T) {

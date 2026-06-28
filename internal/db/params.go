@@ -602,11 +602,6 @@ const (
 	FederationAdoptionBaselineComplete = "complete"
 )
 
-// FederationAdoptionBaselineMaxSourceEvents bounds the one-time historical
-// author preservation grant to the pending-event window the spoke push loop can
-// discover when staging an adoption baseline.
-const FederationAdoptionBaselineMaxSourceEvents = 1000
-
 // FederationIngestResult summarizes an accepted batch. InsertedEventUIDs lists
 // only fresh events, including generated claim audit events in insertion order,
 // so callers can avoid rebroadcasting response-lost retries.

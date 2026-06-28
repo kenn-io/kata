@@ -331,6 +331,9 @@ func computeFederationIngestOpenAdoptionBaselineState(
 		return federationIngestAdoptionSnapshotAuthorState{}, err
 	}
 	if marker.baselineOpen {
+		if err := validateFederationIngestAdoptionBaselineBoundary(ctx, tx, projectID, spokeInstanceUID, baselineShape.events); err != nil {
+			return federationIngestAdoptionSnapshotAuthorState{}, err
+		}
 		if baselineShape.minSourceEventID < marker.nextSourceEventID {
 			state.duplicateOnly = true
 		}
@@ -365,6 +368,9 @@ func computeFederationIngestCompleteAdoptionBaselineState(
 		return federationIngestAdoptionSnapshotAuthorState{}, err
 	}
 	if marker.baselineOpen {
+		if err := validateFederationIngestAdoptionBaselineBoundary(ctx, tx, projectID, spokeInstanceUID, baselineShape.events); err != nil {
+			return federationIngestAdoptionSnapshotAuthorState{}, err
+		}
 		if baselineShape.minSourceEventID < marker.nextSourceEventID {
 			state.duplicateOnly = true
 			state.allowFutureSnapshotLinks = true
@@ -398,9 +404,6 @@ func validateFederationIngestAdoptionBaselineCursor(
 	if !baselineShape.contiguousSourceEventIDs {
 		return fmt.Errorf("%w: adoption baseline source event cursor is not contiguous",
 			db.ErrFederationIngestValidation)
-	}
-	if err := validateFederationIngestAdoptionBaselineSourceSpan(marker, baselineShape, adoptionBaselineEndSourceEventID); err != nil {
-		return err
 	}
 	if baselineShape.maxSourceEventID > adoptionBaselineEndSourceEventID {
 		return fmt.Errorf("%w: adoption baseline chunk exceeds terminal source event %d",
@@ -436,34 +439,13 @@ func validateFederationIngestAdoptionBaselineCursor(
 		db.ErrFederationIngestValidation, stage, baselineShape.minSourceEventID, marker.nextSourceEventID)
 }
 
-func validateFederationIngestAdoptionBaselineSourceSpan(
-	marker federationIngestAdoptionMarkerState,
-	baselineShape federationIngestBaselineShape,
-	adoptionBaselineEndSourceEventID int64,
-) error {
-	startSourceEventID := baselineShape.minSourceEventID
-	if marker.baselineOpen && marker.nextSourceEventID > 1 {
-		startSourceEventID = marker.nextSourceEventID - 1
-		if baselineShape.minSourceEventID < startSourceEventID {
-			startSourceEventID = baselineShape.minSourceEventID
-		}
-	}
-	if adoptionBaselineEndSourceEventID < startSourceEventID {
-		return nil
-	}
-	if adoptionBaselineEndSourceEventID-startSourceEventID+1 <= db.FederationAdoptionBaselineMaxSourceEvents {
-		return nil
-	}
-	return fmt.Errorf("%w: adoption baseline has too many source events between %d and terminal source event %d",
-		db.ErrFederationIngestValidation, startSourceEventID, adoptionBaselineEndSourceEventID)
-}
-
 type federationIngestBaselineShape struct {
 	valid                    bool
 	hasSnapshot              bool
 	contiguousSourceEventIDs bool
 	minSourceEventID         int64
 	maxSourceEventID         int64
+	events                   []db.FederationIngestEvent
 }
 
 func federationIngestAdoptionBaselineShape(events []db.FederationIngestEvent) federationIngestBaselineShape {
@@ -478,6 +460,7 @@ func federationIngestAdoptionBaselineShape(events []db.FederationIngestEvent) fe
 		if in.SourceEventID > shape.maxSourceEventID {
 			shape.maxSourceEventID = in.SourceEventID
 		}
+		shape.events = append(shape.events, in)
 		switch in.Event.Type {
 		case "project.metadata_updated":
 			if shape.hasSnapshot {
@@ -492,6 +475,43 @@ func federationIngestAdoptionBaselineShape(events []db.FederationIngestEvent) fe
 		}
 	}
 	return shape
+}
+
+func validateFederationIngestAdoptionBaselineBoundary(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	spokeInstanceUID string,
+	events []db.FederationIngestEvent,
+) error {
+	var (
+		hlcPhysicalMS int64
+		hlcCounter    int64
+	)
+	err := tx.QueryRowContext(ctx, `
+		SELECT hlc_physical_ms, hlc_counter
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND type IN ('project.metadata_updated', 'issue.snapshot')
+		 ORDER BY id ASC
+		 LIMIT 1`,
+		projectID, spokeInstanceUID).Scan(&hlcPhysicalMS, &hlcCounter)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: adoption baseline continuation has no recorded baseline boundary",
+			db.ErrFederationIngestValidation)
+	}
+	if err != nil {
+		return fmt.Errorf("lookup adoption baseline boundary: %w", err)
+	}
+	for _, in := range events {
+		if in.Event.HLCPhysicalMS == hlcPhysicalMS && in.Event.HLCCounter == hlcCounter {
+			continue
+		}
+		return fmt.Errorf("%w: adoption baseline event %s is outside recorded baseline boundary",
+			db.ErrFederationIngestValidation, in.Event.EventUID)
+	}
+	return nil
 }
 
 func federationIngestAdoptionSnapshotAuthorMarkerState(
