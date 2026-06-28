@@ -1130,9 +1130,8 @@ type FederationIngestEventsBody struct {
 }
 
 type FederationIngestEventsRequestBody struct {
-	ContinueAdoptionSnapshotBaseline *bool                           `json:"continue_adoption_snapshot_baseline,omitempty"`
-	Events                           []FederationIngestEventEnvelope `json:"events,omitempty"`
-	SchemaVersion                    int64                           `json:"schema_version"`
+	Events        []FederationIngestEventEnvelope `json:"events,omitempty"`
+	SchemaVersion int64                           `json:"schema_version"`
 }
 
 func (f FederationIngestEventsRequestBody) Validate() error {

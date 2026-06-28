@@ -69,15 +69,13 @@ func (c *Client) IngestProjectEvents(
 	ctx context.Context,
 	hubProjectID int64,
 	events []api.FederationIngestEventEnvelope,
-	continueAdoptionSnapshotBaseline bool,
 ) (api.FederationIngestEventsBody, error) {
 	var body api.FederationIngestEventsBody
 	err := c.postJSON(ctx,
 		fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProjectID),
 		api.FederationIngestEventsRequestBody{
-			SchemaVersion:                    db.CurrentSchemaVersion(),
-			ContinueAdoptionSnapshotBaseline: continueAdoptionSnapshotBaseline,
-			Events:                           events,
+			SchemaVersion: db.CurrentSchemaVersion(),
+			Events:        events,
 		}, &body)
 	return body, err
 }

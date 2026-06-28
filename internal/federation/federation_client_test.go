@@ -75,12 +75,11 @@ func TestFederationClientIngestProjectEvents(t *testing.T) {
 
 	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	got, err := client.IngestProjectEvents(context.Background(), 42, events, true)
+	got, err := client.IngestProjectEvents(context.Background(), 42, events)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bearer hub-token", gotAuth)
 	assert.Equal(t, db.CurrentSchemaVersion(), gotBody.SchemaVersion)
-	assert.True(t, gotBody.ContinueAdoptionSnapshotBaseline)
 	require.Len(t, gotBody.Events, 1)
 	assert.Equal(t, events[0].EventID, gotBody.Events[0].EventID)
 	assert.Equal(t, events[0].EventUID, gotBody.Events[0].EventUID)
@@ -103,7 +102,7 @@ func TestFederationClientIngestProjectEventsError(t *testing.T) {
 	require.NoError(t, err)
 	_, err = client.IngestProjectEvents(context.Background(), 42, []api.FederationIngestEventEnvelope{{
 		EventID: 1,
-	}}, false)
+	}})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "returned 409")
@@ -141,7 +140,7 @@ func TestFederationClientPostJSONRejectsNonJSONResponse(t *testing.T) {
 
 	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	_, err = client.IngestProjectEvents(context.Background(), 42, nil, false)
+	_, err = client.IngestProjectEvents(context.Background(), 42, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode hub")

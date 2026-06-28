@@ -431,9 +431,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 
 	huma.Register(humaAPI, huma.Operation{
-		OperationID: "ingestFederationProjectEvents",
-		Method:      "POST",
-		Path:        "/api/v1/projects/{project_id}/federation/events:ingest",
+		OperationID:  "ingestFederationProjectEvents",
+		Method:       "POST",
+		Path:         "/api/v1/projects/{project_id}/federation/events:ingest",
+		MaxBodyBytes: 64 << 20,
 	}, func(ctx context.Context, in *api.FederationIngestEventsRequest) (*api.FederationIngestEventsResponse, error) {
 		principal, err := authorizeFederationRequest(ctx, cfg.DB, in.Authorization, in.ProjectID, "push")
 		if err != nil {
@@ -449,13 +450,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
-			ProjectID:                        in.ProjectID,
-			FederationEnrollmentID:           principal.EnrollmentID,
-			SpokeInstanceUID:                 principal.SpokeInstanceUID,
-			BoundActor:                       principal.Actor,
-			AllowSnapshotAuthorPreservation:  principal.AllowAdoptionSnapshotAuthors,
-			ContinueAdoptionSnapshotBaseline: in.Body.ContinueAdoptionSnapshotBaseline,
-			Events:                           federationIngestEventsToDB(in.Body.Events),
+			ProjectID:                       in.ProjectID,
+			FederationEnrollmentID:          principal.EnrollmentID,
+			SpokeInstanceUID:                principal.SpokeInstanceUID,
+			BoundActor:                      principal.Actor,
+			AllowSnapshotAuthorPreservation: principal.AllowAdoptionSnapshotAuthors,
+			Events:                          federationIngestEventsToDB(in.Body.Events),
 		})
 		if err != nil {
 			return nil, federationIngestError(err)

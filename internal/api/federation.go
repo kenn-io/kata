@@ -300,9 +300,8 @@ type FederationIngestEventsRequest struct {
 
 // FederationIngestEventsRequestBody carries an all-or-nothing push batch.
 type FederationIngestEventsRequestBody struct {
-	SchemaVersion                    int                             `json:"schema_version"`
-	ContinueAdoptionSnapshotBaseline bool                            `json:"continue_adoption_snapshot_baseline,omitempty"`
-	Events                           []FederationIngestEventEnvelope `json:"events,omitempty"`
+	SchemaVersion int                             `json:"schema_version"`
+	Events        []FederationIngestEventEnvelope `json:"events,omitempty"`
 }
 
 // FederationIngestEventEnvelope is the portable event shape accepted from a

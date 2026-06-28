@@ -1790,6 +1790,7 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 	localProject, err := spoke.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	largeBody := strings.Repeat("example adopted issue body\n", 1536)
+	issues := make([]db.Issue, 0, 40)
 	issueUIDs := make([]string, 0, 40)
 	for i := range 40 {
 		issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -1799,8 +1800,26 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 			Author:    "historical-author",
 		})
 		require.NoError(t, err)
+		issues = append(issues, issue)
 		issueUIDs = append(issueUIDs, issue.UID)
 	}
+	source := issues[0]
+	target := issues[len(issues)-1]
+	_, _, err = spoke.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+		FromIssueID: source.ID,
+		ToIssueID:   target.ID,
+		Type:        "related",
+		Author:      "historical-linker",
+	}, db.LinkEventParams{
+		EventType:    "issue.linked",
+		EventIssueID: source.ID,
+		FromShortID:  source.ShortID,
+		FromUID:      source.UID,
+		ToShortID:    target.ShortID,
+		ToUID:        target.UID,
+		Actor:        "historical-linker",
+	})
+	require.NoError(t, err)
 
 	var replica api.CreateFederationReplicaBody
 	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
@@ -1833,6 +1852,15 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 		require.NoError(t, err)
 		assert.Equal(t, "historical-author", pushed.Author)
 	}
+	var linkCount int
+	require.NoError(t, hub.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM links
+		 WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
+		   AND from_issue_uid = ? AND to_issue_uid = ? AND type = 'related'
+		   AND author = 'historical-linker'`,
+		hubProject.ID, source.UID, target.UID).Scan(&linkCount))
+	assert.Equal(t, 1, linkCount)
 	var quarantineCount int
 	require.NoError(t, hub.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -1841,6 +1869,77 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 		hubProject.ID).Scan(&quarantineCount))
 	assert.Zero(t, quarantineCount)
 	require.NoError(t, assertHubOriginEventCount(ctx, hub.DB, hubProject.ID, spoke.DB.InstanceUID(), len(issueUIDs)))
+}
+
+func TestSyncFederationOncePushesSplitAdoptionMetadataBeforeHistoricalSnapshots(t *testing.T) {
+	ctx := context.Background()
+	hub := testenv.New(t)
+	spoke := testenv.New(t)
+
+	hubProject := createFederatedHubForPush(t, hub)
+	created, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token:                        "split-metadata-adopt-token",
+		SpokeInstanceUID:             spoke.DB.InstanceUID(),
+		ProjectID:                    &hubProject.ID,
+		Capabilities:                 "pull,push",
+		Actor:                        "agent",
+		AllowAdoptionSnapshotAuthors: true,
+	})
+	require.NoError(t, err)
+	hubBinding, err := hub.DB.FederationBindingByProject(ctx, hubProject.ID)
+	require.NoError(t, err)
+
+	localProject, err := spoke.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	metadataValue, err := json.Marshal(strings.Repeat("m", 620<<10))
+	require.NoError(t, err)
+	metadataOut, err := spoke.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+		ProjectID:  localProject.ID,
+		IfMatchRev: localProject.Revision,
+		Actor:      "agent",
+		Patch: map[string]json.RawMessage{
+			"large": metadataValue,
+		},
+	})
+	require.NoError(t, err)
+	localProject = metadataOut.Project
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: localProject.ID,
+		Title:     "adopted issue",
+		Body:      strings.Repeat("example adopted issue body\n", 4096),
+		Author:    "historical-author",
+	})
+	require.NoError(t, err)
+
+	var replica api.CreateFederationReplicaBody
+	postJSON(t, spoke.URL, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 hub.URL,
+		"hub_project_id":          hubProject.ID,
+		"hub_project_uid":         hubProject.UID,
+		"project_name":            localProject.Name,
+		"replay_horizon_event_id": hubBinding.ReplayHorizonEventID,
+		"token":                   created.Token,
+		"capabilities":            "pull,push",
+		"actor":                   "agent",
+		"push_enabled":            true,
+		"adopt_existing":          true,
+	}, &replica)
+	require.True(t, replica.Adopted)
+	require.Equal(t, int64(1), replica.AdoptionSnapshotCount)
+
+	binding, err := spoke.DB.FederationBindingByProject(ctx, replica.Project.ID)
+	require.NoError(t, err)
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: hubProject.ID,
+		Token:        created.Token,
+		Capabilities: "pull,push",
+	})
+	require.NoError(t, err)
+
+	pushed, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, "historical-author", pushed.Author)
 }
 
 func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {
