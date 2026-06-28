@@ -452,7 +452,7 @@ func (d *Store) ExportFederationQuarantine(ctx context.Context, f db.ExportFilte
 // ExportFederationEnrollments streams federation_enrollments rows ordered by id.
 func (d *Store) ExportFederationEnrollments(ctx context.Context, f db.ExportFilter) iter.Seq2[db.FederationEnrollmentExport, error] {
 	query := `SELECT id, token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
-	                 allow_adoption_snapshot_authors, adoption_snapshot_metadata_prefix_event_id,
+	                 allow_adoption_snapshot_authors,
 	                 CAST(created_at AS TEXT), CAST(updated_at AS TEXT), CAST(revoked_at AS TEXT)
 	          FROM federation_enrollments`
 	query, args := withProjectIDFilter(query, f, "project_id")
@@ -462,7 +462,7 @@ func (d *Store) ExportFederationEnrollments(ctx context.Context, f db.ExportFilt
 			var rec db.FederationEnrollmentExport
 			var allow int
 			if err := rows.Scan(&rec.ID, &rec.TokenHash, &rec.SpokeInstanceUID, &rec.ProjectID,
-				&rec.Capabilities, &rec.Actor, &allow, &rec.AdoptionSnapshotMetadataPrefixEventID,
+				&rec.Capabilities, &rec.Actor, &allow,
 				&rec.CreatedAt, &rec.UpdatedAt, &rec.RevokedAt); err != nil {
 				return db.FederationEnrollmentExport{}, scanError("federation_enrollment", err)
 			}

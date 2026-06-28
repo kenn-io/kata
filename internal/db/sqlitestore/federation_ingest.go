@@ -170,13 +170,6 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID); err != nil {
 			return db.FederationIngestResult{}, err
 		}
-		if adoptionSnapshotAuthorState.shouldRecordMetadataPrefix {
-			if err := recordFederationAdoptionSnapshotMetadataPrefix(ctx, tx,
-				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID,
-				adoptionSnapshotAuthorState.metadataPrefixEventID); err != nil {
-				return db.FederationIngestResult{}, err
-			}
-		}
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {
 			if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
 				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
@@ -229,10 +222,8 @@ func validateFederationBoundActorPayload(
 }
 
 type federationIngestAdoptionSnapshotAuthorState struct {
-	allowAuthorPreservation    bool
-	shouldRecordMetadataPrefix bool
-	shouldDeferMarker          bool
-	metadataPrefixEventID      int64
+	allowAuthorPreservation bool
+	shouldDeferMarker       bool
 }
 
 func computeFederationIngestAdoptionSnapshotAuthorState(
@@ -246,9 +237,10 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	// Adoption emits an initial baseline: optional project metadata followed by
 	// issue.snapshot events that preserve historical issue/comment authors. That
-	// exception must be explicitly attached to the enrollment token. The only
-	// continuation the hub persists is an already accepted metadata-only prefix;
-	// the spoke never declares how long the exception should remain open.
+	// exception must be explicitly attached to the enrollment token and is
+	// consumed with the accepted snapshot batch. A metadata-only prefix can
+	// defer that consumption exactly because the hub can see the persisted
+	// prefix events before accepting the next request.
 	state := federationIngestAdoptionSnapshotAuthorState{}
 	if !allowExplicit || enrollmentID <= 0 {
 		return state, nil
@@ -257,7 +249,7 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	if !baselineShape.valid {
 		return state, nil
 	}
-	marker, metadataPrefixEventID, err := federationIngestAdoptionSnapshotAuthorMarker(ctx, tx,
+	marker, err := federationIngestAdoptionSnapshotAuthorMarker(ctx, tx,
 		projectID, enrollmentID, spokeInstanceUID)
 	if err != nil || !marker {
 		return state, err
@@ -271,7 +263,7 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 		if err != nil {
 			return state, err
 		}
-		if !priorIsBaseline || metadataPrefixEventID <= 0 || !baselineShape.hasSnapshot {
+		if !priorIsBaseline || !baselineShape.hasSnapshot {
 			return state, nil
 		}
 		state.allowAuthorPreservation = true
@@ -279,8 +271,6 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	}
 
 	if !baselineShape.hasSnapshot {
-		state.shouldRecordMetadataPrefix = true
-		state.metadataPrefixEventID = baselineShape.maxSourceEventID
 		state.shouldDeferMarker = true
 		return state, nil
 	}
@@ -322,24 +312,23 @@ func federationIngestAdoptionSnapshotAuthorMarker(
 	projectID int64,
 	enrollmentID int64,
 	spokeInstanceUID string,
-) (bool, int64, error) {
+) (bool, error) {
 	var marker int
-	var through int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT allow_adoption_snapshot_authors, adoption_snapshot_metadata_prefix_event_id
+		SELECT allow_adoption_snapshot_authors
 		  FROM federation_enrollments
 		 WHERE id = ?
 		   AND spoke_instance_uid = ?
 		   AND revoked_at IS NULL
 		   AND (project_id = ? OR project_id IS NULL)`,
-		enrollmentID, spokeInstanceUID, projectID).Scan(&marker, &through)
+		enrollmentID, spokeInstanceUID, projectID).Scan(&marker)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, 0, nil
+		return false, nil
 	}
 	if err != nil {
-		return false, 0, fmt.Errorf("lookup federation adoption snapshot author marker: %w", err)
+		return false, fmt.Errorf("lookup federation adoption snapshot author marker: %w", err)
 	}
-	return marker != 0, through, nil
+	return marker != 0, nil
 }
 
 func federationIngestPriorEventsAreAdoptionBaseline(
@@ -389,34 +378,6 @@ func federationIngestHasPriorEvents(
 	return true, nil
 }
 
-func recordFederationAdoptionSnapshotMetadataPrefix(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	enrollmentID int64,
-	spokeInstanceUID string,
-	prefixEventID int64,
-) error {
-	if enrollmentID <= 0 || prefixEventID <= 0 {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `
-		UPDATE federation_enrollments
-		   SET adoption_snapshot_metadata_prefix_event_id = ?,
-		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ?
-		   AND spoke_instance_uid = ?
-		   AND revoked_at IS NULL
-		   AND (project_id = ? OR project_id IS NULL)
-		   AND allow_adoption_snapshot_authors = 1
-		   AND adoption_snapshot_metadata_prefix_event_id = 0`,
-		prefixEventID, enrollmentID, spokeInstanceUID, projectID)
-	if err != nil {
-		return fmt.Errorf("record federation adoption snapshot metadata prefix: %w", err)
-	}
-	return nil
-}
-
 func consumeFederationAdoptionSnapshotAuthorMarker(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -430,7 +391,6 @@ func consumeFederationAdoptionSnapshotAuthorMarker(
 	_, err := tx.ExecContext(ctx, `
 		UPDATE federation_enrollments
 		   SET allow_adoption_snapshot_authors = 0,
-		       adoption_snapshot_metadata_prefix_event_id = 0,
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 WHERE id = ?
 		   AND spoke_instance_uid = ?

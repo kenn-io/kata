@@ -128,17 +128,16 @@ type FederationQuarantine struct {
 // FederationEnrollment mirrors federation_enrollments. TokenHash stores only
 // the hash of an enrollment token; plaintext tokens are never persisted.
 type FederationEnrollment struct {
-	ID                                    int64
-	TokenHash                             string
-	SpokeInstanceUID                      string
-	ProjectID                             *int64
-	Capabilities                          string
-	Actor                                 string
-	AllowAdoptionSnapshotAuthors          bool
-	AdoptionSnapshotMetadataPrefixEventID int64
-	CreatedAt                             time.Time
-	UpdatedAt                             time.Time
-	RevokedAt                             *time.Time
+	ID                           int64
+	TokenHash                    string
+	SpokeInstanceUID             string
+	ProjectID                    *int64
+	Capabilities                 string
+	Actor                        string
+	AllowAdoptionSnapshotAuthors bool
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
+	RevokedAt                    *time.Time
 }
 
 // IssueClaim mirrors issue_claims. Active claims have ReleasedAt == nil.

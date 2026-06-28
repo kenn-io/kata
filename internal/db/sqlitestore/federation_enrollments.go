@@ -168,7 +168,6 @@ func federationEnrollmentByIDTx(ctx context.Context, tx *sql.Tx, id int64) (db.F
 
 const federationEnrollmentSelect = `SELECT id, token_hash, spoke_instance_uid, project_id,
        capabilities, bound_actor, allow_adoption_snapshot_authors,
-       adoption_snapshot_metadata_prefix_event_id,
        created_at, updated_at, revoked_at
   FROM federation_enrollments`
 
@@ -180,7 +179,7 @@ func scanFederationEnrollment(r rowScanner) (db.FederationEnrollment, error) {
 		revokedAt sql.NullTime
 	)
 	err := r.Scan(&e.ID, &e.TokenHash, &e.SpokeInstanceUID, &projectID,
-		&e.Capabilities, &e.Actor, &allow, &e.AdoptionSnapshotMetadataPrefixEventID,
+		&e.Capabilities, &e.Actor, &allow,
 		&e.CreatedAt, &e.UpdatedAt, &revokedAt)
 	if err == nil {
 		if projectID.Valid {
