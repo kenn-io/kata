@@ -481,6 +481,8 @@ CREATE TABLE federation_enrollments (
   capabilities        TEXT NOT NULL,
   bound_actor         TEXT NOT NULL,
   allow_adoption_snapshot_authors INTEGER NOT NULL DEFAULT 0 CHECK(allow_adoption_snapshot_authors IN (0,1)),
+  adoption_baseline_open INTEGER NOT NULL DEFAULT 0 CHECK(adoption_baseline_open IN (0,1)),
+  adoption_baseline_next_source_event_id BIGINT NOT NULL DEFAULT 0 CHECK(adoption_baseline_next_source_event_id >= 0),
   created_at          TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   updated_at          TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   revoked_at          TEXT,

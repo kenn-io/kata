@@ -325,15 +325,13 @@ func federationIngestEnvelopes(events []db.Event) []api.FederationIngestEventEnv
 func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, string, error) {
 	if len(events) <= 1 {
 		if len(events) == 1 {
-			envelope := federationIngestEnvelope(events[0])
-			size, err := federationIngestRequestSize([]api.FederationIngestEventEnvelope{envelope}, "")
-			if err != nil {
-				return nil, "", err
-			}
 			shape := federationPushAdoptionBaselineShape(events)
-			if shape.valid && shape.hasSnapshot && size > maxFederationHubIngestBodyBytes {
-				return nil, "", fmt.Errorf("%w: request body %d bytes exceeds %d bytes",
-					ErrFederationAdoptionBaselineTooLarge, size, maxFederationHubIngestBodyBytes)
+			if shape.valid && shape.hasSnapshot {
+				return nextFederationPushAdoptionBaselineIngestBatch(events)
+			}
+			envelope := federationIngestEnvelope(events[0])
+			if _, err := federationIngestRequestSize([]api.FederationIngestEventEnvelope{envelope}, ""); err != nil {
+				return nil, "", err
 			}
 		}
 		return events, "", nil

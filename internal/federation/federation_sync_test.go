@@ -2232,6 +2232,21 @@ func TestNextFederationPushIngestBatchRejectsOversizedAdoptionSnapshotBaseline(t
 	assert.Contains(t, err.Error(), "adoption snapshot baseline")
 }
 
+func TestNextFederationPushIngestBatchMarksSingleSnapshotBaselineComplete(t *testing.T) {
+	projectUID := mustTestUID(t)
+	issueUID := mustTestUID(t)
+	events := []db.Event{
+		syncTestEvent(t, 1, projectUID, "spoke-project", &issueUID, "issue.snapshot",
+			`{"uid":"`+issueUID+`","short_id":"`+shortIDForSyncTest(issueUID)+`","title":"terminal","body":"","author":"historical-author","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`),
+	}
+
+	batch, adoptionBaseline, err := nextFederationPushIngestBatch(events)
+
+	require.NoError(t, err)
+	require.Len(t, batch, 1)
+	assert.Equal(t, api.FederationAdoptionBaselineComplete, adoptionBaseline)
+}
+
 func TestSyncFederationOncePushesAllPendingBatchesBeforePull(t *testing.T) {
 	ctx := context.Background()
 	spoke := testenv.New(t)

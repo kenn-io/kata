@@ -120,6 +120,10 @@ func (d *Store) ingestFederationEventsOnce(
 		if !errors.Is(err, db.ErrNotFound) {
 			return db.FederationIngestResult{}, err
 		}
+		if adoptionSnapshotAuthorState.duplicateOnly {
+			return db.FederationIngestResult{}, fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
+				db.ErrFederationIngestValidation, ev.EventUID)
+		}
 		if err := validateFederationBoundActorPayload(ev, boundActor, adoptionSnapshotAuthorState.allowAuthorPreservation); err != nil {
 			return db.FederationIngestResult{}, err
 		}
@@ -176,6 +180,10 @@ func (d *Store) ingestFederationEventsOnce(
 				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
 				return db.FederationIngestResult{}, err
 			}
+		} else if err := recordFederationAdoptionBaselineProgress(ctx, tx,
+			p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID,
+			adoptionSnapshotAuthorState.nextSourceEventID); err != nil {
+			return db.FederationIngestResult{}, err
 		}
 	}
 	if err := federationFailpoint("before_federation_ingest_commit"); err != nil {
@@ -226,6 +234,8 @@ type federationIngestAdoptionSnapshotAuthorState struct {
 	allowAuthorPreservation  bool
 	allowFutureSnapshotLinks bool
 	shouldDeferMarker        bool
+	duplicateOnly            bool
+	nextSourceEventID        int64
 }
 
 func computeFederationIngestAdoptionSnapshotAuthorState(
@@ -252,20 +262,18 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	if !baselineShape.valid {
 		return state, nil
 	}
-	marker, err := federationIngestAdoptionSnapshotAuthorMarker(ctx, tx,
+	marker, err := federationIngestAdoptionSnapshotAuthorMarkerState(ctx, tx,
 		projectID, enrollmentID, spokeInstanceUID)
-	if err != nil || !marker {
+	if err != nil || !marker.allowSnapshotAuthors {
 		return state, err
 	}
 	switch adoptionBaseline {
 	case db.FederationAdoptionBaselineOpen:
-		state.shouldDeferMarker = true
-		state.allowFutureSnapshotLinks = true
-		state.allowAuthorPreservation = baselineShape.hasSnapshot
-		return state, nil
+		return computeFederationIngestOpenAdoptionBaselineState(ctx, tx,
+			projectID, spokeInstanceUID, marker, baselineShape)
 	case db.FederationAdoptionBaselineComplete:
-		state.allowAuthorPreservation = baselineShape.hasSnapshot
-		return state, nil
+		return computeFederationIngestCompleteAdoptionBaselineState(ctx, tx,
+			projectID, spokeInstanceUID, marker, baselineShape)
 	}
 	prior, err := federationIngestHasPriorEvents(ctx, tx, projectID, spokeInstanceUID)
 	if err != nil {
@@ -279,15 +287,125 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	return state, nil
 }
 
+type federationIngestAdoptionMarkerState struct {
+	allowSnapshotAuthors bool
+	baselineOpen         bool
+	nextSourceEventID    int64
+}
+
+func computeFederationIngestOpenAdoptionBaselineState(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	spokeInstanceUID string,
+	marker federationIngestAdoptionMarkerState,
+	baselineShape federationIngestBaselineShape,
+) (federationIngestAdoptionSnapshotAuthorState, error) {
+	state := federationIngestAdoptionSnapshotAuthorState{
+		allowAuthorPreservation:  baselineShape.hasSnapshot,
+		allowFutureSnapshotLinks: true,
+		shouldDeferMarker:        true,
+		nextSourceEventID:        baselineShape.maxSourceEventID + 1,
+	}
+	if err := validateFederationIngestAdoptionBaselineCursor(marker, baselineShape, true); err != nil {
+		return federationIngestAdoptionSnapshotAuthorState{}, err
+	}
+	if marker.baselineOpen {
+		if baselineShape.minSourceEventID < marker.nextSourceEventID {
+			state.duplicateOnly = true
+		}
+		return state, nil
+	}
+	prior, err := federationIngestHasPriorEvents(ctx, tx, projectID, spokeInstanceUID)
+	if err != nil {
+		return federationIngestAdoptionSnapshotAuthorState{}, err
+	}
+	if prior {
+		return federationIngestAdoptionSnapshotAuthorState{}, fmt.Errorf("%w: adoption baseline open chunk has no recorded baseline continuation",
+			db.ErrFederationIngestValidation)
+	}
+	return state, nil
+}
+
+func computeFederationIngestCompleteAdoptionBaselineState(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	spokeInstanceUID string,
+	marker federationIngestAdoptionMarkerState,
+	baselineShape federationIngestBaselineShape,
+) (federationIngestAdoptionSnapshotAuthorState, error) {
+	state := federationIngestAdoptionSnapshotAuthorState{
+		allowAuthorPreservation: baselineShape.hasSnapshot,
+	}
+	if err := validateFederationIngestAdoptionBaselineCursor(marker, baselineShape, false); err != nil {
+		return federationIngestAdoptionSnapshotAuthorState{}, err
+	}
+	if marker.baselineOpen {
+		if baselineShape.minSourceEventID < marker.nextSourceEventID {
+			state.duplicateOnly = true
+			state.allowFutureSnapshotLinks = true
+		}
+		return state, nil
+	}
+	prior, err := federationIngestHasPriorEvents(ctx, tx, projectID, spokeInstanceUID)
+	if err != nil {
+		return federationIngestAdoptionSnapshotAuthorState{}, err
+	}
+	if prior {
+		return federationIngestAdoptionSnapshotAuthorState{}, fmt.Errorf("%w: adoption baseline complete chunk has no recorded baseline continuation",
+			db.ErrFederationIngestValidation)
+	}
+	return state, nil
+}
+
+func validateFederationIngestAdoptionBaselineCursor(
+	marker federationIngestAdoptionMarkerState,
+	baselineShape federationIngestBaselineShape,
+	nonTerminal bool,
+) error {
+	if baselineShape.minSourceEventID <= 0 {
+		return nil
+	}
+	if !baselineShape.contiguousSourceEventIDs {
+		return fmt.Errorf("%w: adoption baseline source event cursor is not contiguous",
+			db.ErrFederationIngestValidation)
+	}
+	if !marker.baselineOpen {
+		return nil
+	}
+	if marker.nextSourceEventID <= 0 {
+		return fmt.Errorf("%w: adoption baseline continuation cursor is missing",
+			db.ErrFederationIngestValidation)
+	}
+	if baselineShape.minSourceEventID <= marker.nextSourceEventID {
+		return nil
+	}
+	stage := "complete"
+	if nonTerminal {
+		stage = "open"
+	}
+	return fmt.Errorf("%w: adoption baseline %s chunk starts at source event %d after expected %d",
+		db.ErrFederationIngestValidation, stage, baselineShape.minSourceEventID, marker.nextSourceEventID)
+}
+
 type federationIngestBaselineShape struct {
-	valid            bool
-	hasSnapshot      bool
-	maxSourceEventID int64
+	valid                    bool
+	hasSnapshot              bool
+	contiguousSourceEventIDs bool
+	minSourceEventID         int64
+	maxSourceEventID         int64
 }
 
 func federationIngestAdoptionBaselineShape(events []db.FederationIngestEvent) federationIngestBaselineShape {
-	shape := federationIngestBaselineShape{valid: true}
-	for _, in := range events {
+	shape := federationIngestBaselineShape{valid: true, contiguousSourceEventIDs: true}
+	for i, in := range events {
+		if i == 0 || in.SourceEventID < shape.minSourceEventID {
+			shape.minSourceEventID = in.SourceEventID
+		}
+		if i > 0 && in.SourceEventID != events[i-1].SourceEventID+1 {
+			shape.contiguousSourceEventIDs = false
+		}
 		if in.SourceEventID > shape.maxSourceEventID {
 			shape.maxSourceEventID = in.SourceEventID
 		}
@@ -307,29 +425,38 @@ func federationIngestAdoptionBaselineShape(events []db.FederationIngestEvent) fe
 	return shape
 }
 
-func federationIngestAdoptionSnapshotAuthorMarker(
+func federationIngestAdoptionSnapshotAuthorMarkerState(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
 	enrollmentID int64,
 	spokeInstanceUID string,
-) (bool, error) {
-	var marker int
+) (federationIngestAdoptionMarkerState, error) {
+	var (
+		state        federationIngestAdoptionMarkerState
+		allow        int
+		baselineOpen int
+	)
 	err := tx.QueryRowContext(ctx, `
-		SELECT allow_adoption_snapshot_authors
-		  FROM federation_enrollments
-		 WHERE id = ?
-		   AND spoke_instance_uid = ?
-		   AND revoked_at IS NULL
-		   AND (project_id = ? OR project_id IS NULL)`,
-		enrollmentID, spokeInstanceUID, projectID).Scan(&marker)
+			SELECT allow_adoption_snapshot_authors,
+			       adoption_baseline_open,
+			       adoption_baseline_next_source_event_id
+			  FROM federation_enrollments
+			 WHERE id = ?
+			   AND spoke_instance_uid = ?
+			   AND revoked_at IS NULL
+			   AND (project_id = ? OR project_id IS NULL)`,
+		enrollmentID, spokeInstanceUID, projectID).Scan(
+		&allow, &baselineOpen, &state.nextSourceEventID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return federationIngestAdoptionMarkerState{}, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("lookup federation adoption snapshot author marker: %w", err)
+		return federationIngestAdoptionMarkerState{}, fmt.Errorf("lookup federation adoption snapshot author marker: %w", err)
 	}
-	return marker != 0, nil
+	state.allowSnapshotAuthors = allow != 0
+	state.baselineOpen = baselineOpen != 0
+	return state, nil
 }
 
 func federationIngestHasPriorEvents(
@@ -368,6 +495,8 @@ func consumeFederationAdoptionSnapshotAuthorMarker(
 	_, err := tx.ExecContext(ctx, `
 		UPDATE federation_enrollments
 		   SET allow_adoption_snapshot_authors = 0,
+		       adoption_baseline_open = 0,
+		       adoption_baseline_next_source_event_id = 0,
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 WHERE id = ?
 		   AND spoke_instance_uid = ?
@@ -377,6 +506,34 @@ func consumeFederationAdoptionSnapshotAuthorMarker(
 		enrollmentID, spokeInstanceUID, projectID)
 	if err != nil {
 		return fmt.Errorf("consume federation adoption snapshot author marker: %w", err)
+	}
+	return nil
+}
+
+func recordFederationAdoptionBaselineProgress(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	enrollmentID int64,
+	spokeInstanceUID string,
+	nextSourceEventID int64,
+) error {
+	if enrollmentID <= 0 || nextSourceEventID <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE federation_enrollments
+		   SET adoption_baseline_open = 1,
+		       adoption_baseline_next_source_event_id = ?,
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE id = ?
+		   AND spoke_instance_uid = ?
+		   AND revoked_at IS NULL
+		   AND (project_id = ? OR project_id IS NULL)
+		   AND allow_adoption_snapshot_authors = 1`,
+		nextSourceEventID, enrollmentID, spokeInstanceUID, projectID)
+	if err != nil {
+		return fmt.Errorf("record federation adoption baseline progress: %w", err)
 	}
 	return nil
 }

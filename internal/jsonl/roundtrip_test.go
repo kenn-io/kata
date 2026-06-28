@@ -531,9 +531,10 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 	_, err = srcDB.ExecContext(ctx, `
 		INSERT INTO federation_enrollments(
 			token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
-			allow_adoption_snapshot_authors
+			allow_adoption_snapshot_authors, adoption_baseline_open,
+			adoption_baseline_next_source_event_id
 		)
-		VALUES(?, ?, ?, ?, ?, 1)`,
+		VALUES(?, ?, ?, ?, ?, 1, 1, 2)`,
 		tokenHash, "01HZZZZZZZZZZZZZZZZZZZZZ02", p.ID, "pull,push", "wesm")
 	require.NoError(t, err)
 
@@ -542,6 +543,8 @@ func TestRoundtrip_FederationEnrollmentRows(t *testing.T) {
 	assert.Contains(t, buf.String(), tokenHash)
 	assert.NotContains(t, buf.String(), plaintextToken)
 	assert.Contains(t, buf.String(), `"allow_adoption_snapshot_authors":true`)
+	assert.NotContains(t, buf.String(), "adoption_baseline_open")
+	assert.NotContains(t, buf.String(), "adoption_baseline_next_source_event_id")
 
 	dstDB := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(buf.Bytes()), dstDB))
