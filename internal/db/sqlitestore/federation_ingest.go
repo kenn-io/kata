@@ -350,7 +350,7 @@ func computeFederationIngestCompleteAdoptionBaselineState(
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	state := federationIngestAdoptionSnapshotAuthorState{
 		allowAuthorPreservation: baselineShape.hasSnapshot,
-		verifySnapshotLinks:     baselineShape.hasSnapshot,
+		verifySnapshotLinks:     baselineShape.hasSnapshot || marker.baselineOpen,
 		endSourceEventID:        adoptionBaselineEndSourceEventID,
 	}
 	if err := validateFederationIngestAdoptionBaselineCursor(marker, baselineShape, adoptionBaselineEndSourceEventID, false); err != nil {
