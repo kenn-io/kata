@@ -268,13 +268,21 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 		return state, nil
 	}
 	baselineShape := federationIngestAdoptionBaselineShape(events)
-	if !baselineShape.valid {
-		return state, nil
-	}
 	marker, err := federationIngestAdoptionSnapshotAuthorMarkerState(ctx, tx,
 		projectID, enrollmentID, spokeInstanceUID)
 	if err != nil || !marker.allowSnapshotAuthors {
 		return state, err
+	}
+	if marker.baselineOpen && adoptionBaseline == "" {
+		return state, fmt.Errorf("%w: adoption baseline continuation is open and requires adoption_baseline marker",
+			db.ErrFederationIngestValidation)
+	}
+	if !baselineShape.valid {
+		if adoptionBaseline != "" || marker.baselineOpen {
+			return state, fmt.Errorf("%w: adoption baseline chunk contains non-baseline event",
+				db.ErrFederationIngestValidation)
+		}
+		return state, nil
 	}
 	switch adoptionBaseline {
 	case db.FederationAdoptionBaselineOpen:
@@ -391,6 +399,9 @@ func validateFederationIngestAdoptionBaselineCursor(
 		return fmt.Errorf("%w: adoption baseline source event cursor is not contiguous",
 			db.ErrFederationIngestValidation)
 	}
+	if err := validateFederationIngestAdoptionBaselineSourceSpan(marker, baselineShape, adoptionBaselineEndSourceEventID); err != nil {
+		return err
+	}
 	if baselineShape.maxSourceEventID > adoptionBaselineEndSourceEventID {
 		return fmt.Errorf("%w: adoption baseline chunk exceeds terminal source event %d",
 			db.ErrFederationIngestValidation, adoptionBaselineEndSourceEventID)
@@ -423,6 +434,28 @@ func validateFederationIngestAdoptionBaselineCursor(
 	}
 	return fmt.Errorf("%w: adoption baseline %s chunk starts at source event %d after expected %d",
 		db.ErrFederationIngestValidation, stage, baselineShape.minSourceEventID, marker.nextSourceEventID)
+}
+
+func validateFederationIngestAdoptionBaselineSourceSpan(
+	marker federationIngestAdoptionMarkerState,
+	baselineShape federationIngestBaselineShape,
+	adoptionBaselineEndSourceEventID int64,
+) error {
+	startSourceEventID := baselineShape.minSourceEventID
+	if marker.baselineOpen && marker.nextSourceEventID > 1 {
+		startSourceEventID = marker.nextSourceEventID - 1
+		if baselineShape.minSourceEventID < startSourceEventID {
+			startSourceEventID = baselineShape.minSourceEventID
+		}
+	}
+	if adoptionBaselineEndSourceEventID < startSourceEventID {
+		return nil
+	}
+	if adoptionBaselineEndSourceEventID-startSourceEventID+1 <= db.FederationAdoptionBaselineMaxSourceEvents {
+		return nil
+	}
+	return fmt.Errorf("%w: adoption baseline has too many source events between %d and terminal source event %d",
+		db.ErrFederationIngestValidation, startSourceEventID, adoptionBaselineEndSourceEventID)
 }
 
 type federationIngestBaselineShape struct {

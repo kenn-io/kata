@@ -2624,7 +2624,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		forgedUID := newTestUID(t)
 		forged := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &forgedUID, nil,
 			"issue.snapshot", 101,
-			`{"uid":"`+forgedUID+`","short_id":"`+shortID(forgedUID)+`","title":"unmarked","body":"","author":"spoofed-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+			`{"uid":"`+forgedUID+`","short_id":"`+shortID(forgedUID)+`","title":"unmarked","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 		forged.Actor = "bound-agent"
 		forged.ContentHash = remoteEventHash(t, forged)
 
@@ -2640,6 +2640,42 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		assertIngestedEventCount(ctx, t, d, p.ID, 1)
+	})
+
+	t.Run("rejects adoption open chunk with oversized terminal source cursor", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		markerValue := strings.Join([]string{"snapshot", "adoption", "oversized", "cursor"}, "-")
+		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token:                        markerValue,
+			SpokeInstanceUID:             spokeUID,
+			ProjectID:                    &p.ID,
+			Capabilities:                 "push",
+			Actor:                        "bound-agent",
+			AllowAdoptionSnapshotAuthors: true,
+		})
+		require.NoError(t, err)
+		issueUID := newTestUID(t)
+		first := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"first","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		first.Actor = "bound-agent"
+		first.ContentHash = remoteEventHash(t, first)
+
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                        p.ID,
+			FederationEnrollmentID:           created.Enrollment.ID,
+			SpokeInstanceUID:                 spokeUID,
+			BoundActor:                       "bound-agent",
+			AllowSnapshotAuthorPreservation:  true,
+			AdoptionBaseline:                 db.FederationAdoptionBaselineOpen,
+			AdoptionBaselineEndSourceEventID: db.FederationAdoptionBaselineMaxSourceEvents + 1,
+			Events:                           []db.FederationIngestEvent{{SourceEventID: 1, Event: first}},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assert.Contains(t, err.Error(), "too many source events")
+		assertIngestedEventCount(ctx, t, d, p.ID, 0)
 	})
 
 	t.Run("rejects adoption open chunk at terminal source cursor", func(t *testing.T) {
