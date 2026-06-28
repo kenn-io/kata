@@ -729,13 +729,17 @@ func TestSyncFederationOnceUnsupportedSchemaDoesNotQuarantine(t *testing.T) {
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/projects/42/federation/events:ingest" {
 			requests++
+			var body api.FederationIngestEventsRequestBody
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			assert.Equal(t, db.CurrentSchemaVersion(), body.SchemaVersion)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			require.NoError(t, json.NewEncoder(w).Encode(api.ErrorEnvelope{
 				Status: http.StatusBadRequest,
 				Error: api.ErrorBody{
-					Code:    "unsupported_federation_schema",
-					Message: "federation ingest schema_version 17 is newer than hub schema_version 14",
+					Code: "unsupported_federation_schema",
+					Message: fmt.Sprintf("federation ingest schema_version %d is newer than hub schema_version %d",
+						body.SchemaVersion, db.CurrentSchemaVersion()-1),
 				},
 			}))
 			return
