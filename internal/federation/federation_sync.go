@@ -324,10 +324,6 @@ func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, error) {
 		if size > maxFederationPushIngestBodyBytes && i > 0 {
 			shape := federationPushAdoptionBaselineShape(events[:i+1])
 			if shape.valid && shape.hasSnapshot {
-				prefixShape := federationPushAdoptionBaselineShape(events[:i])
-				if prefixShape.valid && !prefixShape.hasSnapshot {
-					return events[:i], nil
-				}
 				continue
 			}
 			return events[:i], nil

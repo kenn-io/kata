@@ -238,9 +238,9 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	// Adoption emits an initial baseline: optional project metadata followed by
 	// issue.snapshot events that preserve historical issue/comment authors. That
 	// exception must be explicitly attached to the enrollment token and is
-	// consumed with the accepted snapshot batch. A metadata-only prefix can
-	// defer that consumption exactly because the hub can see the persisted
-	// prefix events before accepting the next request.
+	// consumed with the accepted baseline batch. Spokes keep adoption metadata
+	// and following snapshots in one request; without an explicit snapshot in
+	// the batch, the hub treats metadata-only adoption as terminal.
 	state := federationIngestAdoptionSnapshotAuthorState{}
 	if !allowExplicit || enrollmentID <= 0 {
 		return state, nil
@@ -270,10 +270,6 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 		return state, nil
 	}
 
-	if !baselineShape.hasSnapshot {
-		state.shouldDeferMarker = true
-		return state, nil
-	}
 	state.allowAuthorPreservation = true
 	return state, nil
 }
