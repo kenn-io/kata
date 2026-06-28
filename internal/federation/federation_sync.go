@@ -115,7 +115,9 @@ func SyncFederationOnceWithPulledEvents(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				ack, err := client.IngestProjectEvents(ctx, hubProjectID, federationIngestEnvelopes(batch))
+				continueAdoptionSnapshotBaseline := shouldContinueAdoptionSnapshotBaseline(batch, pending)
+				ack, err := client.IngestProjectEvents(ctx, hubProjectID,
+					federationIngestEnvelopes(batch), continueAdoptionSnapshotBaseline)
 				if err != nil {
 					if isPoisonedFederationPushError(err) {
 						if qErr := recordFederationPushQuarantine(ctx, store, binding.ProjectID, batch, err); qErr != nil {
@@ -316,7 +318,7 @@ func nextFederationPushIngestBatch(events []db.Event) ([]db.Event, error) {
 	envelopes := make([]api.FederationIngestEventEnvelope, 0, len(events))
 	for i, ev := range events {
 		envelopes = append(envelopes, federationIngestEnvelope(ev))
-		size, err := federationIngestRequestSize(envelopes)
+		size, err := federationIngestRequestSize(envelopes, true)
 		if err != nil {
 			return nil, err
 		}
@@ -336,10 +338,28 @@ func pendingFederationEventsAfterCursor(events []db.Event, cursor int64) []db.Ev
 	return nil
 }
 
-func federationIngestRequestSize(events []api.FederationIngestEventEnvelope) (int, error) {
+func shouldContinueAdoptionSnapshotBaseline(batch []db.Event, pending []db.Event) bool {
+	if len(batch) == 0 || len(batch) >= len(pending) {
+		return false
+	}
+	hasSnapshot := false
+	for _, ev := range batch {
+		if ev.Type == "issue.snapshot" {
+			hasSnapshot = true
+			continue
+		}
+		if hasSnapshot || ev.Type != "project.metadata_updated" {
+			return false
+		}
+	}
+	return hasSnapshot && pending[len(batch)].Type == "issue.snapshot"
+}
+
+func federationIngestRequestSize(events []api.FederationIngestEventEnvelope, continueAdoptionSnapshotBaseline bool) (int, error) {
 	body, err := json.Marshal(api.FederationIngestEventsRequestBody{
-		SchemaVersion: db.CurrentSchemaVersion(),
-		Events:        events,
+		SchemaVersion:                    db.CurrentSchemaVersion(),
+		ContinueAdoptionSnapshotBaseline: continueAdoptionSnapshotBaseline,
+		Events:                           events,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("marshal federation ingest batch for size check: %w", err)

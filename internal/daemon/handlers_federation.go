@@ -449,12 +449,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		result, err := cfg.DB.IngestFederationEvents(ctx, db.FederationIngestParams{
-			ProjectID:                       in.ProjectID,
-			FederationEnrollmentID:          principal.EnrollmentID,
-			SpokeInstanceUID:                principal.SpokeInstanceUID,
-			BoundActor:                      principal.Actor,
-			AllowSnapshotAuthorPreservation: principal.AllowAdoptionSnapshotAuthors,
-			Events:                          federationIngestEventsToDB(in.Body.Events),
+			ProjectID:                        in.ProjectID,
+			FederationEnrollmentID:           principal.EnrollmentID,
+			SpokeInstanceUID:                 principal.SpokeInstanceUID,
+			BoundActor:                       principal.Actor,
+			AllowSnapshotAuthorPreservation:  principal.AllowAdoptionSnapshotAuthors,
+			ContinueAdoptionSnapshotBaseline: in.Body.ContinueAdoptionSnapshotBaseline,
+			Events:                           federationIngestEventsToDB(in.Body.Events),
 		})
 		if err != nil {
 			return nil, federationIngestError(err)

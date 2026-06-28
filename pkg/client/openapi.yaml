@@ -1080,6 +1080,8 @@ components:
     FederationIngestEventsRequestBody:
       additionalProperties: false
       properties:
+        continue_adoption_snapshot_baseline:
+          type: boolean
         events:
           items:
             $ref: "#/components/schemas/FederationIngestEventEnvelope"

@@ -170,9 +170,12 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID); err != nil {
 			return db.FederationIngestResult{}, err
 		}
-		if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
-			p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
-			return db.FederationIngestResult{}, err
+		deferAdoptionSnapshotAuthorMarker := p.ContinueAdoptionSnapshotBaseline && allowSnapshotAuthorPreservation
+		if !deferAdoptionSnapshotAuthorMarker {
+			if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
+				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
+				return db.FederationIngestResult{}, err
+			}
 		}
 	}
 	if err := federationFailpoint("before_federation_ingest_commit"); err != nil {
@@ -256,7 +259,13 @@ func allowFederationIngestSnapshotAuthorPreservation(
 		return false, err
 	}
 	if prior {
-		return false, nil
+		priorIsBaseline, err := federationIngestPriorEventsAreAdoptionBaseline(ctx, tx, projectID, spokeInstanceUID)
+		if err != nil {
+			return false, err
+		}
+		if !priorIsBaseline {
+			return false, nil
+		}
 	}
 	var marker int
 	err = tx.QueryRowContext(ctx, `
@@ -274,6 +283,30 @@ func allowFederationIngestSnapshotAuthorPreservation(
 		return false, fmt.Errorf("lookup federation adoption snapshot author marker: %w", err)
 	}
 	return marker != 0, nil
+}
+
+func federationIngestPriorEventsAreAdoptionBaseline(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	spokeInstanceUID string,
+) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND type NOT IN ('project.metadata_updated', 'issue.snapshot')
+		 LIMIT 1`,
+		projectID, spokeInstanceUID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lookup prior federation ingest baseline events: %w", err)
+	}
+	return false, nil
 }
 
 func federationIngestHasPriorEvents(
