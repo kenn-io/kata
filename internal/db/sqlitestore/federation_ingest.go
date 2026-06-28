@@ -403,11 +403,7 @@ func validateFederationIngestAdoptionBaselineCursor(
 		return fmt.Errorf("%w: adoption baseline continuation cursor is missing",
 			db.ErrFederationIngestValidation)
 	}
-	if marker.endSourceEventID <= 0 {
-		return fmt.Errorf("%w: adoption baseline terminal cursor is missing",
-			db.ErrFederationIngestValidation)
-	}
-	if adoptionBaselineEndSourceEventID != marker.endSourceEventID {
+	if marker.endSourceEventID > 0 && adoptionBaselineEndSourceEventID != marker.endSourceEventID {
 		return fmt.Errorf("%w: adoption baseline terminal source event %d does not match recorded terminal source event %d",
 			db.ErrFederationIngestValidation, adoptionBaselineEndSourceEventID, marker.endSourceEventID)
 	}
