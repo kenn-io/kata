@@ -175,6 +175,11 @@ func (d *Store) ingestFederationEventsOnce(
 		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID); err != nil {
 			return db.FederationIngestResult{}, err
 		}
+		if adoptionSnapshotAuthorState.verifySnapshotLinks {
+			if err := validateFederationAdoptionSnapshotLinksResolved(ctx, tx, p.ProjectID, p.SpokeInstanceUID); err != nil {
+				return db.FederationIngestResult{}, err
+			}
+		}
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {
 			if err := consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx,
 				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
@@ -234,6 +239,7 @@ func validateFederationBoundActorPayload(
 type federationIngestAdoptionSnapshotAuthorState struct {
 	allowAuthorPreservation  bool
 	allowFutureSnapshotLinks bool
+	verifySnapshotLinks      bool
 	shouldDeferMarker        bool
 	duplicateOnly            bool
 	nextSourceEventID        int64
@@ -344,6 +350,7 @@ func computeFederationIngestCompleteAdoptionBaselineState(
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	state := federationIngestAdoptionSnapshotAuthorState{
 		allowAuthorPreservation: baselineShape.hasSnapshot,
+		verifySnapshotLinks:     baselineShape.hasSnapshot,
 		endSourceEventID:        adoptionBaselineEndSourceEventID,
 	}
 	if err := validateFederationIngestAdoptionBaselineCursor(marker, baselineShape, adoptionBaselineEndSourceEventID, false); err != nil {
@@ -899,6 +906,50 @@ func payloadLinkIssueUIDs(ev db.RemoteEvent) []string {
 		}
 	}
 	return refs
+}
+
+func validateFederationAdoptionSnapshotLinksResolved(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	spokeInstanceUID string,
+) error {
+	knownIssueUIDs, err := currentFederatedIssueUIDSet(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT uid, payload
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND type = 'issue.snapshot'
+		 ORDER BY id ASC`,
+		projectID, spokeInstanceUID)
+	if err != nil {
+		return fmt.Errorf("list adoption snapshot links: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			eventUID string
+			payload  string
+		)
+		if err := rows.Scan(&eventUID, &payload); err != nil {
+			return fmt.Errorf("scan adoption snapshot link: %w", err)
+		}
+		for _, ref := range payloadLinkIssueUIDs(db.RemoteEvent{Payload: json.RawMessage(payload)}) {
+			if _, ok := knownIssueUIDs[ref]; ok {
+				continue
+			}
+			return fmt.Errorf("%w: adoption baseline unresolved snapshot link %s references unknown issue %s",
+				db.ErrFederationIngestValidation, eventUID, ref)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate adoption snapshot links: %w", err)
+	}
+	return nil
 }
 
 func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]struct{}, error) {
