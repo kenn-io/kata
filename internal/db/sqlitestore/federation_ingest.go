@@ -739,6 +739,10 @@ func canonicalizeFederationSnapshotAuthors(ev db.RemoteEvent, boundActor string)
 				db.ErrFederationIngestValidation, ev.EventUID)
 		}
 		for i := range comments {
+			if comments[i] == nil {
+				return db.RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot comments payload entry must be a JSON object",
+					db.ErrFederationIngestValidation, ev.EventUID)
+			}
 			comments[i]["author"] = actorJSON
 		}
 		normalized, err := json.Marshal(comments)
@@ -754,6 +758,10 @@ func canonicalizeFederationSnapshotAuthors(ev db.RemoteEvent, boundActor string)
 				db.ErrFederationIngestValidation, ev.EventUID)
 		}
 		for i := range links {
+			if links[i] == nil {
+				return db.RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot links payload entry must be a JSON object",
+					db.ErrFederationIngestValidation, ev.EventUID)
+			}
 			links[i]["author"] = actorJSON
 		}
 		normalized, err := json.Marshal(links)
