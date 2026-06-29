@@ -967,7 +967,7 @@ func validateFederationAdoptionSnapshotLinksResolved(
 	projectID int64,
 	spokeInstanceUID string,
 ) error {
-	knownIssueUIDs, err := currentFederatedIssueUIDSet(ctx, tx, projectID)
+	knownIssueUIDs, err := materializedIssueUIDSet(ctx, tx, projectID)
 	if err != nil {
 		return err
 	}
@@ -1006,6 +1006,30 @@ func validateFederationAdoptionSnapshotLinksResolved(
 }
 
 func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]struct{}, error) {
+	out, err := materializedIssueUIDSet(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	eventRows, err := tx.QueryContext(ctx, `
+		SELECT issue_uid FROM events WHERE project_id = ? AND issue_uid IS NOT NULL
+		UNION
+		SELECT related_issue_uid FROM events WHERE project_id = ? AND related_issue_uid IS NOT NULL`,
+		projectID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list event issue uids: %w", err)
+	}
+	defer func() { _ = eventRows.Close() }()
+	for eventRows.Next() {
+		var uid string
+		if err := eventRows.Scan(&uid); err != nil {
+			return nil, fmt.Errorf("scan event issue uid: %w", err)
+		}
+		out[uid] = struct{}{}
+	}
+	return out, eventRows.Err()
+}
+
+func materializedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
 	rows, err := tx.QueryContext(ctx, `SELECT uid FROM issues WHERE project_id = ?`, projectID)
 	if err != nil {
@@ -1025,23 +1049,7 @@ func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int6
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate current issue uids: %w", err)
 	}
-	eventRows, err := tx.QueryContext(ctx, `
-		SELECT issue_uid FROM events WHERE project_id = ? AND issue_uid IS NOT NULL
-		UNION
-		SELECT related_issue_uid FROM events WHERE project_id = ? AND related_issue_uid IS NOT NULL`,
-		projectID, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("list event issue uids: %w", err)
-	}
-	defer func() { _ = eventRows.Close() }()
-	for eventRows.Next() {
-		var uid string
-		if err := eventRows.Scan(&uid); err != nil {
-			return nil, fmt.Errorf("scan event issue uid: %w", err)
-		}
-		out[uid] = struct{}{}
-	}
-	return out, eventRows.Err()
+	return out, nil
 }
 
 func rememberIngestIssueUIDs(ev db.RemoteEvent, known map[string]struct{}) {
