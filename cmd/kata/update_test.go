@@ -331,26 +331,69 @@ func TestUpdate_DefaultClientConfiguration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 
-	client, err := newSelfUpdateClient("v0.4.0")
-
-	require.NoError(t, err)
-	var got selfupdate.Client
-	switch c := client.(type) {
-	case selfupdate.Client:
-		got = c
-	case *selfupdate.Client:
-		got = *c
-	default:
-		t.Fatalf("newSelfUpdateClient returned %T, want selfupdate.Client", client)
-	}
+	got := requireDefaultSelfUpdateClient(t, "v0.4.0")
 	assert.Equal(t, "kenn-io", got.Owner)
 	assert.Equal(t, "kata", got.Repo)
 	assert.Equal(t, "kata", got.BinaryName)
 	assert.Equal(t, "v0.4.0", got.CurrentVersion)
 	assert.Equal(t, filepath.Join(home, "cache", "update"), got.CacheDir)
+	assert.Empty(t, got.GitHubToken)
 	assert.True(t, got.AllowUnsignedChecksums)
 	assert.False(t, got.RequireSignature)
 	assert.Empty(t, got.TrustedPublicKeys)
+}
+
+func TestUpdate_DefaultClientGitHubToken(t *testing.T) {
+	tests := []struct {
+		name        string
+		ghToken     string
+		githubToken string
+		want        string
+	}{
+		{
+			name:        "GH_TOKEN takes precedence",
+			ghToken:     "gh-primary",
+			githubToken: "github-fallback",
+			want:        "gh-primary",
+		},
+		{
+			name:        "GITHUB_TOKEN is fallback",
+			githubToken: "github-fallback",
+			want:        "github-fallback",
+		},
+		{
+			name: "neither token is set",
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetFlags(t)
+			t.Setenv("KATA_HOME", t.TempDir())
+			t.Setenv("GH_TOKEN", tt.ghToken)
+			t.Setenv("GITHUB_TOKEN", tt.githubToken)
+
+			got := requireDefaultSelfUpdateClient(t, "v0.4.0")
+
+			assert.Equal(t, tt.want, got.GitHubToken)
+		})
+	}
+}
+
+func requireDefaultSelfUpdateClient(t *testing.T, current string) selfupdate.Client {
+	t.Helper()
+	client, err := newSelfUpdateClient(current)
+	require.NoError(t, err)
+	switch c := client.(type) {
+	case selfupdate.Client:
+		return c
+	case *selfupdate.Client:
+		return *c
+	default:
+		t.Fatalf("newSelfUpdateClient returned %T, want selfupdate.Client", client)
+	}
+	return selfupdate.Client{}
 }
 
 func executeRootCaptureWithInput(ctx context.Context, t *testing.T, stdin string, args ...string) (stdout, stderr string, err error) {

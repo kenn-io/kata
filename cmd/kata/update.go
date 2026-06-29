@@ -30,6 +30,7 @@ var newSelfUpdateClient = func(current string) (updateClient, error) {
 		BinaryName:             "kata",
 		CurrentVersion:         current,
 		CacheDir:               filepath.Join(home, "cache", "update"),
+		GitHubToken:            selfupdate.EnvironmentGitHubToken(),
 		AllowUnsignedChecksums: true,
 	}, nil
 }
