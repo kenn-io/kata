@@ -31,9 +31,19 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if limit <= 0 {
 			limit = 20
 		}
+		mode := in.Mode
+		if insecureReadonlyRequest(ctx) && cfg.Embedder != nil {
+			switch mode {
+			case "hybrid", "semantic":
+				return nil, api.NewError(401, "auth_required",
+					"semantic search requires authentication; daemon is in --insecure-readonly mode", "", nil)
+			case "", "auto":
+				mode = "lexical"
+			}
+		}
 		res, err := hybridSearch(ctx, cfg.DB, cfg.Embedder, hybridParams{
 			ProjectID: in.ProjectID, Query: in.Query, Limit: limit,
-			IncludeDeleted: in.IncludeDeleted, Requested: in.Mode,
+			IncludeDeleted: in.IncludeDeleted, Requested: mode,
 		})
 		if err != nil {
 			var me *modeError

@@ -82,7 +82,7 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 						"mutations and event stream require authentication; daemon is in --insecure-readonly mode")
 					return
 				}
-				next.ServeHTTP(w, r)
+				next.ServeHTTP(w, r.WithContext(withInsecureReadonlyRequest(r.Context())))
 				return
 			}
 			got := r.Header.Get(authHeader)

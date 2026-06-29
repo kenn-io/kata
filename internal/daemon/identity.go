@@ -39,6 +39,7 @@ type Principal struct {
 }
 
 type principalContextKey struct{}
+type insecureReadonlyContextKey struct{}
 
 // WithPrincipal attaches an authenticated request principal to ctx.
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
@@ -49,6 +50,15 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context {
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(principalContextKey{}).(Principal)
 	return p, ok
+}
+
+func withInsecureReadonlyRequest(ctx context.Context) context.Context {
+	return context.WithValue(ctx, insecureReadonlyContextKey{}, true)
+}
+
+func insecureReadonlyRequest(ctx context.Context) bool {
+	v, _ := ctx.Value(insecureReadonlyContextKey{}).(bool)
+	return v
 }
 
 func actorFor(ctx context.Context, requestActor string) string {

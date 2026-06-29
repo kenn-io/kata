@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -186,5 +187,41 @@ func TestEmbedKeyOnlyToConfiguredOrigin(t *testing.T) {
 	}
 	if gotAuth != "Bearer secret" {
 		t.Fatalf("auth header = %q", gotAuth)
+	}
+}
+
+func TestNewRejectsUnsafeBaseURLWithoutAPIKey(t *testing.T) {
+	_, err := New(Config{BaseURL: "http://example.com/v1", Model: "m", Dims: 2})
+	if err == nil {
+		t.Fatal("expected unsafe plaintext public URL to be rejected without an API key")
+	}
+}
+
+func TestEmbedRejectsCrossOriginRedirectWithoutAPIKey(t *testing.T) {
+	var redirected bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		redirected = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{1, 0}}}})
+	}))
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/embeddings", http.StatusTemporaryRedirect)
+	}))
+	defer redirector.Close()
+
+	c, err := New(Config{BaseURL: redirector.URL, Model: "m", Dims: 2})
+	if err != nil {
+		t.Fatalf("new embedding client: %v", err)
+	}
+	_, err = c.Embed(context.Background(), []string{"x"})
+	if err == nil {
+		t.Fatal("expected cross-origin redirect to be rejected without an API key")
+	}
+	if redirected {
+		t.Fatal("embedding payload followed cross-origin redirect")
+	}
+	if !strings.Contains(err.Error(), "origin") {
+		t.Fatalf("error = %v, want origin context", err)
 	}
 }

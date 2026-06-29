@@ -44,9 +44,9 @@ const (
 	defaultTimeout   = 30 * time.Second
 )
 
-// New builds a Client with an origin-pinned HTTP transport. The API key is
-// attached only to the configured origin (see internal/config/bearer.go);
-// cross-origin redirects are refused.
+// New builds a Client with an origin-pinned HTTP transport. Embedding request
+// bodies carry issue text, so target safety and redirect origin pinning apply
+// even when the endpoint does not use an API key.
 func New(cfg Config) (*Client, error) {
 	if strings.TrimSpace(cfg.BaseURL) == "" || strings.TrimSpace(cfg.Model) == "" {
 		return nil, fmt.Errorf("embedding: base_url and model are required")
@@ -63,11 +63,17 @@ func New(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	hc := &http.Client{Timeout: timeout}
-	if cfg.APIKey != "" {
-		if err := config.ConfigureBearerClientWithTrust(hc, cfg.BaseURL, cfg.APIKey, cfg.TrustPrivateNetwork); err != nil {
-			return nil, fmt.Errorf("embedding: configure client: %w", err)
-		}
+	origin, err := config.BearerOriginForBaseURLWithTrust(cfg.BaseURL, cfg.TrustPrivateNetwork)
+	if err != nil {
+		return nil, fmt.Errorf("embedding: configure client: %w", err)
+	}
+	hc := &http.Client{
+		Timeout: timeout,
+		Transport: &embeddingTransport{
+			origin:              origin,
+			apiKey:              cfg.APIKey,
+			trustPrivateNetwork: cfg.TrustPrivateNetwork,
+		},
 	}
 	return &Client{
 		http:      hc,
@@ -77,6 +83,32 @@ func New(cfg Config) (*Client, error) {
 		dims:      dims,
 		batchSize: batch,
 	}, nil
+}
+
+type embeddingTransport struct {
+	base                http.RoundTripper
+	origin              string
+	apiKey              string
+	trustPrivateNetwork bool
+}
+
+func (t *embeddingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if err := config.CheckBearerTargetSafeURLWithTrust(req.URL, t.trustPrivateNetwork); err != nil {
+		return nil, err
+	}
+	if reqOrigin := req.URL.Scheme + "://" + req.URL.Host; reqOrigin != t.origin {
+		return nil, fmt.Errorf("refusing embedding request to origin %q - client is bound to embedding origin %q", reqOrigin, t.origin)
+	}
+	if t.apiKey == "" || req.Header.Get("Authorization") != "" {
+		return base.RoundTrip(req)
+	}
+	clone := req.Clone(req.Context())
+	clone.Header.Set("Authorization", "Bearer "+t.apiKey)
+	return base.RoundTrip(clone)
 }
 
 // Dims returns the configured/expected vector dimensionality.

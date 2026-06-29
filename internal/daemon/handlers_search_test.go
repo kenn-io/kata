@@ -1,11 +1,19 @@
 package daemon_test
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -23,6 +31,60 @@ func TestSearchEndpoint_ReturnsHitsWithScores(t *testing.T) {
 	assert.Contains(t, body, `"matched_in"`)
 	assert.NotContains(t, body, `"title":"unrelated"`,
 		"unrelated issue should not appear in results")
+}
+
+func TestSearchEndpoint_InsecureReadonlyUnauthenticatedAutoSearchStaysLexical(t *testing.T) {
+	var embeddingCalls atomic.Int32
+	embedderSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		embeddingCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{1, 0}}}})
+	}))
+	defer embedderSrv.Close()
+	emb, err := embedding.New(embedding.Config{BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
+	require.NoError(t, err)
+
+	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
+		cfg.Embedder = emb
+	})
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "index credential rotation",
+		Body:      "keep provider calls behind daemon credentials",
+		Author:    "agent",
+	})
+	require.NoError(t, err)
+
+	resp, bs := envGetRaw(t, env, projectPath(project.ID)+"/search?q="+url.QueryEscape("credential rotation"))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+	assert.Contains(t, string(bs), `"mode":"lexical"`)
+	assert.Equal(t, int32(0), embeddingCalls.Load(), "unauthenticated read-only search must not call embedding provider")
+}
+
+func TestSearchEndpoint_InsecureReadonlyUnauthenticatedExplicitVectorModesRequireAuth(t *testing.T) {
+	var embeddingCalls atomic.Int32
+	embedderSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		embeddingCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{1, 0}}}})
+	}))
+	defer embedderSrv.Close()
+	emb, err := embedding.New(embedding.Config{BaseURL: embedderSrv.URL, Model: "m", Dims: 2})
+	require.NoError(t, err)
+
+	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
+		cfg.Embedder = emb
+	})
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+
+	for _, mode := range []string{"semantic", "hybrid"} {
+		resp, bs := envGetRaw(t, env, projectPath(project.ID)+"/search?q=anything&mode="+mode)
+		assertAPIError(t, resp.StatusCode, bs, http.StatusUnauthorized, "auth_required")
+	}
+	assert.Equal(t, int32(0), embeddingCalls.Load(), "rejected semantic search must not call embedding provider")
 }
 
 func TestSearchEndpoint_EmptyQueryIsValidationError(t *testing.T) {
