@@ -283,17 +283,22 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	// baseline chunks so the hub can keep the one-time marker open until the
 	// terminal chunk arrives.
 	state := federationIngestAdoptionSnapshotAuthorState{}
-	if !allowExplicit || enrollmentID <= 0 {
+	if enrollmentID <= 0 {
 		return state, nil
 	}
 	baselineShape := federationIngestAdoptionBaselineShape(events)
+	if !allowExplicit {
+		return computeFederationIngestConsumedAdoptionBaselineRetryState(
+			adoptionBaseline, adoptionBaselineEndSourceEventID, baselineShape)
+	}
 	marker, err := federationIngestAdoptionSnapshotAuthorMarkerState(ctx, tx,
 		projectID, enrollmentID, spokeInstanceUID)
 	if err != nil {
 		return state, err
 	}
 	if !marker.allowSnapshotAuthors && !marker.baselineOpen {
-		return state, nil
+		return computeFederationIngestConsumedAdoptionBaselineRetryState(
+			adoptionBaseline, adoptionBaselineEndSourceEventID, baselineShape)
 	}
 	if marker.baselineOpen && adoptionBaseline == "" {
 		return state, fmt.Errorf("%w: adoption baseline continuation is open and requires adoption_baseline marker",
@@ -324,6 +329,35 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 
 	state.allowAuthorPreservation = true
 	return state, nil
+}
+
+func computeFederationIngestConsumedAdoptionBaselineRetryState(
+	adoptionBaseline string,
+	adoptionBaselineEndSourceEventID int64,
+	baselineShape federationIngestBaselineShape,
+) (federationIngestAdoptionSnapshotAuthorState, error) {
+	state := federationIngestAdoptionSnapshotAuthorState{}
+	switch adoptionBaseline {
+	case "":
+		return state, nil
+	case db.FederationAdoptionBaselineOpen, db.FederationAdoptionBaselineComplete:
+	default:
+		return state, nil
+	}
+	if !baselineShape.valid {
+		return state, fmt.Errorf("%w: adoption baseline retry contains non-baseline event",
+			db.ErrFederationIngestValidation)
+	}
+	nonTerminal := adoptionBaseline == db.FederationAdoptionBaselineOpen
+	if err := validateFederationIngestAdoptionBaselineCursor(federationIngestAdoptionMarkerState{},
+		baselineShape, adoptionBaselineEndSourceEventID, nonTerminal); err != nil {
+		return federationIngestAdoptionSnapshotAuthorState{}, err
+	}
+	return federationIngestAdoptionSnapshotAuthorState{
+		allowFutureSnapshotLinks: true,
+		overrideSnapshotAuthors:  baselineShape.hasSnapshot,
+		duplicateOnly:            true,
+	}, nil
 }
 
 type federationIngestAdoptionMarkerState struct {

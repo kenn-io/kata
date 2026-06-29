@@ -2469,6 +2469,89 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Contains(t, storedPayload, `"author":"bound-agent"`)
 	})
 
+	t.Run("treats completed adoption baseline retry as duplicate only", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		markerValue := strings.Join([]string{"snapshot", "adoption", "terminal", "retry"}, "-")
+		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token:                        markerValue,
+			SpokeInstanceUID:             spokeUID,
+			ProjectID:                    &p.ID,
+			Capabilities:                 "push",
+			Actor:                        "bound-agent",
+			AllowAdoptionSnapshotAuthors: true,
+		})
+		require.NoError(t, err)
+		firstUID := newTestUID(t)
+		first := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &firstUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+firstUID+`","short_id":"`+shortID(firstUID)+`","title":"first","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		first.Actor = "bound-agent"
+		first.ContentHash = remoteEventHash(t, first)
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                        p.ID,
+			FederationEnrollmentID:           created.Enrollment.ID,
+			SpokeInstanceUID:                 spokeUID,
+			BoundActor:                       "bound-agent",
+			AllowSnapshotAuthorPreservation:  true,
+			AdoptionBaseline:                 db.FederationAdoptionBaselineOpen,
+			AdoptionBaselineEndSourceEventID: 2,
+			Events:                           []db.FederationIngestEvent{{SourceEventID: 1, Event: first}},
+		})
+		require.NoError(t, err)
+
+		secondUID := newTestUID(t)
+		second := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &secondUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+secondUID+`","short_id":"`+shortID(secondUID)+`","title":"second","body":"","author":"second-historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		second.Actor = "bound-agent"
+		second.ContentHash = remoteEventHash(t, second)
+		completeParams := db.FederationIngestParams{
+			ProjectID:                        p.ID,
+			FederationEnrollmentID:           created.Enrollment.ID,
+			SpokeInstanceUID:                 spokeUID,
+			BoundActor:                       "bound-agent",
+			AllowSnapshotAuthorPreservation:  true,
+			AdoptionBaseline:                 db.FederationAdoptionBaselineComplete,
+			AdoptionBaselineEndSourceEventID: 2,
+			Events:                           []db.FederationIngestEvent{{SourceEventID: 2, Event: second}},
+		}
+		res, err := d.IngestFederationEvents(ctx, completeParams)
+		require.NoError(t, err)
+		assert.Equal(t, 1, res.Accepted)
+		secondIssue, err := d.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "bound-agent", secondIssue.Author)
+
+		retryParams := completeParams
+		retryParams.AllowSnapshotAuthorPreservation = false
+		retryRes, err := d.IngestFederationEvents(ctx, retryParams)
+		require.NoError(t, err)
+		assert.Equal(t, 0, retryRes.Accepted)
+		assert.Equal(t, 1, retryRes.Duplicates)
+		assert.Equal(t, int64(2), retryRes.PushCursorEventID)
+		assertIngestedEventCount(ctx, t, d, p.ID, 2)
+
+		forgedUID := newTestUID(t)
+		forged := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &forgedUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+forgedUID+`","short_id":"`+shortID(forgedUID)+`","title":"fresh","body":"","author":"bound-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		forged.Actor = "bound-agent"
+		forged.ContentHash = remoteEventHash(t, forged)
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                        p.ID,
+			FederationEnrollmentID:           created.Enrollment.ID,
+			SpokeInstanceUID:                 spokeUID,
+			BoundActor:                       "bound-agent",
+			AllowSnapshotAuthorPreservation:  false,
+			AdoptionBaseline:                 db.FederationAdoptionBaselineComplete,
+			AdoptionBaselineEndSourceEventID: 3,
+			Events:                           []db.FederationIngestEvent{{SourceEventID: 3, Event: forged}},
+		})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assertIngestedEventCount(ctx, t, d, p.ID, 2)
+	})
+
 	t.Run("rejects open adoption snapshot related envelope future reference", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		markerValue := strings.Join([]string{"snapshot", "adoption", "related", "future"}, "-")
