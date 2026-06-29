@@ -18,6 +18,7 @@ import (
 func newSearchCmd() *cobra.Command {
 	var limit int
 	var includeDeleted bool
+	var lexical, hybrid, semantic bool
 	cmd := &cobra.Command{
 		Use:   "search <query>...",
 		Short: "search issues by title/body/comments",
@@ -30,6 +31,24 @@ func newSearchCmd() *cobra.Command {
 			query := strings.Join(args, " ")
 			if strings.TrimSpace(query) == "" {
 				return &cliError{Message: "query must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			modeFlags := 0
+			for _, b := range []bool{lexical, hybrid, semantic} {
+				if b {
+					modeFlags++
+				}
+			}
+			if modeFlags > 1 {
+				return &cliError{Message: "--lexical, --hybrid, and --semantic are mutually exclusive", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			mode := ""
+			switch {
+			case lexical:
+				mode = "lexical"
+			case hybrid:
+				mode = "hybrid"
+			case semantic:
+				mode = "semantic"
 			}
 			// Mirror list / ready / events validation (hammer-test
 			// finding #5): --limit 0/-1 used to be silently treated
@@ -56,7 +75,7 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			searchURL := buildSearchURL(baseURL, pid, query, limit, includeDeleted)
+			searchURL := buildSearchURL(baseURL, pid, query, limit, includeDeleted, mode)
 			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, searchURL, nil)
 			if err != nil {
 				return err
@@ -69,12 +88,15 @@ func newSearchCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "max rows")
 	cmd.Flags().BoolVar(&includeDeleted, "include-deleted", false, "include soft-deleted issues")
+	cmd.Flags().BoolVar(&lexical, "lexical", false, "lexical (FTS) search only")
+	cmd.Flags().BoolVar(&hybrid, "hybrid", false, "hybrid lexical+semantic search")
+	cmd.Flags().BoolVar(&semantic, "semantic", false, "semantic (vector) search only")
 	return cmd
 }
 
 // buildSearchURL assembles the GET /search request URL with q, optional limit,
-// and optional include_deleted query params.
-func buildSearchURL(baseURL string, pid int64, query string, limit int, includeDeleted bool) string {
+// optional include_deleted, and optional mode query params.
+func buildSearchURL(baseURL string, pid int64, query string, limit int, includeDeleted bool, mode string) string {
 	q := url.Values{}
 	q.Set("q", query)
 	if limit > 0 {
@@ -82,6 +104,9 @@ func buildSearchURL(baseURL string, pid int64, query string, limit int, includeD
 	}
 	if includeDeleted {
 		q.Set("include_deleted", "true")
+	}
+	if mode != "" {
+		q.Set("mode", mode)
 	}
 	return fmt.Sprintf("%s/api/v1/projects/%d/search?%s", baseURL, pid, q.Encode())
 }
@@ -99,8 +124,11 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		return err
 	}
 	var b struct {
-		Query   string `json:"query"`
-		Results []struct {
+		Query          string `json:"query"`
+		Mode           string `json:"mode"`
+		Degraded       bool   `json:"degraded"`
+		DegradedReason string `json:"degraded_reason"`
+		Results        []struct {
 			Issue struct {
 				ShortID string `json:"short_id"`
 				Title   string `json:"title"`
@@ -113,9 +141,19 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	// A pre-0.3.0 daemon (reachable only in remote-client mode) omits "mode";
+	// it only ever did lexical search, so render it as the lexical baseline
+	// rather than emitting a bare "# mode=" / "mode=" line.
+	if b.Mode == "" {
+		b.Mode = "lexical"
+	}
 	if mode == outputAgent {
 		out := cmd.OutOrStdout()
-		if _, err := fmt.Fprintf(out, "OK search count=%d query=%s\n", len(b.Results), agentValue(b.Query)); err != nil {
+		header := fmt.Sprintf("OK search count=%d query=%s mode=%s", len(b.Results), agentValue(b.Query), b.Mode)
+		if b.Degraded {
+			header += " degraded=" + agentValue(b.DegradedReason)
+		}
+		if _, err := fmt.Fprintln(out, header); err != nil {
 			return err
 		}
 		for _, r := range b.Results {
@@ -131,6 +169,21 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		}
 		return nil
 	}
+	// Header rule keyed on whether this is the plain baseline, not the
+	// effective mode alone: print a leading "# mode=<mode>" line whenever the
+	// mode is hybrid/semantic OR the result is degraded. Baseline lexical
+	// (mode=lexical, not degraded) stays byte-identical to today — no header,
+	// %.2f scores — so degraded auto fallback is silent-but-labeled rather
+	// than silent. See docs/design/semantic-search.md "API and CLI contract".
+	if b.Mode != "lexical" || b.Degraded {
+		header := "# mode=" + b.Mode
+		if b.Degraded {
+			header += " degraded: " + b.DegradedReason
+		}
+		if _, err := fmt.Fprintln(cmd.OutOrStdout(), header); err != nil {
+			return err
+		}
+	}
 	if len(b.Results) == 0 {
 		if flags.Quiet {
 			return nil
@@ -138,8 +191,15 @@ func printSearchResults(cmd *cobra.Command, bs []byte) error {
 		_, err := fmt.Fprintln(cmd.OutOrStdout(), "no matches")
 		return err
 	}
+	// RRF and cosine scores cluster around 0.01-0.03, which %.2f would flatten;
+	// hybrid/semantic use %.4f. Degraded-lexical results are ordinary BM25 and
+	// keep %.2f.
+	scoreFmt := "%.2f"
+	if b.Mode == "hybrid" || b.Mode == "semantic" {
+		scoreFmt = "%.4f"
+	}
 	for _, r := range b.Results {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%-8s  %.2f  %-8s  %s  (%s)\n",
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%-8s  "+scoreFmt+"  %-8s  %s  (%s)\n",
 			r.Issue.ShortID, r.Score, r.Issue.Status,
 			textsafe.Line(r.Issue.Title),
 			strings.Join(r.MatchedIn, ",")); err != nil {

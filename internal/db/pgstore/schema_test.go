@@ -24,6 +24,7 @@ var expectedTables = []string{
 	"federation_sync_status",
 	"import_mappings",
 	"issue_claims",
+	"issue_embeddings",
 	"issue_labels",
 	"issues",
 	"issues_search",
@@ -73,6 +74,7 @@ var expectedFKCounts = map[string]int{
 	"issue_claims":           2, // -> projects, -> issues
 	"pending_claim_requests": 2, // -> projects, -> issues
 	"issues_search":          1, // -> issues (CASCADE)
+	"issue_embeddings":       1, // -> issues (CASCADE)
 	"import_mappings":        4, // -> projects, issues, comments, links
 }
 

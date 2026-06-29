@@ -197,13 +197,28 @@ func (r RestoreProjectQuery) Validate() error {
 }
 
 type SearchIssuesQuery struct {
-	Q              string `json:"q" validate:"required"`
-	Limit          *int64 `json:"limit,omitempty"`
-	IncludeDeleted *bool  `json:"include_deleted,omitempty"`
+	Q              string                 `json:"q" validate:"required"`
+	Limit          *int64                 `json:"limit,omitempty"`
+	IncludeDeleted *bool                  `json:"include_deleted,omitempty"`
+	Mode           *SearchIssuesQueryMode `json:"mode,omitempty"`
 }
 
 func (s SearchIssuesQuery) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(s.Q, "required"); err != nil {
+		errors = errors.Append("Q", err)
+	}
+	if s.Mode != nil {
+		if v, ok := any(s.Mode).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Mode", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ReadyIssuesGlobalQuery struct {

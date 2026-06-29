@@ -1,12 +1,31 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// renderSearch drives printSearchResults directly: it sets the active output
+// mode, feeds the raw response body, and returns captured stdout. It isolates
+// the rendering contract (header rule, score precision, agent field order) from
+// daemon round-trips, mirroring the cobra output-capture pattern used by the
+// other cmd/kata tests.
+func renderSearch(t *testing.T, mode outputMode, body string) string {
+	t.Helper()
+	resetFlags(t)
+	flags.Mode = mode
+	cmd := &cobra.Command{}
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	require.NoError(t, printSearchResults(cmd, []byte(body)))
+	return buf.String()
+}
 
 // TestSearch_OutputsShortIDNotNumber pins the JSON wire shape: each search
 // result's nested issue carries short_id; the legacy `number` field is gone.
@@ -47,7 +66,7 @@ func TestSearch_AgentOutputEmptyEmitsOnlyHeader(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
-	assert.Equal(t, "OK search count=0 query=\"login race\"\n", out)
+	assert.Equal(t, "OK search count=0 query=\"login race\" mode=lexical\n", out)
 }
 
 func TestSearch_EmptyQueryIsValidationError(t *testing.T) {
@@ -66,6 +85,99 @@ func TestSearch_UnquotedMultiTerm(t *testing.T) {
 	out := runCLI(t, env, dir, "search", "login", "Safari")
 	assert.Contains(t, out, "fix login crash on Safari")
 	assert.NotContains(t, out, "unrelated issue")
+}
+
+// TestSearchHumanBaselineLexicalUnchanged pins that plain lexical output (the
+// unconfigured daemon, auto-with-embeddings-off, and explicit --lexical) stays
+// byte-identical to today: no mode header, %.2f scores.
+func TestSearchHumanBaselineLexicalUnchanged(t *testing.T) {
+	body := `{"query":"login","mode":"lexical","results":[
+	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":1.23,"matched_in":["title"]}]}`
+	out := renderSearch(t, outputHuman, body)
+	if strings.Contains(out, "# mode=") {
+		t.Fatalf("baseline lexical must not print a mode header:\n%s", out)
+	}
+	if !strings.Contains(out, "abc4") || !strings.Contains(out, "1.23") {
+		t.Fatalf("row format changed:\n%s", out)
+	}
+}
+
+// TestSearchHumanDegradedAutoPrintsNote pins that a degraded lexical result
+// (auto fell back because the embedder is down) still prints a labeled note so
+// the human knows semantic results are missing.
+func TestSearchHumanDegradedAutoPrintsNote(t *testing.T) {
+	body := `{"query":"login","mode":"lexical","degraded":true,"degraded_reason":"embedder unreachable","results":[]}`
+	out := renderSearch(t, outputHuman, body)
+	if !strings.Contains(out, "# mode=lexical") || !strings.Contains(out, "degraded") {
+		t.Fatalf("degraded auto must print a note:\n%s", out)
+	}
+}
+
+// TestSearchHumanHybridUsesHigherPrecision pins the %.4f precision for hybrid
+// (and semantic) scores, which cluster around 0.01-0.03 and would flatten
+// under %.2f, plus the mode header.
+func TestSearchHumanHybridUsesHigherPrecision(t *testing.T) {
+	body := `{"query":"login","mode":"hybrid","results":[
+	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":0.0163,"matched_in":["title","semantic"]}]}`
+	out := renderSearch(t, outputHuman, body)
+	if !strings.Contains(out, "# mode=hybrid") {
+		t.Fatalf("hybrid must print mode header:\n%s", out)
+	}
+	if !strings.Contains(out, "0.0163") {
+		t.Fatalf("hybrid must use %%.4f precision:\n%s", out)
+	}
+}
+
+// TestSearchAgentAppendsMode pins the appended agent field order: mode= follows
+// count= and query= without disturbing their names or positions.
+func TestSearchAgentAppendsMode(t *testing.T) {
+	body := `{"query":"login","mode":"lexical","results":[
+	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":1.2,"matched_in":["title"]}]}`
+	out := renderSearch(t, outputAgent, body)
+	if !strings.Contains(out, "OK search count=1 query=login mode=lexical") {
+		t.Fatalf("agent header order wrong:\n%s", out)
+	}
+}
+
+// TestSearch_ModeFlagsMutuallyExclusive pins that --lexical/--hybrid/--semantic
+// cannot be combined; each conflicting pair is a validation error.
+func TestSearch_ModeFlagsMutuallyExclusive(t *testing.T) {
+	pairs := [][]string{
+		{"--lexical", "--hybrid"},
+		{"--lexical", "--semantic"},
+		{"--hybrid", "--semantic"},
+	}
+	for _, p := range pairs {
+		args := append([]string{"search", "x"}, p...)
+		_, err := runCmdOutput(t, nil, args...)
+		_ = requireCLIError(t, err, ExitValidation)
+	}
+}
+
+// TestSearchHumanDegradedLexicalKeepsTwoDecimals pins that degraded-lexical
+// results (BM25 scores) keep %.2f — only hybrid/semantic use %.4f.
+func TestSearchHumanDegradedLexicalKeepsTwoDecimals(t *testing.T) {
+	body := `{"query":"login","mode":"lexical","degraded":true,"degraded_reason":"embedder unreachable","results":[
+	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":2.5,"matched_in":["title"]}]}`
+	out := renderSearch(t, outputHuman, body)
+	if !strings.Contains(out, "2.50") || strings.Contains(out, "2.5000") {
+		t.Fatalf("degraded-lexical must use %%.2f, not %%.4f:\n%s", out)
+	}
+}
+
+// TestSearchHumanOldDaemonEmptyModeRendersAsLexical pins that a response with
+// no "mode" field (a pre-0.3.0 daemon, reachable only in remote-client mode)
+// renders as the lexical baseline rather than a bare "# mode=" line.
+func TestSearchHumanOldDaemonEmptyModeRendersAsLexical(t *testing.T) {
+	body := `{"query":"login","results":[
+	  {"issue":{"short_id":"abc4","title":"Fix login","status":"open"},"score":1.23,"matched_in":["title"]}]}`
+	out := renderSearch(t, outputHuman, body)
+	if strings.Contains(out, "# mode=") {
+		t.Fatalf("empty mode must not print a header:\n%s", out)
+	}
+	if !strings.Contains(out, "1.23") {
+		t.Fatalf("empty mode must render lexical %%.2f rows:\n%s", out)
+	}
 }
 
 // TestSearch_RejectsNonPositiveLimit covers hammer-test #5: --limit

@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
@@ -545,6 +546,11 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		return err
 	}
 
+	embedder, reconcilerHealth, err := startEmbeddingReconciler(ctx, dcfg, store, broadcaster, daemonLog)
+	if err != nil {
+		return err
+	}
+
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:                store,
 		StartedAt:         time.Now().UTC(),
@@ -560,6 +566,8 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		},
 		Auth:             dcfg.Auth,
 		InsecureReadonly: insecureReadonly,
+		Embedder:         embedder,
+		ReconcilerHealth: reconcilerHealth,
 	})
 	defer func() { _ = srv.Close() }()
 
@@ -711,6 +719,71 @@ func startFederationRunner(
 		}
 	}()
 	return wakeRunner
+}
+
+// startEmbeddingReconciler constructs the embedding client and reconciler when
+// semantic search is configured, starts the reconciler goroutine, subscribes to
+// the broadcaster so new/edited issues are embedded promptly, and triggers an
+// initial backfill sweep. It returns the client and a health snapshot func to
+// wire into ServerConfig. When embeddings are not configured it returns nils so
+// the daemon behaves exactly as it did before semantic search existed.
+func startEmbeddingReconciler(
+	ctx context.Context,
+	dcfg *config.DaemonConfig,
+	store db.Storage,
+	bcast *daemon.EventBroadcaster,
+	daemonLog *log.Logger,
+) (*embedding.Client, func() daemon.ReconcilerHealth, error) {
+	ec := dcfg.Search.Embeddings
+	if !ec.Enabled() {
+		return nil, nil, nil
+	}
+	embedder, err := embedding.New(embedding.Config{
+		BaseURL:             ec.BaseURL,
+		Model:               ec.Model,
+		APIKey:              ec.ResolvedAPIKey(),
+		Salt:                ec.FingerprintSalt,
+		Dims:                ec.Dims,
+		BatchSize:           ec.BatchSize,
+		Timeout:             time.Duration(ec.TimeoutSeconds) * time.Second,
+		TrustPrivateNetwork: ec.TrustPrivateNetwork,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("embedding client: %w", err)
+	}
+	reconciler := daemon.NewReconciler(store, embedder, daemon.ReconcilerConfig{BatchSize: ec.BatchSize})
+	go func() {
+		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			daemonLog.Printf("reconciler: %v", err)
+		}
+	}()
+	startEmbeddingNudge(ctx, bcast, reconciler)
+	reconciler.Wake() // initial backfill sweep
+	return embedder, reconciler.Health, nil
+}
+
+// startEmbeddingNudge subscribes to the broadcaster and wakes the reconciler on
+// every committed event so new/edited issues are embedded promptly. The
+// goroutine exits when ctx is cancelled or the subscription channel closes, and
+// always releases the subscription via Unsub.
+func startEmbeddingNudge(ctx context.Context, bcast *daemon.EventBroadcaster, r *daemon.Reconciler) {
+	sub := bcast.Subscribe(daemon.SubFilter{})
+	go func() {
+		defer sub.Unsub()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-sub.Ch:
+				if !ok {
+					return
+				}
+				if msg.Kind == "event" {
+					r.Wake()
+				}
+			}
+		}
+	}()
 }
 
 func federationRunnerInterval() time.Duration {

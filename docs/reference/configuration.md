@@ -200,6 +200,50 @@ message-substance checks, and evidence checks. The TUI close path skips the
 message-substance and evidence checks because an interactive human confirms each
 close; the structural guards still apply.
 
+## Semantic search
+
+This section is the field reference; see the
+[Semantic search guide](../guide/semantic-search.md) for setup and behavior.
+
+Semantic (vector) search is opt-in. With no `[search.embeddings]` section,
+`kata search` behaves exactly as before — lexical FTS only — and the daemon
+makes no embedding network calls. Adding the section enables hybrid search: the
+daemon embeds each issue's title and body through an OpenAI-compatible
+`/embeddings` endpoint and fuses vector results with the lexical leg.
+
+```toml
+[search.embeddings]
+base_url = "http://localhost:11434/v1"  # any OpenAI-compatible /embeddings
+model    = "nomic-embed-text"
+# api_key      = "..."          # or api_key_env = "SOME_VAR"; mutually exclusive
+# fingerprint_salt = ""         # bump to force re-embed when model weights change
+# dims                          # expected vector dimensionality (default 768)
+# batch_size                    # inputs per request (default 64)
+# timeout_seconds               # per-request timeout (default 30)
+# trust_private_network = false # allow plaintext HTTP to literal non-public IPs
+```
+
+`base_url` and `model` are both required once the section exists; setting only
+one is a startup error rather than a silent disable. `api_key` and `api_key_env`
+are mutually exclusive. The embedding API key is attached only to requests whose
+origin matches `base_url`, following the same bearer-token trust ladder as
+daemon catalog tokens: HTTPS is always allowed, HTTP to loopback is allowed, and
+HTTP to other private IPs needs `trust_private_network = true`.
+
+Privacy: configuring an endpoint sends issue titles and bodies to it on every
+embed. That is the consent boundary — the operator who writes this section
+authorizes the data flow. For sensitive projects, prefer a local endpoint (for
+example Ollama on loopback) so issue text never leaves the host. Embeddings are
+local derived state and **do not federate**: each daemon embeds only what it
+stores, and no vectors are sent to or pulled from federated hubs.
+
+The daemon keeps the index fresh on its own: a background reconciler embeds new
+and edited issues within seconds, and `kata` reports its state under
+`embeddings` in the `/health` response (`configured`, `last_success_at`,
+`last_error`, and `backlog`). Search never blocks on embedding lag — an
+issue is findable lexically the instant it is created, and gains semantic recall
+once the reconciler catches up.
+
 ## Telemetry
 
 kata sends limited anonymous telemetry to PostHog when the daemon starts, and

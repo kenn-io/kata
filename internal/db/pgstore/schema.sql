@@ -113,6 +113,7 @@ CREATE TABLE issues (
   metadata      TEXT NOT NULL DEFAULT '{}'
                   CHECK (jsonb_typeof((metadata)::jsonb) = 'object'),
   revision      BIGINT NOT NULL DEFAULT 1,
+  content_revision BIGINT NOT NULL DEFAULT 0,
   recurrence_id   BIGINT REFERENCES recurrences(id) ON DELETE SET NULL,
   occurrence_key  TEXT,
   CHECK (length(uid) = 26),
@@ -551,6 +552,22 @@ CREATE TABLE pending_claim_requests (
 CREATE UNIQUE INDEX uniq_pending_claim_active
   ON pending_claim_requests(issue_uid, holder_instance_uid, holder, client_kind)
   WHERE rejected_at IS NULL AND resolved_at IS NULL;
+
+-- ----------------------------------------------------------------------
+-- Semantic search: one L2-normalized vector per issue. Canonical derived
+-- state, mirroring sqlitestore. pgvector acceleration is built from this in
+-- a later phase; this table is the source of truth either way.
+-- ----------------------------------------------------------------------
+
+CREATE TABLE issue_embeddings (
+  issue_id                  BIGINT PRIMARY KEY REFERENCES issues(id) ON DELETE CASCADE,
+  embedded_content_revision BIGINT NOT NULL,
+  embed_fingerprint         TEXT NOT NULL CHECK (length(embed_fingerprint) = 64),
+  dims                      INTEGER NOT NULL CHECK (dims > 0),
+  vector_bytes              BYTEA NOT NULL CHECK (octet_length(vector_bytes) = dims * 4),
+  updated_at                TEXT NOT NULL
+);
+CREATE INDEX idx_issue_embeddings_fingerprint ON issue_embeddings(embed_fingerprint);
 
 -- ----------------------------------------------------------------------
 -- FTS surface: issues_search table + rebuild function + 5 sync triggers.

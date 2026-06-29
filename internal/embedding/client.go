@@ -1,0 +1,219 @@
+package embedding
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"go.kenn.io/kata/internal/config"
+)
+
+// Config configures an embedding Client. BaseURL and Model are required by the
+// caller (daemon config validation enforces this). Dims defaults to 768.
+type Config struct {
+	BaseURL             string
+	Model               string
+	APIKey              string
+	Salt                string
+	Dims                int
+	BatchSize           int
+	Timeout             time.Duration
+	TrustPrivateNetwork bool
+}
+
+// Client calls an OpenAI-compatible /embeddings endpoint.
+type Client struct {
+	http      *http.Client
+	baseURL   string
+	model     string
+	salt      string
+	dims      int
+	batchSize int
+}
+
+const (
+	defaultDims      = 768
+	defaultBatchSize = 64
+	defaultTimeout   = 30 * time.Second
+)
+
+// New builds a Client with an origin-pinned HTTP transport. The API key is
+// attached only to the configured origin (see internal/config/bearer.go);
+// cross-origin redirects are refused.
+func New(cfg Config) (*Client, error) {
+	if strings.TrimSpace(cfg.BaseURL) == "" || strings.TrimSpace(cfg.Model) == "" {
+		return nil, fmt.Errorf("embedding: base_url and model are required")
+	}
+	dims := cfg.Dims
+	if dims <= 0 {
+		dims = defaultDims
+	}
+	batch := cfg.BatchSize
+	if batch <= 0 {
+		batch = defaultBatchSize
+	}
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	hc := &http.Client{Timeout: timeout}
+	if cfg.APIKey != "" {
+		if err := config.ConfigureBearerClientWithTrust(hc, cfg.BaseURL, cfg.APIKey, cfg.TrustPrivateNetwork); err != nil {
+			return nil, fmt.Errorf("embedding: configure client: %w", err)
+		}
+	}
+	return &Client{
+		http:      hc,
+		baseURL:   strings.TrimRight(cfg.BaseURL, "/"),
+		model:     cfg.Model,
+		salt:      cfg.Salt,
+		dims:      dims,
+		batchSize: batch,
+	}, nil
+}
+
+// Dims returns the configured/expected vector dimensionality.
+func (c *Client) Dims() int { return c.dims }
+
+// Fingerprint identifies the model/dims/recipe/salt of vectors this client
+// produces.
+func (c *Client) Fingerprint() string { return Fingerprint(c.model, c.dims, c.salt) }
+
+// BatchSize is the maximum number of inputs per request.
+func (c *Client) BatchSize() int { return c.batchSize }
+
+type embedRequest struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+}
+
+type embedResponse struct {
+	Data []struct {
+		Embedding []float32 `json:"embedding"`
+	} `json:"data"`
+}
+
+// APIError is a non-2xx response from the embedding endpoint.
+type APIError struct {
+	StatusCode int
+	RetryAfter time.Duration
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("embedding endpoint returned %d: %s", e.StatusCode, e.Body)
+}
+
+// Definitive reports whether retrying is pointless without operator action.
+func (e *APIError) Definitive() bool {
+	switch e.StatusCode {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return true
+	}
+	return false
+}
+
+// Embed returns one L2-normalized vector per input, preserving order. Inputs
+// are sent in batches of at most BatchSize.
+func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, 0, len(texts))
+	for start := 0; start < len(texts); start += c.batchSize {
+		end := start + c.batchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		vecs, err := c.embedBatch(ctx, texts[start:end])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, vecs...)
+	}
+	return out, nil
+}
+
+func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	body, err := json.Marshal(embedRequest{Model: c.model, Input: texts})
+	if err != nil {
+		return nil, fmt.Errorf("embedding: marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("embedding: request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Cap the response read, but scale it to the expected payload: one vector
+	// per input at `dims` float32s, JSON-encoded (~16 bytes/float) plus 1 MiB
+	// of structural overhead. A fixed 1 MiB cap silently truncated common
+	// configs (e.g. 3072-dim models at batch 64 ≈ 3 MiB), surfacing as a
+	// misleading decode error.
+	maxBytes := int64(c.dims)*int64(len(texts))*16 + (1 << 20)
+	rb, _ := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if resp.StatusCode != http.StatusOK {
+		return nil, &APIError{
+			StatusCode: resp.StatusCode,
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+			Body:       string(rb),
+		}
+	}
+	var er embedResponse
+	if err := json.Unmarshal(rb, &er); err != nil {
+		return nil, fmt.Errorf("embedding: decode response: %w", err)
+	}
+	if len(er.Data) != len(texts) {
+		return nil, fmt.Errorf("embedding: got %d vectors for %d inputs", len(er.Data), len(texts))
+	}
+	vecs := make([][]float32, len(er.Data))
+	for i, d := range er.Data {
+		if len(d.Embedding) != c.dims {
+			return nil, fmt.Errorf("embedding: vector dims %d != configured %d", len(d.Embedding), c.dims)
+		}
+		vecs[i] = normalize(d.Embedding)
+	}
+	return vecs, nil
+}
+
+func parseRetryAfter(h string) time.Duration {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(h); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second
+	}
+	// RFC 7231 also allows an HTTP-date form. Convert it to a delay; clamp a
+	// past date to 0 so callers never treat it as a negative backoff.
+	if t, err := http.ParseTime(h); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+func normalize(v []float32) []float32 {
+	var sum float64
+	for _, x := range v {
+		sum += float64(x) * float64(x)
+	}
+	if sum == 0 {
+		return v
+	}
+	inv := float32(1 / math.Sqrt(sum))
+	out := make([]float32, len(v))
+	for i, x := range v {
+		out[i] = x * inv
+	}
+	return out
+}

@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 )
@@ -53,6 +54,15 @@ type ServerConfig struct {
 	// bearer-derived principal). Nil uses slog.Default(); tests inject a
 	// per-test logger so output is observable and isolated.
 	Logger *slog.Logger
+
+	// Embedder is the semantic-search embedding client. Nil means semantic
+	// search is disabled and the search handler falls back to lexical-only.
+	Embedder *embedding.Client
+
+	// ReconcilerHealth snapshots the embedding reconciler's operator-visible
+	// state for /health. Nil means semantic search is disabled, in which case
+	// the health response omits the embeddings block entirely.
+	ReconcilerHealth func() ReconcilerHealth
 }
 
 // authPolicy returns the resolved bearer-auth policy in the form the

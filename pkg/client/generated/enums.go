@@ -173,3 +173,22 @@ func (l ListIssuesQueryStatus) Validate() error {
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ListIssuesQueryStatus value, got: %v", l))
 	}
 }
+
+type SearchIssuesQueryMode string
+
+const (
+	Auto     SearchIssuesQueryMode = "auto"
+	Hybrid   SearchIssuesQueryMode = "hybrid"
+	Lexical  SearchIssuesQueryMode = "lexical"
+	Semantic SearchIssuesQueryMode = "semantic"
+)
+
+// Validate checks if the SearchIssuesQueryMode value is valid
+func (s SearchIssuesQueryMode) Validate() error {
+	switch s {
+	case Auto, Hybrid, Lexical, Semantic:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid SearchIssuesQueryMode value, got: %v", s))
+	}
+}

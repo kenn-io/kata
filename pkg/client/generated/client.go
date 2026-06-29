@@ -5143,6 +5143,7 @@ func (c *Client) SearchIssues(ctx context.Context, options *SearchIssuesRequestO
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"include_deleted": {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":           {Style: "form", Explode: &[]bool{false}[0]},
+		"mode":            {Style: "form", Explode: &[]bool{false}[0]},
 		"q":               {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{

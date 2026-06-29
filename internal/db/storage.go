@@ -147,6 +147,12 @@ type Storage interface {
 	SearchFTS(ctx context.Context, projectID int64, q string, limit int, includeDeleted bool) ([]SearchCandidate, error)
 	SearchFTSAny(ctx context.Context, projectID int64, q string, limit int, includeDeleted bool) ([]SearchCandidate, error)
 
+	// embeddings (semantic search)
+	UpsertIssueEmbedding(ctx context.Context, e IssueEmbedding) error
+	ListEmbedTargets(ctx context.Context, fingerprint string, limit int) ([]EmbedTarget, error)
+	EmbeddingStats(ctx context.Context, projectID int64, fingerprint string) (count int64, maxUpdatedAt string, err error)
+	SearchVector(ctx context.Context, projectID int64, queryVec []float32, fingerprint string, k int, includeDeleted bool) ([]SearchCandidate, error)
+
 	// import support
 	ImportBatch(ctx context.Context, p ImportBatchParams) (ImportBatchResult, []Event, error)
 	UpsertImportMapping(ctx context.Context, p ImportMappingParams) (ImportMapping, error)
@@ -241,6 +247,7 @@ type Storage interface {
 	ExportIssueSyncStatus(ctx context.Context, f ExportFilter) iter.Seq2[IssueSyncStatusExport, error]
 	ExportRecurrences(ctx context.Context, f ExportFilter) iter.Seq2[RecurrenceExport, error]
 	ExportIssues(ctx context.Context, f ExportFilter) iter.Seq2[IssueExport, error]
+	ExportIssueEmbeddings(ctx context.Context, f ExportFilter) iter.Seq2[IssueEmbeddingExport, error]
 	ExportComments(ctx context.Context, f ExportFilter) iter.Seq2[CommentExport, error]
 	ExportIssueLabels(ctx context.Context, f ExportFilter) iter.Seq2[IssueLabelExport, error]
 	ExportLinks(ctx context.Context, f ExportFilter) iter.Seq2[LinkExport, error]

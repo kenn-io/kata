@@ -128,7 +128,7 @@ func (d *Store) ExportIssues(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 	                 i.status, i.closed_reason, i.owner, i.priority, i.author,
 	                 CAST(i.created_at AS TEXT), CAST(i.updated_at AS TEXT),
 	                 CAST(i.closed_at AS TEXT), CAST(i.deleted_at AS TEXT),
-	                 i.metadata, i.revision,
+	                 i.metadata, i.revision, i.content_revision,
 	                 i.recurrence_id, r.uid, i.occurrence_key
 	          FROM issues i
 	          LEFT JOIN recurrences r ON r.id = i.recurrence_id` +
@@ -139,7 +139,7 @@ func (d *Store) ExportIssues(ctx context.Context, f db.ExportFilter) iter.Seq2[d
 			var metadata string
 			if err := rows.Scan(&rec.ID, &rec.UID, &rec.ProjectID, &rec.ShortID, &rec.Title, &rec.Body,
 				&rec.Status, &rec.ClosedReason, &rec.Owner, &rec.Priority, &rec.Author, &rec.CreatedAt,
-				&rec.UpdatedAt, &rec.ClosedAt, &rec.DeletedAt, &metadata, &rec.Revision,
+				&rec.UpdatedAt, &rec.ClosedAt, &rec.DeletedAt, &metadata, &rec.Revision, &rec.ContentRevision,
 				&rec.RecurrenceID, &rec.RecurrenceUID, &rec.OccurrenceKey); err != nil {
 				return db.IssueExport{}, scanError("issue", err)
 			}

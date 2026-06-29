@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -142,6 +143,8 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 		return linkSkipNone, importRecurrence(ctx, tx, r.Recurrence)
 	case db.ImportKindIssue:
 		return linkSkipNone, importIssue(ctx, tx, r.Issue)
+	case db.ImportKindIssueEmbedding:
+		return linkSkipNone, importIssueEmbedding(ctx, tx, r.IssueEmbedding)
 	case db.ImportKindComment:
 		return linkSkipNone, importComment(ctx, tx, r.Comment)
 	case db.ImportKindIssueLabel:
@@ -340,13 +343,47 @@ func importIssue(ctx context.Context, tx *sql.Tx, i *db.IssueExport) error {
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO issues(id, uid, project_id, short_id, title, body, status, closed_reason, owner, priority, author,
-		                    created_at, updated_at, closed_at, deleted_at, metadata, revision,
+		                    created_at, updated_at, closed_at, deleted_at, metadata, revision, content_revision,
 		                    recurrence_id, occurrence_key)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		i.ID, i.UID, i.ProjectID, i.ShortID, i.Title, i.Body, i.Status, i.ClosedReason,
 		i.Owner, i.Priority, i.Author, i.CreatedAt, i.UpdatedAt, i.ClosedAt, i.DeletedAt,
-		string(metadata), revision, recurrenceID, i.OccurrenceKey)
+		string(metadata), revision, i.ContentRevision, recurrenceID, i.OccurrenceKey)
 	return wrapImportErr(db.ImportKindIssue, err)
+}
+
+// importIssueEmbedding resolves the embedding's issue_uid to a local id and
+// inserts the row. It silently drops (returns nil without inserting) when the
+// parent issue is absent — a project-scoped export can carry an embedding whose
+// issue lives in an omitted project — or when embedded_content_revision exceeds
+// the imported issue's content_revision, which only happens for a corrupt or
+// hand-edited dump; the reconciler re-embeds such an issue on its next sweep.
+// A malformed base64 vector is a hard error: it is a structurally invalid
+// envelope, not recoverable derived state.
+func importIssueEmbedding(ctx context.Context, tx *sql.Tx, e *db.IssueEmbeddingExport) error {
+	var issueID, contentRevision int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT id, content_revision FROM issues WHERE uid = ?`, e.IssueUID).Scan(&issueID, &contentRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return wrapImportErr(db.ImportKindIssueEmbedding, err)
+	}
+	if e.EmbeddedContentRevision > contentRevision {
+		return nil
+	}
+	vec, err := base64.StdEncoding.DecodeString(e.VectorB64)
+	if err != nil {
+		return wrapImportErr(db.ImportKindIssueEmbedding,
+			fmt.Errorf("issue %s: decode vector_b64: %w", e.IssueUID, err))
+	}
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO issue_embeddings
+		   (issue_id, embedded_content_revision, embed_fingerprint, dims, vector_bytes, updated_at)
+		 VALUES(?, ?, ?, ?, ?, ?)`,
+		issueID, e.EmbeddedContentRevision, e.Fingerprint, e.Dims, vec, nowTimestamp())
+	return wrapImportErr(db.ImportKindIssueEmbedding, err)
 }
 
 func importComment(ctx context.Context, tx *sql.Tx, c *db.CommentExport) error {

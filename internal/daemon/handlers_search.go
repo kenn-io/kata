@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -9,8 +10,10 @@ import (
 	"go.kenn.io/kata/internal/api"
 )
 
-// registerSearchHandlers installs GET /api/v1/projects/{id}/search. Returns
-// the spec §4.10 envelope: query echo + ranked results with score + matched_in.
+// registerSearchHandlers installs GET /api/v1/projects/{id}/search. Returns the
+// spec §4.10 envelope: query echo, effective mode, optional degraded fields,
+// and ranked results with mode-scoped score + matched_in. The lexical and
+// vector legs run concurrently; see hybridSearch.
 func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "searchIssues",
@@ -28,21 +31,34 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if limit <= 0 {
 			limit = 20
 		}
-		candidates, err := cfg.DB.SearchFTS(ctx, in.ProjectID, in.Query, limit, in.IncludeDeleted)
+		res, err := hybridSearch(ctx, cfg.DB, cfg.Embedder, hybridParams{
+			ProjectID: in.ProjectID, Query: in.Query, Limit: limit,
+			IncludeDeleted: in.IncludeDeleted, Requested: in.Mode,
+		})
 		if err != nil {
+			var me *modeError
+			if errors.As(err, &me) {
+				kind := "validation"
+				if me.Status() == 503 {
+					kind = "unavailable"
+				}
+				return nil, api.NewError(me.Status(), kind, me.Error(), "", nil)
+			}
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
-		hits := make([]api.SearchHit, 0, len(candidates))
-		for _, c := range candidates {
-			hits = append(hits, api.SearchHit{
+		out := &api.SearchResponse{}
+		out.Body.Query = in.Query
+		out.Body.Mode = string(res.Mode)
+		out.Body.Degraded = res.Degraded
+		out.Body.DegradedReason = res.DegradedReason
+		out.Body.Results = make([]api.SearchHit, 0, len(res.Hits))
+		for _, c := range res.Hits {
+			out.Body.Results = append(out.Body.Results, api.SearchHit{
 				Issue:     c.Issue,
 				Score:     c.Score,
 				MatchedIn: c.MatchedIn,
 			})
 		}
-		out := &api.SearchResponse{}
-		out.Body.Query = in.Query
-		out.Body.Results = hits
 		return out, nil
 	})
 }

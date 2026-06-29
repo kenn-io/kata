@@ -67,7 +67,27 @@ kata list [--status open|closed|all] [--limit N]
 kata list [--label LABEL] [--no-label LABEL] [--owner NAME] [--unowned]
 kata show <issue-ref>
 kata search <query> [--limit N] [--include-deleted]
+kata search <query> [--lexical | --hybrid | --semantic]
 ```
+
+By default `kata search` runs lexical (FTS) search. When the daemon has
+[semantic search](../guide/semantic-search.md) configured, search
+automatically fuses lexical and vector results. The mode flags are mutually
+exclusive and force a strategy:
+
+- `--lexical` — FTS only, exactly the default behavior on a daemon without
+  embeddings.
+- `--hybrid` — fuse the lexical and vector legs (reciprocal rank fusion).
+- `--semantic` — vector (embedding) results only.
+
+`--hybrid` and `--semantic` require `[search.embeddings]`; against a daemon
+without it they return an error rather than silently falling back. If the
+embedding endpoint is unreachable for a given query, only the default (auto)
+search falls back to lexical results and labels the response `degraded`;
+`--json` and `--agent` output carry the effective `mode` and the degraded
+reason so the downgrade is never silent. Explicit `--hybrid` and `--semantic`
+do not degrade: they return an error (HTTP 503) when the vector leg cannot run,
+just as they return 400 when embeddings are not configured at all.
 
 Edit:
 

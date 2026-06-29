@@ -20,6 +20,7 @@ const (
 	KindGitHubSyncStatus     Kind = "github_sync_status"
 	KindRecurrence           Kind = "recurrence"
 	KindIssue                Kind = "issue"
+	KindIssueEmbedding       Kind = "issue_embedding"
 	KindComment              Kind = "comment"
 	KindIssueLabel           Kind = "issue_label"
 	KindLink                 Kind = "link"
@@ -53,20 +54,21 @@ var kindOrder = map[Kind]int{
 	KindGitHubSyncStatus:     4,
 	KindRecurrence:           5,
 	KindIssue:                6,
-	KindComment:              7,
-	KindIssueLabel:           8,
-	KindLink:                 9,
-	KindImportMapping:        10,
-	KindFederationBinding:    11,
-	KindFederationSyncStatus: 12,
-	KindFederationQuarantine: 13,
-	KindFederationEnrollment: 14,
-	KindIssueClaim:           15,
-	KindPendingClaimRequest:  16,
-	KindEvent:                17,
-	KindPurgeLog:             18,
-	KindProjectPurgeLog:      19,
-	KindSQLiteSequence:       20,
+	KindIssueEmbedding:       7,
+	KindComment:              8,
+	KindIssueLabel:           9,
+	KindLink:                 10,
+	KindImportMapping:        11,
+	KindFederationBinding:    12,
+	KindFederationSyncStatus: 13,
+	KindFederationQuarantine: 14,
+	KindFederationEnrollment: 15,
+	KindIssueClaim:           16,
+	KindPendingClaimRequest:  17,
+	KindEvent:                18,
+	KindPurgeLog:             19,
+	KindProjectPurgeLog:      20,
+	KindSQLiteSequence:       21,
 }
 
 // Envelope is one NDJSON record.

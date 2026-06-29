@@ -129,6 +129,24 @@ Empty reads emit the header with `count=0` and no rows:
 OK search count=0 query="login race"
 ```
 
+`kata search` appends a `mode=` field to its header — `lexical`, `hybrid`, or
+`semantic` — reporting the strategy actually run. When the embedding endpoint is
+configured but could not serve a query, the search falls back to lexical and a
+`degraded=<reason>` field follows `mode=`; it is omitted when the query was not
+degraded. Result rows carry `matched=` listing the contributing sources (FTS
+column names), and a row gains `semantic` in that list when the vector leg
+matched it:
+
+```text
+OK search count=1 query="auth redirect duplicates" mode=hybrid
+- issue=abc4 score=0.0312 status=open matched=title,semantic title="Login callback double-submits on Safari"
+```
+
+`count`, `query`, and the existing row fields keep their names, positions, and
+meanings, so these additions are purely additive and `agent_format` stays `1`.
+A daemon without `[search.embeddings]` always reports `mode=lexical` and never
+sets `degraded=`, so its output is unchanged apart from the appended `mode=`.
+
 ### Events
 
 Non-tail reads use a header plus rows; tail mode is stream-safe and emits exactly

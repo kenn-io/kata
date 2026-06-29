@@ -38,6 +38,8 @@ required_files=(
   "docs/design/hosted-mode.md"
   "docs/design/architecture.md"
   "docs/design/data-model.md"
+  "docs/design/semantic-search.md"
+  "docs/guide/semantic-search.md"
   "docs/reference/agent-output.md"
   "docs/stylesheets/extra.css"
 )
@@ -168,7 +170,8 @@ for generated in \
   docs/site/design/architecture/index.html \
   docs/site/design/data-model/index.html \
   docs/site/design/federation/index.html \
-  docs/site/design/hosted-mode/index.html; do
+  docs/site/design/hosted-mode/index.html \
+  docs/site/design/semantic-search/index.html; do
   if [[ ! -e "$generated" ]]; then
     printf 'generated site is missing design docs page: %s\n' "$generated" >&2
     exit 1

@@ -76,6 +76,9 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 	if err := streamExport(enc, KindIssue, store.ExportIssues(ctx, f)); err != nil {
 		return err
 	}
+	if err := streamExport(enc, KindIssueEmbedding, store.ExportIssueEmbeddings(ctx, f)); err != nil {
+		return err
+	}
 	if err := streamExport(enc, KindComment, store.ExportComments(ctx, f)); err != nil {
 		return err
 	}

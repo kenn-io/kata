@@ -20,6 +20,7 @@ nav = [
   {"Guide" = [
     {"Concepts" = "guide/concepts.md"},
     {"Workspaces and projects" = "guide/workspaces-projects.md"},
+    {"Semantic search" = "guide/semantic-search.md"},
     {"Comparisons" = "guide/comparisons.md"},
     {"Migrating from Beads" = "guide/migrating-from-beads.md"},
   ]},
@@ -46,6 +47,7 @@ nav = [
     {"Data model and durability" = "design/data-model.md"},
     {"Federation technical notes" = "design/federation.md"},
     {"Hosted mode technical notes" = "design/hosted-mode.md"},
+    {"Semantic search technical notes" = "design/semantic-search.md"},
   ]},
   {"Development" = [
     {"Contributing" = "development/contributing.md"},

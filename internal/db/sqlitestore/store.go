@@ -44,6 +44,7 @@ type Store struct {
 	instanceUID string
 	readOnly    bool
 	readQ       readQuerier
+	vectorCache *vectorCache
 }
 
 // readQuerier is the read-only query surface shared between *sql.DB and *sql.Tx.
@@ -97,7 +98,7 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping %s: %w", path, err)
 	}
-	d := &Store{DB: sdb, path: path}
+	d := &Store{DB: sdb, path: path, vectorCache: newVectorCache()}
 	d.readQ = sdb
 	if err := d.bootstrap(ctx); err != nil {
 		_ = sdb.Close()
@@ -267,7 +268,7 @@ func openReadOnly(ctx context.Context, path string) (*Store, error) {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping read-only %s: %w", path, err)
 	}
-	s := &Store{DB: sdb, path: path, readOnly: true}
+	s := &Store{DB: sdb, path: path, readOnly: true, vectorCache: newVectorCache()}
 	s.readQ = sdb
 	return s, nil
 }

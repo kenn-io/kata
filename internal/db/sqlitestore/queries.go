@@ -1532,6 +1532,9 @@ func (d *Store) editIssue(ctx context.Context, p db.EditIssueParams) (db.Issue, 
 	}
 	sets = append([]string{`updated_at = ?`}, sets...)
 	args = append([]any{ts}, args...)
+	if contentFieldsChanged(issue, p.Title, p.Body) {
+		sets = append(sets, `content_revision = content_revision + 1`)
+	}
 	args = append(args, p.IssueID)
 	// `sets` only contains string literals chosen above; user-provided values
 	// are parameterized via `args`. Safe to concatenate.
@@ -1566,6 +1569,20 @@ func (d *Store) editIssue(ctx context.Context, p db.EditIssueParams) (db.Issue, 
 // of falling back to the event's independently clocked created_at.
 func nowTimestamp() string {
 	return time.Now().UTC().Format(sqliteTimeFormat)
+}
+
+// contentFieldsChanged reports whether a title or body edit actually changes
+// the embeddable content of issue. It is the precise trigger for bumping
+// issues.content_revision; owner, priority, status, comments, links, and
+// metadata deliberately do not bump it. See docs/design/semantic-search.md.
+func contentFieldsChanged(issue db.Issue, title, body *string) bool {
+	if title != nil && *title != issue.Title {
+		return true
+	}
+	if body != nil && *body != issue.Body {
+		return true
+	}
+	return false
 }
 
 func issueFieldUpdatePlan(issue db.Issue, title, body, owner *string, ts string) ([]string, []any, string, bool, error) {

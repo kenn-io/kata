@@ -258,6 +258,12 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		}
 		i := rec.IssueExport
 		return db.ImportRecord{Kind: string(KindIssue), Issue: &i}, nil
+	case KindIssueEmbedding:
+		var rec db.IssueEmbeddingExport
+		if err := decodeData(env, &rec); err != nil {
+			return db.ImportRecord{}, err
+		}
+		return db.ImportRecord{Kind: string(KindIssueEmbedding), IssueEmbedding: &rec}, nil
 	case KindComment:
 		var rec db.CommentExport
 		if err := decodeData(env, &rec); err != nil {

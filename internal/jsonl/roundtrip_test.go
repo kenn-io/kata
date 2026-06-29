@@ -145,7 +145,7 @@ func TestRoundtrip_DuplicateTokenRevokedEventsKeepFirstRevokedAt(t *testing.T) {
 func assertRoundtripTableCounts(t *testing.T, src, dst *sqlitestore.Store) {
 	t.Helper()
 	for _, table := range []string{
-		"projects", "project_aliases", "issues", "comments", "issue_labels",
+		"projects", "project_aliases", "issues", "issue_embeddings", "comments", "issue_labels",
 		"links", "import_mappings", "federation_bindings", "federation_enrollments",
 		"federation_sync_status", "federation_quarantine", "issue_claims", "pending_claim_requests", "events", "purge_log",
 	} {

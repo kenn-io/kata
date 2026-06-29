@@ -47,6 +47,7 @@ CREATE TABLE issues (
   metadata      TEXT NOT NULL DEFAULT '{}'
                   CHECK (json_valid(metadata) AND json_type(metadata) = 'object'),
   revision      INTEGER NOT NULL DEFAULT 1,
+  content_revision INTEGER NOT NULL DEFAULT 0,
   recurrence_id   INTEGER REFERENCES recurrences(id) ON DELETE SET NULL,
   occurrence_key  TEXT,
   CHECK (length(uid) = 26),
@@ -69,6 +70,18 @@ CREATE UNIQUE INDEX uniq_issues_project_short_id
 CREATE UNIQUE INDEX issues_recurrence_occurrence_uniq
   ON issues(recurrence_id, occurrence_key)
   WHERE recurrence_id IS NOT NULL AND occurrence_key IS NOT NULL;
+
+-- Semantic search: one L2-normalized vector per issue. Canonical derived
+-- state; pgvector acceleration (Phase 2) is built from this, never instead.
+CREATE TABLE issue_embeddings (
+  issue_id                  INTEGER PRIMARY KEY REFERENCES issues(id) ON DELETE CASCADE,
+  embedded_content_revision INTEGER NOT NULL,
+  embed_fingerprint         TEXT NOT NULL CHECK (length(embed_fingerprint) = 64),
+  dims                      INTEGER NOT NULL CHECK (dims > 0),
+  vector_bytes              BLOB NOT NULL CHECK (length(vector_bytes) = dims * 4),
+  updated_at                TEXT NOT NULL
+);
+CREATE INDEX idx_issue_embeddings_fingerprint ON issue_embeddings(embed_fingerprint);
 
 CREATE TABLE comments (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -41,6 +41,66 @@ type DaemonConfig struct {
 	// Storage carries DB-selection settings. Today only `dsn` is honored;
 	// see config.KataDSN for the full precedence (env > file > default).
 	Storage StorageConfig `toml:"storage"`
+	// Search carries opt-in semantic-search settings. An empty
+	// [search.embeddings] section leaves kata on lexical-only FTS.
+	Search SearchConfig `toml:"search"`
+}
+
+// SearchConfig is the [search] block of <KATA_HOME>/config.toml. Today it only
+// nests [search.embeddings]; lexical FTS needs no configuration.
+type SearchConfig struct {
+	Embeddings EmbeddingsConfig `toml:"embeddings"`
+}
+
+// EmbeddingsConfig is the [search.embeddings] block. It is opt-in: when BaseURL
+// and Model are both empty kata stays on lexical-only search. BaseURL and Model
+// must be set together (a partial config is rejected at load), and APIKey is
+// mutually exclusive with APIKeyEnv, mirroring the [[daemon]] token pattern.
+type EmbeddingsConfig struct {
+	// BaseURL is the OpenAI-compatible endpoint base, e.g.
+	// "http://localhost:11434/v1". The client appends "/embeddings".
+	BaseURL string `toml:"base_url"`
+	// Model is the embedding model name sent in each request.
+	Model string `toml:"model"`
+	// APIKey is the inline bearer token, mutually exclusive with APIKeyEnv.
+	APIKey string `toml:"api_key"`
+	// APIKeyEnv names an environment variable holding the bearer token, so
+	// the secret stays out of the config file.
+	APIKeyEnv string `toml:"api_key_env"`
+	// FingerprintSalt is the operator's lever for "same model name,
+	// different weights"; changing it invalidates every stored vector.
+	FingerprintSalt string `toml:"fingerprint_salt"`
+	// Dims is the expected vector dimensionality. 0 means use the client
+	// default. Negative values are rejected.
+	Dims int `toml:"dims"`
+	// BatchSize caps inputs per embedding request. 0 means the client
+	// default; negative values are rejected.
+	BatchSize int `toml:"batch_size"`
+	// TimeoutSeconds is the per-request HTTP timeout. 0 means the client
+	// default; negative values are rejected.
+	TimeoutSeconds int `toml:"timeout_seconds"`
+	// TrustPrivateNetwork allows a plaintext bearer token to a private-network
+	// endpoint, mirroring [auth].trust_private_network.
+	TrustPrivateNetwork bool `toml:"trust_private_network"`
+}
+
+// Enabled reports whether semantic search is configured. Both base_url and
+// model are required; validateEmbeddings rejects a partial config so Enabled
+// never sees a half-set section.
+func (e EmbeddingsConfig) Enabled() bool {
+	return strings.TrimSpace(e.BaseURL) != "" && strings.TrimSpace(e.Model) != ""
+}
+
+// ResolvedAPIKey returns the literal api_key, or the value of the environment
+// variable named by api_key_env. Returns "" when neither is set.
+func (e EmbeddingsConfig) ResolvedAPIKey() string {
+	if e.APIKey != "" {
+		return e.APIKey
+	}
+	if e.APIKeyEnv != "" {
+		return os.Getenv(strings.TrimSpace(e.APIKeyEnv))
+	}
+	return ""
 }
 
 // StorageConfig is the [storage] block of <KATA_HOME>/config.toml. An empty
@@ -172,6 +232,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
 		cfg.Storage.DSN = strings.TrimSpace(cfg.Storage.DSN)
 		cfg.Close.Throttle.Window = strings.TrimSpace(cfg.Close.Throttle.Window)
+		trimSearchEmbeddings(&cfg)
 		trimDaemonCatalog(&cfg)
 	case errors.Is(err, os.ErrNotExist):
 		// Absent file: fall through with zero-value cfg. Env merge and
@@ -185,6 +246,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		return nil, err
 	}
 	if _, err := cfg.Close.Throttle.ThrottleWindow(); err != nil {
+		return nil, err
+	}
+	if err := validateEmbeddings(cfg.Search.Embeddings); err != nil {
 		return nil, err
 	}
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
@@ -228,6 +292,15 @@ func ReadAuthConfig() (AuthConfig, error) {
 		return AuthConfig{}, err
 	}
 	return cfg.Auth, nil
+}
+
+func trimSearchEmbeddings(cfg *DaemonConfig) {
+	e := &cfg.Search.Embeddings
+	e.BaseURL = strings.TrimSpace(e.BaseURL)
+	e.Model = strings.TrimSpace(e.Model)
+	e.APIKey = strings.TrimSpace(e.APIKey)
+	e.APIKeyEnv = strings.TrimSpace(e.APIKeyEnv)
+	e.FingerprintSalt = strings.TrimSpace(e.FingerprintSalt)
 }
 
 func trimDaemonCatalog(cfg *DaemonConfig) {
@@ -278,6 +351,29 @@ func validateAuthProxy(p ProxyConfig) error {
 		return errors.New(
 			"auth.proxy: trusted_actor_header is set but trusted_proxy_listeners is empty. " +
 				"Set both to enable proxy attribution, or unset the header to disable")
+	}
+	return nil
+}
+
+// validateEmbeddings rejects partial or contradictory [search.embeddings]
+// config. base_url and model must both be set or both omitted (a half-set
+// section is an operator mistake, not a usable default). api_key and
+// api_key_env are mutually exclusive, mirroring the [[daemon]] token rule.
+// The numeric knobs are sizes/durations, so negatives are invalid.
+func validateEmbeddings(e EmbeddingsConfig) error {
+	hasBase := strings.TrimSpace(e.BaseURL) != ""
+	hasModel := strings.TrimSpace(e.Model) != ""
+	if hasBase != hasModel {
+		return errors.New(
+			"search.embeddings: base_url and model must both be set or both omitted")
+	}
+	if e.APIKey != "" && e.APIKeyEnv != "" {
+		return errors.New(
+			"search.embeddings: api_key and api_key_env are mutually exclusive")
+	}
+	if e.Dims < 0 || e.BatchSize < 0 || e.TimeoutSeconds < 0 {
+		return errors.New(
+			"search.embeddings: dims, batch_size, and timeout_seconds must be non-negative")
 	}
 	return nil
 }

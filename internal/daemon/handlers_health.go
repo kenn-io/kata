@@ -46,6 +46,15 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Version = version.Version
 		out.Body.StartedAt = cfg.StartedAt
 		out.Body.Uptime = time.Since(cfg.StartedAt).Round(time.Second).String()
+		if cfg.ReconcilerHealth != nil {
+			h := cfg.ReconcilerHealth()
+			out.Body.Embeddings = &api.EmbeddingsHealth{
+				Configured:    h.Configured,
+				LastSuccessAt: h.LastSuccessAt,
+				LastError:     h.LastError,
+				Backlog:       h.Backlog,
+			}
+		}
 		return out, nil
 	})
 }

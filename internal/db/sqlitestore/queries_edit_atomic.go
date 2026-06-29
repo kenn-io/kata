@@ -65,6 +65,9 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	if fieldsChanged {
 		sets = append([]string{`updated_at = ?`}, sets...)
 		args = append([]any{ts}, args...)
+		if contentFieldsChanged(issue, p.Title, p.Body) {
+			sets = append(sets, `content_revision = content_revision + 1`)
+		}
 		args = append(args, p.IssueID)
 		// `sets` only contains fixed string literals; user values are bound
 		// via `args`. Concatenation is safe.

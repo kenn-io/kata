@@ -416,8 +416,15 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	if item.CreatedAt.Before(createdAt) {
 		createdAt = item.CreatedAt
 	}
+	// Bump content_revision only when the embeddable text actually changes,
+	// mirroring editIssue. The fragment is a fixed literal with no bound
+	// value, so it never widens the args list. See docs/design/semantic-search.md.
+	bump := ""
+	if item.Title != existing.Title || item.Body != existing.Body {
+		bump = `, content_revision = content_revision + 1`
+	}
 	_, err := tx.ExecContext(ctx, `UPDATE issues
-		SET title = ?, body = ?, status = ?, closed_reason = ?, owner = ?, created_at = ?, updated_at = ?, closed_at = ?, priority = ?
+		SET title = ?, body = ?, status = ?, closed_reason = ?, owner = ?, created_at = ?, updated_at = ?, closed_at = ?, priority = ?`+bump+`
 		WHERE id = ?`, item.Title, item.Body, item.Status, item.ClosedReason, normalizeOwner(item.Owner), createdAt, item.UpdatedAt, item.ClosedAt, item.Priority, existing.ID)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported issue: %w", err)

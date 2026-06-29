@@ -49,6 +49,7 @@ type ImportRecord struct {
 	IssueSyncStatus      *IssueSyncStatusExport
 	Recurrence           *RecurrenceExport
 	Issue                *IssueExport
+	IssueEmbedding       *IssueEmbeddingExport
 	Comment              *CommentExport
 	Label                *IssueLabelExport
 	Link                 *LinkExport
@@ -77,6 +78,7 @@ const (
 	ImportKindIssueSyncStatus      = "issue_sync_status"
 	ImportKindRecurrence           = "recurrence"
 	ImportKindIssue                = "issue"
+	ImportKindIssueEmbedding       = "issue_embedding"
 	ImportKindComment              = "comment"
 	ImportKindIssueLabel           = "issue_label"
 	ImportKindLink                 = "link"
@@ -108,6 +110,7 @@ func (r ImportRecord) Validate() error {
 		{ImportKindIssueSyncStatus, r.IssueSyncStatus != nil},
 		{ImportKindRecurrence, r.Recurrence != nil},
 		{ImportKindIssue, r.Issue != nil},
+		{ImportKindIssueEmbedding, r.IssueEmbedding != nil},
 		{ImportKindComment, r.Comment != nil},
 		{ImportKindIssueLabel, r.Label != nil},
 		{ImportKindLink, r.Link != nil},

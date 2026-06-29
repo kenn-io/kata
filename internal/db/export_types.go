@@ -17,26 +17,40 @@ type MetaKV struct {
 
 // IssueExport is one issue row in export shape (recurrence_uid resolved via join).
 type IssueExport struct {
-	ID            int64           `json:"id"`
-	UID           string          `json:"uid"`
-	ProjectID     int64           `json:"project_id"`
-	ShortID       string          `json:"short_id"`
-	Title         string          `json:"title"`
-	Body          string          `json:"body"`
-	Status        string          `json:"status"`
-	ClosedReason  *string         `json:"closed_reason"`
-	Owner         *string         `json:"owner"`
-	Priority      *int64          `json:"priority,omitempty"`
-	Author        string          `json:"author"`
-	CreatedAt     string          `json:"created_at"`
-	UpdatedAt     string          `json:"updated_at"`
-	ClosedAt      *string         `json:"closed_at"`
-	DeletedAt     *string         `json:"deleted_at"`
-	Metadata      json.RawMessage `json:"metadata"`
-	Revision      int64           `json:"revision"`
-	RecurrenceID  *int64          `json:"recurrence_id,omitempty"`
-	RecurrenceUID *string         `json:"recurrence_uid,omitempty"`
-	OccurrenceKey *string         `json:"occurrence_key,omitempty"`
+	ID              int64           `json:"id"`
+	UID             string          `json:"uid"`
+	ProjectID       int64           `json:"project_id"`
+	ShortID         string          `json:"short_id"`
+	Title           string          `json:"title"`
+	Body            string          `json:"body"`
+	Status          string          `json:"status"`
+	ClosedReason    *string         `json:"closed_reason"`
+	Owner           *string         `json:"owner"`
+	Priority        *int64          `json:"priority,omitempty"`
+	Author          string          `json:"author"`
+	CreatedAt       string          `json:"created_at"`
+	UpdatedAt       string          `json:"updated_at"`
+	ClosedAt        *string         `json:"closed_at"`
+	DeletedAt       *string         `json:"deleted_at"`
+	Metadata        json.RawMessage `json:"metadata"`
+	Revision        int64           `json:"revision"`
+	ContentRevision int64           `json:"content_revision"`
+	RecurrenceID    *int64          `json:"recurrence_id,omitempty"`
+	RecurrenceUID   *string         `json:"recurrence_uid,omitempty"`
+	OccurrenceKey   *string         `json:"occurrence_key,omitempty"`
+}
+
+// IssueEmbeddingExport is one issue_embeddings row in export shape, keyed by
+// issue UID so import resolves identity independent of local numeric ids. The
+// vector is base64-encoded (dims x float32 little-endian, L2-normalized).
+// Embeddings are expensive derived state, so they are exported to avoid
+// re-embedding a whole project after a schema cutover or backup restore.
+type IssueEmbeddingExport struct {
+	IssueUID                string `json:"issue_uid"`
+	EmbeddedContentRevision int64  `json:"embedded_content_revision"`
+	Fingerprint             string `json:"embed_fingerprint"`
+	Dims                    int    `json:"dims"`
+	VectorB64               string `json:"vector_b64"`
 }
 
 // RecurrenceExport is one recurrence row in export shape.

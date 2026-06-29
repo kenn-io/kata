@@ -578,6 +578,109 @@ func TestReadDaemonConfig_StorageRejectsUnknownKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "storage.foo")
 }
 
+func TestReadDaemonConfig_SearchEmbeddingsValid(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[search.embeddings]
+base_url = "http://localhost:11434/v1"
+model = "nomic-embed-text"
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.Search.Embeddings.Enabled(),
+		"base_url + model present must enable embeddings")
+	assert.Equal(t, "http://localhost:11434/v1", cfg.Search.Embeddings.BaseURL)
+	assert.Equal(t, "nomic-embed-text", cfg.Search.Embeddings.Model)
+}
+
+func TestReadDaemonConfig_SearchEmbeddingsDisabledWhenAbsent(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.False(t, cfg.Search.Embeddings.Enabled(),
+		"absent [search.embeddings] must leave semantic search disabled")
+}
+
+func TestReadDaemonConfig_SearchEmbeddingsRejectsBaseURLWithoutModel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[search.embeddings]
+base_url = "http://localhost:11434/v1"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err, "base_url without model is a partial config and must reject")
+	assert.Contains(t, err.Error(), "base_url")
+	assert.Contains(t, err.Error(), "model")
+}
+
+func TestReadDaemonConfig_SearchEmbeddingsRejectsModelWithoutBaseURL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[search.embeddings]
+model = "nomic-embed-text"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err, "model without base_url is a partial config and must reject")
+	assert.Contains(t, err.Error(), "base_url")
+	assert.Contains(t, err.Error(), "model")
+}
+
+func TestReadDaemonConfig_SearchEmbeddingsRejectsAPIKeyAndAPIKeyEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[search.embeddings]
+base_url = "http://localhost:11434/v1"
+model = "m"
+api_key = "x"
+api_key_env = "Y"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err, "api_key and api_key_env are mutually exclusive")
+	assert.Contains(t, err.Error(), "api_key")
+	assert.Contains(t, err.Error(), "api_key_env")
+}
+
+func TestReadDaemonConfig_SearchEmbeddingsRejectsNegativeDims(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[search.embeddings]
+base_url = "http://localhost:11434/v1"
+model = "m"
+dims = -1
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err, "negative dims must reject")
+	assert.Contains(t, err.Error(), "dims")
+}
+
+func TestReadDaemonConfig_SearchEmbeddingsResolvedAPIKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_EMBED_KEY", "secret-from-env")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[search.embeddings]
+base_url = "http://localhost:11434/v1"
+model = "m"
+api_key_env = "KATA_EMBED_KEY"
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Search.Embeddings.APIKey)
+	assert.Equal(t, "secret-from-env", cfg.Search.Embeddings.ResolvedAPIKey(),
+		"api_key_env must resolve from the environment")
+}
+
 func TestApplyDaemonConfigEnv_AuthProxyListeners(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
