@@ -2890,6 +2890,8 @@ func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T
 	assert.Equal(t, "remote title", reconciled.Title)
 	assert.Equal(t, "remote body", reconciled.Body)
 	assert.Greater(t, reconciled.Revision, issue.Revision)
+	assert.Greater(t, contentRev(ctx, t, d, issue.ID), contentRev(ctx, t, d, peer.ID),
+		"federated title/body update must mark embeddings stale")
 	reconciledRevision := reconciled.Revision
 
 	require.NoError(t, d.MaterializeFederatedProject(ctx, p.ID))

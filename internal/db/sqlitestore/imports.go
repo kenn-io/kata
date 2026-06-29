@@ -445,7 +445,7 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 }
 
 func (d *Store) updateImportedPresentationTitle(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, existing db.Issue, projectName string) (db.Issue, db.Event, error) {
-	_, err := tx.ExecContext(ctx, `UPDATE issues SET title = ? WHERE id = ?`, item.Title, existing.ID)
+	_, err := tx.ExecContext(ctx, `UPDATE issues SET title = ?, content_revision = content_revision + 1 WHERE id = ?`, item.Title, existing.ID)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported title: %w", err)
 	}

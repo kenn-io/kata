@@ -1441,6 +1441,7 @@ func reconcileFederatedIssues(
 				string(metadata),
 			}
 			args := append([]any{}, issueValues...)
+			args = append(args, issue.Title, issue.Body)
 			args = append(args, row.id)
 			args = append(args, issueValues...)
 			_, err := tx.ExecContext(ctx, `
@@ -1458,7 +1459,11 @@ func reconcileFederatedIssues(
 				       closed_at = ?,
 					       deleted_at = ?,
 					       metadata = ?,
-					       revision = revision + 1
+					       revision = revision + 1,
+					       content_revision = content_revision + CASE
+					           WHEN title IS NOT ? OR body IS NOT ? THEN 1
+					           ELSE 0
+					       END
 					 WHERE id = ?
 					   AND (
 					       short_id IS NOT ? OR

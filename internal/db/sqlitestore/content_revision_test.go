@@ -141,3 +141,36 @@ func TestContentRevisionBumpsFromImport(t *testing.T) {
 	require.Equalf(t, afterTitle, contentRev(ctx, t, d, issueID),
 		"import non-content change must not bump content_revision")
 }
+
+func TestContentRevisionBumpsFromImportPresentationTitleCorrection(t *testing.T) {
+	ctx := context.Background()
+	d := openTestDB(t)
+	proj := createProject(ctx, t, d, "spoke-project")
+	sourceTime := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: proj.ID, Source: "github:R_example", Actor: "sync-agent",
+		Items: []db.ImportItem{{
+			ExternalID: "issue-id:101", Title: "Original title", Body: "body",
+			Author: "sync-agent", Status: "open",
+			CreatedAt: sourceTime.Add(-time.Minute), UpdatedAt: sourceTime,
+		}},
+	})
+	require.NoError(t, err)
+	m, err := d.ImportMappingBySource(ctx, proj.ID, "github:R_example", "issue", "issue-id:101")
+	require.NoError(t, err)
+	require.NotNil(t, m.IssueID)
+	base := contentRev(ctx, t, d, *m.IssueID)
+
+	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: proj.ID, Source: "github:R_example", Actor: "sync-agent",
+		Items: []db.ImportItem{{
+			ExternalID: "issue-id:101", Title: "[GitHub #1] Original title", Body: "body",
+			Author: "sync-agent", Status: "open",
+			CreatedAt: sourceTime.Add(-time.Minute), UpdatedAt: sourceTime,
+		}},
+	})
+	require.NoError(t, err)
+	require.Equalf(t, base+1, contentRev(ctx, t, d, *m.IssueID),
+		"source-owned title correction must bump content_revision")
+}
