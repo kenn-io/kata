@@ -27,6 +27,7 @@ if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 tag="v${version}"
+changelog_agent="${CHANGELOG_AGENT:-codex}"
 
 if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
   printf 'tag %s already exists\n' "$tag" >&2
@@ -41,6 +42,24 @@ fi
 
 notes_file="$(mktemp)"
 trap 'rm -f "$notes_file"' EXIT
+
+printf 'Preparing release %s\n' "$tag"
+printf '%s\n' '- Checking that the tag does not already exist and the worktree is clean.'
+case "$changelog_agent" in
+  codex)
+    printf '%s\n' '- Generating release notes with CHANGELOG_AGENT=codex; this calls codex exec on the git log.'
+    ;;
+  claude)
+    printf '%s\n' '- Generating release notes with CHANGELOG_AGENT=claude; this calls claude --print on the git log.'
+    ;;
+  none)
+    printf '%s\n' '- Generating release notes with CHANGELOG_AGENT=none; this uses the deterministic git-log fallback.'
+    ;;
+  *)
+    printf '%s\n' "- Generating release notes with CHANGELOG_AGENT=${changelog_agent}; scripts/changelog.sh will validate this value."
+    ;;
+esac
+printf '%s\n\n' '- Showing the release notes preview before creating or pushing any tag.'
 
 "$repo_root/scripts/changelog.sh" "$version" "-" "$extra_instructions" >"$notes_file"
 
@@ -63,7 +82,9 @@ trap 'rm -f "$notes_file" "$tag_message"' EXIT
   cat "$notes_file"
 } >"$tag_message"
 
+printf 'Creating annotated tag %s...\n' "$tag"
 git tag -a "$tag" -F "$tag_message"
+printf 'Pushing %s to origin...\n' "$tag"
 git push origin "$tag"
 
 printf 'pushed %s\n' "$tag"
