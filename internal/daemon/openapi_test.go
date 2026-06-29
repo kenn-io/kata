@@ -187,9 +187,9 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	}
 }
 
-func TestAPISchemaVersionReflectsRewriteAuthorEndpointMove(t *testing.T) {
-	if APISchemaVersion != "0.3.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.3.0 for rewrite-author endpoint move", APISchemaVersion)
+func TestAPISchemaVersionReflectsSemanticSearchContract(t *testing.T) {
+	if APISchemaVersion != "0.4.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.4.0 for semantic search response and health contract", APISchemaVersion)
 	}
 }
 

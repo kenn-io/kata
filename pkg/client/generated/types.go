@@ -957,10 +957,10 @@ func (e EditIssueResponseBody) Validate() error {
 }
 
 type EmbeddingsHealth struct {
-	Backlog       int64      `json:"backlog"`
-	Configured    bool       `json:"configured"`
-	LastError     *string    `json:"last_error,omitempty"`
-	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
+	Backlog         int64      `json:"backlog"`
+	Configured      bool       `json:"configured"`
+	LastErrorStatus *int64     `json:"last_error_status,omitempty"`
+	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
 }
 
 type EnableIssueSyncRequestBody struct {

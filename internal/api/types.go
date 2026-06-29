@@ -47,10 +47,10 @@ type HealthResponse struct {
 // an absent block means semantic search is disabled. It mirrors
 // daemon.ReconcilerHealth.
 type EmbeddingsHealth struct {
-	Configured    bool       `json:"configured"`
-	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
-	Backlog       int64      `json:"backlog"`
+	Configured      bool       `json:"configured"`
+	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
+	LastErrorStatus int        `json:"last_error_status,omitempty"`
+	Backlog         int64      `json:"backlog"`
 }
 
 // InstanceResponse mirrors /api/v1/instance. Surfaces the local kata

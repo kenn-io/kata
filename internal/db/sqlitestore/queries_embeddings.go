@@ -73,8 +73,10 @@ func (d *Store) ListEmbedTargets(ctx context.Context, fingerprint string, limit 
 	rows, err := d.QueryContext(ctx, `
 		SELECT i.id, i.content_revision, i.title, i.body
 		FROM issues i
+		JOIN projects p ON p.id = i.project_id
 		LEFT JOIN issue_embeddings e ON e.issue_id = i.id
 		WHERE i.deleted_at IS NULL
+		  AND p.deleted_at IS NULL
 		  AND (e.issue_id IS NULL
 		       OR e.embed_fingerprint != ?
 		       OR e.embedded_content_revision != i.content_revision)

@@ -133,6 +133,28 @@ func TestListEmbedTargetsExcludesSoftDeleted(t *testing.T) {
 	require.Equal(t, live.ID, targets[0].IssueID)
 }
 
+func TestListEmbedTargetsExcludesArchivedProjects(t *testing.T) {
+	ctx := context.Background()
+	d := openTestDB(t)
+	liveProj := createProject(ctx, t, d, "spoke-project")
+	archivedProj := createProject(ctx, t, d, "hub-project")
+	live := mkEmbeddingIssue(ctx, t, d, liveProj.ID, "live")
+	mkEmbeddingIssue(ctx, t, d, archivedProj.ID, "archived")
+	fp := "a" + repeat63
+
+	_, _, err := d.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: archivedProj.ID,
+		Actor:     "tester",
+		Force:     true,
+	})
+	require.NoError(t, err)
+
+	targets, err := d.ListEmbedTargets(ctx, fp, 10)
+	require.NoError(t, err)
+	require.Lenf(t, targets, 1, "issues in archived projects must not be embed targets")
+	require.Equal(t, live.ID, targets[0].IssueID)
+}
+
 func TestListEmbedTargetsRespectsLimit(t *testing.T) {
 	ctx := context.Background()
 	d := openTestDB(t)

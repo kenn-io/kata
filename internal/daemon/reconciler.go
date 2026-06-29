@@ -29,10 +29,11 @@ type ReconcilerConfig struct {
 
 // ReconcilerHealth is the operator-visible state surfaced in /health.
 type ReconcilerHealth struct {
-	Configured    bool       `json:"configured"`
-	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
-	LastError     string     `json:"last_error,omitempty"`
-	Backlog       int64      `json:"backlog"`
+	Configured      bool       `json:"configured"`
+	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
+	LastError       string     `json:"-"`
+	LastErrorStatus int        `json:"last_error_status,omitempty"`
+	Backlog         int64      `json:"backlog"`
 }
 
 // Reconciler keeps issue_embeddings fresh by embedding dirty issues.
@@ -186,12 +187,19 @@ func (r *Reconciler) markSuccess() {
 	defer r.mu.Unlock()
 	r.health.LastSuccessAt = &now
 	r.health.LastError = ""
+	r.health.LastErrorStatus = 0
 }
 
 func (r *Reconciler) markError(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.health.LastError = err.Error()
+	var apiErr *embedding.APIError
+	if errors.As(err, &apiErr) {
+		r.health.LastErrorStatus = apiErr.StatusCode
+	} else {
+		r.health.LastErrorStatus = 0
+	}
 }
 
 func (r *Reconciler) setBacklog(n int64) {

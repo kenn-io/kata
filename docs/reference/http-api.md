@@ -38,7 +38,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.3.0",
+  "api_schema_version": "0.4.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db"
@@ -70,6 +70,7 @@ response of an older daemon that predates it. Treat an **absent or empty**
 
 | Version | Change |
 | --- | --- |
+| `0.4.0` | Added semantic-search response mode metadata and embeddings health fields. Search responses now always include the effective `mode`; configured daemons may also report sanitized embedding reconciler status from `/health`, including backlog and provider HTTP status without raw provider diagnostics. |
 | `0.3.0` | Moved the author identity rewrite endpoint from `POST /api/v1/projects/{project_id}/federation/rewrite-author` to `POST /api/v1/projects/{project_id}/actions/rewrite-author`. The operation is project current-state hygiene rather than a federation command, so generated clients should use the project action route. |
 | `0.2.0` | Removed `links[].project_id` from link projections. Links are now project-independent edges that may span projects, so a single `project_id` no longer describes a link. `links[].from` and `links[].to` (and the edit response's `changes` block peers) gain `project` and `qualified_id` — always populated. `IssueOut.parent_short_id` is replaced by `parent` (a `LinkPeer` object with all four fields). The cross-project link feature lands across this version. Event payloads are unchanged: a cross-project link mutation currently emits its event in the subject issue's project only (mirrored peer-project events are planned). |
 | `0.1.0` | Initial published contract. |

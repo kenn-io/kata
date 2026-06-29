@@ -49,10 +49,10 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if cfg.ReconcilerHealth != nil {
 			h := cfg.ReconcilerHealth()
 			out.Body.Embeddings = &api.EmbeddingsHealth{
-				Configured:    h.Configured,
-				LastSuccessAt: h.LastSuccessAt,
-				LastError:     h.LastError,
-				Backlog:       h.Backlog,
+				Configured:      h.Configured,
+				LastSuccessAt:   h.LastSuccessAt,
+				LastErrorStatus: h.LastErrorStatus,
+				Backlog:         h.Backlog,
 			}
 		}
 		return out, nil

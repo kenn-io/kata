@@ -745,8 +745,9 @@ components:
           type: integer
         configured:
           type: boolean
-        last_error:
-          type: string
+        last_error_status:
+          format: int64
+          type: integer
         last_success_at:
           format: date-time
           type: string
@@ -3172,7 +3173,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.3.0
+  version: 0.4.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

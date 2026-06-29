@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -50,10 +51,11 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 		StartedAt: d.now,
 		ReconcilerHealth: func() daemon.ReconcilerHealth {
 			return daemon.ReconcilerHealth{
-				Configured:    true,
-				LastSuccessAt: &last,
-				LastError:     "boom",
-				Backlog:       5,
+				Configured:      true,
+				LastSuccessAt:   &last,
+				LastError:       "provider reflected issue body: secret project content",
+				LastErrorStatus: 400,
+				Backlog:         5,
 			}
 		},
 	})
@@ -65,7 +67,35 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 	require.NotNil(t, body.Embeddings, "embeddings health must surface when ReconcilerHealth is wired")
 	assert.True(t, body.Embeddings.Configured)
 	assert.Equal(t, int64(5), body.Embeddings.Backlog)
-	assert.Equal(t, "boom", body.Embeddings.LastError)
+	assert.Equal(t, 400, body.Embeddings.LastErrorStatus)
 	require.NotNil(t, body.Embeddings.LastSuccessAt)
 	assert.True(t, body.Embeddings.LastSuccessAt.Equal(last))
+}
+
+func TestHealth_DoesNotExposeEmbeddingProviderDiagnostics(t *testing.T) {
+	d := openTestDB(t)
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		ReconcilerHealth: func() daemon.ReconcilerHealth {
+			return daemon.ReconcilerHealth{
+				Configured:      true,
+				LastError:       "embedding endpoint returned 400: reflected issue title",
+				LastErrorStatus: 400,
+				Backlog:         1,
+			}
+		},
+	})
+
+	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+	assert.NotContains(t, string(bs), "reflected issue title")
+
+	var body struct {
+		Embeddings map[string]json.RawMessage `json:"embeddings"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &body))
+	_, hasLastError := body.Embeddings["last_error"]
+	assert.False(t, hasLastError, "unauthenticated health must omit raw embedding provider diagnostics")
+	assert.Contains(t, body.Embeddings, "last_error_status")
 }
