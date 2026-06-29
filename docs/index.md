@@ -64,7 +64,8 @@ Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
 -   __Built for agents__
 
     Stable short refs, `--json` and `--agent` output, idempotent creates, a
-    claim flow, and predictable failure modes agents can script against.
+    claim flow, semantic-aware search, and predictable failure modes agents can
+    script against.
 
 -   __Made for humans too__
 
@@ -110,7 +111,9 @@ walkthrough.
 The `kata` CLI resolves a project from your workspace, `.kata.toml`, or
 `--project`, then talks to a local daemon, starting one automatically when
 needed. The daemon owns a SQLite database under `KATA_HOME`, applies mutations,
-and records an event stream that both the CLI/TUI and hooks read. Optional
+and records an event stream that both the CLI/TUI and hooks read. Search is
+lexical by default and can opt into [semantic search](guide/semantic-search.md)
+with a local or hosted OpenAI-compatible embeddings endpoint. Optional
 [GitHub sync](operations/github-sync.md) can mirror upstream GitHub issues into
 kata, and federation can replicate selected projects through a hub. Your repo
 commits only the small `.kata.toml` binding, so issue history stays out of code
@@ -140,6 +143,8 @@ is a local ledger for the work itself. They coexist. See
 
 -   [__Concepts__](guide/concepts.md). The data model and how the pieces fit.
 -   [__CLI reference__](reference/cli.md). Every command and flag.
+-   [__Semantic search__](guide/semantic-search.md). Improve issue discovery
+    with opt-in embeddings.
 -   [__GitHub sync__](operations/github-sync.md). Bring GitHub issues into kata.
 -   [__Agent workflows__](workflows/agents.md). The operating contract for agents.
 -   [__Comparisons__](guide/comparisons.md). kata vs. SaaS issue trackers.

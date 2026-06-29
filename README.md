@@ -80,8 +80,8 @@ overwriting the rest of either file.
 ## Why kata
 
 - **Built for agents.** Stable short refs, `--json` and `--agent` output,
-  idempotent creates, a claim flow, and predictable failure modes agents can
-  script against.
+  idempotent creates, semantic-aware search, a claim flow, and predictable
+  failure modes agents can script against.
 - **Made for humans too.** `kata tui` browses, triages, and supervises
   agent-written work over the same data. No raw JSON required.
 - **Local-first, repo-clean.** One Go binary, no runtime dependencies. Issue
@@ -129,6 +129,7 @@ The [docs site](docs/) is the definitive reference:
   [Changelog](docs/changelog.md)
 - Guide: [Concepts](docs/guide/concepts.md) ·
   [Workspaces and projects](docs/guide/workspaces-projects.md) ·
+  [Semantic search](docs/guide/semantic-search.md) ·
   [Migrating from Beads](docs/guide/migrating-from-beads.md)
 - Reference: [CLI](docs/reference/cli.md) ·
   [Configuration](docs/reference/configuration.md)

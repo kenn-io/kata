@@ -6,6 +6,59 @@ description: Release history for kata
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
+## 0.7.0
+<small>2026-06-29</small>
+
+kata 0.7.0 improves discovery, sharing, and release operations. Search can now
+use opt-in embeddings for semantic recall while preserving lexical behavior by
+default, GitHub sync gains safer daemon-side credentials and parent-link
+reconciliation, and federation handles larger adoption and push workloads more
+reliably.
+
+**New features**
+
+- Added opt-in semantic search for SQLite-backed projects. Configure an
+  OpenAI-compatible `/embeddings` endpoint under `[search.embeddings]` to make
+  default `kata search` run hybrid lexical/vector search; use `--lexical`,
+  `--hybrid`, or `--semantic` to force a mode. Search remains lexical with no
+  embedding config, and automatic fallback reports degraded mode instead of
+  silently hiding vector failures.
+- Added daemon-scoped GitHub sync credentials. Shared daemons can use
+  `[[github_sync.app]]` GitHub App credentials matched by `(host, owner)`,
+  env-token fallback is host-scoped with `[github_sync].token_host`, and GitHub
+  Enterprise hosts must be explicitly allow-listed.
+- Added GitHub sub-issue parent-link synchronization. GitHub-sourced parent
+  links are imported and reconciled as source-managed kata parent links, while
+  unsupported Enterprise schemas preserve existing source-managed parent links
+  instead of deleting them.
+- Added `kata projects rewrite-author` and the matching HTTP action for
+  project-scoped current-state identity hygiene. It rewrites exact matches in
+  issue authors, issue owners, comment authors, and link authors before export,
+  sharing, or federation enrollment.
+- Added `kata comment edit` and the matching HTTP route. Comment edits preserve
+  the comment UID, author, creation time, and thread position, which makes them
+  useful for pre-federation content redaction.
+- Added `kata projects purge` for permanently deleting archived projects and
+  freeing their names, with force/confirmation guards, audit tombstones, JSON
+  output, and federation-binding refusal.
+
+**Improvements**
+
+- Improved federation adoption by chunking baseline snapshot pushes so large
+  existing projects can be adopted without sending one oversized push request.
+- Improved federation push reliability by splitting oversized outbound batches
+  and retrying them as smaller batches instead of quarantining only because a
+  request was too large.
+- Improved `kata update` behavior for development builds. Update checks fetch
+  fresh release data, show the latest official release and artifact metadata,
+  and require `--force` before replacing a dev build.
+- Published release artifacts automatically from tag pushes through the
+  release workflow.
+- Served nav-listed Markdown documentation sources from docs builds, so public
+  `.md` URLs come from the same deployment as the rendered pages.
+- Refreshed release documentation and docs navigation for semantic search,
+  GitHub sync credentials, project purge, author rewrite, and comment redaction.
+
 ## 0.6.0
 <small>2026-06-24</small>
 
