@@ -59,6 +59,11 @@ reliably.
 - Refreshed release documentation and docs navigation for semantic search,
   GitHub sync credentials, project purge, author rewrite, and comment redaction.
 
+**Acknowledgements**
+
+- Thanks to [andy-vdg](https://github.com/andy-vdg) for the scoped GitHub sync
+  service credential work and GitHub parent-link synchronization.
+
 ## 0.6.0
 <small>2026-06-24</small>
 
