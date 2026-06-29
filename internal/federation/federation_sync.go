@@ -224,6 +224,25 @@ func SyncFederationOnceWithPulledEvents(
 		deliverUIDs := make([]string, 0, len(body.Events))
 		localInstanceUID := store.InstanceUID()
 		for _, ev := range body.Events {
+			if ev.OriginInstanceUID == localInstanceUID {
+				exists, err := pulledLocalEventExists(ctx, store, binding.ProjectID, ev.EventUID)
+				if err != nil {
+					return err
+				}
+				if exists {
+					deliverDuplicate := false
+					if shouldDeliverPage {
+						deliverDuplicate, err = shouldDeliverDuplicatePulledEvent(ctx, store, currentBinding, runStartBinding, ev, localInstanceUID)
+						if err != nil {
+							return err
+						}
+					}
+					if deliverDuplicate {
+						deliverUIDs = append(deliverUIDs, ev.EventUID)
+					}
+					continue
+				}
+			}
 			inserted, err := store.InsertRemoteEvent(ctx, binding.ProjectID, remoteEventFromEnvelope(ev))
 			if err != nil {
 				return err
@@ -262,6 +281,17 @@ func SyncFederationOnceWithPulledEvents(
 		onPulledEvents(binding.ProjectID, pulledEvents)
 	}
 	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC())
+}
+
+func pulledLocalEventExists(ctx context.Context, store db.Storage, projectID int64, eventUID string) (bool, error) {
+	events, err := store.EventsByUIDs(ctx, projectID, []string{eventUID})
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return len(events) == 1, nil
 }
 
 func shouldDeliverDuplicatePulledEvent(

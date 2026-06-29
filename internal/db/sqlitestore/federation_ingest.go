@@ -92,7 +92,11 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 		if existingHash, ok := seenBatch[ev.EventUID]; ok {
-			if existingHash != ev.ContentHash {
+			matches, err := federationEventHashMatches(ev, existingHash, boundActor, adoptionSnapshotAuthorState.overrideSnapshotAuthors)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			if !matches {
 				return db.FederationIngestResult{}, fmt.Errorf("%w: event %s", db.ErrRemoteEventConflict, ev.EventUID)
 			}
 			result.Duplicates++
@@ -105,7 +109,11 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 		existingHash, err := federationEventHashByUID(ctx, tx, ev.EventUID)
 		if err == nil {
-			if existingHash != ev.ContentHash {
+			matches, err := federationEventHashMatches(ev, existingHash, boundActor, adoptionSnapshotAuthorState.overrideSnapshotAuthors)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			if !matches {
 				return db.FederationIngestResult{}, fmt.Errorf("%w: event %s", db.ErrRemoteEventConflict, ev.EventUID)
 			}
 			result.Duplicates++
@@ -124,8 +132,15 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
 				db.ErrFederationIngestValidation, ev.EventUID)
 		}
+		if adoptionSnapshotAuthorState.overrideSnapshotAuthors {
+			var err error
+			ev, err = canonicalizeFederationSnapshotAuthors(ev, boundActor)
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+		}
 		if err := validateFederationBoundActorPayload(ev, boundActor,
-			adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors); err != nil {
+			adoptionSnapshotAuthorState.allowAuthorPreservation); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if freshSnapshotSeen && ev.Type != "issue.snapshot" {
@@ -173,12 +188,6 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 	}
 	if result.Accepted > 0 {
-		if adoptionSnapshotAuthorState.recordSnapshotAuthorCutoff {
-			if err := recordFederationAdoptionSnapshotAuthorCutoff(ctx, tx,
-				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
-				return db.FederationIngestResult{}, err
-			}
-		}
 		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID); err != nil {
 			return db.FederationIngestResult{}, err
 		}
@@ -251,7 +260,6 @@ type federationIngestAdoptionSnapshotAuthorState struct {
 	shouldDeferMarker            bool
 	deferAuthorPreservationGrant bool
 	overrideSnapshotAuthors      bool
-	recordSnapshotAuthorCutoff   bool
 	duplicateOnly                bool
 	nextSourceEventID            int64
 	endSourceEventID             int64
@@ -315,7 +323,6 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	}
 
 	state.allowAuthorPreservation = true
-	state.recordSnapshotAuthorCutoff = baselineShape.hasSnapshot
 	return state, nil
 }
 
@@ -341,7 +348,6 @@ func computeFederationIngestOpenAdoptionBaselineState(
 		shouldDeferMarker:            true,
 		deferAuthorPreservationGrant: marker.allowSnapshotAuthors && !baselineShape.hasSnapshot,
 		overrideSnapshotAuthors:      baselineShape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
-		recordSnapshotAuthorCutoff:   baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
 		nextSourceEventID:            baselineShape.maxSourceEventID + 1,
 		endSourceEventID:             adoptionBaselineEndSourceEventID,
 	}
@@ -378,11 +384,10 @@ func computeFederationIngestCompleteAdoptionBaselineState(
 	adoptionBaselineEndSourceEventID int64,
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	state := federationIngestAdoptionSnapshotAuthorState{
-		allowAuthorPreservation:    baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
-		verifySnapshotLinks:        baselineShape.hasSnapshot || marker.baselineOpen,
-		overrideSnapshotAuthors:    baselineShape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
-		recordSnapshotAuthorCutoff: baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
-		endSourceEventID:           adoptionBaselineEndSourceEventID,
+		allowAuthorPreservation: baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
+		verifySnapshotLinks:     baselineShape.hasSnapshot || marker.baselineOpen,
+		overrideSnapshotAuthors: baselineShape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
+		endSourceEventID:        adoptionBaselineEndSourceEventID,
 	}
 	if err := validateFederationIngestAdoptionBaselineCursor(marker, baselineShape, adoptionBaselineEndSourceEventID, false); err != nil {
 		return federationIngestAdoptionSnapshotAuthorState{}, err
@@ -655,42 +660,94 @@ func recordFederationAdoptionBaselineProgress(
 	return nil
 }
 
-func recordFederationAdoptionSnapshotAuthorCutoff(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	enrollmentID int64,
-	spokeInstanceUID string,
-) error {
-	if enrollmentID <= 0 {
-		return nil
+func federationEventHashMatches(
+	ev db.RemoteEvent,
+	storedHash string,
+	boundActor string,
+	allowCanonicalSnapshotAuthors bool,
+) (bool, error) {
+	if storedHash == ev.ContentHash {
+		return true, nil
 	}
-	var cutoffEventID int64
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(MAX(id), 0)
-		  FROM events
-		 WHERE project_id = ?
-		   AND origin_instance_uid = ?
-		   AND type = 'issue.snapshot'`,
-		projectID, spokeInstanceUID).Scan(&cutoffEventID); err != nil {
-		return fmt.Errorf("lookup federation adoption snapshot author cutoff: %w", err)
+	if !allowCanonicalSnapshotAuthors {
+		return false, nil
 	}
-	if cutoffEventID <= 0 {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `
-		UPDATE federation_enrollments
-		   SET adoption_snapshot_author_cutoff_event_id = MAX(adoption_snapshot_author_cutoff_event_id, ?),
-		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-		 WHERE id = ?
-		   AND spoke_instance_uid = ?
-		   AND revoked_at IS NULL
-		   AND project_id = ?`,
-		cutoffEventID, enrollmentID, spokeInstanceUID, projectID)
+	canonical, err := canonicalizeFederationSnapshotAuthors(ev, boundActor)
 	if err != nil {
-		return fmt.Errorf("record federation adoption snapshot author cutoff: %w", err)
+		return false, err
 	}
-	return nil
+	return storedHash == canonical.ContentHash, nil
+}
+
+func canonicalizeFederationSnapshotAuthors(ev db.RemoteEvent, boundActor string) (db.RemoteEvent, error) {
+	boundActor = strings.TrimSpace(boundActor)
+	if ev.Type != "issue.snapshot" || boundActor == "" {
+		return ev, nil
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+		return db.RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot payload is invalid JSON",
+			db.ErrFederationIngestValidation, ev.EventUID)
+	}
+	actorJSON, err := json.Marshal(boundActor)
+	if err != nil {
+		return db.RemoteEvent{}, fmt.Errorf("marshal federation snapshot author: %w", err)
+	}
+	payload["author"] = actorJSON
+	if raw, ok := payload["comments"]; ok && len(raw) > 0 && string(raw) != "null" {
+		var comments []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &comments); err != nil {
+			return db.RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot comments payload is invalid JSON",
+				db.ErrFederationIngestValidation, ev.EventUID)
+		}
+		for i := range comments {
+			comments[i]["author"] = actorJSON
+		}
+		normalized, err := json.Marshal(comments)
+		if err != nil {
+			return db.RemoteEvent{}, fmt.Errorf("marshal federation snapshot comments: %w", err)
+		}
+		payload["comments"] = normalized
+	}
+	if raw, ok := payload["links"]; ok && len(raw) > 0 && string(raw) != "null" {
+		var links []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &links); err != nil {
+			return db.RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot links payload is invalid JSON",
+				db.ErrFederationIngestValidation, ev.EventUID)
+		}
+		for i := range links {
+			links[i]["author"] = actorJSON
+		}
+		normalized, err := json.Marshal(links)
+		if err != nil {
+			return db.RemoteEvent{}, fmt.Errorf("marshal federation snapshot links: %w", err)
+		}
+		payload["links"] = normalized
+	}
+	normalizedPayload, err := json.Marshal(payload)
+	if err != nil {
+		return db.RemoteEvent{}, fmt.Errorf("marshal federation snapshot payload: %w", err)
+	}
+	ev.Payload = normalizedPayload
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID:               ev.EventUID,
+		OriginInstanceUID: ev.OriginInstanceUID,
+		ProjectUID:        ev.ProjectUID,
+		ProjectName:       ev.ProjectName,
+		IssueUID:          ev.IssueUID,
+		RelatedIssueUID:   ev.RelatedIssueUID,
+		Type:              ev.Type,
+		Actor:             ev.Actor,
+		HLCPhysicalMS:     ev.HLCPhysicalMS,
+		HLCCounter:        ev.HLCCounter,
+		CreatedAt:         ev.CreatedAt.UTC().Format(sqliteTimeFormat),
+		Payload:           ev.Payload,
+	})
+	if err != nil {
+		return db.RemoteEvent{}, fmt.Errorf("hash canonical federation snapshot: %w", err)
+	}
+	ev.ContentHash = hash
+	return ev, nil
 }
 
 func validateFederationPayloadAuthor(ev db.RemoteEvent, boundActor string) error {

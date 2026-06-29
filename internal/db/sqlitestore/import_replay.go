@@ -490,14 +490,13 @@ func importFederationEnrollment(ctx context.Context, tx *sql.Tx, e *db.Federatio
 		   bound_actor, allow_adoption_snapshot_authors,
 		   adoption_baseline_open, adoption_baseline_next_source_event_id,
 		   adoption_baseline_end_source_event_id,
-		   adoption_snapshot_author_cutoff_event_id,
 		   created_at, updated_at, revoked_at
 		 )
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, e.TokenHash, e.SpokeInstanceUID, e.ProjectID, e.Capabilities,
 		actor, e.AllowAdoptionSnapshotAuthors, e.AdoptionBaselineOpen,
 		e.AdoptionBaselineNextSourceEventID, e.AdoptionBaselineEndSourceEventID,
-		e.AdoptionSnapshotAuthorCutoffEventID, e.CreatedAt, e.UpdatedAt, e.RevokedAt)
+		e.CreatedAt, e.UpdatedAt, e.RevokedAt)
 	return wrapImportErr(db.ImportKindFederationEnrollment, err)
 }
 

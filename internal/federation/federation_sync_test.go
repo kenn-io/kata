@@ -1932,6 +1932,42 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 		require.NoError(t, err)
 		assert.Equal(t, expectedAuthor, pushed.Author)
 	}
+	pullReplica := testenv.New(t)
+	pullEnrollment, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token:            "split-adopt-pull-replica-token",
+		SpokeInstanceUID: pullReplica.DB.InstanceUID(),
+		ProjectID:        &hubProject.ID,
+		Capabilities:     "pull",
+		Actor:            "replica-agent",
+	})
+	require.NoError(t, err)
+	pullProject, err := pullReplica.DB.CreateProjectWithUID(ctx, "replica-project", hubProject.UID)
+	require.NoError(t, err)
+	pullBinding, err := pullReplica.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            pullProject.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               hub.URL,
+		HubProjectID:         hubProject.ID,
+		HubProjectUID:        hubProject.UID,
+		ReplayHorizonEventID: hubBinding.ReplayHorizonEventID,
+		PullCursorEventID:    hubBinding.ReplayHorizonEventID - 1,
+		Actor:                "replica-agent",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, SyncFederationOnce(ctx, pullReplica.DB, pullBinding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: hubProject.ID,
+		Token:        pullEnrollment.Token,
+		Capabilities: "pull",
+	}))
+	for _, issueUID := range issueUIDs {
+		expectedAuthor, ok := snapshotAuthorsByUID[issueUID]
+		require.True(t, ok)
+		pulled, err := pullReplica.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, expectedAuthor, pulled.Author)
+	}
 	var linkCount int
 	require.NoError(t, hub.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)

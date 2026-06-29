@@ -5,18 +5,17 @@ import "encoding/json"
 // FoldEvent is the portable event shape consumed by the fold engine. It excludes
 // local SQLite row IDs by design.
 type FoldEvent struct {
-	UID                    string
-	OriginInstanceUID      string
-	ProjectUID             string
-	IssueUID               string
-	RelatedIssueUID        string
-	Type                   string
-	Actor                  string
-	HLCPhysicalMS          int64
-	HLCCounter             int64
-	CreatedAt              string
-	Payload                json.RawMessage
-	SnapshotAuthorOverride string
+	UID               string
+	OriginInstanceUID string
+	ProjectUID        string
+	IssueUID          string
+	RelatedIssueUID   string
+	Type              string
+	Actor             string
+	HLCPhysicalMS     int64
+	HLCCounter        int64
+	CreatedAt         string
+	Payload           json.RawMessage
 }
 
 // FoldClock is an event's deterministic last-writer timestamp.

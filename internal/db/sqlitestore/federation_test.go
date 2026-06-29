@@ -20,7 +20,7 @@ import (
 func TestFederationSchemaVersionAndTable(t *testing.T) {
 	d := openTestDB(t)
 
-	assert.Equal(t, 23, db.CurrentSchemaVersion())
+	assert.Equal(t, 22, db.CurrentSchemaVersion())
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 	assertSchemaObject(t, d, "federation_bindings")
 	assertSchemaObject(t, d, "idx_federation_bindings_role_enabled")
@@ -2466,7 +2466,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		var storedPayload string
 		require.NoError(t, d.QueryRowContext(ctx,
 			`SELECT payload FROM events WHERE uid = ?`, second.EventUID).Scan(&storedPayload))
-		assert.Contains(t, storedPayload, `"author":"spoofed-agent"`)
+		assert.Contains(t, storedPayload, `"author":"bound-agent"`)
 	})
 
 	t.Run("rejects open adoption snapshot related envelope future reference", func(t *testing.T) {
@@ -2713,8 +2713,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		_, err = d.ExecContext(ctx, `
 			UPDATE federation_enrollments
 			   SET allow_adoption_snapshot_authors = 1,
-			       adoption_baseline_end_source_event_id = 0,
-			       adoption_snapshot_author_cutoff_event_id = 0
+			       adoption_baseline_end_source_event_id = 0
 			 WHERE id = ?`, created.Enrollment.ID)
 		require.NoError(t, err)
 

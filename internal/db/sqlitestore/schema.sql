@@ -424,7 +424,6 @@ CREATE TABLE federation_enrollments (
   adoption_baseline_open INTEGER NOT NULL DEFAULT 0 CHECK(adoption_baseline_open IN (0,1)),
   adoption_baseline_next_source_event_id INTEGER NOT NULL DEFAULT 0 CHECK(adoption_baseline_next_source_event_id >= 0),
   adoption_baseline_end_source_event_id INTEGER NOT NULL DEFAULT 0 CHECK(adoption_baseline_end_source_event_id >= 0),
-  adoption_snapshot_author_cutoff_event_id INTEGER NOT NULL DEFAULT 0 CHECK(adoption_snapshot_author_cutoff_event_id >= 0),
   created_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at          DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   revoked_at          DATETIME,
