@@ -461,7 +461,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			FederationEnrollmentID:           principal.EnrollmentID,
 			SpokeInstanceUID:                 principal.SpokeInstanceUID,
 			BoundActor:                       principal.Actor,
-			AllowSnapshotAuthorPreservation:  principal.AllowAdoptionSnapshotAuthors,
+			AllowSnapshotAuthorPreservation:  principal.AllowAdoptionBaseline,
 			AdoptionBaseline:                 in.Body.AdoptionBaseline,
 			AdoptionBaselineEndSourceEventID: in.Body.AdoptionBaselineEndEventID,
 			Events:                           federationIngestEventsToDB(in.Body.Events),

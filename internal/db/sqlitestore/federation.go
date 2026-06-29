@@ -1318,8 +1318,12 @@ func federationIssueRecurrenceUID(ctx context.Context, tx *sql.Tx, recurrenceID 
 }
 
 func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]db.FoldEvent, error) {
+	authorCutoffs, err := federationSnapshotAuthorCutoffs(ctx, tx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT uid, origin_instance_uid, project_name, issue_uid, related_issue_uid,
+		SELECT id, uid, origin_instance_uid, project_name, issue_uid, related_issue_uid,
 		       type, actor, payload, hlc_physical_ms, hlc_counter, created_at
 		  FROM events
 		 WHERE project_id = ?
@@ -1335,6 +1339,7 @@ func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]d
 	var out []db.FoldEvent
 	for rows.Next() {
 		var (
+			eventID         int64
 			e               db.FoldEvent
 			projectName     string
 			payload         string
@@ -1342,7 +1347,7 @@ func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]d
 			relatedIssueUID sql.NullString
 			createdAt       time.Time
 		)
-		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &projectName, &issueUID,
+		if err := rows.Scan(&eventID, &e.UID, &e.OriginInstanceUID, &projectName, &issueUID,
 			&relatedIssueUID, &e.Type, &e.Actor, &payload, &e.HLCPhysicalMS,
 			&e.HLCCounter, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan federated event: %w", err)
@@ -1356,7 +1361,50 @@ func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]d
 		}
 		e.Payload = json.RawMessage(payload)
 		e.CreatedAt = createdAt.UTC().Format(sqliteTimeFormat)
+		if cutoff, ok := authorCutoffs[e.OriginInstanceUID]; ok &&
+			e.Type == "issue.snapshot" && eventID > cutoff.eventID {
+			e.SnapshotAuthorOverride = cutoff.actor
+		}
 		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+type federationSnapshotAuthorCutoff struct {
+	eventID int64
+	actor   string
+}
+
+func federationSnapshotAuthorCutoffs(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+) (map[string]federationSnapshotAuthorCutoff, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT spoke_instance_uid, bound_actor, adoption_snapshot_author_cutoff_event_id
+		  FROM federation_enrollments
+		 WHERE project_id = ?
+		   AND adoption_snapshot_author_cutoff_event_id > 0
+		 ORDER BY adoption_snapshot_author_cutoff_event_id DESC`,
+		projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list federation snapshot author cutoffs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]federationSnapshotAuthorCutoff{}
+	for rows.Next() {
+		var (
+			spokeInstanceUID string
+			actor            string
+			eventID          int64
+		)
+		if err := rows.Scan(&spokeInstanceUID, &actor, &eventID); err != nil {
+			return nil, fmt.Errorf("scan federation snapshot author cutoff: %w", err)
+		}
+		if _, exists := out[spokeInstanceUID]; exists {
+			continue
+		}
+		out[spokeInstanceUID] = federationSnapshotAuthorCutoff{eventID: eventID, actor: actor}
 	}
 	return out, rows.Err()
 }

@@ -21,9 +21,8 @@ const federationPollLimit = 1000
 // large baseline snapshots are split before the hub rejects them at transport.
 const maxFederationPushIngestBodyBytes = 768 << 10
 
-// Adoption snapshot baselines intentionally preserve single-request snapshot
-// semantics until chunked baseline validation has a protocol. Keep that
-// unsplittable request under the hub's configured federation ingest cap.
+// A single snapshot can still exceed the proxy-safe soft cap, so keep that
+// unsplittable event under the hub's configured federation ingest cap.
 const maxFederationHubIngestBodyBytes = 64 << 20
 
 const defaultClientTimeout = 5 * time.Second

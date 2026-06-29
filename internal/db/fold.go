@@ -130,7 +130,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		issue.ShortID = in.ShortID
 	}
 	if issue.Author == "" {
-		issue.Author = in.Author
+		issue.Author = snapshotAuthor(in.Author, e.SnapshotAuthorOverride)
 	}
 	if issue.CreatedAt == "" {
 		issue.CreatedAt = in.CreatedAt
@@ -168,14 +168,24 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 			from, to = to, from
 		}
 		author := link.Author
+		if e.SnapshotAuthorOverride != "" {
+			author = e.SnapshotAuthorOverride
+		}
 		if author == "" {
 			author = e.Actor
 		}
 		p.setLink(from, to, link.Type, true, clockOf(e), author)
 	}
 	for _, comment := range in.Comments {
-		p.setComment(comment.CommentUID, uid, comment.Author, comment.Body, comment.CreatedAt, clockOf(e))
+		p.setComment(comment.CommentUID, uid, snapshotAuthor(comment.Author, e.SnapshotAuthorOverride), comment.Body, comment.CreatedAt, clockOf(e))
 	}
+}
+
+func snapshotAuthor(author, override string) string {
+	if override != "" {
+		return override
+	}
+	return author
 }
 
 func (p *FoldProjection) applyIssueUpdated(e FoldEvent, payload map[string]json.RawMessage) {

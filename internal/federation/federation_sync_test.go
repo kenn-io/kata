@@ -1794,17 +1794,40 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 	var baselineStages []string
 	var baselineEndEventIDs []int64
 	var baselineLastEventIDs []int64
+	snapshotAuthorsByUID := map[string]string{}
+	var sawContinuationBoundActor bool
+	var snapshotRequestAccepted bool
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
+		requestHadSnapshot := false
 		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProject.ID) {
 			requestSizes = append(requestSizes, len(raw))
 			var body api.FederationIngestEventsRequestBody
 			require.NoError(t, json.Unmarshal(raw, &body))
 			require.NotEmpty(t, body.Events)
+			isSnapshotContinuation := snapshotRequestAccepted
 			baselineStages = append(baselineStages, body.AdoptionBaseline)
 			baselineEndEventIDs = append(baselineEndEventIDs, body.AdoptionBaselineEndEventID)
 			baselineLastEventIDs = append(baselineLastEventIDs, body.Events[len(body.Events)-1].EventID)
+			for _, ev := range body.Events {
+				if ev.Type != "issue.snapshot" {
+					continue
+				}
+				var payload struct {
+					UID    string `json:"uid"`
+					Author string `json:"author"`
+				}
+				require.NoError(t, json.Unmarshal(ev.Payload, &payload))
+				assert.Equal(t, "historical-author", payload.Author)
+				projectedAuthor := "historical-author"
+				if isSnapshotContinuation {
+					projectedAuthor = "agent"
+					sawContinuationBoundActor = true
+				}
+				snapshotAuthorsByUID[payload.UID] = projectedAuthor
+				requestHadSnapshot = true
+			}
 		}
 		req, err := http.NewRequestWithContext(r.Context(), r.Method, hub.URL+r.URL.RequestURI(), bytes.NewReader(raw)) //nolint:gosec // test proxy forwards only to the local httptest hub.
 		require.NoError(t, err)
@@ -1820,6 +1843,9 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 		w.WriteHeader(resp.StatusCode)
 		_, err = io.Copy(w, resp.Body)
 		require.NoError(t, err)
+		if requestHadSnapshot && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest {
+			snapshotRequestAccepted = true
+		}
 	}))
 	t.Cleanup(proxy.Close)
 
@@ -1897,11 +1923,14 @@ func TestSyncFederationOncePushesSplitAdoptionSnapshotsWithHistoricalAuthors(t *
 	for _, endEventID := range baselineEndEventIDs {
 		assert.Equal(t, terminalEndEventID, endEventID)
 	}
+	require.True(t, sawContinuationBoundActor)
 
 	for _, issueUID := range issueUIDs {
+		expectedAuthor, ok := snapshotAuthorsByUID[issueUID]
+		require.True(t, ok)
 		pushed, err := hub.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
-		assert.Equal(t, "historical-author", pushed.Author)
+		assert.Equal(t, expectedAuthor, pushed.Author)
 	}
 	var linkCount int
 	require.NoError(t, hub.DB.QueryRowContext(ctx, `
@@ -1943,14 +1972,39 @@ func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T
 	var ingestCount int
 	var firstAcceptedCursor int64
 	failSecondIngest := true
+	snapshotAuthorsByUID := map[string]string{}
+	var sawContinuationBoundActor bool
+	var snapshotRequestAccepted bool
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProject.ID) {
+		requestSnapshotAuthors := map[string]string{}
+		requestHadSnapshot := false
+		forwardedIngest := r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/events:ingest", hubProject.ID)
+		if forwardedIngest {
 			ingestCount++
 			var body api.FederationIngestEventsRequestBody
 			require.NoError(t, json.Unmarshal(raw, &body))
 			require.NotEmpty(t, body.Events)
+			isSnapshotContinuation := snapshotRequestAccepted
+			for _, ev := range body.Events {
+				if ev.Type != "issue.snapshot" {
+					continue
+				}
+				var payload struct {
+					UID    string `json:"uid"`
+					Author string `json:"author"`
+				}
+				require.NoError(t, json.Unmarshal(ev.Payload, &payload))
+				assert.Equal(t, "historical-author", payload.Author)
+				projectedAuthor := "historical-author"
+				if isSnapshotContinuation {
+					projectedAuthor = "agent"
+					sawContinuationBoundActor = true
+				}
+				requestSnapshotAuthors[payload.UID] = projectedAuthor
+				requestHadSnapshot = true
+			}
 			if ingestCount == 1 {
 				firstAcceptedCursor = body.Events[len(body.Events)-1].EventID
 				assert.Equal(t, api.FederationAdoptionBaselineOpen, body.AdoptionBaseline)
@@ -1967,6 +2021,14 @@ func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T
 		resp, err := http.DefaultClient.Do(req) //nolint:gosec // test proxy forwards only to the local httptest hub.
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
+		if forwardedIngest && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest {
+			for uid, author := range requestSnapshotAuthors {
+				snapshotAuthorsByUID[uid] = author
+			}
+			if requestHadSnapshot {
+				snapshotRequestAccepted = true
+			}
+		}
 		for key, values := range resp.Header {
 			for _, value := range values {
 				w.Header().Add(key, value)
@@ -2024,15 +2086,18 @@ func TestSyncFederationOnceResumesSplitAdoptionBaselineAfterFailure(t *testing.T
 	assert.Equal(t, firstAcceptedCursor, binding.PushCursorEventID)
 	authorized, err := hub.DB.AuthorizeFederationToken(ctx, created.Token, hubProject.ID, "push")
 	require.NoError(t, err)
-	assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
+	assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 
 	failSecondIngest = false
 	err = SyncFederationOnce(ctx, spoke.DB, binding, creds)
 	require.NoError(t, err)
+	require.True(t, sawContinuationBoundActor)
 	for _, issueUID := range issueUIDs {
+		expectedAuthor, ok := snapshotAuthorsByUID[issueUID]
+		require.True(t, ok)
 		pushed, err := hub.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
-		assert.Equal(t, "historical-author", pushed.Author)
+		assert.Equal(t, expectedAuthor, pushed.Author)
 	}
 	authorized, err = hub.DB.AuthorizeFederationToken(ctx, created.Token, hubProject.ID, "push")
 	require.NoError(t, err)

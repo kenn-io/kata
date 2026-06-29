@@ -162,6 +162,7 @@ func (d *Store) AuthorizeFederationToken(
 		enrollment.AdoptionBaselineOpen = false
 		enrollment.AdoptionBaselineNextSourceEventID = 0
 		enrollment.AdoptionBaselineEndSourceEventID = 0
+		enrollment.AdoptionSnapshotAuthorCutoffEventID = 0
 	}
 	return enrollment, nil
 }
@@ -183,6 +184,7 @@ const federationEnrollmentSelect = `SELECT id, token_hash, spoke_instance_uid, p
        capabilities, bound_actor, allow_adoption_snapshot_authors,
        adoption_baseline_open, adoption_baseline_next_source_event_id,
        adoption_baseline_end_source_event_id,
+       adoption_snapshot_author_cutoff_event_id,
        created_at, updated_at, revoked_at
   FROM federation_enrollments`
 
@@ -197,7 +199,7 @@ func scanFederationEnrollment(r rowScanner) (db.FederationEnrollment, error) {
 	err := r.Scan(&e.ID, &e.TokenHash, &e.SpokeInstanceUID, &projectID,
 		&e.Capabilities, &e.Actor, &allow, &open,
 		&e.AdoptionBaselineNextSourceEventID, &e.AdoptionBaselineEndSourceEventID,
-		&e.CreatedAt, &e.UpdatedAt, &revokedAt)
+		&e.AdoptionSnapshotAuthorCutoffEventID, &e.CreatedAt, &e.UpdatedAt, &revokedAt)
 	if err == nil {
 		if projectID.Valid {
 			v := projectID.Int64

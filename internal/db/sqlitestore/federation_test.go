@@ -20,7 +20,7 @@ import (
 func TestFederationSchemaVersionAndTable(t *testing.T) {
 	d := openTestDB(t)
 
-	assert.Equal(t, 22, db.CurrentSchemaVersion())
+	assert.Equal(t, 23, db.CurrentSchemaVersion())
 	assertSchemaVersion(t, d, db.CurrentSchemaVersion())
 	assertSchemaObject(t, d, "federation_bindings")
 	assertSchemaObject(t, d, "idx_federation_bindings_role_enabled")
@@ -2376,7 +2376,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, 1, firstRes.Accepted)
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
-		assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
+		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 		firstIssue, err := d.IssueByUID(ctx, firstUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
 		assert.Equal(t, "historical-agent", firstIssue.Author)
@@ -2401,11 +2401,109 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 		secondIssue, err := d.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
 		require.NoError(t, err)
-		assert.Equal(t, "second-historical-agent", secondIssue.Author)
+		assert.Equal(t, "bound-agent", secondIssue.Author)
 		links, err = d.LinksByIssue(ctx, firstIssue.ID)
 		require.NoError(t, err)
 		require.Len(t, links, 1)
 		assert.Equal(t, "historical-linker", links[0].Author)
+	})
+
+	t.Run("projects continuation adoption snapshot historical author as bound actor", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		markerValue := strings.Join([]string{"snapshot", "adoption", "continuation", "author"}, "-")
+		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token:                        markerValue,
+			SpokeInstanceUID:             spokeUID,
+			ProjectID:                    &p.ID,
+			Capabilities:                 "push",
+			Actor:                        "bound-agent",
+			AllowAdoptionSnapshotAuthors: true,
+		})
+		require.NoError(t, err)
+		firstUID := newTestUID(t)
+		secondUID := newTestUID(t)
+		first := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &firstUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+firstUID+`","short_id":"`+shortID(firstUID)+`","title":"first","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		first.Actor = "bound-agent"
+		first.ContentHash = remoteEventHash(t, first)
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                        p.ID,
+			FederationEnrollmentID:           created.Enrollment.ID,
+			SpokeInstanceUID:                 spokeUID,
+			BoundActor:                       "bound-agent",
+			AllowSnapshotAuthorPreservation:  true,
+			AdoptionBaseline:                 db.FederationAdoptionBaselineOpen,
+			AdoptionBaselineEndSourceEventID: 2,
+			Events:                           []db.FederationIngestEvent{{SourceEventID: 1, Event: first}},
+		})
+		require.NoError(t, err)
+
+		second := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &secondUID, nil,
+			"issue.snapshot", 100,
+			`{"uid":"`+secondUID+`","short_id":"`+shortID(secondUID)+`","title":"second","body":"","author":"spoofed-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		second.Actor = "bound-agent"
+		second.ContentHash = remoteEventHash(t, second)
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                        p.ID,
+			FederationEnrollmentID:           created.Enrollment.ID,
+			SpokeInstanceUID:                 spokeUID,
+			BoundActor:                       "bound-agent",
+			AllowSnapshotAuthorPreservation:  true,
+			AdoptionBaseline:                 db.FederationAdoptionBaselineComplete,
+			AdoptionBaselineEndSourceEventID: 2,
+			Events:                           []db.FederationIngestEvent{{SourceEventID: 2, Event: second}},
+		})
+
+		require.NoError(t, err)
+		assertIngestedEventCount(ctx, t, d, p.ID, 2)
+		firstIssue, err := d.IssueByUID(ctx, firstUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "historical-agent", firstIssue.Author)
+		secondIssue, err := d.IssueByUID(ctx, secondUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		assert.Equal(t, "bound-agent", secondIssue.Author)
+		var storedPayload string
+		require.NoError(t, d.QueryRowContext(ctx,
+			`SELECT payload FROM events WHERE uid = ?`, second.EventUID).Scan(&storedPayload))
+		assert.Contains(t, storedPayload, `"author":"spoofed-agent"`)
+	})
+
+	t.Run("rejects open adoption snapshot related envelope future reference", func(t *testing.T) {
+		d, ctx, p, spokeUID := setupFederationIngestHub(t)
+		markerValue := strings.Join([]string{"snapshot", "adoption", "related", "future"}, "-")
+		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token:                        markerValue,
+			SpokeInstanceUID:             spokeUID,
+			ProjectID:                    &p.ID,
+			Capabilities:                 "push",
+			Actor:                        "bound-agent",
+			AllowAdoptionSnapshotAuthors: true,
+		})
+		require.NoError(t, err)
+		issueUID := newTestUID(t)
+		missingUID := newTestUID(t)
+		ev := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, &missingUID,
+			"issue.snapshot", 100,
+			`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"first","body":"","author":"historical-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		ev.Actor = "bound-agent"
+		ev.ContentHash = remoteEventHash(t, ev)
+
+		_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID:                        p.ID,
+			FederationEnrollmentID:           created.Enrollment.ID,
+			SpokeInstanceUID:                 spokeUID,
+			BoundActor:                       "bound-agent",
+			AllowSnapshotAuthorPreservation:  true,
+			AdoptionBaseline:                 db.FederationAdoptionBaselineOpen,
+			AdoptionBaselineEndSourceEventID: 2,
+			Events:                           []db.FederationIngestEvent{{SourceEventID: 1, Event: ev}},
+		})
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+		assert.Contains(t, err.Error(), "references unknown issue")
+		assertIngestedEventCount(ctx, t, d, p.ID, 0)
 	})
 
 	t.Run("rejects complete adoption baseline with unresolved open chunk snapshot link", func(t *testing.T) {
@@ -2462,7 +2560,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Contains(t, err.Error(), "unresolved snapshot link")
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
-		assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
+		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
 
@@ -2519,7 +2617,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Contains(t, err.Error(), "unresolved snapshot link")
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
-		assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
+		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
 
@@ -2576,7 +2674,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Contains(t, err.Error(), "unresolved snapshot link")
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
-		assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
+		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
 
@@ -2614,7 +2712,9 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 
 		_, err = d.ExecContext(ctx, `
 			UPDATE federation_enrollments
-			   SET adoption_baseline_end_source_event_id = 0
+			   SET allow_adoption_snapshot_authors = 1,
+			       adoption_baseline_end_source_event_id = 0,
+			       adoption_snapshot_author_cutoff_event_id = 0
 			 WHERE id = ?`, created.Enrollment.ID)
 		require.NoError(t, err)
 
@@ -2677,7 +2777,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
-		assert.True(t, authorized.AllowAdoptionSnapshotAuthors)
+		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
 		var baselineOpen, nextSourceEventID, endSourceEventID int64
 		require.NoError(t, d.QueryRowContext(ctx, `
 				SELECT adoption_baseline_open, adoption_baseline_next_source_event_id,

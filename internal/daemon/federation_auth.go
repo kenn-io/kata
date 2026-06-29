@@ -16,6 +16,7 @@ type federationPrincipal struct {
 	Capabilities                 string
 	Actor                        string
 	AllowAdoptionSnapshotAuthors bool
+	AllowAdoptionBaseline        bool
 }
 
 func authorizeFederationRequest(
@@ -49,5 +50,6 @@ func authorizeFederationRequest(
 		Capabilities:                 enrollment.Capabilities,
 		Actor:                        enrollment.Actor,
 		AllowAdoptionSnapshotAuthors: enrollment.AllowAdoptionSnapshotAuthors,
+		AllowAdoptionBaseline:        enrollment.AllowAdoptionSnapshotAuthors || enrollment.AdoptionBaselineOpen,
 	}, nil
 }

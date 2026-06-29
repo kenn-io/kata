@@ -124,7 +124,8 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
 				db.ErrFederationIngestValidation, ev.EventUID)
 		}
-		if err := validateFederationBoundActorPayload(ev, boundActor, adoptionSnapshotAuthorState.allowAuthorPreservation); err != nil {
+		if err := validateFederationBoundActorPayload(ev, boundActor,
+			adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if freshSnapshotSeen && ev.Type != "issue.snapshot" {
@@ -172,6 +173,12 @@ func (d *Store) ingestFederationEventsOnce(
 		}
 	}
 	if result.Accepted > 0 {
+		if adoptionSnapshotAuthorState.recordSnapshotAuthorCutoff {
+			if err := recordFederationAdoptionSnapshotAuthorCutoff(ctx, tx,
+				p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID); err != nil {
+				return db.FederationIngestResult{}, err
+			}
+		}
 		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID); err != nil {
 			return db.FederationIngestResult{}, err
 		}
@@ -188,7 +195,8 @@ func (d *Store) ingestFederationEventsOnce(
 		} else if err := recordFederationAdoptionBaselineProgress(ctx, tx,
 			p.ProjectID, p.FederationEnrollmentID, p.SpokeInstanceUID,
 			adoptionSnapshotAuthorState.nextSourceEventID,
-			adoptionSnapshotAuthorState.endSourceEventID); err != nil {
+			adoptionSnapshotAuthorState.endSourceEventID,
+			adoptionSnapshotAuthorState.deferAuthorPreservationGrant); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 	}
@@ -237,13 +245,16 @@ func validateFederationBoundActorPayload(
 }
 
 type federationIngestAdoptionSnapshotAuthorState struct {
-	allowAuthorPreservation  bool
-	allowFutureSnapshotLinks bool
-	verifySnapshotLinks      bool
-	shouldDeferMarker        bool
-	duplicateOnly            bool
-	nextSourceEventID        int64
-	endSourceEventID         int64
+	allowAuthorPreservation      bool
+	allowFutureSnapshotLinks     bool
+	verifySnapshotLinks          bool
+	shouldDeferMarker            bool
+	deferAuthorPreservationGrant bool
+	overrideSnapshotAuthors      bool
+	recordSnapshotAuthorCutoff   bool
+	duplicateOnly                bool
+	nextSourceEventID            int64
+	endSourceEventID             int64
 }
 
 func computeFederationIngestAdoptionSnapshotAuthorState(
@@ -270,8 +281,11 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	baselineShape := federationIngestAdoptionBaselineShape(events)
 	marker, err := federationIngestAdoptionSnapshotAuthorMarkerState(ctx, tx,
 		projectID, enrollmentID, spokeInstanceUID)
-	if err != nil || !marker.allowSnapshotAuthors {
+	if err != nil {
 		return state, err
+	}
+	if !marker.allowSnapshotAuthors && !marker.baselineOpen {
+		return state, nil
 	}
 	if marker.baselineOpen && adoptionBaseline == "" {
 		return state, fmt.Errorf("%w: adoption baseline continuation is open and requires adoption_baseline marker",
@@ -301,6 +315,7 @@ func computeFederationIngestAdoptionSnapshotAuthorState(
 	}
 
 	state.allowAuthorPreservation = true
+	state.recordSnapshotAuthorCutoff = baselineShape.hasSnapshot
 	return state, nil
 }
 
@@ -321,11 +336,14 @@ func computeFederationIngestOpenAdoptionBaselineState(
 	adoptionBaselineEndSourceEventID int64,
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	state := federationIngestAdoptionSnapshotAuthorState{
-		allowAuthorPreservation:  baselineShape.hasSnapshot,
-		allowFutureSnapshotLinks: true,
-		shouldDeferMarker:        true,
-		nextSourceEventID:        baselineShape.maxSourceEventID + 1,
-		endSourceEventID:         adoptionBaselineEndSourceEventID,
+		allowAuthorPreservation:      baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
+		allowFutureSnapshotLinks:     true,
+		shouldDeferMarker:            true,
+		deferAuthorPreservationGrant: marker.allowSnapshotAuthors && !baselineShape.hasSnapshot,
+		overrideSnapshotAuthors:      baselineShape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
+		recordSnapshotAuthorCutoff:   baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
+		nextSourceEventID:            baselineShape.maxSourceEventID + 1,
+		endSourceEventID:             adoptionBaselineEndSourceEventID,
 	}
 	if err := validateFederationIngestAdoptionBaselineCursor(marker, baselineShape, adoptionBaselineEndSourceEventID, true); err != nil {
 		return federationIngestAdoptionSnapshotAuthorState{}, err
@@ -360,9 +378,11 @@ func computeFederationIngestCompleteAdoptionBaselineState(
 	adoptionBaselineEndSourceEventID int64,
 ) (federationIngestAdoptionSnapshotAuthorState, error) {
 	state := federationIngestAdoptionSnapshotAuthorState{
-		allowAuthorPreservation: baselineShape.hasSnapshot,
-		verifySnapshotLinks:     baselineShape.hasSnapshot || marker.baselineOpen,
-		endSourceEventID:        adoptionBaselineEndSourceEventID,
+		allowAuthorPreservation:    baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
+		verifySnapshotLinks:        baselineShape.hasSnapshot || marker.baselineOpen,
+		overrideSnapshotAuthors:    baselineShape.hasSnapshot && marker.baselineOpen && !marker.allowSnapshotAuthors,
+		recordSnapshotAuthorCutoff: baselineShape.hasSnapshot && marker.allowSnapshotAuthors,
+		endSourceEventID:           adoptionBaselineEndSourceEventID,
 	}
 	if err := validateFederationIngestAdoptionBaselineCursor(marker, baselineShape, adoptionBaselineEndSourceEventID, false); err != nil {
 		return federationIngestAdoptionSnapshotAuthorState{}, err
@@ -592,8 +612,7 @@ func consumeFederationAdoptionSnapshotAuthorMarker(
 		 WHERE id = ?
 		   AND spoke_instance_uid = ?
 		   AND revoked_at IS NULL
-		   AND project_id = ?
-		   AND allow_adoption_snapshot_authors = 1`,
+		   AND project_id = ?`,
 		enrollmentID, spokeInstanceUID, projectID)
 	if err != nil {
 		return fmt.Errorf("consume federation adoption snapshot author marker: %w", err)
@@ -609,24 +628,67 @@ func recordFederationAdoptionBaselineProgress(
 	spokeInstanceUID string,
 	nextSourceEventID int64,
 	endSourceEventID int64,
+	deferAuthorPreservationGrant bool,
 ) error {
 	if enrollmentID <= 0 || nextSourceEventID <= 0 || endSourceEventID <= 0 {
 		return nil
 	}
+	allowSnapshotAuthors := 0
+	if deferAuthorPreservationGrant {
+		allowSnapshotAuthors = 1
+	}
 	_, err := tx.ExecContext(ctx, `
 		UPDATE federation_enrollments
-		   SET adoption_baseline_open = 1,
+		   SET allow_adoption_snapshot_authors = ?,
+		       adoption_baseline_open = 1,
 		       adoption_baseline_next_source_event_id = ?,
 		       adoption_baseline_end_source_event_id = ?,
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 WHERE id = ?
 		   AND spoke_instance_uid = ?
 		   AND revoked_at IS NULL
-		   AND project_id = ?
-		   AND allow_adoption_snapshot_authors = 1`,
-		nextSourceEventID, endSourceEventID, enrollmentID, spokeInstanceUID, projectID)
+		   AND project_id = ?`,
+		allowSnapshotAuthors, nextSourceEventID, endSourceEventID, enrollmentID, spokeInstanceUID, projectID)
 	if err != nil {
 		return fmt.Errorf("record federation adoption baseline progress: %w", err)
+	}
+	return nil
+}
+
+func recordFederationAdoptionSnapshotAuthorCutoff(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	enrollmentID int64,
+	spokeInstanceUID string,
+) error {
+	if enrollmentID <= 0 {
+		return nil
+	}
+	var cutoffEventID int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(id), 0)
+		  FROM events
+		 WHERE project_id = ?
+		   AND origin_instance_uid = ?
+		   AND type = 'issue.snapshot'`,
+		projectID, spokeInstanceUID).Scan(&cutoffEventID); err != nil {
+		return fmt.Errorf("lookup federation adoption snapshot author cutoff: %w", err)
+	}
+	if cutoffEventID <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE federation_enrollments
+		   SET adoption_snapshot_author_cutoff_event_id = MAX(adoption_snapshot_author_cutoff_event_id, ?),
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE id = ?
+		   AND spoke_instance_uid = ?
+		   AND revoked_at IS NULL
+		   AND project_id = ?`,
+		cutoffEventID, enrollmentID, spokeInstanceUID, projectID)
+	if err != nil {
+		return fmt.Errorf("record federation adoption snapshot author cutoff: %w", err)
 	}
 	return nil
 }
@@ -836,9 +898,11 @@ func validateFederationProjectEvent(
 	default:
 		return fmt.Errorf("%w: unsupported event type %s", db.ErrFederationIngestValidation, ev.Type)
 	}
+	snapshotLinkRefs := map[string]struct{}{}
 	deferredSnapshotLinks := map[string]struct{}{}
 	if ev.Type == "issue.snapshot" {
 		for _, ref := range payloadLinkIssueUIDs(ev) {
+			snapshotLinkRefs[ref] = struct{}{}
 			if _, ok := batchCreateSnapshotUIDs[ref]; ok {
 				deferredSnapshotLinks[ref] = struct{}{}
 			}
@@ -853,6 +917,9 @@ func validateFederationProjectEvent(
 				continue
 			}
 			if allowFutureSnapshotLinks && ev.Type == "issue.snapshot" {
+				if _, ok := snapshotLinkRefs[ref]; !ok {
+					return fmt.Errorf("%w: event %s references unknown issue %s", db.ErrFederationIngestValidation, ev.EventUID, ref)
+				}
 				continue
 			}
 			return fmt.Errorf("%w: event %s references unknown issue %s", db.ErrFederationIngestValidation, ev.EventUID, ref)
