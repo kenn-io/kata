@@ -221,6 +221,7 @@ type Storage interface {
 	LeaveFederationReplica(ctx context.Context, projectID int64) (LeaveFederationResult, error)
 	AdoptProjectIntoFederation(ctx context.Context, p AdoptProjectIntoFederationParams) (AdoptProjectIntoFederationResult, error)
 	AdvanceFederationPullCursor(ctx context.Context, projectID, nextCursor int64) error
+	ReconcileLocalFederationEcho(ctx context.Context, projectID int64, ev RemoteEvent) (bool, error)
 	InsertRemoteEvent(ctx context.Context, projectID int64, ev RemoteEvent) (bool, error)
 	EnableProjectFederation(ctx context.Context, projectID int64, actor string) (FederationBinding, error)
 	RefreshProjectFederationBaseline(ctx context.Context, projectID int64, actor string) (FederationBinding, bool, error)

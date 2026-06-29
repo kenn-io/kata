@@ -1144,6 +1144,125 @@ func TestSyncFederationOncePushEchoDoesNotDeliverPulledLocalEvent(t *testing.T) 
 	assert.Empty(t, delivered, "push echo was the only unadvanced pull event")
 }
 
+func TestSyncFederationOnceRejectsLocalPushEchoHashMismatch(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "from spoke",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	envelope := eventEnvelopeForSyncTest(localEvent, 100)
+	envelope.Payload = json.RawMessage(strings.Replace(string(envelope.Payload), `"title":"from spoke"`, `"title":"from hub"`, 1))
+	rehashEventEnvelope(t, &envelope)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 100,
+		PullCursorEventID:    99,
+		Actor:                "tester",
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events":
+			require.Equal(t, "99", r.URL.Query().Get("after_id"))
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+				Events:      []api.EventEnvelope{envelope},
+				NextAfterID: 100,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, db.ErrRemoteEventConflict)
+	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(99), binding.PullCursorEventID)
+}
+
+func TestSyncFederationOnceCanonicalizesLocalAdoptionPushEcho(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "adopted issue",
+		Author:    "historical-author",
+	})
+	require.NoError(t, err)
+	adopted, err := spoke.DB.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID:            project.ID,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 100,
+		Actor:                "agent",
+	})
+	require.NoError(t, err)
+	events, err := spoke.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 10})
+	require.NoError(t, err)
+	var snapshot db.Event
+	for _, ev := range events {
+		if ev.Type == "issue.snapshot" && ev.IssueUID != nil && *ev.IssueUID == issue.UID {
+			snapshot = ev
+			break
+		}
+	}
+	require.NotEmpty(t, snapshot.UID)
+	assert.Contains(t, snapshot.Payload, `"author":"historical-author"`)
+	envelope := eventEnvelopeForSyncTest(snapshot, 100)
+	envelope.Payload = json.RawMessage(strings.Replace(string(envelope.Payload), `"author":"historical-author"`, `"author":"agent"`, 1))
+	rehashEventEnvelope(t, &envelope)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/42/federation/events":
+			require.Equal(t, "99", r.URL.Query().Get("after_id"))
+			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{
+				Events:      []api.EventEnvelope{envelope},
+				NextAfterID: 100,
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(hub.Close)
+	binding := adopted.Binding
+	binding.PushEnabled = false
+
+	require.NoError(t, SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	}))
+
+	events, err = spoke.DB.EventsByUIDs(ctx, project.ID, []string{snapshot.UID})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, envelope.ContentHash, events[0].ContentHash)
+	assert.Contains(t, events[0].Payload, `"author":"agent"`)
+	materialized, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, "agent", materialized.Author)
+}
+
 func TestSyncFederationOnceResetRetryDeliversReplayedLocalOriginEvent(t *testing.T) {
 	ctx := context.Background()
 	spoke := testenv.New(t)
@@ -3354,6 +3473,30 @@ func eventEnvelopeForSyncTest(event db.Event, eventID int64) api.EventEnvelope {
 		Payload:           payload,
 		CreatedAt:         event.CreatedAt,
 	}
+}
+
+func rehashEventEnvelope(t *testing.T, ev *api.EventEnvelope) {
+	t.Helper()
+	payload := ev.Payload
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID:               ev.EventUID,
+		OriginInstanceUID: ev.OriginInstanceUID,
+		ProjectUID:        ev.ProjectUID,
+		ProjectName:       ev.ProjectName,
+		IssueUID:          ev.IssueUID,
+		RelatedIssueUID:   ev.RelatedIssueUID,
+		Type:              ev.Type,
+		Actor:             ev.Actor,
+		HLCPhysicalMS:     ev.HLCPhysicalMS,
+		HLCCounter:        ev.HLCCounter,
+		CreatedAt:         ev.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		Payload:           payload,
+	})
+	require.NoError(t, err)
+	ev.ContentHash = hash
 }
 
 func mustTestUID(t *testing.T) string {

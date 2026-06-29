@@ -696,6 +696,10 @@ func (s *Store) RecentSiblingCloses(_ context.Context, _ int64, _ int64, _ strin
 	return nil, ErrNotImplementedPhase3
 }
 
+func (s *Store) ReconcileLocalFederationEcho(_ context.Context, _ int64, _ db.RemoteEvent) (bool, error) {
+	return false, ErrNotImplementedPhase3
+}
+
 func (s *Store) RecordFederationQuarantine(_ context.Context, _ db.RecordFederationQuarantineParams) (db.FederationQuarantine, error) {
 	return db.FederationQuarantine{}, ErrNotImplementedPhase3
 }

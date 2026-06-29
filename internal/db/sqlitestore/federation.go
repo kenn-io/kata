@@ -585,31 +585,25 @@ func (d *Store) InsertRemoteEvent(ctx context.Context, projectID int64, ev db.Re
 	})
 }
 
-func (d *Store) insertRemoteEvent(ctx context.Context, projectID int64, ev db.RemoteEvent) (bool, error) {
-	payload := ev.Payload
-	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	createdAt := ev.CreatedAt.UTC().Format(sqliteTimeFormat)
-	expectedHash, err := db.EventContentHash(db.EventHashInput{
-		UID:               ev.EventUID,
-		OriginInstanceUID: ev.OriginInstanceUID,
-		ProjectUID:        ev.ProjectUID,
-		ProjectName:       ev.ProjectName,
-		IssueUID:          ev.IssueUID,
-		RelatedIssueUID:   ev.RelatedIssueUID,
-		Type:              ev.Type,
-		Actor:             ev.Actor,
-		HLCPhysicalMS:     ev.HLCPhysicalMS,
-		HLCCounter:        ev.HLCCounter,
-		CreatedAt:         createdAt,
-		Payload:           payload,
+// ReconcileLocalFederationEcho validates a pulled event whose origin is this
+// instance and whose UID may already exist locally. A byte-for-byte echo is a
+// no-op. The only accepted hash mismatch is the hub's canonicalized adoption
+// snapshot payload, which replaces the local payload so future local folds match
+// hub and downstream replica folds.
+func (d *Store) ReconcileLocalFederationEcho(
+	ctx context.Context,
+	projectID int64,
+	ev db.RemoteEvent,
+) (bool, error) {
+	return retryWrite1(ctx, d, func() (bool, error) {
+		return d.reconcileLocalFederationEcho(ctx, projectID, ev)
 	})
+}
+
+func (d *Store) insertRemoteEvent(ctx context.Context, projectID int64, ev db.RemoteEvent) (bool, error) {
+	payload, createdAt, err := validateRemoteEventContentHash(ev)
 	if err != nil {
-		return false, fmt.Errorf("remote event content hash: %w", err)
-	}
-	if !strings.EqualFold(expectedHash, ev.ContentHash) {
-		return false, fmt.Errorf("%w: event %s", db.ErrRemoteEventHashMismatch, ev.EventUID)
+		return false, err
 	}
 
 	tx, err := d.BeginTx(ctx, nil)
@@ -656,6 +650,132 @@ func (d *Store) insertRemoteEvent(ctx context.Context, projectID int64, ev db.Re
 		return false, fmt.Errorf("commit remote event insert: %w", err)
 	}
 	return true, nil
+}
+
+func (d *Store) reconcileLocalFederationEcho(ctx context.Context, projectID int64, ev db.RemoteEvent) (bool, error) {
+	payload, _, err := validateRemoteEventContentHash(ev)
+	if err != nil {
+		return false, err
+	}
+
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin local federation echo reconcile: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var id int64
+	err = tx.QueryRowContext(ctx,
+		`SELECT id FROM events WHERE project_id = ? AND uid = ?`,
+		projectID, ev.EventUID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lookup local federation echo %s: %w", ev.EventUID, err)
+	}
+	existing, err := scanEvent(tx.QueryRowContext(ctx, eventSelectByID, id))
+	if err != nil {
+		return false, fmt.Errorf("read local federation echo %s: %w", ev.EventUID, err)
+	}
+	if existing.ContentHash == ev.ContentHash {
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("commit local federation echo no-op: %w", err)
+		}
+		return true, nil
+	}
+	matches, err := localEchoMatchesCanonicalSnapshot(existing, ev)
+	if err != nil {
+		return false, err
+	}
+	if !matches {
+		return true, fmt.Errorf("%w: event %s", db.ErrRemoteEventConflict, ev.EventUID)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE events
+		   SET payload = ?,
+		       content_hash = ?
+		 WHERE id = ?`,
+		string(payload), ev.ContentHash, id); err != nil {
+		return false, fmt.Errorf("canonicalize local federation echo %s: %w", ev.EventUID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit local federation echo canonicalization: %w", err)
+	}
+	return true, nil
+}
+
+func validateRemoteEventContentHash(ev db.RemoteEvent) (json.RawMessage, string, error) {
+	payload := ev.Payload
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	createdAt := ev.CreatedAt.UTC().Format(sqliteTimeFormat)
+	expectedHash, err := db.EventContentHash(db.EventHashInput{
+		UID:               ev.EventUID,
+		OriginInstanceUID: ev.OriginInstanceUID,
+		ProjectUID:        ev.ProjectUID,
+		ProjectName:       ev.ProjectName,
+		IssueUID:          ev.IssueUID,
+		RelatedIssueUID:   ev.RelatedIssueUID,
+		Type:              ev.Type,
+		Actor:             ev.Actor,
+		HLCPhysicalMS:     ev.HLCPhysicalMS,
+		HLCCounter:        ev.HLCCounter,
+		CreatedAt:         createdAt,
+		Payload:           payload,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("remote event content hash: %w", err)
+	}
+	if !strings.EqualFold(expectedHash, ev.ContentHash) {
+		return nil, "", fmt.Errorf("%w: event %s", db.ErrRemoteEventHashMismatch, ev.EventUID)
+	}
+	return payload, createdAt, nil
+}
+
+func localEchoMatchesCanonicalSnapshot(existing db.Event, ev db.RemoteEvent) (bool, error) {
+	if existing.Type != "issue.snapshot" || ev.Type != "issue.snapshot" {
+		return false, nil
+	}
+	if existing.UID != ev.EventUID ||
+		existing.OriginInstanceUID != ev.OriginInstanceUID ||
+		existing.ProjectUID != ev.ProjectUID ||
+		!stringPtrsEqual(existing.IssueUID, ev.IssueUID) ||
+		!stringPtrsEqual(existing.RelatedIssueUID, ev.RelatedIssueUID) ||
+		existing.Actor != ev.Actor ||
+		existing.HLCPhysicalMS != ev.HLCPhysicalMS ||
+		existing.HLCCounter != ev.HLCCounter ||
+		existing.CreatedAt.UTC().Format(sqliteTimeFormat) != ev.CreatedAt.UTC().Format(sqliteTimeFormat) {
+		return false, nil
+	}
+	local := db.RemoteEvent{
+		EventUID:          existing.UID,
+		OriginInstanceUID: existing.OriginInstanceUID,
+		ProjectUID:        existing.ProjectUID,
+		ProjectName:       existing.ProjectName,
+		IssueUID:          existing.IssueUID,
+		RelatedIssueUID:   existing.RelatedIssueUID,
+		Type:              existing.Type,
+		Actor:             existing.Actor,
+		HLCPhysicalMS:     existing.HLCPhysicalMS,
+		HLCCounter:        existing.HLCCounter,
+		ContentHash:       existing.ContentHash,
+		Payload:           json.RawMessage(existing.Payload),
+		CreatedAt:         existing.CreatedAt,
+	}
+	canonical, err := canonicalizeFederationSnapshotAuthors(local, ev.Actor)
+	if err != nil {
+		return false, err
+	}
+	return canonical.ContentHash == ev.ContentHash, nil
+}
+
+func stringPtrsEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // EnableProjectFederation marks a local project as a pull hub and writes a
