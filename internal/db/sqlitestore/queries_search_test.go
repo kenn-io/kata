@@ -129,6 +129,17 @@ func TestSearchFTS_FiltersByProject(t *testing.T) {
 	assert.Equal(t, p1.ID, got[0].Issue.ProjectID)
 }
 
+func TestSearchFTS_PopulatesIssueUIDs(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login bug", "")
+
+	got, err := d.SearchFTS(ctx, p.ID, "login", 20, false)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, issue.UID, got[0].Issue.UID)
+	assert.Equal(t, p.UID, got[0].Issue.ProjectUID)
+}
+
 func TestSearchFTS_ExcludesDeletedByDefault(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	keep := createTesterIssueWithBody(ctx, t, d, p.ID, "keep login", "")
