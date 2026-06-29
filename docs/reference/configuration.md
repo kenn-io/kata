@@ -18,6 +18,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_ALLOW_INSECURE` | Set to `1` or `true` to allow a configured remote daemon hostname over plain HTTP. Federation uses `kata federation enroll --allow-insecure` and `kata federation join --allow-insecure` instead because enrollment credentials are stored separately. |
 | `KATA_TELEMETRY_ENABLED` | Set to `0` to disable anonymous PostHog telemetry. |
 | `KATA_HTTP_TIMEOUT` | Per-request CLI timeout for non-streaming daemon calls, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. |
+| `KATA_GITHUB_TOKEN` | Default explicit token source for GitHub sync when no matching `[[github_sync.app]]` credential is configured. It is scoped to `github.com` unless `[github_sync].token_host` names a different host. `[github_sync].token_env` can name a different env var. |
 | `KATA_GITHUB_SYNC_ALLOWED_HOSTS` | Comma-separated exact GitHub Enterprise hostnames trusted for GitHub sync and git-remote inference. `github.com` is always trusted. |
 | `KATA_FEDERATION_PULL_INTERVAL_MS` | Federation runner poll interval for tests or latency-sensitive private deployments. |
 | `PORT` | Hosted-mode listener port when no explicit listener is configured and the daemon is not an auto-start child. |
@@ -112,6 +113,17 @@ dsn = "/var/lib/kata/kata.db"
 [auth]
 token = "change-me"
 trust_private_network = true
+
+[github_sync]
+token_env = "KATA_GITHUB_TOKEN"
+token_host = "github.com"
+
+[[github_sync.app]]
+host = "github.com"
+owner = "example-org"
+app_id = 12345
+installation_id = 67890
+private_key_path = "/var/lib/kata/github-app.pem"
 ```
 
 The `kata daemon start --listen <host:port>` flag wins over the config file.
@@ -121,6 +133,17 @@ and hosted deployments. Auto-started daemons also read the config-file listener
 value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
+
+`[github_sync]` controls daemon-side GitHub credentials. The recommended shared
+daemon path is `[[github_sync.app]]`, matched exactly by normalized `(host,
+owner)`. The GitHub App needs only Metadata read and Issues read permissions.
+If no App matches a binding, kata reads the environment variable named by
+`[github_sync].token_env` (default `KATA_GITHUB_TOKEN`) only when the binding
+host matches `[github_sync].token_host` (default `github.com`). If no host-bound
+env token matches, kata falls back to `gh auth token --hostname <host>` for
+local/single-user deployments. GitHub Enterprise hosts still must be listed in
+`KATA_GITHUB_SYNC_ALLOWED_HOSTS`, and Enterprise env-token deployments should
+set both `token_env` and `token_host`.
 
 For a single-user private network where the private IP itself is the access
 boundary, omit `token` and use:

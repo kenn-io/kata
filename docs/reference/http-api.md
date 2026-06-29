@@ -138,16 +138,20 @@ commands.
 
 All GitHub access happens in the daemon process. For provider `github`, v1
 accepts `github.com` and exact GitHub Enterprise hostnames listed in
-`KATA_GITHUB_SYNC_ALLOWED_HOSTS`. The daemon must have `gh` installed and
-authenticated for the configured host because enablement and sync runs call
-`gh api`. Remote clients call these endpoints on the daemon, so a client-side
-GitHub CLI login is not sufficient when the daemon runs elsewhere, for example
-behind `https://daemon.example`.
+`KATA_GITHUB_SYNC_ALLOWED_HOSTS`. The daemon resolves credentials in this
+order: a matching `[[github_sync.app]]` entry, the explicit token env named by
+`[github_sync].token_env` (default `KATA_GITHUB_TOKEN`) only when
+`[github_sync].token_host` matches the binding host, then `gh auth token
+--hostname <host>` as a local fallback. Remote clients call these endpoints on
+the daemon, so client-side GitHub credentials are not sufficient when the
+daemon runs elsewhere, for example behind `https://daemon.example`.
 
-The GitHub CLI credential path is appropriate for local and single-user daemon
-deployments. Shared team hubs should use GitHub sync only once a GitHub App
-credential path exists, so repository access belongs to the service
-installation rather than one operator's ambient `gh auth` session.
+The GitHub App credential path is the recommended shared-daemon deployment
+model. The App only needs Metadata read and Issues read permissions. The `gh
+auth token` fallback is best suited to local and single-user daemons.
+GitHub-sourced parent links are imported when the host exposes the queried
+parent fields; unsupported schemas are nonfatal and preserve existing
+source-managed parent links.
 
 The API surface is provider-neutral so future providers such as GitLab or
 Linear can use the same lifecycle endpoints. Provider-specific identity lives
@@ -178,8 +182,9 @@ Content-Type: application/json
 For GitHub, `config.host` defaults to `github.com`. Clients may send
 `interval_seconds` instead of `interval`. `config.title_prefix` defaults to
 `true`; set it to `false` to preserve GitHub issue titles without the
-`[GitHub #123]` prefix. The daemon validates the repository through `gh`, stores
-the repository identity, and returns the binding and status.
+`[GitHub #123]` prefix. The daemon validates the repository with its configured
+GitHub credential chain, stores the repository identity, and returns the
+binding and status.
 
 Disable sync:
 

@@ -18,8 +18,8 @@ hosted release installer.
 
 - Added one-way GitHub issue sync with `kata sync github`, backed by
   daemon-owned bindings, cursors, import mappings, status, and a poller. The
-  first provider imports GitHub issues and issue comments through the daemon's
-  `gh api` environment, skips pull requests, prefixes imported titles by
+  first provider imports GitHub issues and issue comments through daemon-side
+  GitHub credentials, skips pull requests, prefixes imported titles by
   default, and keeps GitHub as the source of truth for synced fields.
 - Added provider-neutral issue-sync API/storage foundations so GitHub sync
   state participates in backup, restore, JSONL cutover, and daemon status

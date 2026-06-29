@@ -234,6 +234,135 @@ token_env = "  KATA_WORK_TOKEN  "
 	assert.Empty(t, cfg.Daemons[0].Token)
 }
 
+func TestReadDaemonConfig_GitHubSyncDefaultsTokenEnv(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+
+	assert.Equal(t, "KATA_GITHUB_TOKEN", cfg.GitHubSync.TokenEnvName())
+	assert.Equal(t, "github.com", cfg.GitHubSync.TokenHostName())
+	assert.Empty(t, cfg.GitHubSync.Apps)
+}
+
+func TestReadDaemonConfig_ReadsGitHubSyncConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_GITHUB_TOKEN", "secret-from-env")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[github_sync]
+token_env = "EXAMPLE_GITHUB_TOKEN"
+token_host = " GitHub.Example "
+
+[[github_sync.app]]
+host = " GitHub.Example "
+owner = " Example-Owner "
+app_id = 12345
+installation_id = 67890
+private_key_path = " /secure/example-app.pem "
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+
+	assert.Equal(t, "EXAMPLE_GITHUB_TOKEN", cfg.GitHubSync.TokenEnvName())
+	assert.Equal(t, "github.example", cfg.GitHubSync.TokenHostName())
+	require.Len(t, cfg.GitHubSync.Apps, 1)
+	app := cfg.GitHubSync.Apps[0]
+	assert.Equal(t, "github.example", app.Host)
+	assert.Equal(t, "Example-Owner", app.Owner)
+	assert.Equal(t, int64(12345), app.AppID)
+	assert.Equal(t, int64(67890), app.InstallationID)
+	assert.Equal(t, "/secure/example-app.pem", app.PrivateKeyPath)
+}
+
+func TestReadDaemonConfig_GitHubSyncRejectsDuplicateApps(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[github_sync.app]]
+host = "github.example"
+owner = "Example-Owner"
+app_id = 1
+installation_id = 2
+private_key_path = "/secure/one.pem"
+
+[[github_sync.app]]
+host = "GITHUB.EXAMPLE"
+owner = "example-owner"
+app_id = 3
+installation_id = 4
+private_key_path = "/secure/two.pem"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "github_sync.app")
+	assert.Contains(t, err.Error(), "duplicate")
+	assert.Contains(t, err.Error(), "github.example")
+	assert.Contains(t, err.Error(), "example-owner")
+}
+
+func TestReadDaemonConfig_GitHubSyncRejectsIncompleteApp(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[github_sync.app]]
+owner = "example-owner"
+app_id = 1
+installation_id = 2
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "github_sync.app")
+	assert.Contains(t, err.Error(), "private_key_path")
+}
+
+func TestReadDaemonConfig_GitHubSyncRejectsNegativeAppIDs(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{
+			name: "app id",
+			config: `
+[[github_sync.app]]
+owner = "example-owner"
+app_id = -1
+installation_id = 2
+private_key_path = "/secure/example.pem"
+`,
+			wantErr: "app_id",
+		},
+		{
+			name: "installation id",
+			config: `
+[[github_sync.app]]
+owner = "example-owner"
+app_id = 1
+installation_id = -2
+private_key_path = "/secure/example.pem"
+`,
+			wantErr: "installation_id",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tt.config), 0o600))
+
+			_, err := config.ReadDaemonConfig()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "github_sync.app")
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestReadDaemonConfig_ThrottleDefaultsDisabled(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	cfg, err := config.ReadDaemonConfig()

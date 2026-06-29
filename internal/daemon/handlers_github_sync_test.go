@@ -132,7 +132,7 @@ func TestGitHubSyncHandlers_EnableValidationErrors(t *testing.T) {
 
 	t.Run("maps fetcher failure to redacted validation error", func(t *testing.T) {
 		h := newGitHubSyncHandlerHarness(t)
-		h.fetcher.repositoryErr = errors.New("gh api failed: token [redacted] cannot access repository")
+		h.fetcher.repositoryErr = errors.New("GitHub API failed: token [redacted] cannot access repository")
 
 		resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "enable"), map[string]any{
 			"config": map[string]any{
@@ -311,6 +311,28 @@ func TestGitHubSyncHandlers_OnceRunsSyncAndBroadcastsImportEvents(t *testing.T) 
 	assert.Equal(t, []string{"github-sync", "github-sync"}, []string{hookEvents[0].Actor, hookEvents[1].Actor})
 }
 
+func TestGitHubSyncHandlers_OnceFallbackUsesHTTPFetcher(t *testing.T) {
+	var captured config.GitHubSyncConfig
+	tokenEnv := "EXAMPLE_" + "GITHUB_TOKEN"
+	h := newGitHubSyncHandlerHarnessWithOpts(t, gitHubSyncHarnessOpts{
+		fakeRunner:  true,
+		omitFetcher: true,
+		syncConfig:  config.GitHubSyncConfig{TokenEnv: tokenEnv},
+		fetcherFactory: func(cfg config.GitHubSyncConfig) githubsync.Fetcher {
+			captured = cfg
+			return githubsync.NewHTTPFetcher(githubsync.HTTPFetcherConfig{})
+		},
+	})
+	h.mustUpsertBinding(t, true)
+
+	resp, _ := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "once"), map[string]any{})
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Equal(t, 1, h.runnerRunCount())
+	assert.Equal(t, tokenEnv, captured.TokenEnv)
+	require.IsType(t, &githubsync.HTTPFetcher{}, h.runnerFetcher)
+}
+
 func TestGitHubSyncHandlers_OnceRejectsMissingAndDisabledBindings(t *testing.T) {
 	t.Run("missing binding", func(t *testing.T) {
 		h := newGitHubSyncHandlerHarnessWithFakeRunner(t)
@@ -376,15 +398,16 @@ func TestGitHubSyncHandlers_MutationsRejectUnattributedTrustedProxy(t *testing.T
 }
 
 type gitHubSyncHandlerHarness struct {
-	server      *httptest.Server
-	store       db.Storage
-	project     db.Project
-	fetcher     *fakeGitHubSyncFetcher
-	broadcaster *daemon.EventBroadcaster
-	hooks       *recordingSink
-	mu          sync.Mutex
-	wakes       int
-	runnerRuns  int
+	server        *httptest.Server
+	store         db.Storage
+	project       db.Project
+	fetcher       *fakeGitHubSyncFetcher
+	broadcaster   *daemon.EventBroadcaster
+	hooks         *recordingSink
+	mu            sync.Mutex
+	wakes         int
+	runnerRuns    int
+	runnerFetcher githubsync.Fetcher
 }
 
 type gitHubSyncHarnessOpts struct {
@@ -393,6 +416,9 @@ type gitHubSyncHarnessOpts struct {
 	// an allowlisted loopback listener so tests can exercise the
 	// write-attribution guard by omitting the actor header.
 	trustedActorHeader string
+	omitFetcher        bool
+	syncConfig         config.GitHubSyncConfig
+	fetcherFactory     func(config.GitHubSyncConfig) githubsync.Fetcher
 }
 
 func newGitHubSyncHandlerHarness(t *testing.T) *gitHubSyncHandlerHarness {
@@ -423,18 +449,25 @@ func newGitHubSyncHandlerHarnessWithOpts(t *testing.T, opts gitHubSyncHarnessOpt
 		FullName: "example-owner/example-repo",
 	}
 	cfg := daemon.ServerConfig{
-		DB:                d.db,
-		StartedAt:         d.now,
-		Broadcaster:       h.broadcaster,
-		Hooks:             h.hooks,
-		GitHubSyncFetcher: h.fetcher,
-		GitHubSyncWake:    h.wake,
+		DB:                       d.db,
+		StartedAt:                d.now,
+		Broadcaster:              h.broadcaster,
+		Hooks:                    h.hooks,
+		GitHubSyncWake:           h.wake,
+		GitHubSyncConfig:         opts.syncConfig,
+		GitHubSyncFetcherFactory: opts.fetcherFactory,
 		GitHubSyncRunnerFactory: func(cfg daemon.GitHubSyncRunnerConfig) daemon.GitHubSyncRunner {
+			h.mu.Lock()
+			h.runnerFetcher = cfg.Fetcher
+			h.mu.Unlock()
 			if opts.fakeRunner {
 				return fakeGitHubSyncRunner{h: h}
 			}
 			return daemon.NewDefaultGitHubSyncRunner(cfg)
 		},
+	}
+	if !opts.omitFetcher {
+		cfg.GitHubSyncFetcher = h.fetcher
 	}
 	if opts.trustedActorHeader != "" {
 		h.server = startGitHubSyncTrustedProxyServer(t, cfg, opts.trustedActorHeader)
@@ -597,6 +630,10 @@ func (f *fakeGitHubSyncFetcher) Issues(_ context.Context, _ githubsync.Binding, 
 func (f *fakeGitHubSyncFetcher) Comments(_ context.Context, _ githubsync.Binding, issueNumber int) ([]githubsync.Comment, error) {
 	f.commentCalls++
 	return f.comments[issueNumber], nil
+}
+
+func (f *fakeGitHubSyncFetcher) ParentData(_ context.Context, _ githubsync.Binding) (githubsync.ParentData, error) {
+	return githubsync.ParentData{}, nil
 }
 
 type fakeGitHubSyncRunner struct {

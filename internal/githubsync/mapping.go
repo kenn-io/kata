@@ -16,12 +16,12 @@ func IsPullRequestIssue(issue Issue) bool {
 
 // BuildImportBatch maps GitHub issue and comment API rows to kata import items.
 func BuildImportBatch(sourceKey string, issues []Issue, comments map[int][]Comment, syncStartedAt time.Time) db.ImportBatchParams {
-	return BuildImportBatchWithConfig(sourceKey, Config{}, issues, comments, syncStartedAt)
+	return BuildImportBatchWithConfig(sourceKey, Config{}, issues, comments, ParentData{}, syncStartedAt)
 }
 
 // BuildImportBatchWithConfig maps GitHub issue and comment API rows to kata
 // import items using stored provider config for presentation choices.
-func BuildImportBatchWithConfig(sourceKey string, config Config, issues []Issue, comments map[int][]Comment, syncStartedAt time.Time) db.ImportBatchParams {
+func BuildImportBatchWithConfig(sourceKey string, config Config, issues []Issue, comments map[int][]Comment, parentData ParentData, syncStartedAt time.Time) db.ImportBatchParams {
 	batch := db.ImportBatchParams{
 		Source: sourceKey,
 		Actor:  actorGitHubSync,
@@ -54,6 +54,17 @@ func BuildImportBatchWithConfig(sourceKey string, config Config, issues []Issue,
 				closedAt = updatedAt
 			}
 			item.ClosedAt = &closedAt
+		}
+		if parentID, ok := parentData.ParentID(issue.Number); ok {
+			item.Links = append(item.Links, db.ImportLink{
+				Type:             "parent",
+				TargetExternalID: fmt.Sprintf("issue-id:%d", parentID),
+			})
+		}
+		if parentData.Unsupported {
+			item.LinkTypesAuthoritative = map[string]bool{"parent": false}
+		} else if parentData.Authoritative {
+			item.LinkTypesAuthoritative = map[string]bool{"parent": parentData.ChildScanned(issue.Number)}
 		}
 		batch.Items = append(batch.Items, item)
 	}

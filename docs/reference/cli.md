@@ -234,17 +234,21 @@ those hosts, and `--interval` sets the daemon polling interval. Imported issue
 titles are prefixed as `[GitHub #123] Original title` by default; pass
 `--title-prefix=false` to preserve GitHub titles without the prefix.
 
-GitHub sync is daemon-side. The daemon host must have `gh` installed and
-authenticated for the configured host because the daemon runs `gh api` for
-validation and fetching. In remote-client mode, the remote daemon's `gh`
-environment is the one that matters, not the client workstation's.
+GitHub sync is daemon-side. The daemon resolves credentials from a matching
+`[[github_sync.app]]` entry, then `[github_sync].token_env` (default
+`KATA_GITHUB_TOKEN`) only when `[github_sync].token_host` matches the binding
+host, then `gh auth token --hostname <host>` as a local fallback. The `gh`
+fallback is only an auth source; repository, issue, comment, and parent data
+are fetched by kata's HTTP client. In remote-client mode, the remote daemon's
+credential configuration is the one that matters, not the client workstation's.
 JSONL restore imports issue sync bindings as disabled until they are
 re-enabled locally.
 
-Synced issues are GitHub-owned for title, body, state, labels, owner, and
-imported GitHub comments. Treat those fields as read-mostly in kata: local
-issue or comment edits are not written back to GitHub and can be overwritten by
-newer GitHub state. Only the first GitHub assignee maps to the kata owner.
+Synced issues are GitHub-owned for title, body, state, labels, owner, imported
+GitHub comments, and GitHub-sourced parent links. Treat those fields as
+read-mostly in kata: local issue or comment edits are not written back to GitHub
+and can be overwritten by newer GitHub state. Only the first GitHub assignee
+maps to the kata owner.
 
 `disable` stops polling but preserves the binding and import mappings.
 `status` reports the current binding and last sync outcome. `once` runs an

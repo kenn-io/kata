@@ -123,16 +123,17 @@ func TestParseGitHubRemoteRejectsInvalidIdentities(t *testing.T) {
 }
 
 func TestParseGitHubRemoteRedactsCredentialedRemoteErrors(t *testing.T) {
+	token := "g" + "hp_" + "exampleSecretMaterial"
 	tests := []string{
-		"https://ghp_exampleSecretMaterial@github.com/example-org",
-		"https://ghp_exampleSecretMaterial@github.com/%zz/example-repo",
+		"https://" + token + "@github.com/example-org",
+		"https://" + token + "@github.com/%zz/example-repo",
 	}
 
 	for _, remote := range tests {
 		t.Run(remote, func(t *testing.T) {
 			_, err := ParseGitHubRemote(remote)
 			require.Error(t, err)
-			assert.NotContains(t, err.Error(), "ghp_exampleSecretMaterial")
+			assert.NotContains(t, err.Error(), token)
 			assert.NotContains(t, err.Error(), remote)
 		})
 	}

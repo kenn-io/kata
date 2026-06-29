@@ -44,6 +44,9 @@ type DaemonConfig struct {
 	// Search carries opt-in semantic-search settings. An empty
 	// [search.embeddings] section leaves kata on lexical-only FTS.
 	Search SearchConfig `toml:"search"`
+	// GitHubSync carries daemon-owned GitHub API credential settings for
+	// background synchronization.
+	GitHubSync GitHubSyncConfig `toml:"github_sync"`
 }
 
 // SearchConfig is the [search] block of <KATA_HOME>/config.toml. Today it only
@@ -108,6 +111,48 @@ func (e EmbeddingsConfig) ResolvedAPIKey() string {
 // default <KATA_HOME>/kata.db wins. See config.KataDSN.
 type StorageConfig struct {
 	DSN string `toml:"dsn"`
+}
+
+// DefaultGitHubSyncTokenEnv is the environment variable name used for
+// daemon GitHub sync tokens when [github_sync].token_env is omitted.
+const DefaultGitHubSyncTokenEnv = "KATA_GITHUB_TOKEN" // #nosec G101 -- environment variable name, not a credential value.
+
+// DefaultGitHubSyncTokenHost is the GitHub host that may receive the default
+// daemon GitHub sync token.
+const DefaultGitHubSyncTokenHost = "github.com"
+
+// GitHubSyncConfig is the [github_sync] block of <KATA_HOME>/config.toml.
+type GitHubSyncConfig struct {
+	TokenEnv  string            `toml:"token_env"`
+	TokenHost string            `toml:"token_host"`
+	Apps      []GitHubAppConfig `toml:"app"`
+}
+
+// TokenEnvName returns the configured GitHub sync token environment variable,
+// defaulting to KATA_GITHUB_TOKEN when unset.
+func (c GitHubSyncConfig) TokenEnvName() string {
+	if v := strings.TrimSpace(c.TokenEnv); v != "" {
+		return v
+	}
+	return DefaultGitHubSyncTokenEnv
+}
+
+// TokenHostName returns the GitHub host allowed to receive the configured env
+// token, defaulting to github.com when unset.
+func (c GitHubSyncConfig) TokenHostName() string {
+	if v := strings.ToLower(strings.TrimSpace(c.TokenHost)); v != "" {
+		return v
+	}
+	return DefaultGitHubSyncTokenHost
+}
+
+// GitHubAppConfig is one [[github_sync.app]] credential entry.
+type GitHubAppConfig struct {
+	Host           string `toml:"host"`
+	Owner          string `toml:"owner"`
+	AppID          int64  `toml:"app_id"`
+	InstallationID int64  `toml:"installation_id"`
+	PrivateKeyPath string `toml:"private_key_path"`
 }
 
 // AuthConfig is the [auth] block of <KATA_HOME>/config.toml. An empty
@@ -234,6 +279,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Close.Throttle.Window = strings.TrimSpace(cfg.Close.Throttle.Window)
 		trimSearchEmbeddings(&cfg)
 		trimDaemonCatalog(&cfg)
+		trimGitHubSync(&cfg)
 	case errors.Is(err, os.ErrNotExist):
 		// Absent file: fall through with zero-value cfg. Env merge and
 		// validation below still apply so an env-only misconfig is
@@ -249,6 +295,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		return nil, err
 	}
 	if err := validateEmbeddings(cfg.Search.Embeddings); err != nil {
+		return nil, err
+	}
+	if err := validateGitHubSync(cfg.GitHubSync); err != nil {
 		return nil, err
 	}
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
@@ -311,6 +360,45 @@ func trimDaemonCatalog(cfg *DaemonConfig) {
 		cfg.Daemons[i].Token = strings.TrimSpace(cfg.Daemons[i].Token)
 		cfg.Daemons[i].TokenEnv = strings.TrimSpace(cfg.Daemons[i].TokenEnv)
 	}
+}
+
+func trimGitHubSync(cfg *DaemonConfig) {
+	cfg.GitHubSync.TokenEnv = strings.TrimSpace(cfg.GitHubSync.TokenEnv)
+	cfg.GitHubSync.TokenHost = strings.ToLower(strings.TrimSpace(cfg.GitHubSync.TokenHost))
+	for i := range cfg.GitHubSync.Apps {
+		app := &cfg.GitHubSync.Apps[i]
+		app.Host = strings.ToLower(strings.TrimSpace(app.Host))
+		if app.Host == "" {
+			app.Host = "github.com"
+		}
+		app.Owner = strings.TrimSpace(app.Owner)
+		app.PrivateKeyPath = strings.TrimSpace(app.PrivateKeyPath)
+	}
+}
+
+func validateGitHubSync(cfg GitHubSyncConfig) error {
+	seen := make(map[string]struct{}, len(cfg.Apps))
+	for i := range cfg.Apps {
+		app := cfg.Apps[i]
+		if app.Owner == "" {
+			return errors.New("github_sync.app: owner is required")
+		}
+		if app.AppID <= 0 {
+			return errors.New("github_sync.app: app_id is required")
+		}
+		if app.InstallationID <= 0 {
+			return errors.New("github_sync.app: installation_id is required")
+		}
+		if app.PrivateKeyPath == "" {
+			return errors.New("github_sync.app: private_key_path is required")
+		}
+		key := app.Host + "/" + strings.ToLower(app.Owner)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("github_sync.app: duplicate app for %s", key)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 func normalizeDaemonCatalog(cfg *DaemonConfig) error {

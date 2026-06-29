@@ -50,6 +50,14 @@ var newGitHubSyncDaemonRunner = func(config githubsync.RunnerConfig) githubSyncD
 	return githubsync.NewRunner(config)
 }
 
+var newGitHubSyncHTTPFetcher = githubsync.NewHTTPFetcher
+
+func newConfiguredGitHubSyncFetcher(cfg config.GitHubSyncConfig) githubsync.Fetcher {
+	return newGitHubSyncHTTPFetcher(githubsync.HTTPFetcherConfig{
+		CredentialResolver: githubsync.NewCredentialResolver(cfg, nil),
+	})
+}
+
 type daemonStartOutput struct {
 	Action  string `json:"action"`
 	PID     int    `json:"pid"`
@@ -539,7 +547,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	go runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
 	broadcaster := daemon.NewEventBroadcaster()
 	federationWake := startFederationRunner(ctx, store, broadcaster, disp, daemonLog)
-	gitHubSyncFetcher := githubsync.NewGHFetcher(nil)
+	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
 	gitHubSyncWake := startGitHubSyncRunner(ctx, store, gitHubSyncFetcher, broadcaster, disp, daemonLog)
 	closeThrottleWindow, err := dcfg.Close.Throttle.ThrottleWindow()
 	if err != nil {
@@ -559,6 +567,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		Broadcaster:       broadcaster,
 		FederationWake:    federationWake,
 		GitHubSyncFetcher: gitHubSyncFetcher,
+		GitHubSyncConfig:  dcfg.GitHubSync,
 		GitHubSyncWake:    gitHubSyncWake,
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
@@ -814,7 +823,7 @@ func startGitHubSyncRunner(
 		}
 	}
 	if fetcher == nil {
-		fetcher = githubsync.NewGHFetcher(nil)
+		fetcher = newConfiguredGitHubSyncFetcher(config.GitHubSyncConfig{})
 	}
 	if bcast == nil {
 		bcast = daemon.NewEventBroadcaster()

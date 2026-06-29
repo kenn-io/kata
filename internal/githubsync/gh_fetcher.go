@@ -3,7 +3,6 @@ package githubsync
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -13,83 +12,55 @@ import (
 	"time"
 )
 
+// ParentData carries GitHub parent relationship data plus scan coverage.
+type ParentData struct {
+	ParentByChild   map[int]int64
+	ScannedChildren map[int]struct{}
+	ChildIDByNumber map[int]int64
+	Authoritative   bool
+	Unsupported     bool
+}
+
+// ParentID returns the parent REST ID for childNumber when GitHub reported one.
+func (d ParentData) ParentID(childNumber int) (int64, bool) {
+	if d.ParentByChild == nil {
+		return 0, false
+	}
+	parentID, ok := d.ParentByChild[childNumber]
+	if !ok || parentID == 0 {
+		return 0, false
+	}
+	return parentID, true
+}
+
+// ChildScanned reports whether the parent scan included childNumber.
+func (d ParentData) ChildScanned(childNumber int) bool {
+	if d.ScannedChildren == nil {
+		return false
+	}
+	_, ok := d.ScannedChildren[childNumber]
+	return ok
+}
+
 // Fetcher reads GitHub repository data needed by the sync importer.
 type Fetcher interface {
 	Repository(ctx context.Context, host, owner, repo string) (Repository, error)
 	Issues(ctx context.Context, binding Binding, since *time.Time) ([]Issue, error)
 	Comments(ctx context.Context, binding Binding, issueNumber int) ([]Comment, error)
+	// ParentData returns child issue parent REST IDs plus the child numbers
+	// covered by the scan. Unsupported providers should return Unsupported.
+	ParentData(ctx context.Context, binding Binding) (ParentData, error)
+}
+
+// BindingSessionFetcher can provide a Fetcher that reuses binding-scoped
+// resources such as authenticated transports for one sync run.
+type BindingSessionFetcher interface {
+	ForBinding(ctx context.Context, binding Binding) (Fetcher, error)
 }
 
 // CommandRunner executes a command and returns stdout, stderr, and the command error.
 type CommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, []byte, error)
-}
-
-// GHFetcher reads GitHub data through gh api.
-type GHFetcher struct {
-	runner CommandRunner
-}
-
-// NewGHFetcher returns a GitHub fetcher backed by runner.
-func NewGHFetcher(runner CommandRunner) *GHFetcher {
-	if runner == nil {
-		runner = execCommandRunner{}
-	}
-	return &GHFetcher{runner: runner}
-}
-
-// Repository validates and reads a GitHub repository.
-func (f *GHFetcher) Repository(ctx context.Context, host, owner, repo string) (Repository, error) {
-	binding, err := normalizeBinding(Binding{Host: host, Owner: owner, Repo: repo})
-	if err != nil {
-		return Repository{}, err
-	}
-	stdout, stderr, err := f.runner.Run(ctx, "gh", "api", "--hostname", binding.Host, repositoryEndpoint(binding))
-	if err != nil {
-		return Repository{}, ghAPIError(stderr, err)
-	}
-	var out Repository
-	if err := json.Unmarshal(stdout, &out); err != nil {
-		return Repository{}, fmt.Errorf("decode GitHub repository: %w", err)
-	}
-	return out, nil
-}
-
-// Issues reads repository issues using gh api pagination slurp output.
-func (f *GHFetcher) Issues(ctx context.Context, binding Binding, since *time.Time) ([]Issue, error) {
-	binding, err := normalizeBinding(binding)
-	if err != nil {
-		return nil, err
-	}
-	stdout, stderr, err := f.runner.Run(ctx, "gh", "api", "--hostname", binding.Host, "--paginate", "--slurp", issuesEndpoint(binding, since))
-	if err != nil {
-		return nil, ghAPIError(stderr, err)
-	}
-	issues, err := DecodeSlurpArray[Issue](stdout)
-	if err != nil {
-		return nil, err
-	}
-	return issues, nil
-}
-
-// Comments reads issue comments for one issue number using gh api pagination slurp output.
-func (f *GHFetcher) Comments(ctx context.Context, binding Binding, issueNumber int) ([]Comment, error) {
-	if issueNumber <= 0 {
-		return nil, fmt.Errorf("GitHub issue number must be positive")
-	}
-	binding, err := normalizeBinding(binding)
-	if err != nil {
-		return nil, err
-	}
-	stdout, stderr, err := f.runner.Run(ctx, "gh", "api", "--hostname", binding.Host, "--paginate", "--slurp", commentsEndpoint(binding, issueNumber))
-	if err != nil {
-		return nil, ghAPIError(stderr, err)
-	}
-	comments, err := DecodeSlurpArray[Comment](stdout)
-	if err != nil {
-		return nil, err
-	}
-	return comments, nil
 }
 
 type execCommandRunner struct{}
@@ -149,16 +120,8 @@ func commentsEndpoint(binding Binding, issueNumber int) string {
 	return repositoryEndpoint(binding) + "/issues/" + strconv.Itoa(issueNumber) + "/comments?" + query.Encode()
 }
 
-func ghAPIError(stderr []byte, err error) error {
-	errText := redactTokenMaterial(err.Error())
-	stderrText := strings.TrimSpace(redactTokenMaterial(string(stderr)))
-	if stderrText == "" {
-		return fmt.Errorf("gh api failed: %s", errText)
-	}
-	return fmt.Errorf("gh api failed: %s: %s", errText, stderrText)
-}
-
 var tokenRedactions = []*regexp.Regexp{
+	regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`),
 	regexp.MustCompile(`github_pat_[A-Za-z0-9_]+`),
 	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9_]+`),
 	regexp.MustCompile(`(?i)(authorization:\s*(?:bearer|token)\s+)\S+`),

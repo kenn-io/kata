@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/githubsync"
 )
@@ -296,7 +297,17 @@ func githubSyncFetcher(cfg ServerConfig) githubsync.Fetcher {
 	if cfg.GitHubSyncFetcher != nil {
 		return cfg.GitHubSyncFetcher
 	}
-	return githubsync.NewGHFetcher(nil)
+	factory := cfg.GitHubSyncFetcherFactory
+	if factory == nil {
+		factory = defaultGitHubSyncHTTPFetcher
+	}
+	return factory(cfg.GitHubSyncConfig)
+}
+
+func defaultGitHubSyncHTTPFetcher(cfg config.GitHubSyncConfig) githubsync.Fetcher {
+	return githubsync.NewHTTPFetcher(githubsync.HTTPFetcherConfig{
+		CredentialResolver: githubsync.NewCredentialResolver(cfg, nil),
+	})
 }
 
 func githubSyncRunner(cfg ServerConfig) GitHubSyncRunner {

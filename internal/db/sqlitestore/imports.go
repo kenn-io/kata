@@ -122,8 +122,9 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 		if state == nil {
 			continue
 		}
-		if state.created || state.sourceNewer {
-			linkEvents, n, err := d.reconcileImportLinks(ctx, tx, p, state.issue, item, states, projectName)
+		linkTypeFilter, reconcileLinks := importLinkReconcileFilter(p, state, item)
+		if reconcileLinks {
+			linkEvents, n, err := d.reconcileImportLinks(ctx, tx, p, state.issue, item, states, projectName, linkTypeFilter)
 			if err != nil {
 				return db.ImportBatchResult{}, nil, err
 			}
@@ -652,11 +653,14 @@ func (d *Store) insertLabelEvent(ctx context.Context, tx *sql.Tx, p db.ImportBat
 	return d.insertEventTx(ctx, tx, eventInsert{ProjectID: p.ProjectID, ProjectName: projectName, IssueID: &issue.ID, Type: eventType, Actor: p.Actor, Payload: string(payload)})
 }
 
-func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, item db.ImportItem, states map[string]*importIssueState, projectName string) ([]db.Event, int, error) {
+func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, item db.ImportItem, states map[string]*importIssueState, projectName string, linkTypeFilter map[string]bool) ([]db.Event, int, error) {
 	events := []db.Event{}
 	created := 0
 	desired := map[string]db.ImportLink{}
 	for _, l := range item.Links {
+		if !importLinkTypeAllowed(linkTypeFilter, l.Type) {
+			continue
+		}
 		desired[importLinkExternalID(item.ExternalID, l)] = l
 	}
 
@@ -707,6 +711,12 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 		if m.linkID.Valid {
 			link, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE id = ?`, m.linkID.Int64))
 			if err == nil {
+				if !importLinkTypeAllowed(linkTypeFilter, link.Type) {
+					continue
+				}
+				if !importItemLinkTypeAuthoritative(item, link.Type) {
+					continue
+				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID); err != nil {
 					return nil, 0, fmt.Errorf("delete source link: %w", err)
 				}
@@ -718,6 +728,8 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 			} else if !errors.Is(err, db.ErrNotFound) {
 				return nil, 0, err
 			}
+		} else if !importLinkMappingExternalIDAllowed(item.ExternalID, m.externalID, linkTypeFilter) {
+			continue
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM import_mappings WHERE id = ?`, m.id); err != nil {
 			return nil, 0, fmt.Errorf("delete source link mapping: %w", err)
@@ -745,7 +757,13 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 			VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?, ?)`,
 			fromID, toID, fromID, toID, importLink.Type, p.Actor, createdAt)
 		if err != nil {
-			return nil, 0, classifyLinkInsertError(err)
+			classified := classifyLinkInsertError(err)
+			if errors.Is(classified, db.ErrParentAlreadySet) {
+				if p.PreserveLocalParentConflicts {
+					continue
+				}
+			}
+			return nil, 0, classified
 		}
 		linkID, err := res.LastInsertId()
 		if err != nil {
@@ -767,6 +785,45 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 		created++
 	}
 	return events, created, nil
+}
+
+func importLinkReconcileFilter(p db.ImportBatchParams, state *importIssueState, item db.ImportItem) (map[string]bool, bool) {
+	if state.created || state.sourceNewer {
+		return nil, true
+	}
+	if len(p.ReconcileLinkTypesForUnchanged) == 0 {
+		return nil, false
+	}
+	filter := make(map[string]bool, len(p.ReconcileLinkTypesForUnchanged))
+	for linkType, enabled := range p.ReconcileLinkTypesForUnchanged {
+		if enabled && importItemLinkTypeAuthoritative(item, linkType) {
+			filter[linkType] = true
+		}
+	}
+	return filter, len(filter) > 0
+}
+
+func importLinkTypeAllowed(filter map[string]bool, linkType string) bool {
+	if filter == nil {
+		return true
+	}
+	return filter[linkType]
+}
+
+func importLinkMappingExternalIDAllowed(issueExternalID, linkExternalID string, filter map[string]bool) bool {
+	if filter == nil {
+		return true
+	}
+	prefix := issueExternalID + ":"
+	if !strings.HasPrefix(linkExternalID, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(linkExternalID, prefix)
+	linkType, _, ok := strings.Cut(rest, ":")
+	if !ok {
+		return false
+	}
+	return filter[linkType]
 }
 
 func (d *Store) insertLinkEvent(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, projectName, eventType string, link db.Link, updatedAt time.Time) (db.Event, error) {
@@ -933,6 +990,16 @@ func importLabelExternalID(issueExternalID, label string) string {
 
 func importLinkExternalID(issueExternalID string, link db.ImportLink) string {
 	return issueExternalID + ":" + link.Type + ":" + link.TargetExternalID
+}
+
+func importItemLinkTypeAuthoritative(item db.ImportItem, linkType string) bool {
+	if item.LinkTypesAuthoritative == nil {
+		return true
+	}
+	if authoritative, ok := item.LinkTypesAuthoritative[linkType]; ok {
+		return authoritative
+	}
+	return true
 }
 
 func normalizeOwner(owner *string) *string {

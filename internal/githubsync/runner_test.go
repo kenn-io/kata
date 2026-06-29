@@ -52,6 +52,27 @@ func TestRunnerFirstSyncFetchesAllImportsCommentsEmitsEventsAndAdvancesCursor(t 
 	assert.Equal(t, h.project.ID, h.sinkCalls[0].projectID)
 }
 
+func TestRunnerUsesBindingSessionFetcherForOneRun(t *testing.T) {
+	h := newRunnerHarness(t)
+	issueTime := h.now.Add(-time.Hour)
+	session := &fakeRunnerFetcher{
+		repo: Repository{NodeID: h.binding.RemoteID, ID: 101, FullName: h.binding.DisplayName},
+		issues: []Issue{
+			testIssue(101, 1, "session issue", issueTime),
+		},
+	}
+	sessionFetcher := &fakeBindingSessionFetcher{session: session}
+	h.runner.config.Fetcher = sessionFetcher
+
+	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, result.Import.Created)
+	assert.Equal(t, []Binding{{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}}, sessionFetcher.bindings)
+	require.Len(t, session.issueCalls, 1)
+	assert.Empty(t, sessionFetcher.issueCalls)
+}
+
 func TestRunnerOversizedInitialSyncSplitsImportsAndAdvancesCursorAfterAllChunks(t *testing.T) {
 	h := newRunnerHarness(t, withInitialBatchSize(2))
 	issueTime := h.now.Add(-time.Hour)
@@ -95,6 +116,315 @@ func TestRunnerPartialMultiBatchFailureDeliversEarlierEventsAndLeavesCursorUncha
 	assert.Nil(t, status.SyncStartedAt)
 	require.NotNil(t, status.LastErrorAt)
 	assert.Contains(t, status.LastError, "import failed")
+}
+
+func TestRunnerParentDataFailureRecordsErrorAndLeavesExistingState(t *testing.T) {
+	h := newRunnerHarness(t)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+	h.fetcher.parentMapErr = errors.New("parent lookup unavailable")
+
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.ErrorContains(t, err, "parent lookup unavailable")
+
+	assert.Empty(t, h.store.importItemCounts)
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	status, err := h.db.IssueSyncStatusByProject(h.ctx, h.project.ID)
+	require.NoError(t, err)
+	assert.Nil(t, status.SyncStartedAt)
+	require.NotNil(t, status.LastErrorAt)
+	assert.Contains(t, status.LastError, "parent lookup unavailable")
+}
+
+func TestRunnerInitialSyncReconcilesParentLinksAfterAllChunksImport(t *testing.T) {
+	h := newRunnerHarness(t, withInitialBatchSize(1))
+	issueTime := h.now.Add(-time.Hour)
+	h.fetcher.issues = []Issue{
+		testIssue(101, 1, "child issue", issueTime),
+		testIssue(102, 2, "parent issue", issueTime),
+	}
+	h.fetcher.parentMap = map[int]int64{1: 102}
+
+	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, []int{1, 1}, h.store.importItemCounts)
+	assert.Equal(t, 2, result.Import.Created)
+	assert.Equal(t, 1, result.Import.Links)
+	childMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:101")
+	require.NoError(t, err)
+	require.NotNil(t, childMapping.IssueID)
+	parentMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:102")
+	require.NoError(t, err)
+	require.NotNil(t, parentMapping.IssueID)
+	parents, err := h.db.ParentNumbersByIssues(h.ctx, []int64{*childMapping.IssueID})
+	require.NoError(t, err)
+	assert.Equal(t, *parentMapping.IssueID, parents[*childMapping.IssueID])
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+}
+
+func TestRunnerFeatureUnsupportedParentDataPreservesChangedIssueParent(t *testing.T) {
+	h := newRunnerHarness(t)
+	initialTime := h.now.Add(-2 * time.Hour)
+	seedSourceParentLink(t, h, initialTime)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
+	h.fetcher.parentData = ParentData{Unsupported: true}
+	h.fetcher.parentDataSet = true
+
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+}
+
+func TestRunnerBackfillsParentLinksWithOneFullImport(t *testing.T) {
+	h := newRunnerHarness(t)
+	initialTime := h.now.Add(-2 * time.Hour)
+	seedSourceParentLink(t, h, initialTime)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{
+		testIssue(101, 1, "changed child", h.now.Add(-time.Hour)),
+		testIssue(102, 2, "parent", h.now.Add(-time.Hour)),
+	}
+	h.fetcher.parentData = ParentData{
+		ParentByChild:   map[int]int64{1: 102},
+		ScannedChildren: map[int]struct{}{1: {}, 2: {}},
+		Authoritative:   true,
+	}
+	h.fetcher.parentDataSet = true
+
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	require.Len(t, h.fetcher.issueCalls, 1)
+	assert.Nil(t, h.fetcher.issueCalls[0].since)
+	refreshed, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	refreshedConfig, err := DecodeConfig(refreshed.Config)
+	require.NoError(t, err)
+	assert.Equal(t, currentParentLinksVersion, refreshedConfig.ParentLinksVersion)
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+
+	firstRunAt := h.now
+	h.advance(5 * time.Minute)
+	h.fetcher.issueCalls = nil
+	h.fetcher.issues = nil
+
+	_, err = h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	require.Len(t, h.fetcher.issueCalls, 1)
+	require.NotNil(t, h.fetcher.issueCalls[0].since)
+	assert.Equal(t, firstRunAt.Add(-2*time.Minute), *h.fetcher.issueCalls[0].since)
+}
+
+func TestRunnerBackfillReconcilesParentLinksForUnchangedExistingIssues(t *testing.T) {
+	h := newRunnerHarness(t)
+	initialTime := h.now.Add(-2 * time.Hour)
+	seedBatch := BuildImportBatchWithConfig(h.binding.SourceKey, Config{
+		Host:  "github.com",
+		Owner: "example-owner",
+		Repo:  "example-repo",
+	}, []Issue{
+		testIssue(101, 1, "unchanged child", initialTime),
+		testIssue(102, 2, "unchanged parent", initialTime),
+	}, nil, ParentData{}, h.now)
+	seedBatch.ProjectID = h.project.ID
+	_, _, err := h.db.ImportBatch(h.ctx, seedBatch)
+	require.NoError(t, err)
+	childMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", "issue-id:101")
+	require.NoError(t, err)
+	require.NotNil(t, childMapping.IssueID)
+	parents, err := h.db.ParentNumbersByIssues(h.ctx, []int64{*childMapping.IssueID})
+	require.NoError(t, err)
+	assert.NotContains(t, parents, *childMapping.IssueID)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{
+		testIssue(101, 1, "unchanged child", initialTime),
+		testIssue(102, 2, "unchanged parent", initialTime),
+	}
+	h.fetcher.parentData = ParentData{
+		ParentByChild:   map[int]int64{1: 102},
+		ScannedChildren: map[int]struct{}{1: {}, 2: {}},
+		Authoritative:   true,
+	}
+	h.fetcher.parentDataSet = true
+
+	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, result.Import.Unchanged)
+	assert.Equal(t, 1, result.Import.Links)
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+	refreshed, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	refreshedConfig, err := DecodeConfig(refreshed.Config)
+	require.NoError(t, err)
+	assert.Equal(t, currentParentLinksVersion, refreshedConfig.ParentLinksVersion)
+}
+
+func TestRunnerReconcilesScannedParentForIssueAbsentFromIncrementalFetch(t *testing.T) {
+	h := newRunnerHarness(t)
+	initialTime := h.now.Add(-2 * time.Hour)
+	seedBatch := BuildImportBatchWithConfig(h.binding.SourceKey, Config{
+		Host:  "github.com",
+		Owner: "example-owner",
+		Repo:  "example-repo",
+	}, []Issue{
+		testIssue(101, 1, "child", initialTime),
+		testIssue(102, 2, "old parent", initialTime),
+		testIssue(103, 3, "new parent", initialTime),
+	}, nil, ParentData{
+		ParentByChild:   map[int]int64{1: 102},
+		ScannedChildren: map[int]struct{}{1: {}, 2: {}, 3: {}},
+		ChildIDByNumber: map[int]int64{1: 101, 2: 102, 3: 103},
+		Authoritative:   true,
+	}, h.now)
+	seedBatch.ProjectID = h.project.ID
+	_, _, err := h.db.ImportBatch(h.ctx, seedBatch)
+	require.NoError(t, err)
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = nil
+	h.fetcher.parentData = ParentData{
+		ParentByChild:   map[int]int64{1: 103},
+		ScannedChildren: map[int]struct{}{1: {}, 2: {}, 3: {}},
+		ChildIDByNumber: map[int]int64{1: 101, 2: 102, 3: 103},
+		Authoritative:   true,
+	}
+	h.fetcher.parentDataSet = true
+
+	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, result.Import.Unchanged)
+	assert.Equal(t, 1, result.Import.Links)
+	assertSourceParent(t, h, "issue-id:101", "issue-id:103")
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+}
+
+func TestRunnerRemovesScannedParentForIssueAbsentFromIncrementalFetch(t *testing.T) {
+	h := newRunnerHarness(t)
+	initialTime := h.now.Add(-2 * time.Hour)
+	seedSourceParentLink(t, h, initialTime)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = nil
+	h.fetcher.parentData = ParentData{
+		ScannedChildren: map[int]struct{}{1: {}, 2: {}},
+		ChildIDByNumber: map[int]int64{1: 101, 2: 102},
+		Authoritative:   true,
+	}
+	h.fetcher.parentDataSet = true
+
+	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, result.Import.Unchanged)
+	assert.Equal(t, 0, result.Import.Links)
+	assertNoParent(t, h, "issue-id:101")
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+}
+
+func TestRunnerBackfillConfigPersistFailureRecordsErrorAndClearsInFlight(t *testing.T) {
+	h := newRunnerHarness(t)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{
+		testIssue(101, 1, "child", h.now.Add(-time.Hour)),
+		testIssue(102, 2, "parent", h.now.Add(-time.Hour)),
+	}
+	h.fetcher.parentData = ParentData{
+		ParentByChild:   map[int]int64{1: 102},
+		ScannedChildren: map[int]struct{}{1: {}, 2: {}},
+		Authoritative:   true,
+	}
+	h.fetcher.parentDataSet = true
+	h.store.refreshErr = errors.New("config persist unavailable")
+
+	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.ErrorContains(t, err, "config persist unavailable")
+
+	assert.Equal(t, 2, result.Import.Created)
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	status, err := h.db.IssueSyncStatusByProject(h.ctx, h.project.ID)
+	require.NoError(t, err)
+	assert.Nil(t, status.SyncStartedAt)
+	require.NotNil(t, status.LastErrorAt)
+	assert.Contains(t, status.LastError, "config persist unavailable")
+}
+
+func TestRunnerMissingParentTargetSkipsLinkAndPreservesExistingParent(t *testing.T) {
+	h := newRunnerHarness(t)
+	initialTime := h.now.Add(-2 * time.Hour)
+	seedSourceParentLink(t, h, initialTime)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
+	h.fetcher.parentData = ParentData{
+		ParentByChild:   map[int]int64{1: 999},
+		ScannedChildren: map[int]struct{}{1: {}},
+		Authoritative:   true,
+	}
+	h.fetcher.parentDataSet = true
+
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
+}
+
+func TestRunnerParentTargetLookupErrorRecordsFailureAndSkipsImport(t *testing.T) {
+	h := newRunnerHarness(t)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
+	h.fetcher.parentData = ParentData{
+		ParentByChild:   map[int]int64{1: 999},
+		ScannedChildren: map[int]struct{}{1: {}},
+		Authoritative:   true,
+	}
+	h.fetcher.parentDataSet = true
+	h.store.importMappingErr = errors.New("mapping lookup unavailable")
+
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.ErrorContains(t, err, "mapping lookup unavailable")
+
+	assert.Empty(t, h.store.importItemCounts)
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	status, err := h.db.IssueSyncStatusByProject(h.ctx, h.project.ID)
+	require.NoError(t, err)
+	assert.Nil(t, status.SyncStartedAt)
+	require.NotNil(t, status.LastErrorAt)
+	assert.Contains(t, status.LastError, "mapping lookup unavailable")
+}
+
+func TestRunnerChildAbsentFromParentScanPreservesChangedIssueParent(t *testing.T) {
+	h := newRunnerHarness(t)
+	initialTime := h.now.Add(-2 * time.Hour)
+	seedSourceParentLink(t, h, initialTime)
+	lastCursor := h.now.Add(-10 * time.Minute)
+	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
+	h.fetcher.issues = []Issue{testIssue(101, 1, "changed child", h.now.Add(-time.Hour))}
+	h.fetcher.parentData = ParentData{
+		ScannedChildren: map[int]struct{}{2: {}},
+		Authoritative:   true,
+	}
+	h.fetcher.parentDataSet = true
+
+	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
 }
 
 func TestRunnerNegativeInitialBatchSizeDefaults(t *testing.T) {
@@ -173,7 +503,7 @@ func TestRunnerLegacyTitlePrefixConfigReconcilesExistingImportedTitles(t *testin
 		Repo:        "example-repo",
 		RepoID:      101,
 		TitlePrefix: &noTitlePrefix,
-	}, []Issue{exactTitle}, nil, h.now)
+	}, []Issue{exactTitle}, nil, ParentData{}, h.now)
 	exactBatch.ProjectID = h.project.ID
 	_, _, err := h.db.ImportBatch(h.ctx, exactBatch)
 	require.NoError(t, err)
@@ -678,11 +1008,13 @@ type spyStorage struct {
 	db.Storage
 	failImportCall   int
 	importErr        error
+	importMappingErr error
 	importCalls      int
 	importItemCounts []int
 	lastImportGuard  *db.IssueSyncImportGuard
 	successCtxErr    error
 	errorCtxErr      error
+	refreshErr       error
 }
 
 func (s *spyStorage) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
@@ -695,6 +1027,13 @@ func (s *spyStorage) ImportBatch(ctx context.Context, p db.ImportBatchParams) (d
 	return s.Storage.ImportBatch(ctx, p)
 }
 
+func (s *spyStorage) ImportMappingBySource(ctx context.Context, projectID int64, source, objectType, externalID string) (db.ImportMapping, error) {
+	if s.importMappingErr != nil {
+		return db.ImportMapping{}, s.importMappingErr
+	}
+	return s.Storage.ImportMappingBySource(ctx, projectID, source, objectType, externalID)
+}
+
 func (s *spyStorage) RecordIssueSyncSuccess(ctx context.Context, p db.IssueSyncSuccessParams) (db.IssueSyncStatus, error) {
 	s.successCtxErr = ctx.Err()
 	return s.Storage.RecordIssueSyncSuccess(ctx, p)
@@ -703,6 +1042,13 @@ func (s *spyStorage) RecordIssueSyncSuccess(ctx context.Context, p db.IssueSyncS
 func (s *spyStorage) RecordIssueSyncError(ctx context.Context, p db.IssueSyncErrorParams) (db.IssueSyncStatus, error) {
 	s.errorCtxErr = ctx.Err()
 	return s.Storage.RecordIssueSyncError(ctx, p)
+}
+
+func (s *spyStorage) RefreshIssueSyncBinding(ctx context.Context, p db.IssueSyncBindingUpdateParams) (db.IssueSyncBinding, error) {
+	if s.refreshErr != nil {
+		return db.IssueSyncBinding{}, s.refreshErr
+	}
+	return s.Storage.RefreshIssueSyncBinding(ctx, p)
 }
 
 type fakeRunnerFetcher struct {
@@ -717,12 +1063,27 @@ type fakeRunnerFetcher struct {
 	beforeIssuesReturn func()
 	comments           map[int][]Comment
 	commentsErr        error
+	parentData         ParentData
+	parentDataSet      bool
+	parentMap          map[int]int64
+	parentMapErr       error
 	repoCalls          []string
 	issueCalls         []fakeIssueCall
 	commentCalls       []int
 	blockRepository    chan struct{}
 	releaseRepository  chan struct{}
 	blockOnce          sync.Once
+}
+
+type fakeBindingSessionFetcher struct {
+	fakeRunnerFetcher
+	session  Fetcher
+	bindings []Binding
+}
+
+func (f *fakeBindingSessionFetcher) ForBinding(_ context.Context, binding Binding) (Fetcher, error) {
+	f.bindings = append(f.bindings, binding)
+	return f.session, nil
 }
 
 func (f *fakeRunnerFetcher) Repository(_ context.Context, _, _ string, repo string) (Repository, error) {
@@ -776,6 +1137,103 @@ func (f *fakeRunnerFetcher) Comments(_ context.Context, _ Binding, issueNumber i
 		return nil, f.commentsErr
 	}
 	return append([]Comment(nil), f.comments[issueNumber]...), nil
+}
+
+func (f *fakeRunnerFetcher) ParentData(_ context.Context, _ Binding) (ParentData, error) {
+	if f.parentMapErr != nil {
+		return ParentData{}, f.parentMapErr
+	}
+	if f.parentDataSet {
+		return cloneParentData(f.parentData), nil
+	}
+	if f.parentMap == nil {
+		return ParentData{}, nil
+	}
+	out := make(map[int]int64, len(f.parentMap))
+	scanned := make(map[int]struct{}, len(f.parentMap))
+	for k, v := range f.parentMap {
+		out[k] = v
+		scanned[k] = struct{}{}
+	}
+	return ParentData{ParentByChild: out, ScannedChildren: scanned, Authoritative: true}, nil
+}
+
+func cloneParentData(in ParentData) ParentData {
+	out := in
+	if in.ParentByChild != nil {
+		out.ParentByChild = make(map[int]int64, len(in.ParentByChild))
+		for k, v := range in.ParentByChild {
+			out.ParentByChild[k] = v
+		}
+	}
+	if in.ScannedChildren != nil {
+		out.ScannedChildren = make(map[int]struct{}, len(in.ScannedChildren))
+		for k, v := range in.ScannedChildren {
+			out.ScannedChildren[k] = v
+		}
+	}
+	if in.ChildIDByNumber != nil {
+		out.ChildIDByNumber = make(map[int]int64, len(in.ChildIDByNumber))
+		for k, v := range in.ChildIDByNumber {
+			out.ChildIDByNumber[k] = v
+		}
+	}
+	return out
+}
+
+func seedSourceParentLink(t *testing.T, h *runnerHarness, ts time.Time) {
+	t.Helper()
+	_, _, err := h.db.ImportBatch(h.ctx, db.ImportBatchParams{
+		ProjectID: h.project.ID,
+		Source:    h.binding.SourceKey,
+		Actor:     actorGitHubSync,
+		Items: []db.ImportItem{
+			{
+				ExternalID: "issue-id:101",
+				Title:      "child",
+				Body:       "body",
+				Author:     "alice",
+				Status:     "open",
+				CreatedAt:  ts,
+				UpdatedAt:  ts,
+				Links:      []db.ImportLink{{Type: "parent", TargetExternalID: "issue-id:102"}},
+			},
+			{
+				ExternalID: "issue-id:102",
+				Title:      "parent",
+				Body:       "body",
+				Author:     "bob",
+				Status:     "open",
+				CreatedAt:  ts,
+				UpdatedAt:  ts,
+			},
+		},
+	})
+	require.NoError(t, err)
+	assertSourceParent(t, h, "issue-id:101", "issue-id:102")
+}
+
+func assertSourceParent(t *testing.T, h *runnerHarness, childExternalID, parentExternalID string) {
+	t.Helper()
+	childMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", childExternalID)
+	require.NoError(t, err)
+	require.NotNil(t, childMapping.IssueID)
+	parentMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", parentExternalID)
+	require.NoError(t, err)
+	require.NotNil(t, parentMapping.IssueID)
+	parents, err := h.db.ParentNumbersByIssues(h.ctx, []int64{*childMapping.IssueID})
+	require.NoError(t, err)
+	assert.Equal(t, *parentMapping.IssueID, parents[*childMapping.IssueID])
+}
+
+func assertNoParent(t *testing.T, h *runnerHarness, childExternalID string) {
+	t.Helper()
+	childMapping, err := h.db.ImportMappingBySource(h.ctx, h.project.ID, h.binding.SourceKey, "issue", childExternalID)
+	require.NoError(t, err)
+	require.NotNil(t, childMapping.IssueID)
+	parents, err := h.db.ParentNumbersByIssues(h.ctx, []int64{*childMapping.IssueID})
+	require.NoError(t, err)
+	assert.NotContains(t, parents, *childMapping.IssueID)
 }
 
 func (f *fakeRunnerFetcher) repoCallCount() int {

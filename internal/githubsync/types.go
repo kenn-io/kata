@@ -71,12 +71,15 @@ type Binding struct {
 // Config is the GitHub-owned issue sync binding configuration stored in the
 // provider-neutral issue_sync_bindings.config_json column.
 type Config struct {
-	Host        string `json:"host"`
-	Owner       string `json:"owner"`
-	Repo        string `json:"repo"`
-	RepoID      int64  `json:"repo_id"`
-	TitlePrefix *bool  `json:"title_prefix"`
+	Host               string `json:"host"`
+	Owner              string `json:"owner"`
+	Repo               string `json:"repo"`
+	RepoID             int64  `json:"repo_id"`
+	TitlePrefix        *bool  `json:"title_prefix"`
+	ParentLinksVersion int    `json:"parent_links_version,omitempty"`
 }
+
+const currentParentLinksVersion = 1
 
 // Binding converts the stored config into the fetcher binding shape.
 func (c Config) Binding() Binding {
@@ -96,6 +99,19 @@ func (c Config) UseTitlePrefix() bool {
 		return true
 	}
 	return *c.TitlePrefix
+}
+
+// NeedsParentLinkBackfill reports whether an existing binding still needs a
+// full issue pass to populate source-managed parent links.
+func (c Config) NeedsParentLinkBackfill() bool {
+	return c.ParentLinksVersion < currentParentLinksVersion
+}
+
+// WithParentLinksBackfilled marks the config as having completed the current
+// parent-link backfill version.
+func (c Config) WithParentLinksBackfilled() Config {
+	c.ParentLinksVersion = currentParentLinksVersion
+	return c
 }
 
 // Validate reports whether the config has the GitHub repository identity needed

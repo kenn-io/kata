@@ -33,31 +33,29 @@ important.
 ## Operating Model
 
 All GitHub network access runs in the daemon. The CLI resolves the kata project
-and repository coordinates, then calls daemon HTTP endpoints. The daemon runs
-`gh api` for repository validation and sync fetches, relying on the GitHub CLI
-to supply its configured authentication.
+and repository coordinates, then calls daemon HTTP endpoints. The daemon uses
+a small `net/http` GitHub client for repository validation, REST issue/comment
+reads, and GraphQL parent discovery.
 
-kata does not read, store, log, or transmit a GitHub token. The operational
-requirement is therefore daemon-side: the daemon host must have `gh` installed
-and authenticated for the configured GitHub host. For a normal GitHub.com
-repository, verify the daemon environment with:
-
-```sh
-gh auth status --hostname github.com
-```
+Credentials are daemon-owned and resolved per binding. The daemon first looks
+for a matching `[[github_sync.app]]` entry keyed by normalized `(host, owner)`.
+If no App matches, it reads the explicit token env named by
+`[github_sync].token_env` (default `KATA_GITHUB_TOKEN`) only when the binding
+host matches `[github_sync].token_host` (default `github.com`). If no
+host-bound env token matches, it falls back to `gh auth token --hostname
+<host>` for local/single-user deployments. The resolved bearer material is
+guarded so it can only reach the configured GitHub API host and repository
+scope.
 
 Remote-client mode keeps the same boundary. A client on another machine can run
 `kata sync github enable`, but validation and later polling succeed only if the
-remote daemon can run authenticated `gh` against the target repository. A
-client-side `gh` login is not enough when `KATA_SERVER` points at
-`https://daemon.example`.
+remote daemon has credentials for the target repository. A client-side `gh`
+login is not enough when `KATA_SERVER` points at `https://daemon.example`.
 
-This `gh`-delegated credential model is intentionally narrow. It works for
-local and single-user daemon deployments, but it is not the right service
-credential for a shared team hub: a hub should not depend on one user's ambient
-GitHub CLI session. Shared hub deployments need GitHub App authentication so
-repository access is owned by the service installation and can be audited,
-rotated, and scoped independently of any individual user.
+GitHub App authentication is the preferred service credential for shared team
+hubs because repository access belongs to the service installation and can be
+audited, rotated, and scoped independently of any individual user. The App
+needs only Metadata read and Issues read permissions.
 
 The sync binding, cursor, interval, and status live in the daemon database, not
 in `.kata.toml`, so remote clients and daemon restarts see the same state.
@@ -65,10 +63,9 @@ Durable storage and HTTP lifecycle endpoints use the provider-neutral
 `issue_sync_*` model and `/issue-sync/{provider}/...` routes; the GitHub
 implementation is the first provider adapter on top of that model.
 
-GitLab can likely follow the same CLI-delegated auth model as GitHub through a
-provider-specific CLI. Linear or other token-based providers need a separate
-credential design before implementation: issue sync config is allowed to carry
-provider identity, but it must not store raw API tokens.
+GitLab, Linear, or other providers need their own credential design before
+implementation: issue sync config is allowed to carry provider identity, but it
+must not store raw API tokens.
 
 ## Commands
 
@@ -137,6 +134,15 @@ issue write path. GitHub issue and comment IDs are stored as external IDs, so
 repeated syncs are idempotent. The import path compares source timestamps for
 issue fields, which is why newer GitHub state can replace local edits to
 GitHub-owned fields.
+
+Parent links are imported from a full-repository GraphQL parent scan. When the
+GitHub host does not support the parent fields, kata treats parent data as
+unsupported for that host and preserves existing source-managed parent links.
+GitHub reparent and unparent operations may not advance the child issue's
+`updated_at`, so authoritative parent data is reconciled for already imported
+scanned children even when those children were absent from the incremental REST
+issue fetch. Transient GraphQL, REST, auth, and rate-limit failures fail the
+sync attempt and leave the cursor unchanged.
 
 GitHub sync may run on a federation hub project. In that supported topology,
 GitHub is imported into the hub, then federation replicates the resulting kata

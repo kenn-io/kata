@@ -27,15 +27,17 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
-	DB                      db.Storage
-	StartedAt               time.Time
-	Endpoint                *kitdaemon.Endpoint
-	Broadcaster             *EventBroadcaster
-	FederationWake          func()
-	GitHubSyncFetcher       githubsync.Fetcher
-	GitHubSyncRunnerFactory GitHubSyncRunnerFactory
-	GitHubSyncWake          func()
-	Hooks                   hooks.Sink
+	DB                       db.Storage
+	StartedAt                time.Time
+	Endpoint                 *kitdaemon.Endpoint
+	Broadcaster              *EventBroadcaster
+	FederationWake           func()
+	GitHubSyncFetcher        githubsync.Fetcher
+	GitHubSyncConfig         config.GitHubSyncConfig
+	GitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
+	GitHubSyncRunnerFactory  GitHubSyncRunnerFactory
+	GitHubSyncWake           func()
+	Hooks                    hooks.Sink
 	// CloseThrottle controls whether the opt-in sibling-burst and repeated-
 	// message guards run on close. Zero-value means "guards off".
 	CloseThrottle CloseThrottlePolicy

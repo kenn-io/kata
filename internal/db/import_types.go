@@ -159,7 +159,15 @@ type ImportBatchParams struct {
 	Source         string
 	Actor          string
 	IssueSyncGuard *IssueSyncImportGuard
-	Items          []ImportItem
+	// ReconcileLinkTypesForUnchanged asks ImportBatch to reconcile source-managed
+	// links of selected types even when the issue row itself is unchanged. Normal
+	// imports leave unchanged issues' labels and links alone.
+	ReconcileLinkTypesForUnchanged map[string]bool
+	// PreserveLocalParentConflicts leaves an existing local parent in place when
+	// a source-managed parent insert would create a second parent. Generic
+	// imports report ErrParentAlreadySet by default.
+	PreserveLocalParentConflicts bool
+	Items                        []ImportItem
 }
 
 // IssueSyncImportGuard binds an ImportBatch call to a specific claimed
@@ -181,20 +189,21 @@ type ImportItem struct {
 	// this same object. When no mapping exists under ExternalID, import upsert
 	// adopts a mapping found under one of these and re-keys it onto ExternalID,
 	// so a canonical-key change does not duplicate already-imported issues.
-	LegacyExternalIDs []string
-	Title             string
-	Body              string
-	Author            string
-	Owner             *string
-	Priority          *int64
-	Status            string
-	ClosedReason      *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	ClosedAt          *time.Time
-	Labels            []string
-	Comments          []ImportComment
-	Links             []ImportLink
+	LegacyExternalIDs      []string
+	Title                  string
+	Body                   string
+	Author                 string
+	Owner                  *string
+	Priority               *int64
+	Status                 string
+	ClosedReason           *string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	ClosedAt               *time.Time
+	Labels                 []string
+	Comments               []ImportComment
+	Links                  []ImportLink
+	LinkTypesAuthoritative map[string]bool
 }
 
 // ImportComment is one normalized comment attached to an ImportItem. ExternalID

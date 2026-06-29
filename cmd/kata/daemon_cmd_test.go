@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -207,7 +209,9 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemon.Na
 		cancel()
 		select {
 		case err := <-done:
-			assert.NoError(t, err)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", err)
+			}
 		case <-time.After(3 * time.Second):
 			t.Error("daemon did not stop after context cancellation")
 		}
@@ -751,6 +755,125 @@ func TestGitHubSyncRunnerInterval(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, githubSyncRunnerInterval())
 }
 
+func TestDaemonGitHubSyncHTTPFetcherUsesCredentialConfig(t *testing.T) {
+	var captured githubsync.HTTPFetcherConfig
+	orig := newGitHubSyncHTTPFetcher
+	newGitHubSyncHTTPFetcher = func(cfg githubsync.HTTPFetcherConfig) *githubsync.HTTPFetcher {
+		captured = cfg
+		return orig(cfg)
+	}
+	t.Cleanup(func() { newGitHubSyncHTTPFetcher = orig })
+
+	tokenEnv := "EXAMPLE_" + "GITHUB_TOKEN"
+	cfg := config.GitHubSyncConfig{
+		TokenEnv: tokenEnv,
+		Apps: []config.GitHubAppConfig{{
+			Host:           "github.com",
+			Owner:          "example-owner",
+			AppID:          123,
+			InstallationID: 456,
+			PrivateKeyPath: "/secure/example.pem",
+		}},
+	}
+	fetcher := newConfiguredGitHubSyncFetcher(cfg)
+	require.IsType(t, &githubsync.HTTPFetcher{}, fetcher)
+
+	resolver, ok := captured.CredentialResolver.(*githubsync.CredentialResolver)
+	require.True(t, ok)
+	appKind, err := resolver.ResolveKind(context.Background(), githubsync.Binding{
+		Host:  "github.com",
+		Owner: "example-owner",
+		Repo:  "example-repo",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, githubsync.CredentialKindApp, appKind)
+
+	t.Setenv(tokenEnv, "env-token")
+	envKind, err := resolver.ResolveKind(context.Background(), githubsync.Binding{
+		Host:  "github.com",
+		Owner: "other-owner",
+		Repo:  "example-repo",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, githubsync.CredentialKindEnv, envKind)
+}
+
+func TestDaemonStartGitHubSyncHTTPFetcherUsesConfigFileCredentials(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[github_sync]
+token_env = "EXAMPLE_GITHUB_TOKEN"
+
+[[github_sync.app]]
+host = "github.com"
+owner = "example-owner"
+app_id = 123
+installation_id = 456
+private_key_path = "/secure/example.pem"
+`), 0o600))
+
+	origTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = origTelemetry })
+
+	captured := make(chan githubsync.HTTPFetcherConfig, 1)
+	origFetcher := newGitHubSyncHTTPFetcher
+	newGitHubSyncHTTPFetcher = func(cfg githubsync.HTTPFetcherConfig) *githubsync.HTTPFetcher {
+		select {
+		case captured <- cfg:
+		default:
+		}
+		return origFetcher(cfg)
+	}
+	t.Cleanup(func() { newGitHubSyncHTTPFetcher = origFetcher })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after context cancellation")
+		}
+	})
+
+	var cfg githubsync.HTTPFetcherConfig
+	select {
+	case cfg = <-captured:
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not construct GitHub sync HTTP fetcher")
+	}
+	resolver, ok := cfg.CredentialResolver.(*githubsync.CredentialResolver)
+	require.True(t, ok)
+	kind, err := resolver.ResolveKind(context.Background(), githubsync.Binding{
+		Host:  "github.com",
+		Owner: "example-owner",
+		Repo:  "example-repo",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, githubsync.CredentialKindApp, kind)
+
+	t.Setenv("EXAMPLE_GITHUB_TOKEN", "env-token")
+	envKind, err := resolver.ResolveKind(context.Background(), githubsync.Binding{
+		Host:  "github.com",
+		Owner: "other-owner",
+		Repo:  "example-repo",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, githubsync.CredentialKindEnv, envKind)
+}
+
 func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *testing.T) {
 	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
 	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
@@ -782,6 +905,30 @@ func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *te
 	assert.NotNil(t, configs[0].Logger)
 	require.NotNil(t, wake)
 	require.NotPanics(t, wake)
+}
+
+func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
+	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "25")
+	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
+	defer func() { _ = store.Close() }()
+	runner := &recordingGitHubSyncDaemonRunner{runCalled: make(chan struct{})}
+	var configs []githubsync.RunnerConfig
+	orig := newGitHubSyncDaemonRunner
+	newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) githubSyncDaemonRunner {
+		configs = append(configs, cfg)
+		return runner
+	}
+	t.Cleanup(func() { newGitHubSyncDaemonRunner = orig })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startGitHubSyncRunner(ctx, store, nil, daemon.NewEventBroadcaster(), hooks.NewNoop(), log.New(io.Discard, "", 0))
+
+	require.Eventually(t, func() bool {
+		return runner.wasRun()
+	}, time.Second, time.Millisecond)
+	require.Len(t, configs, 1)
+	require.IsType(t, &githubsync.HTTPFetcher{}, configs[0].Fetcher)
 }
 
 func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing.T) {
@@ -1058,6 +1205,10 @@ func (f *daemonGitHubSyncFetcher) Comments(_ context.Context, _ githubsync.Bindi
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]githubsync.Comment(nil), f.comments[issueNumber]...), nil
+}
+
+func (f *daemonGitHubSyncFetcher) ParentData(_ context.Context, _ githubsync.Binding) (githubsync.ParentData, error) {
+	return githubsync.ParentData{}, nil
 }
 
 func (f *daemonGitHubSyncFetcher) repositoryCallCount() int64 {

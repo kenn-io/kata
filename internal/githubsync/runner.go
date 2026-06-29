@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -150,7 +151,12 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
 	reconcileLegacyTitles := ghConfig.TitlePrefix == nil
-	repo, err := r.config.Fetcher.Repository(ctx, ghConfig.Host, ghConfig.Owner, ghConfig.Repo)
+	activeBinding := ghConfig.Binding()
+	fetcher, err := r.fetcherForBinding(ctx, activeBinding)
+	if err != nil {
+		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	repo, err := fetcher.Repository(ctx, ghConfig.Host, ghConfig.Owner, ghConfig.Repo)
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
@@ -162,22 +168,50 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
+	if refreshedBinding := ghConfig.Binding(); refreshedBinding != activeBinding {
+		fetcher, err = r.fetcherForBinding(ctx, refreshedBinding)
+		if err != nil {
+			return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+		}
+	}
+
+	parentData, err := fetcher.ParentData(ctx, ghConfig.Binding())
+	if err != nil {
+		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	parentLinkBackfill := ghConfig.NeedsParentLinkBackfill() && parentData.Authoritative
 
 	since := syncSince(binding.LastCursorAt)
-	if reconcileLegacyTitles {
+	if reconcileLegacyTitles || parentLinkBackfill {
 		since = nil
 	}
-	issues, err := r.config.Fetcher.Issues(ctx, ghConfig.Binding(), since)
+	issues, err := fetcher.Issues(ctx, ghConfig.Binding(), since)
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
-	comments, err := r.fetchComments(ctx, ghConfig, issues)
+	comments, err := r.fetchComments(ctx, fetcher, ghConfig, issues)
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
 	}
 
-	batch := BuildImportBatchWithConfig(binding.SourceKey, ghConfig, issues, comments, syncStartedAt)
+	batch := BuildImportBatchWithConfig(binding.SourceKey, ghConfig, issues, comments, parentData, syncStartedAt)
 	batch.ProjectID = binding.ProjectID
+	batch.PreserveLocalParentConflicts = true
+	if parentData.Authoritative {
+		batch.ReconcileLinkTypesForUnchanged = map[string]bool{"parent": true}
+		batch.Items, err = r.appendScannedParentReconcileItems(ctx, batch, parentData)
+		if err != nil {
+			return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+		}
+	}
+	if parentLinkBackfill {
+		batch.ReconcileLinkTypesForUnchanged = map[string]bool{"parent": true}
+	}
+	batch.Items, err = r.filterUnresolvableParentLinks(ctx, batch)
+	if err != nil {
+		return r.recordError(ctx, binding, syncStartedAt, err, db.ImportBatchResult{})
+	}
+	batch.Items = orderImportItemsForLinkTargets(batch.Items)
 	batch.IssueSyncGuard = &db.IssueSyncImportGuard{
 		BindingID: binding.ID,
 		Provider:  "github",
@@ -189,6 +223,23 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 	}
 	cleanupCtx, cleanupCancel := r.cleanupContext()
 	defer cleanupCancel()
+	if parentLinkBackfill {
+		backfilledConfig := ghConfig.WithParentLinksBackfilled()
+		configJSON, err := EncodeConfig(backfilledConfig)
+		if err != nil {
+			return r.recordError(ctx, binding, syncStartedAt, err, importResult)
+		}
+		refreshedBinding, err := r.config.Store.RefreshIssueSyncBinding(cleanupCtx, db.IssueSyncBindingUpdateParams{
+			BindingID:   binding.ID,
+			DisplayName: backfilledConfig.DisplayName(),
+			Config:      configJSON,
+		})
+		if err != nil {
+			return r.recordError(ctx, binding, syncStartedAt, err, importResult)
+		}
+		binding = refreshedBinding
+		ghConfig = backfilledConfig
+	}
 	status, err := r.config.Store.RecordIssueSyncSuccess(cleanupCtx, db.IssueSyncSuccessParams{
 		BindingID:     binding.ID,
 		StartedAt:     syncStartedAt,
@@ -200,7 +251,7 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 		LastComments:  importResult.Comments,
 	})
 	if err != nil {
-		return RunResult{Binding: binding, Import: importResult}, err
+		return r.recordError(ctx, binding, syncStartedAt, err, importResult)
 	}
 	binding.LastCursorAt = &syncStartedAt
 	return RunResult{Binding: binding, Status: status, Import: importResult}, nil
@@ -212,11 +263,12 @@ func (r *Runner) refreshRepository(ctx context.Context, binding db.IssueSyncBind
 		return binding, ghConfig, fmt.Errorf("github repository full_name %q is invalid", repo.FullName)
 	}
 	refreshedConfig := Config{
-		Host:        ghConfig.Host,
-		Owner:       owner,
-		Repo:        name,
-		RepoID:      repo.ID,
-		TitlePrefix: ghConfig.TitlePrefix,
+		Host:               ghConfig.Host,
+		Owner:              owner,
+		Repo:               name,
+		RepoID:             repo.ID,
+		TitlePrefix:        ghConfig.TitlePrefix,
+		ParentLinksVersion: ghConfig.ParentLinksVersion,
 	}
 	configJSON, err := EncodeConfig(refreshedConfig)
 	if err != nil {
@@ -233,7 +285,14 @@ func (r *Runner) refreshRepository(ctx context.Context, binding db.IssueSyncBind
 	return refreshed, refreshedConfig, err
 }
 
-func (r *Runner) fetchComments(ctx context.Context, ghConfig Config, issues []Issue) (map[int][]Comment, error) {
+func (r *Runner) fetcherForBinding(ctx context.Context, binding Binding) (Fetcher, error) {
+	if sessionFetcher, ok := r.config.Fetcher.(BindingSessionFetcher); ok {
+		return sessionFetcher.ForBinding(ctx, binding)
+	}
+	return r.config.Fetcher, nil
+}
+
+func (r *Runner) fetchComments(ctx context.Context, fetcher Fetcher, ghConfig Config, issues []Issue) (map[int][]Comment, error) {
 	out := make(map[int][]Comment)
 	fetchBinding := ghConfig.Binding()
 	for _, issue := range issues {
@@ -243,13 +302,142 @@ func (r *Runner) fetchComments(ctx context.Context, ghConfig Config, issues []Is
 		if issue.Comments == 0 {
 			continue
 		}
-		comments, err := r.config.Fetcher.Comments(ctx, fetchBinding, issue.Number)
+		comments, err := fetcher.Comments(ctx, fetchBinding, issue.Number)
 		if err != nil {
 			return nil, err
 		}
 		out[issue.Number] = comments
 	}
 	return out, nil
+}
+
+func (r *Runner) appendScannedParentReconcileItems(ctx context.Context, batch db.ImportBatchParams, parentData ParentData) ([]db.ImportItem, error) {
+	if !parentData.Authoritative || len(parentData.ChildIDByNumber) == 0 {
+		return batch.Items, nil
+	}
+	present := make(map[string]struct{}, len(batch.Items))
+	for _, item := range batch.Items {
+		present[item.ExternalID] = struct{}{}
+	}
+	numbers := make([]int, 0, len(parentData.ChildIDByNumber))
+	for number := range parentData.ChildIDByNumber {
+		numbers = append(numbers, number)
+	}
+	sort.Ints(numbers)
+	items := append([]db.ImportItem(nil), batch.Items...)
+	for _, number := range numbers {
+		childID := parentData.ChildIDByNumber[number]
+		if childID == 0 {
+			continue
+		}
+		childExternalID := fmt.Sprintf("issue-id:%d", childID)
+		if _, ok := present[childExternalID]; ok {
+			continue
+		}
+		mapping, err := r.config.Store.ImportMappingBySource(ctx, batch.ProjectID, batch.Source, "issue", childExternalID)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				r.config.Logger.Warn("github sync skipped parent reconciliation for unmapped scanned child",
+					"source", batch.Source,
+					"child_external_id", childExternalID,
+					"child_number", number,
+				)
+				continue
+			}
+			return nil, fmt.Errorf("lookup github scanned child %q: %w", childExternalID, err)
+		}
+		if mapping.IssueID == nil {
+			return nil, fmt.Errorf("%w: github scanned child mapping %q missing issue_id", db.ErrNotFound, childExternalID)
+		}
+		issue, err := r.config.Store.IssueByID(ctx, *mapping.IssueID)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				r.config.Logger.Warn("github sync skipped parent reconciliation for missing mapped child",
+					"source", batch.Source,
+					"child_external_id", childExternalID,
+					"child_number", number,
+				)
+				continue
+			}
+			return nil, fmt.Errorf("lookup github scanned child issue %q: %w", childExternalID, err)
+		}
+		item := db.ImportItem{
+			ExternalID: childExternalID,
+			Title:      issue.Title,
+			Body:       issue.Body,
+			Author:     issue.Author,
+			Owner:      issue.Owner,
+			Status:     issue.Status,
+			CreatedAt:  issue.CreatedAt,
+			UpdatedAt:  issue.UpdatedAt,
+			ClosedAt:   issue.ClosedAt,
+			LinkTypesAuthoritative: map[string]bool{
+				"parent": parentData.ChildScanned(number),
+			},
+		}
+		if issue.ClosedReason != nil {
+			reason := *issue.ClosedReason
+			item.ClosedReason = &reason
+		}
+		if parentID, ok := parentData.ParentID(number); ok {
+			item.Links = append(item.Links, db.ImportLink{
+				Type:             "parent",
+				TargetExternalID: fmt.Sprintf("issue-id:%d", parentID),
+			})
+		}
+		items = append(items, item)
+		present[childExternalID] = struct{}{}
+	}
+	return items, nil
+}
+
+func (r *Runner) filterUnresolvableParentLinks(ctx context.Context, batch db.ImportBatchParams) ([]db.ImportItem, error) {
+	if len(batch.Items) == 0 {
+		return batch.Items, nil
+	}
+	inBatch := make(map[string]struct{}, len(batch.Items))
+	for _, item := range batch.Items {
+		inBatch[item.ExternalID] = struct{}{}
+	}
+	items := append([]db.ImportItem(nil), batch.Items...)
+	for i := range items {
+		if len(items[i].Links) == 0 {
+			continue
+		}
+		links := items[i].Links[:0]
+		for _, link := range items[i].Links {
+			if link.Type != "parent" {
+				links = append(links, link)
+				continue
+			}
+			if _, ok := inBatch[link.TargetExternalID]; ok {
+				links = append(links, link)
+				continue
+			}
+			if _, err := r.config.Store.ImportMappingBySource(ctx, batch.ProjectID, batch.Source, "issue", link.TargetExternalID); err != nil {
+				if errors.Is(err, db.ErrNotFound) {
+					r.config.Logger.Warn("github sync skipped unresolved parent link",
+						"source", batch.Source,
+						"child_external_id", items[i].ExternalID,
+						"target_external_id", link.TargetExternalID,
+					)
+					markParentLinkNonAuthoritative(&items[i])
+					continue
+				}
+				return nil, fmt.Errorf("lookup github parent link target %q: %w", link.TargetExternalID, err)
+			}
+			links = append(links, link)
+		}
+		items[i].Links = links
+	}
+	return items, nil
+}
+
+func markParentLinkNonAuthoritative(item *db.ImportItem) {
+	if item.LinkTypesAuthoritative == nil {
+		item.LinkTypesAuthoritative = map[string]bool{}
+	}
+	item.LinkTypesAuthoritative["parent"] = false
 }
 
 func (r *Runner) importChunks(ctx context.Context, binding db.IssueSyncBinding, batch db.ImportBatchParams) (db.ImportBatchResult, error) {
@@ -353,6 +541,39 @@ func mergeImportResult(dst *db.ImportBatchResult, src db.ImportBatchResult) {
 	dst.Links += src.Links
 	dst.Items = append(dst.Items, src.Items...)
 	dst.Errors = append(dst.Errors, src.Errors...)
+}
+
+func orderImportItemsForLinkTargets(items []db.ImportItem) []db.ImportItem {
+	if len(items) < 2 {
+		return items
+	}
+	byExternalID := make(map[string]int, len(items))
+	for i, item := range items {
+		byExternalID[item.ExternalID] = i
+	}
+	ordered := make([]db.ImportItem, 0, len(items))
+	state := make([]uint8, len(items))
+	var visit func(int)
+	visit = func(i int) {
+		switch state[i] {
+		case 2:
+			return
+		case 1:
+			return
+		}
+		state[i] = 1
+		for _, link := range items[i].Links {
+			if targetIndex, ok := byExternalID[link.TargetExternalID]; ok {
+				visit(targetIndex)
+			}
+		}
+		state[i] = 2
+		ordered = append(ordered, items[i])
+	}
+	for i := range items {
+		visit(i)
+	}
+	return ordered
 }
 
 func errorsIsAlreadyRunning(err error) bool {

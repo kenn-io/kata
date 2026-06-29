@@ -188,10 +188,93 @@ func TestBuildImportBatchCanPreserveGitHubTitles(t *testing.T) {
 		},
 	}
 
-	batch := BuildImportBatchWithConfig("github:repo-node", Config{TitlePrefix: &titlePrefix}, issues, nil, syncStartedAt)
+	batch := BuildImportBatchWithConfig("github:repo-node", Config{TitlePrefix: &titlePrefix}, issues, nil, ParentData{}, syncStartedAt)
 
 	assert.Equal(t, "Original title", itemByExternalID(t, batch.Items, "issue:I_normal").Title)
 	assert.Equal(t, "(untitled GitHub issue #202)", itemByExternalID(t, batch.Items, "issue:I_empty").Title)
+}
+
+func TestBuildImportBatchUsesParentDataAuthority(t *testing.T) {
+	syncStartedAt := mustTime(t, "2026-06-22T10:00:00Z")
+	updatedAt := mustTime(t, "2026-06-21T10:00:00Z")
+	issues := []Issue{
+		{
+			ID:        101,
+			Number:    1,
+			HTMLURL:   "https://github.com/example-org/example-repo/issues/1",
+			Title:     "child",
+			State:     "open",
+			User:      &User{Login: "alice"},
+			CreatedAt: &updatedAt,
+			UpdatedAt: &updatedAt,
+		},
+		{
+			ID:        102,
+			Number:    2,
+			HTMLURL:   "https://github.com/example-org/example-repo/issues/2",
+			Title:     "parentless scanned child",
+			State:     "open",
+			User:      &User{Login: "bob"},
+			CreatedAt: &updatedAt,
+			UpdatedAt: &updatedAt,
+		},
+		{
+			ID:        103,
+			Number:    3,
+			HTMLURL:   "https://github.com/example-org/example-repo/issues/3",
+			Title:     "changed outside scan",
+			State:     "open",
+			User:      &User{Login: "carol"},
+			CreatedAt: &updatedAt,
+			UpdatedAt: &updatedAt,
+		},
+	}
+	parentData := ParentData{
+		ParentByChild: map[int]int64{1: 102},
+		ScannedChildren: map[int]struct{}{
+			1: {},
+			2: {},
+		},
+		Authoritative: true,
+	}
+
+	batch := BuildImportBatchWithConfig("github:repo-node", Config{}, issues, nil, parentData, syncStartedAt)
+
+	child := itemByExternalID(t, batch.Items, "issue-id:101")
+	require.Len(t, child.Links, 1)
+	assert.Equal(t, db.ImportLink{Type: "parent", TargetExternalID: "issue-id:102"}, child.Links[0])
+	assert.Equal(t, map[string]bool{"parent": true}, child.LinkTypesAuthoritative)
+
+	parentless := itemByExternalID(t, batch.Items, "issue-id:102")
+	assert.Empty(t, parentless.Links)
+	assert.Equal(t, map[string]bool{"parent": true}, parentless.LinkTypesAuthoritative)
+
+	notScanned := itemByExternalID(t, batch.Items, "issue-id:103")
+	assert.Empty(t, notScanned.Links)
+	assert.Equal(t, map[string]bool{"parent": false}, notScanned.LinkTypesAuthoritative)
+}
+
+func TestBuildImportBatchUnsupportedParentDataIsNotAuthoritative(t *testing.T) {
+	syncStartedAt := mustTime(t, "2026-06-22T10:00:00Z")
+	updatedAt := mustTime(t, "2026-06-21T10:00:00Z")
+	issues := []Issue{
+		{
+			ID:        101,
+			Number:    1,
+			HTMLURL:   "https://github.com/example-org/example-repo/issues/1",
+			Title:     "child",
+			State:     "open",
+			User:      &User{Login: "alice"},
+			CreatedAt: &updatedAt,
+			UpdatedAt: &updatedAt,
+		},
+	}
+
+	batch := BuildImportBatchWithConfig("github:repo-node", Config{}, issues, nil, ParentData{Unsupported: true}, syncStartedAt)
+
+	item := itemByExternalID(t, batch.Items, "issue-id:101")
+	assert.Empty(t, item.Links)
+	assert.Equal(t, map[string]bool{"parent": false}, item.LinkTypesAuthoritative)
 }
 
 func TestBuildImportBatchUsesExternalIDFallbacks(t *testing.T) {

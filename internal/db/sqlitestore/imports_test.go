@@ -461,6 +461,228 @@ func TestImportBatch_SourceOwnedLabelsLinksReconcileLocalRemain(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
+func TestImportBatch_NonAuthoritativeParentLinksPreserveExistingSourceParentForChangedIssue(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:101", Title: "Child", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1, Links: []db.ImportLink{{Type: "parent", TargetExternalID: "issue-id:102"}}},
+		{ExternalID: "issue-id:102", Title: "Parent", Body: "body", Author: "bob", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+	}})
+	require.NoError(t, err)
+
+	childMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:101")
+	require.NoError(t, err)
+	parentMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:102")
+	require.NoError(t, err)
+
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:101", Title: "Child changed", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t2, LinkTypesAuthoritative: map[string]bool{"parent": false}},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Updated)
+	assert.Equal(t, 0, res.Links)
+	for _, event := range events {
+		assert.NotEqual(t, "issue.unlinked", event.Type)
+	}
+
+	parents, err := d.ParentNumbersByIssues(ctx, []int64{*childMap.IssueID})
+	require.NoError(t, err)
+	assert.Equal(t, *parentMap.IssueID, parents[*childMap.IssueID])
+	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:101:parent:issue-id:102")
+	assert.NoError(t, err)
+}
+
+func TestImportBatch_AuthoritativeParentLinksRemoveMissingSourceParentForChangedIssue(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:101", Title: "Child", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1, Links: []db.ImportLink{{Type: "parent", TargetExternalID: "issue-id:102"}}},
+		{ExternalID: "issue-id:102", Title: "Parent", Body: "body", Author: "bob", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+	}})
+	require.NoError(t, err)
+
+	childMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:101")
+	require.NoError(t, err)
+
+	_, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:101", Title: "Child changed", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t2, LinkTypesAuthoritative: map[string]bool{"parent": true}},
+	}})
+	require.NoError(t, err)
+
+	var unlinked bool
+	for _, event := range events {
+		if event.Type == "issue.unlinked" {
+			unlinked = true
+		}
+	}
+	assert.True(t, unlinked)
+	parents, err := d.ParentNumbersByIssues(ctx, []int64{*childMap.IssueID})
+	require.NoError(t, err)
+	assert.NotContains(t, parents, *childMap.IssueID)
+	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:101:parent:issue-id:102")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestImportBatch_AuthoritativeParentDoesNotReplaceExistingLocalParent(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:101", Title: "Child", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+		{ExternalID: "issue-id:102", Title: "Source parent", Body: "body", Author: "bob", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+		{ExternalID: "issue-id:103", Title: "Local parent", Body: "body", Author: "cara", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+	}})
+	require.NoError(t, err)
+
+	childMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:101")
+	require.NoError(t, err)
+	sourceParentMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:102")
+	require.NoError(t, err)
+	localParentMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:103")
+	require.NoError(t, err)
+	localLink := makeLink(ctx, t, d, *childMap.IssueID, *localParentMap.IssueID, "parent")
+
+	res, events, err := d.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID:                    p.ID,
+		Source:                       "github:R_example",
+		Actor:                        "github-sync",
+		PreserveLocalParentConflicts: true,
+		Items: []db.ImportItem{
+			{ExternalID: "issue-id:101", Title: "Child changed", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t2, Links: []db.ImportLink{{Type: "parent", TargetExternalID: "issue-id:102"}}, LinkTypesAuthoritative: map[string]bool{"parent": true}},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Updated)
+	assert.Equal(t, 0, res.Links)
+	for _, event := range events {
+		assert.NotEqual(t, "issue.linked", event.Type)
+	}
+
+	parents, err := d.ParentNumbersByIssues(ctx, []int64{*childMap.IssueID})
+	require.NoError(t, err)
+	assert.Equal(t, *localParentMap.IssueID, parents[*childMap.IssueID])
+	_, err = d.LinkByID(ctx, localLink.ID)
+	assert.NoError(t, err)
+	_, err = d.LinkByEndpoints(ctx, *childMap.IssueID, *sourceParentMap.IssueID, "parent")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:101:parent:issue-id:102")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestImportBatch_ConflictingParentFailsUnlessLocalParentPreservationEnabled(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "child", Title: "Child", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+		{ExternalID: "import-parent", Title: "Import parent", Body: "body", Author: "bob", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+		{ExternalID: "local-parent", Title: "Local parent", Body: "body", Author: "cara", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+	}})
+	require.NoError(t, err)
+
+	childMap, err := d.ImportMappingBySource(ctx, p.ID, "beads", "issue", "child")
+	require.NoError(t, err)
+	localParentMap, err := d.ImportMappingBySource(ctx, p.ID, "beads", "issue", "local-parent")
+	require.NoError(t, err)
+	makeLink(ctx, t, d, *childMap.IssueID, *localParentMap.IssueID, "parent")
+
+	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "beads", Actor: "importer", Items: []db.ImportItem{
+		{ExternalID: "child", Title: "Child changed", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t2, Links: []db.ImportLink{{Type: "parent", TargetExternalID: "import-parent"}}},
+	}})
+	require.ErrorIs(t, err, db.ErrParentAlreadySet)
+}
+
+func TestImportBatch_NonAuthoritativeParentDoesNotPreserveOtherLinkTypes(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:101", Title: "Child", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1, Links: []db.ImportLink{
+			{Type: "parent", TargetExternalID: "issue-id:102"},
+			{Type: "blocks", TargetExternalID: "issue-id:103"},
+		}},
+		{ExternalID: "issue-id:102", Title: "Parent", Body: "body", Author: "bob", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+		{ExternalID: "issue-id:103", Title: "Blocked", Body: "body", Author: "cara", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+	}})
+	require.NoError(t, err)
+
+	childMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:101")
+	require.NoError(t, err)
+	parentMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:102")
+	require.NoError(t, err)
+	blockedMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:103")
+	require.NoError(t, err)
+
+	_, events, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:101", Title: "Child changed", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t2, LinkTypesAuthoritative: map[string]bool{"parent": false}},
+	}})
+	require.NoError(t, err)
+
+	var unlinked bool
+	for _, event := range events {
+		if event.Type == "issue.unlinked" {
+			unlinked = true
+		}
+	}
+	assert.True(t, unlinked)
+	parents, err := d.ParentNumbersByIssues(ctx, []int64{*childMap.IssueID})
+	require.NoError(t, err)
+	assert.Equal(t, *parentMap.IssueID, parents[*childMap.IssueID])
+	_, err = d.LinkByEndpoints(ctx, *childMap.IssueID, *blockedMap.IssueID, "blocks")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:101:parent:issue-id:102")
+	assert.NoError(t, err)
+	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:101:blocks:issue-id:103")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func TestImportBatch_StaleSourceLinkMappingDoesNotUseIssueExternalIDAsLinkType(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	t1 := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC)
+
+	_, _, err := d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:parent:101", Title: "Source ID with delimiter", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t1, Links: []db.ImportLink{{Type: "blocks", TargetExternalID: "issue-id:102"}}},
+		{ExternalID: "issue-id:102", Title: "Blocked", Body: "body", Author: "bob", Status: "open", CreatedAt: t1, UpdatedAt: t1},
+	}})
+	require.NoError(t, err)
+
+	childMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:parent:101")
+	require.NoError(t, err)
+	blockedMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "issue", "issue-id:102")
+	require.NoError(t, err)
+	linkMap, err := d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:parent:101:blocks:issue-id:102")
+	require.NoError(t, err)
+	require.NotNil(t, linkMap.LinkID)
+
+	conn, err := d.Conn(ctx)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, conn.Close()) }()
+	_, err = conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, *linkMap.LinkID)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+
+	_, _, err = d.ImportBatch(ctx, db.ImportBatchParams{ProjectID: p.ID, Source: "github:R_example", Actor: "github-sync", Items: []db.ImportItem{
+		{ExternalID: "issue-id:parent:101", Title: "Source ID with delimiter changed", Body: "body", Author: "alice", Status: "open", CreatedAt: t1, UpdatedAt: t2, LinkTypesAuthoritative: map[string]bool{"parent": false}},
+	}})
+	require.NoError(t, err)
+
+	_, err = d.LinkByEndpoints(ctx, *childMap.IssueID, *blockedMap.IssueID, "blocks")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	_, err = d.ImportMappingBySource(ctx, p.ID, "github:R_example", "link", "issue-id:parent:101:blocks:issue-id:102")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
 func TestImportBatch_DoesNotAdoptPreExistingLocalLink(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	t1 := time.Now().UTC().Add(-24 * time.Hour)
