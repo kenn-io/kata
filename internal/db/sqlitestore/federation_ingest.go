@@ -689,6 +689,10 @@ func canonicalizeFederationSnapshotAuthors(ev db.RemoteEvent, boundActor string)
 		return db.RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot payload is invalid JSON",
 			db.ErrFederationIngestValidation, ev.EventUID)
 	}
+	if payload == nil {
+		return db.RemoteEvent{}, fmt.Errorf("%w: event %s issue.snapshot payload must be a JSON object",
+			db.ErrFederationIngestValidation, ev.EventUID)
+	}
 	actorJSON, err := json.Marshal(boundActor)
 	if err != nil {
 		return db.RemoteEvent{}, fmt.Errorf("marshal federation snapshot author: %w", err)
