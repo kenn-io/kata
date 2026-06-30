@@ -2,6 +2,7 @@
 package api //nolint:revive // package name "api" is fixed by Plan 1 §4 wire-types layout.
 
 import (
+	"cmp"
 	"encoding/json"
 	"time"
 
@@ -495,6 +496,12 @@ type ReachableGraphNode struct {
 	QualifiedID string `json:"qualified_id"`
 }
 
+// Compare orders graph nodes by stable issue UID for deterministic graph
+// payloads independent of insertion or query order.
+func (n ReachableGraphNode) Compare(other ReachableGraphNode) int {
+	return cmp.Compare(n.UID, other.UID)
+}
+
 // ReachableGraphEdge is a canonical directed relationship edge. Parent edges
 // are oriented parent -> child even though storage records child -> parent;
 // blocks edges are blocker -> blocked; related edges use storage-canonical
@@ -507,6 +514,17 @@ type ReachableGraphEdge struct {
 	Layout  bool   `json:"layout"`
 }
 
+// Compare orders graph edges by relationship kind and stable endpoint UIDs.
+func (e ReachableGraphEdge) Compare(other ReachableGraphEdge) int {
+	if n := cmp.Compare(e.Kind, other.Kind); n != 0 {
+		return n
+	}
+	if n := cmp.Compare(e.FromUID, other.FromUID); n != 0 {
+		return n
+	}
+	return cmp.Compare(e.ToUID, other.ToUID)
+}
+
 // ReachableGraphUnresolvedRef records a link endpoint that could not be
 // materialized into a node. Normal kata mutations prevent this; the field is
 // still part of the canonical response so clients can tolerate imported,
@@ -516,6 +534,21 @@ type ReachableGraphUnresolvedRef struct {
 	Side     string `json:"side" enum:"from,to"`
 	Kind     string `json:"kind" enum:"parent,blocks,related"`
 	OtherUID string `json:"other_uid"`
+}
+
+// Compare orders unresolved graph endpoints by the missing UID, then the
+// relationship metadata that explains how the reference was discovered.
+func (r ReachableGraphUnresolvedRef) Compare(other ReachableGraphUnresolvedRef) int {
+	if n := cmp.Compare(r.UID, other.UID); n != 0 {
+		return n
+	}
+	if n := cmp.Compare(r.Kind, other.Kind); n != 0 {
+		return n
+	}
+	if n := cmp.Compare(r.Side, other.Side); n != 0 {
+		return n
+	}
+	return cmp.Compare(r.OtherUID, other.OtherUID)
 }
 
 // ReachableGraphResponse is the graph payload for one source issue.

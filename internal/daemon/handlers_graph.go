@@ -1,9 +1,10 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 
 	"go.kenn.io/kata/internal/api"
@@ -28,6 +29,15 @@ type graphLinkRow struct {
 	FromIssueUID string
 	ToIssueUID   string
 	Kind         string
+}
+
+type graphNeighbor struct {
+	IssueID  int64
+	IssueUID string
+}
+
+func (n graphNeighbor) Compare(other graphNeighbor) int {
+	return cmp.Compare(n.IssueUID, other.IssueUID)
 }
 
 func buildReachableIssueGraph(
@@ -65,20 +75,24 @@ func buildReachableIssueGraph(
 	visible := func(issue db.Issue) bool {
 		return issue.ID == source.ID || !opts.HideDone || issue.Status != "closed"
 	}
-	adjacent := make(map[int64][]int64)
+	adjacent := make(map[int64][]graphNeighbor)
 	for _, link := range links {
 		from, fromOK := issueByID[link.FromIssueID]
 		to, toOK := issueByID[link.ToIssueID]
 		if !fromOK || !toOK || !visible(from) || !visible(to) {
 			continue
 		}
-		adjacent[link.FromIssueID] = append(adjacent[link.FromIssueID], link.ToIssueID)
-		adjacent[link.ToIssueID] = append(adjacent[link.ToIssueID], link.FromIssueID)
+		adjacent[link.FromIssueID] = append(adjacent[link.FromIssueID], graphNeighbor{
+			IssueID:  link.ToIssueID,
+			IssueUID: to.UID,
+		})
+		adjacent[link.ToIssueID] = append(adjacent[link.ToIssueID], graphNeighbor{
+			IssueID:  link.FromIssueID,
+			IssueUID: from.UID,
+		})
 	}
 	for id := range adjacent {
-		sort.Slice(adjacent[id], func(i, j int) bool {
-			return issueByID[adjacent[id][i]].UID < issueByID[adjacent[id][j]].UID
-		})
+		slices.SortFunc(adjacent[id], graphNeighbor.Compare)
 	}
 
 	dist := traverseGraph(source.ID, adjacent, depth)
@@ -94,9 +108,7 @@ func buildReachableIssueGraph(
 			QualifiedID: project.Name + "#" + issue.ShortID,
 		})
 	}
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].UID < nodes[j].UID
-	})
+	slices.SortFunc(nodes, api.ReachableGraphNode.Compare)
 
 	edges, unresolved := graphEdgesAndUnresolved(links, issueByID, dist, depth, opts.HideDone, source.ID)
 	markTransitiveBlockLayout(edges)
@@ -149,7 +161,7 @@ func listGraphLinks(ctx context.Context, store *db.DB, projectID int64) ([]graph
 	return out, nil
 }
 
-func traverseGraph(sourceID int64, adjacent map[int64][]int64, depth parsedGraphDepth) map[int64]int {
+func traverseGraph(sourceID int64, adjacent map[int64][]graphNeighbor, depth parsedGraphDepth) map[int64]int {
 	dist := map[int64]int{sourceID: 0}
 	queue := []int64{sourceID}
 	for len(queue) > 0 {
@@ -160,11 +172,11 @@ func traverseGraph(sourceID int64, adjacent map[int64][]int64, depth parsedGraph
 			continue
 		}
 		for _, next := range adjacent[id] {
-			if _, seen := dist[next]; seen {
+			if _, seen := dist[next.IssueID]; seen {
 				continue
 			}
-			dist[next] = currentDepth + 1
-			queue = append(queue, next)
+			dist[next.IssueID] = currentDepth + 1
+			queue = append(queue, next.IssueID)
 		}
 	}
 	return dist
@@ -223,27 +235,8 @@ func graphEdgesAndUnresolved(
 		})
 	}
 
-	sort.Slice(edges, func(i, j int) bool {
-		if edges[i].Kind != edges[j].Kind {
-			return edges[i].Kind < edges[j].Kind
-		}
-		if edges[i].FromUID != edges[j].FromUID {
-			return edges[i].FromUID < edges[j].FromUID
-		}
-		return edges[i].ToUID < edges[j].ToUID
-	})
-	sort.Slice(unresolved, func(i, j int) bool {
-		if unresolved[i].UID != unresolved[j].UID {
-			return unresolved[i].UID < unresolved[j].UID
-		}
-		if unresolved[i].Kind != unresolved[j].Kind {
-			return unresolved[i].Kind < unresolved[j].Kind
-		}
-		if unresolved[i].Side != unresolved[j].Side {
-			return unresolved[i].Side < unresolved[j].Side
-		}
-		return unresolved[i].OtherUID < unresolved[j].OtherUID
-	})
+	slices.SortFunc(edges, api.ReachableGraphEdge.Compare)
+	slices.SortFunc(unresolved, api.ReachableGraphUnresolvedRef.Compare)
 	return edges, unresolved
 }
 
@@ -285,7 +278,7 @@ func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
 		blockAdj[edge.FromUID] = append(blockAdj[edge.FromUID], edge.ToUID)
 	}
 	for uid := range blockAdj {
-		sort.Strings(blockAdj[uid])
+		slices.Sort(blockAdj[uid])
 	}
 	for i := range edges {
 		if edges[i].Kind != "blocks" {
