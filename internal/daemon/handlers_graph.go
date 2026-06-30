@@ -3,6 +3,7 @@ package daemon
 import (
 	"cmp"
 	"context"
+	"errors"
 	"slices"
 	"strconv"
 
@@ -54,10 +55,6 @@ func buildReachableIssueGraph(
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
-	project, err := store.ProjectByID(ctx, projectID)
-	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
-	}
 
 	issueByID := make(map[int64]db.Issue, len(issues))
 	for _, issue := range issues {
@@ -78,14 +75,19 @@ func buildReachableIssueGraph(
 	}
 
 	nodes := make([]api.ReachableGraphNode, 0, len(dist))
+	names := &projectNames{store: store}
 	for id := range dist {
 		issue, ok := issueByID[id]
 		if !ok || !visible(issue) {
 			continue
 		}
+		projectName, err := names.name(ctx, issue.ProjectID)
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
 		nodes = append(nodes, api.ReachableGraphNode{
 			Issue:       issue,
-			QualifiedID: project.Name + "#" + issue.ShortID,
+			QualifiedID: qualifiedID(projectName, issue.ShortID),
 		})
 	}
 	slices.SortFunc(nodes, api.ReachableGraphNode.Compare)
@@ -220,7 +222,17 @@ func graphNeighbors(
 			continue
 		}
 		neighbor, ok := issueByID[neighborID]
-		if !ok || !visible(neighbor) {
+		if !ok {
+			var err error
+			neighbor, ok, err = hydrateGraphIssue(ctx, cache.store, issueByID, neighborID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+		}
+		if !visible(neighbor) {
 			continue
 		}
 		seen[neighborID] = struct{}{}
@@ -231,6 +243,39 @@ func graphNeighbors(
 	}
 	slices.SortFunc(neighbors, graphNeighbor.Compare)
 	return neighbors, nil
+}
+
+func hydrateGraphIssue(
+	ctx context.Context,
+	store db.Storage,
+	issueByID map[int64]db.Issue,
+	issueID int64,
+) (db.Issue, bool, error) {
+	if issue, ok := issueByID[issueID]; ok {
+		return issue, true, nil
+	}
+	issue, err := store.IssueByID(ctx, issueID)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, false, nil
+	}
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+	if issue.DeletedAt != nil {
+		return db.Issue{}, false, nil
+	}
+	project, err := store.ProjectByID(ctx, issue.ProjectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, false, nil
+	}
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+	if project.DeletedAt != nil {
+		return db.Issue{}, false, nil
+	}
+	issueByID[issue.ID] = issue
+	return issue, true, nil
 }
 
 func graphEdgesAndUnresolved(

@@ -105,6 +105,30 @@ func TestReachableGraph_RelatedEdges(t *testing.T) {
 	assert.Equal(t, []string{"related:" + a.UID + "->" + b.UID + ":true"}, graphEdgeKeys(graph))
 }
 
+func TestReachableGraph_TraversesCrossProjectLinksWithQualifiedIDs(t *testing.T) {
+	h, ts, sourceProjectID := graphProject(t)
+	ctx := context.Background()
+	foreignProject, err := h.DB().CreateProject(ctx, "foreign")
+	require.NoError(t, err)
+	source := graphIssue(t, h, sourceProjectID, "01HZNQ7VFPK1XGD8R5MABCD4E1", "source")
+	foreign := graphIssue(t, h, foreignProject.ID, "01HZNQ7VFPK1XGD8R5MABCD4E2", "foreign")
+	foreignChild := graphIssue(t, h, foreignProject.ID, "01HZNQ7VFPK1XGD8R5MABCD4E3", "foreign child")
+	graphLink(t, h, sourceProjectID, source.ID, foreign.ID, "blocks")
+	graphLink(t, h, foreignProject.ID, foreign.ID, foreignChild.ID, "blocks")
+
+	graph := getGraph(t, ts, sourceProjectID, source.ShortID, "?depth=full")
+
+	assert.Equal(t, []string{source.UID, foreign.UID, foreignChild.UID}, graphNodeUIDs(graph))
+	assert.Equal(t, "kata#"+source.ShortID, graphNodeByUID(t, graph, source.UID).QualifiedID)
+	assert.Equal(t, "foreign#"+foreign.ShortID, graphNodeByUID(t, graph, foreign.UID).QualifiedID)
+	assert.Equal(t, "foreign#"+foreignChild.ShortID, graphNodeByUID(t, graph, foreignChild.UID).QualifiedID)
+	assert.Equal(t, []string{
+		"blocks:" + source.UID + "->" + foreign.UID + ":true",
+		"blocks:" + foreign.UID + "->" + foreignChild.UID + ":true",
+	}, graphEdgeKeys(graph))
+	assert.Empty(t, graph.UnresolvedRefs)
+}
+
 func TestReachableGraph_BoundedDepthVsFullTraversal(t *testing.T) {
 	h, ts, pid := graphProject(t)
 	a := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E1", "a")
@@ -251,6 +275,17 @@ func graphNodeUIDs(graph graphResponseTest) []string {
 		out = append(out, node.UID)
 	}
 	return out
+}
+
+func graphNodeByUID(t *testing.T, graph graphResponseTest, uid string) graphNodeTest {
+	t.Helper()
+	for _, node := range graph.Nodes {
+		if node.UID == uid {
+			return node
+		}
+	}
+	t.Fatalf("graph missing node uid %s", uid)
+	return graphNodeTest{}
 }
 
 func graphEdgeKeys(graph graphResponseTest) []string {
