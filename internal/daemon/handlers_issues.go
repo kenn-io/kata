@@ -256,6 +256,21 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 
 	huma.Register(humaAPI, huma.Operation{
+		OperationID: "reachableIssueGraph",
+		Method:      "GET",
+		Path:        "/api/v1/projects/{project_id}/issues/{ref}/graph",
+	}, func(ctx context.Context, in *api.ReachableGraphRequest) (*api.ReachableGraphResponse, error) {
+		source, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		return buildReachableIssueGraph(ctx, cfg.DB, in.ProjectID, source, reachableGraphOptions{
+			Depth:    in.Depth,
+			HideDone: in.HideDone,
+		})
+	})
+
+	huma.Register(humaAPI, huma.Operation{
 		OperationID: "editIssue",
 		Method:      "PATCH",
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}",

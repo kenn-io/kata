@@ -476,6 +476,60 @@ type ShowIssueByUIDRequest struct {
 	IncludeDeleted bool   `query:"include_deleted,omitempty"`
 }
 
+// ReachableGraphRequest is GET /api/v1/projects/{id}/issues/{ref}/graph.
+// Depth accepts "full" or a bounded hop count. HideDone excludes closed
+// non-source issues from traversal and output when callers want an active-work
+// graph.
+type ReachableGraphRequest struct {
+	ProjectID int64  `path:"project_id" required:"true"`
+	Ref       string `path:"ref" required:"true"`
+	Depth     string `query:"depth,omitempty" doc:"full or a bounded hop count such as 1, 2, or 3"`
+	HideDone  bool   `query:"hide_done,omitempty"`
+}
+
+// ReachableGraphNode is the canonical issue node returned by the reachable
+// graph endpoint. It intentionally carries issue data and stable display refs,
+// not frontend layout state.
+type ReachableGraphNode struct {
+	db.Issue
+	QualifiedID string `json:"qualified_id"`
+}
+
+// ReachableGraphEdge is a canonical directed relationship edge. Parent edges
+// are oriented parent -> child even though storage records child -> parent;
+// blocks edges are blocker -> blocked; related edges use storage-canonical
+// endpoint order. Layout=false means the edge remains part of the graph for
+// rendering/highlighting but can be omitted from layout force calculations.
+type ReachableGraphEdge struct {
+	FromUID string `json:"from_uid"`
+	ToUID   string `json:"to_uid"`
+	Kind    string `json:"kind" enum:"parent,blocks,related"`
+	Layout  bool   `json:"layout"`
+}
+
+// ReachableGraphUnresolvedRef records a link endpoint that could not be
+// materialized into a node. Normal kata mutations prevent this; the field is
+// still part of the canonical response so clients can tolerate imported,
+// federated, or manually repaired databases without dropping references.
+type ReachableGraphUnresolvedRef struct {
+	UID      string `json:"uid"`
+	Side     string `json:"side" enum:"from,to"`
+	Kind     string `json:"kind" enum:"parent,blocks,related"`
+	OtherUID string `json:"other_uid"`
+}
+
+// ReachableGraphResponse is the graph payload for one source issue.
+type ReachableGraphResponse struct {
+	Body struct {
+		SourceUID      string                        `json:"source_uid"`
+		Depth          string                        `json:"depth"`
+		HideDone       bool                          `json:"hide_done"`
+		Nodes          []ReachableGraphNode          `json:"nodes"`
+		Edges          []ReachableGraphEdge          `json:"edges"`
+		UnresolvedRefs []ReachableGraphUnresolvedRef `json:"unresolved_refs"`
+	}
+}
+
 // ShowIssueResponse is the per-issue read payload (Plan 2: + links, + labels).
 type ShowIssueResponse struct {
 	Body struct {
