@@ -191,7 +191,7 @@ func graphIssue(t *testing.T, h *httptestServerHandle, projectID int64, uid, tit
 	return issue
 }
 
-func graphLink(t *testing.T, h *httptestServerHandle, projectID, fromID, toID int64, kind string) {
+func graphLink(t *testing.T, h *httptestServerHandle, _ int64, fromID, toID int64, kind string) {
 	t.Helper()
 	_, err := h.DB().CreateLink(context.Background(), db.CreateLinkParams{
 		FromIssueID: fromID,
@@ -213,7 +213,7 @@ func graphRelated(t *testing.T, h *httptestServerHandle, projectID, aID, bID int
 func insertUnresolvedGraphLink(
 	t *testing.T,
 	h *httptestServerHandle,
-	projectID, fromID, toID int64,
+	_ int64, fromID, toID int64,
 	fromUID, toUID, kind string,
 ) {
 	t.Helper()
