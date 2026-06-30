@@ -225,6 +225,10 @@ type EditCommentResponse = CommentResponseBody
 
 type EditCommentErrorResponse = ErrorEnvelope
 
+type ReachableIssueGraphResponse = ReachableGraphResponseBody
+
+type ReachableIssueGraphErrorResponse = ErrorEnvelope
+
 type AddLabelResponse = AddLabelResponseBody
 
 type AddLabelErrorResponse = ErrorEnvelope
@@ -710,6 +714,13 @@ type EditCommentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *EditCommentResponse
+}
+
+type ReachableIssueGraphResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReachableIssueGraphResponse
 }
 
 type AddLabelResp struct {

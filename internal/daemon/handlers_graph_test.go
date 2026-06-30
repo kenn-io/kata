@@ -194,7 +194,6 @@ func graphIssue(t *testing.T, h *httptestServerHandle, projectID int64, uid, tit
 func graphLink(t *testing.T, h *httptestServerHandle, projectID, fromID, toID int64, kind string) {
 	t.Helper()
 	_, err := h.DB().CreateLink(context.Background(), db.CreateLinkParams{
-		ProjectID:   projectID,
 		FromIssueID: fromID,
 		ToIssueID:   toID,
 		Type:        kind,
@@ -221,9 +220,9 @@ func insertUnresolvedGraphLink(
 	_, err := h.DB().ExecContext(context.Background(), `PRAGMA foreign_keys = OFF`)
 	require.NoError(t, err)
 	_, err = h.DB().ExecContext(context.Background(),
-		`INSERT INTO links(project_id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
-		 VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		projectID, fromID, toID, fromUID, toUID, kind, "tester")
+		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		 VALUES(?, ?, ?, ?, ?, ?)`,
+		fromID, toID, fromUID, toUID, kind, "tester")
 	require.NoError(t, err)
 }
 

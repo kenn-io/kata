@@ -2576,6 +2576,135 @@ func (p PurgeResponseBody) Validate() error {
 	return errors
 }
 
+type ReachableGraphEdge struct {
+	FromUID string                 `json:"from_uid" validate:"required"`
+	Kind    ReachableGraphEdgeKind `json:"kind" validate:"required"`
+	Layout  bool                   `json:"layout"`
+	ToUID   string                 `json:"to_uid" validate:"required"`
+}
+
+func (r ReachableGraphEdge) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.FromUID, "required"); err != nil {
+		errors = errors.Append("FromUID", err)
+	}
+	if v, ok := any(r.Kind).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Kind", err)
+		}
+	}
+	if err := typesValidator.Var(r.ToUID, "required"); err != nil {
+		errors = errors.Append("ToUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type ReachableGraphNode struct {
+	Author        string         `json:"author" validate:"required"`
+	Body          string         `json:"body" validate:"required"`
+	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason  *string        `json:"closed_reason,omitempty"`
+	CreatedAt     time.Time      `json:"created_at" validate:"required"`
+	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
+	ID            int64          `json:"id"`
+	Metadata      map[string]any `json:"metadata"`
+	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
+	Owner         *string        `json:"owner,omitempty"`
+	Priority      *int64         `json:"priority,omitempty"`
+	ProjectID     int64          `json:"project_id"`
+	ProjectUID    *string        `json:"project_uid,omitempty"`
+	QualifiedID   string         `json:"qualified_id" validate:"required"`
+	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
+	Revision      int64          `json:"revision"`
+	ShortID       string         `json:"short_id" validate:"required"`
+	Status        string         `json:"status" validate:"required"`
+	Title         string         `json:"title" validate:"required"`
+	UID           string         `json:"uid" validate:"required"`
+	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+}
+
+func (r ReachableGraphNode) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ReachableGraphResponseBody struct {
+	Depth          string                        `json:"depth" validate:"required"`
+	Edges          []ReachableGraphEdge          `json:"edges,omitempty" validate:"required"`
+	HideDone       bool                          `json:"hide_done"`
+	Nodes          []ReachableGraphNode          `json:"nodes,omitempty" validate:"required"`
+	SourceUID      string                        `json:"source_uid" validate:"required"`
+	UnresolvedRefs []ReachableGraphUnresolvedRef `json:"unresolved_refs,omitempty" validate:"required"`
+}
+
+func (r ReachableGraphResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Depth, "required"); err != nil {
+		errors = errors.Append("Depth", err)
+	}
+	for i, item := range r.Edges {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Edges[%d]", i), err)
+			}
+		}
+	}
+	for i, item := range r.Nodes {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Nodes[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(r.SourceUID, "required"); err != nil {
+		errors = errors.Append("SourceUID", err)
+	}
+	for i, item := range r.UnresolvedRefs {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("UnresolvedRefs[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type ReachableGraphUnresolvedRef struct {
+	Kind     ReachableGraphUnresolvedRefKind `json:"kind" validate:"required"`
+	OtherUID string                          `json:"other_uid" validate:"required"`
+	Side     ReachableGraphUnresolvedRefSide `json:"side" validate:"required"`
+	UID      string                          `json:"uid" validate:"required"`
+}
+
+func (r ReachableGraphUnresolvedRef) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(r.Kind).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Kind", err)
+		}
+	}
+	if err := typesValidator.Var(r.OtherUID, "required"); err != nil {
+		errors = errors.Append("OtherUID", err)
+	}
+	if v, ok := any(r.Side).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Side", err)
+		}
+	}
+	if err := typesValidator.Var(r.UID, "required"); err != nil {
+		errors = errors.Append("UID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type ReadyGlobalIssue struct {
 	Author        string         `json:"author" validate:"required"`
 	Body          string         `json:"body" validate:"required"`

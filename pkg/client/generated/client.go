@@ -283,6 +283,9 @@ type ClientInterface interface {
 	EditComment(ctx context.Context, options *EditCommentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EditCommentResponse, error)
 	EditCommentWithResponse(ctx context.Context, options *EditCommentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*EditCommentResp, error)
 
+	ReachableIssueGraph(ctx context.Context, options *ReachableIssueGraphRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReachableIssueGraphResponse, error)
+	ReachableIssueGraphWithResponse(ctx context.Context, options *ReachableIssueGraphRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReachableIssueGraphResp, error)
+
 	AddLabel(ctx context.Context, options *AddLabelRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddLabelResponse, error)
 	AddLabelWithResponse(ctx context.Context, options *AddLabelRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AddLabelResp, error)
 
@@ -3868,6 +3871,74 @@ func (c *Client) EditComment(ctx context.Context, options *EditCommentRequestOpt
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/comments/{comment_ref}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) ReachableIssueGraph(ctx context.Context, options *ReachableIssueGraphRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReachableIssueGraphResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"depth":     {Style: "form", Explode: &[]bool{false}[0]},
+		"hide_done": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/issues/{ref}/graph",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ReachableIssueGraphResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ReachableIssueGraphErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ReachableIssueGraphErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ReachableIssueGraphResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ReachableIssueGraphResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/issues/{ref}/graph")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

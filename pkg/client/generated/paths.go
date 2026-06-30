@@ -264,6 +264,15 @@ func (e EditCommentPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(e))
 }
 
+type ReachableIssueGraphPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (r ReachableIssueGraphPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type AddLabelPath struct {
 	ProjectID int64  `json:"project_id"`
 	Ref       string `json:"ref" validate:"required"`

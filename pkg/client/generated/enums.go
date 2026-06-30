@@ -138,6 +138,59 @@ func (i ImportLinkInputType) Validate() error {
 	}
 }
 
+type ReachableGraphEdgeKind string
+
+const (
+	ReachableGraphEdgeKindBlocks  ReachableGraphEdgeKind = "blocks"
+	ReachableGraphEdgeKindParent  ReachableGraphEdgeKind = "parent"
+	ReachableGraphEdgeKindRelated ReachableGraphEdgeKind = "related"
+)
+
+// Validate checks if the ReachableGraphEdgeKind value is valid
+func (r ReachableGraphEdgeKind) Validate() error {
+	switch r {
+	case ReachableGraphEdgeKindBlocks, ReachableGraphEdgeKindParent, ReachableGraphEdgeKindRelated:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReachableGraphEdgeKind value, got: %v", r))
+	}
+}
+
+type ReachableGraphUnresolvedRefKind string
+
+const (
+	ReachableGraphUnresolvedRefKindBlocks  ReachableGraphUnresolvedRefKind = "blocks"
+	ReachableGraphUnresolvedRefKindParent  ReachableGraphUnresolvedRefKind = "parent"
+	ReachableGraphUnresolvedRefKindRelated ReachableGraphUnresolvedRefKind = "related"
+)
+
+// Validate checks if the ReachableGraphUnresolvedRefKind value is valid
+func (r ReachableGraphUnresolvedRefKind) Validate() error {
+	switch r {
+	case ReachableGraphUnresolvedRefKindBlocks, ReachableGraphUnresolvedRefKindParent, ReachableGraphUnresolvedRefKindRelated:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReachableGraphUnresolvedRefKind value, got: %v", r))
+	}
+}
+
+type ReachableGraphUnresolvedRefSide string
+
+const (
+	From ReachableGraphUnresolvedRefSide = "from"
+	To   ReachableGraphUnresolvedRefSide = "to"
+)
+
+// Validate checks if the ReachableGraphUnresolvedRefSide value is valid
+func (r ReachableGraphUnresolvedRefSide) Validate() error {
+	switch r {
+	case From, To:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReachableGraphUnresolvedRefSide value, got: %v", r))
+	}
+}
+
 type ListAllIssuesQueryStatus string
 
 const (

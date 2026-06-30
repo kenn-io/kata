@@ -3,7 +3,6 @@ package daemon
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"slices"
 	"strconv"
 
@@ -42,7 +41,7 @@ func (n graphNeighbor) Compare(other graphNeighbor) int {
 
 func buildReachableIssueGraph(
 	ctx context.Context,
-	store *db.DB,
+	store db.Storage,
 	projectID int64,
 	source db.Issue,
 	opts reachableGraphOptions,
@@ -52,10 +51,6 @@ func buildReachableIssueGraph(
 		return nil, err
 	}
 	issues, err := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: projectID})
-	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
-	}
-	links, err := listGraphLinks(ctx, store, projectID)
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
@@ -75,27 +70,12 @@ func buildReachableIssueGraph(
 	visible := func(issue db.Issue) bool {
 		return issue.ID == source.ID || !opts.HideDone || issue.Status != "closed"
 	}
-	adjacent := make(map[int64][]graphNeighbor)
-	for _, link := range links {
-		from, fromOK := issueByID[link.FromIssueID]
-		to, toOK := issueByID[link.ToIssueID]
-		if !fromOK || !toOK || !visible(from) || !visible(to) {
-			continue
-		}
-		adjacent[link.FromIssueID] = append(adjacent[link.FromIssueID], graphNeighbor{
-			IssueID:  link.ToIssueID,
-			IssueUID: to.UID,
-		})
-		adjacent[link.ToIssueID] = append(adjacent[link.ToIssueID], graphNeighbor{
-			IssueID:  link.FromIssueID,
-			IssueUID: from.UID,
-		})
-	}
-	for id := range adjacent {
-		slices.SortFunc(adjacent[id], graphNeighbor.Compare)
-	}
 
-	dist := traverseGraph(source.ID, adjacent, depth)
+	cache := &graphLinkCache{store: store, linksByIssue: map[int64][]graphLinkRow{}}
+	dist, err := traverseGraph(ctx, source.ID, issueByID, visible, cache, depth)
+	if err != nil {
+		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+	}
 
 	nodes := make([]api.ReachableGraphNode, 0, len(dist))
 	for id := range dist {
@@ -110,6 +90,10 @@ func buildReachableIssueGraph(
 	}
 	slices.SortFunc(nodes, api.ReachableGraphNode.Compare)
 
+	links, err := cache.linksForReached(ctx, dist)
+	if err != nil {
+		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+	}
 	edges, unresolved := graphEdgesAndUnresolved(links, issueByID, dist, depth, opts.HideDone, source.ID)
 	markTransitiveBlockLayout(edges)
 
@@ -135,33 +119,61 @@ func parseReachableGraphDepth(raw string) (parsedGraphDepth, error) {
 	return parsedGraphDepth{Label: strconv.Itoa(n), Max: n}, nil
 }
 
-func listGraphLinks(ctx context.Context, store *db.DB, projectID int64) ([]graphLinkRow, error) {
-	rows, err := store.QueryContext(ctx,
-		`SELECT id, from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type
-		   FROM links
-		  WHERE project_id = ?
-		  ORDER BY type ASC, from_issue_uid ASC, to_issue_uid ASC, id ASC`,
-		projectID)
+type graphLinkCache struct {
+	store        db.Storage
+	linksByIssue map[int64][]graphLinkRow
+}
+
+func (c *graphLinkCache) linksForIssue(ctx context.Context, issueID int64) ([]graphLinkRow, error) {
+	if links, ok := c.linksByIssue[issueID]; ok {
+		return links, nil
+	}
+	dbLinks, err := c.store.LinksByIssue(ctx, issueID)
 	if err != nil {
-		return nil, fmt.Errorf("list graph links: %w", err)
+		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	links := make([]graphLinkRow, 0, len(dbLinks))
+	for _, link := range dbLinks {
+		links = append(links, graphLinkRow{
+			ID:           link.ID,
+			FromIssueID:  link.FromIssueID,
+			ToIssueID:    link.ToIssueID,
+			FromIssueUID: link.FromIssueUID,
+			ToIssueUID:   link.ToIssueUID,
+			Kind:         link.Type,
+		})
+	}
+	c.linksByIssue[issueID] = links
+	return links, nil
+}
+
+func (c *graphLinkCache) linksForReached(ctx context.Context, dist map[int64]int) ([]graphLinkRow, error) {
+	seen := map[int64]struct{}{}
 	var out []graphLinkRow
-	for rows.Next() {
-		var link graphLinkRow
-		if err := rows.Scan(&link.ID, &link.FromIssueID, &link.ToIssueID,
-			&link.FromIssueUID, &link.ToIssueUID, &link.Kind); err != nil {
-			return nil, fmt.Errorf("scan graph link: %w", err)
+	for issueID := range dist {
+		links, err := c.linksForIssue(ctx, issueID)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, link)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate graph links: %w", err)
+		for _, link := range links {
+			if _, ok := seen[link.ID]; ok {
+				continue
+			}
+			seen[link.ID] = struct{}{}
+			out = append(out, link)
+		}
 	}
 	return out, nil
 }
 
-func traverseGraph(sourceID int64, adjacent map[int64][]graphNeighbor, depth parsedGraphDepth) map[int64]int {
+func traverseGraph(
+	ctx context.Context,
+	sourceID int64,
+	issueByID map[int64]db.Issue,
+	visible func(db.Issue) bool,
+	cache *graphLinkCache,
+	depth parsedGraphDepth,
+) (map[int64]int, error) {
 	dist := map[int64]int{sourceID: 0}
 	queue := []int64{sourceID}
 	for len(queue) > 0 {
@@ -171,7 +183,11 @@ func traverseGraph(sourceID int64, adjacent map[int64][]graphNeighbor, depth par
 		if !depth.Full && currentDepth >= depth.Max {
 			continue
 		}
-		for _, next := range adjacent[id] {
+		neighbors, err := graphNeighbors(ctx, id, issueByID, visible, cache)
+		if err != nil {
+			return nil, err
+		}
+		for _, next := range neighbors {
 			if _, seen := dist[next.IssueID]; seen {
 				continue
 			}
@@ -179,7 +195,42 @@ func traverseGraph(sourceID int64, adjacent map[int64][]graphNeighbor, depth par
 			queue = append(queue, next.IssueID)
 		}
 	}
-	return dist
+	return dist, nil
+}
+
+func graphNeighbors(
+	ctx context.Context,
+	issueID int64,
+	issueByID map[int64]db.Issue,
+	visible func(db.Issue) bool,
+	cache *graphLinkCache,
+) ([]graphNeighbor, error) {
+	links, err := cache.linksForIssue(ctx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[int64]struct{}{}
+	neighbors := make([]graphNeighbor, 0, len(links))
+	for _, link := range links {
+		neighborID := link.ToIssueID
+		if link.ToIssueID == issueID {
+			neighborID = link.FromIssueID
+		}
+		if _, ok := seen[neighborID]; ok {
+			continue
+		}
+		neighbor, ok := issueByID[neighborID]
+		if !ok || !visible(neighbor) {
+			continue
+		}
+		seen[neighborID] = struct{}{}
+		neighbors = append(neighbors, graphNeighbor{
+			IssueID:  neighbor.ID,
+			IssueUID: neighbor.UID,
+		})
+	}
+	slices.SortFunc(neighbors, graphNeighbor.Compare)
+	return neighbors, nil
 }
 
 func graphEdgesAndUnresolved(

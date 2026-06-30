@@ -2791,6 +2791,156 @@ components:
       required:
         - purge_log
       type: object
+    ReachableGraphEdge:
+      additionalProperties: true
+      properties:
+        from_uid:
+          type: string
+        kind:
+          enum:
+            - parent
+            - blocks
+            - related
+          type: string
+        layout:
+          type: boolean
+        to_uid:
+          type: string
+      required:
+        - from_uid
+        - to_uid
+        - kind
+        - layout
+      type: object
+    ReachableGraphNode:
+      additionalProperties: true
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        closed_reason:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        metadata:
+          additionalProperties: true
+          type: object
+        occurrence_key:
+          type: string
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_uid:
+          type: string
+        qualified_id:
+          type: string
+        recurrence_id:
+          format: int64
+          type: integer
+        revision:
+          format: int64
+          type: integer
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - qualified_id
+        - id
+        - uid
+        - project_id
+        - short_id
+        - title
+        - body
+        - status
+        - author
+        - metadata
+        - revision
+        - created_at
+        - updated_at
+      type: object
+    ReachableGraphResponseBody:
+      additionalProperties: true
+      properties:
+        depth:
+          type: string
+        edges:
+          items:
+            $ref: "#/components/schemas/ReachableGraphEdge"
+          type:
+            - array
+            - "null"
+        hide_done:
+          type: boolean
+        nodes:
+          items:
+            $ref: "#/components/schemas/ReachableGraphNode"
+          type:
+            - array
+            - "null"
+        source_uid:
+          type: string
+        unresolved_refs:
+          items:
+            $ref: "#/components/schemas/ReachableGraphUnresolvedRef"
+          type:
+            - array
+            - "null"
+      required:
+        - source_uid
+        - depth
+        - hide_done
+        - nodes
+        - edges
+        - unresolved_refs
+      type: object
+    ReachableGraphUnresolvedRef:
+      additionalProperties: true
+      properties:
+        kind:
+          enum:
+            - parent
+            - blocks
+            - related
+          type: string
+        other_uid:
+          type: string
+        side:
+          enum:
+            - from
+            - to
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - side
+        - kind
+        - other_uid
+      type: object
     ReadyGlobalIssue:
       additionalProperties: true
       properties:
@@ -5110,6 +5260,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CommentResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/graph:
+    get:
+      operationId: reachableIssueGraph
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+        - description: full or a bounded hop count such as 1, 2, or 3
+          explode: false
+          in: query
+          name: depth
+          schema:
+            description: full or a bounded hop count such as 1, 2, or 3
+            type: string
+        - explode: false
+          in: query
+          name: hide_done
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReachableGraphResponseBody"
           description: OK
         default:
           content:
