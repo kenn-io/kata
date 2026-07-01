@@ -46,10 +46,64 @@ type shortIDExtensionItem struct {
 
 func newProjectsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "projects", Short: "list and inspect kata projects"}
-	cmd.AddCommand(projectsListCmd(), projectsShowCmd(), projectsRenameCmd(),
+	cmd.AddCommand(projectsListCmd(), projectsCreateCmd(), projectsShowCmd(), projectsRenameCmd(),
 		projectsMergeCmd(), projectsRemoveCmd(), projectsRestoreCmd(),
 		projectsDetachCmd(), projectsPurgeCmd(), projectsRewriteAuthorCmd())
 	return cmd
+}
+
+func projectsCreateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "create <name>",
+		Short: "create a daemon project without binding a workspace",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(strings.Join(args, " "))
+			if name == "" {
+				return &cliError{Message: "project name must be non-empty", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+
+			ctx := cmd.Context()
+			baseURL, err := ensureDaemon(ctx)
+			if err != nil {
+				return err
+			}
+			bs, err := postProjects(ctx, baseURL, map[string]string{"name": name})
+			if err != nil {
+				return err
+			}
+			if flags.JSON {
+				var buf bytes.Buffer
+				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+					return err
+				}
+				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+				return err
+			}
+			var b struct {
+				Project projectRef `json:"project"`
+				Created bool       `json:"created"`
+			}
+			if err := json.Unmarshal(bs, &b); err != nil {
+				return err
+			}
+			if currentOutputMode() == outputAgent {
+				return writeAgentProjectAction(cmd.OutOrStdout(), "create",
+					agentRowField("id", fmt.Sprint(b.Project.ID)),
+					agentRowField("project", b.Project.Name),
+					agentRowField("created", strconv.FormatBool(b.Created)),
+				)
+			}
+			if b.Created {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "created project #%d (%s)\n",
+					b.Project.ID, textsafe.Line(b.Project.Name))
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "project #%d (%s) already exists\n",
+				b.Project.ID, textsafe.Line(b.Project.Name))
+			return err
+		},
+	}
 }
 
 func projectsListCmd() *cobra.Command {

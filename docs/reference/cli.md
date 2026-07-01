@@ -274,6 +274,7 @@ reviewing close discipline and finding lazy or duplicate closes.
 
 ```sh
 kata projects list
+kata projects create <name>
 kata projects show <project>
 kata projects rename <project> <name>
 kata projects merge <source> <target> [--rename-target NAME]
@@ -283,6 +284,12 @@ kata projects purge <project> --force --confirm "PURGE <project>" [--reason TEXT
 kata projects detach <alias-identity>
 kata projects rewrite-author [<project>] --from <old-author> --to <new-author>
 ```
+
+`projects create` creates or returns an active daemon project by name without
+writing workspace files, attaching aliases, or changing `.kata.toml`. Use it
+for projects that are not tied one-to-one with a repository workspace. If the
+same name belongs to an archived project, restore it first or choose a
+different name.
 
 `projects remove` archives a project (reversible with `restore`). The name
 stays reserved while archived.

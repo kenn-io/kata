@@ -69,6 +69,17 @@ kata init --project product
 Commit `.kata.toml` when multiple agents, clones, or worktrees should resolve
 to the same kata project. The file is intentionally secret-free.
 
+When a kata project is not tied to a repository workspace, create it directly
+in the daemon instead:
+
+```sh
+kata projects create example-project
+```
+
+This creates or returns the named project without writing `.kata.toml`,
+`.gitignore`, or agent guidance files. Use `kata init` later only for
+workspaces that should resolve to that project automatically.
+
 To also drop a short kata briefing where coding agents look for it, pass
 `--with-agents`:
 

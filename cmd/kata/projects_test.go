@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,6 +50,109 @@ func TestProjects_ListAgentIncludesStats(t *testing.T) {
 	out := requireCmdOutput(t, env, "--agent", "projects", "list")
 
 	assert.Equal(t, "OK projects count=1\n- project=kata id="+itoa(p.ID)+" open=1 closed=1\n", out)
+}
+
+func TestProjectsCreateCreatesProjectWithoutWorkspaceBinding(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+
+	out := requireCmdOutput(t, env, "--workspace", dir, "projects", "create", "example-project")
+
+	assert.Contains(t, out, "created project #")
+	assert.Contains(t, out, "(example-project)")
+	assert.NoFileExists(t, filepath.Join(dir, ".kata.toml"))
+	assert.NoFileExists(t, filepath.Join(dir, ".gitignore"))
+	got, err := env.DB.ProjectByName(context.Background(), "example-project")
+	require.NoError(t, err)
+	assert.Equal(t, "example-project", got.Name)
+}
+
+func TestProjectsCreateExistingProjectIsIdempotent(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+
+	out := requireCmdOutput(t, env, "projects", "create", "example-project")
+
+	assert.Equal(t, "project #"+itoa(p.ID)+" (example-project) already exists\n", out)
+}
+
+func TestProjectsCreateJSONReturnsDaemonResponse(t *testing.T) {
+	env := testenv.New(t)
+
+	out := requireCmdOutput(t, env, "--json", "projects", "create", "example-project")
+
+	var got struct {
+		Project struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"project"`
+		Created bool `json:"created"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.NotZero(t, got.Project.ID)
+	assert.Equal(t, "example-project", got.Project.Name)
+	assert.True(t, got.Created)
+}
+
+func TestProjectsCreateFormatJSONReturnsDaemonResponse(t *testing.T) {
+	env := testenv.New(t)
+
+	out := requireCmdOutput(t, env, "--format", "json", "projects", "create", "example-project")
+
+	var got struct {
+		Project struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"project"`
+		Created bool `json:"created"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.NotZero(t, got.Project.ID)
+	assert.Equal(t, "example-project", got.Project.Name)
+	assert.True(t, got.Created)
+}
+
+func TestProjectsCreateAgentOutput(t *testing.T) {
+	env := testenv.New(t)
+
+	out := requireCmdOutput(t, env, "--agent", "projects", "create", "example-project")
+
+	got, err := env.DB.ProjectByName(context.Background(), "example-project")
+	require.NoError(t, err)
+	assert.Equal(t, "OK project action=create id="+itoa(got.ID)+" project=example-project created=true\n", out)
+}
+
+func TestProjectsCreateRejectsWhitespaceNameBeforeRequest(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		http.Error(w, "unexpected request", http.StatusTeapot)
+	}))
+	t.Cleanup(srv.Close)
+
+	_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+		"projects", "create", "   ")
+
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, ce.Message, "project name must be non-empty")
+	assert.Equal(t, 0, requests)
+}
+
+func TestProjectsCreatePreservesArchivedNameConflict(t *testing.T) {
+	env := testenv.New(t)
+	ctx := context.Background()
+	p, err := env.DB.CreateProject(ctx, "archived-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "tester"})
+	require.NoError(t, err)
+
+	_, err = runCmdOutput(t, env, "projects", "create", "archived-project")
+
+	ce := requireCLIError(t, err, ExitConflict)
+	assert.Equal(t, "project_archived", ce.Code)
+	assert.Contains(t, ce.Message, "archived")
 }
 
 func TestProjects_ShowAgentUsesReadShape(t *testing.T) {
