@@ -178,6 +178,34 @@ func TestReachableGraph_UnresolvedReferences(t *testing.T) {
 	assert.Equal(t, source.UID, graph.UnresolvedRefs[0].Other)
 }
 
+func TestReachableGraph_OmitsDeletedAndArchivedEndpoints(t *testing.T) {
+	h, ts, pid := graphProject(t)
+	ctx := context.Background()
+	source := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E1", "source")
+	deleted := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E2", "deleted")
+	graphLink(t, h, pid, source.ID, deleted.ID, "blocks")
+	_, _, changed, err := h.DB().SoftDeleteIssue(ctx, deleted.ID, "tester")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	archivedProject, err := h.DB().CreateProject(ctx, "archived-project")
+	require.NoError(t, err)
+	archived := graphIssue(t, h, archivedProject.ID, "01HZNQ7VFPK1XGD8R5MABCD4E3", "archived")
+	graphLink(t, h, pid, source.ID, archived.ID, "blocks")
+	_, _, err = h.DB().RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: archivedProject.ID,
+		Actor:     "tester",
+		Force:     true,
+	})
+	require.NoError(t, err)
+
+	graph := getGraph(t, ts, pid, source.ShortID, "?depth=full")
+
+	assert.Equal(t, []string{source.UID}, graphNodeUIDs(graph))
+	assert.Empty(t, graph.Edges)
+	assert.Empty(t, graph.UnresolvedRefs)
+}
+
 func TestReachableGraph_TransitiveBlockPruningForLayoutOnlyAndStableOrdering(t *testing.T) {
 	h, ts, pid := graphProject(t)
 	c := graphIssue(t, h, pid, "01HZNQ7VFPK1XGD8R5MABCD4E3", "c")

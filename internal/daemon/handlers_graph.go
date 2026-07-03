@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -17,33 +16,45 @@ type reachableGraphOptions struct {
 }
 
 type parsedGraphDepth struct {
-	Label string
-	Full  bool
-	Max   int
+	Full bool
+	Max  int
 }
 
-type graphLinkRow struct {
-	ID           int64
-	FromIssueID  int64
-	ToIssueID    int64
-	FromIssueUID string
-	ToIssueUID   string
-	Kind         string
+func (d parsedGraphDepth) String() string {
+	if d.Full {
+		return "full"
+	}
+	return strconv.Itoa(d.Max)
 }
 
-type graphNeighbor struct {
-	IssueID  int64
-	IssueUID string
+func parseReachableGraphDepth(raw string) (parsedGraphDepth, error) {
+	if raw == "" || raw == "full" {
+		return parsedGraphDepth{Full: true}, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return parsedGraphDepth{}, api.NewError(400, "validation",
+			"depth must be full or a non-negative integer", "", nil)
+	}
+	return parsedGraphDepth{Max: n}, nil
 }
 
-func (n graphNeighbor) Compare(other graphNeighbor) int {
-	return cmp.Compare(n.IssueUID, other.IssueUID)
+// graphWalk holds per-request traversal state: lazily hydrated issues and
+// projects, memoized link reads, and link endpoints that exist in storage but
+// are hidden from the active graph (soft-deleted issues, archived projects).
+type graphWalk struct {
+	store        db.Storage
+	sourceID     int64
+	hideDone     bool
+	issueByID    map[int64]db.Issue
+	projectByID  map[int64]db.Project
+	linksByIssue map[int64][]db.Link
+	hidden       map[int64]struct{}
 }
 
 func buildReachableIssueGraph(
 	ctx context.Context,
 	store db.Storage,
-	projectID int64,
 	source db.Issue,
 	opts reachableGraphOptions,
 ) (*api.ReachableGraphResponse, error) {
@@ -51,57 +62,45 @@ func buildReachableIssueGraph(
 	if err != nil {
 		return nil, err
 	}
-	issues, err := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: projectID})
-	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+	w := &graphWalk{
+		store:        store,
+		sourceID:     source.ID,
+		hideDone:     opts.HideDone,
+		issueByID:    map[int64]db.Issue{source.ID: source},
+		projectByID:  map[int64]db.Project{},
+		linksByIssue: map[int64][]db.Link{},
+		hidden:       map[int64]struct{}{},
 	}
 
-	issueByID := make(map[int64]db.Issue, len(issues))
-	for _, issue := range issues {
-		issueByID[issue.ID] = issue
-	}
-	if _, ok := issueByID[source.ID]; !ok {
-		issueByID[source.ID] = source
-	}
-
-	visible := func(issue db.Issue) bool {
-		return issue.ID == source.ID || !opts.HideDone || issue.Status != "closed"
-	}
-
-	cache := &graphLinkCache{store: store, linksByIssue: map[int64][]graphLinkRow{}}
-	dist, err := traverseGraph(ctx, source.ID, issueByID, visible, cache, depth)
+	dist, err := w.traverse(ctx, depth)
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
 
 	nodes := make([]api.ReachableGraphNode, 0, len(dist))
-	names := &projectNames{store: store}
 	for id := range dist {
-		issue, ok := issueByID[id]
-		if !ok || !visible(issue) {
-			continue
-		}
-		projectName, err := names.name(ctx, issue.ProjectID)
+		issue := w.issueByID[id]
+		project, err := w.project(ctx, issue.ProjectID)
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
 		nodes = append(nodes, api.ReachableGraphNode{
 			Issue:       issue,
-			QualifiedID: qualifiedID(projectName, issue.ShortID),
+			QualifiedID: qualifiedID(project.Name, issue.ShortID),
 		})
 	}
 	slices.SortFunc(nodes, api.ReachableGraphNode.Compare)
 
-	links, err := cache.linksForReached(ctx, dist)
+	links, err := w.linksForReached(ctx, dist)
 	if err != nil {
 		return nil, api.NewError(500, "internal", err.Error(), "", nil)
 	}
-	edges, unresolved := graphEdgesAndUnresolved(links, issueByID, dist, depth, opts.HideDone, source.ID)
+	edges, unresolved := w.edgesAndUnresolved(links, dist, depth)
 	markTransitiveBlockLayout(edges)
 
 	out := &api.ReachableGraphResponse{}
 	out.Body.SourceUID = source.UID
-	out.Body.Depth = depth.Label
+	out.Body.Depth = depth.String()
 	out.Body.HideDone = opts.HideDone
 	out.Body.Nodes = nodes
 	out.Body.Edges = edges
@@ -109,51 +108,115 @@ func buildReachableIssueGraph(
 	return out, nil
 }
 
-func parseReachableGraphDepth(raw string) (parsedGraphDepth, error) {
-	if raw == "" || raw == "full" {
-		return parsedGraphDepth{Label: "full", Full: true}, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		return parsedGraphDepth{}, api.NewError(400, "validation",
-			"depth must be full or a non-negative integer", "", nil)
-	}
-	return parsedGraphDepth{Label: strconv.Itoa(n), Max: n}, nil
+// visible reports whether an issue participates in the graph under the
+// hide-done option. The source issue is always shown.
+func (w *graphWalk) visible(issue db.Issue) bool {
+	return issue.ID == w.sourceID || !w.hideDone || issue.Status != "closed"
 }
 
-type graphLinkCache struct {
-	store        db.Storage
-	linksByIssue map[int64][]graphLinkRow
+// issue lazily hydrates an issue by id. ok is false when the issue does not
+// exist or is hidden (soft-deleted, or its project is archived); hidden
+// endpoints are recorded so edge building can drop their links instead of
+// reporting them as unresolved references.
+func (w *graphWalk) issue(ctx context.Context, issueID int64) (db.Issue, bool, error) {
+	if issue, ok := w.issueByID[issueID]; ok {
+		return issue, true, nil
+	}
+	if _, ok := w.hidden[issueID]; ok {
+		return db.Issue{}, false, nil
+	}
+	issue, err := w.store.IssueByID(ctx, issueID)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, false, nil
+	}
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+	if issue.DeletedAt != nil {
+		w.hidden[issueID] = struct{}{}
+		return db.Issue{}, false, nil
+	}
+	project, err := w.project(ctx, issue.ProjectID)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Issue{}, false, nil
+	}
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+	if project.DeletedAt != nil {
+		w.hidden[issueID] = struct{}{}
+		return db.Issue{}, false, nil
+	}
+	w.issueByID[issueID] = issue
+	return issue, true, nil
 }
 
-func (c *graphLinkCache) linksForIssue(ctx context.Context, issueID int64) ([]graphLinkRow, error) {
-	if links, ok := c.linksByIssue[issueID]; ok {
+func (w *graphWalk) project(ctx context.Context, projectID int64) (db.Project, error) {
+	if project, ok := w.projectByID[projectID]; ok {
+		return project, nil
+	}
+	project, err := w.store.ProjectByID(ctx, projectID)
+	if err != nil {
+		return db.Project{}, err
+	}
+	w.projectByID[projectID] = project
+	return project, nil
+}
+
+func (w *graphWalk) links(ctx context.Context, issueID int64) ([]db.Link, error) {
+	if links, ok := w.linksByIssue[issueID]; ok {
 		return links, nil
 	}
-	dbLinks, err := c.store.LinksByIssue(ctx, issueID)
+	links, err := w.store.LinksByIssue(ctx, issueID)
 	if err != nil {
 		return nil, err
 	}
-	links := make([]graphLinkRow, 0, len(dbLinks))
-	for _, link := range dbLinks {
-		links = append(links, graphLinkRow{
-			ID:           link.ID,
-			FromIssueID:  link.FromIssueID,
-			ToIssueID:    link.ToIssueID,
-			FromIssueUID: link.FromIssueUID,
-			ToIssueUID:   link.ToIssueUID,
-			Kind:         link.Type,
-		})
-	}
-	c.linksByIssue[issueID] = links
+	w.linksByIssue[issueID] = links
 	return links, nil
 }
 
-func (c *graphLinkCache) linksForReached(ctx context.Context, dist map[int64]int) ([]graphLinkRow, error) {
+// traverse runs a breadth-first walk over links from the source, returning
+// each reached issue's hop distance. Only visible issues are entered.
+func (w *graphWalk) traverse(ctx context.Context, depth parsedGraphDepth) (map[int64]int, error) {
+	dist := map[int64]int{w.sourceID: 0}
+	queue := []int64{w.sourceID}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		if !depth.Full && dist[id] >= depth.Max {
+			continue
+		}
+		links, err := w.links(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, link := range links {
+			neighborID := link.ToIssueID
+			if link.ToIssueID == id {
+				neighborID = link.FromIssueID
+			}
+			if _, seen := dist[neighborID]; seen {
+				continue
+			}
+			neighbor, ok, err := w.issue(ctx, neighborID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || !w.visible(neighbor) {
+				continue
+			}
+			dist[neighborID] = dist[id] + 1
+			queue = append(queue, neighborID)
+		}
+	}
+	return dist, nil
+}
+
+func (w *graphWalk) linksForReached(ctx context.Context, dist map[int64]int) ([]db.Link, error) {
 	seen := map[int64]struct{}{}
-	var out []graphLinkRow
+	var out []db.Link
 	for issueID := range dist {
-		links, err := c.linksForIssue(ctx, issueID)
+		links, err := w.links(ctx, issueID)
 		if err != nil {
 			return nil, err
 		}
@@ -168,130 +231,14 @@ func (c *graphLinkCache) linksForReached(ctx context.Context, dist map[int64]int
 	return out, nil
 }
 
-func traverseGraph(
-	ctx context.Context,
-	sourceID int64,
-	issueByID map[int64]db.Issue,
-	visible func(db.Issue) bool,
-	cache *graphLinkCache,
-	depth parsedGraphDepth,
-) (map[int64]int, error) {
-	dist := map[int64]int{sourceID: 0}
-	queue := []int64{sourceID}
-	for len(queue) > 0 {
-		id := queue[0]
-		queue = queue[1:]
-		currentDepth := dist[id]
-		if !depth.Full && currentDepth >= depth.Max {
-			continue
-		}
-		neighbors, err := graphNeighbors(ctx, id, issueByID, visible, cache)
-		if err != nil {
-			return nil, err
-		}
-		for _, next := range neighbors {
-			if _, seen := dist[next.IssueID]; seen {
-				continue
-			}
-			dist[next.IssueID] = currentDepth + 1
-			queue = append(queue, next.IssueID)
-		}
-	}
-	return dist, nil
-}
-
-func graphNeighbors(
-	ctx context.Context,
-	issueID int64,
-	issueByID map[int64]db.Issue,
-	visible func(db.Issue) bool,
-	cache *graphLinkCache,
-) ([]graphNeighbor, error) {
-	links, err := cache.linksForIssue(ctx, issueID)
-	if err != nil {
-		return nil, err
-	}
-	seen := map[int64]struct{}{}
-	neighbors := make([]graphNeighbor, 0, len(links))
-	for _, link := range links {
-		neighborID := link.ToIssueID
-		if link.ToIssueID == issueID {
-			neighborID = link.FromIssueID
-		}
-		if _, ok := seen[neighborID]; ok {
-			continue
-		}
-		neighbor, ok := issueByID[neighborID]
-		if !ok {
-			var err error
-			neighbor, ok, err = hydrateGraphIssue(ctx, cache.store, issueByID, neighborID)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				continue
-			}
-		}
-		if !visible(neighbor) {
-			continue
-		}
-		seen[neighborID] = struct{}{}
-		neighbors = append(neighbors, graphNeighbor{
-			IssueID:  neighbor.ID,
-			IssueUID: neighbor.UID,
-		})
-	}
-	slices.SortFunc(neighbors, graphNeighbor.Compare)
-	return neighbors, nil
-}
-
-func hydrateGraphIssue(
-	ctx context.Context,
-	store db.Storage,
-	issueByID map[int64]db.Issue,
-	issueID int64,
-) (db.Issue, bool, error) {
-	if issue, ok := issueByID[issueID]; ok {
-		return issue, true, nil
-	}
-	issue, err := store.IssueByID(ctx, issueID)
-	if errors.Is(err, db.ErrNotFound) {
-		return db.Issue{}, false, nil
-	}
-	if err != nil {
-		return db.Issue{}, false, err
-	}
-	if issue.DeletedAt != nil {
-		return db.Issue{}, false, nil
-	}
-	project, err := store.ProjectByID(ctx, issue.ProjectID)
-	if errors.Is(err, db.ErrNotFound) {
-		return db.Issue{}, false, nil
-	}
-	if err != nil {
-		return db.Issue{}, false, err
-	}
-	if project.DeletedAt != nil {
-		return db.Issue{}, false, nil
-	}
-	issueByID[issue.ID] = issue
-	return issue, true, nil
-}
-
-func graphEdgesAndUnresolved(
-	links []graphLinkRow,
-	issueByID map[int64]db.Issue,
+func (w *graphWalk) edgesAndUnresolved(
+	links []db.Link,
 	dist map[int64]int,
 	depth parsedGraphDepth,
-	hideDone bool,
-	sourceID int64,
 ) ([]api.ReachableGraphEdge, []api.ReachableGraphUnresolvedRef) {
 	visible := func(id int64) bool {
-		issue, ok := issueByID[id]
-		if !ok {
-			return false
-		}
-		return id == sourceID || !hideDone || issue.Status != "closed"
+		issue, ok := w.issueByID[id]
+		return ok && w.visible(issue)
 	}
 
 	edgeSeen := map[string]struct{}{}
@@ -300,8 +247,14 @@ func graphEdgesAndUnresolved(
 	var unresolved []api.ReachableGraphUnresolvedRef
 	for _, link := range links {
 		fromID, toID, fromUID, toUID := canonicalGraphEdge(link)
-		fromIssue, fromExists := issueByID[fromID]
-		toIssue, toExists := issueByID[toID]
+		if _, ok := w.hidden[fromID]; ok {
+			continue
+		}
+		if _, ok := w.hidden[toID]; ok {
+			continue
+		}
+		fromIssue, fromExists := w.issueByID[fromID]
+		toIssue, toExists := w.issueByID[toID]
 		fromReachedDepth, fromReached := dist[fromID]
 		toReachedDepth, toReached := dist[toID]
 
@@ -310,15 +263,15 @@ func graphEdgesAndUnresolved(
 			include = fromReached && toReached && visible(fromID) && visible(toID)
 		} else if fromExists && fromReached && visible(fromID) && canExpandUnresolved(fromReachedDepth, depth) {
 			include = true
-			unresolved = appendUnresolvedRef(unresolved, unresolvedSeen, toUID, "to", link.Kind, fromIssue.UID)
+			unresolved = appendUnresolvedRef(unresolved, unresolvedSeen, toUID, "to", link.Type, fromIssue.UID)
 		} else if toExists && toReached && visible(toID) && canExpandUnresolved(toReachedDepth, depth) {
 			include = true
-			unresolved = appendUnresolvedRef(unresolved, unresolvedSeen, fromUID, "from", link.Kind, toIssue.UID)
+			unresolved = appendUnresolvedRef(unresolved, unresolvedSeen, fromUID, "from", link.Type, toIssue.UID)
 		}
 		if !include {
 			continue
 		}
-		key := link.Kind + "\x00" + fromUID + "\x00" + toUID
+		key := link.Type + "\x00" + fromUID + "\x00" + toUID
 		if _, ok := edgeSeen[key]; ok {
 			continue
 		}
@@ -326,7 +279,7 @@ func graphEdgesAndUnresolved(
 		edges = append(edges, api.ReachableGraphEdge{
 			FromUID: fromUID,
 			ToUID:   toUID,
-			Kind:    link.Kind,
+			Kind:    link.Type,
 			Layout:  true,
 		})
 	}
@@ -336,13 +289,18 @@ func graphEdgesAndUnresolved(
 	return edges, unresolved
 }
 
-func canonicalGraphEdge(link graphLinkRow) (fromID, toID int64, fromUID, toUID string) {
-	if link.Kind == "parent" {
+// canonicalGraphEdge orients an edge for display: parent links are stored
+// child -> parent but rendered parent -> child.
+func canonicalGraphEdge(link db.Link) (fromID, toID int64, fromUID, toUID string) {
+	if link.Type == "parent" {
 		return link.ToIssueID, link.FromIssueID, link.ToIssueUID, link.FromIssueUID
 	}
 	return link.FromIssueID, link.ToIssueID, link.FromIssueUID, link.ToIssueUID
 }
 
+// canExpandUnresolved reports whether traversal would have expanded a node's
+// neighbors, i.e. whether a dangling endpoint next to it is genuinely
+// unresolved rather than simply beyond the depth bound.
 func canExpandUnresolved(nodeDepth int, depth parsedGraphDepth) bool {
 	return depth.Full || nodeDepth < depth.Max
 }

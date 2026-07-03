@@ -264,7 +264,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		return buildReachableIssueGraph(ctx, cfg.DB, in.ProjectID, source, reachableGraphOptions{
+		return buildReachableIssueGraph(ctx, cfg.DB, source, reachableGraphOptions{
 			Depth:    in.Depth,
 			HideDone: in.HideDone,
 		})
