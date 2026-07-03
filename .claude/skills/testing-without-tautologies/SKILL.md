@@ -73,6 +73,11 @@ Apply these checks to every new or modified test:
 10. **No content-assertion shell tests**
     - Never assert shell script, workflow, or config behavior by grepping the file for implementation text (repo rule). Exercise the command or use the tool's own validation; if that's impractical, document the manual check instead.
 
+11. **NEVER write negative-existence refactoring tests**
+    - When cleaning up code, do not add tests asserting that a function, method, file, flag, route, or symbol *no longer exists* (grepping the source tree, reflecting on types, asserting a file is absent, asserting a package doesn't compile a name).
+    - These are tautologies about the current shape of the codebase: they pin an implementation detail, break legitimate future reintroduction, and catch no behavior. The compiler already fails on references to removed Go symbols; deleted behavior is protected by the *positive* tests of what replaced it.
+    - If a removal has a user-visible contract (a CLI flag now rejected, an endpoint now 404/410, a config key now erroring), test that observable behavior instead — the response the user gets, not the absence of code.
+
 ## Test Level
 
 Use the narrowest test that can catch the break. The ladder in this repo:
@@ -114,5 +119,6 @@ If none fail, the test is probably tautological.
 - Translates a constructor, getter, setter, mapper, or wrapper line by line.
 - Exists for coverage without checking side effects, boundaries, or outcomes.
 - Hides expected values behind loops, formatters, builders, or helpers.
+- Asserts that removed code stays removed (file absent, symbol gone, grep finds nothing) instead of testing the replacement's behavior.
 - Asserts only the action endpoint's status code without re-reading the state it claims to change.
 - Regenerated goldens or flipped literals in the same commit that changed behavior, with no note on why the new contract is right.
