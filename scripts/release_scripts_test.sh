@@ -139,10 +139,9 @@ test_changelog_fallback_groups_commits_by_user_facing_sections() {
   assert_not_contains "$output" "### Changes" "fallback changelog should use categorized headings"
 }
 
-test_changelog_agent_prompt_requests_categorized_sections() {
-  local repo="$tmp_root/changelog-prompt-sections"
-  local fake_bin="$tmp_root/fake-bin-prompt-sections"
-  local prompt_capture="$tmp_root/changelog-prompt.txt"
+test_changelog_agent_receives_release_context() {
+  local repo="$tmp_root/changelog-agent-context"
+  local fake_bin="$tmp_root/fake-bin-agent-context"
   init_repo "$repo"
   mkdir -p "$fake_bin"
   cat >"$fake_bin/codex" <<'EOF'
@@ -155,25 +154,27 @@ while [[ $# -gt 0 ]]; do
   fi
   shift || true
 done
-prompt="$(cat)"
-printf '%s' "$prompt" >"${PROMPT_CAPTURE:?}"
+release_context="$(cat)"
+case "$release_context" in
+  *"feat: add task list"*) ;;
+  *)
+    printf 'missing commit context\n' >&2
+    exit 3
+    ;;
+esac
 if [[ -n "$out" ]]; then
-  printf '### New Features\n\n- AI changelog was invoked\n' >"$out"
+  printf '### New Features\n\n- Summarized fixture feature from provided commits\n' >"$out"
 else
-  printf '### New Features\n\n- AI changelog was invoked\n'
+  printf '### New Features\n\n- Summarized fixture feature from provided commits\n'
 fi
 EOF
   chmod +x "$fake_bin/codex"
 
-  local output prompt
-  output="$(run_in_repo "$repo" env PATH="$fake_bin:$PATH" PROMPT_CAPTURE="$prompt_capture" "$repo_root/scripts/changelog.sh" NEXT -)"
-  prompt="$(cat "$prompt_capture")"
+  local output
+  output="$(run_in_repo "$repo" env PATH="$fake_bin:$PATH" "$repo_root/scripts/changelog.sh" NEXT -)"
 
-  assert_contains "$output" "AI changelog was invoked" "agent changelog output"
-  assert_contains "$prompt" "### New Features" "agent prompt feature section"
-  assert_contains "$prompt" "### Improvements" "agent prompt improvement section"
-  assert_contains "$prompt" "### Bug Fixes" "agent prompt bug fix section"
-  assert_contains "$prompt" "Do NOT mention documentation-only changes" "agent prompt docs filtering"
+  assert_contains "$output" "### New Features" "agent changelog section"
+  assert_contains "$output" "Summarized fixture feature from provided commits" "agent changelog output"
 }
 
 test_changelog_defaults_to_codex_agent() {
@@ -470,7 +471,7 @@ test_release_rejects_non_semver_version
 test_release_refuses_dirty_worktree
 test_changelog_fallback_includes_first_commit_without_tags
 test_changelog_fallback_groups_commits_by_user_facing_sections
-test_changelog_agent_prompt_requests_categorized_sections
+test_changelog_agent_receives_release_context
 test_changelog_defaults_to_codex_agent
 test_changelog_allows_explicit_agent_opt_in
 test_changelog_rejects_unknown_agent
