@@ -129,6 +129,38 @@ returns per-field counts. The endpoint refuses already-federated projects
 because it is a current-state hygiene operation for local project rows, not a
 federated history rewrite.
 
+## Issue Graph Endpoint
+
+`GET /api/v1/projects/{project_id}/issues/{ref}/graph` returns the relationship
+graph reachable from one source issue. The path `ref` accepts the same issue ref
+forms as other project-scoped issue endpoints. The optional `depth` query value
+is either `full` (the default) or a non-negative hop count such as `1`, `2`, or
+`3`. Pass `hide_done=true` to keep the source issue but exclude closed
+non-source issues from traversal and output.
+
+The response body is a canonical graph payload:
+
+| Field | Meaning |
+| --- | --- |
+| `source_uid` | Stable UID of the source issue. |
+| `depth` | Effective traversal depth, either `full` or the bounded hop count. |
+| `hide_done` | Whether closed non-source issues were hidden. |
+| `nodes` | Reached issues, including normal issue fields plus `qualified_id` (`project#short_id`) for display. |
+| `edges` | Directed relationship edges with `from_uid`, `to_uid`, `kind`, and `layout`. |
+| `unresolved_refs` | Link endpoints that exist in storage but could not be materialized as graph nodes. |
+
+Edge direction is normalized for clients: parent edges point parent -> child,
+`blocks` edges point blocker -> blocked, and related edges use kata's canonical
+related-link ordering. `layout=false` keeps an edge in the graph while telling
+layout engines they can omit it from force/layout calculations; current daemons
+use that hint for transitive `blocks` edges.
+
+Soft-deleted issues and issues in archived projects are hidden instead of
+reported as unresolved references. `unresolved_refs` is reserved for dangling
+endpoints that can appear after imports, federation repair, or manual database
+maintenance, so graph clients can surface incomplete data without discarding
+the reachable graph.
+
 ## Issue Sync Endpoints
 
 Issue sync endpoints are project-scoped and provider-qualified. They configure

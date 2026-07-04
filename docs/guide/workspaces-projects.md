@@ -56,6 +56,18 @@ kata projects list
 kata projects show product
 ```
 
+Create a project by name without binding the current directory:
+
+```sh
+kata projects create research
+```
+
+`projects create` talks to the daemon only. It creates or returns the active
+project named `research` without writing `.kata.toml`, `.gitignore`, or agent
+guidance files, and without attaching a git alias. Use it for projects that do
+not map one-to-one to a repository workspace, then run `kata init --project
+research` later from any workspace that should resolve to the same project.
+
 Rename a project:
 
 ```sh

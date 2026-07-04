@@ -6,6 +6,42 @@ description: Release history for kata
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
+## 0.8.0
+<small>2026-07-04</small>
+
+kata 0.8.0 adds a graph-shaped issue API for clients that need to visualize or
+analyze connected work, makes daemon projects easier to create without a local
+workspace, and records testing guidance for behavior-based validation.
+
+**New features**
+
+- Added `GET /api/v1/projects/{project_id}/issues/{ref}/graph` for reachable
+  issue graphs. The endpoint walks parent, `blocks`, and related relationships
+  from a source issue, supports `depth=full` or a bounded hop count, can hide
+  closed non-source issues with `hide_done=true`, includes cross-project
+  `qualified_id` values, and reports unresolved link endpoints without dropping
+  the rest of the graph.
+- Added `kata projects create <name>` for creating or returning an active
+  daemon project by name without writing `.kata.toml`, `.gitignore`, or agent
+  guidance files and without attaching a workspace alias.
+- Added testing guidance that discourages tautological content assertions,
+  especially shell tests that grep scripts or config for implementation text,
+  and favors assertions against observable behavior, persisted state, command
+  output, API responses, events, or rendered UI.
+
+**Improvements**
+
+- Documented the name-only project creation workflow in quickstart and CLI
+  reference docs so projects that are not tied one-to-one to a repository can
+  be created before any workspace is initialized.
+
+**Acknowledgements**
+
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for the
+  reachable issue graph API and testing-without-tautologies guidance.
+- Thanks to [Wes McKinney](https://github.com/wesm) for name-only project
+  creation.
+
 ## 0.7.0
 <small>2026-06-29</small>
 
