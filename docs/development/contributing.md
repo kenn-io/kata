@@ -45,28 +45,6 @@ RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
   -timeout 2m
 ```
 
-## Testing standards
-
-Tests should protect behavior that users, operators, or callers can observe.
-Prefer assertions against returned values, persisted rows, HTTP response bodies
-and status codes, emitted events, CLI output and exit codes, rendered TUI
-output, or auth outcomes. Avoid tests that only prove the current source text
-contains a string or that a private implementation detail is arranged the way it
-is today.
-
-For shell scripts, workflows, config, and generated artifacts, do not add tests
-that grep implementation files for expected text. Those content checks are
-usually tautological: they pass when the file contains the searched string, not
-when the release, installer, workflow, or daemon behavior works. Exercise the
-command or tool behavior directly, use the tool's own validation command, or
-document a manual check when direct behavior coverage is not practical.
-
-When a fake stands in for an external boundary such as a hub, GitHub, or an
-embedding provider, keep it specific enough to catch the wrong branch,
-argument, status, or side effect. Do not mock the subject under test, and do
-not update golden snapshots or expected literals just to silence a failure
-without first confirming that the new output is the intended contract.
-
 ## Documentation checks
 
 Install Zensical:
