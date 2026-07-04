@@ -113,8 +113,67 @@ test_changelog_fallback_includes_first_commit_without_tags() {
   local output
   output="$(run_in_repo "$repo" env CHANGELOG_AGENT=none "$repo_root/scripts/changelog.sh" NEXT -)"
 
-  assert_contains "$output" "### Changes" "fallback changelog heading"
+  assert_contains "$output" "### New Features" "fallback changelog heading"
   assert_contains "$output" "feat: add task list" "fallback changelog commit"
+}
+
+test_changelog_fallback_groups_commits_by_user_facing_sections() {
+  local repo="$tmp_root/changelog-sections"
+  init_repo "$repo"
+  printf 'faster release notes\n' >"$repo/perf.txt"
+  git -C "$repo" add perf.txt
+  git -C "$repo" commit -q -m "perf: speed up release notes"
+  printf 'release cancellation\n' >"$repo/fix.txt"
+  git -C "$repo" add fix.txt
+  git -C "$repo" commit -q -m "fix: handle cancelled releases"
+
+  local output
+  output="$(run_in_repo "$repo" env CHANGELOG_AGENT=none "$repo_root/scripts/changelog.sh" NEXT -)"
+
+  assert_contains "$output" "### New Features" "fallback changelog feature section"
+  assert_contains "$output" "- feat: add task list" "fallback changelog feature entry"
+  assert_contains "$output" "### Improvements" "fallback changelog improvement section"
+  assert_contains "$output" "- perf: speed up release notes" "fallback changelog improvement entry"
+  assert_contains "$output" "### Bug Fixes" "fallback changelog bug fix section"
+  assert_contains "$output" "- fix: handle cancelled releases" "fallback changelog bug fix entry"
+  assert_not_contains "$output" "### Changes" "fallback changelog should use categorized headings"
+}
+
+test_changelog_agent_prompt_requests_categorized_sections() {
+  local repo="$tmp_root/changelog-prompt-sections"
+  local fake_bin="$tmp_root/fake-bin-prompt-sections"
+  local prompt_capture="$tmp_root/changelog-prompt.txt"
+  init_repo "$repo"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/codex" <<'EOF'
+#!/usr/bin/env bash
+out=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-o" ]]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+prompt="$(cat)"
+printf '%s' "$prompt" >"${PROMPT_CAPTURE:?}"
+if [[ -n "$out" ]]; then
+  printf '### New Features\n\n- AI changelog was invoked\n' >"$out"
+else
+  printf '### New Features\n\n- AI changelog was invoked\n'
+fi
+EOF
+  chmod +x "$fake_bin/codex"
+
+  local output prompt
+  output="$(run_in_repo "$repo" env PATH="$fake_bin:$PATH" PROMPT_CAPTURE="$prompt_capture" "$repo_root/scripts/changelog.sh" NEXT -)"
+  prompt="$(cat "$prompt_capture")"
+
+  assert_contains "$output" "AI changelog was invoked" "agent changelog output"
+  assert_contains "$prompt" "### New Features" "agent prompt feature section"
+  assert_contains "$prompt" "### Improvements" "agent prompt improvement section"
+  assert_contains "$prompt" "### Bug Fixes" "agent prompt bug fix section"
+  assert_contains "$prompt" "Do NOT mention documentation-only changes" "agent prompt docs filtering"
 }
 
 test_changelog_defaults_to_codex_agent() {
@@ -144,7 +203,7 @@ EOF
   output="$(run_in_repo "$repo" env PATH="$fake_bin:$PATH" "$repo_root/scripts/changelog.sh" NEXT -)"
 
   assert_contains "$output" "AI changelog was invoked" "default changelog agent"
-  assert_not_contains "$output" "### Changes" "default changelog should not use deterministic fallback"
+  assert_not_contains "$output" "feat: add task list" "default changelog should not use deterministic fallback"
 }
 
 test_changelog_allows_explicit_agent_opt_in() {
@@ -200,9 +259,32 @@ test_release_creates_and_pushes_bare_semver_tag() {
   local output
   output="$(printf 'y\n' | run_in_repo "$repo" env CHANGELOG_AGENT=none "$repo_root/scripts/release.sh" 0.5.0)"
 
-  assert_contains "$output" "Release v0.5.0" "release preview"
+  assert_contains "$output" "PROPOSED CHANGELOG FOR v0.5.0" "release preview"
   git -C "$repo" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null || fail "local tag v0.5.0 missing"
   git -C "$remote" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null || fail "remote tag v0.5.0 missing"
+}
+
+test_release_preview_matches_categorized_changelog_style() {
+  local repo="$tmp_root/release-preview"
+  local remote="$tmp_root/release-preview-origin.git"
+  init_repo "$repo"
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+
+  local output status
+  set +e
+  output="$(printf 'n\n' | run_in_repo "$repo" env CHANGELOG_AGENT=none "$repo_root/scripts/release.sh" 0.5.0 2>&1)"
+  status=$?
+  set -e
+
+  [[ $status -eq 0 ]] || fail "release.sh should treat an operator cancellation as a clean cancellation"
+  assert_contains "$output" "PROPOSED CHANGELOG FOR v0.5.0" "release preview heading"
+  assert_contains "$output" "### New Features" "release preview categorized changelog"
+  assert_contains "$output" "Accept this changelog and create release v0.5.0? [y/N]" "release confirmation prompt"
+  assert_contains "$output" "Release cancelled." "release cancellation"
+  if git -C "$repo" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null; then
+    fail "release cancellation should not create a tag"
+  fi
 }
 
 test_release_uses_codex_changelog_by_default() {
@@ -387,10 +469,13 @@ test_release_rejects_v_prefixed_version
 test_release_rejects_non_semver_version
 test_release_refuses_dirty_worktree
 test_changelog_fallback_includes_first_commit_without_tags
+test_changelog_fallback_groups_commits_by_user_facing_sections
+test_changelog_agent_prompt_requests_categorized_sections
 test_changelog_defaults_to_codex_agent
 test_changelog_allows_explicit_agent_opt_in
 test_changelog_rejects_unknown_agent
 test_release_creates_and_pushes_bare_semver_tag
+test_release_preview_matches_categorized_changelog_style
 test_release_uses_codex_changelog_by_default
 test_verify_release_tag_rejects_tag_outside_origin_main
 test_verify_release_tag_accepts_tag_on_origin_main

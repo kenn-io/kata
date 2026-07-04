@@ -17,6 +17,16 @@ else
   fi
 fi
 
+git_diff_stat() {
+  if [[ -n "$range_spec" ]]; then
+    git diff --stat "$range_spec"
+  else
+    local empty_tree
+    empty_tree="$(git hash-object -t tree /dev/null)"
+    git diff --stat "$empty_tree" HEAD
+  fi
+}
+
 git_log() {
   if [[ -n "$range_spec" ]]; then
     git log --no-merges "$@" "$range_spec"
@@ -26,17 +36,55 @@ git_log() {
 }
 
 fallback_changelog() {
-  printf '### Changes\n\n'
   local log_output
   log_output="$(git_log --pretty=format:'%s%x09%h')"
   if [[ -z "$log_output" ]]; then
+    printf '### Changes\n\n'
     printf '%s\n' '- No commits since the previous release.'
     return
   fi
+
+  local features=""
+  local improvements=""
+  local fixes=""
+
   while IFS=$'\t' read -r subject short_hash; do
     [[ -n "$subject" ]] || continue
-    printf '%s\n' "- ${subject} (${short_hash})"
+    local entry="- ${subject} (${short_hash})"
+    case "$subject" in
+      feat:*|feat\(*\):*|feature:*|feature\(*\):*)
+        features+="${entry}"$'\n'
+        ;;
+      fix:*|fix\(*\):*|bugfix:*|bugfix\(*\):*)
+        fixes+="${entry}"$'\n'
+        ;;
+      docs:*|docs\(*\):*|doc:*|doc\(*\):*)
+        ;;
+      *)
+        improvements+="${entry}"$'\n'
+        ;;
+    esac
   done <<<"$log_output"
+
+  local printed=0
+  if [[ -n "$features" ]]; then
+    printf '### New Features\n\n%s\n' "$features"
+    printed=1
+  fi
+  if [[ -n "$improvements" ]]; then
+    [[ $printed -eq 0 ]] || printf '\n'
+    printf '### Improvements\n\n%s\n' "$improvements"
+    printed=1
+  fi
+  if [[ -n "$fixes" ]]; then
+    [[ $printed -eq 0 ]] || printf '\n'
+    printf '### Bug Fixes\n\n%s\n' "$fixes"
+    printed=1
+  fi
+  if [[ $printed -eq 0 ]]; then
+    printf '### Improvements\n\n'
+    printf '%s\n' '- No user-facing changes in this commit range.'
+  fi
 }
 
 agent="${CHANGELOG_AGENT:-codex}"
@@ -48,25 +96,37 @@ fi
 
 prompt_file="$(mktemp)"
 log_file="$(mktemp)"
+diff_file="$(mktemp)"
 notes_file="$(mktemp)"
 err_file="$(mktemp)"
-trap 'rm -f "$prompt_file" "$log_file" "$notes_file" "$err_file"' EXIT
+trap 'rm -f "$prompt_file" "$log_file" "$diff_file" "$notes_file" "$err_file"' EXIT
 
 git_log --date=short --pretty=format:'%ad%x09%h%x09%s' >"$log_file"
+git_diff_stat >"$diff_file"
 
 {
   printf 'Write concise Markdown release notes for kata %s.\n\n' "$version"
   printf 'IMPORTANT: Do not use tools, run shell commands, search, or read files.\n'
-  printf 'All required information is provided below. Analyze the commit log only.\n\n'
+  printf 'All required information is provided below. Analyze the commit log and diff summary only.\n\n'
   printf 'kata is a local-first issue tracker with a daemon, CLI, TUI, federation, and documentation.\n'
-  printf 'Use user-facing language, group related changes when useful, and avoid private workspace or repository names.\n'
+  printf 'Use user-facing language and avoid private workspace or repository names.\n'
+  printf 'Group changes into these Markdown sections when applicable:\n'
+  printf '%s\n' '- ### New Features'
+  printf '%s\n' '- ### Improvements'
+  printf '%s\n' '- ### Bug Fixes'
+  printf 'Use only sections that have entries.\n'
   printf 'Skip internal refactoring unless it affects users.\n'
+  printf 'Do NOT mention documentation-only changes, including docs, changelog, release notes, README, website copy, screenshots, or generated docs asset updates, unless documentation is the user-facing product being released.\n'
+  printf 'Do NOT mention bugs that were introduced and fixed within this same release cycle.\n'
+  printf 'Keep descriptions brief, one line each, and use present tense.\n'
   printf 'Output only the release notes, with no preamble.\n'
   if [[ -n "$extra_instructions" ]]; then
     printf '\nAdditional instructions:\n%s\n' "$extra_instructions"
   fi
   printf '\nCommits:\n'
   cat "$log_file"
+  printf '\n\nDiff summary:\n'
+  cat "$diff_file"
 } >"$prompt_file"
 
 run_agent() {

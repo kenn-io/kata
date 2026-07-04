@@ -43,36 +43,39 @@ fi
 notes_file="$(mktemp)"
 trap 'rm -f "$notes_file"' EXIT
 
-printf 'Preparing release %s\n' "$tag"
-printf '%s\n' '- Checking that the tag does not already exist and the worktree is clean.'
 case "$changelog_agent" in
   codex)
-    printf '%s\n' '- Generating release notes with CHANGELOG_AGENT=codex; this calls codex exec on the git log.'
+    printf 'Generating release notes for %s with CHANGELOG_AGENT=codex; this calls codex exec on the git log.\n' "$tag"
     ;;
   claude)
-    printf '%s\n' '- Generating release notes with CHANGELOG_AGENT=claude; this calls claude --print on the git log.'
+    printf 'Generating release notes for %s with CHANGELOG_AGENT=claude; this calls claude --print on the git log.\n' "$tag"
     ;;
   none)
-    printf '%s\n' '- Generating release notes with CHANGELOG_AGENT=none; this uses the deterministic git-log fallback.'
+    printf 'Generating release notes for %s with CHANGELOG_AGENT=none; this uses the deterministic git-log fallback.\n' "$tag"
     ;;
   *)
-    printf '%s\n' "- Generating release notes with CHANGELOG_AGENT=${changelog_agent}; scripts/changelog.sh will validate this value."
+    printf 'Generating release notes for %s with CHANGELOG_AGENT=%s; scripts/changelog.sh will validate this value.\n' "$tag" "$changelog_agent"
     ;;
 esac
-printf '%s\n\n' '- Showing the release notes preview before creating or pushing any tag.'
 
 "$repo_root/scripts/changelog.sh" "$version" "-" "$extra_instructions" >"$notes_file"
 
-printf 'Release %s\n\n' "$tag"
+printf '\n'
+printf '==========================================\n'
+printf 'PROPOSED CHANGELOG FOR %s\n' "$tag"
+printf '==========================================\n'
 cat "$notes_file"
 printf '\n'
+printf '==========================================\n'
+printf '\n'
 
-printf 'Create and push %s? [y/N] ' "$tag"
+printf 'Accept this changelog and create release %s? [y/N] ' "$tag"
 answer=""
 read -r answer || true
+printf '\n'
 if [[ "$answer" != "y" && "$answer" != "Y" && "$answer" != "yes" && "$answer" != "YES" ]]; then
-  printf 'release aborted\n' >&2
-  exit 1
+  printf 'Release cancelled.\n'
+  exit 0
 fi
 
 tag_message="$(mktemp)"
@@ -87,4 +90,6 @@ git tag -a "$tag" -F "$tag_message"
 printf 'Pushing %s to origin...\n' "$tag"
 git push origin "$tag"
 
-printf 'pushed %s\n' "$tag"
+printf '\n'
+printf 'Release %s created and pushed successfully.\n' "$tag"
+printf 'GitHub Actions will build and publish the release.\n'
