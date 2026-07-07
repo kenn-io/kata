@@ -238,7 +238,8 @@ kata wait <ref> [<ref>...] [--until closed|attention|needs-human|stuck] \
 
 `kata wait` is a read-only blocking wait. It defaults to `--until closed` and
 `--all` (waiting for every ref). In attention modes, a closed issue also
-completes the wait. A timeout exits with a dedicated nonzero code.
+completes the wait. A timeout exits with a dedicated nonzero code and covers the
+whole command, including project/ref resolution and polling.
 
 ## Ready work
 

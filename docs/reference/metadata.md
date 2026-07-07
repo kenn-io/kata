@@ -115,7 +115,7 @@ with `--json-value`.
 
 ### `kata list --meta`
 
-Filter the list by metadata:
+Filter the selected project's list by metadata:
 
 ```sh
 kata list --meta work.attention           # issues that have the key at all
@@ -124,7 +124,8 @@ kata list --meta work.attention=needs-human  # issues where it equals this strin
 
 `--meta` is repeatable. A bare `key` matches on **presence**; `key=value` matches
 on **equality against a string value**. Multiple `--meta` filters are ANDed
-together.
+together. The filter is project-scoped because `kata list` is project-scoped; for
+cross-project dashboards, poll each project or consume the event stream.
 
 ## Orchestration conventions (`work.*` keys)
 

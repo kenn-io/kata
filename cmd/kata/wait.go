@@ -241,12 +241,36 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 	}
 	anyMode := opts.anyMode // --all is the default when neither is set
 
-	ctx := cmd.Context()
+	originalCtx := cmd.Context()
+	start := time.Now()
+	ctx := originalCtx
+	var cancel context.CancelFunc
+	if opts.timeout > 0 {
+		ctx, cancel = context.WithDeadline(originalCtx, start.Add(opts.timeout))
+		defer cancel()
+		// Ref/project resolution reads cmd.Context(), so temporarily install the
+		// wait deadline before resolving refs. Restore the original context before
+		// returning so tests and future callers do not observe a mutated command.
+		cmd.SetContext(ctx)
+		defer cmd.SetContext(originalCtx)
+	}
+
+	reporter := &waitReporter{mode: currentOutputMode(), w: cmd.OutOrStdout()}
 	targets := make([]*waitTarget, 0, len(args))
 	var baseURL string
 	for _, arg := range args {
 		c, resolvedURL, pid, ref, rerr := resolveIssueRefForCommand(cmd, arg)
 		if rerr != nil {
+			if opts.timeout > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				if err := emitWaitJSON(cmd, waitJSONOutput{
+					Results:  []waitResult{},
+					TimedOut: true,
+					Pending:  append([]string(nil), args...),
+				}); err != nil {
+					return err
+				}
+				return waitTimeoutError(opts.timeout, args)
+			}
 			return rerr
 		}
 		ctx = c
@@ -258,19 +282,11 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 		return err
 	}
 
-	reporter := &waitReporter{mode: currentOutputMode(), w: cmd.OutOrStdout()}
-	start := time.Now()
-
 	// Bound every state fetch by the wait deadline so a hung daemon request
-	// cannot block past --timeout. Ref resolution above already ran against the
-	// unbounded context; this caps only the polling GETs. Cancellation (Ctrl-C)
-	// still flows through the parent ctx used for the poll loop's sleep.
+	// cannot block past --timeout. The same deadline also covered ref/project
+	// resolution above, making --timeout a wall-clock cap for the whole command.
+	// Cancellation (Ctrl-C) still flows through the parent context.
 	fetchCtx := ctx
-	if opts.timeout > 0 {
-		var cancel context.CancelFunc
-		fetchCtx, cancel = context.WithDeadline(ctx, start.Add(opts.timeout))
-		defer cancel()
-	}
 
 	// Initial pass: fail fast only on a permanent (4xx) unresolvable ref
 	// (listing which), and complete refs whose condition already holds at
@@ -335,30 +351,44 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 		if timedOut {
 			pending = pendingRefs(targets)
 		}
-		out := waitJSONOutput{
+		if err := emitWaitJSON(cmd, waitJSONOutput{
 			Results:   collectResults(targets),
 			TimedOut:  timedOut,
 			Pending:   pending,
 			Abandoned: collectAbandoned(targets),
-		}
-		var buf bytes.Buffer
-		if err := emitJSON(&buf, out); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprint(cmd.OutOrStdout(), buf.String()); err != nil {
+		}); err != nil {
 			return err
 		}
 	}
 
 	if timedOut {
-		return &cliError{
-			Message: fmt.Sprintf("wait timed out after %s; pending: %s",
-				opts.timeout, strings.Join(pendingRefs(targets), ", ")),
-			Kind:     kindTimeout,
-			ExitCode: ExitWaitTimeout,
-		}
+		return waitTimeoutError(opts.timeout, pendingRefs(targets))
 	}
 	return nil
+}
+
+func emitWaitJSON(cmd *cobra.Command, out waitJSONOutput) error {
+	if currentOutputMode() != outputJSON {
+		return nil
+	}
+	var buf bytes.Buffer
+	if err := emitJSON(&buf, out); err != nil {
+		return err
+	}
+	_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+	return err
+}
+
+func waitTimeoutError(timeout time.Duration, pending []string) *cliError {
+	msg := fmt.Sprintf("wait timed out after %s", timeout)
+	if len(pending) > 0 {
+		msg += "; pending: " + strings.Join(pending, ", ")
+	}
+	return &cliError{
+		Message:  msg,
+		Kind:     kindTimeout,
+		ExitCode: ExitWaitTimeout,
+	}
 }
 
 // waitPollLoop polls the still-pending targets on the configured cadence until
@@ -397,6 +427,9 @@ func waitPollLoop(
 		if sleep > 0 {
 			select {
 			case <-ctx.Done():
+				if !deadline.IsZero() && !time.Now().Before(deadline) {
+					return nil // timed out during the sleep
+				}
 				return ctx.Err()
 			case <-time.After(sleep):
 			}

@@ -5,6 +5,13 @@ coding agents, or supervise processes. What it provides is a durable board and a
 small metadata convention that external tools use to coordinate agents around a
 shared issue. This chapter is the operational recipe for that convention.
 
+The boundary is intentional. kata stores issue state, metadata, relationships,
+and events; launchers own worktrees, terminals, process supervision, and branch
+lifecycle. If a dashboard needs mechanical lifecycle state such as
+running/orphaned/done, it should read that from the launcher or harness, not from
+kata metadata. If a delegated issue tree is useful, model it with ordinary issue
+relationships such as `--parent`; there is no separate delegated-link type.
+
 The coordination substrate is the `work.*` metadata convention documented in the
 [Metadata reference](../reference/metadata.md#orchestration-conventions-work-keys):
 
@@ -126,8 +133,9 @@ modes a *close* also completes the wait — the reported reason distinguishes a
 close from an attention change, so the coordinator can branch on it. Default
 `--until closed` with default `--all` blocks until every named issue is closed;
 `--timeout <dur>` exits with a dedicated nonzero code so a wrapper can tell a
-timeout from a satisfied wait. `kata wait` is read-only state polling (default
-`--poll-interval 2s`).
+timeout from a satisfied wait. The timeout is the wall-clock budget for the
+whole command, including project/ref resolution and polling. `kata wait` is
+read-only state polling (default `--poll-interval 2s`).
 
 For a **human dashboard**, poll the same convention with `list`, or follow the
 event stream:
@@ -137,6 +145,10 @@ kata list --meta work.attention=needs-human
 kata list --meta work.attention=stuck
 kata events --tail
 ```
+
+`kata list --meta` is scoped to the selected project. A dashboard that spans
+projects should either poll each project separately or follow the event stream
+and maintain its own cross-project view.
 
 The `issue.metadata_updated` events carry per-key before/after diffs, so a
 dashboard sees exactly when an attention level changes.

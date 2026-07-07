@@ -338,6 +338,36 @@ func TestWaitTimeoutBoundsHungFetch(t *testing.T) {
 		"a hung daemon fetch must be bounded by --timeout, not block on the stuck request")
 }
 
+// TestWaitTimeoutBoundsRefResolution: --timeout is the whole command's
+// wall-clock budget, not only the post-resolution poll loop. If project/ref
+// resolution stalls, the command must return ExitWaitTimeout promptly instead
+// of waiting for the default per-request HTTP timeout.
+func TestWaitTimeoutBoundsRefResolution(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/projects/resolve":
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+				_, _ = w.Write([]byte(`{"project":{"id":1,"name":"kata"}}`))
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	resetFlags(t)
+	start := time.Now()
+	_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+		"wait", "kata#abcd", "--timeout", "300ms", "--poll-interval", "50ms")
+	elapsed := time.Since(start)
+
+	_ = requireCLIError(t, err, ExitWaitTimeout)
+	assert.Less(t, elapsed, 2*time.Second,
+		"a stalled ref resolution must be bounded by --timeout, not the default HTTP timeout")
+}
+
 // TestWaitTimeoutAfterTransientFailsReportsTimeout: a fetch cut short by the
 // --timeout deadline must not be counted toward the consecutive-failure budget.
 // With two prior transient (5xx) failures, a third deadline-canceled fetch must
