@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
+	"github.com/klauspost/compress/gzhttp"
 	kitdaemon "go.kenn.io/kit/daemon"
 
 	"go.kenn.io/kata/internal/api"
@@ -148,8 +150,28 @@ func NewServer(cfg ServerConfig) *Server {
 	registerOpenAPIYAML(mux)
 	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 
-	s.handler = withCSRFGuards(requireBearer(cfg.authPolicy(), cfg.DB)(withTrustedProxyActor(cfg)(mux)))
+	s.handler = withGzip(withCSRFGuards(requireBearer(cfg.authPolicy(), cfg.DB)(withTrustedProxyActor(cfg)(mux))))
 	return s
+}
+
+// withGzip compresses responses with gzip when the client sends
+// Accept-Encoding: gzip. Eligibility is limited to the JSON API surface and
+// the OpenAPI YAML document; text/event-stream is deliberately excluded so
+// SSE frames flush through to the client unbuffered (the events handler
+// also depends on the ResponseWriter passing http.Flusher through, which
+// gzhttp's wrapper preserves). Responses under gzhttp's default minimum
+// size are sent as-is since gzip overhead would outweigh the savings.
+func withGzip(next http.Handler) http.Handler {
+	wrap, err := gzhttp.NewWrapper(gzhttp.ContentTypes([]string{
+		"application/json",
+		"application/openapi+yaml",
+	}))
+	if err != nil {
+		// The options above are static; NewWrapper only fails on invalid
+		// option values, so any error here is a programming error.
+		panic(fmt.Errorf("build gzip middleware: %w", err))
+	}
+	return wrap(next)
 }
 
 // Handler returns the http.Handler suitable for httptest.NewServer.

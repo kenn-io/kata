@@ -16,6 +16,7 @@ require (
 	github.com/doordash-oss/oapi-codegen-dd/v3 v3.75.5
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/jackc/pgx/v5 v5.9.2
+	github.com/klauspost/compress v1.18.6
 	github.com/mattn/go-runewidth v0.0.20
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/posthog/posthog-go v1.12.6
@@ -84,7 +85,6 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
