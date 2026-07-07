@@ -344,8 +344,8 @@ func TestWaitTimeoutBoundsHungFetch(t *testing.T) {
 // of waiting for the default per-request HTTP timeout.
 func TestWaitTimeoutBoundsRefResolution(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/v1/projects/resolve":
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
 			select {
 			case <-r.Context().Done():
 			case <-time.After(5 * time.Second):
