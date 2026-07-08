@@ -187,9 +187,9 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	}
 }
 
-func TestAPISchemaVersionReflectsSemanticSearchContract(t *testing.T) {
-	if APISchemaVersion != "0.4.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.4.0 for semantic search response and health contract", APISchemaVersion)
+func TestAPISchemaVersionReflectsBranchOrchestrationContract(t *testing.T) {
+	if APISchemaVersion != "0.5.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.5.0 for create metadata and list metadata filter contract", APISchemaVersion)
 	}
 }
 
