@@ -16,6 +16,7 @@ coverage.out
 /docs/.venv/
 /docs/.cache/
 /docs/site/
+__pycache__/
 /docs/.zensical-build.*.toml
 /docs/zensical-public-docs.*/
 
