@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/textsafe"
 )
 
 func newListCmd() *cobra.Command {
@@ -120,6 +119,9 @@ func newListCmd() *cobra.Command {
 					Owner       *string  `json:"owner"`
 					Priority    *int64   `json:"priority"`
 					Labels      []string `json:"labels"`
+					BlockedBy   []struct {
+						Status string `json:"status"`
+					} `json:"blocked_by"`
 				} `json:"issues"`
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
@@ -150,14 +152,37 @@ func newListCmd() *cobra.Command {
 			// list and ready confused users (hammer-test finding #10).
 			// Unowned issues render as "(unowned)" so the trailing
 			// "(...)" cell is never empty.
-			for _, i := range b.Issues {
+			rows := make([]issueRow, len(b.Issues))
+			for idx, i := range b.Issues {
 				owner := "unowned"
 				if i.Owner != nil && *i.Owner != "" {
 					owner = *i.Owner
 				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%-8s  %-8s  %s  (%s)\n",
-					i.ShortID, i.Status,
-					textsafe.Line(i.Title), textsafe.Line(owner)); err != nil {
+				blocked := false
+				if i.Status == "open" {
+					for _, peer := range i.BlockedBy {
+						if peer.Status == "open" {
+							blocked = true
+							break
+						}
+					}
+				}
+				rows[idx] = issueRow{
+					ID:       i.ShortID,
+					Title:    i.Title,
+					Owner:    owner,
+					Priority: i.Priority,
+					Status:   i.Status,
+					Blocked:  blocked,
+					Labels:   i.Labels,
+				}
+			}
+			renderer := newRowRenderer(cmd.OutOrStdout())
+			if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
+				return err
+			}
+			if !flags.Quiet && len(rows) > 0 {
+				if err := renderer.renderListFooter(cmd.OutOrStdout(), rows); err != nil {
 					return err
 				}
 			}
