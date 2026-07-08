@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/textsafe"
 )
 
 func newReadyCmd() *cobra.Command {
@@ -121,19 +120,32 @@ func newReadyCmd() *cobra.Command {
 						Title       string  `json:"title"`
 						Owner       *string `json:"owner,omitempty"`
 						ProjectName string  `json:"project_name"`
+						Priority    *int64  `json:"priority"`
 					} `json:"issues"`
 				}
 				if err := json.Unmarshal(bs, &b); err != nil {
 					return err
 				}
-				for _, i := range b.Issues {
+				rows := make([]issueRow, len(b.Issues))
+				for idx, i := range b.Issues {
 					owner := "-"
 					if i.Owner != nil {
 						owner = *i.Owner
 					}
-					qualified := i.ProjectName + "#" + i.ShortID
-					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%-16s  %s  (%s)\n",
-						qualified, textsafe.Line(i.Title), textsafe.Line(owner)); err != nil {
+					rows[idx] = issueRow{
+						ID:       i.ProjectName + "#" + i.ShortID,
+						Title:    i.Title,
+						Owner:    owner,
+						Priority: i.Priority,
+						Status:   "open",
+					}
+				}
+				renderer := newRowRenderer(cmd.OutOrStdout())
+				if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
+					return err
+				}
+				if !flags.Quiet && len(rows) > 0 {
+					if err := renderer.renderReadyFooter(cmd.OutOrStdout(), len(rows)); err != nil {
 						return err
 					}
 				}
@@ -168,13 +180,26 @@ func newReadyCmd() *cobra.Command {
 				}
 				return nil
 			}
-			for _, i := range b.Issues {
+			rows := make([]issueRow, len(b.Issues))
+			for idx, i := range b.Issues {
 				ownerStr := "-"
 				if i.Owner != nil {
 					ownerStr = *i.Owner
 				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%-8s  %s  (%s)\n",
-					i.ShortID, textsafe.Line(i.Title), textsafe.Line(ownerStr)); err != nil {
+				rows[idx] = issueRow{
+					ID:       i.ShortID,
+					Title:    i.Title,
+					Owner:    ownerStr,
+					Priority: i.Priority,
+					Status:   "open",
+				}
+			}
+			renderer := newRowRenderer(cmd.OutOrStdout())
+			if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
+				return err
+			}
+			if !flags.Quiet && len(rows) > 0 {
+				if err := renderer.renderReadyFooter(cmd.OutOrStdout(), len(rows)); err != nil {
 					return err
 				}
 			}

@@ -118,6 +118,107 @@ func TestReady_AllFromBoundDirSkipsLocalProject(t *testing.T) {
 // global ready endpoint does not apply --unowned / --owner / --label /
 // --no-label, so accepting those alongside --all would return misleading
 // (unfiltered) results.
+// TestReady_HumanRowUsesGlyphLayout pins that the project-scoped human
+// path renders through the shared row renderer: open glyph + title.
+func TestReady_HumanRowUsesGlyphLayout(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "alpha")
+
+	out := runCLI(t, env, dir, "ready")
+
+	assert.Contains(t, out, "○ ", "expected open glyph prefix in human ready output")
+	assert.Contains(t, out, "alpha")
+}
+
+// TestReady_HumanRowRendersPriorityChip pins that a ready issue with a
+// priority renders the "• P<n>" chip in project-scoped human output.
+func TestReady_HumanRowRendersPriorityChip(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	postJSON[map[string]any](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
+		map[string]any{"actor": "tester", "title": "urgent fix", "priority": int64(1)})
+
+	out := runCLI(t, env, dir, "ready")
+
+	assert.Contains(t, out, "• P1")
+}
+
+// TestReady_HumanFooterShowsSummaryAndLegend pins the ready footer: rule,
+// "Ready: N issues with no active blockers" summary, and the
+// "Status: ○ open" legend (no "● blocked" clause since ready results are
+// by definition unblocked).
+func TestReady_HumanFooterShowsSummaryAndLegend(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "alpha")
+
+	out := runCLI(t, env, dir, "ready")
+
+	assert.Contains(t, out, "Ready: 1 issue with no active blockers")
+	assert.Contains(t, out, "Status: ○ open")
+	assert.NotContains(t, out, "● blocked")
+}
+
+// TestReady_HumanFooterAbsentUnderQuiet pins that --quiet suppresses the
+// ready footer even when rows were printed.
+func TestReady_HumanFooterAbsentUnderQuiet(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "alpha")
+
+	out := runCLI(t, env, dir, "--quiet", "ready")
+
+	assert.NotContains(t, out, "Ready:")
+	assert.NotContains(t, out, "Status: ○ open")
+}
+
+// TestReady_HumanFooterAbsentOnZeroRows pins that an empty ready result
+// prints no footer at all.
+func TestReady_HumanFooterAbsentOnZeroRows(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+
+	out := runCLI(t, env, dir, "ready")
+
+	assert.NotContains(t, out, "Ready:")
+}
+
+// TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID pins that the --all
+// human path renders through the shared row renderer with the qualified
+// "project#short_id" id and the open glyph.
+func TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "alpha")
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "○ ", "expected open glyph prefix in --all human ready output")
+	assert.Contains(t, out, "#")
+	assert.Contains(t, out, "alpha")
+}
+
+// TestReady_AllHumanRowRendersPriorityChip pins that --all human output
+// renders the priority chip for a ready issue created with a priority.
+func TestReady_AllHumanRowRendersPriorityChip(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	postJSON[map[string]any](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
+		map[string]any{"actor": "tester", "title": "urgent fix", "priority": int64(1)})
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "• P1")
+}
+
+// TestReady_AllHumanFooterShowsSummaryAndLegend pins the --all footer.
+func TestReady_AllHumanFooterShowsSummaryAndLegend(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "alpha")
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "Ready: 1 issue with no active blockers")
+	assert.Contains(t, out, "Status: ○ open")
+}
+
 func TestReady_AllRejectsFilterFlags(t *testing.T) {
 	cases := []struct {
 		name string
