@@ -152,6 +152,10 @@ type Storage interface {
 	ListEmbedTargets(ctx context.Context, fingerprint string, limit int) ([]EmbedTarget, error)
 	EmbeddingStats(ctx context.Context, projectID int64, fingerprint string) (count int64, maxUpdatedAt string, err error)
 	SearchVector(ctx context.Context, projectID int64, queryVec []float32, fingerprint string, k int, includeDeleted bool) ([]SearchCandidate, error)
+	// ListIssueContent returns live issues (live projects only) with id >
+	// afterID, ordered by id ascending, at most limit rows. It feeds the
+	// vector mirror.
+	ListIssueContent(ctx context.Context, afterID int64, limit int) ([]IssueContent, error)
 
 	// import support
 	ImportBatch(ctx context.Context, p ImportBatchParams) (ImportBatchResult, []Event, error)

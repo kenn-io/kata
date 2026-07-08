@@ -558,6 +558,10 @@ func (s *Store) ListFederationEnrollments(_ context.Context) ([]db.FederationEnr
 	return nil, ErrNotImplementedPhase3
 }
 
+func (s *Store) ListIssueContent(_ context.Context, _ int64, _ int) ([]db.IssueContent, error) {
+	return nil, ErrNotImplementedPhase3
+}
+
 func (s *Store) ListIssues(_ context.Context, _ db.ListIssuesParams) ([]db.Issue, error) {
 	return nil, ErrNotImplementedPhase3
 }
