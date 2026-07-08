@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
@@ -211,6 +212,37 @@ func TestGenerationFingerprintComponents(t *testing.T) {
 	fps := map[string]bool{g1.Fingerprint(): true, g2.Fingerprint(): true, g3.Fingerprint(): true}
 	if len(fps) != 3 {
 		t.Fatalf("model/salt must each change the fingerprint, got %d distinct", len(fps))
+	}
+}
+
+func TestFingerprint(t *testing.T) {
+	c1, _ := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 4})
+	c2, _ := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 4, Salt: "s"})
+	c3, _ := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m2", Dims: 4})
+
+	fps := []string{c1.Fingerprint(), c2.Fingerprint(), c3.Fingerprint()}
+
+	// Check that all fingerprints are exactly 64 lowercase hex characters.
+	for i, fp := range fps {
+		if len(fp) != 64 {
+			t.Fatalf("client %d fingerprint length = %d, want 64", i, len(fp))
+		}
+		if fp != strings.ToLower(fp) {
+			t.Fatalf("client %d fingerprint not lowercase: %s", i, fp)
+		}
+		// Verify it's valid hex.
+		if _, err := hex.DecodeString(fp); err != nil {
+			t.Fatalf("client %d fingerprint not valid hex: %v", i, err)
+		}
+	}
+
+	// Check that all three fingerprints are distinct across model/dims/salt.
+	fpMap := make(map[string]bool)
+	for _, fp := range fps {
+		fpMap[fp] = true
+	}
+	if len(fpMap) != 3 {
+		t.Fatalf("fingerprints not distinct: got %d unique, want 3", len(fpMap))
 	}
 }
 
