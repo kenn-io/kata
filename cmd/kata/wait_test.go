@@ -408,6 +408,42 @@ func TestWaitTimeoutAfterTransientFailsReportsTimeout(t *testing.T) {
 	_ = requireCLIError(t, err, ExitWaitTimeout)
 }
 
+// TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout: when the command runs
+// under a parent context whose deadline fires before --timeout (e.g. a caller
+// using ExecuteContext with its own budget), a ref resolution cut short by that
+// parent deadline must surface as the resolution error, not be misclassified as
+// ExitWaitTimeout with timed_out=true — the wait command's own timeout budget
+// was never exhausted.
+func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+				_, _ = w.Write([]byte(`{"project":{"id":1,"name":"kata"}}`))
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	resetFlags(t)
+	parentCtx, cancel := context.WithTimeout(
+		contextWithBaseURL(context.Background(), srv.URL), 200*time.Millisecond)
+	defer cancel()
+	_, _, err := executeRootCapture(t, parentCtx,
+		"wait", "kata#abcd", "--timeout", "5s", "--poll-interval", "50ms")
+
+	require.Error(t, err)
+	var ce *cliError
+	if errors.As(err, &ce) {
+		assert.NotEqual(t, ExitWaitTimeout, ce.ExitCode,
+			"a parent-context deadline during resolution must not be reported as the wait's own --timeout")
+	}
+}
+
 // TestWaitAnyInitialPassStopsAfterJoinMet: in --any the initial pass must stop
 // fetching once a ref already satisfies the join. Otherwise a later stalled
 // fetch (with no --timeout to bound it) hangs even though the wait is already

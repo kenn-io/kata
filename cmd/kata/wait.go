@@ -261,7 +261,14 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 	for _, arg := range args {
 		c, resolvedURL, pid, ref, rerr := resolveIssueRefForCommand(cmd, arg)
 		if rerr != nil {
-			if opts.timeout > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			// Attribute the failure to --timeout only when the wait's own
+			// deadline has actually elapsed (wall clock, matching the poll
+			// loop). ctx.Err() alone is not enough: a parent context deadline
+			// (e.g. a caller's ExecuteContext budget) also surfaces as
+			// DeadlineExceeded on the derived context, and that failure must
+			// return the resolution error, not timed_out=true.
+			if opts.timeout > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) &&
+				!time.Now().Before(start.Add(opts.timeout)) {
 				if err := emitWaitJSON(cmd, waitJSONOutput{
 					Results:  []waitResult{},
 					TimedOut: true,
