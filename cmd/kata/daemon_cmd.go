@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
+	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -554,7 +555,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		return err
 	}
 
-	embedder, reconcilerHealth, err := startEmbeddingReconciler(ctx, dcfg, store, broadcaster, daemonLog)
+	embedder, reconcilerHealth, err := startEmbeddingReconciler(ctx, dcfg, store, dbPath, broadcaster, daemonLog)
 	if err != nil {
 		return err
 	}
@@ -736,10 +737,16 @@ func startFederationRunner(
 // initial backfill sweep. It returns the client and a health snapshot func to
 // wire into ServerConfig. When embeddings are not configured it returns nils so
 // the daemon behaves exactly as it did before semantic search existed.
+//
+// The vector sidecar path is derived inline from dbPath here as a minimal,
+// working placement (sibling "vectors.db" next to the sqlite file); deriving
+// it from proper daemon/namespace config and managing the *vector.Index's
+// lifetime (closing it on shutdown) is Task 10's scope.
 func startEmbeddingReconciler(
 	ctx context.Context,
 	dcfg *config.DaemonConfig,
 	store db.Storage,
+	dbPath string,
 	bcast *daemon.EventBroadcaster,
 	daemonLog *log.Logger,
 ) (*embedding.Client, func() daemon.ReconcilerHealth, error) {
@@ -760,7 +767,12 @@ func startEmbeddingReconciler(
 	if err != nil {
 		return nil, nil, fmt.Errorf("embedding client: %w", err)
 	}
-	reconciler := daemon.NewReconciler(store, embedder, daemon.ReconcilerConfig{BatchSize: ec.BatchSize})
+	vectorsPath := filepath.Join(filepath.Dir(strings.TrimPrefix(dbPath, "sqlite://")), "vectors.db")
+	idx, err := vector.Open(ctx, vectorsPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("vector index: %w", err)
+	}
+	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{BatchSize: ec.BatchSize})
 	go func() {
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			daemonLog.Printf("reconciler: %v", err)

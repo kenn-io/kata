@@ -8,14 +8,15 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kata/internal/vector"
+	kitvec "go.kenn.io/kit/vector"
 )
 
 // embedder is the subset of *embedding.Client the reconciler needs (an
 // interface so tests can substitute a fake).
 type embedder interface {
-	Embed(ctx context.Context, texts []string) ([][]float32, error)
-	Fingerprint() string
-	Dims() int
+	EncodeFunc() kitvec.EncodeFunc
+	Generation() kitvec.Generation
 	BatchSize() int
 }
 
@@ -36,9 +37,12 @@ type ReconcilerHealth struct {
 	Backlog         int64      `json:"backlog"`
 }
 
-// Reconciler keeps issue_embeddings fresh by embedding dirty issues.
+// Reconciler keeps the vector sidecar's active generation fresh: it mirrors
+// live issue content, fills the desired embedding generation via kit, and
+// cuts over to it once fully populated.
 type Reconciler struct {
 	store db.Storage
+	idx   *vector.Index
 	emb   embedder
 	cfg   ReconcilerConfig
 	wake  chan struct{}
@@ -48,10 +52,7 @@ type Reconciler struct {
 }
 
 // NewReconciler constructs a reconciler. It does no I/O.
-func NewReconciler(store db.Storage, emb embedder, cfg ReconcilerConfig) *Reconciler {
-	if cfg.BatchSize <= 0 {
-		cfg.BatchSize = emb.BatchSize()
-	}
+func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg ReconcilerConfig) *Reconciler {
 	if cfg.SweepEvery <= 0 {
 		cfg.SweepEvery = 5 * time.Minute
 	}
@@ -63,6 +64,7 @@ func NewReconciler(store db.Storage, emb embedder, cfg ReconcilerConfig) *Reconc
 	}
 	return &Reconciler{
 		store:  store,
+		idx:    idx,
 		emb:    emb,
 		cfg:    cfg,
 		wake:   make(chan struct{}, 1),
@@ -134,50 +136,36 @@ func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
 	return next
 }
 
-// reconcileOnce embeds one batch of dirty targets and updates health.
+// reconcileOnce refreshes the mirror, drains the fill for the desired
+// generation, cuts over when the fill completes, and updates health. Fill
+// loops internally until no documents are pending, so a successful return
+// means the desired generation is fully populated and active.
 func (r *Reconciler) reconcileOnce(ctx context.Context) error {
-	fp := r.emb.Fingerprint()
-	targets, err := r.store.ListEmbedTargets(ctx, fp, r.cfg.BatchSize)
-	if err != nil {
+	if _, err := r.idx.RefreshMirror(ctx, r.store); err != nil {
+		r.markError(err)
 		return err
 	}
-	r.setBacklog(int64(len(targets)))
-	if len(targets) == 0 {
-		r.markSuccess()
-		return nil
+	gen := r.emb.Generation()
+	key := gen.Fingerprint()
+	if err := r.idx.EnsureBuilding(ctx, key, gen); err != nil {
+		r.markError(err)
+		return err
 	}
-	texts := make([]string, len(targets))
-	for i, t := range targets {
-		texts[i] = embedding.EmbedText(t.Title, t.Body)
+	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.emb.BatchSize()); err != nil {
+		r.markError(err)
+		return err
 	}
-	vecs, err := r.emb.Embed(ctx, texts)
+	if err := r.idx.CutOver(ctx, key); err != nil {
+		r.markError(err)
+		return err
+	}
+	backlog, err := r.idx.Backlog(ctx, key)
 	if err != nil {
 		r.markError(err)
 		return err
 	}
-	for i, t := range targets {
-		if err := r.store.UpsertIssueEmbedding(ctx, db.IssueEmbedding{
-			IssueID:                 t.IssueID,
-			EmbeddedContentRevision: t.ContentRevision,
-			Fingerprint:             fp,
-			Dims:                    r.emb.Dims(),
-			Vector:                  vecs[i],
-		}); err != nil {
-			r.markError(err)
-			return err
-		}
-	}
+	r.setBacklog(backlog)
 	r.markSuccess()
-	// Only a partial batch proves the queue is fully drained, so clear the
-	// gauge to 0 then. A full batch may have more dirty rows behind it; leave
-	// the gauge at the batch count set above (clearing it would make /health
-	// report backlog=0 while the index is still incomplete) and self-wake so
-	// the next cycle's ListEmbedTargets recomputes the true remaining count.
-	if len(targets) < r.cfg.BatchSize {
-		r.setBacklog(0)
-	} else {
-		r.Wake()
-	}
 	return nil
 }
 
