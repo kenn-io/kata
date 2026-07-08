@@ -419,6 +419,67 @@ func TestMatch_LinksChangedRecognized(t *testing.T) {
 	}
 }
 
+// TestMatch_IssueMetadataUpdatedRecognized pins that issue.metadata_updated
+// (added alongside per-issue metadata support) is in knownEventTypes — both
+// the explicit form and the issue.* / * wildcard matchers must accept it.
+// Without this, hook configs cannot subscribe to metadata patches.
+func TestMatch_IssueMetadataUpdatedRecognized(t *testing.T) {
+	_, exact, err := compileEventMatcher("issue.metadata_updated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exact("issue.metadata_updated") {
+		t.Fatal("explicit issue.metadata_updated matcher must match the event")
+	}
+
+	_, issueStar, err := compileEventMatcher("issue.*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !issueStar("issue.metadata_updated") {
+		t.Fatal("issue.* must match issue.metadata_updated")
+	}
+
+	_, allStar, err := compileEventMatcher("*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allStar("issue.metadata_updated") {
+		t.Fatal("* must match issue.metadata_updated")
+	}
+}
+
+// TestMatch_ProjectMetadataUpdatedRecognized pins that
+// project.metadata_updated is in knownEventTypes: explicit subscription must
+// validate, and the `*` wildcard must match. project.metadata_updated lives
+// outside the issue.* namespace (it describes the project, not an issue), so
+// issue.* must NOT match it.
+func TestMatch_ProjectMetadataUpdatedRecognized(t *testing.T) {
+	_, exact, err := compileEventMatcher("project.metadata_updated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exact("project.metadata_updated") {
+		t.Fatal("explicit project.metadata_updated matcher must match the event")
+	}
+
+	_, allStar, err := compileEventMatcher("*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allStar("project.metadata_updated") {
+		t.Fatal("* must match project.metadata_updated")
+	}
+
+	_, issueStar, err := compileEventMatcher("issue.*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issueStar("project.metadata_updated") {
+		t.Fatal("issue.* must not match project.metadata_updated (out of namespace)")
+	}
+}
+
 // TestMatch_CloseThrottledRecognized pins that close.throttled audit
 // events are in knownEventTypes: explicit subscription must validate,
 // and the `*` wildcard must match. close.throttled deliberately lives
