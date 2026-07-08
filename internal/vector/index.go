@@ -13,7 +13,6 @@ import (
 	"os"
 
 	"go.kenn.io/kit/vector/sqlitevec"
-	_ "modernc.org/sqlite"
 )
 
 // mirrorSchemaVersion guards the kata-owned tables in the sidecar. Bump it
@@ -75,8 +74,7 @@ func (ix *Index) Close() error { return ix.db.Close() }
 
 func openSidecar(path string) (*sql.DB, error) {
 	sqlitevec.Register() // no-op on modernc builds; required on cgo builds
-	db, err := sql.Open("sqlite",
-		path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	db, err := sql.Open(sidecarDriver, sidecarDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("vector: open sidecar %s: %w", path, err)
 	}

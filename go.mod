@@ -18,6 +18,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/klauspost/compress v1.18.6
 	github.com/mattn/go-runewidth v0.0.20
+	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/posthog/posthog-go v1.12.6
 	github.com/spf13/cobra v1.10.2
