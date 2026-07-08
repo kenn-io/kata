@@ -145,8 +145,10 @@ fingerprint_salt}`. Any component change starts a *new generation* rather
 than marking existing rows stale in place: the reconciler fills it in the
 background while the previous generation keeps serving searches, then cuts
 over automatically once the fill completes and reclaims the retired
-generation's storage (see "Storage"). Semantic recall never drops to zero
-mid-swap. The salt is the operator's lever for "same model name, different
+generation's storage (see "Storage"). Search stays available mid-swap —
+queries are embedded under the new model and score poorly against old-model
+vectors, so the vector leg degrades (labeled) rather than breaking, and
+semantic matches return as the backfill completes. The salt is the operator's lever for "same model name, different
 weights" (for example a re-pulled Ollama model). The endpoint URL is
 deliberately not in the fingerprint: moving a port or switching localhost to
 a tunnel must not force a full re-embed.

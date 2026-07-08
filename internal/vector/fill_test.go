@@ -81,9 +81,6 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	// Poison doc: 400 on one document is skipped, fill continues.
 	badOnce := map[string]bool{}
 	enc := func(_ context.Context, texts []string) ([][]float32, error) {
-		for _, txt := range texts {
-			_ = txt
-		}
 		if !badOnce["done"] {
 			badOnce["done"] = true
 			return nil, &embedding.APIError{StatusCode: 400, Body: "rejected"}

@@ -136,10 +136,12 @@ looping.
 Each stored vector belongs to a generation keyed by a fingerprint of the
 model, dimensionality, and text recipe it was produced under. If you switch
 `model`, `dims`, or `fingerprint_salt`, kata builds a new generation in the
-background while the previous generation keeps serving searches — semantic
-recall does not drop while the new model backfills. When the new generation
-finishes filling, kata cuts over to it automatically and reclaims the old
-generation's storage. If you keep the same model name but its weights changed
+background while the previous generation keeps serving searches — search stays
+available throughout, though queries embedded under the new model score poorly
+against the old generation's vectors, so semantic matches reappear as the
+backfill completes (auto mode labels any degraded responses in the meantime).
+When the new generation finishes filling, kata cuts over to it automatically
+and reclaims the old generation's storage. If you keep the same model name but its weights changed
 underneath you (for example a re-pulled Ollama tag), bump `fingerprint_salt`
 to force the same re-embed.
 
