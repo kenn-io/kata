@@ -110,7 +110,8 @@ You can watch the reconciler in `kata health --json` under `embeddings`:
 - `configured` — whether an endpoint is set;
 - `backlog` — how many issues are waiting to be (re-)embedded; trends to 0;
 - `last_success_at` — when the reconciler last completed a batch;
-- `last_error` — the most recent embedding failure, if any.
+- `last_error_status` — the HTTP status of the most recent embedding failure,
+  if any.
 
 ## When the endpoint is unavailable
 
@@ -125,9 +126,10 @@ mode:
   (HTTP 503) so a caller that asked for semantic results knows it did not get
   them. They return 400 when embeddings are not configured at all.
 
-A persistent endpoint problem shows up as a growing `backlog` and a `last_error`
-in health; the reconciler backs off and retries, and a misconfiguration (bad
-key, wrong model) is reported there rather than silently looping.
+A persistent endpoint problem shows up as a growing `backlog` and a
+`last_error_status` in health; the reconciler backs off and retries, and a
+misconfiguration (bad key, wrong model) is reported there rather than silently
+looping.
 
 ## Changing the model
 
