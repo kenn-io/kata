@@ -167,7 +167,18 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 			return err
 		}
 	}
+	// Publish the pending count before the fill so /health reports the real
+	// backlog during a long backfill instead of the previous cycle's value.
+	backlog, err := r.idx.Backlog(ctx, key)
+	if err != nil {
+		r.markError(err)
+		return err
+	}
+	r.setBacklog(backlog)
 	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.emb.BatchSize()); err != nil {
+		if backlog, berr := r.idx.Backlog(ctx, key); berr == nil {
+			r.setBacklog(backlog)
+		}
 		r.markError(err)
 		return err
 	}
@@ -175,7 +186,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		r.markError(err)
 		return err
 	}
-	backlog, err := r.idx.Backlog(ctx, key)
+	backlog, err = r.idx.Backlog(ctx, key)
 	if err != nil {
 		r.markError(err)
 		return err

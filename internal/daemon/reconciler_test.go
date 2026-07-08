@@ -184,6 +184,27 @@ func TestReconcileOnceModelChangeCutsOver(t *testing.T) {
 	}
 }
 
+func TestReconcileErrorReportsPendingBacklog(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, _ := store.CreateProject(ctx, "spoke-project")
+	for i := 0; i < 2; i++ {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idx := openTestVectorIndex(t)
+	emb := &fakeEmbedder{model: "m1", dims: 2, err: &embedding.APIError{StatusCode: 500, Body: "down"}}
+	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64})
+
+	if err := r.reconcileOnce(ctx); err == nil {
+		t.Fatal("expected fill error")
+	}
+	if h := r.Health(); h.Backlog != 2 {
+		t.Fatalf("backlog after failed fill = %d, want 2 (documents still pending)", h.Backlog)
+	}
+}
+
 func TestReconcileDefinitiveErrorPinsHealth(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)
