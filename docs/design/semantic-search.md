@@ -224,12 +224,24 @@ buys a simpler, exact dirty signal over carrying a content hash.
 
 Failure classes:
 
-- 401 / 403 / 404 / 400 model-not-found — definitive misconfiguration: pin
+- 400 — ambiguous: the same status covers a request-level problem (bad model
+  name, malformed request, oversized batch) and a document the model
+  permanently rejects. The fill verifies which by replaying the failing
+  document's exact request shape — same chunk count, per-chunk lengths, and
+  batching — with benign text. If the replay succeeds, the 400 was
+  content-specific: the document is stamped as skipped (it stops being
+  pending and gains no semantic recall until its content changes) and the
+  fill continues past it. If the replay also fails, the 400 is request-level
+  and handled as definitive misconfiguration below — a systemic 400 must
+  never stamp the corpus as skipped.
+- 401 / 403 / 404 / request-level 400 — definitive misconfiguration: pin
   backoff at the maximum immediately (no hot loop) and surface the error in
   health.
 - 429 — honor `Retry-After` when present, otherwise normal backoff.
 - 5xx / timeouts / connection errors — exponential backoff, 1s doubling to a
-  5m cap.
+  5m cap. The backlog gauge is published before each fill and refreshed when
+  a fill fails partway, so `/health` reports the true pending count during
+  long backfills and outages rather than the previous cycle's value.
 
 Reconciler health — `{configured, last_success_at, last_error_status, backlog}` —
 joins the `/health` payload (following the `api_schema_version` reporting
@@ -480,8 +492,8 @@ version-mismatch handling.
 - `internal/embedding` against an `httptest` fake: wire shape, key attached
   only to the pinned origin, cross-origin redirect refusal (mirroring the
   `bearer.go` tests), batching, timeout, 429-with-Retry-After versus 401
-  classification, truncation, fingerprint composition (each component
-  independently changes it), L2 normalization.
+  classification, the no-truncation recipe, generation fingerprint
+  composition (each component independently changes it), L2 normalization.
 - RRF as a pure function: overlapping/disjoint/empty legs, similarity floor,
   determinism and tie-breaks.
 - Storage conformance suite shared by both backends (pgstore joins in
