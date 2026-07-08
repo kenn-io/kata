@@ -6,6 +6,25 @@ description: Release history for kata
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
+## Unreleased
+
+**Improvements**
+
+- Moved semantic search storage from a single embeddings table in `kata.db`
+  to a sidecar vector index (`vectors.db`) built on the shared `kit` vector
+  layer, with chunked embeddings instead of a fixed truncation cap and
+  generation-based model swaps: changing `model`, `dims`, or
+  `fingerprint_salt` now fills a new generation in the background while the
+  previous one keeps serving searches, then cuts over automatically instead
+  of dropping semantic recall to zero during re-embedding. `vectors.db` is
+  disposable derived state — safe to delete, excluded from backups, rebuilt
+  by re-embedding.
+- The first daemon start after upgrading re-embeds every issue; `auto`-mode
+  search reports labeled degraded (lexical) results until the backfill
+  completes. JSONL export no longer carries `issue_embedding` records; import
+  of older archives that still contain them skips those records instead of
+  failing.
+
 ## 0.8.0
 <small>2026-07-04</small>
 

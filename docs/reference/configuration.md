@@ -267,6 +267,26 @@ and edited issues within seconds, and `kata` reports its state under
 issue is findable lexically the instant it is created, and gains semantic recall
 once the reconciler catches up.
 
+Issue text is chunked before embedding rather than embedded as a single
+truncated vector, so long issues get full semantic coverage instead of losing
+everything past a fixed length cutoff.
+
+Embeddings live in `vectors.db`, a SQLite sidecar database the daemon creates
+next to `kata.db` (same directory) the first time this section is configured.
+It holds only derived state and is safe to delete at any time — the daemon
+rebuilds it by re-embedding on the next reconcile — so exclude it from
+backups; back up `kata.db` as usual.
+
+Upgrading to a kata version that changes embedding storage re-embeds every
+issue from scratch on the first daemon start after the upgrade. Until that
+backfill completes, `auto`-mode search reports labeled degraded results
+falling back to lexical, the same as any other reconciler backlog.
+
+Changing `model`, `dims`, or `fingerprint_salt` builds a new index generation
+in the background while the previous one keeps serving searches, then cuts
+over automatically once the new generation finishes filling — semantic
+recall does not drop during a model change.
+
 ## Telemetry
 
 kata sends limited anonymous telemetry to PostHog when the daemon starts, and

@@ -16,8 +16,9 @@ command flags see the [CLI reference](../reference/cli.md).
 ## How it works
 
 When you configure an embedding endpoint, the daemon embeds each issue's title
-and body into a vector and stores it alongside the issue. A search then runs two
-legs and fuses them:
+and body, chunking long text instead of truncating it so long issues get full
+coverage, and stores the resulting vectors in a sidecar database next to the
+main one. A search then runs two legs and fuses them:
 
 - the **lexical leg** — the existing full-text search, unchanged; and
 - the **vector leg** — embeds your query and finds issues whose vectors are
@@ -130,13 +131,15 @@ key, wrong model) is reported there rather than silently looping.
 
 ## Changing the model
 
-Each stored vector records a fingerprint of the model, dimensionality, and text
-recipe it was produced under. If you switch `model`, kata notices the
-fingerprint changed and re-embeds every issue under the new model in the
-background; until a given issue is re-embedded it is carried by the lexical leg
-and never compared across models. If you keep the same model name but its weights
-changed underneath you (for example a re-pulled Ollama tag), bump
-`fingerprint_salt` to force the same re-embed.
+Each stored vector belongs to a generation keyed by a fingerprint of the
+model, dimensionality, and text recipe it was produced under. If you switch
+`model`, `dims`, or `fingerprint_salt`, kata builds a new generation in the
+background while the previous generation keeps serving searches — semantic
+recall does not drop while the new model backfills. When the new generation
+finishes filling, kata cuts over to it automatically and reclaims the old
+generation's storage. If you keep the same model name but its weights changed
+underneath you (for example a re-pulled Ollama tag), bump `fingerprint_salt`
+to force the same re-embed.
 
 ## Privacy and federation
 
@@ -147,16 +150,20 @@ API key is only ever sent to the configured `base_url` origin.
 
 Embeddings are local derived state and **do not federate**: each daemon embeds
 only what it stores, and no vectors are sent to or pulled from federated hubs.
-They are included in JSONL [backup/export](../operations/backup-restore.md) so a
-backup or schema upgrade does not force a full re-embed.
+They live in a sidecar database, not in `kata.db`, and are not included in
+JSONL [backup/export](../operations/backup-restore.md) — a restore or a
+storage-format upgrade re-embeds from scratch rather than carrying vectors
+forward. Archives exported by older kata versions that still contain
+embedding records import cleanly: those records are skipped and the
+reconciler rebuilds the vectors.
 
 ## Scope and limits
 
 - Only issue **title and body** are embedded today; comments are searchable
   lexically but a paraphrase that lives only in a comment will not vector-match.
-- The PostgreSQL backend stores the same embeddings, but accelerated vector
-  search there (pgvector) is not yet implemented; semantic search currently runs
-  on the SQLite backend.
+- Semantic search requires the SQLite backend. A daemon configured with a
+  non-SQLite database and `[search.embeddings]` set fails to start with a
+  configuration error; PostgreSQL support is not yet implemented.
 
 For the design rationale and internals, see the
 [semantic search design note](../design/semantic-search.md).
