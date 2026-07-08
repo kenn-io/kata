@@ -1,11 +1,12 @@
 # Branch-orchestration primitives for kata — exploratory sketch
 
 Status: **execution started 2026-07-06 — coordination substrate, metadata-first.**
-Direction confirmed 2026-07-03; on 2026-07-06 the maintainer agreed to begin
-implementation and to three adjustments (hooks as first-class attention
-writers, `kata wait` promoted to its own layer right after conventions, and the
-attention enum renamed to `ok | needs-human | stuck`), now folded in below along
-with the four open-question decisions.
+Direction confirmed 2026-07-03; on 2026-07-06 the maintainer okayed an
+implementation pass. Three adjustments proposed in that discussion (hooks as
+first-class attention writers, `kata wait` promoted to its own layer right
+after conventions, and the attention enum renamed to `ok | needs-human |
+stuck`) are folded in below, along with proposed resolutions to the four open
+questions — all subject to maintainer review on the implementation PR.
 This sketch records a feature survey of an adjacent per-branch agent
 orchestrator (reviewed 2026-07-03) and proposes which of its ideas kata should
 grow. Maintainer constraints, confirmed the same day:
@@ -215,10 +216,10 @@ metadata is ignored everywhere.
 - New required workflow for existing users: every layer is opt-in and
   invisible when unused.
 
-## Decisions (2026-07-06)
+## Proposed decisions (2026-07-06)
 
-The four open questions were resolved with the maintainer when execution
-started:
+The four open questions were resolved as follows at execution start —
+proposed by the implementer, not yet ratified by the maintainer:
 
 1. **Key naming: keep the dotted `work.` prefix.** It reads as clearer
    namespacing for convention keys; kata's own reserved keys stay flat
