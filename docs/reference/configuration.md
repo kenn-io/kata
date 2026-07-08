@@ -263,7 +263,7 @@ stores, and no vectors are sent to or pulled from federated hubs.
 The daemon keeps the index fresh on its own: a background reconciler embeds new
 and edited issues within seconds, and `kata` reports its state under
 `embeddings` in the `/health` response (`configured`, `last_success_at`,
-`last_error`, and `backlog`). Search never blocks on embedding lag — an
+`last_error_status`, and `backlog`). Search never blocks on embedding lag — an
 issue is findable lexically the instant it is created, and gains semantic recall
 once the reconciler catches up.
 

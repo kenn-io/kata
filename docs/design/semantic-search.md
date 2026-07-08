@@ -223,7 +223,7 @@ Failure classes:
 - 5xx / timeouts / connection errors — exponential backoff, 1s doubling to a
   5m cap.
 
-Reconciler health — `{configured, last_success_at, last_error, backlog}` —
+Reconciler health — `{configured, last_success_at, last_error_status, backlog}` —
 joins the `/health` payload (following the `api_schema_version` reporting
 precedent) and is the operator's view of index freshness.
 
