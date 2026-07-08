@@ -197,6 +197,39 @@ func TestNewRejectsUnsafeBaseURLWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestGenerationFingerprintComponents(t *testing.T) {
+	c1, _ := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 4})
+	c2, _ := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 4, Salt: "s"})
+	c3, _ := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m2", Dims: 4})
+	g1, g2, g3 := c1.Generation(), c2.Generation(), c3.Generation()
+	if g1.Params["recipe"] != "2" {
+		t.Fatalf("recipe param = %q, want \"2\"", g1.Params["recipe"])
+	}
+	if _, ok := g1.Params["salt"]; ok {
+		t.Fatal("empty salt must be omitted from params")
+	}
+	fps := map[string]bool{g1.Fingerprint(): true, g2.Fingerprint(): true, g3.Fingerprint(): true}
+	if len(fps) != 3 {
+		t.Fatalf("model/salt must each change the fingerprint, got %d distinct", len(fps))
+	}
+}
+
+func TestEncodeFuncRecoversPanic(t *testing.T) {
+	c, _ := New(Config{BaseURL: "http://127.0.0.1:9", Model: "m"})
+	enc := c.EncodeFunc()
+	// nil ctx makes http.NewRequestWithContext panic-free but forcing a panic
+	// requires a hostile transport; instead verify the recover wrapper directly.
+	c.http.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) { panic("boom") })
+	_, err := enc(context.Background(), []string{"x"})
+	if err == nil || !strings.Contains(err.Error(), "encoder panic") {
+		t.Fatalf("want recovered panic error, got %v", err)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestEmbedRejectsCrossOriginRedirectWithoutAPIKey(t *testing.T) {
 	var redirected bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
