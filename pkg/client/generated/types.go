@@ -1971,6 +1971,7 @@ type LinkPeer struct {
 	Project     string `json:"project" validate:"required"`
 	QualifiedID string `json:"qualified_id" validate:"required"`
 	ShortID     string `json:"short_id" validate:"required"`
+	Status      string `json:"status" validate:"required"`
 	UID         string `json:"uid" validate:"required"`
 }
 

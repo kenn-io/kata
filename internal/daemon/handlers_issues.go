@@ -908,6 +908,7 @@ func linkPeerFor(ctx context.Context, names *projectNames, iss db.Issue) (api.Li
 		ShortID:     iss.ShortID,
 		Project:     project,
 		QualifiedID: qualifiedID(project, iss.ShortID),
+		Status:      iss.Status,
 	}, nil
 }
 

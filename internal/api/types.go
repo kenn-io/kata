@@ -753,12 +753,15 @@ type CreateLinkRequest struct {
 // LinkPeer identifies one endpoint of a link. Project and QualifiedID are
 // always populated (0.2.0): links may span projects, so a bare short_id
 // is ambiguous without them. ShortID stays bare — it never carries a
-// "project#" prefix.
+// "project#" prefix. Status carries the peer issue's own status (0.9.0)
+// so clients (e.g. `kata list` human output) can render a blocked glyph
+// without an extra per-peer lookup.
 type LinkPeer struct {
 	UID         string `json:"uid"`
 	ShortID     string `json:"short_id"`
 	Project     string `json:"project"`
 	QualifiedID string `json:"qualified_id"`
+	Status      string `json:"status"`
 }
 
 // LinkOut is the wire projection of a link with both endpoints rendered as

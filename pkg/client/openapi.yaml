@@ -2016,6 +2016,8 @@ components:
           type: string
         short_id:
           type: string
+        status:
+          type: string
         uid:
           type: string
       required:
@@ -2023,6 +2025,7 @@ components:
         - short_id
         - project
         - qualified_id
+        - status
       type: object
     LinksDelta:
       additionalProperties: false

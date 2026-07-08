@@ -105,6 +105,7 @@ type linkPeerTest struct {
 	ShortID     string `json:"short_id"`
 	Project     string `json:"project"`
 	QualifiedID string `json:"qualified_id"`
+	Status      string `json:"status"`
 }
 
 // issueShortIDFromCreate decodes the short_id field from a /issues POST

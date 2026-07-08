@@ -106,6 +106,19 @@ func TestIssueOutUsesLinkPeerForParent(t *testing.T) {
 	assert.Equal(t, peerPtrType, f.Type, "IssueOut.Parent must be *LinkPeer")
 }
 
+// TestLinkPeerHasStatus pins that LinkPeer carries the peer issue's status
+// (0.9.0), so clients (e.g. `kata list` human output) can render a blocked
+// glyph without an extra lookup per blocked_by peer.
+func TestLinkPeerHasStatus(t *testing.T) {
+	typ := reflect.TypeOf(api.LinkPeer{})
+	f, ok := typ.FieldByName("Status")
+	if !ok {
+		t.Fatal("LinkPeer.Status missing")
+	}
+	assert.Equal(t, reflect.TypeOf(""), f.Type, "LinkPeer.Status must be string")
+	assert.Equal(t, "status", f.Tag.Get("json"), `LinkPeer.Status must be tagged json:"status"`)
+}
+
 // TestLinkOutUsesLinkPeer covers the wire projection of one link: from/to are
 // now structured peer objects rather than flat integer numbers, and the
 // project_id field is gone now that links are project-independent edges

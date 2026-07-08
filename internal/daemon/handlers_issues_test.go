@@ -1988,6 +1988,47 @@ func TestListIssues_IncludesBlockerMetadata(t *testing.T) {
 	assert.Empty(t, byShort[blockedShort])
 }
 
+// TestListIssues_BlockedByPeerCarriesStatus pins that a list response's
+// blocked_by LinkPeer entries carry the blocker issue's own status (0.9.0),
+// so `kata list` human output can render a blocked glyph without a
+// per-peer lookup. Status must reflect the blocker's current state: open
+// while unresolved, closed once the blocker is closed.
+func TestListIssues_BlockedByPeerCarriesStatus(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	blocker := createIssueViaHTTP(t, env, pid, "blocker")
+	blocked := createIssueViaHTTP(t, env, pid, "blocked")
+	postLink(t, env, pid, blocker, "blocks", blocked)
+	blockerShort := refForIssue(t, env, blocker)
+	blockedShort := refForIssue(t, env, blocked)
+
+	fetchBlockedBy := func() map[string][]linkPeerTest {
+		var out struct {
+			Issues []struct {
+				ShortID   string         `json:"short_id"`
+				BlockedBy []linkPeerTest `json:"blocked_by,omitempty"`
+			} `json:"issues"`
+		}
+		envGetJSON(t, env, projectPath(pid)+"/issues", &out)
+		byShort := map[string][]linkPeerTest{}
+		for _, iss := range out.Issues {
+			byShort[iss.ShortID] = iss.BlockedBy
+		}
+		return byShort
+	}
+
+	byShort := fetchBlockedBy()
+	require.Len(t, byShort[blockedShort], 1)
+	assert.Equal(t, blockerShort, byShort[blockedShort][0].ShortID)
+	assert.Equal(t, "open", byShort[blockedShort][0].Status)
+
+	closeIssueAs(t, env, pid, blocker, "tester", "done")
+
+	byShort = fetchBlockedBy()
+	require.Len(t, byShort[blockedShort], 1)
+	assert.Equal(t, "closed", byShort[blockedShort][0].Status)
+}
+
 // TestListAllIssues_AcrossProjects pins #22's wire contract: GET /api/v1/issues
 // with no project_id returns issues from every project, hydrating labels
 // per-issue across project boundaries.
