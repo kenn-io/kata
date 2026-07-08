@@ -555,7 +555,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		return err
 	}
 
-	embedder, reconcilerHealth, err := startEmbeddingReconciler(ctx, dcfg, store, dbPath, broadcaster, daemonLog)
+	embedder, vectorIndex, reconcilerHealth, err := startEmbeddingReconciler(ctx, dcfg, store, dbPath, broadcaster, daemonLog)
 	if err != nil {
 		return err
 	}
@@ -577,6 +577,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		Auth:             dcfg.Auth,
 		InsecureReadonly: insecureReadonly,
 		Embedder:         embedder,
+		VectorIndex:      vectorIndex,
 		ReconcilerHealth: reconcilerHealth,
 	})
 	defer func() { _ = srv.Close() }()
@@ -731,12 +732,13 @@ func startFederationRunner(
 	return wakeRunner
 }
 
-// startEmbeddingReconciler constructs the embedding client and reconciler when
-// semantic search is configured, starts the reconciler goroutine, subscribes to
-// the broadcaster so new/edited issues are embedded promptly, and triggers an
-// initial backfill sweep. It returns the client and a health snapshot func to
-// wire into ServerConfig. When embeddings are not configured it returns nils so
-// the daemon behaves exactly as it did before semantic search existed.
+// startEmbeddingReconciler constructs the embedding client, sidecar vector
+// index, and reconciler when semantic search is configured, starts the
+// reconciler goroutine, subscribes to the broadcaster so new/edited issues are
+// embedded promptly, and triggers an initial backfill sweep. It returns the
+// client, the index, and a health snapshot func to wire into ServerConfig.
+// When embeddings are not configured it returns nils so the daemon behaves
+// exactly as it did before semantic search existed.
 //
 // The vector sidecar path is derived inline from dbPath here as a minimal,
 // working placement (sibling "vectors.db" next to the sqlite file); deriving
@@ -749,10 +751,10 @@ func startEmbeddingReconciler(
 	dbPath string,
 	bcast *daemon.EventBroadcaster,
 	daemonLog *log.Logger,
-) (*embedding.Client, func() daemon.ReconcilerHealth, error) {
+) (*embedding.Client, *vector.Index, func() daemon.ReconcilerHealth, error) {
 	ec := dcfg.Search.Embeddings
 	if !ec.Enabled() {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	embedder, err := embedding.New(embedding.Config{
 		BaseURL:             ec.BaseURL,
@@ -765,12 +767,12 @@ func startEmbeddingReconciler(
 		TrustPrivateNetwork: ec.TrustPrivateNetwork,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("embedding client: %w", err)
+		return nil, nil, nil, fmt.Errorf("embedding client: %w", err)
 	}
 	vectorsPath := filepath.Join(filepath.Dir(strings.TrimPrefix(dbPath, "sqlite://")), "vectors.db")
 	idx, err := vector.Open(ctx, vectorsPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("vector index: %w", err)
+		return nil, nil, nil, fmt.Errorf("vector index: %w", err)
 	}
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{BatchSize: ec.BatchSize})
 	go func() {
@@ -780,7 +782,7 @@ func startEmbeddingReconciler(
 	}()
 	startEmbeddingNudge(ctx, bcast, reconciler)
 	reconciler.Wake() // initial backfill sweep
-	return embedder, reconciler.Health, nil
+	return embedder, idx, reconciler.Health, nil
 }
 
 // startEmbeddingNudge subscribes to the broadcaster and wakes the reconciler on

@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
+	"go.kenn.io/kata/internal/vector"
 )
 
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
@@ -62,6 +63,10 @@ type ServerConfig struct {
 	// Embedder is the semantic-search embedding client. Nil means semantic
 	// search is disabled and the search handler falls back to lexical-only.
 	Embedder *embedding.Client
+
+	// VectorIndex is the semantic-search sidecar index. Nil means semantic and
+	// hybrid search are unavailable, exactly like a nil Embedder.
+	VectorIndex *vector.Index
 
 	// ReconcilerHealth snapshots the embedding reconciler's operator-visible
 	// state for /health. Nil means semantic search is disabled, in which case

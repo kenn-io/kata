@@ -41,7 +41,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				mode = "lexical"
 			}
 		}
-		res, err := hybridSearch(ctx, cfg.DB, cfg.Embedder, hybridParams{
+		res, err := hybridSearch(ctx, cfg.DB, cfg.VectorIndex, cfg.Embedder, hybridParams{
 			ProjectID: in.ProjectID, Query: in.Query, Limit: limit,
 			IncludeDeleted: in.IncludeDeleted, Requested: mode,
 		})
