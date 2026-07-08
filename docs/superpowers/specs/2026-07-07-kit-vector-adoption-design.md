@@ -8,8 +8,8 @@ Status: draft, awaiting review
 Replace kata's in-house vector embedding management (single-vector-per-issue
 BLOB storage, brute-force cosine search, hand-rolled fingerprint and
 reconcile loop) with `go.kenn.io/kit/vector` + `go.kenn.io/kit/vector/sqlitevec`,
-the same layer agentsview builds on. This maximizes shared code across kit
-consumers and picks up three capability upgrades kata lacks today:
+the same layer kit's other consumers build on. This maximizes shared code
+across kit consumers and picks up three capability upgrades kata lacks today:
 
 1. **Chunked embeddings** (`kitvec.Split`) instead of truncating issue text at
    8000 runes — long issues get full semantic coverage.
@@ -28,18 +28,19 @@ Decisions made during brainstorming:
 - JSONL export **drops** the `issue_embedding` kind; import tolerates it in
   old archives (skip + log, never error).
 - Sidecar database (`vectors.db`) alongside `kata.db`, structurally parallel
-  to agentsview's `vectors.db` mirror pattern — the canonical schema,
-  backups, JSONL contract, and federation are untouched.
+  to the mirror-database pattern used by another kit consumer — the
+  canonical schema, backups, JSONL contract, and federation are untouched.
 
-## Constraint: do not disrupt agentsview
+## Constraint: do not disrupt other kit consumers
 
-kit is a shared dependency; agentsview ships on tagged `go.kenn.io/kit
-v0.2.1`. Rules for this project:
+kit is a shared dependency; another consumer already ships on a tagged kit
+release. Rules for this project:
 
-- kata consumes kit via **tagged releases only** (`v0.2.1` or later). No
+- kata consumes kit via **tagged releases only** (`v0.3.0` or later). No
   `replace` directives or commit pins in committed `go.mod`.
 - This design requires **zero kit API changes**. Where kit has gaps (noted
-  below), kata works around them locally the same way agentsview does.
+  below), kata works around them locally the same way kit's other
+  consumers do.
 - Any future kit improvements motivated by kata (e.g. a generation
   reclamation API) land as **additive** kit PRs, released via tags, adopted
   by each consumer on its own schedule.
@@ -60,9 +61,9 @@ v0.2.1`. Rules for this project:
 - `internal/embedding/client.go` — the OpenAI-compatible HTTP client with
   SSRF/origin-pinning, batching, L2 normalization, and `APIError`
   (definitive/Retry-After classification). kit deliberately provides no
-  provider client (`EncodeFunc` is the caller's job); this is the piece
-  agentsview had to write from scratch. It gains a small adapter method
-  returning a `kitvec.EncodeFunc`.
+  provider client (`EncodeFunc` is the caller's job); every kit consumer
+  writes its own. It gains a small adapter method returning a
+  `kitvec.EncodeFunc`.
 - The daemon reconciler's shell: `Wake()` on events, periodic sweep,
   exponential backoff honoring `Retry-After`, `Health()` wire shape.
 - `hybridSearch` + `mergeRRF` (RRF fusion of lexical + vector legs). kit's
@@ -80,19 +81,23 @@ stays).
 
 ## Architecture
 
-New package `internal/vector` (named to parallel agentsview's) owning:
+New package `internal/vector` (the naming convention kit consumers share)
+owning:
 
 - **Sidecar db management** — `<KATA_HOME>/vectors.db`, opened with
   `modernc.org/sqlite` + `sqlitevec.Register()`. Contains kata's mirror
-  table plus kit's bookkeeping (`_generations`, `_chunks`, `_stamps`) and
-  per-generation `vec0` virtual tables via
+  table plus kit's bookkeeping tables (prefix-qualified from
+  `Schema.VectorsPrefix`: `<prefix>_generations`, `<prefix>_chunks`,
+  `<prefix>_stamps`) and per-generation `vec0` virtual tables via
   `sqlitevec.New[string, string](ctx, db, schema)`.
 - **Mirror table** — `issue_mirror(issue_uid TEXT PRIMARY KEY, project_uid
-  TEXT, content TEXT, content_revision INTEGER)`. `content` is the rendered
-  recipe (title + "\n\n" + body, untruncated; comments still excluded —
-  RecipeVersion 2). A `vector_meta` version marker guards the mirror schema:
-  version mismatch → drop and rebuild everything in the sidecar (safe,
-  all derived).
+  TEXT, content TEXT, content_revision INTEGER, embed_gen TEXT)`. `content`
+  is the rendered recipe (title + "\n\n" + body, untruncated; comments still
+  excluded — RecipeVersion 2). `embed_gen` is the nullable generation stamp
+  kit requires on the docs table (`Schema.EmbedGenColumn`), updated by
+  `SaveVectors` when it stamps coverage. A `vector_meta` version marker
+  guards the mirror schema: version mismatch → drop and rebuild everything
+  in the sidecar (safe, all derived).
 - **Generation lifecycle** — desired generation derives from config:
   `kitvec.Generation{Model, Dimensions: dims, Params: {"recipe": "2",
   "salt": salt}}`; its fingerprint is the generation key (`G = string`).
@@ -100,8 +105,9 @@ New package `internal/vector` (named to parallel agentsview's) owning:
   "kata uses UUIDs").
 - **Fill orchestration and search hydration** (below).
 
-Dependency changes: `go.kenn.io/kit v0.1.8 → v0.2.1` (or newer tag),
-`modernc.org/sqlite v1.49.1 → v1.53.0` (kit's tested version).
+Dependency changes: `go.kenn.io/kit v0.1.8 → v0.3.0` (or newer tag),
+`modernc.org/sqlite v1.49.1 → v1.53.0` (the version kit v0.3.0 pins and
+tests against).
 
 kata is pure-Go/no-cgo via modernc; kit's `extension_modernc.go` build path
 (`vec_f32(?)` literals, sqlite-vec registered at init) covers this — no
@@ -126,24 +132,31 @@ build-tag work needed unless kata ever adds a cgo build.
 Error policy stays kata's (kit is explicit that retry/backoff is the
 caller's):
 
-- `FillOptions.OnEncodeError`: definitive `APIError` (400/401/403/404) on a
-  document → skip it (poison-document handling); anything else → abort the
-  fill, reconciler backs off (Retry-After honored, exponential to cap).
+- `FillOptions.OnEncodeError`: only a content-definitive `APIError`
+  (HTTP 400 — the endpoint rejected this document's input) skips the
+  document (poison-document handling). Auth/endpoint errors (401/403/404)
+  are operator-action cases affecting every document, not poison documents:
+  they abort the fill and back off at the max, matching the current
+  reconciler's treatment of definitive errors. Transient errors (5xx/429/
+  transport) abort the fill and back off exponentially, honoring
+  `Retry-After`.
 - The `EncodeFunc` adapter wraps calls in `recover` → error, because kit
   invokes encoders on its own worker goroutines where the reconciler's
-  recovery can't reach (agentsview lesson, `manager.go`).
+  recovery can't reach (a lesson learned by another kit consumer).
 
 Cutover: when a fill completes for a non-active generation, activate it,
 retire the previous one, and reclaim the retired generation's rows
 (vec0 + chunk map + stamps) with local SQL against kit's tables — kit has
-no reclamation API yet (known gap, agentsview has the same workaround).
+no reclamation API yet (known gap; other consumers carry the same
+workaround).
 While the new generation fills, the old active generation keeps serving
 searches.
 
 Backlog gauge for `ReconcilerHealth`: count of mirror rows not covered by
 the active-or-building generation (one query joining the mirror and kit's
-stamp table — accepted coupling to kit's table shape, same as agentsview's
-coverage queries). Health wire shape unchanged; may gain additive fields
+stamp table — accepted coupling to kit's table shape, a pattern kit
+consumers already use for coverage queries). Health wire shape unchanged;
+may gain additive fields
 (generation fingerprint, fill progress).
 
 ## Search path
@@ -152,9 +165,12 @@ Only `runVectorLeg` changes inside `hybridSearch`:
 
 1. Embed the query via the client (3s timeout, unchanged).
 2. `store.QueryGeneration` against the **active generation only** —
-   deliberately bypassing `kitvec.Search`, which queries all live
-   generations with one query vector (dimensions may differ across
-   generations; same reasoned divergence as agentsview `search.go`).
+   deliberately bypassing `kitvec.Search`. Since kit v0.3.0, `Search`
+   embeds the query once per live generation via `encFor(gen)`, so the old
+   dimension-mismatch concern no longer applies; the reasons to bypass are
+   that kata wants exactly one serving generation (the building one must
+   not answer searches mid-fill) and a single query-embed call within the
+   3s budget, not one per live generation.
 3. `kitvec.RollupByDocument` (best chunk per issue).
 4. Hydrate: resolve each hit's issue UID against the live `issues` table in
    `kata.db`; drop soft-deleted issues and issues outside the requested
@@ -216,13 +232,13 @@ below.
 2. **Backlog query coupling**: computing the health backlog reads kit's
    stamp table directly. Alternative: report only mirror-side counts
    (embeddable issues vs. mirror rows) and drop per-generation precision.
-3. **Reclamation SQL**: local SQL against kit's `_chunks`/`_stamps`/vec0
-   tables mirrors agentsview `resetGeneration`. If kit grows a reclamation
-   API, both consumers switch to it.
+3. **Reclamation SQL**: local SQL against kit's prefix-qualified
+   `_chunks`/`_stamps`/vec0 tables, the same workaround other kit consumers
+   use. If kit grows a reclamation API, all consumers switch to it.
 4. **Where lifecycle state lives**: this design keeps generation cutover
-   fully automatic (config-driven, no CLI). agentsview exposes
-   build/activate/retire commands; kata can add operator commands later if
+   fully automatic (config-driven, no CLI). Other kit consumers expose
+   build/activate/retire operator commands; kata can add them later if
    needed (YAGNI for now).
 5. **Chunking constants**: `Split` max-runes/overlap start as package
    constants (values to be picked in the implementation plan, informed by
-   agentsview's choices), not config keys.
+   prior art in other kit consumers), not config keys.
