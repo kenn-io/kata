@@ -559,6 +559,11 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if vectorIndex != nil {
+			_ = vectorIndex.Close()
+		}
+	}()
 
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:                store,
@@ -732,18 +737,25 @@ func startFederationRunner(
 	return wakeRunner
 }
 
+// vectorsPathForDSN places the semantic-search sidecar next to the SQLite
+// database file. Embeddings require the SQLite backend; other DSNs error so
+// startEmbeddingReconciler can refuse clearly instead of guessing a path.
+func vectorsPathForDSN(dsn string) (string, error) {
+	path := strings.TrimPrefix(dsn, "sqlite://")
+	if strings.Contains(path, "://") {
+		return "", fmt.Errorf("semantic search requires the sqlite backend, got dsn %s", config.RedactDSN(dsn))
+	}
+	return filepath.Join(filepath.Dir(path), "vectors.db"), nil
+}
+
 // startEmbeddingReconciler constructs the embedding client, sidecar vector
 // index, and reconciler when semantic search is configured, starts the
 // reconciler goroutine, subscribes to the broadcaster so new/edited issues are
 // embedded promptly, and triggers an initial backfill sweep. It returns the
 // client, the index, and a health snapshot func to wire into ServerConfig.
 // When embeddings are not configured it returns nils so the daemon behaves
-// exactly as it did before semantic search existed.
-//
-// The vector sidecar path is derived inline from dbPath here as a minimal,
-// working placement (sibling "vectors.db" next to the sqlite file); deriving
-// it from proper daemon/namespace config and managing the *vector.Index's
-// lifetime (closing it on shutdown) is Task 10's scope.
+// exactly as it did before semantic search existed. The caller owns the
+// returned *vector.Index's lifetime and must close it on shutdown.
 func startEmbeddingReconciler(
 	ctx context.Context,
 	dcfg *config.DaemonConfig,
@@ -769,10 +781,13 @@ func startEmbeddingReconciler(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("embedding client: %w", err)
 	}
-	vectorsPath := filepath.Join(filepath.Dir(strings.TrimPrefix(dbPath, "sqlite://")), "vectors.db")
+	vectorsPath, err := vectorsPathForDSN(dbPath)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("embedding index: %w", err)
+	}
 	idx, err := vector.Open(ctx, vectorsPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("vector index: %w", err)
+		return nil, nil, nil, fmt.Errorf("embedding index: %w", err)
 	}
 	reconciler := daemon.NewReconciler(store, idx, embedder, daemon.ReconcilerConfig{BatchSize: ec.BatchSize})
 	go func() {

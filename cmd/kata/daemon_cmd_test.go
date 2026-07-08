@@ -741,6 +741,20 @@ func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
 	})
 }
 
+func TestVectorsPathForDSN(t *testing.T) {
+	got, err := vectorsPathForDSN("/var/lib/kata/kata.db")
+	if err != nil || got != "/var/lib/kata/vectors.db" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	got, err = vectorsPathForDSN("sqlite:///var/lib/kata/kata.db")
+	if err != nil || got != "/var/lib/kata/vectors.db" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if _, err := vectorsPathForDSN("postgres://h/db"); err == nil {
+		t.Fatal("postgres DSN must error: sidecar embeddings are sqlite-only")
+	}
+}
+
 func TestGitHubSyncRunnerInterval(t *testing.T) {
 	t.Setenv("KATA_GITHUB_SYNC_INTERVAL_MS", "")
 	assert.Equal(t, 5*time.Minute, githubSyncRunnerInterval())
