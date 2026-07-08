@@ -102,6 +102,43 @@ func TestFillAbortsOnRequestLevel400(t *testing.T) {
 	}
 }
 
+// TestFillAbortsOnBatchShape400 pins the probe against shape-level 400s: an
+// endpoint that rejects the document's request shape (here, any multi-text
+// batch) but accepts trivial single-text requests is not rejecting the
+// document's content, so the fill must abort rather than poison-skip. The
+// probe has to replay the document's actual request shape, not a one-item
+// canary.
+func TestFillAbortsOnBatchShape400(t *testing.T) {
+	ctx := context.Background()
+	ix := openTestIndex(t)
+	seedMirror(t, ix, "u1", 1)
+	// Long content: multiple chunks, all sent in one encode call (batch 0).
+	if _, err := ix.db.ExecContext(ctx,
+		`UPDATE issue_mirror SET content = ? WHERE issue_uid = 'u1'`,
+		strings.Repeat("kata ", 1000)); err != nil {
+		t.Fatal(err)
+	}
+	g := testGen("m1")
+	key := g.Fingerprint()
+	if err := ix.EnsureBuilding(ctx, key, g); err != nil {
+		t.Fatal(err)
+	}
+	enc := func(_ context.Context, texts []string) ([][]float32, error) {
+		if len(texts) > 1 {
+			return nil, &embedding.APIError{StatusCode: 400, Body: "batch too large"}
+		}
+		return [][]float32{{1, 0, 0, 0}}, nil
+	}
+	stats, err := ix.Fill(ctx, key, enc, 0, 0)
+	var apiErr *embedding.APIError
+	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+		t.Fatalf("shape-level 400 must abort the fill, got %v", err)
+	}
+	if stats.Skipped != 0 {
+		t.Fatalf("stats = %+v; shape-level 400 must not stamp the document as skipped", stats)
+	}
+}
+
 func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	ctx := context.Background()
 	ix := openTestIndex(t)

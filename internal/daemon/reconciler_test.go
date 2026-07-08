@@ -44,11 +44,15 @@ func openTestVectorIndex(t *testing.T) *vector.Index {
 }
 
 // fakeEmbedder implements the embedder interface the reconciler depends on.
+// When err is set, EncodeFunc fails every call, or — with failAfter > 0 —
+// only calls after the first failAfter, which succeed normally.
 type fakeEmbedder struct {
-	model string
-	dims  int
-	err   error
-	n     int
+	model     string
+	dims      int
+	err       error
+	failAfter int
+	calls     int
+	n         int
 }
 
 func (f *fakeEmbedder) Generation() kitvec.Generation {
@@ -57,7 +61,8 @@ func (f *fakeEmbedder) Generation() kitvec.Generation {
 func (f *fakeEmbedder) BatchSize() int { return 64 }
 func (f *fakeEmbedder) EncodeFunc() kitvec.EncodeFunc {
 	return func(_ context.Context, texts []string) ([][]float32, error) {
-		if f.err != nil {
+		f.calls++
+		if f.err != nil && f.calls > f.failAfter {
 			return nil, f.err
 		}
 		f.n += len(texts)
@@ -202,6 +207,35 @@ func TestReconcileErrorReportsPendingBacklog(t *testing.T) {
 	}
 	if h := r.Health(); h.Backlog != 2 {
 		t.Fatalf("backlog after failed fill = %d, want 2 (documents still pending)", h.Backlog)
+	}
+}
+
+// TestReconcileFillErrorRefreshesPartialBacklog pins the on-error backlog
+// refresh: when the fill stamps some documents before failing, health must
+// report only what is still pending, not the pre-fill count.
+func TestReconcileFillErrorRefreshesPartialBacklog(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, _ := store.CreateProject(ctx, "spoke-project")
+	for i := 0; i < 2; i++ {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idx := openTestVectorIndex(t)
+	// First encode call (first document) succeeds and stamps; the second
+	// fails, aborting the fill with one document embedded and one pending.
+	emb := &fakeEmbedder{model: "m1", dims: 2, failAfter: 1, err: &embedding.APIError{StatusCode: 500, Body: "down"}}
+	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64})
+
+	if err := r.reconcileOnce(ctx); err == nil {
+		t.Fatal("expected fill error")
+	}
+	if emb.n != 1 {
+		t.Fatalf("embedded %d documents before the failure, want 1", emb.n)
+	}
+	if h := r.Health(); h.Backlog != 1 {
+		t.Fatalf("backlog after partial fill = %d, want 1 (only the unembedded document)", h.Backlog)
 	}
 }
 
