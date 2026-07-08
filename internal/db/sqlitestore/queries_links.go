@@ -269,12 +269,16 @@ func (d *Store) appendBlockNumbersForChunk(
 	return nil
 }
 
-// BlockedByNumbersByIssues returns issue ID -> issue numbers that block
-// that issue. Inverse of BlockNumbersByIssues: for each issue X, the
+// BlockedByNumbersByIssues returns issue ID -> issue numbers that actively
+// block that issue. Inverse of BlockNumbersByIssues: for each issue X, the
 // returned numbers are the issues whose outgoing `blocks` link points
 // at X. Used by `kata list --json` to surface every relationship type
 // per row, not just outgoing blocks. Links are project-independent edges
-// (storage v16), so a blocker in another project is still returned.
+// (storage v16), so a blocker in another project is still returned — but
+// only carries ACTIVE blockers: a blocker whose project is archived
+// (projects.deleted_at IS NOT NULL) is excluded, mirroring ReadyIssues'
+// active-blocker predicate so `kata list` and `kata ready` agree on
+// whether an issue is actually blocked.
 func (d *Store) BlockedByNumbersByIssues(
 	ctx context.Context, issueIDs []int64,
 ) (map[int64][]int64, error) {
@@ -302,8 +306,10 @@ func (d *Store) appendBlockedByNumbersForChunk(
 	          FROM links l
 	          JOIN issues blocker ON blocker.id = l.from_issue_id
 	          JOIN issues blocked ON blocked.id = l.to_issue_id
+	          JOIN projects bp ON bp.id = blocker.project_id
 	          WHERE l.type = 'blocks'
 	            AND blocker.deleted_at IS NULL
+	            AND bp.deleted_at IS NULL
 	            AND l.to_issue_id IN (` + placeholders + `)
 	          ORDER BY l.to_issue_id ASC, blocker.id ASC`
 	rows, err := d.QueryContext(ctx, query, args...)

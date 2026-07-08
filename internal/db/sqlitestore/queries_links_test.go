@@ -468,3 +468,23 @@ func TestChildCountsByParents_ExcludesArchivedProjectChildren(t *testing.T) {
 	assert.Equal(t, db.ChildCounts{Open: 1, Total: 1}, got[parent.ID],
 		"archived-project child must not count toward open or total")
 }
+
+// TestBlockedByNumbersByIssues_IgnoresBlockerInArchivedProject: an open
+// blocker whose project is archived must not appear in blocked_by hydration,
+// mirroring ReadyIssues' archived-project exclusion (storage v16 links
+// survive project archival, so without this join a hidden archived blocker
+// would still render the downstream issue as blocked in `kata list`).
+func TestBlockedByNumbersByIssues_IgnoresBlockerInArchivedProject(t *testing.T) {
+	d, ctx, p1 := setupTestProject(t)
+	p2, err := d.CreateProject(ctx, "blocker-project")
+	require.NoError(t, err)
+	blocked := makeIssue(t, ctx, d, p1.ID, "blocked", "tester")
+	blocker := makeIssue(t, ctx, d, p2.ID, "blocker", "tester")
+	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
+	archiveProjectByID(ctx, t, d, p2.ID)
+
+	got, err := d.BlockedByNumbersByIssues(ctx, []int64{blocked.ID})
+	require.NoError(t, err)
+	assert.NotContains(t, got[blocked.ID], blocker.ID,
+		"blocker in an archived project must not count as an active blocker")
+}

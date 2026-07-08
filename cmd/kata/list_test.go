@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 // TestList_OutputsShortIDNotNumber pins the JSON wire shape: each issue
@@ -105,6 +107,37 @@ func TestList_HumanRowBlockedGlyphFollowsOpenBlocker(t *testing.T) {
 	blockedLine = findLineContaining(t, out, "blocked issue")
 	assert.Contains(t, blockedLine, "○", "expected open glyph once blocker is closed")
 	assert.NotContains(t, blockedLine, "●")
+}
+
+// TestList_HumanRowIgnoresBlockerInArchivedProject pins that `kata list`
+// agrees with `kata ready`: an open blocker whose project has been archived
+// must not mark the blocked issue as blocked. The issue lives in the bound
+// workspace project; the blocker lives in a separate project that gets
+// archived via the same path `kata projects remove` uses (RemoveProject).
+func TestList_HumanRowIgnoresBlockerInArchivedProject(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ctx := context.Background()
+	blockerProject, err := env.DB.CreateProject(ctx, "blocker-project")
+	require.NoError(t, err)
+
+	blocked := createIssue(t, env, pid, "blocked issue")
+	blocker := createIssue(t, env, blockerProject.ID, "blocker issue")
+	// Cross-project link target must be qualified ("project#short_id"); a
+	// bare short_id resolves within the subject's own (blocker) project.
+	createLinkViaHTTP(t, env, blockerProject.ID, blocker, "blocks", "kata#"+blocked)
+
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: blockerProject.ID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	out := runCLI(t, env, dir, "list")
+	blockedLine := findLineContaining(t, out, "blocked issue")
+	assert.Contains(t, blockedLine, "○",
+		"blocker in an archived project must not render the blocked glyph")
+	assert.NotContains(t, blockedLine, "●")
+	assert.Contains(t, out, "Total: 1 issue (1 open)",
+		"footer must count the issue as open, not blocked")
 }
 
 // TestList_HumanFooterShowsTotalsAndLegend pins the footer: non-quiet human
