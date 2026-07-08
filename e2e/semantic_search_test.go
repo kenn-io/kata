@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -439,14 +440,16 @@ func editIssueE2E(t *testing.T, client *http.Client, baseURL string, pid int64, 
 }
 
 // waitForSemanticHit polls the real mode=hybrid search until the paraphrase
-// surfaces the target issue via the vector leg, then returns that response. It
-// asserts on observable search behavior rather than the /health backlog gauge,
-// so it is immune to gauge timing: the reconciler's pre-embed backlog can read
-// 0 before the post-create wake has embedded anything, which a backlog wait
-// would accept too early. The poll is deadline-bounded and, on timeout, reports
-// the last search response, the last /health snapshot, and daemon stderr so a
-// genuinely stuck embedder surfaces as a clear message instead of a bare
-// timeout.
+// surfaces the target issue via the vector leg — the hit must credit
+// "semantic" in matched_in, since a query sharing tokens with the issue can
+// surface it through the lexical leg before the reconciler has (re-)embedded
+// it — then returns that response. It asserts on observable search behavior
+// rather than the /health backlog gauge, so it is immune to gauge timing: the
+// reconciler's pre-embed backlog can read 0 before the post-create wake has
+// embedded anything, which a backlog wait would accept too early. The poll is
+// deadline-bounded and, on timeout, reports the last search response, the
+// last /health snapshot, and daemon stderr so a genuinely stuck embedder
+// surfaces as a clear message instead of a bare timeout.
 func waitForSemanticHit(t *testing.T, client *http.Client, baseURL, pidStr, query, shortID string, daemonStderr *safeBuffer) searchResult {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
@@ -457,7 +460,7 @@ func waitForSemanticHit(t *testing.T, client *http.Client, baseURL, pidStr, quer
 		if status == http.StatusOK {
 			var res searchResult
 			require.NoErrorf(t, json.Unmarshal(body, &res), "decode search response: %s", body)
-			if containsIssue(res, shortID) {
+			if hit, ok := findHit(res, shortID); ok && slices.Contains(hit.MatchedIn, "semantic") {
 				return res
 			}
 		}
