@@ -68,6 +68,40 @@ func TestFillEmbedsChunksAndQueryFindsThem(t *testing.T) {
 	}
 }
 
+// TestFillAbortsOnRequestLevel400 pins the poison-skip guard: a 400 that
+// rejects every request (bad model name, malformed request) is not
+// document-specific, so the fill must abort with the error instead of
+// stamping the whole corpus as skipped with backlog zero and no retry.
+func TestFillAbortsOnRequestLevel400(t *testing.T) {
+	ctx := context.Background()
+	ix := openTestIndex(t)
+	seedMirror(t, ix, "u1", 1)
+	seedMirror(t, ix, "u2", 1)
+	g := testGen("m1")
+	key := g.Fingerprint()
+	if err := ix.EnsureBuilding(ctx, key, g); err != nil {
+		t.Fatal(err)
+	}
+	enc := func(_ context.Context, _ []string) ([][]float32, error) {
+		return nil, &embedding.APIError{StatusCode: 400, Body: "invalid model"}
+	}
+	stats, err := ix.Fill(ctx, key, enc, 0, 0)
+	var apiErr *embedding.APIError
+	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+		t.Fatalf("request-level 400 must abort the fill, got %v", err)
+	}
+	if stats.Skipped != 0 {
+		t.Fatalf("stats = %+v; request-level 400 must not stamp documents as skipped", stats)
+	}
+	backlog, err := ix.Backlog(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backlog != 2 {
+		t.Fatalf("backlog = %d, want 2 (both documents still pending)", backlog)
+	}
+}
+
 func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	ctx := context.Background()
 	ix := openTestIndex(t)
