@@ -470,9 +470,9 @@ func (d *Store) applyLinksDeltaTx(ctx context.Context, tx *sql.Tx, issue db.Issu
 func peerIdentityTx(ctx context.Context, tx *sql.Tx, issueID int64) (db.PeerIdentity, error) {
 	var p db.PeerIdentity
 	err := tx.QueryRowContext(ctx, `
-		SELECT i.short_id, i.uid, pr.name
+		SELECT i.short_id, i.uid, pr.name, i.status
 		  FROM issues i JOIN projects pr ON pr.id = i.project_id
-		 WHERE i.id = ?`, issueID).Scan(&p.ShortID, &p.UID, &p.Project)
+		 WHERE i.id = ?`, issueID).Scan(&p.ShortID, &p.UID, &p.Project, &p.Status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.PeerIdentity{}, fmt.Errorf("peer identity for issue %d: %w", issueID, db.ErrNotFound)
 	}

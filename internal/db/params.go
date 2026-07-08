@@ -251,10 +251,14 @@ type EditIssueAtomicParams struct {
 // the mutating transaction: display ref, canonical pointer, and the
 // peer's project at mutation time (links span projects since storage
 // v16, so a bare short_id no longer identifies a peer unambiguously).
+// Status is the peer issue's own status at mutation time, so edit-delta
+// wire responses can populate api.LinkPeer.Status (required, 0.9.0)
+// without a post-transaction lookup.
 type PeerIdentity struct {
 	ShortID string
 	UID     string
 	Project string
+	Status  string
 }
 
 // AtomicEditChanges describes which link mutations actually applied.

@@ -424,6 +424,41 @@ func TestEditIssue_LinksDelta_AddBlocks(t *testing.T) {
 	assert.Equal(t, target, show.Links[0].To.ShortID)
 }
 
+// TestEditIssue_LinksDelta_PeerCarriesStatus pins that edit-delta LinkPeer
+// entries carry the peer issue's own status (0.9.0), matching the list
+// response's LinkPeer contract — the wire schema marks status required, so
+// edit responses must not serialize an empty string.
+func TestEditIssue_LinksDelta_PeerCarriesStatus(t *testing.T) {
+	_, ts, pid, src := bootstrapProjectWithIssue(t)
+	resp, bs := postJSON(t, ts, issuesURL(pid),
+		map[string]any{"actor": "tester", "title": "blocked target"})
+	require.Equal(t, 200, resp.StatusCode)
+	var created struct {
+		Issue struct {
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &created))
+	target := created.Issue.ShortID
+
+	resp, bs = patchJSON(t, ts, issueURL(pid, src, ""), map[string]any{
+		"actor": "tester",
+		"links_delta": map[string]any{
+			"add_blocks": []string{target},
+		},
+	})
+	require.Equalf(t, 200, resp.StatusCode, "patch: %s", string(bs))
+
+	var out struct {
+		Changes struct {
+			BlocksAdded []linkPeerTest `json:"blocks_added"`
+		} `json:"changes"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &out))
+	require.Len(t, out.Changes.BlocksAdded, 1)
+	assert.Equal(t, "open", out.Changes.BlocksAdded[0].Status)
+}
+
 // TestEditIssue_LinksDelta_AddBlockedBy verifies the inverse-direction add:
 // `add_blocked_by: [N]` on URL issue X stores a `blocks` link from N to X
 // (i.e. N blocks X). The Changes block reports it under blocked_by_added.

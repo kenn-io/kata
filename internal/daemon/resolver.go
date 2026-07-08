@@ -333,8 +333,8 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 }
 
 // buildLinkChanges projects db.AtomicEditChanges into the wire-facing
-// api.LinkChanges. PeerIdentity carries the project name captured in-tx,
-// so no storage lookup is required.
+// api.LinkChanges. PeerIdentity carries the project name and peer status
+// captured in-tx, so no storage lookup is required.
 func buildLinkChanges(changes db.AtomicEditChanges) *api.LinkChanges {
 	peer := func(p db.PeerIdentity) api.LinkPeer {
 		return api.LinkPeer{
@@ -342,6 +342,7 @@ func buildLinkChanges(changes db.AtomicEditChanges) *api.LinkChanges {
 			ShortID:     p.ShortID,
 			Project:     p.Project,
 			QualifiedID: qualifiedID(p.Project, p.ShortID),
+			Status:      p.Status,
 		}
 	}
 	peers := func(ps []db.PeerIdentity) []api.LinkPeer {
