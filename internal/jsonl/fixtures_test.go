@@ -253,18 +253,6 @@ func buildRichJSONLFixture(t *testing.T) richJSONLFixture {
 	addTesterComment(ctx, t, d, login.ID, "watermelon comment text")
 	addTesterComment(ctx, t, d, purged.ID, "purged comment text")
 
-	// Seed one embedding so the byte-equivalence round-trip exercises the
-	// issue_embeddings export/import path. content_revision is 0 here (the
-	// issue is unedited), which is the boundary case for the import's
-	// embedded_content_revision <= content_revision validation.
-	require.NoError(t, d.UpsertIssueEmbedding(ctx, db.IssueEmbedding{
-		IssueID:                 login.ID,
-		EmbeddedContentRevision: 0,
-		Fingerprint:             "e" + strings.Repeat("0", 63),
-		Dims:                    3,
-		Vector:                  []float32{0, 0, 1},
-	}))
-
 	_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
 		FromIssueID: blocker.ID,
 		ToIssueID:   login.ID,

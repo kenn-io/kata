@@ -337,6 +337,17 @@ type ReadyGlobalIssue struct {
 	ProjectName string `json:"project_name"`
 }
 
+// IssueContent is one embeddable issue's text and identity for the vector
+// mirror. ID is the pagination cursor; UID is the mirror/doc key.
+type IssueContent struct {
+	ID              int64
+	UID             string
+	ProjectUID      string
+	Title           string
+	Body            string
+	ContentRevision int64
+}
+
 // Comment mirrors a row in comments.
 type Comment struct {
 	ID        int64     `json:"id"`

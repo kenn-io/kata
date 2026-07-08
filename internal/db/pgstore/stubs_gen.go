@@ -234,10 +234,6 @@ func (s *Store) EditIssueAtomic(_ context.Context, _ db.EditIssueAtomicParams) (
 	return db.EditIssueAtomicResult{}, ErrNotImplementedPhase3
 }
 
-func (s *Store) EmbeddingStats(_ context.Context, _ int64, _ string) (int64, string, error) {
-	return 0, "", ErrNotImplementedPhase3
-}
-
 func (s *Store) EnableFederationPush(_ context.Context, _ int64, _ int64) (db.FederationBinding, error) {
 	return db.FederationBinding{}, ErrNotImplementedPhase3
 }
@@ -319,12 +315,6 @@ func (s *Store) ExportImportMappings(_ context.Context, _ db.ExportFilter) iter.
 func (s *Store) ExportIssueClaims(_ context.Context, _ db.ExportFilter) iter.Seq2[db.IssueClaimExport, error] {
 	return func(yield func(db.IssueClaimExport, error) bool) {
 		yield(db.IssueClaimExport{}, ErrNotImplementedPhase3)
-	}
-}
-
-func (s *Store) ExportIssueEmbeddings(_ context.Context, _ db.ExportFilter) iter.Seq2[db.IssueEmbeddingExport, error] {
-	return func(yield func(db.IssueEmbeddingExport, error) bool) {
-		yield(db.IssueEmbeddingExport{}, ErrNotImplementedPhase3)
 	}
 }
 
@@ -543,10 +533,6 @@ func (s *Store) ListAllIssues(_ context.Context, _ db.ListAllIssuesParams) ([]db
 }
 
 func (s *Store) ListDueIssueSyncBindings(_ context.Context, _ string, _ time.Time, _ time.Time, _ int) ([]db.IssueSyncBinding, error) {
-	return nil, ErrNotImplementedPhase3
-}
-
-func (s *Store) ListEmbedTargets(_ context.Context, _ string, _ int) ([]db.EmbedTarget, error) {
 	return nil, ErrNotImplementedPhase3
 }
 
@@ -846,10 +832,6 @@ func (s *Store) SearchFTSAny(_ context.Context, _ int64, _ string, _ int, _ bool
 	return nil, ErrNotImplementedPhase3
 }
 
-func (s *Store) SearchVector(_ context.Context, _ int64, _ []float32, _ string, _ int, _ bool) ([]db.SearchCandidate, error) {
-	return nil, ErrNotImplementedPhase3
-}
-
 func (s *Store) SkipFederationQuarantine(_ context.Context, _ db.SkipFederationQuarantineParams) (db.FederationQuarantine, error) {
 	return db.FederationQuarantine{}, ErrNotImplementedPhase3
 }
@@ -892,10 +874,6 @@ func (s *Store) UpsertFederationBinding(_ context.Context, _ db.FederationBindin
 
 func (s *Store) UpsertImportMapping(_ context.Context, _ db.ImportMappingParams) (db.ImportMapping, error) {
 	return db.ImportMapping{}, ErrNotImplementedPhase3
-}
-
-func (s *Store) UpsertIssueEmbedding(_ context.Context, _ db.IssueEmbedding) error {
-	return ErrNotImplementedPhase3
 }
 
 func (s *Store) UpsertIssueSyncBinding(_ context.Context, _ db.UpsertIssueSyncBindingParams) (db.IssueSyncBinding, error) {

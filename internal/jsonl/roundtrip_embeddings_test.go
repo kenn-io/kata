@@ -1,106 +1,50 @@
 package jsonl_test
 
 import (
-	"bytes"
 	"context"
+	"encoding/base64"
+	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/jsonl"
 )
 
-// repeat63jsonl is a 63-char zero run; prefixing a leading char yields a
-// 64-char fingerprint that satisfies the schema CHECK.
-const repeat63jsonl = "000000000000000000000000000000000000000000000000000000000000000"
-
-// TestEmbeddingsRoundTripPreservesContentRevision proves the JSONL export
-// carries issues.content_revision and the issue_embeddings rows, so an issue
-// that was edited (content_revision > 0) then embedded is not falsely stale
-// after a cutover/backup round-trip: ListEmbedTargets must return nothing for
-// it under the same fingerprint.
-func TestEmbeddingsRoundTripPreservesContentRevision(t *testing.T) {
+// TestImportSkipsLegacyIssueEmbeddingRecords proves that pre-v23 archives
+// carrying issue_embedding envelopes (the legacy issue_embeddings table,
+// dropped in Task 11) still import cleanly. Vectors are now derived state
+// rebuilt by the embedding reconciler from the vector sidecar, so the
+// legacy envelope is acknowledged and dropped rather than erroring old
+// archives or requiring the now-removed issue_embeddings table.
+func TestImportSkipsLegacyIssueEmbeddingRecords(t *testing.T) {
 	ctx := context.Background()
-	src := openExportTestDB(t)
-	proj, err := src.CreateProject(ctx, "spoke-project")
+	const (
+		projUID  = "01HZZZZZZZZZZZZZZZZZZZZZZZ"
+		issueUID = "01HZZZZZZZZZZZZZZZZZZZZA01"
+	)
+	vectorB64 := base64.StdEncoding.EncodeToString(make([]byte, 8)) // dims=2 float32s
+
+	rows := []string{
+		`{"kind":"meta","data":{"key":"export_version","value":"22"}}`,
+		`{"kind":"project","data":{"id":1,"uid":"` + projUID + `","name":"legacy-embed-project","metadata":{},"revision":1,"created_at":"2026-01-01T00:00:00.000Z"}}`,
+		`{"kind":"issue","data":{"id":1,"uid":"` + issueUID + `","project_id":1,"short_id":"za01","title":"legacy embed issue","body":"","status":"open","closed_reason":null,"owner":null,"author":"tester","created_at":"2026-01-01T00:00:01.000Z","updated_at":"2026-01-01T00:00:01.000Z","closed_at":null,"deleted_at":null,"metadata":{},"revision":1}}`,
+		`{"kind":"issue_embedding","data":{"issue_uid":"` + issueUID + `","embedded_content_revision":0,"embed_fingerprint":"` + strings.Repeat("a", 64) + `","dims":2,"vector_b64":"` + vectorB64 + `"}}`,
+	}
+
+	// Import the same archive into two fresh targets: the legacy embedding
+	// record must not error and must not prevent the issue from landing,
+	// and the outcome must be identical either time (idempotent import).
+	first := openImportTargetDB(t)
+	require.NoError(t, importJSONL(ctx, first, rows...))
+	second := openImportTargetDB(t)
+	require.NoError(t, importJSONL(ctx, second, rows...))
+
+	firstIssue, err := first.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	iss, _, err := src.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: proj.ID, Title: "t", Body: "b", Author: "a",
-	})
+	assert.Equal(t, "legacy embed issue", firstIssue.Title)
+
+	secondIssue, err := second.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
 	require.NoError(t, err)
-	nt := "edited"
-	_, _, _, err = src.EditIssue(ctx, db.EditIssueParams{IssueID: iss.ID, Title: &nt, Actor: "a"})
-	require.NoError(t, err)
-
-	var cr int64
-	require.NoError(t, src.QueryRowContext(ctx,
-		`SELECT content_revision FROM issues WHERE id=?`, iss.ID).Scan(&cr))
-	require.Greater(t, cr, int64(0), "edit must bump content_revision above zero")
-
-	fp := "a" + repeat63jsonl
-	require.NoError(t, src.UpsertIssueEmbedding(ctx, db.IssueEmbedding{
-		IssueID: iss.ID, EmbeddedContentRevision: cr, Fingerprint: fp, Dims: 2, Vector: []float32{1, 0},
-	}))
-
-	var buf bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{}))
-
-	dst := openImportTargetDB(t)
-	require.NoError(t, jsonl.Import(ctx, &buf, dst))
-
-	// Imported issue carries content_revision, so the imported embedding is
-	// NOT stale: ListEmbedTargets returns nothing under the same fingerprint.
-	targets, err := dst.ListEmbedTargets(ctx, fp, 10)
-	require.NoError(t, err)
-	require.Empty(t, targets, "imported embedding falsely stale")
-
-	// And the vector survived the round-trip intact.
-	var dims int
-	var raw []byte
-	require.NoError(t, dst.QueryRowContext(ctx, `
-		SELECT e.dims, e.vector_bytes
-		  FROM issue_embeddings e
-		  JOIN issues i ON i.id = e.issue_id
-		 WHERE i.uid = ?`, iss.UID).Scan(&dims, &raw))
-	require.Equal(t, 2, dims)
-	require.Len(t, raw, 8, "2 float32 == 8 bytes")
-}
-
-// TestEmbeddingImportDropsRowExceedingContentRevision proves the import
-// validation: an embedding whose embedded_content_revision exceeds the
-// imported issue's content_revision (a corrupt or hand-edited dump) is dropped
-// and left for the reconciler rather than inserted.
-func TestEmbeddingImportDropsRowExceedingContentRevision(t *testing.T) {
-	ctx := context.Background()
-	src := openExportTestDB(t)
-	proj, err := src.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	iss, _, err := src.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: proj.ID, Title: "t", Body: "b", Author: "a",
-	})
-	require.NoError(t, err)
-	// content_revision is 0 (never edited); embed at 0 so the row is valid in
-	// the source DB (the CHECK is import-only).
-	fp := "a" + repeat63jsonl
-	require.NoError(t, src.UpsertIssueEmbedding(ctx, db.IssueEmbedding{
-		IssueID: iss.ID, EmbeddedContentRevision: 0, Fingerprint: fp, Dims: 2, Vector: []float32{1, 0},
-	}))
-	// Forge a future embedded_content_revision the imported issue can't match.
-	_, err = src.ExecContext(ctx,
-		`UPDATE issue_embeddings SET embedded_content_revision = 99 WHERE issue_id = ?`, iss.ID)
-	require.NoError(t, err)
-
-	var buf bytes.Buffer
-	require.NoError(t, jsonl.Export(ctx, src, &buf, jsonl.ExportOptions{}))
-
-	dst := openImportTargetDB(t)
-	require.NoError(t, jsonl.Import(ctx, &buf, dst))
-
-	var count int
-	require.NoError(t, dst.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		  FROM issue_embeddings e
-		  JOIN issues i ON i.id = e.issue_id
-		 WHERE i.uid = ?`, iss.UID).Scan(&count))
-	require.Equal(t, 0, count, "embedding exceeding content_revision must be dropped on import")
+	assert.Equal(t, "legacy embed issue", secondIssue.Title)
 }

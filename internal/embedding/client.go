@@ -3,8 +3,6 @@ package embedding
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -144,20 +142,6 @@ func (c *Client) EncodeFunc() kitvec.EncodeFunc {
 		}()
 		return c.Embed(ctx, texts)
 	}
-}
-
-// Fingerprint is a transitional shim over Generation().Fingerprint(); the
-// daemon migrates off it in the reconciler/search rewire tasks (8-9) and the
-// legacy issue_embeddings table it feeds is dropped in Task 11. kit's
-// Generation.Fingerprint() is 16 hex chars, but the legacy
-// issue_embeddings.embed_fingerprint column still enforces
-// CHECK (length(embed_fingerprint) = 64) from the pre-kit sha256 recipe.
-// Re-hashing to sha256 keeps every write valid against that constraint
-// without loosening it, while preserving the underlying Generation's
-// distinctness across model/dims/salt/recipe.
-func (c *Client) Fingerprint() string {
-	sum := sha256.Sum256([]byte(c.Generation().Fingerprint()))
-	return hex.EncodeToString(sum[:])
 }
 
 type embedRequest struct {

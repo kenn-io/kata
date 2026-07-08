@@ -12,9 +12,9 @@ import (
 // TestAllSchemaTablesExist guards against a future schema edit accidentally
 // dropping a table that Plan 1 doesn't actively exercise. Plan 1 reads/writes
 // projects, project_aliases, issues, comments, events, and meta. The other
-// names below (links, issue_labels, purge_log, issues_fts, issue_embeddings)
-// are scaffolded by schema.sql for later plans; this test is the only thing
-// that catches a silent removal.
+// names below (links, issue_labels, purge_log, issues_fts) are scaffolded by
+// schema.sql for later plans; this test is the only thing that catches a
+// silent removal.
 func TestAllSchemaTablesExist(t *testing.T) {
 	d := openTestDB(t)
 	wanted := []string{
@@ -25,7 +25,6 @@ func TestAllSchemaTablesExist(t *testing.T) {
 		"issue_sync_bindings", "issue_sync_status",
 		"issue_claims", "pending_claim_requests",
 		"meta", "issues_fts", "import_mappings", "recurrences",
-		"issue_embeddings",
 	}
 	for _, name := range wanted {
 		assertSchemaObject(t, d, name)
