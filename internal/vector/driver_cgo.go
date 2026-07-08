@@ -2,7 +2,7 @@
 
 package vector
 
-import _ "github.com/mattn/go-sqlite3"
+import _ "github.com/mattn/go-sqlite3" // cgo SQLite driver registered as "sqlite3"; provides C sqlite symbols for kit's sqlite-vec cgo bindings
 
 // sidecarDriver selects the database/sql driver the vector sidecar opens
 // with. On Unix with cgo it is mattn/go-sqlite3, the driver kit's

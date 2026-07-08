@@ -2,7 +2,7 @@
 
 package vector
 
-import _ "modernc.org/sqlite"
+import _ "modernc.org/sqlite" // pure-Go SQLite driver registered as "sqlite"; kit's sqlitevec registers modernc.org/sqlite/vec extension at init
 
 // sidecarDriver selects the database/sql driver the vector sidecar opens
 // with. The cgo sqlite-vec bindings do not build on Windows, so kit's
