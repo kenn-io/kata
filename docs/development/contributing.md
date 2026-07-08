@@ -11,11 +11,24 @@ documented.
 | `cmd/kata` | CLI commands and output modes. |
 | `internal/daemon` | HTTP routes, daemon runtime, auth, SSE, federation routes. |
 | `internal/db` | Storage contract, backend implementations, schemas, projections, events, queries, federation state. |
+| `internal/embedding` | OpenAI-compatible embeddings client and text recipe (storage-free). |
+| `internal/vector` | `kata.vectors.db` sidecar: mirror, generation lifecycle, fill, KNN query (built on `go.kenn.io/kit/vector`). |
 | `internal/client` | Client discovery, auto-start, remote daemon, bearer handling. |
 | `internal/tui` | Bubble Tea TUI. |
 | `internal/jsonl` | Export/import, cutover, fixture compatibility. |
 | `internal/federation` | Spoke-side federation client and runner. |
 | `docs` | Public Zensical documentation source and maintained design notes. |
+
+## Building
+
+Release binaries are pure Go (`CGO_ENABLED=0`): `modernc.org/sqlite` provides
+both the database driver and the sqlite-vec extension. Development builds on
+machines with a C toolchain default to `CGO_ENABLED=1`, where kit's sqlitevec
+selects its cgo sqlite-vec bindings by build constraint; those need C sqlite
+symbols at link time, so `internal/vector/driver_cgo.go` links
+`mattn/go-sqlite3` purely to keep ambient `go build`/`go test` working. Both
+driver shims live in `internal/vector/driver_*.go` — nothing to configure,
+but don't remove the mattn dependency because release builds don't use it.
 
 ## Local checks
 
