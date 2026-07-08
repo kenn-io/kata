@@ -13,9 +13,11 @@ const mirrorPageSize = 500
 // RefreshMirror synchronizes issue_mirror with the canonical store: it
 // upserts new/edited issues (rendering the embed recipe) and removes rows —
 // plus their vectors in every generation — for issues that left the feed
-// (purged, or their project deleted). Soft-deleted issues stay mirrored so
-// include_deleted searches keep semantic recall; hydration filters them per
-// request. It returns the number of rows written or removed.
+// (soft-deleted, purged, or their project deleted). Dropping soft-deleted
+// issues is a privacy contract: mirror content is sent to the embedding
+// endpoint, and deleting an issue must stop that outbound flow. A restore
+// puts the issue back in the feed, re-mirroring and re-embedding it. It
+// returns the number of rows written or removed.
 func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, error) {
 	changed := 0
 	seen := make(map[string]struct{})

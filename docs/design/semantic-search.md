@@ -201,14 +201,16 @@ comments, links, and metadata all leave `content_revision` unchanged, and
 also moves on non-content mutations (status flips), and its millisecond
 precision can collapse same-instant edits.
 
-Soft-deleted issues stay in `ListIssueContent` (the mirror's feed), so their
-mirror rows and vectors survive deletion — matching the single-table
-embeddings design, which kept rows during soft-delete. An `include_deleted`
-search can therefore still rank them on their last-known content, hydration
-filters them out of default searches per request, and a restore costs
-nothing. Rows leave the mirror only when the issue is gone from the feed
-(purged, or its project deleted); the next refresh removes the row and its
-vectors in every generation.
+Soft-deleted issues are excluded from `ListIssueContent` (the mirror's
+feed). This is a privacy contract, not a convenience: mirror content is what
+gets sent to the configured embedding endpoint, and deleting an issue must
+stop that outbound flow — otherwise every initial sidecar build or
+generation rebuild would re-send historical deleted content to the provider.
+The next refresh after a deletion removes the mirror row and its vectors in
+every generation (the same path that handles purge and project deletion), so
+an `include_deleted` search ranks soft-deleted issues lexically only; their
+semantic recall returns when a restore puts them back in the feed and the
+reconciler re-embeds them.
 
 Cycle: wake on a debounced (~1–2s) post-commit nudge, on startup, and on a
 periodic safety sweep (~5m) that recovers anything missed across restarts.
@@ -410,11 +412,12 @@ with legs running in parallel a probe saves nothing.
 model, vector store failure) in a mode that wanted it. A nonzero reconciler
 backlog is health state, not per-query degradation.
 
-`include_deleted=true` lets both legs rank soft-deleted issues: the lexical
-leg on their last-indexed text, and the vector leg on the vectors that stay
-in the mirror until purge or project deletion (see "Reconciler") — the same
-behavior as the single-table design, which kept embeddings around during
-soft-delete. Default searches filter deleted issues at hydration time.
+`include_deleted=true` ranks soft-deleted issues through the lexical leg
+only: their mirror rows and vectors are removed at the first refresh after
+deletion (see "Reconciler" — deleted content must not keep flowing to the
+embedding endpoint), so the vector leg has nothing to rank them with. In the
+window before that refresh runs, hydration still filters them out of default
+searches per request.
 
 ## API and CLI contract
 

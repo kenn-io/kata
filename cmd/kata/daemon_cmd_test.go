@@ -756,10 +756,16 @@ func TestVectorsPathForDSN(t *testing.T) {
 	if err != nil || got != "/var/lib/kata/other.vectors.db" {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	// A path without a .db suffix gets .vectors.db appended.
+	// A path without a .db suffix gets .vectors appended, so it can never
+	// collide with the .db-suffixed form of the same stem: data and data.db
+	// in one directory must map to distinct sidecars.
 	got, err = vectorsPathForDSN("/var/lib/kata/data")
-	if err != nil || got != "/var/lib/kata/data.vectors.db" {
+	if err != nil || got != "/var/lib/kata/data.vectors" {
 		t.Fatalf("got %q, %v", got, err)
+	}
+	withDB, err := vectorsPathForDSN("/var/lib/kata/data.db")
+	if err != nil || withDB == got {
+		t.Fatalf("data and data.db must not share a sidecar: %q vs %q (%v)", got, withDB, err)
 	}
 	if _, err := vectorsPathForDSN("postgres://h/db"); err == nil {
 		t.Fatal("postgres DSN must error: sidecar embeddings are sqlite-only")

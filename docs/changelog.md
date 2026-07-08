@@ -27,6 +27,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   backfill drains (the `embeddings` backlog in `/health` reports progress).
   JSONL export no longer carries `issue_embedding` records; import of older
   archives that still contain them skips those records instead of failing.
+- Soft-deleting an issue now removes its vectors at the next reconcile, so
+  deleted content is never re-sent to the embedding endpoint by later index
+  rebuilds. Searches with `include_deleted` rank soft-deleted issues
+  lexically only; restoring an issue re-embeds it and semantic recall
+  resumes.
 
 ## 0.8.0
 <small>2026-07-04</small>

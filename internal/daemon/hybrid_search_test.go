@@ -308,12 +308,12 @@ func TestVectorLegModelChangeBackfillUnavailable(t *testing.T) {
 	}
 }
 
-// TestVectorLegIncludeDeletedRanksSoftDeleted pins the include_deleted
-// contract: a soft-deleted issue stays in the mirror and its vectors keep
-// serving — even across a mirror refresh after the delete — so an
-// include_deleted search can still rank it semantically, while a default
-// search filters it at hydration time.
-func TestVectorLegIncludeDeletedRanksSoftDeleted(t *testing.T) {
+// TestVectorLegSoftDeleteDropsFromIndexUntilRestore pins the privacy
+// contract: a soft-deleted issue leaves the mirror (and loses its vectors) at
+// the next refresh, so its content is never re-sent to the embedding endpoint
+// while deleted and no search — not even include_deleted — ranks it
+// semantically. Restoring the issue re-mirrors and re-embeds it.
+func TestVectorLegSoftDeleteDropsFromIndexUntilRestore(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
@@ -333,9 +333,9 @@ func TestVectorLegIncludeDeletedRanksSoftDeleted(t *testing.T) {
 	if _, _, _, err := store.SoftDeleteIssue(ctx, iss.ID, "a"); err != nil {
 		t.Fatal(err)
 	}
-	// Reconcile again after the soft delete: the mirror row and its vectors
-	// must survive the refresh (they are only removed on purge or project
-	// deletion).
+	// Reconcile after the soft delete: the mirror row and its vectors must be
+	// removed so deleted content cannot flow to the embedding endpoint on a
+	// later rebuild.
 	activateFixedGeneration(ctx, t, store, idx)
 
 	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
@@ -347,18 +347,25 @@ func TestVectorLegIncludeDeletedRanksSoftDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hybridSearch include_deleted: %v", err)
 	}
-	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != iss.UID {
-		t.Fatalf("include_deleted=true must rank the soft-deleted issue, got %#v", res.Hits)
+	if len(res.Hits) != 0 {
+		t.Fatalf("soft-deleted issue must leave the vector index at the next refresh, got %#v", res.Hits)
 	}
+
+	// Restore: the issue rejoins the mirror and is re-embedded, so semantic
+	// recall resumes.
+	if _, _, _, err := store.RestoreIssue(ctx, iss.ID, "a"); err != nil {
+		t.Fatal(err)
+	}
+	activateFixedGeneration(ctx, t, store, idx)
 
 	res, err = hybridSearch(ctx, store, idx, emb, hybridParams{
 		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
 	})
 	if err != nil {
-		t.Fatalf("hybridSearch default: %v", err)
+		t.Fatalf("hybridSearch after restore: %v", err)
 	}
-	if len(res.Hits) != 0 {
-		t.Fatalf("include_deleted=false must filter the soft-deleted issue, got %#v", res.Hits)
+	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != iss.UID {
+		t.Fatalf("restored issue must regain semantic recall, got %#v", res.Hits)
 	}
 }
 

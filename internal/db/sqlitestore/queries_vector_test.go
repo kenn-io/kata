@@ -10,9 +10,9 @@ import (
 )
 
 // TestListIssueContentPaginatesLiveIssues verifies that ListIssueContent pages
-// through issues in id order, keeping soft-deleted issues (their vectors keep
-// serving include_deleted searches; hydration filters per request) while
-// excluding issues whose project is deleted.
+// through issues in id order, excluding soft-deleted issues (their content
+// must never be sent to the embedding endpoint after deletion) and issues
+// whose project is deleted. A restored issue rejoins the feed.
 func TestListIssueContentPaginatesLiveIssues(t *testing.T) {
 	ctx := context.Background()
 	d := openTestDB(t)
@@ -27,7 +27,8 @@ func TestListIssueContentPaginatesLiveIssues(t *testing.T) {
 		issues = append(issues, iss)
 	}
 	uids := []string{issues[0].UID, issues[1].UID, issues[2].UID}
-	// Soft-delete the middle issue: it must still be listed.
+	// Soft-delete the middle issue: it must leave the feed so its content is
+	// never re-sent to the embedding endpoint while deleted.
 	_, _, _, err := d.SoftDeleteIssue(ctx, issues[1].ID, "x")
 	require.NoError(t, err)
 
@@ -44,11 +45,18 @@ func TestListIssueContentPaginatesLiveIssues(t *testing.T) {
 	require.NoError(t, err)
 	require.Lenf(t, page1, 2, "page1 = %+v", page1)
 	require.Equal(t, uids[0], page1[0].UID)
-	require.Equal(t, uids[1], page1[1].UID, "soft-deleted issue must stay in the feed")
+	require.Equal(t, uids[2], page1[1].UID, "soft-deleted issue must leave the feed")
 	require.Equal(t, proj.UID, page1[0].ProjectUID)
 
 	page2, err := d.ListIssueContent(ctx, page1[1].ID, 10)
 	require.NoError(t, err)
-	require.Lenf(t, page2, 1, "page2 must exclude the deleted project's issue, got %+v", page2)
-	require.Equal(t, uids[2], page2[0].UID)
+	require.Emptyf(t, page2, "page2 must exclude the deleted project's issue, got %+v", page2)
+
+	// Restore: the issue rejoins the feed so it is re-mirrored and re-embedded.
+	_, _, _, err = d.RestoreIssue(ctx, issues[1].ID, "x")
+	require.NoError(t, err)
+	all, err := d.ListIssueContent(ctx, 0, 10)
+	require.NoError(t, err)
+	require.Lenf(t, all, 3, "restored issue must rejoin the feed, got %+v", all)
+	require.Equal(t, uids[1], all[1].UID)
 }

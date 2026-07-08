@@ -740,15 +740,21 @@ func startFederationRunner(
 // vectorsPathForDSN places the semantic-search sidecar next to the SQLite
 // database file, deriving its name from the database filename
 // (/x/kata.db -> /x/kata.vectors.db) so two databases in one directory never
-// share sidecar state. Embeddings require the SQLite backend; other DSNs
-// error so startEmbeddingReconciler can refuse clearly instead of guessing a
-// path.
+// share sidecar state. The mapping must be injective: a filename ending in
+// .db swaps that suffix for .vectors.db, any other filename appends .vectors
+// — the outputs can never coincide (one ends in .vectors.db only when its
+// input ended in .db), so /x/data and /x/data.db get distinct sidecars.
+// Embeddings require the SQLite backend; other DSNs error so
+// startEmbeddingReconciler can refuse clearly instead of guessing a path.
 func vectorsPathForDSN(dsn string) (string, error) {
 	path := strings.TrimPrefix(dsn, "sqlite://")
 	if strings.Contains(path, "://") {
 		return "", fmt.Errorf("semantic search requires the sqlite backend, got dsn %s", config.RedactDSN(dsn))
 	}
-	return strings.TrimSuffix(path, ".db") + ".vectors.db", nil
+	if stem, ok := strings.CutSuffix(path, ".db"); ok {
+		return stem + ".vectors.db", nil
+	}
+	return path + ".vectors", nil
 }
 
 // startEmbeddingReconciler constructs the embedding client, sidecar vector
