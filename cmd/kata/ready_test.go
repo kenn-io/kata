@@ -54,6 +54,39 @@ func TestReady_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
 	assert.NotContains(t, out, "owner=")
 }
 
+// TestReady_AgentAllEmitsKVRows pins the agent-mode contract for the global
+// path: `--agent ready --all` emits the structured `OK ready count=N` header
+// plus one kv row per issue whose issue field is the qualified
+// "<project>#<short_id>" ref — never the human glyph rows.
+func TestReady_AgentAllEmitsKVRows(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	sid := createIssue(t, env, pid, "agent all row")
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "--agent", "ready", "--all")
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "OK ready count=1\n")
+	assert.Contains(t, out, "- issue=kata#"+sid)
+	assert.Contains(t, out, `title="agent all row"`)
+	assert.NotContains(t, out, "○ ", "agent mode must not emit human glyph rows")
+	assert.NotContains(t, out, "Ready:", "agent mode must not emit the human footer")
+}
+
+// TestReady_AgentAllRowCarriesPriorityAndOmitsAbsentOwner pins the field set
+// on --all agent rows: priority is rendered when set, owner is omitted when
+// absent (same optional-field idiom as the project-scoped agent path).
+func TestReady_AgentAllRowCarriesPriorityAndOmitsAbsentOwner(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	postJSON[map[string]any](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
+		map[string]any{"actor": "tester", "title": "urgent fix", "priority": int64(1)})
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "--agent", "ready", "--all")
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "priority=1")
+	assert.NotContains(t, out, "owner=")
+}
+
 func TestReady_UnownedAndOwnerMutualExclusion(t *testing.T) {
 	env, dir := setupCLIEnv(t)
 	resetFlags(t)

@@ -129,7 +129,9 @@ func (r *rowRenderer) glyph(row issueRow) string {
 
 // priorityField renders the fixed 4-cell priority field. P3 and any
 // unrecognized value render as unstyled default-fg text (matching
-// the Visual Spec's "P3: default fg, no color").
+// the Visual Spec's "P3: default fg, no color"). The fixed 4-cell
+// width ("• P<n>") relies on the daemon clamping priority to 0-4;
+// a multi-digit priority would break column alignment.
 func (r *rowRenderer) priorityField(p *int64) string {
 	if p == nil {
 		return "    "

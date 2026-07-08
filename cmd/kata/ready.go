@@ -126,6 +126,23 @@ func newReadyCmd() *cobra.Command {
 				if err := json.Unmarshal(bs, &b); err != nil {
 					return err
 				}
+				if mode == outputAgent {
+					out := cmd.OutOrStdout()
+					if _, err := fmt.Fprintf(out, "OK ready count=%d\n", len(b.Issues)); err != nil {
+						return err
+					}
+					for _, i := range b.Issues {
+						if err := writeAgentKVRow(out,
+							agentRowField("issue", i.ProjectName+"#"+i.ShortID),
+							agentRowIntField("priority", i.Priority),
+							agentOptionalRowField("owner", i.Owner),
+							agentRowField("title", i.Title),
+						); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
 				rows := make([]issueRow, len(b.Issues))
 				for idx, i := range b.Issues {
 					owner := "-"
