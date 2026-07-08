@@ -29,7 +29,11 @@ func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Gene
 }
 
 // ActiveGeneration returns the serving generation's key, or ok=false when no
-// generation is active (cold start or mid-first-build).
+// generation is active (cold start or mid-first-build). The ORDER BY ordinal
+// DESC LIMIT 1 is a tiebreak for a transient double-active window (e.g. a
+// crash mid-cutover leaves two rows active): it assumes forward-only
+// migrations, so the newest ordinal is always the intended survivor and
+// there is no rollback to an older generation.
 func (ix *Index) ActiveGeneration(ctx context.Context) (string, bool, error) {
 	var key string
 	err := ix.db.QueryRowContext(ctx, fmt.Sprintf(
@@ -78,6 +82,15 @@ func (ix *Index) CutOver(ctx context.Context, key string) error {
 	for _, g := range gens {
 		if g.key == key {
 			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("vector: cutover: generation %s not found", key)
+	}
+
+	for _, g := range gens {
+		if g.key == key {
 			if g.state != string(sqlitevec.StateActive) {
 				if err := ix.store.SetGenerationState(ctx, key, sqlitevec.StateActive); err != nil {
 					return fmt.Errorf("vector: activate %s: %w", key, err)
@@ -85,18 +98,18 @@ func (ix *Index) CutOver(ctx context.Context, key string) error {
 			}
 			continue
 		}
-		if g.state == string(sqlitevec.StateRetired) {
-			continue
-		}
-		if err := ix.store.SetGenerationState(ctx, g.key, sqlitevec.StateRetired); err != nil {
-			return fmt.Errorf("vector: retire %s: %w", g.key, err)
+		// Reclaim unconditionally: reclaim's statements are idempotent, so a
+		// generation already left in state 'retired' by a crash between a
+		// prior retire and its reclaim is cleaned up here instead of leaking
+		// storage forever.
+		if g.state != string(sqlitevec.StateRetired) {
+			if err := ix.store.SetGenerationState(ctx, g.key, sqlitevec.StateRetired); err != nil {
+				return fmt.Errorf("vector: retire %s: %w", g.key, err)
+			}
 		}
 		if err := ix.reclaim(ctx, g.ordinal); err != nil {
 			return err
 		}
-	}
-	if !found {
-		return fmt.Errorf("vector: cutover: generation %s not found", key)
 	}
 	return nil
 }
