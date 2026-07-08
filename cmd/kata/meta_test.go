@@ -116,6 +116,57 @@ func TestMetaIfMatchStaleRevisionConflictsAndCorrectRevisionSucceeds(t *testing.
 	assert.Contains(t, out, "rev-2")
 }
 
+func TestMetaSetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "if match empty value issue")
+
+	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", "--if-match", "", ref, "work.attention", "ok")
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, kindValidation, ce.Kind)
+	assert.Contains(t, stderr, "--if-match")
+
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+}
+
+func TestMetaSetIfMatchWhitespaceValueRejectedAsMalformed(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "if match whitespace value issue")
+
+	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "set", "--if-match", "   ", ref, "work.attention", "ok")
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, kindValidation, ce.Kind)
+	assert.Contains(t, stderr, "--if-match")
+
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	assert.JSONEq(t, `{}`, string(issue.Issue.Metadata))
+}
+
+func TestMetaUnsetIfMatchEmptyValueRejectedAsMalformed(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "if match empty value unset issue")
+	runCLI(t, env, dir, "meta", "set", ref, "work.branch", "feature/example")
+
+	_, stderr, err := runCLIWithErr(t, env, dir, "meta", "unset", "--if-match", "", ref, "work.branch")
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, kindValidation, ce.Kind)
+	assert.Contains(t, stderr, "--if-match")
+
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	require.JSONEq(t, `{"work.branch":"feature/example"}`, string(issue.Issue.Metadata))
+}
+
+func TestMetaSetIfMatchAbsentStillUnconditional(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "if match absent issue")
+
+	out := runCLI(t, env, dir, "meta", "set", ref, "work.attention", "ok")
+	assert.Contains(t, out, "rev-2")
+
+	issue := fetchMetaIssueViaHTTP(t, env, pid, ref)
+	require.JSONEq(t, `{"work.attention":"ok"}`, string(issue.Issue.Metadata))
+}
+
 func TestMetaSetAndGetAgentOutput(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "agent metadata issue")

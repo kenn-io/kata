@@ -37,6 +37,9 @@ func newMetaSetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
+				return err
+			}
 			return runMetaPatch(cmd, args[0], args[1], value, ifMatch, "set")
 		},
 	}
@@ -52,6 +55,9 @@ func newMetaUnsetCmd() *cobra.Command {
 		Short: "clear issue metadata",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
+				return err
+			}
 			return runMetaPatch(cmd, args[0], args[1], json.RawMessage("null"), ifMatch, "unset")
 		},
 	}
@@ -172,6 +178,24 @@ func parseMetaSetValue(raw string, asJSON bool) (json.RawMessage, error) {
 		}
 	}
 	return json.RawMessage(compact.Bytes()), nil
+}
+
+// validateMetaIfMatchFlag distinguishes an absent --if-match (unconditional
+// write, the deliberate default) from a present-but-blank value, which is
+// almost always a scripting bug (e.g. an unset shell variable interpolated
+// into the flag) rather than an intentional unconditional request. The
+// daemon already rejects a present-but-empty If-Match header the same way
+// (see internal/daemon/handlers_metadata.go); this catches it client-side
+// before any request is sent.
+func validateMetaIfMatchFlag(cmd *cobra.Command, ifMatch string) error {
+	if cmd.Flags().Changed("if-match") && strings.TrimSpace(ifMatch) == "" {
+		return &cliError{
+			Message:  "--if-match must not be blank; omit the flag for an unconditional write",
+			Kind:     kindValidation,
+			ExitCode: ExitValidation,
+		}
+	}
+	return nil
 }
 
 func runMetaPatch(cmd *cobra.Command, rawRef, key string, value json.RawMessage, ifMatch, verb string) error {
