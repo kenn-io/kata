@@ -148,9 +148,10 @@ type Storage interface {
 	SearchFTSAny(ctx context.Context, projectID int64, q string, limit int, includeDeleted bool) ([]SearchCandidate, error)
 
 	// embeddings (semantic search)
-	// ListIssueContent returns live issues (live projects only) with id >
-	// afterID, ordered by id ascending, at most limit rows. It feeds the
-	// vector mirror.
+	// ListIssueContent returns issues in live projects (including
+	// soft-deleted issues, whose vectors keep serving include_deleted
+	// searches) with id > afterID, ordered by id ascending, at most limit
+	// rows. It feeds the vector mirror.
 	ListIssueContent(ctx context.Context, afterID int64, limit int) ([]IssueContent, error)
 
 	// import support

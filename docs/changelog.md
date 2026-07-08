@@ -11,19 +11,22 @@ All notable changes to kata, grouped by release. Versioned releases start with
 **Improvements**
 
 - Moved semantic search storage from a single embeddings table in `kata.db`
-  to a sidecar vector index (`vectors.db`) built on the shared `kit` vector
-  layer, with chunked embeddings instead of a fixed truncation cap and
+  to a sidecar vector index built on the shared `kit` vector layer, named
+  after the database file (`kata.vectors.db` for the default `kata.db`),
+  with chunked embeddings instead of a fixed truncation cap and
   generation-based model swaps: changing `model`, `dims`, or
-  `fingerprint_salt` now fills a new generation in the background and cuts
-  over automatically — search stays available (with labeled degradation)
-  during re-embedding instead of losing the vector index outright. `vectors.db` is
-  disposable derived state — safe to delete, excluded from backups, rebuilt
-  by re-embedding.
-- The first daemon start after upgrading re-embeds every issue; `auto`-mode
-  search reports labeled degraded (lexical) results until the backfill
-  completes. JSONL export no longer carries `issue_embedding` records; import
-  of older archives that still contain them skips those records instead of
-  failing.
+  `fingerprint_salt` fills a new generation in the background and cuts over
+  automatically. During that backfill the vector leg is unavailable — `auto`
+  searches degrade to labeled lexical results and explicit
+  `semantic`/`hybrid` requests return 503 until the cutover — instead of
+  losing the vector index outright; lexical search is unaffected. The
+  sidecar is disposable derived state — safe to delete, excluded from
+  backups, rebuilt by re-embedding.
+- The first daemon start after upgrading re-embeds every issue; the rebuilt
+  index activates immediately and serves partial semantic results while the
+  backfill drains (the `embeddings` backlog in `/health` reports progress).
+  JSONL export no longer carries `issue_embedding` records; import of older
+  archives that still contain them skips those records instead of failing.
 
 ## 0.8.0
 <small>2026-07-04</small>

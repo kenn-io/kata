@@ -742,12 +742,23 @@ func TestRunDaemonTelemetryHeartbeatEmitsDailyActiveEvent(t *testing.T) {
 }
 
 func TestVectorsPathForDSN(t *testing.T) {
+	// Derived from the database filename so two SQLite databases in one
+	// directory never share sidecar state.
 	got, err := vectorsPathForDSN("/var/lib/kata/kata.db")
-	if err != nil || got != "/var/lib/kata/vectors.db" {
+	if err != nil || got != "/var/lib/kata/kata.vectors.db" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 	got, err = vectorsPathForDSN("sqlite:///var/lib/kata/kata.db")
-	if err != nil || got != "/var/lib/kata/vectors.db" {
+	if err != nil || got != "/var/lib/kata/kata.vectors.db" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	got, err = vectorsPathForDSN("/var/lib/kata/other.db")
+	if err != nil || got != "/var/lib/kata/other.vectors.db" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	// A path without a .db suffix gets .vectors.db appended.
+	got, err = vectorsPathForDSN("/var/lib/kata/data")
+	if err != nil || got != "/var/lib/kata/data.vectors.db" {
 		t.Fatalf("got %q, %v", got, err)
 	}
 	if _, err := vectorsPathForDSN("postgres://h/db"); err == nil {

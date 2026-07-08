@@ -4,9 +4,9 @@ Status: implemented. This note captures the semantic search design
 rationale; for current operator-facing behavior see the
 [semantic search guide](../guide/semantic-search.md) and
 [Configuration](../reference/configuration.md#semantic-search). The
-"Storage" section reflects the kit-based sidecar vector index (`vectors.db`)
-that replaced the single-table brute-force design this note originally
-described.
+"Storage" section reflects the kit-based sidecar vector index
+(`kata.vectors.db`) that replaced the single-table brute-force design this
+note originally described.
 
 kata's search is lexical: SQLite FTS5 with BM25 ranking over title, body, and
 comments (`internal/db/sqlitestore/queries_search.go`), with the PostgreSQL
@@ -71,7 +71,7 @@ Credential handling follows the existing bearer-token trust model:
 
 ```
 write path:  mutation commit ──nudge──▶ reconciler ──▶ RefreshMirror
-                                           │              (issue_mirror in vectors.db)
+                                           │              (issue_mirror in kata.vectors.db)
                                            ▼
                                      kitvec.Fill ──▶ embedding client (batched HTTP)
                                      (active-or-building generation)
@@ -89,7 +89,7 @@ Components:
   recipe. Storage-free: it does not import `internal/db` and operates on
   plain strings (`EmbedText(title, body string)`). Named `embedding`, not
   `embed`, to avoid colliding with the Go stdlib package.
-- `internal/vector` — owns the `vectors.db` sidecar (mirror table,
+- `internal/vector` — owns the `kata.vectors.db` sidecar (mirror table,
   generation lifecycle, fill, and query), built on `go.kenn.io/kit/vector`
   and `go.kenn.io/kit/vector/sqlitevec`. See "Storage" below. `internal/db`
   contributes one read method, `ListIssueContent`, that feeds the mirror; it
@@ -145,21 +145,26 @@ fingerprint_salt}`. Any component change starts a *new generation* rather
 than marking existing rows stale in place: the reconciler fills it in the
 background while the previous generation keeps serving searches, then cuts
 over automatically once the fill completes and reclaims the retired
-generation's storage (see "Storage"). Search stays available mid-swap —
-queries are embedded under the new model and score poorly against old-model
-vectors, so the vector leg degrades (labeled) rather than breaking, and
-semantic matches return as the backfill completes. The salt is the operator's lever for "same model name, different
-weights" (for example a re-pulled Ollama model). The endpoint URL is
-deliberately not in the fingerprint: moving a port or switching localhost to
-a tunnel must not force a full re-embed.
+generation's storage (see "Storage"). Mid-swap the vector leg is
+**unavailable**: the active generation's fingerprint no longer matches the
+configured embedder's, and scoring a new-model query vector against
+old-model stored vectors would be meaningless (same dims) or an error (dims
+change), so the search handler refuses the leg — auto degrades to labeled
+lexical, explicit hybrid/semantic return 503 — until the cutover. Lexical
+search carries throughout, and semantic results resume the moment the new
+generation activates. The salt is the operator's lever for "same model name,
+different weights" (for example a re-pulled Ollama model). The endpoint URL
+is deliberately not in the fingerprint: moving a port or switching localhost
+to a tunnel must not force a full re-embed.
 
 ### Reconciler
 
 One goroutine, started only when embeddings are configured. Each cycle does
-two things: refresh the `vectors.db` mirror from the canonical store (upsert
-rows whose `content_revision` differs from the mirror's; remove rows — and
-their vectors in every generation — for issues that are gone or
-soft-deleted), then run kit's `Fill` for the desired generation, which embeds
+two things: refresh the sidecar mirror from the canonical store (upsert rows
+whose `content_revision` or `project_uid` differs from the mirror's; remove
+rows — and their vectors in every generation — for issues that left the
+feed: purged, or their project deleted), then run kit's `Fill` for the
+desired generation, which embeds
 any mirror row that generation doesn't yet cover. There is no separate
 durable queue: the mirror's `content_revision` column plus kit's own
 per-generation coverage bookkeeping is the queue.
@@ -196,13 +201,14 @@ comments, links, and metadata all leave `content_revision` unchanged, and
 also moves on non-content mutations (status flips), and its millisecond
 precision can collapse same-instant edits.
 
-Soft-deleted issues are excluded from `ListIssueContent` (the mirror's feed),
-so mirror refresh deletes their mirror row and vectors immediately rather
-than keeping them for a cheap restore — a change from the earlier
-single-table embeddings design, which kept rows during soft-delete. A
-restored issue re-enters the mirror on the next refresh and is picked up by
-the next fill like any newly created issue. Purge is a no-op for the sidecar:
-the mirror row is already gone.
+Soft-deleted issues stay in `ListIssueContent` (the mirror's feed), so their
+mirror rows and vectors survive deletion — matching the single-table
+embeddings design, which kept rows during soft-delete. An `include_deleted`
+search can therefore still rank them on their last-known content, hydration
+filters them out of default searches per request, and a restore costs
+nothing. Rows leave the mirror only when the issue is gone from the feed
+(purged, or its project deleted); the next refresh removes the row and its
+vectors in every generation.
 
 Cycle: wake on a debounced (~1–2s) post-commit nudge, on startup, and on a
 periodic safety sweep (~5m) that recovers anything missed across restarts.
@@ -248,9 +254,11 @@ semantic recall lags.
 
 ### Sidecar database
 
-Vectors live in `vectors.db`, a SQLite sidecar the daemon opens (creating it
-if absent) next to `kata.db` the first time `[search.embeddings]` is
-configured — `internal/vector.Open`. It is derived state, rebuildable from
+Vectors live in a SQLite sidecar the daemon opens (creating it if absent)
+next to the main database the first time `[search.embeddings]` is configured
+— `internal/vector.Open`. Its name is derived from the database filename
+(`kata.db` → `kata.vectors.db`) so two databases in one directory never
+share sidecar state. It is derived state, rebuildable from
 `kata.db` at any time: a structural mismatch in the mirror schema version
 (`vector_meta`) deletes and recreates the file rather than migrating it in
 place, and an operator can delete it outright — the reconciler rebuilds it
@@ -285,8 +293,13 @@ retired generation's storage — drops its `vec0` table, deletes its
 `_chunks`/`_stamps` rows — with local SQL, since kit has no reclamation API
 yet (a workaround other kit consumers share). Reclaim is unconditional and
 idempotent, so a crash between retire and reclaim self-heals on the next
-cutover. `Index.Query` reads only the active generation — never the building
-one — so a search never observes a partially-filled index.
+cutover. Cold start is the deliberate exception to build-then-cutover: when
+no generation is active (fresh sidecar, or the first start after an upgrade
+that reset the sidecar), the reconciler cuts the new generation over
+immediately — before the fill — so search serves partial results during the
+initial backfill and the health backlog explains the coverage. `Index.Query`
+reads only the active generation — never a building one — so a model swap
+never exposes a partially-filled index to queries.
 
 ### JSONL export/import
 
@@ -318,7 +331,10 @@ never visibility: a stale hit either fails the join (purged) or is filtered
 (deleted, wrong project). The KNN index is daemon-global while search is
 project-scoped, so the vector leg over-fetches (`fetchCap`, 200) before
 rollup and the visibility join, then applies `cosineFloor = 0.3` so weak
-hits do not pad results.
+hits do not pad results. When the first batch comes back full but filters
+down to fewer in-project hits than wanted (another project's higher-scoring
+chunks crowded the batch), the leg retries once at `knnDeepLimit` (1000)
+before giving up — one bounded retry, not a loop.
 
 ### PostgreSQL: not supported
 
@@ -352,13 +368,18 @@ sketched for PostgreSQL.
 
 Both legs start concurrently — the FTS leg never waits on the embedder.
 Per-leg output depth is `max(limit*3, 50)`, capped at 200. The vector leg
-embeds the query (3s timeout, `embedding.EmbedText` — unchunked, same as any
-query string), queries the active generation for `fetchCap = 200` raw KNN
-hits (over-fetched ahead of the project/liveness hydration in "Storage"),
-and drops hits below cosine 0.3 so weak vectors do not pad results. Serving
-only the active generation makes cross-model comparison structurally
-impossible: rows still in a building generation are invisible to the vector
-leg until that generation cuts over, and the FTS leg carries them meanwhile.
+first checks that the active generation's fingerprint matches the configured
+embedder's — on mismatch (model change mid-backfill) the leg is unavailable
+(degraded / 503) rather than scoring a new-model query against old-model
+vectors — then embeds the query (3s timeout, `embedding.EmbedText` —
+unchunked, same as any query string), queries the active generation for
+`fetchCap = 200` raw KNN hits (over-fetched ahead of the project/liveness
+hydration in "Storage", with one bounded deep retry at `knnDeepLimit` when a
+full batch filters down short), and drops hits below cosine 0.3 so weak
+vectors do not pad results. Serving only the fingerprint-matching active
+generation makes cross-model comparison structurally impossible: rows still
+in a building generation are invisible to the vector leg until that
+generation cuts over, and the FTS leg carries them meanwhile.
 
 Fusion is reciprocal rank fusion with k=60 and equal leg weights:
 `score(d) = Σ_legs 1/(60 + rank_leg(d))`. Ties break deterministically
@@ -374,12 +395,11 @@ with legs running in parallel a probe saves nothing.
 model, vector store failure) in a mode that wanted it. A nonzero reconciler
 backlog is health state, not per-query degradation.
 
-`include_deleted=true` lets the lexical leg rank soft-deleted issues on their
-last-indexed text. The vector leg cannot: mirror refresh removes a
-soft-deleted issue's row and vectors as soon as it next runs (see
-"Reconciler"), so archaeological hits for deleted issues come from the
-lexical leg only — a change from the single-table design, which kept
-embeddings around during soft-delete and could still vector-match them.
+`include_deleted=true` lets both legs rank soft-deleted issues: the lexical
+leg on their last-indexed text, and the vector leg on the vectors that stay
+in the mirror until purge or project deletion (see "Reconciler") — the same
+behavior as the single-table design, which kept embeddings around during
+soft-delete. Default searches filter deleted issues at hydration time.
 
 ## API and CLI contract
 
@@ -441,9 +461,10 @@ The CLI has three output surfaces, each handled to a precise shape:
 | Query embed dims ≠ configured dims | Treated as embed failure (degraded / 503) + health error |
 | Embedder unreachable in reconciler | Backoff per failure class; backlog grows; search unaffected (FTS carries) |
 | Definitive 4xx in reconciler | Max backoff immediately + health error; no hot loop |
-| Rows not yet embedded / model swap in progress | Invisible to vector leg (not yet in the active generation), carried by FTS leg |
+| Rows not yet embedded (reconciler backlog) | Invisible to vector leg (not yet stamped in the active generation), carried by FTS leg; not degradation |
+| Model swap in progress (active generation fingerprint ≠ configured embedder) | Vector leg unavailable until cutover: `auto` → lexical + `degraded:true`; explicit `hybrid`/`semantic` → 503 |
 | Non-SQLite backend with embeddings configured | Daemon fails to start with a configuration error |
-| Missing or version-mismatched `vectors.db` at query time | Treated as vector-leg failure (degraded / 503) |
+| Missing or version-mismatched `kata.vectors.db` at query time | Treated as vector-leg failure (degraded / 503) |
 | Mirror/fill lag (edited issue before next reconcile) | Ranking-only effect; visibility always resolved against live `issues` |
 
 ## Testing
@@ -453,7 +474,8 @@ the storage-conformance bullet below describes the original v1 test plan
 against the single-table design — `internal/vector`'s actual suite covers
 the sidecar equivalents instead: mirror refresh and staleness, fill and
 backfill, generation cutover with reclaim, project filtering, soft-delete
-removal, and mirror version-mismatch handling.
+retention (removal only on purge or project deletion), and mirror
+version-mismatch handling.
 
 - `internal/embedding` against an `httptest` fake: wire shape, key attached
   only to the pinned origin, cross-origin redirect refusal (mirroring the

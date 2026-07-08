@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"go.kenn.io/kata/internal/db"
@@ -68,13 +70,28 @@ func failingEmbedClient(t *testing.T, status int) *embedding.Client {
 	return c
 }
 
-// fixedVectorEmbedClient builds a real *embedding.Client pointed at a stub
-// server that always returns vec for every input, regardless of text. Tests
-// use it to make the query embed deterministic against a sidecar filled via
-// fakeEmbedder (which also ignores content), so every indexed document scores
-// identically and the test isolates project/deleted filtering rather than
-// ranking.
+// fixedVectorEmbedClient builds a real *embedding.Client (model "m") pointed
+// at a stub server that always returns vec for every input, regardless of
+// text. Tests use it to make both the fill and the query embed deterministic,
+// so every indexed document scores identically and the test isolates
+// project/deleted filtering rather than ranking.
 func fixedVectorEmbedClient(t *testing.T, vec []float32) *embedding.Client {
+	t.Helper()
+	return fixedVectorEmbedClientModel(t, "m", vec)
+}
+
+// fixedVectorEmbedClientModel is fixedVectorEmbedClient with a caller-chosen
+// model name, for tests that need two clients whose generation fingerprints
+// differ while their dimensionality matches.
+func fixedVectorEmbedClientModel(t *testing.T, model string, vec []float32) *embedding.Client {
+	t.Helper()
+	return mappedVectorEmbedClient(t, model, len(vec), func(string) []float32 { return vec })
+}
+
+// mappedVectorEmbedClient builds a real *embedding.Client whose stub server
+// returns vecFor(input) per input, so tests can craft content-dependent
+// vectors (e.g. distractors on one axis, the target off-axis).
+func mappedVectorEmbedClient(t *testing.T, model string, dims int, vecFor func(string) []float32) *embedding.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -85,26 +102,33 @@ func fixedVectorEmbedClient(t *testing.T, vec []float32) *embedding.Client {
 			return
 		}
 		data := make([]map[string]any, len(req.Input))
-		for i := range req.Input {
-			data[i] = map[string]any{"embedding": vec}
+		for i, in := range req.Input {
+			data[i] = map[string]any{"embedding": vecFor(in)}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 	t.Cleanup(srv.Close)
-	c, err := embedding.New(embedding.Config{BaseURL: srv.URL, Model: "m", Dims: len(vec)})
+	c, err := embedding.New(embedding.Config{BaseURL: srv.URL, Model: model, Dims: dims})
 	if err != nil {
 		t.Fatalf("new embedding client: %v", err)
 	}
 	return c
 }
 
-// activateFixedGeneration runs a reconciler cycle with fakeEmbedder (fixed
-// unit vector, ignores content) so idx has an active generation containing
-// every live issue currently in store. Tests that need a populated sidecar
-// call this once after creating their fixtures.
+// activateFixedGeneration runs a reconciler cycle with a fixed-vector
+// embedding client (model "m", the same generation fingerprint as
+// fixedVectorEmbedClient) so idx has an active generation containing every
+// issue currently in store. Tests that need a populated sidecar call this
+// once after creating their fixtures.
 func activateFixedGeneration(ctx context.Context, t *testing.T, store db.Storage, idx *vector.Index) {
 	t.Helper()
-	emb := &fakeEmbedder{model: "m1", dims: 4}
+	fillGeneration(ctx, t, store, idx, fixedVectorEmbedClient(t, []float32{1, 0, 0, 0}))
+}
+
+// fillGeneration runs one reconciler cycle with emb, filling and activating
+// its generation.
+func fillGeneration(ctx context.Context, t *testing.T, store db.Storage, idx *vector.Index, emb embedder) {
+	t.Helper()
 	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64})
 	if err := r.reconcileOnce(ctx); err != nil {
 		t.Fatalf("reconcile once: %v", err)
@@ -234,6 +258,165 @@ func TestVectorLegExcludesOtherProjectsAndDeleted(t *testing.T) {
 	}
 	if len(hit.MatchedIn) != 1 || hit.MatchedIn[0] != "semantic" {
 		t.Fatalf("matched_in = %v, want [\"semantic\"]", hit.MatchedIn)
+	}
+}
+
+// TestVectorLegModelChangeBackfillUnavailable pins the model-change window:
+// while the active generation was built under a different fingerprint than
+// the configured embedder (same dims, so raw KNN would silently rank a
+// new-model query vector against old-model stored vectors), the vector leg
+// must refuse to serve — auto degrades labeled, explicit semantic is 503 —
+// until the new generation cuts over.
+func TestVectorLegModelChangeBackfillUnavailable(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "login race", Body: "x", Author: "a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	idx := openTestVectorIndex(t)
+	activateFixedGeneration(ctx, t, store, idx) // active generation under model "m"
+
+	// Same dims, different model: the configured embedder's fingerprint no
+	// longer matches the active generation.
+	emb := fixedVectorEmbedClientModel(t, "m-next", []float32{1, 0, 0, 0})
+
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login", Limit: 10, Requested: "auto",
+	})
+	if err != nil {
+		t.Fatalf("auto must degrade, not error: %v", err)
+	}
+	if res.Mode != modeLexical || !res.Degraded || res.DegradedReason == "" {
+		t.Fatalf("model change mid-backfill must degrade auto to labeled lexical: %#v", res)
+	}
+
+	_, err = hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login", Limit: 10, Requested: "semantic",
+	})
+	var me *modeError
+	if !errors.As(err, &me) {
+		t.Fatalf("want *modeError, got %T: %v", err, err)
+	}
+	if me.Status() != 503 {
+		t.Fatalf("explicit semantic during model-change backfill must be 503, got %d", me.Status())
+	}
+}
+
+// TestVectorLegIncludeDeletedRanksSoftDeleted pins the include_deleted
+// contract: a soft-deleted issue stays in the mirror and its vectors keep
+// serving — even across a mirror refresh after the delete — so an
+// include_deleted search can still rank it semantically, while a default
+// search filters it at hydration time.
+func TestVectorLegIncludeDeletedRanksSoftDeleted(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "login race", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	idx := openTestVectorIndex(t)
+	activateFixedGeneration(ctx, t, store, idx)
+
+	if _, _, _, err := store.SoftDeleteIssue(ctx, iss.ID, "a"); err != nil {
+		t.Fatal(err)
+	}
+	// Reconcile again after the soft delete: the mirror row and its vectors
+	// must survive the refresh (they are only removed on purge or project
+	// deletion).
+	activateFixedGeneration(ctx, t, store, idx)
+
+	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
+		IncludeDeleted: true,
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch include_deleted: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != iss.UID {
+		t.Fatalf("include_deleted=true must rank the soft-deleted issue, got %#v", res.Hits)
+	}
+
+	res, err = hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch default: %v", err)
+	}
+	if len(res.Hits) != 0 {
+		t.Fatalf("include_deleted=false must filter the soft-deleted issue, got %#v", res.Hits)
+	}
+}
+
+// TestVectorLegDeepRetryBeatsCrossProjectStarvation pins the bounded depth
+// retry: the KNN index is daemon-global, so more than fetchCap higher-scoring
+// chunks from another project can fill the entire first batch and starve the
+// requested project. When the first batch comes back full and yields fewer
+// in-project hits than wanted, one deeper query (knnDeepLimit) must recover
+// the requested project's match.
+func TestVectorLegDeepRetryBeatsCrossProjectStarvation(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	projA, err := store.CreateProject(ctx, "spoke-project-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	projB, err := store.CreateProject(ctx, "spoke-project-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: projA.ID, Title: "target login race", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// fetchCap+1 distractors in project B whose vectors score above the
+	// target for the query vector, so the first KNN batch holds only them.
+	for i := 0; i < fetchCap+1; i++ {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: projB.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	idx := openTestVectorIndex(t)
+	// Distractor content lands on the query axis (cosine 1.0); the target is
+	// off-axis but above the floor (cosine 0.6).
+	fill := mappedVectorEmbedClient(t, "m", 4, func(text string) []float32 {
+		if strings.HasPrefix(text, "distractor") {
+			return []float32{1, 0, 0, 0}
+		}
+		return []float32{0.6, 0.8, 0, 0}
+	})
+	fillGeneration(ctx, t, store, idx, fill)
+
+	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: projA.ID, Query: "login race", Limit: 10, Requested: "semantic",
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != target.UID {
+		t.Fatalf("project A's issue must survive %d higher-scoring cross-project chunks, got %#v",
+			fetchCap+1, res.Hits)
 	}
 }
 

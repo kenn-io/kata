@@ -43,6 +43,14 @@ const (
 // L2-normalized, so the dot product is cosine similarity in [-1, 1].
 const cosineFloor = 0.3
 
+// knnDeepLimit is the depth of the single retry query the vector leg makes
+// when the first fetchCap-deep KNN batch comes back full but yields too few
+// in-project hits (the index is daemon-global, so another project's chunks
+// can crowd out the requested project). One retry at this fixed depth bounds
+// the work per request; a project buried under more than knnDeepLimit
+// higher-scoring foreign chunks can still miss, by design.
+const knnDeepLimit = 1000
+
 // hybridSearch runs the lexical and (when applicable) vector legs and merges
 // them. The lexical leg never waits on the embedder. A vector-leg failure in
 // an auto/hybrid request degrades to lexical with a reason; an explicit
@@ -116,7 +124,8 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 // runVectorLeg embeds the query, KNN-searches the active generation, rolls
 // chunk hits up to issues, and hydrates them against live canonical rows. The
 // index is daemon-global while search is project-scoped, so the leg fetches
-// fetchCap candidates and filters by project and liveness afterwards;
+// fetchCap candidates, filters by project and liveness afterwards, and
+// retries once at knnDeepLimit when a full batch filters down short;
 // hydrating against kata.db (not the sidecar) preserves the guarantee that
 // soft-deleted or purged issues never leak, whatever the sidecar holds.
 func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb *embedding.Client, p hybridParams, fetch int) ([]db.SearchCandidate, error) {
@@ -130,18 +139,51 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	if !ok {
 		return nil, errors.New("no active embedding generation (backfill in progress)")
 	}
+	// The active generation must match the configured embedder's fingerprint.
+	// After a model change the old generation keeps its vectors while the new
+	// one backfills; ranking a new-model query vector against old-model stored
+	// vectors is meaningless (same dims) or an error (dims change), so the leg
+	// is unavailable until cutover.
+	if key != emb.Generation().Fingerprint() {
+		return nil, errors.New("embedding model changed; new index is backfilling")
+	}
 	ectx, cancel := context.WithTimeout(ctx, queryEmbedTimeout)
 	defer cancel()
 	vecs, err := emb.Embed(ectx, []string{embedding.EmbedText(p.Query, "")})
 	if err != nil {
 		return nil, err
 	}
-	hits, err := idx.Query(ctx, key, kitvec.Vector(vecs[0]), fetchCap)
+	query := kitvec.Vector(vecs[0])
+	hits, err := idx.Query(ctx, key, query, fetchCap)
 	if err != nil {
 		return nil, err
 	}
-	hits = kitvec.RollupByDocument(hits)
+	out, err := hydrateVectorHits(ctx, store, hits, p, fetch)
+	if err != nil {
+		return nil, err
+	}
+	// Bounded depth retry: a full first batch means more chunks may exist
+	// beyond fetchCap, and coming up short after filtering means another
+	// project's higher-scoring chunks may have crowded this one out. Re-query
+	// once at knnDeepLimit and redo the rollup + filter.
+	if len(out) < fetch && len(hits) == fetchCap {
+		hits, err = idx.Query(ctx, key, query, knnDeepLimit)
+		if err != nil {
+			return nil, err
+		}
+		out, err = hydrateVectorHits(ctx, store, hits, p, fetch)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
 
+// hydrateVectorHits rolls chunk hits up to issues and hydrates them against
+// live canonical rows, filtering by project and (unless requested) deletion,
+// stopping at the cosine floor or fetch collected candidates.
+func hydrateVectorHits(ctx context.Context, store db.Storage, hits []kitvec.Hit[string], p hybridParams, fetch int) ([]db.SearchCandidate, error) {
+	hits = kitvec.RollupByDocument(hits)
 	include := db.IncludeDeletedNo
 	if p.IncludeDeleted {
 		include = db.IncludeDeletedYes

@@ -36,6 +36,32 @@ func openTestIndex(t *testing.T) *Index {
 	return ix
 }
 
+func TestRefreshMirrorUpdatesProjectMoveWithoutRevisionBump(t *testing.T) {
+	ctx := context.Background()
+	ix := openTestIndex(t)
+	st := &fakeStorage{issues: []db.IssueContent{
+		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", Body: "b", ContentRevision: 1},
+	}}
+	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Move the issue to another project without a content edit: same
+	// content_revision, changed ProjectUID. The mirror row must follow.
+	st.issues[0].ProjectUID = "p2"
+	if _, err := ix.RefreshMirror(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	var projectUID string
+	if err := ix.db.QueryRowContext(ctx,
+		`SELECT project_uid FROM issue_mirror WHERE issue_uid = 'u1'`).Scan(&projectUID); err != nil {
+		t.Fatal(err)
+	}
+	if projectUID != "p2" {
+		t.Fatalf("project_uid = %q, want %q after a project move with unchanged revision", projectUID, "p2")
+	}
+}
+
 func TestRefreshMirrorUpsertsAndDeletes(t *testing.T) {
 	ctx := context.Background()
 	ix := openTestIndex(t)

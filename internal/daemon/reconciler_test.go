@@ -99,6 +99,68 @@ func TestReconcileOnceEmbedsAndActivates(t *testing.T) {
 	}
 }
 
+// TestReconcileOnceColdStartActivatesBeforeFill pins the cold-start contract:
+// with no previously active generation (fresh sidecar or first upgrade), the
+// new generation is activated immediately after EnsureBuilding — before the
+// fill — so search serves partial results during the initial backfill instead
+// of the vector leg being unavailable until the whole corpus is embedded. The
+// failing embedder interrupts reconcileOnce mid-fill, proving activation did
+// not wait for the fill to complete.
+func TestReconcileOnceColdStartActivatesBeforeFill(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, _ := store.CreateProject(ctx, "spoke-project")
+	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	idx := openTestVectorIndex(t)
+	emb := &fakeEmbedder{model: "m1", dims: 4, err: errors.New("connection refused")}
+	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64})
+
+	if err := r.reconcileOnce(ctx); err == nil {
+		t.Fatal("expected the failing fill to surface an error")
+	}
+	key, ok, err := idx.ActiveGeneration(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || key != emb.Generation().Fingerprint() {
+		t.Fatalf("cold start must activate the generation before the fill: key=%q ok=%v", key, ok)
+	}
+}
+
+// TestReconcileOnceModelChangeKeepsOldActiveDuringBackfill pins the
+// counterpart: when a generation IS already active (model change), the new
+// one is built in the background and only cut over once its fill completes —
+// an interrupted fill leaves the old generation serving.
+func TestReconcileOnceModelChangeKeepsOldActiveDuringBackfill(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, _ := store.CreateProject(ctx, "spoke-project")
+	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	idx := openTestVectorIndex(t)
+	emb1 := &fakeEmbedder{model: "m1", dims: 4}
+	r1 := NewReconciler(store, idx, emb1, ReconcilerConfig{BatchSize: 64})
+	if err := r1.reconcileOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	emb2 := &fakeEmbedder{model: "m2", dims: 4, err: errors.New("connection refused")}
+	r2 := NewReconciler(store, idx, emb2, ReconcilerConfig{BatchSize: 64})
+	if err := r2.reconcileOnce(ctx); err == nil {
+		t.Fatal("expected the failing fill to surface an error")
+	}
+	key, ok, err := idx.ActiveGeneration(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || key != emb1.Generation().Fingerprint() {
+		t.Fatalf("old generation must stay active while the new fill is incomplete: key=%q ok=%v", key, ok)
+	}
+}
+
 func TestReconcileOnceModelChangeCutsOver(t *testing.T) {
 	ctx := context.Background()
 	store := newReconcilerTestStore(t)

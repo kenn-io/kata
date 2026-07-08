@@ -110,8 +110,9 @@ You can watch the reconciler in `kata health --json` under `embeddings`:
 - `configured` — whether an endpoint is set;
 - `backlog` — how many issues are waiting to be (re-)embedded; trends to 0;
 - `last_success_at` — when the reconciler last completed a batch;
-- `last_error_status` — the HTTP status of the most recent embedding failure,
-  if any.
+- `last_error_status` — the HTTP status of the most recent embedding-endpoint
+  error response, if any. It is set only when the endpoint answered with an
+  HTTP error; an unreachable endpoint (transport failure) leaves it unset.
 
 ## When the endpoint is unavailable
 
@@ -126,22 +127,26 @@ mode:
   (HTTP 503) so a caller that asked for semantic results knows it did not get
   them. They return 400 when embeddings are not configured at all.
 
-A persistent endpoint problem shows up as a growing `backlog` and a
-`last_error_status` in health; the reconciler backs off and retries, and a
-misconfiguration (bad key, wrong model) is reported there rather than silently
-looping.
+A persistent endpoint problem shows up as a growing `backlog` and a stale
+`last_success_at` in health; the reconciler backs off and retries. When the
+endpoint answers with an HTTP error, `last_error_status` carries that status —
+a misconfiguration (bad key, wrong model) is reported there rather than
+silently looping. An endpoint that is unreachable outright (transport error,
+no HTTP response) leaves `last_error_status` unset; the growing backlog and
+stale `last_success_at` are the signal in that case.
 
 ## Changing the model
 
 Each stored vector belongs to a generation keyed by a fingerprint of the
 model, dimensionality, and text recipe it was produced under. If you switch
 `model`, `dims`, or `fingerprint_salt`, kata builds a new generation in the
-background while the previous generation keeps serving searches — search stays
-available throughout, though queries embedded under the new model score poorly
-against the old generation's vectors, so semantic matches reappear as the
-backfill completes (auto mode labels any degraded responses in the meantime).
-When the new generation finishes filling, kata cuts over to it automatically
-and reclaims the old generation's storage. If you keep the same model name but its weights changed
+background. While that backfill runs, the vector leg is **unavailable** —
+queries embedded under the new model cannot be scored against the old
+generation's vectors, so auto mode serves labeled degraded lexical results
+and explicit `--hybrid`/`--semantic` requests return 503. Lexical search is
+unaffected throughout. When the new generation finishes filling, kata cuts
+over to it automatically, semantic results resume, and the old generation's
+storage is reclaimed. If you keep the same model name but its weights changed
 underneath you (for example a re-pulled Ollama tag), bump `fingerprint_salt`
 to force the same re-embed.
 

@@ -11,9 +11,11 @@ import (
 const mirrorPageSize = 500
 
 // RefreshMirror synchronizes issue_mirror with the canonical store: it
-// upserts new/edited live issues (rendering the embed recipe) and removes
-// rows — plus their vectors in every generation — for issues that are gone
-// or soft-deleted. It returns the number of rows written or removed.
+// upserts new/edited issues (rendering the embed recipe) and removes rows —
+// plus their vectors in every generation — for issues that left the feed
+// (purged, or their project deleted). Soft-deleted issues stay mirrored so
+// include_deleted searches keep semantic recall; hydration filters them per
+// request. It returns the number of rows written or removed.
 func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, error) {
 	changed := 0
 	seen := make(map[string]struct{})
@@ -36,7 +38,8 @@ func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, erro
 				  project_uid = excluded.project_uid,
 				  content = excluded.content,
 				  content_revision = excluded.content_revision
-				WHERE issue_mirror.content_revision != excluded.content_revision`,
+				WHERE issue_mirror.content_revision != excluded.content_revision
+				   OR issue_mirror.project_uid != excluded.project_uid`,
 				ic.UID, ic.ProjectUID, embedding.EmbedText(ic.Title, ic.Body), ic.ContentRevision)
 			if err != nil {
 				return changed, fmt.Errorf("vector: upsert mirror row %s: %w", ic.UID, err)

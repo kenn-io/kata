@@ -140,6 +140,13 @@ func (r *Reconciler) nextBackoff(cur time.Duration, err error) time.Duration {
 // generation, cuts over when the fill completes, and updates health. Fill
 // loops internally until no documents are pending, so a successful return
 // means the desired generation is fully populated and active.
+//
+// Cold start (no active generation: fresh sidecar or first upgrade) cuts the
+// new generation over immediately, before the fill, so search serves partial
+// results during the initial backfill and the health backlog explains the
+// coverage. A model change (an active generation exists) keeps the
+// build-then-cutover path: the old generation stays active until the new one
+// is fully filled.
 func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	if _, err := r.idx.RefreshMirror(ctx, r.store); err != nil {
 		r.markError(err)
@@ -150,6 +157,15 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	if err := r.idx.EnsureBuilding(ctx, key, gen); err != nil {
 		r.markError(err)
 		return err
+	}
+	if _, active, err := r.idx.ActiveGeneration(ctx); err != nil {
+		r.markError(err)
+		return err
+	} else if !active {
+		if err := r.idx.CutOver(ctx, key); err != nil {
+			r.markError(err)
+			return err
+		}
 	}
 	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.emb.BatchSize()); err != nil {
 		r.markError(err)

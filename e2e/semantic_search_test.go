@@ -202,10 +202,10 @@ func TestE2E_SemanticSearch_ModelChangeCutover(t *testing.T) {
 	require.Equal(t, "hybrid", baseline.Mode, "baseline search before the model change: %+v", baseline)
 
 	// Restart the daemon on the same KATA_HOME with a changed model. The
-	// sidecar vectors.db lives next to kata.db and survives the restart, so
-	// the generation built under fixtureModelV1 is still on disk when the new
-	// daemon process opens the index — this is what the new generation must
-	// eventually cut over from.
+	// sidecar vector database (kata.vectors.db) lives next to kata.db and
+	// survives the restart, so the generation built under fixtureModelV1 is
+	// still on disk when the new daemon process opens the index — this is
+	// what the new generation must eventually cut over from.
 	stopDaemon(cmd)
 	writeEmbeddingsConfig(t, dirs.home, embedder.URL(), fixtureModelV2)
 	_, stderr2 := startDaemonCmd(t, bin, env)
@@ -500,12 +500,16 @@ func waitForBacklogZero(t *testing.T, client *http.Client, baseURL string, daemo
 	var last string
 	for time.Now().Before(deadline) {
 		last = embeddingHealth(t, client, baseURL)
+		// Embeddings is a pointer so a missing block cannot decode to a
+		// zero struct and vacuously satisfy backlog == 0.
 		var health struct {
-			Embeddings struct {
-				Backlog int64 `json:"backlog"`
+			Embeddings *struct {
+				Configured bool  `json:"configured"`
+				Backlog    int64 `json:"backlog"`
 			} `json:"embeddings"`
 		}
-		if err := json.Unmarshal([]byte(last), &health); err == nil && health.Embeddings.Backlog == 0 {
+		if err := json.Unmarshal([]byte(last), &health); err == nil &&
+			health.Embeddings != nil && health.Embeddings.Configured && health.Embeddings.Backlog == 0 {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
