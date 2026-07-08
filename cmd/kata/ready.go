@@ -161,8 +161,11 @@ func newReadyCmd() *cobra.Command {
 				if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
 					return err
 				}
+				// ready's default limit is 0 (no limit); a positive limit
+				// that returned exactly that many rows may be truncating.
+				truncated := limit > 0 && len(rows) == limit
 				if !flags.Quiet && len(rows) > 0 {
-					if err := renderer.renderReadyFooter(cmd.OutOrStdout(), len(rows)); err != nil {
+					if err := renderer.renderReadyFooter(cmd.OutOrStdout(), len(rows), truncated); err != nil {
 						return err
 					}
 				}
@@ -215,8 +218,11 @@ func newReadyCmd() *cobra.Command {
 			if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
 				return err
 			}
+			// ready's default limit is 0 (no limit); a positive limit
+			// that returned exactly that many rows may be truncating.
+			truncated := limit > 0 && len(rows) == limit
 			if !flags.Quiet && len(rows) > 0 {
-				if err := renderer.renderReadyFooter(cmd.OutOrStdout(), len(rows)); err != nil {
+				if err := renderer.renderReadyFooter(cmd.OutOrStdout(), len(rows), truncated); err != nil {
 					return err
 				}
 			}

@@ -215,6 +215,36 @@ func TestList_SanitizesAnsiAndNewlinesInTitle(t *testing.T) {
 	}
 }
 
+// TestList_HumanFooterShowsShowingWhenTruncated pins that when the returned
+// page is exactly --limit rows, the human footer swaps "Total:" for
+// "Showing:" so the summary doesn't misread as a project-wide total.
+func TestList_HumanFooterShowsShowingWhenTruncated(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"alpha", "beta", "gamma"} {
+		createIssue(t, env, pid, title)
+	}
+
+	out := runCLI(t, env, dir, "list", "--limit", "2")
+
+	assert.Contains(t, out, "Showing: 2 issues")
+	assert.NotContains(t, out, "Total:")
+}
+
+// TestList_HumanFooterShowsTotalWhenNotTruncated pins the non-truncated
+// counterpart: when all matching rows fit under --limit, the footer keeps
+// the "Total:" wording.
+func TestList_HumanFooterShowsTotalWhenNotTruncated(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"alpha", "beta"} {
+		createIssue(t, env, pid, title)
+	}
+
+	out := runCLI(t, env, dir, "list", "--limit", "10")
+
+	assert.Contains(t, out, "Total: 2 issues")
+	assert.NotContains(t, out, "Showing:")
+}
+
 // TestList_HintsWhenTruncated covers the silent-truncation pitfall: when the
 // returned page is exactly --limit rows, the CLI prints a stderr hint so users
 // realize there may be more. Hint goes to stderr so it doesn't pollute pipes

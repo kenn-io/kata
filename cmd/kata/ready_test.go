@@ -212,6 +212,52 @@ func TestReady_HumanFooterAbsentOnZeroRows(t *testing.T) {
 	assert.NotContains(t, out, "Ready:")
 }
 
+// TestReady_HumanFooterShowsShowingWhenTruncated pins that when the
+// returned page is exactly --limit rows, the scoped ready footer swaps
+// "Ready:" for "Showing:" so the summary doesn't misread as a full count
+// of ready issues.
+func TestReady_HumanFooterShowsShowingWhenTruncated(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"alpha", "beta", "gamma"} {
+		createIssue(t, env, pid, title)
+	}
+
+	out := runCLI(t, env, dir, "ready", "--limit", "2")
+
+	assert.Contains(t, out, "Showing: 2 ready issues with no active blockers")
+	assert.NotContains(t, out, "Ready:")
+}
+
+// TestReady_HumanFooterShowsReadyWhenNotTruncated pins the non-truncated
+// counterpart: when all ready rows fit under --limit, the footer keeps
+// the "Ready:" wording.
+func TestReady_HumanFooterShowsReadyWhenNotTruncated(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"alpha", "beta"} {
+		createIssue(t, env, pid, title)
+	}
+
+	out := runCLI(t, env, dir, "ready", "--limit", "10")
+
+	assert.Contains(t, out, "Ready: 2 issues with no active blockers")
+	assert.NotContains(t, out, "Showing:")
+}
+
+// TestReady_AllHumanFooterShowsShowingWhenTruncated pins the --all path's
+// truncation wording, mirroring the scoped-project case above.
+func TestReady_AllHumanFooterShowsShowingWhenTruncated(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"alpha", "beta", "gamma"} {
+		createIssue(t, env, pid, title)
+	}
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--limit", "2")
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "Showing: 2 ready issues with no active blockers")
+	assert.NotContains(t, out, "Ready:")
+}
+
 // TestReady_AllHumanRowUsesGlyphLayoutAndQualifiedID pins that the --all
 // human path renders through the shared row renderer with the qualified
 // "project#short_id" id and the open glyph.

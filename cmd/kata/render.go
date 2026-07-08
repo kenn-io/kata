@@ -180,7 +180,10 @@ func (r *rowRenderer) chipsField(labels []string) string {
 // (blocked wins over open for the bucket, matching renderRow's
 // glyph precedence) rather than trusting a caller-supplied total, so
 // the summary always reflects what was actually printed above it.
-func (r *rowRenderer) renderListFooter(w io.Writer, rows []issueRow) error {
+// When truncated is true (the caller hit --limit and there may be
+// more matching issues than were returned), the summary uses
+// "Showing:" instead of "Total:" so it doesn't read as a full count.
+func (r *rowRenderer) renderListFooter(w io.Writer, rows []issueRow, truncated bool) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -206,17 +209,29 @@ func (r *rowRenderer) renderListFooter(w io.Writer, rows []issueRow) error {
 		clauses = append(clauses, fmt.Sprintf("%d closed", closed))
 	}
 	total := len(rows)
-	summary := fmt.Sprintf("Total: %d %s (%s)", total, issueWord(total), strings.Join(clauses, ", "))
+	label := "Total"
+	if truncated {
+		label = "Showing"
+	}
+	summary := fmt.Sprintf("%s: %d %s (%s)", label, total, issueWord(total), strings.Join(clauses, ", "))
 	return r.renderFooter(w, summary, "Status: ○ open  ● blocked  ✓ closed")
 }
 
 // renderReadyFooter writes the footer for `kata ready`. The legend
 // omits "● blocked" since ready results are, by definition, unblocked.
-func (r *rowRenderer) renderReadyFooter(w io.Writer, n int) error {
+// When truncated is true (the caller hit --limit and there may be
+// more ready issues than were returned), the summary uses "Showing:"
+// instead of "Ready:" so it doesn't read as a full count.
+func (r *rowRenderer) renderReadyFooter(w io.Writer, n int, truncated bool) error {
 	if n == 0 {
 		return nil
 	}
-	summary := fmt.Sprintf("Ready: %d %s with no active blockers", n, issueWord(n))
+	var summary string
+	if truncated {
+		summary = fmt.Sprintf("Showing: %d ready %s with no active blockers", n, issueWord(n))
+	} else {
+		summary = fmt.Sprintf("Ready: %d %s with no active blockers", n, issueWord(n))
+	}
 	return r.renderFooter(w, summary, "Status: ○ open")
 }
 

@@ -183,7 +183,7 @@ func TestRenderListFooter_ColorOff(t *testing.T) {
 			{ID: "a2", Status: "open", Blocked: true},
 			{ID: "a3", Status: "closed"},
 		}
-		require.NoError(t, r.renderListFooter(&buf, rows))
+		require.NoError(t, r.renderListFooter(&buf, rows, false))
 		want := "\n" + rule + "\n" + "Total: 3 issues (1 open, 1 blocked, 1 closed)\n" + "\n" + legend + "\n"
 		assert.Equal(t, want, buf.String())
 	})
@@ -191,7 +191,7 @@ func TestRenderListFooter_ColorOff(t *testing.T) {
 	t.Run("singular, all open", func(t *testing.T) {
 		var buf bytes.Buffer
 		rows := []issueRow{{ID: "a1", Status: "open"}}
-		require.NoError(t, r.renderListFooter(&buf, rows))
+		require.NoError(t, r.renderListFooter(&buf, rows, false))
 		want := "\n" + rule + "\n" + "Total: 1 issue (1 open)\n" + "\n" + legend + "\n"
 		assert.Equal(t, want, buf.String())
 	})
@@ -202,7 +202,7 @@ func TestRenderListFooter_ColorOff(t *testing.T) {
 			{ID: "a1", Status: "open"},
 			{ID: "a2", Status: "closed"},
 		}
-		require.NoError(t, r.renderListFooter(&buf, rows))
+		require.NoError(t, r.renderListFooter(&buf, rows, false))
 		want := "\n" + rule + "\n" + "Total: 2 issues (1 open, 1 closed)\n" + "\n" + legend + "\n"
 		assert.Equal(t, want, buf.String())
 	})
@@ -212,15 +212,35 @@ func TestRenderListFooter_ColorOff(t *testing.T) {
 		rows := []issueRow{
 			{ID: "a1", Status: "open", Blocked: true},
 		}
-		require.NoError(t, r.renderListFooter(&buf, rows))
+		require.NoError(t, r.renderListFooter(&buf, rows, false))
 		want := "\n" + rule + "\n" + "Total: 1 issue (1 blocked)\n" + "\n" + legend + "\n"
 		assert.Equal(t, want, buf.String())
 	})
 
 	t.Run("zero rows prints nothing", func(t *testing.T) {
 		var buf bytes.Buffer
-		require.NoError(t, r.renderListFooter(&buf, nil))
+		require.NoError(t, r.renderListFooter(&buf, nil, false))
 		assert.Empty(t, buf.String())
+	})
+
+	t.Run("truncated uses Showing wording, not Total", func(t *testing.T) {
+		var buf bytes.Buffer
+		rows := []issueRow{
+			{ID: "a1", Status: "open"},
+			{ID: "a2", Status: "open", Blocked: true},
+			{ID: "a3", Status: "closed"},
+		}
+		require.NoError(t, r.renderListFooter(&buf, rows, true))
+		want := "\n" + rule + "\n" + "Showing: 3 issues (1 open, 1 blocked, 1 closed)\n" + "\n" + legend + "\n"
+		assert.Equal(t, want, buf.String())
+	})
+
+	t.Run("truncated singular uses Showing wording", func(t *testing.T) {
+		var buf bytes.Buffer
+		rows := []issueRow{{ID: "a1", Status: "open"}}
+		require.NoError(t, r.renderListFooter(&buf, rows, true))
+		want := "\n" + rule + "\n" + "Showing: 1 issue (1 open)\n" + "\n" + legend + "\n"
+		assert.Equal(t, want, buf.String())
 	})
 }
 
@@ -232,22 +252,36 @@ func TestRenderReadyFooter_ColorOff(t *testing.T) {
 
 	t.Run("plural", func(t *testing.T) {
 		var buf bytes.Buffer
-		require.NoError(t, r.renderReadyFooter(&buf, 3))
+		require.NoError(t, r.renderReadyFooter(&buf, 3, false))
 		want := "\n" + rule + "\n" + "Ready: 3 issues with no active blockers\n" + "\n" + legend + "\n"
 		assert.Equal(t, want, buf.String())
 	})
 
 	t.Run("singular", func(t *testing.T) {
 		var buf bytes.Buffer
-		require.NoError(t, r.renderReadyFooter(&buf, 1))
+		require.NoError(t, r.renderReadyFooter(&buf, 1, false))
 		want := "\n" + rule + "\n" + "Ready: 1 issue with no active blockers\n" + "\n" + legend + "\n"
 		assert.Equal(t, want, buf.String())
 	})
 
 	t.Run("zero prints nothing", func(t *testing.T) {
 		var buf bytes.Buffer
-		require.NoError(t, r.renderReadyFooter(&buf, 0))
+		require.NoError(t, r.renderReadyFooter(&buf, 0, false))
 		assert.Empty(t, buf.String())
+	})
+
+	t.Run("truncated plural uses Showing wording", func(t *testing.T) {
+		var buf bytes.Buffer
+		require.NoError(t, r.renderReadyFooter(&buf, 3, true))
+		want := "\n" + rule + "\n" + "Showing: 3 ready issues with no active blockers\n" + "\n" + legend + "\n"
+		assert.Equal(t, want, buf.String())
+	})
+
+	t.Run("truncated singular uses Showing wording", func(t *testing.T) {
+		var buf bytes.Buffer
+		require.NoError(t, r.renderReadyFooter(&buf, 1, true))
+		want := "\n" + rule + "\n" + "Showing: 1 ready issue with no active blockers\n" + "\n" + legend + "\n"
+		assert.Equal(t, want, buf.String())
 	})
 }
 
@@ -290,7 +324,7 @@ func TestRenderListFooter_ColorOn(t *testing.T) {
 
 	rows := []issueRow{{ID: "a1", Status: "open"}}
 	var buf bytes.Buffer
-	require.NoError(t, r.renderListFooter(&buf, rows))
+	require.NoError(t, r.renderListFooter(&buf, rows, false))
 
 	const rule = "──────────────────────────────────────────────────"
 	want := "\n" +
@@ -302,7 +336,7 @@ func TestRenderListFooter_ColorOn(t *testing.T) {
 
 	off := newRowRendererFor(lipgloss.NewRenderer(&bytes.Buffer{}, termenv.WithProfile(termenv.Ascii)))
 	var offBuf bytes.Buffer
-	require.NoError(t, off.renderListFooter(&offBuf, rows))
+	require.NoError(t, off.renderListFooter(&offBuf, rows, false))
 	assert.Equal(t, offBuf.String(), stripANSITest(buf.String()))
 }
 

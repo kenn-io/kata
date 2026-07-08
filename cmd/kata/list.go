@@ -181,18 +181,20 @@ func newListCmd() *cobra.Command {
 			if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
 				return err
 			}
+			// Truncation heuristic: when we got exactly --limit rows back
+			// the daemon may have more. Has a false positive when the
+			// project has exactly --limit issues, which we accept as a
+			// much smaller harm than silently reporting a total that
+			// isn't one.
+			truncated := len(b.Issues) == limit
 			if !flags.Quiet && len(rows) > 0 {
-				if err := renderer.renderListFooter(cmd.OutOrStdout(), rows); err != nil {
+				if err := renderer.renderListFooter(cmd.OutOrStdout(), rows, truncated); err != nil {
 					return err
 				}
 			}
-			// Truncation hint: when we got exactly --limit rows back the
-			// daemon may have more. Print to stderr so pipelines stay
-			// clean (kata list | grep ...). Quiet suppresses it. Has a
-			// false positive when the project has exactly --limit issues,
-			// which we accept as a much smaller harm than silent
-			// truncation on projects above the default.
-			if !flags.Quiet && len(b.Issues) == limit {
+			// Truncation hint: print to stderr so pipelines stay clean
+			// (kata list | grep ...). Quiet suppresses it.
+			if !flags.Quiet && truncated {
 				if _, err := fmt.Fprintf(cmd.ErrOrStderr(),
 					"... showing %d (raise --limit to see more)\n", limit); err != nil {
 					return err
