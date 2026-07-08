@@ -333,14 +333,29 @@ func TestVectorLegSoftDeleteDropsFromIndexUntilRestore(t *testing.T) {
 	if _, _, _, err := store.SoftDeleteIssue(ctx, iss.ID, "a"); err != nil {
 		t.Fatal(err)
 	}
+
+	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+
+	// Before any mirror refresh the stale vectors still exist in the index;
+	// hydration must enforce the contract per request — the vector leg serves
+	// live issues only, even for include_deleted searches.
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
+		IncludeDeleted: true,
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch include_deleted pre-refresh: %v", err)
+	}
+	if len(res.Hits) != 0 {
+		t.Fatalf("vector leg must not rank a soft-deleted issue even before the mirror refresh, got %#v", res.Hits)
+	}
+
 	// Reconcile after the soft delete: the mirror row and its vectors must be
 	// removed so deleted content cannot flow to the embedding endpoint on a
 	// later rebuild.
 	activateFixedGeneration(ctx, t, store, idx)
 
-	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
-
-	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+	res, err = hybridSearch(ctx, store, idx, emb, hybridParams{
 		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
 		IncludeDeleted: true,
 	})

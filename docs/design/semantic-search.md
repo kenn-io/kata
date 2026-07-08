@@ -415,9 +415,9 @@ backlog is health state, not per-query degradation.
 `include_deleted=true` ranks soft-deleted issues through the lexical leg
 only: their mirror rows and vectors are removed at the first refresh after
 deletion (see "Reconciler" — deleted content must not keep flowing to the
-embedding endpoint), so the vector leg has nothing to rank them with. In the
-window before that refresh runs, hydration still filters them out of default
-searches per request.
+embedding endpoint), and hydration serves live issues only regardless of
+`include_deleted`, so the contract holds per request even in the window
+between a soft delete and the refresh that removes its stale vectors.
 
 ## API and CLI contract
 

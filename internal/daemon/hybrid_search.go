@@ -180,30 +180,27 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 }
 
 // hydrateVectorHits rolls chunk hits up to issues and hydrates them against
-// live canonical rows, filtering by project and (unless requested) deletion,
-// stopping at the cosine floor or fetch collected candidates.
+// live canonical rows, filtering by project, stopping at the cosine floor or
+// fetch collected candidates. The vector leg serves live issues only — even
+// for include_deleted searches: soft-deleted issues leave the index at the
+// next mirror refresh, and this filter enforces the same contract per
+// request in the window before that refresh runs (include_deleted ranks
+// deleted issues through the lexical leg alone).
 func hydrateVectorHits(ctx context.Context, store db.Storage, hits []kitvec.Hit[string], p hybridParams, fetch int) ([]db.SearchCandidate, error) {
 	hits = kitvec.RollupByDocument(hits)
-	include := db.IncludeDeletedNo
-	if p.IncludeDeleted {
-		include = db.IncludeDeletedYes
-	}
 	out := make([]db.SearchCandidate, 0, fetch)
 	for _, h := range hits {
 		if h.Score < cosineFloor {
 			break // hits are sorted by score descending
 		}
-		iss, err := store.IssueByUID(ctx, h.Doc, include)
+		iss, err := store.IssueByUID(ctx, h.Doc, db.IncludeDeletedNo)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
-				continue // purged since the last mirror refresh
+				continue // soft-deleted or purged since the last mirror refresh
 			}
 			return nil, err
 		}
 		if iss.ProjectID != p.ProjectID {
-			continue
-		}
-		if iss.DeletedAt != nil && !p.IncludeDeleted {
 			continue
 		}
 		out = append(out, db.SearchCandidate{
