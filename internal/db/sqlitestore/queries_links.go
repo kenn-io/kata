@@ -327,12 +327,15 @@ func (d *Store) appendBlockedByNumbersForChunk(
 }
 
 // ActivelyBlockedIssueIDs returns issue ID -> true for each input issue that
-// has at least one ACTIVE incoming `blocks` blocker, mirroring the ReadyIssues
-// predicate exactly: the blocker issue must be open, not soft-deleted, and its
-// project must not be archived (projects.deleted_at IS NULL). Issues with no
-// active blocker are absent from the map (callers treat absence as false). This
-// is the display-policy counterpart to BlockedByNumbersByIssues (which carries
-// the full relationship set): `kata list` renders the blocked glyph from this
+// is actively blocked, mirroring the ReadyIssues predicate on both sides:
+// the TARGET issue must itself be open and not soft-deleted, and at least
+// one incoming `blocks` blocker must be open, not soft-deleted, and in a
+// non-archived project (projects.deleted_at IS NULL). A closed target is
+// never actively blocked, even with an open blocker — blocked is actionable
+// display state, not relationship data. Issues not actively blocked are
+// absent from the map (callers treat absence as false). This is the
+// display-policy counterpart to BlockedByNumbersByIssues (which carries the
+// full relationship set): `kata list` renders the blocked glyph from this
 // so it agrees with `kata ready`. Chunks its inputs like the sibling
 // relationship queries.
 func (d *Store) ActivelyBlockedIssueIDs(
@@ -358,14 +361,18 @@ func (d *Store) appendActivelyBlockedForChunk(
 	ctx context.Context, chunk []int64, out map[int64]bool,
 ) error {
 	placeholders, args := relationshipChunkPlaceholders(chunk)
-	// Mirrors the ReadyIssues NOT EXISTS predicate: a row is actively blocked
-	// iff an incoming `blocks` link has an open, live blocker in a non-archived
-	// project. DISTINCT collapses multiple qualifying blockers to one row.
+	// Mirrors the ReadyIssues predicate on both sides: the target row must be
+	// an open, live issue, and an incoming `blocks` link must carry an open,
+	// live blocker in a non-archived project. DISTINCT collapses multiple
+	// qualifying blockers to one row.
 	query := `SELECT DISTINCT l.to_issue_id
 	          FROM links l
+	          JOIN issues blocked ON blocked.id = l.to_issue_id
 	          JOIN issues blocker ON blocker.id = l.from_issue_id
 	          JOIN projects bp ON bp.id = blocker.project_id
 	          WHERE l.type = 'blocks'
+	            AND blocked.status = 'open'
+	            AND blocked.deleted_at IS NULL
 	            AND blocker.status = 'open'
 	            AND blocker.deleted_at IS NULL
 	            AND bp.deleted_at IS NULL

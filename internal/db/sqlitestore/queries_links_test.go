@@ -491,9 +491,10 @@ func TestBlockedByNumbersByIssues_IncludesBlockerInArchivedProject(t *testing.T)
 }
 
 // TestActivelyBlockedIssueIDs pins the display-policy predicate that mirrors
-// ReadyIssues: true iff an incoming blocker is open, live, and in a
-// non-archived project. Closed blockers, archived-project blockers, and issues
-// with no blocker are all not actively blocked (absent from the map).
+// ReadyIssues: true iff the target issue is itself open and live AND an
+// incoming blocker is open, live, and in a non-archived project. Closed
+// blockers, archived-project blockers, issues with no blocker, and closed
+// target issues are all not actively blocked (absent from the map).
 func TestActivelyBlockedIssueIDs(t *testing.T) {
 	d, ctx, p1 := setupTestProject(t)
 	p2, err := d.CreateProject(ctx, "blocker-project")
@@ -516,8 +517,19 @@ func TestActivelyBlockedIssueIDs(t *testing.T) {
 
 	unblocked := makeIssue(t, ctx, d, p1.ID, "unblocked", "tester")
 
+	// A CLOSED target with an open blocker is not actively blocked: the
+	// predicate is two-sided (target must itself be open, mirroring the
+	// blocked-side conditions of the ready predicate), so closed rows never
+	// serialize blocked:true on status=closed|all list responses.
+	closedTarget := makeIssue(t, ctx, d, p1.ID, "closed-target", "tester")
+	closedTargetBlocker := makeIssue(t, ctx, d, p1.ID, "closed-target-blocker", "tester")
+	makeLink(ctx, t, d, closedTargetBlocker.ID, closedTarget.ID, "blocks")
+	_, _, _, err = d.CloseIssue(ctx, closedTarget.ID, "done", "tester", "", nil)
+	require.NoError(t, err)
+
 	got, err := d.ActivelyBlockedIssueIDs(ctx, []int64{
 		openBlocked.ID, closedBlocked.ID, archivedBlocked.ID, unblocked.ID,
+		closedTarget.ID,
 	})
 	require.NoError(t, err)
 	assert.True(t, got[openBlocked.ID], "open blocker must mark issue actively blocked")
@@ -525,4 +537,6 @@ func TestActivelyBlockedIssueIDs(t *testing.T) {
 	assert.False(t, got[archivedBlocked.ID],
 		"blocker in an archived project must not mark issue blocked")
 	assert.False(t, got[unblocked.ID], "issue with no blocker must not be blocked")
+	assert.False(t, got[closedTarget.ID],
+		"closed target with an open blocker must not be actively blocked")
 }

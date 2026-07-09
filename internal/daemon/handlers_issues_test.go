@@ -2095,9 +2095,19 @@ func TestListIssues_BlockedFieldFollowsReadyPredicate(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Closed target with an open blocker → blocked must be false/omitted:
+	// "actively blocked" requires the target itself to be open, so closed
+	// rows never serialize blocked:true on all-status list responses (the
+	// unfiltered request below returns every status).
+	blockedClosed := createIssueViaHTTP(t, env, hubPID, "blocked-closed")
+	blockerOfClosed := createIssueViaHTTP(t, env, hubPID, "blocker-of-closed")
+	postLink(t, env, hubPID, blockerOfClosed, "blocks", blockedClosed)
+	closeIssueAs(t, env, hubPID, blockedClosed, "tester", "done")
+
 	blockedActiveShort := refForIssue(t, env, blockedActive)
 	blockedArchivedShort := refForIssue(t, env, blockedArchived)
 	blockerArchivedShort := refForIssue(t, env, blockerArchived)
+	blockedClosedShort := refForIssue(t, env, blockedClosed)
 
 	var out struct {
 		Issues []struct {
@@ -2128,6 +2138,12 @@ func TestListIssues_BlockedFieldFollowsReadyPredicate(t *testing.T) {
 		"archived-project blocker edge must still hydrate into blocked_by")
 	assert.Equal(t, blockerArchivedShort, archivedRow.blockedBy[0].ShortID,
 		"blocked_by must carry the archived-project peer (wire completeness)")
+
+	closedRow := byShort[blockedClosedShort]
+	assert.False(t, closedRow.blocked,
+		"closed issue with an open blocker must not serialize blocked:true")
+	require.Len(t, closedRow.blockedBy, 1,
+		"closed issue's blocker edge must still hydrate into blocked_by")
 }
 
 // TestListAllIssues_AcrossProjects pins #22's wire contract: GET /api/v1/issues
