@@ -199,9 +199,10 @@ aborts the whole wait with the daemon's exit code instead.`,
 	}
 	cmd.Flags().StringVar(&opts.until, "until", "closed",
 		"condition to wait for: closed|attention|needs-human|stuck")
-	cmd.Flags().DurationVar(&opts.timeout, "timeout", 0,
+	opts.pollInterval = defaultWaitPollInterval
+	cmd.Flags().Var(durationFlag{&opts.timeout}, "timeout",
 		"maximum time to wait (0 = wait forever)")
-	cmd.Flags().DurationVar(&opts.pollInterval, "poll-interval", defaultWaitPollInterval,
+	cmd.Flags().Var(durationFlag{&opts.pollInterval}, "poll-interval",
 		"state poll cadence (must be > 0)")
 	cmd.Flags().BoolVar(&opts.anyMode, "any", false,
 		"return as soon as the first ref's condition is met")

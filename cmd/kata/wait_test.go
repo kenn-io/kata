@@ -305,6 +305,23 @@ func TestWaitUsageNegativeTimeout(t *testing.T) {
 	_ = requireCLIError(t, err, ExitValidation)
 }
 
+// TestWaitUsageBareTimeoutSuggestsUnit: "--timeout 1800" (no unit) is the
+// first mistake real agents make (kenn-io/kata#159). It must fail at flag
+// parsing with an error suggesting the "1800s" spelling, not Go's stock
+// parse failure.
+func TestWaitUsageBareTimeoutSuggestsUnit(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "bare timeout")
+
+	_, err := runCLICapture(t, env, dir, "wait", ref, "--timeout", "1800")
+	if err == nil {
+		t.Fatal("bare --timeout 1800: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), `"1800s"`) {
+		t.Fatalf("bare --timeout error %q does not suggest \"1800s\"", err)
+	}
+}
+
 // TestWaitTimeoutBoundsHungFetch: a daemon state fetch that never returns must
 // be bounded by --timeout. Ref resolution answers immediately, but the issue
 // GET hangs; the command must still return an ExitWaitTimeout well before the
