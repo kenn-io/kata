@@ -120,6 +120,9 @@ func newListCmd() *cobra.Command {
 					Priority    *int64   `json:"priority"`
 					Labels      []string `json:"labels"`
 					Blocked     bool     `json:"blocked"`
+					Parent      *struct {
+						ShortID string `json:"short_id"`
+					} `json:"parent"`
 				} `json:"issues"`
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
@@ -151,6 +154,7 @@ func newListCmd() *cobra.Command {
 			// Unowned issues render as "(unowned)" so the trailing
 			// "(...)" cell is never empty.
 			rows := make([]issueRow, len(b.Issues))
+			parents := make([]string, len(b.Issues))
 			for idx, i := range b.Issues {
 				owner := "unowned"
 				if i.Owner != nil && *i.Owner != "" {
@@ -165,7 +169,11 @@ func newListCmd() *cobra.Command {
 					Blocked:  i.Blocked,
 					Labels:   i.Labels,
 				}
+				if i.Parent != nil {
+					parents[idx] = i.Parent.ShortID
+				}
 			}
+			rows = treeRows(rows, parents)
 			renderer := newRowRenderer(cmd.OutOrStdout())
 			if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
 				return err

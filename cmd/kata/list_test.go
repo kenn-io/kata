@@ -86,6 +86,84 @@ func TestList_HumanRowRendersBugLabelChip(t *testing.T) {
 	assert.Contains(t, out, "[bug] ")
 }
 
+// TestList_HumanTreeIndentsChildrenUnderParent pins bd-style tree
+// rendering: children move directly beneath their parent, non-last
+// children connect with "├─ ", the last child with "└─ ", and the
+// parent row stays unindented.
+func TestList_HumanTreeIndentsChildrenUnderParent(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	parent := createIssue(t, env, pid, "parent epic")
+	childA := createIssue(t, env, pid, "child alpha")
+	childB := createIssue(t, env, pid, "child beta")
+	runCLI(t, env, dir, "edit", childA, "--parent", parent)
+	runCLI(t, env, dir, "edit", childB, "--parent", parent)
+
+	out := runCLI(t, env, dir, "list")
+
+	assert.Contains(t, out, "├─ ○ ", "non-last child connects with ├─")
+	assert.Contains(t, out, "└─ ○ ", "last child connects with └─")
+	parentIdx := strings.Index(out, "parent epic")
+	require.GreaterOrEqual(t, parentIdx, 0)
+	for _, title := range []string{"child alpha", "child beta"} {
+		idx := strings.Index(out, title)
+		require.GreaterOrEqual(t, idx, 0)
+		assert.Greater(t, idx, parentIdx, "%s renders beneath its parent", title)
+	}
+}
+
+// TestList_HumanTreeRendersGrandchildRecursively pins recursion through
+// parent chains: a grandchild nests one level deeper with the rail
+// continuation prefix.
+func TestList_HumanTreeRendersGrandchildRecursively(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	root := createIssue(t, env, pid, "tree root")
+	mid := createIssue(t, env, pid, "tree mid")
+	leaf := createIssue(t, env, pid, "tree leaf")
+	runCLI(t, env, dir, "edit", mid, "--parent", root)
+	runCLI(t, env, dir, "edit", leaf, "--parent", mid)
+
+	out := runCLI(t, env, dir, "list")
+
+	assert.Contains(t, out, "└─ ○ ", "mid connects under root")
+	assert.Contains(t, out, "   └─ ○ ", "leaf nests one level deeper")
+}
+
+// TestList_HumanTreeOrphanedChildRendersFlat pins the filter-mismatch
+// fallback: when a child's parent does not match the active filter
+// (here excluded via --no-label), the child renders flat at top level
+// rather than being dropped or indented.
+func TestList_HumanTreeOrphanedChildRendersFlat(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	parent := createIssue(t, env, pid, "filtered parent")
+	child := createIssue(t, env, pid, "orphan child")
+	runCLI(t, env, dir, "edit", child, "--parent", parent)
+	runCLI(t, env, dir, "label", "add", parent, "hidden")
+
+	out := runCLI(t, env, dir, "list", "--no-label", "hidden")
+
+	assert.NotContains(t, out, "filtered parent")
+
+	assert.Contains(t, out, "orphan child")
+	assert.NotContains(t, out, "├─", "orphan renders flat, no connector")
+	assert.NotContains(t, out, "└─", "orphan renders flat, no connector")
+}
+
+// TestList_AgentOutputUnchangedByTree pins that tree rendering is human
+// mode only: agent rows keep the flat "- issue=..." shape with no
+// box-drawing connectors.
+func TestList_AgentOutputUnchangedByTree(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	parent := createIssue(t, env, pid, "agent parent")
+	child := createIssue(t, env, pid, "agent child")
+	runCLI(t, env, dir, "edit", child, "--parent", parent)
+
+	out := runCLI(t, env, dir, "--agent", "list")
+
+	assert.NotContains(t, out, "├─")
+	assert.NotContains(t, out, "└─")
+	assert.Contains(t, out, "- issue=")
+}
+
 // TestList_HumanRowBlockedGlyphFollowsOpenBlocker pins the Blocked
 // derivation: an open issue with an OPEN blocker renders the blocked glyph
 // "●", and once the blocker is closed (or the blocker starts out closed)

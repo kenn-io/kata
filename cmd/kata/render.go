@@ -23,6 +23,10 @@ type issueRow struct {
 	Status   string   // "open" | "closed"
 	Blocked  bool     // wins over Status for the glyph when Status=="open"
 	Labels   []string // renderer picks out epic/bug chips
+	// TreePrefix is the box-drawing connector rendered before the glyph
+	// ("├─ ", "└─ ", with rail continuation). Set by treeRows for `kata
+	// list`; empty for flat output.
+	TreePrefix string
 }
 
 // footerRuleWidth is the width in cells of the "─" rule printed
@@ -122,7 +126,7 @@ func (r *rowRenderer) renderRow(row issueRow, id string, idWidth int) string {
 	chips := r.chipsField(row.Labels)
 	title := textsafe.Line(row.Title)
 	owner := r.ownerStyle.Render("(" + textsafe.Line(row.Owner) + ")")
-	return glyph + " " + idCell + "  " + prio + "  " + chips + title + " " + owner
+	return row.TreePrefix + glyph + " " + idCell + "  " + prio + "  " + chips + title + " " + owner
 }
 
 // glyph picks the status glyph. Closed wins outright; otherwise
