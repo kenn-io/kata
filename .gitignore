@@ -12,6 +12,7 @@ coverage.out
 
 # Local data dir for manual testing
 /.kata/
+/.cache/golangci-lint/
 /.venv/
 /docs/.venv/
 /docs/.cache/

@@ -64,7 +64,7 @@ docs-deploy:
 	vercel deploy --prod
 
 lint:
-	golangci-lint run --config .golangci.yml
+	GOLANGCI_LINT_CACHE="$(CURDIR)/.cache/golangci-lint" golangci-lint run --config .golangci.yml
 
 vet:
 	go vet ./...
