@@ -8,8 +8,37 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+## 0.9.0
+<small>2026-07-09</small>
+
+kata 0.9.0 adds coordination primitives for agent launchers and dashboards,
+improves scriptable metadata handling, and refreshes semantic search storage and
+terminal rendering.
+
+**New features**
+
+- Added `kata wait`, a read-only fan-out/join command for scripts that need to
+  block until one or more issues close or report attention through
+  `work.attention`. It supports `--until closed|attention|needs-human|stuck`,
+  `--any`/`--all`, polling control, timeouts with a dedicated exit code, and
+  JSON output for wrappers.
+- Added first-class issue metadata commands and API support. `kata meta set`,
+  `kata meta unset`, and `kata meta get` read and patch issue metadata, support
+  raw JSON values where needed, and expose optimistic concurrency through
+  `--if-match` / `If-Match` revisions.
+- Added documented `work.*` metadata conventions for branch orchestration
+  workflows, including `work.branch`, `work.attention`, and
+  `work.attention_msg`, plus an agent-orchestration runbook for launchers,
+  working agents, coordinators, and merge automation.
+
 **Improvements**
 
+- Polished human-readable `kata list` and `kata ready` output with clearer
+  status glyphs, priority chips, label chips, owner display, and summary
+  footers while preserving machine-readable `--json` and `--agent` output.
+- Improved daemon HTTP API performance by gzip-compressing eligible JSON
+  responses when clients send `Accept-Encoding: gzip`; server-sent event
+  streams stay uncompressed so they keep streaming normally.
 - Moved semantic search storage from a single embeddings table in `kata.db`
   to a sidecar vector index built on the shared `kit` vector layer, named
   after the database file (`kata.vectors.db` for the default `kata.db`),
@@ -32,6 +61,16 @@ All notable changes to kata, grouped by release. Versioned releases start with
   rebuilds. Searches with `include_deleted` rank soft-deleted issues
   lexically only; restoring an issue re-embeds it and semantic recall
   resumes.
+- Updated the TUI stack to Charm's v2 Bubble Tea, Bubbles, Lip Gloss, and
+  Glamour packages for improved terminal rendering and input behavior.
+
+**Acknowledgements**
+
+- Thanks to [Matthew Jacobs](https://github.com/mjacobs) for `kata wait`, issue
+  metadata commands, `work.*` orchestration conventions, and human-readable
+  `list` / `ready` polish.
+- Thanks to [Wes McKinney](https://github.com/wesm) for gzip API compression,
+  semantic search vector storage, and the TUI stack update.
 
 ## 0.8.0
 <small>2026-07-04</small>
