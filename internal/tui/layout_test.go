@@ -1,10 +1,9 @@
 package tui
 
 import (
-	"io"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // layoutTestSetup pins KATA_COLOR_MODE=none and rebuilds the styles
@@ -15,11 +14,11 @@ func layoutTestSetup(t *testing.T) (Model, func()) {
 	t.Helper()
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
-	applyDefaultColorMode(io.Discard)
+	applyDefaultColorMode()
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.list.issues = snapListFixture()
-	cleanup := func() { applyDefaultColorMode(io.Discard) }
+	cleanup := func() { applyDefaultColorMode() }
 	return m, cleanup
 }
 

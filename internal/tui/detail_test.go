@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -201,8 +201,8 @@ func TestDetail_RenderHierarchySections(t *testing.T) {
 func TestDetail_TabCycle_NextPrev(t *testing.T) {
 	dm := detailFixture()
 	km := newKeymap()
-	tabKey := tea.KeyMsg{Type: tea.KeyTab}
-	shiftTab := tea.KeyMsg{Type: tea.KeyShiftTab}
+	tabKey := tea.KeyPressMsg{Code: tea.KeyTab}
+	shiftTab := tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 
 	dm, _ = dm.Update(tabKey, km, nil)
 	if dm.activeTab != tabEvents {
@@ -236,11 +236,11 @@ func TestDetail_TabRender_ActiveContent(t *testing.T) {
 	if !strings.Contains(docOut(dm), "Comments (2)") {
 		t.Fatalf("comments header missing:\n%s", docOut(dm))
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab}, km, nil)
 	if !strings.Contains(docOut(dm), "Events (2)") {
 		t.Fatalf("events header missing after tab:\n%s", docOut(dm))
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab}, km, nil)
 	if !strings.Contains(docOut(dm), "Links (1)") {
 		t.Fatalf("links header missing after second tab:\n%s", docOut(dm))
 	}
@@ -283,12 +283,12 @@ func TestDetail_Scroll_PageDownScrollsBodyEvenWithActivityRows(t *testing.T) {
 	if dm.scroll != 0 {
 		t.Fatalf("setup: scroll = %d, want 0", dm.scroll)
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgDown}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, km, nil)
 	if dm.scroll == 0 {
 		t.Fatalf("pgdown did not scroll body; scroll = %d, want >0", dm.scroll)
 	}
 	prev := dm.scroll
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgUp}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgUp}, km, nil)
 	if dm.scroll >= prev {
 		t.Fatalf("pgup did not unwind body scroll; scroll = %d, prev = %d", dm.scroll, prev)
 	}
@@ -299,7 +299,7 @@ func TestDetail_Scroll_PageDownScrollsBodyEvenWithActivityRows(t *testing.T) {
 func TestDetail_Scroll_PageUpClampsAtTop(t *testing.T) {
 	dm := detailFixture()
 	km := newKeymap()
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgUp}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgUp}, km, nil)
 	if dm.scroll != 0 {
 		t.Fatalf("scroll = %d, want 0 (clamped at top)", dm.scroll)
 	}
@@ -314,7 +314,7 @@ func TestDetail_Scroll_PageDownWorksOnChildrenFocus(t *testing.T) {
 	dm.children = []Issue{{UID: "01TEST-99zz", ShortID: "99zz", Title: "child", Status: "open"}}
 	dm.detailFocus = focusChildren
 	km := newKeymap()
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgDown}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, km, nil)
 	if dm.scroll == 0 {
 		t.Fatalf("pgdown on children focus did not scroll body; scroll = %d", dm.scroll)
 	}
@@ -336,14 +336,14 @@ func TestDetail_Scroll_PageDownClampsPastEOFAndPageUpResponds(t *testing.T) {
 	// dm.scroll would be 96; with the clamp it stays at the body's
 	// approximate maxStart (<= a small number for short bodies).
 	for i := 0; i < 12; i++ {
-		dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgDown}, km, nil)
+		dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, km, nil)
 	}
 	if dm.scroll > 24 {
 		t.Fatalf("PgDn past EOF should clamp dm.scroll, got scroll=%d", dm.scroll)
 	}
 	// One PgUp must produce a visible (smaller) scroll value.
 	prev := dm.scroll
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgUp}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgUp}, km, nil)
 	if dm.scroll >= prev && prev > 0 {
 		t.Fatalf("PgUp after overscroll did not respond visually: scroll=%d, prev=%d", dm.scroll, prev)
 	}
@@ -367,13 +367,13 @@ func TestDetail_Scroll_PageDownClampsToDocument(t *testing.T) {
 
 	km := newKeymap()
 	for i := 0; i < 12; i++ {
-		dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgDown}, km, nil)
+		dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, km, nil)
 	}
 	if dm.scroll > maxStart {
 		t.Fatalf("PgDn past EOF: scroll=%d > maxStart=%d", dm.scroll, maxStart)
 	}
 	prev := dm.scroll
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgUp}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgUp}, km, nil)
 	if prev > 0 && dm.scroll >= prev {
 		t.Fatalf("PgUp after overscroll did not respond: scroll=%d, prev=%d",
 			dm.scroll, prev)
@@ -396,7 +396,7 @@ func TestDetail_Scroll_SplitViewportClamp(t *testing.T) {
 
 	km := newKeymap()
 	for i := 0; i < 30; i++ {
-		dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyPgDown}, km, nil)
+		dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyPgDown}, km, nil)
 	}
 	if dm.scroll != maxStart {
 		t.Fatalf("PgDn in split overflowed: scroll=%d, want maxStart=%d",
@@ -509,7 +509,7 @@ func TestModel_ToggleLayout_RefreshesViewportCache(t *testing.T) {
 func TestDetail_Back_EmitsPopMsg(t *testing.T) {
 	dm := detailFixture()
 	km := newKeymap()
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEsc}, km, nil)
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEsc}, km, nil)
 	if cmd == nil {
 		t.Fatal("esc must return a tea.Cmd")
 	}
@@ -533,7 +533,7 @@ func TestDetail_OpenFromList_DispatchesBatch(t *testing.T) {
 	}
 	out, _ := m.Update(runeKey('j'))
 	m = out.(Model)
-	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = out.(Model)
 	if cmd == nil {
 		t.Fatal("expected open cmd from Enter")
@@ -1092,7 +1092,7 @@ func TestDetail_RenderCommentsTab_FormatsAuthorAndIndentsBody(t *testing.T) {
 			CreatedAt: time.Date(2025, 1, 2, 15, 4, 0, 0, time.UTC),
 		},
 	}
-	out := renderCommentsTab(cs, 80, 20, -1, tabState{})
+	out := stripANSI(renderCommentsTab(cs, 80, 20, -1, tabState{}))
 	if !strings.Contains(out, "alice  Jan 2 15:04") {
 		t.Fatalf("missing author/timestamp header:\n%s", out)
 	}
@@ -1214,7 +1214,7 @@ func TestDetail_TabSwitch_ResetsCursor(t *testing.T) {
 	if dm.tabCursor != 1 {
 		t.Fatalf("setup: tabCursor = %d, want 1", dm.tabCursor)
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab}, km, nil)
 	if dm.tabCursor != 0 {
 		t.Fatalf("after tab switch: tabCursor = %d, want 0", dm.tabCursor)
 	}
@@ -1225,23 +1225,23 @@ func TestDetailFocus_TabCyclesChildrenCommentsEventsLinks(t *testing.T) {
 	dm.children = []Issue{{UID: "01TEST-43cc", ShortID: "43cc"}}
 	km := newKeymap()
 
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyShiftTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, km, nil)
 	if dm.detailFocus != focusChildren {
 		t.Fatalf("shift+tab from comments focus = %v, want children", dm.detailFocus)
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab}, km, nil)
 	if dm.detailFocus != focusActivity || dm.activeTab != tabComments {
 		t.Fatalf("tab from children focus/tab = %v/%v, want activity/comments", dm.detailFocus, dm.activeTab)
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab}, km, nil)
 	if dm.activeTab != tabEvents {
 		t.Fatalf("tab from comments activeTab = %v, want events", dm.activeTab)
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab}, km, nil)
 	if dm.activeTab != tabLinks {
 		t.Fatalf("tab from events activeTab = %v, want links", dm.activeTab)
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab}, km, nil)
 	if dm.detailFocus != focusChildren {
 		t.Fatalf("tab from links focus = %v, want children", dm.detailFocus)
 	}
@@ -1251,11 +1251,11 @@ func TestDetailFocus_SkipsChildrenWhenEmpty(t *testing.T) {
 	dm := detailFixture()
 	km := newKeymap()
 
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab}, km, nil)
 	if dm.detailFocus != focusActivity || dm.activeTab != tabEvents {
 		t.Fatalf("tab with no children focus/tab = %v/%v, want activity/events", dm.detailFocus, dm.activeTab)
 	}
-	dm, _ = dm.Update(tea.KeyMsg{Type: tea.KeyShiftTab}, km, nil)
+	dm, _ = dm.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, km, nil)
 	if dm.detailFocus != focusActivity || dm.activeTab != tabComments {
 		t.Fatalf("shift+tab with no children focus/tab = %v/%v, want activity/comments", dm.detailFocus, dm.activeTab)
 	}
@@ -1288,7 +1288,7 @@ func TestDetailChildren_EnterJumpsToChild(t *testing.T) {
 	dm.childCursor = 1
 	km := newKeymap()
 
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, &fakeDetailAPI{})
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, &fakeDetailAPI{})
 	assertJumpDetailCmd(t, cmd, "44dd")
 }
 
@@ -1321,7 +1321,7 @@ func TestDetail_EnterOnChild_CarriesChildProjectID(t *testing.T) {
 	dm.childCursor = 1
 	km := newKeymap()
 
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, &fakeDetailAPI{})
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, &fakeDetailAPI{})
 	jm := jumpMsgFromCmd(t, cmd)
 	if jm.ref != "44dd" || jm.projectID != 9 {
 		t.Fatalf("jumpDetailMsg = %+v, want ref=44dd projectID=9", jm)
@@ -1450,7 +1450,7 @@ func TestDetail_EnterOnEventWithIssueRef_JumpsAndStacks(t *testing.T) {
 	}
 	dm.tabCursor = 0
 	km := newKeymap()
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, api)
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, api)
 	assertJumpDetailCmd(t, cmd, "l1l1")
 }
 
@@ -1475,7 +1475,7 @@ func TestDetail_EnterOnLinkEvent_PrefersPeerUID(t *testing.T) {
 			}},
 	}
 	dm.tabCursor = 0
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, newKeymap(), api)
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, newKeymap(), api)
 	assertJumpDetailCmd(t, cmd, "01TESTPEERUID0000000000000")
 }
 
@@ -1489,7 +1489,7 @@ func TestDetail_EnterOnCurrentIssueEventDoesNotSelfJump(t *testing.T) {
 			Payload: map[string]any{"issue_short_id": dm.issue.ShortID}},
 	}
 
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, newKeymap(), api)
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, newKeymap(), api)
 	if cmd != nil {
 		t.Fatalf("Enter on current-issue event emitted jump cmd %T; want no-op", cmd)
 	}
@@ -1505,7 +1505,7 @@ func TestDetail_EnterOnLinkEntry_JumpsToTarget(t *testing.T) {
 	dm.activeTab = tabLinks
 	dm.tabCursor = 0
 	km := newKeymap()
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, api)
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, api)
 	assertJumpDetailCmd(t, cmd, "7bb")
 }
 
@@ -1532,7 +1532,7 @@ func TestDetail_EnterOnIncomingLink_JumpsToFromShortID(t *testing.T) {
 		},
 	}
 	km := newKeymap()
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, api)
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, api)
 	assertJumpDetailCmd(t, cmd, "99zz")
 }
 
@@ -1698,7 +1698,7 @@ func TestDetail_EnterOnComment_NoJump(t *testing.T) {
 	api := &fakeDetailAPI{}
 	dm := detailFixture() // active tab is tabComments
 	km := newKeymap()
-	dm, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, api)
+	dm, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, api)
 	if cmd != nil {
 		t.Fatalf("expected nil cmd from Enter on comment, got %T", cmd)
 	}
@@ -1720,7 +1720,7 @@ func TestDetail_EscFromStackedDetail_PopsToPrior(t *testing.T) {
 		navStack: []detailModel{prior},
 	}
 	km := newKeymap()
-	got, cmd := current.Update(tea.KeyMsg{Type: tea.KeyEsc}, km, nil)
+	got, cmd := current.Update(tea.KeyPressMsg{Code: tea.KeyEsc}, km, nil)
 	if cmd != nil {
 		t.Fatalf("expected nil cmd (no popDetailMsg), got %T", cmd)
 	}
@@ -1745,7 +1745,7 @@ func TestDetail_EscFromTopLevelDetail_ReturnsToList(t *testing.T) {
 	m.connGen = 9
 	m.view = viewDetail
 	m.detail = detailFixture()
-	_, cmd := updateModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatal("expected popDetailCmd")
 	}
@@ -1774,7 +1774,7 @@ func TestDetail_NavStackCappedAtOne(t *testing.T) {
 		navStack: []detailModel{prior}, // already at cap
 	}
 	km := newKeymap()
-	dm, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, api)
+	dm, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, api)
 	if cmd != nil {
 		t.Fatalf("expected nil cmd at nav cap, got %T", cmd)
 	}
@@ -1796,7 +1796,7 @@ func TestDetail_EnterOnEventWithoutPayload_NoOp(t *testing.T) {
 		events:    []EventLogEntry{{Type: "issue.created"}},
 	}
 	km := newKeymap()
-	_, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, api)
+	_, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, api)
 	if cmd != nil {
 		t.Fatalf("expected nil cmd for non-jumpable event, got %T", cmd)
 	}
@@ -1940,7 +1940,7 @@ func TestModel_GenMonotonicAcrossJumpBackOpen(t *testing.T) {
 	// Back to A. handleBack restores A's snapshot — including its
 	// smaller gen. m.detail.gen is now genA again (this is the bug
 	// surface a Model-level counter has to defend against).
-	out, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = out.(Model)
 	if m.detail.gen != genA {
 		t.Fatalf("after back, dm.gen = %d, want %d (snapshot restore)",
@@ -1950,7 +1950,7 @@ func TestModel_GenMonotonicAcrossJumpBackOpen(t *testing.T) {
 	// Pop to list (Esc again from the now-top-level A). handleBack
 	// returns popDetailCmd; we invoke the cmd to feed popDetailMsg
 	// back into the model so the view actually transitions.
-	out, popCmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	out, popCmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = out.(Model)
 	if popCmd == nil {
 		t.Fatal("expected popDetailCmd from Esc on top-level detail")
@@ -2118,7 +2118,7 @@ func TestDetail_Jump_PreservesActor(t *testing.T) {
 	dm.activeTab = tabLinks
 	dm.tabCursor = 0
 	km := newKeymap()
-	dm, cmd := dm.Update(tea.KeyMsg{Type: tea.KeyEnter}, km, api)
+	dm, cmd := dm.Update(tea.KeyPressMsg{Code: tea.KeyEnter}, km, api)
 	if cmd == nil {
 		t.Fatal("expected jump cmd")
 	}

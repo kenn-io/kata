@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // assertNoSourceReference scans every non-test .go file in the
@@ -152,7 +152,7 @@ func TestNewIssueForm_ConstructorBlursAllFieldsFocusesField0(t *testing.T) {
 func TestNewIssueForm_TabCyclesFieldsWithWrap(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
 	for _, want := range []int{1, 2, 3, 4, 0} {
-		m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyTab})
+		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 		assertActiveField(t, m, want)
 	}
 }
@@ -162,7 +162,7 @@ func TestNewIssueForm_TabCyclesFieldsWithWrap(t *testing.T) {
 func TestNewIssueForm_ShiftTabReverseCyclesWithWrap(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
 	for _, want := range []int{4, 3, 2, 1, 0} {
-		m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 		assertActiveField(t, m, want)
 	}
 }
@@ -172,20 +172,20 @@ func TestNewIssueForm_ShiftTabReverseCyclesWithWrap(t *testing.T) {
 // → Body, Labels → Owner, Owner → Parent, Parent → Title (wrap).
 func TestNewIssueForm_EnterInSingleLineAdvancesField(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
-	m, cmd := stepModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
 		t.Fatalf("enter on Title dispatched a cmd %T; expected advance only", cmd)
 	}
 	assertActiveField(t, m, 1)
 	// Skip Body — enter inserts a newline there. Cycle to Labels (idx 2).
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	assertActiveField(t, m, 2)
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	assertActiveField(t, m, 3)
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	assertActiveField(t, m, 4)
 	// Enter on Parent wraps to Title.
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	assertActiveField(t, m, 0)
 }
 
@@ -194,11 +194,11 @@ func TestNewIssueForm_EnterInSingleLineAdvancesField(t *testing.T) {
 func TestNewIssueForm_EnterInBodyInsertsNewline(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
 	// Tab to Body.
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	assertActiveField(t, m, 1)
 	// Type a line then enter then another line.
 	m = typeString(m, "line1")
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	assertActiveField(t, m, 1)
 	m = typeString(m, "line2")
 	body := m.input.fields[1].area.Value()
@@ -214,7 +214,7 @@ func TestNewIssueForm_EnterInBodyInsertsNewline(t *testing.T) {
 // blank Title sets the in-form err and does NOT dispatch.
 func TestNewIssueForm_CtrlSEmptyTitleSetsErrNoDispatch(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
-	nm, cmd := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatalf("empty-title ctrl+s dispatched cmd %T; want nil", cmd)
 	}
@@ -320,23 +320,23 @@ func TestNewIssueForm_CtrlSAllFields_NormalizedPayload(t *testing.T) {
 func TestNewIssueForm_CtrlEOnlyWhenBodyFocused(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
 	// Title focused — ctrl+e is a no-op.
-	m, cmd := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlE})
+	m, cmd := stepModel(m, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatalf("ctrl+e on Title dispatched cmd %T; want nil (gated)", cmd)
 	}
 	assertInputKind(t, m, inputNewIssueForm)
 	// Tab to Body — ctrl+e fires.
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyTab})
-	m, cmd = stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlE})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m, cmd = stepModel(m, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("ctrl+e on Body produced no editor handoff cmd")
 	}
 	assertInputKind(t, m, inputNewIssueForm)
 	// Tab through Labels, Owner, and Parent — ctrl+e is a no-op for all three.
 	for _, want := range []int{2, 3, 4} {
-		m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyTab})
+		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 		assertActiveField(t, m, want)
-		_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+		_, cmd = m.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 		if cmd != nil {
 			t.Fatalf("ctrl+e on field[%d] dispatched cmd %T; want nil", want, cmd)
 		}
@@ -421,7 +421,7 @@ func TestList_NewChild_PrefillsSelectedParent(t *testing.T) {
 func TestNewChildForm_ParentPrefillIgnoresEditsUntilCleared(t *testing.T) {
 	s := newNewIssueFormWithParent("42aa")
 	s = focusNewIssueField(s, 4)
-	next, _ := s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'9'}})
+	next, _ := s.Update(tea.KeyPressMsg{Code: '9', Text: "9"})
 	if got := next.fields[4].input.Value(); got != "42aa" {
 		t.Fatalf("locked parent accepted edit; got %q, want 42aa", got)
 	}
@@ -430,14 +430,14 @@ func TestNewChildForm_ParentPrefillIgnoresEditsUntilCleared(t *testing.T) {
 func TestNewChildForm_ParentPrefillBackspaceClearsAndUnlocks(t *testing.T) {
 	s := newNewIssueFormWithParent("42aa")
 	s = focusNewIssueField(s, 4)
-	next, _ := s.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	next, _ := s.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := next.fields[4].input.Value(); got != "" {
 		t.Fatalf("backspace on locked parent = %q, want empty", got)
 	}
 	if next.fields[4].locked {
 		t.Fatal("backspace on locked parent should unlock the field")
 	}
-	next, _ = next.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'9'}})
+	next, _ = next.Update(tea.KeyPressMsg{Code: '9', Text: "9"})
 	if got := next.fields[4].input.Value(); got != "9" {
 		t.Fatalf("unlocked parent did not accept edit; got %q, want 9", got)
 	}
@@ -449,7 +449,7 @@ func TestNewChildForm_ParentPrefillBackspaceClearsAndUnlocks(t *testing.T) {
 func TestNewIssueForm_StaleEditorReturnDropped(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
 	// Tab to Body and seed it.
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m.input.fields[1].area.SetValue("user-typed body")
 	staleGen := m.input.formGen + 999 // any non-matching value
 	nm, _ := stepModel(m, editorReturnedMsg{
@@ -485,7 +485,7 @@ func TestNewIssueForm_MutationFailureLeavesFormOpenWithErr(t *testing.T) {
 func TestNewIssueForm_EscDiscardsAndReturnsToList(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
 	m = typeString(m, "draft")
-	nm, cmd := stepModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	assertInputKind(t, nm, inputNone)
 	if nm.view != viewList {
 		t.Fatalf("view = %v, want viewList (no auto-detail)", nm.view)
@@ -648,7 +648,7 @@ func TestNewIssueForm_StaleResponseFromPriorFormDropped(t *testing.T) {
 	// Type something into the original form so we have observable state.
 	m = typeString(m, "draft A")
 	// User presses esc, closing form A.
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	assertInputKind(t, m, inputNone)
 	// User opens form B — fresh formGen should be staleGen+1 (or larger).
 	m = openNewIssueForm(t, m)

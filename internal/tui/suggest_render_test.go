@@ -165,7 +165,7 @@ func TestSuggestMenu_InfoLineAndFooterStayAtBottom_WhenMenuOpen(t *testing.T) {
 			{Label: "gamma", Count: 3},
 		},
 	}
-	out := m.View()
+	out := m.viewContent()
 	lines := strings.Split(out, "\n")
 	if len(lines) < m.height {
 		t.Fatalf("View returned %d lines, want >= %d", len(lines), m.height)

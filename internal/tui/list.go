@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // listAPI is the subset of *Client the list-view Update path needs.
@@ -104,7 +104,7 @@ func (lm listModel) Update(
 	msg tea.Msg, km keymap, api listAPI, sc scope,
 ) (listModel, tea.Cmd) {
 	switch m := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return lm.applyNavKey(m, km, api, sc)
 	case initialFetchMsg, refetchedMsg:
 		lm = lm.applyFetched(m)
@@ -119,7 +119,7 @@ func (lm listModel) Update(
 // has consumed the key so the cyclomatic budget per function stays
 // inside the project's ≤8 limit.
 func (lm listModel) applyNavKey(
-	msg tea.KeyMsg, km keymap, api listAPI, sc scope,
+	msg tea.KeyPressMsg, km keymap, api listAPI, sc scope,
 ) (listModel, tea.Cmd) {
 	// pendingPriority is checked first so the next keystroke after `!`
 	// is consumed by the priority handler regardless of what else it
@@ -168,7 +168,7 @@ func (lm listModel) applyNavKey(
 // is consumed by applyPendingPriorityKey before it reaches any other
 // handler.
 func (lm listModel) applyMutationKey(
-	msg tea.KeyMsg, km keymap, api listAPI, sc scope,
+	msg tea.KeyPressMsg, km keymap, api listAPI, sc scope,
 ) (listModel, tea.Cmd, bool) {
 	switch {
 	case km.Close.matches(msg):
@@ -203,7 +203,7 @@ func (lm listModel) armPendingPriority() listModel {
 // pending mode flips off and the status hint clears). ok=true means the
 // key was handled — the caller skips the rest of the dispatch chain.
 func (lm listModel) applyPendingPriorityKey(
-	msg tea.KeyMsg, api listAPI, sc scope,
+	msg tea.KeyPressMsg, api listAPI, sc scope,
 ) (listModel, tea.Cmd, bool) {
 	lm.pendingPriority = false
 	s := msg.String()
@@ -348,7 +348,7 @@ func setPriorityListCmd(api listAPI, pid int64, ref string, priority *int64, act
 // Empty list (cursor would point past the slice) is a quiet no-op so a
 // stray Enter on the empty-state hint does nothing.
 func (lm listModel) applyOpenKey(
-	msg tea.KeyMsg, km keymap,
+	msg tea.KeyPressMsg, km keymap,
 ) (listModel, tea.Cmd, bool) {
 	if !km.Open.matches(msg) {
 		return lm, nil, false
@@ -374,7 +374,7 @@ func (lm listModel) applyOpenKey(
 // Each cursor change also updates lm.selectedUID so an SSE-driven
 // refetch can put the cursor back on the same issue rather than the
 // same index — see syncSelection.
-func (lm listModel) applyCursorKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
+func (lm listModel) applyCursorKey(msg tea.KeyPressMsg, km keymap) (listModel, bool) {
 	rows := lm.visibleRows()
 	n := len(rows)
 	switch {
@@ -405,7 +405,7 @@ func (lm listModel) applyCursorKey(msg tea.KeyMsg, km keymap) (listModel, bool) 
 	return lm, true
 }
 
-func (lm listModel) applyExpandKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
+func (lm listModel) applyExpandKey(msg tea.KeyPressMsg, km keymap) (listModel, bool) {
 	if lm.viewMode == issueListViewFlat {
 		return lm, false
 	}
@@ -420,7 +420,7 @@ func (lm listModel) applyExpandKey(msg tea.KeyMsg, km keymap) (listModel, bool) 
 	return lm, false
 }
 
-func (lm listModel) applyExpandAllKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
+func (lm listModel) applyExpandAllKey(msg tea.KeyPressMsg, km keymap) (listModel, bool) {
 	if !km.ExpandAll.matches(msg) {
 		return lm, false
 	}
@@ -486,7 +486,7 @@ func (lm listModel) setExpansion(row queueRow, want bool) listModel {
 	return lm
 }
 
-func (lm listModel) applyViewModeKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
+func (lm listModel) applyViewModeKey(msg tea.KeyPressMsg, km keymap) (listModel, bool) {
 	if !km.ToggleIssueView.matches(msg) {
 		return lm, false
 	}
@@ -501,7 +501,7 @@ func (lm listModel) applyViewModeKey(msg tea.KeyMsg, km keymap) (listModel, bool
 	return lm.restoreCursorToSelection(), true
 }
 
-func (lm listModel) applyChildSortKey(msg tea.KeyMsg, km keymap) (listModel, bool) {
+func (lm listModel) applyChildSortKey(msg tea.KeyPressMsg, km keymap) (listModel, bool) {
 	if !km.SortChildren.matches(msg) {
 		return lm, false
 	}
@@ -749,7 +749,7 @@ func (lm listModel) syncSelection(rows []queueRow) listModel {
 // previously-selected issue if it survived the new filter. The
 // explicit "I changed the filter" intent overrides the implicit
 // "follow the same issue across refetches" intent.
-func (lm listModel) applyFilterKey(msg tea.KeyMsg, km keymap) (listModel, tea.Cmd, bool) {
+func (lm listModel) applyFilterKey(msg tea.KeyPressMsg, km keymap) (listModel, tea.Cmd, bool) {
 	switch {
 	case km.FilterStatus.matches(msg):
 		lm.filter.Status = nextStatus(lm.filter.Status)
@@ -782,7 +782,7 @@ func (lm listModel) applyFilterKey(msg tea.KeyMsg, km keymap) (listModel, tea.Cm
 // status hint instead of opening the form. The filter modal is NOT
 // gated — filter-only modals work in cross-project mode too.
 func (lm listModel) applyPromptKey(
-	msg tea.KeyMsg, km keymap, sc scope,
+	msg tea.KeyPressMsg, km keymap, sc scope,
 ) (listModel, tea.Cmd, bool) {
 	switch {
 	case km.Search.matches(msg):

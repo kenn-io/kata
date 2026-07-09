@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -9,10 +10,18 @@ import (
 // bytes — both let agent-supplied text attack the terminal (cursor
 // manipulation, column overwrite). Every TUI view that surfaces
 // external content must sanitize before render.
+// sgrSequence matches the styling escapes (CSI ... m) that Lip Gloss
+// v2 styles legitimately emit at render time (profile downsampling
+// moved into Bubble Tea's compositor, so rendered strings always carry
+// SGR). Everything else — OSC title hijacks, CSI erase/cursor motion,
+// bare ESC — must never survive input sanitization.
+var sgrSequence = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
 func assertSafeRender(t testing.TB, got string) {
 	t.Helper()
+	got = sgrSequence.ReplaceAllString(got, "")
 	if strings.Contains(got, "\x1b") {
-		t.Fatalf("ESC survived in render: %q", got)
+		t.Fatalf("non-SGR ESC survived in render: %q", got)
 	}
 	if strings.Contains(got, "\r") {
 		t.Fatalf("CR survived in render: %q", got)

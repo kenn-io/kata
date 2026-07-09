@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // listFilterEqual compares two ListFilter values by every field. The
@@ -55,7 +55,7 @@ func openFilterForm(t *testing.T, m Model) Model {
 	return m
 }
 
-// typeString feeds each rune of s through the model as a tea.KeyMsg.
+// typeString feeds each rune of s through the model as a tea.KeyPressMsg.
 // Mirrors how a user types into the focused field of an input form.
 func typeString(m Model, s string) Model {
 	for _, r := range s {
@@ -68,7 +68,7 @@ func typeString(m Model, s string) Model {
 // focused field by a known number of steps in one expression.
 func pressTabN(m Model, n int) Model {
 	for i := 0; i < n; i++ {
-		m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyTab})
+		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	return m
 }
@@ -133,7 +133,7 @@ func TestFilterForm_TabCyclesFourFields_WithWrap(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
 	wants := []int{1, 2, 3, 0}
 	for i, want := range wants {
-		m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyTab})
+		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if m.input.active != want {
 			t.Fatalf("step %d: active = %d, want %d", i, m.input.active, want)
 		}
@@ -149,17 +149,17 @@ func TestFilterForm_StatusFieldRadioCycle_LeftRightSpace(t *testing.T) {
 		t.Fatalf("initial radio = %q, want all", got)
 	}
 	// → all → open
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyRight})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyRight})
 	if got := m.input.fields[0].radio.value(); got != "open" {
 		t.Fatalf("after right: %q, want open", got)
 	}
 	// space open → closed
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeySpace})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	if got := m.input.fields[0].radio.value(); got != "closed" {
 		t.Fatalf("after space: %q, want closed", got)
 	}
 	// ← closed → open
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyLeft})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	if got := m.input.fields[0].radio.value(); got != "open" {
 		t.Fatalf("after left: %q, want open", got)
 	}
@@ -176,7 +176,7 @@ func TestFilterForm_StatusFieldRadioCycle_LeftRightSpace(t *testing.T) {
 func TestFilterForm_CommitUsesDedicatedPath(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
 	// Set Status=open via a right-arrow cycle.
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyRight})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyRight})
 	// Tab to Owner; type alice.
 	m = pressTabN(m, 1)
 	m = typeString(m, "alice")
@@ -184,7 +184,7 @@ func TestFilterForm_CommitUsesDedicatedPath(t *testing.T) {
 	m = pressTabN(m, 1)
 	m = typeString(m, "login")
 	// ctrl+s commits.
-	nm, cmd := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatalf("commit produced cmd %T; filters should apply client-side", cmd)
 	}
@@ -203,7 +203,7 @@ func TestFilterForm_CommitZeroesSelectedUIDAndResetsCursor(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
 	m.list.cursor = 5
 	m.list.selectedUID = "01TEST-42aa"
-	nm, _ := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if nm.list.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0 after commit", nm.list.cursor)
 	}
@@ -218,7 +218,7 @@ func TestFilterForm_CommitZeroesSelectedUIDAndResetsCursor(t *testing.T) {
 func TestFilterForm_CommitClearsLmStatus(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
 	m.list.status = "closed #99"
-	nm, _ := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if nm.list.status != "" {
 		t.Fatalf("list.status = %q, want empty after commit", nm.list.status)
 	}
@@ -228,7 +228,7 @@ func TestFilterForm_CommitClearsLmStatus(t *testing.T) {
 // cached all-status working set and returns no command.
 func TestFilterForm_CommitDoesNotRefetch(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
-	_, cmd := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	_, cmd := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatalf("expected nil cmd, got %T", cmd)
 	}
@@ -240,7 +240,7 @@ func TestFilterForm_CommitDoesNotRefetch(t *testing.T) {
 func TestFilterForm_CommitResetsCursorToZero(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
 	m.list.cursor = 17
-	nm, _ := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if nm.list.cursor != 0 {
 		t.Fatalf("cursor not reset: got %d, want 0", nm.list.cursor)
 	}
@@ -266,7 +266,7 @@ func TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact(t *testing.T) {
 		t.Fatalf("preFilter = %+v, want %+v", m.input.preFilter, wantPre)
 	}
 	// ctrl+r resets.
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlR})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	if got := m.input.fields[0].radio.value(); got != "all" {
 		t.Fatalf("Status not reset: %q, want all", got)
 	}
@@ -297,7 +297,7 @@ func TestFilterForm_EscRestoresPreFilter(t *testing.T) {
 	m = pressTabN(m, 1)
 	m = typeString(m, "alice")
 	// Esc cancels.
-	nm, _ := stepModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	nm, _ := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	assertInputKind(t, nm, inputNone)
 	want := ListFilter{Status: "open", Owner: "wesm"}
 	if !listFilterEqual(nm.list.filter, want) {
@@ -315,7 +315,7 @@ func TestFilterForm_CtrlSCommitsViaCommitInputBranch_NotCommitFormInput(
 	t *testing.T,
 ) {
 	m := openFilterForm(t, filterFormFixture())
-	nm, _ := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	assertInputKind(t, nm, inputNone)
 	if nm.input.saving {
 		t.Fatal("saving=true after ctrl+s; filter form fell into commitFormInput")
@@ -416,7 +416,7 @@ func TestFilterForm_LabelsField_AnyOfSemantics_AppliesViaCommit(t *testing.T) {
 		t.Fatalf("active = %d, want 3 (Labels)", m.input.active)
 	}
 	m = typeString(m, "bug, prio-1")
-	nm, _ := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	want := []string{"bug", "prio-1"}
 	if len(nm.list.filter.Labels) != len(want) {
 		t.Fatalf("filter.Labels = %v, want %v", nm.list.filter.Labels, want)
@@ -458,7 +458,7 @@ func TestFilterForm_LabelsField_FreeTypedInAllProjectsScope(t *testing.T) {
 	// Tab to Labels (idx 3); type free text.
 	m = pressTabN(m, 3)
 	m = typeString(m, "ad-hoc-label")
-	nm, _ := stepModel(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if len(nm.list.filter.Labels) != 1 || nm.list.filter.Labels[0] != "ad-hoc-label" {
 		t.Fatalf("filter.Labels = %v, want [ad-hoc-label]", nm.list.filter.Labels)
 	}

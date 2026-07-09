@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // captureCreateIssue stands up a test client whose handler records the
@@ -209,7 +209,7 @@ func TestForm_OpenCommentForm_StartsEmpty(t *testing.T) {
 func TestForm_CtrlS_OnEmptyComment_BlocksAndShowsError(t *testing.T) {
 	m := formFixture()
 	m = m.openCommentForm()
-	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	out, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	nm := out.(Model)
 	if cmd != nil {
 		t.Fatalf("empty comment dispatched cmd %T; want nil", cmd)
@@ -231,7 +231,7 @@ func TestForm_CtrlS_OnEmptyBodyEdit_AllowedToCommit(t *testing.T) {
 	// Clear the textarea (it pre-filled with the existing body).
 	m.input.activeField().setValue("")
 	m.input.fields[m.input.active] = *m.input.activeField()
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("empty body edit must dispatch EditBody (clearing is legitimate)")
 	}
@@ -245,7 +245,7 @@ func TestForm_CtrlS_SetsSavingGate(t *testing.T) {
 	m = m.openCommentForm()
 	m.input.activeField().setValue("hello")
 	m.input.fields[m.input.active] = *m.input.activeField()
-	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	out, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	nm := out.(Model)
 	if cmd == nil {
 		t.Fatal("first ctrl+s should dispatch AddComment")
@@ -254,7 +254,7 @@ func TestForm_CtrlS_SetsSavingGate(t *testing.T) {
 		t.Fatal("saving flag not set after first ctrl+s")
 	}
 	// Duplicate ctrl+s while saving must be a no-op.
-	out2, cmd2 := nm.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	out2, cmd2 := nm.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	nm2 := out2.(Model)
 	if cmd2 != nil {
 		t.Fatalf("duplicate ctrl+s dispatched cmd %T; want nil (saving gate)", cmd2)
@@ -270,7 +270,7 @@ func TestForm_Esc_CancelsAndClosesForm(t *testing.T) {
 	m := formFixture()
 	m = m.openCommentForm()
 	m.input.activeField().setValue("draft comment")
-	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	nm := out.(Model)
 	if nm.input.kind != inputNone {
 		t.Fatalf("esc did not close form; kind = %v", nm.input.kind)
@@ -295,7 +295,7 @@ func TestForm_CtrlE_RequestsEditorHandoff_TaggedWithFormGen(t *testing.T) {
 	m := formFixture()
 	m = m.openBodyEditForm()
 	formGenAtOpen := m.input.formGen
-	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	out, cmd := m.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	nm := out.(Model)
 	if cmd == nil {
 		t.Fatal("ctrl+e produced no cmd; expected editor handoff")
@@ -340,7 +340,7 @@ func TestForm_EditorReturn_StaleFormGen_DropsContent(t *testing.T) {
 	m = m.openCommentForm()
 	staleGen := m.input.formGen
 	// Close (esc) and re-open — new formGen.
-	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = out.(Model)
 	m = m.openCommentForm()
 	m.input.activeField().setValue("typed in fresh form")

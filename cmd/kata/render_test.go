@@ -6,8 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +33,7 @@ func row(glyph, idPadded, prio, chips, title, owner string) string {
 }
 
 func TestRenderRows_ColorOff(t *testing.T) {
-	r := newRowRendererFor(lipgloss.NewRenderer(&bytes.Buffer{}, termenv.WithProfile(termenv.Ascii)))
+	r := newRowRendererFor(colorprofile.NoTTY)
 
 	t.Run("open row with P1 and epic chip", func(t *testing.T) {
 		var buf bytes.Buffer
@@ -171,7 +170,7 @@ func TestRenderRows_ColorOff(t *testing.T) {
 }
 
 func TestRenderListFooter_ColorOff(t *testing.T) {
-	r := newRowRendererFor(lipgloss.NewRenderer(&bytes.Buffer{}, termenv.WithProfile(termenv.Ascii)))
+	r := newRowRendererFor(colorprofile.NoTTY)
 
 	const rule = "──────────────────────────────────────────────────"
 	const legend = "Status: ○ open  ● blocked  ✓ closed"
@@ -245,7 +244,7 @@ func TestRenderListFooter_ColorOff(t *testing.T) {
 }
 
 func TestRenderReadyFooter_ColorOff(t *testing.T) {
-	r := newRowRendererFor(lipgloss.NewRenderer(&bytes.Buffer{}, termenv.WithProfile(termenv.Ascii)))
+	r := newRowRendererFor(colorprofile.NoTTY)
 
 	const rule = "──────────────────────────────────────────────────"
 	const legend = "Status: ○ open"
@@ -290,9 +289,7 @@ func TestRenderReadyFooter_ColorOff(t *testing.T) {
 // It also asserts that stripping the ANSI from the color-ON row yields
 // byte-identical output to the color-OFF rendering (layout invariance).
 func TestRenderRows_ColorOn(t *testing.T) {
-	lr := lipgloss.NewRenderer(&bytes.Buffer{})
-	lr.SetColorProfile(termenv.ANSI256)
-	r := newRowRendererFor(lr)
+	r := newRowRendererFor(colorprofile.ANSI256)
 
 	rows := []issueRow{{
 		ID:       "abc1",
@@ -305,11 +302,13 @@ func TestRenderRows_ColorOn(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, r.renderRows(&buf, rows))
 
-	const want = "○ \x1b[36mabc1\x1b[0m  \x1b[31m• P1\x1b[0m  \x1b[35m[epic]\x1b[0m " +
-		"fix the thing \x1b[2m(alice)\x1b[0m\n"
+	// Bubble Tea v2's colorprofile writer normalizes the SGR reset to
+	// the empty-parameter form \x1b[m (identical meaning to \x1b[0m).
+	const want = "○ \x1b[36mabc1\x1b[m  \x1b[31m• P1\x1b[m  \x1b[35m[epic]\x1b[m " +
+		"fix the thing \x1b[2m(alice)\x1b[m\n"
 	assert.Equal(t, want, buf.String())
 
-	off := newRowRendererFor(lipgloss.NewRenderer(&bytes.Buffer{}, termenv.WithProfile(termenv.Ascii)))
+	off := newRowRendererFor(colorprofile.NoTTY)
 	var offBuf bytes.Buffer
 	require.NoError(t, off.renderRows(&offBuf, rows))
 	assert.Equal(t, offBuf.String(), stripANSITest(buf.String()))
@@ -318,9 +317,7 @@ func TestRenderRows_ColorOn(t *testing.T) {
 // TestRenderListFooter_ColorOn pins the rule's and legend's exact ANSI
 // output (both faint).
 func TestRenderListFooter_ColorOn(t *testing.T) {
-	lr := lipgloss.NewRenderer(&bytes.Buffer{})
-	lr.SetColorProfile(termenv.ANSI256)
-	r := newRowRendererFor(lr)
+	r := newRowRendererFor(colorprofile.ANSI256)
 
 	rows := []issueRow{{ID: "a1", Status: "open"}}
 	var buf bytes.Buffer
@@ -328,13 +325,13 @@ func TestRenderListFooter_ColorOn(t *testing.T) {
 
 	const rule = "──────────────────────────────────────────────────"
 	want := "\n" +
-		"\x1b[2m" + rule + "\x1b[0m\n" +
+		"\x1b[2m" + rule + "\x1b[m\n" +
 		"Total: 1 issue (1 open)\n" +
 		"\n" +
-		"\x1b[2mStatus: ○ open  ● blocked  ✓ closed\x1b[0m\n"
+		"\x1b[2mStatus: ○ open  ● blocked  ✓ closed\x1b[m\n"
 	assert.Equal(t, want, buf.String())
 
-	off := newRowRendererFor(lipgloss.NewRenderer(&bytes.Buffer{}, termenv.WithProfile(termenv.Ascii)))
+	off := newRowRendererFor(colorprofile.NoTTY)
 	var offBuf bytes.Buffer
 	require.NoError(t, off.renderListFooter(&offBuf, rows, false))
 	assert.Equal(t, offBuf.String(), stripANSITest(buf.String()))
@@ -344,7 +341,7 @@ func TestRenderListFooter_ColorOn(t *testing.T) {
 // and confirms id-column alignment uses cell width, not len(), and does
 // not panic. "カタ1" is 5 cells wide (2 + 2 + 1).
 func TestRenderRows_WideGlyphID(t *testing.T) {
-	r := newRowRendererFor(lipgloss.NewRenderer(&bytes.Buffer{}, termenv.WithProfile(termenv.Ascii)))
+	r := newRowRendererFor(colorprofile.NoTTY)
 
 	rows := []issueRow{
 		{ID: "カタ1", Title: "wide id row", Owner: "eve", Status: "open"},
@@ -363,7 +360,7 @@ func TestRenderRows_WideGlyphID(t *testing.T) {
 // and doesn't perturb id-column alignment (the id column precedes the
 // title, so only id padding affects alignment).
 func TestRenderRows_WideGlyphTitle(t *testing.T) {
-	r := newRowRendererFor(lipgloss.NewRenderer(&bytes.Buffer{}, termenv.WithProfile(termenv.Ascii)))
+	r := newRowRendererFor(colorprofile.NoTTY)
 
 	rows := []issueRow{
 		{ID: "abcdefgh", Title: "long id row", Owner: "eve", Status: "open"},

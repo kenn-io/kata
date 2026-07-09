@@ -1,11 +1,11 @@
 package tui
 
 import (
-	"io"
+	"image/color"
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 type colorMode int
@@ -72,14 +72,21 @@ var (
 )
 
 // Border colors used by M3+ render code for panel chrome (focused vs
-// unfocused panes, form/prompt boxes). Stored as lipgloss.TerminalColor
-// so callers pass them straight to BorderForeground without re-resolving
-// the color mode. Re-bound by applyColorMode so KATA_COLOR_MODE picks
-// the right shade.
+// unfocused panes, form/prompt boxes). Stored as color.Color so callers
+// pass them straight to BorderForeground without re-resolving the color
+// mode. Re-bound by applyColorMode so KATA_COLOR_MODE picks the right
+// shade.
 var (
-	panelActiveBorder   lipgloss.TerminalColor // magenta
-	panelInactiveBorder lipgloss.TerminalColor // gray
+	panelActiveBorder   color.Color // magenta
+	panelInactiveBorder color.Color // gray
 )
+
+// markdownCodeBlockBg is the glamour-facing code-block background as an
+// ANSI-256 palette string ("" = no background). Kept alongside
+// markdownCodeBlockStyle because glamour's StyleConfig wants a *string,
+// not a color.Color — re-deriving the string from the style would need
+// a reverse color→string mapping. Re-bound by applyColorMode.
+var markdownCodeBlockBg string
 
 // M3.5 chrome styles — borrowed from msgvault's view.go palette. Each
 // pairs a foreground/bold/italic with an adaptive background so the
@@ -115,20 +122,18 @@ var (
 )
 
 // applyColorMode rebuilds all package-level styles. Called at TUI boot
-// so tests can swap modes without leaking state across tests. The
-// renderer is bound to w so color-capability detection runs against the
-// actual output stream (not the package-default os.Stdout-bound
-// renderer, which is wrong when opts.Stdout is something else).
-func applyColorMode(m colorMode, w io.Writer) {
+// and again when the terminal answers the in-loop background-color
+// query (tea.BackgroundColorMsg), so tests can swap modes without
+// leaking state across tests. isDark is only consulted in colorAuto;
+// the explicit modes pin it. Lip Gloss v2 has no renderer — color
+// downsampling happens in Bubble Tea's compositor against the real
+// output stream, so no capability probe runs here.
+func applyColorMode(m colorMode, isDark bool) {
 	activeColorMode = m
-	if w == nil {
-		w = os.Stdout
-	}
-	r := lipgloss.NewRenderer(w)
-	activeHasDarkBackground = r.HasDarkBackground()
+	activeHasDarkBackground = isDark
 	if m == colorNone {
 		activeHasDarkBackground = false
-		base := r.NewStyle()
+		base := lipgloss.NewStyle()
 		titleStyle = base.Bold(true)
 		subtleStyle = base
 		statusStyle = base
@@ -147,6 +152,7 @@ func applyColorMode(m colorMode, w io.Writer) {
 		detailMetaStyle = base
 		detailSectionHeaderStyle = base.Bold(true)
 		markdownCodeBlockStyle = base
+		markdownCodeBlockBg = ""
 		// Borders carry no foreground in colorNone — lipgloss renders
 		// them in the default terminal color. NoColor is the closest
 		// stand-in for "use whatever the terminal would otherwise pick."
@@ -166,79 +172,89 @@ func applyColorMode(m colorMode, w io.Writer) {
 		modalBoxStyle = base.Border(lipgloss.RoundedBorder()).Padding(1, 2)
 		return
 	}
-	pick := func(light, dark string) lipgloss.TerminalColor {
-		switch m {
-		case colorLight:
-			activeHasDarkBackground = false
-			return lipgloss.Color(light)
-		case colorDark:
-			activeHasDarkBackground = true
-			return lipgloss.Color(dark)
-		default:
-			return lipgloss.AdaptiveColor{Light: light, Dark: dark}
-		}
+	switch m {
+	case colorLight:
+		activeHasDarkBackground = false
+	case colorDark:
+		activeHasDarkBackground = true
+	}
+	// Lip Gloss v2 removed AdaptiveColor (adaptive-at-render-time). The
+	// light/dark decision resolves here instead: applyColorMode re-runs
+	// when tea.BackgroundColorMsg lands, so every style rebuilds against
+	// the terminal's actual background.
+	lightDark := lipgloss.LightDark(activeHasDarkBackground)
+	pick := func(light, dark string) color.Color {
+		return lightDark(lipgloss.Color(light), lipgloss.Color(dark))
 	}
 	// titleStyle is bold without a saturated foreground so the issue
 	// header reads as the page lead rather than a magenta announcement.
 	// The full chrome stack (project bar accent, status pill, focused
 	// borders) still carries hue; the title leans on weight + position
 	// to be the visual anchor.
-	titleStyle = r.NewStyle().Bold(true)
-	subtleStyle = r.NewStyle().Foreground(pick("242", "246"))
-	statusStyle = r.NewStyle().Foreground(pick("242", "246"))
-	selectedStyle = r.NewStyle().Background(pick("153", "24"))
-	openStyle = r.NewStyle().Foreground(pick("28", "46"))
-	closedStyle = r.NewStyle().Foreground(pick("240", "245"))
+	titleStyle = lipgloss.NewStyle().Bold(true)
+	subtleStyle = lipgloss.NewStyle().Foreground(pick("242", "246"))
+	statusStyle = lipgloss.NewStyle().Foreground(pick("242", "246"))
+	selectedStyle = lipgloss.NewStyle().Background(pick("153", "24"))
+	openStyle = lipgloss.NewStyle().Foreground(pick("28", "46"))
+	closedStyle = lipgloss.NewStyle().Foreground(pick("240", "245"))
 	// deletedStyle is the dim-red semantic remap of roborev's failStyle
 	// — design doc §"Visual language". Faint avoids reading as alarming
 	// while still distinguishing soft-deleted rows from open/closed.
-	deletedStyle = r.NewStyle().Faint(true).Foreground(pick("124", "196"))
-	helpKeyStyle = r.NewStyle().Foreground(pick("242", "246"))
-	helpDescStyle = r.NewStyle().Foreground(pick("248", "240"))
-	errorStyle = r.NewStyle().Bold(true).Foreground(pick("124", "196"))
-	toastStyle = r.NewStyle().Bold(true).Foreground(pick("28", "46"))
-	chipStyle = r.NewStyle().Foreground(pick("242", "246"))
-	chipActive = r.NewStyle().Bold(true).Foreground(pick("125", "205"))
-	tabActive = r.NewStyle().Bold(true).Underline(true).Foreground(pick("125", "205"))
-	tabInactive = r.NewStyle().Foreground(pick("242", "246"))
+	deletedStyle = lipgloss.NewStyle().Faint(true).Foreground(pick("124", "196"))
+	helpKeyStyle = lipgloss.NewStyle().Foreground(pick("242", "246"))
+	helpDescStyle = lipgloss.NewStyle().Foreground(pick("248", "240"))
+	errorStyle = lipgloss.NewStyle().Bold(true).Foreground(pick("124", "196"))
+	toastStyle = lipgloss.NewStyle().Bold(true).Foreground(pick("28", "46"))
+	chipStyle = lipgloss.NewStyle().Foreground(pick("242", "246"))
+	chipActive = lipgloss.NewStyle().Bold(true).Foreground(pick("125", "205"))
+	tabActive = lipgloss.NewStyle().Bold(true).Underline(true).Foreground(pick("125", "205"))
+	tabInactive = lipgloss.NewStyle().Foreground(pick("242", "246"))
 	// detailMetaStyle and detailSectionHeaderStyle no longer paint a
 	// background band. The earlier full-width slabs read as heavy
 	// chrome that competed with the issue body. Section labels lean on
 	// bold weight + position; metadata rows lean on subtleStyle for
 	// the label half and plain text for the value half.
-	detailMetaStyle = r.NewStyle()
-	detailSectionHeaderStyle = r.NewStyle().Bold(true)
-	markdownCodeBlockStyle = r.NewStyle().Background(pick("252", "236"))
+	detailMetaStyle = lipgloss.NewStyle()
+	detailSectionHeaderStyle = lipgloss.NewStyle().Bold(true)
+	markdownCodeBlockStyle = lipgloss.NewStyle().Background(pick("252", "236"))
+	if activeHasDarkBackground {
+		markdownCodeBlockBg = "236"
+	} else {
+		markdownCodeBlockBg = "252"
+	}
 	panelActiveBorder = pick("125", "205")
 	panelInactiveBorder = pick("242", "246")
 	// M3.5 chrome — adaptive bgs lifted from msgvault. titleBar uses a
 	// brighter bg than statsLine so the brand strip stands out from
 	// the breadcrumb row. cursorRow is brighter than altRow so the
 	// three-tier striping reads cleanly even in 256-color terminals.
-	titleBarStyle = r.NewStyle().Bold(true).Padding(0, 1).
+	titleBarStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1).
 		Foreground(pick("232", "255")).
 		Background(pick("248", "238"))
-	statsLineStyle = r.NewStyle().Padding(0, 1).
+	statsLineStyle = lipgloss.NewStyle().Padding(0, 1).
 		Foreground(pick("242", "246")).
 		Background(pick("253", "234"))
-	tableHeaderStyle = r.NewStyle().Bold(true).
+	tableHeaderStyle = lipgloss.NewStyle().Bold(true).
 		Foreground(pick("242", "246")).
 		Background(pick("253", "234"))
-	separatorRuleStyle = r.NewStyle().Faint(true).
+	separatorRuleStyle = lipgloss.NewStyle().Faint(true).
 		Foreground(pick("248", "242"))
-	cursorRowStyle = r.NewStyle().
+	cursorRowStyle = lipgloss.NewStyle().
 		Background(pick("153", "24"))
-	altRowStyle = r.NewStyle().
+	altRowStyle = lipgloss.NewStyle().
 		Background(pick("254", "236"))
-	normalRowStyle = r.NewStyle()
-	footerBarStyle = r.NewStyle().Padding(0, 1).
+	normalRowStyle = lipgloss.NewStyle()
+	footerBarStyle = lipgloss.NewStyle().Padding(0, 1).
 		Foreground(pick("242", "246")).
 		Background(pick("253", "234"))
-	modalBoxStyle = r.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).
+	modalBoxStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).
 		BorderForeground(pick("125", "205"))
 }
 
-// applyDefaultColorMode wires the resolved color mode to the active
-// output writer. Called from Run so style vars are always populated
-// against the real stream.
-func applyDefaultColorMode(w io.Writer) { applyColorMode(resolveColorMode(), w) }
+// applyDefaultColorMode populates the style vars at boot. Before the
+// terminal has answered the background-color query the dark palette is
+// assumed (the common terminal default, and v1 termenv's fallback);
+// Update re-runs applyColorMode with the real answer when
+// tea.BackgroundColorMsg lands, so an auto-mode light terminal restyles
+// on the first frame after the response.
+func applyDefaultColorMode() { applyColorMode(resolveColorMode(), true) }

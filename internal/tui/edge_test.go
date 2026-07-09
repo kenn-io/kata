@@ -2,12 +2,11 @@ package tui
 
 import (
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // TestEdge_WindowResize_NoPanic feeds a wide-then-narrow WindowSizeMsg
@@ -20,10 +19,10 @@ import (
 // stays deterministic.
 func TestEdge_WindowResize_NoPanic(t *testing.T) {
 	t.Setenv("KATA_COLOR_MODE", "none")
-	applyDefaultColorMode(io.Discard)
+	applyDefaultColorMode()
 	prior := renderNow
 	renderNow = func() time.Time { return snapshotFixedNow }
-	defer func() { renderNow = prior; applyDefaultColorMode(io.Discard) }()
+	defer func() { renderNow = prior; applyDefaultColorMode() }()
 
 	m := initialModel(Options{})
 	m.list.loading = false
@@ -31,7 +30,7 @@ func TestEdge_WindowResize_NoPanic(t *testing.T) {
 	m.list.issues[0].Title = "fix login bug on Safari with an unusually long regression title"
 
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 140, Height: 30})
-	wide := m.View()
+	wide := m.viewContent()
 	if !strings.Contains(wide, "fix login bug on Safari with an unusually long regression title") {
 		t.Fatalf("wide render missing full title:\n%s", wide)
 	}
@@ -40,7 +39,7 @@ func TestEdge_WindowResize_NoPanic(t *testing.T) {
 	if m.width != 80 || m.height != 30 {
 		t.Fatalf("resize not applied: width=%d height=%d", m.width, m.height)
 	}
-	narrow := m.View()
+	narrow := m.viewContent()
 	// At 80 cols the title column flexes to 20 (floor: fixed cols sum
 	// to 42, leaving 38 — less than the wide render's title width).
 	// The cursor marker must still be present.
@@ -113,7 +112,7 @@ func TestEdge_SSEDuringSearchPrompt(t *testing.T) {
 
 	// Enter commits — bar closes, filter stays. No refetch (Search is
 	// client-side; the bar already mirrored the value live).
-	m, _ = updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.input.kind != inputNone {
 		t.Fatal("Enter did not close the bar")
 	}
@@ -190,27 +189,27 @@ func TestEdge_PageUpPageDown_PagesVisibleWindow(t *testing.T) {
 	mm, _ := updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 30})
 	m = mm
 
-	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyPgDown})
+	nm, _ := updateModel(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	assertSelection(t, nm, 27, "01TEST-r028")
 	assertViewContains(t, nm, "[23-46 of 50]")
 
-	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgDown})
+	nm, _ = updateModel(nm, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	assertSelection(t, nm, 31, "01TEST-r032")
 	assertViewContains(t, nm, "[27-50 of 50]")
 
-	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgDown})
+	nm, _ = updateModel(nm, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	assertSelection(t, nm, 49, "01TEST-r050")
 
-	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
+	nm, _ = updateModel(nm, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if nm.list.cursor >= 49 {
 		t.Fatalf("after pgup from end, cursor = %d, want movement off the last row", nm.list.cursor)
 	}
 
-	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
+	nm, _ = updateModel(nm, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	assertSelection(t, nm, 23, "01TEST-r024")
 	assertViewContains(t, nm, "[1-24 of 50]")
 
-	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
+	nm, _ = updateModel(nm, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	assertSelection(t, nm, 0, "01TEST-r001")
 	assertViewContains(t, nm, "[1-24 of 50]")
 }
@@ -223,11 +222,11 @@ func TestEdge_PageDownToFinalPagePreservesScreenRow(t *testing.T) {
 	mm, _ := updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 80})
 	m = mm
 
-	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyPgDown})
+	nm, _ := updateModel(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	assertSelection(t, nm, 14, "01TEST-r015")
 	assertViewContains(t, nm, "[15-88 of 88]")
 
-	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgDown})
+	nm, _ = updateModel(nm, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	assertSelection(t, nm, 87, "01TEST-r088")
 }
 
@@ -239,11 +238,11 @@ func TestEdge_PageUpToFirstPagePreservesScreenRow(t *testing.T) {
 	mm, _ := updateModel(m, tea.WindowSizeMsg{Width: 120, Height: 80})
 	m = mm
 
-	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyPgUp})
+	nm, _ := updateModel(m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	assertSelection(t, nm, 73, "01TEST-r074")
 	assertViewContains(t, nm, "[1-74 of 88]")
 
-	nm, _ = updateModel(nm, tea.KeyMsg{Type: tea.KeyPgUp})
+	nm, _ = updateModel(nm, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	assertSelection(t, nm, 0, "01TEST-r001")
 }
 
@@ -255,7 +254,7 @@ func TestEdge_PageDown_ClampsAtEnd(t *testing.T) {
 	m.list.issues = makeTestIssues(12)
 	m.list.cursor = 8
 
-	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyPgDown})
+	nm, _ := updateModel(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if nm.list.cursor != 11 {
 		t.Fatalf("cursor = %d, want 11 (clamped to last row)", nm.list.cursor)
 	}
@@ -388,7 +387,7 @@ func TestQuit_QPressed_OpensConfirm(t *testing.T) {
 func TestQuit_CtrlCFastQuits(t *testing.T) {
 	m := initialModel(Options{})
 	m.list.loading = false
-	nm, cmd := updateModel(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	nm, cmd := updateModel(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if nm.modal != modalNone {
 		t.Fatalf("ctrl+c opened a modal: %v", nm.modal)
 	}
@@ -438,7 +437,7 @@ func TestQuit_NCancels(t *testing.T) {
 	m := initialModel(Options{})
 	m.list.loading = false
 	m.modal = modalQuitConfirm
-	nm, _ := updateModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	nm, _ := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if nm.modal != modalNone {
 		t.Fatal("Esc did not close the quit modal")
 	}
@@ -658,7 +657,7 @@ func TestEdge_DetailJumpBack(t *testing.T) {
 	m.nextGen = 1
 
 	// Press Enter on the link → emits jumpDetailMsg(7bb).
-	m, cmd := updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("expected jump cmd from Enter")
 	}
@@ -694,7 +693,7 @@ func TestEdge_DetailJumpBack(t *testing.T) {
 	}
 
 	// Press Esc → pop to original (handleBack restores from navStack).
-	m, popCmd := updateModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m, popCmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if popCmd != nil {
 		t.Fatalf("Esc on stacked detail must not emit a cmd, got %T", popCmd)
 	}

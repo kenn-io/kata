@@ -1,11 +1,10 @@
 package tui
 
 import (
-	"io"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // splitTestSetup boots a Model into split layout (160x40) with the
@@ -17,14 +16,14 @@ func splitTestSetup(t *testing.T) (Model, func()) {
 	t.Helper()
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
-	applyDefaultColorMode(io.Discard)
+	applyDefaultColorMode()
 	m := initialModel(Options{})
 	m.api = &Client{}
 	m.scope = scope{projectID: 7, projectName: "kata"}
 	m.list.loading = false
 	m.list.issues = snapListFixture()
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
-	cleanup := func() { applyDefaultColorMode(io.Discard) }
+	cleanup := func() { applyDefaultColorMode() }
 	if m.layout != layoutSplit {
 		t.Fatalf("split setup failed: layout=%v want layoutSplit", m.layout)
 	}
@@ -108,8 +107,8 @@ func TestSplit_DebounceCoalescesBursts(t *testing.T) {
 func TestSplit_InitialFetchBootstrapsDetailPane(t *testing.T) {
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
-	applyDefaultColorMode(io.Discard)
-	defer applyDefaultColorMode(io.Discard)
+	applyDefaultColorMode()
+	defer applyDefaultColorMode()
 	m := initialModel(Options{})
 	m.api = &Client{}
 	m.scope = scope{projectID: 7, projectName: "kata"}
@@ -146,8 +145,8 @@ func TestSplit_InitialFetchBootstrapsDetailPane(t *testing.T) {
 func TestSplit_StackedToSplitResizeBootstrapsDetailPane(t *testing.T) {
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
-	applyDefaultColorMode(io.Discard)
-	defer applyDefaultColorMode(io.Discard)
+	applyDefaultColorMode()
+	defer applyDefaultColorMode()
 	m := initialModel(Options{})
 	m.api = &Client{}
 	m.scope = scope{projectID: 7, projectName: "kata"}
@@ -189,8 +188,8 @@ func TestSplit_StackedToSplitResizeBootstrapsDetailPane(t *testing.T) {
 func TestSplit_InitialFetchSkipsBootstrapInStacked(t *testing.T) {
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
-	applyDefaultColorMode(io.Discard)
-	defer applyDefaultColorMode(io.Discard)
+	applyDefaultColorMode()
+	defer applyDefaultColorMode()
 	m := initialModel(Options{})
 	m.api = &Client{}
 	m.scope = scope{projectID: 7, projectName: "kata"}
@@ -222,7 +221,7 @@ func TestSplit_TabMovesFocusToDetail(t *testing.T) {
 	if m.focus != focusList {
 		t.Fatalf("setup focus=%v want focusList", m.focus)
 	}
-	m, _ = updateModel(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.focus != focusDetail {
 		t.Errorf("focus=%v after tab, want focusDetail", m.focus)
 	}
@@ -235,7 +234,7 @@ func TestSplit_TabMovesFocusToDetail(t *testing.T) {
 func TestSplit_EnterMovesFocusToDetail(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
-	m, cmd := updateModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("Enter on list pane produced no cmd; expected openDetailMsg dispatch")
 	}
@@ -256,7 +255,7 @@ func TestSplit_EscReturnsFocusToList(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	focusFirstIssueDetail(&m)
-	m, _ = updateModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.focus != focusList {
 		t.Errorf("focus=%v after esc, want focusList", m.focus)
 	}
@@ -275,7 +274,7 @@ func TestSplit_EscDoesNotEscapeWhilePromptActive(t *testing.T) {
 	if m.input.kind != inputLabelPrompt {
 		t.Fatalf("setup failed: input.kind=%v want inputLabelPrompt", m.input.kind)
 	}
-	m, _ = updateModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.input.kind != inputNone {
 		t.Errorf("input.kind=%v after first esc, want inputNone (prompt closed)", m.input.kind)
 	}
@@ -283,7 +282,7 @@ func TestSplit_EscDoesNotEscapeWhilePromptActive(t *testing.T) {
 		t.Errorf("focus=%v after first esc, want focusDetail (focus stays)", m.focus)
 	}
 	// Second esc moves focus.
-	m, _ = updateModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.focus != focusList {
 		t.Errorf("focus=%v after second esc, want focusList", m.focus)
 	}
@@ -299,7 +298,7 @@ func TestSplit_FilterModalOverlaysWholeTerminal(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m, _ = m.openInput(inputFilterForm)
-	got := m.View()
+	got := m.viewContent()
 	if !strings.Contains(got, "filter") {
 		t.Fatalf("filter modal did not render; output:\n%s", got)
 	}
@@ -312,7 +311,7 @@ func TestSplit_NewIssueFormOverlaysWholeTerminal(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
 	m, _ = m.openInput(inputNewIssueForm)
-	got := m.View()
+	got := m.viewContent()
 	if !strings.Contains(got, "new issue") {
 		t.Fatalf("new-issue form did not render; output:\n%s", got)
 	}
@@ -328,7 +327,7 @@ func TestSplit_NewIssueFormOverlaysWholeTerminal(t *testing.T) {
 func TestSplit_HelpRowSwapsWithFocus(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
-	listView := m.View()
+	listView := m.viewContent()
 	if !strings.Contains(listView, "search") {
 		t.Errorf("list-focus footer missing 'search' hint:\n%s", listView)
 	}
@@ -338,7 +337,7 @@ func TestSplit_HelpRowSwapsWithFocus(t *testing.T) {
 	iss := m.list.issues[0]
 	m.detail.issue = &iss
 	m.focus = focusDetail
-	detailView := m.View()
+	detailView := m.viewContent()
 	if !strings.Contains(detailView, "section") {
 		t.Errorf("detail-focus footer missing 'section' hint:\n%s", detailView)
 	}
@@ -362,7 +361,7 @@ func TestSplit_SuggestionMenuClampedToDetailPane(t *testing.T) {
 		labels: []LabelCount{{Label: "alpha", Count: 1}},
 	}
 	m, _ = m.openInput(inputLabelPrompt)
-	got := m.View()
+	got := m.viewContent()
 	// Look for the unique menu content "alpha (1)" — it shouldn't
 	// appear on the left side of the screen (which is the list
 	// pane), only inside the detail pane (column >= list-pane width).
@@ -425,7 +424,7 @@ func TestSplit_JumpDetail_SurvivesCursorFollowFocusDetail(t *testing.T) {
 		t.Fatalf("setup: m.view=%v want viewList (cursor-follow must not change m.view)", m.view)
 	}
 	// Tab advances focus to focusDetail; m.view still viewList.
-	m, _ = updateModel(m, tea.KeyMsg{Type: tea.KeyTab})
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.focus != focusDetail {
 		t.Fatalf("setup: m.focus=%v want focusDetail after Tab", m.focus)
 	}

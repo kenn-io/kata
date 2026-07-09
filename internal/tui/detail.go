@@ -3,7 +3,7 @@ package tui
 import (
 	"context"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // detailTab names which sub-tab the detail view is rendering.
@@ -154,7 +154,7 @@ func newDetailModel() detailModel { return detailModel{} }
 // so dm.Update no longer has a "modal active" branch.
 func (dm detailModel) Update(msg tea.Msg, km keymap, api detailAPI) (detailModel, tea.Cmd) {
 	switch m := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return dm.handleKey(m, km, api)
 	case mutationDoneMsg:
 		return dm.applyMutation(m, api)
@@ -263,7 +263,7 @@ func mergeErr(prev, next error) error {
 // thin router: navigation keys live here directly, mutation keys defer
 // to handleMutationKey so the cyclomatic budget (≤8) holds.
 func (dm detailModel) handleKey(
-	msg tea.KeyMsg, km keymap, api detailAPI,
+	msg tea.KeyPressMsg, km keymap, api detailAPI,
 ) (detailModel, tea.Cmd) {
 	if next, cmd, ok := dm.handleNavKey(msg, km, api); ok {
 		return next, cmd
@@ -286,7 +286,7 @@ func (dm detailModel) handleKey(
 // dedicated key the body scroll path was unreachable in practice
 // because the events tab almost always has at least one row.
 func (dm detailModel) handleNavKey(
-	msg tea.KeyMsg, km keymap, api detailAPI,
+	msg tea.KeyPressMsg, km keymap, api detailAPI,
 ) (detailModel, tea.Cmd, bool) {
 	switch {
 	case km.NextTab.matches(msg):

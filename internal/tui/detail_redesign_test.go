@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -221,8 +220,8 @@ func TestDetailRedesign_FooterHintsAreComprehensive(t *testing.T) {
 // adaptive background; the redesign drops the background so labels
 // read as plain bold text against the page surface.
 func TestDetailRedesign_SectionHeadersHaveNoBackgroundSlab(t *testing.T) {
-	defer applyDefaultColorMode(io.Discard)
-	applyColorMode(colorDark, io.Discard)
+	defer applyDefaultColorMode()
+	applyColorMode(colorDark, true)
 	if styleHasBackground(detailSectionHeaderStyle) {
 		t.Fatal("detailSectionHeaderStyle should not paint a background slab")
 	}

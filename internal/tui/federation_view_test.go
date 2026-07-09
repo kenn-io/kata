@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -30,7 +30,7 @@ func TestFederationView_FKeyTransitionsFromList(t *testing.T) {
 func TestFederationView_EscReturnsToPreviousView(t *testing.T) {
 	m := setupFederationView()
 
-	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, cmd := m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, viewList, out.view)
@@ -217,7 +217,7 @@ func TestFederationBrowse_ReadOnlyDoesNotCreateEnrollment(t *testing.T) {
 	require.NotNil(t, cmd)
 	out, _ = updateModel(out, cmd().(federationHubProjectsLoadedMsg))
 
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeBrowseHubs, out.federationMode)
@@ -266,7 +266,7 @@ func TestFederationEnroll_NWithCurrentProjectStartsLocalSelectionCursored(t *tes
 	assert.Equal(t, "spoke-project", cursorRow.project.Name)
 
 	// One Enter keeps the previous adopt ergonomics.
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeSelectHub, out.federationMode)
 	assert.Equal(t, int64(7), out.federationDraft.SpokeProjectID)
@@ -328,11 +328,11 @@ func TestFederationEnroll_EscFromHubSelectionReturnsToLocalProjectSelection(t *t
 	out, cmd := m.routeFederationViewKey(keyRune('n'))
 	require.Nil(t, cmd)
 	out.federationLocalProjectCursor = 1
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
 	require.Equal(t, federationModeSelectHub, out.federationMode)
 
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeSelectLocalProject, out.federationMode)
@@ -389,9 +389,9 @@ func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) {
 	m.activeDaemon = m.daemonTargets[0]
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
-	out, _ = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter}) // adopt the pre-cursored active project
+	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // adopt the pre-cursored active project
 	out.federationHubCursor = 1
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	out = out.handleFederationHubProjectsLoaded(cmd().(federationHubProjectsLoadedMsg))
 
@@ -399,7 +399,7 @@ func TestFederationEnroll_SelectHubLoadsHubAuthPrincipal(t *testing.T) {
 	assert.Equal(t, "hub-operator", out.federationDraft.HubInstance.Auth.Actor)
 	assert.Contains(t, rendered, "hub auth: token actor hub-operator")
 
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
 	rendered = stripANSI(renderFederation(out))
 	assert.Contains(t, rendered, "requested actor: hub-operator")
@@ -453,11 +453,11 @@ func TestFederationEnroll_CreateReplicaBranchDefaultsLocalNameFromHubProject(t *
 
 	out, cmd := m.routeFederationViewKey(keyRune('n'))
 	require.Nil(t, cmd)
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeSelectHub, out.federationMode)
 	out.federationHubCursor = 1
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	out = out.handleFederationHubProjectsLoaded(federationHubProjectsLoadedMsg{
 		connGen:  out.connGen,
@@ -466,7 +466,7 @@ func TestFederationEnroll_CreateReplicaBranchDefaultsLocalNameFromHubProject(t *
 		projects: []ProjectSummary{{ID: 42, Name: "hub-project"}},
 	})
 
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModePreview, out.federationMode)
@@ -522,7 +522,7 @@ func TestFederationEnroll_ExistingLocalFederationBindingBlocksBeforeMutation(t *
 	assert.Equal(t, federationModePreview, out.federationMode)
 	assert.Contains(t, stripANSI(renderFederation(out)), "already has federation binding")
 
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModePreview, out.federationMode)
 }
@@ -539,9 +539,9 @@ func TestFederationEnroll_MissingTokenEnvBlocksBeforeMutation(t *testing.T) {
 	m.activeDaemon = m.daemonTargets[0]
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
-	out, _ = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter}) // adopt the pre-cursored active project
+	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // adopt the pre-cursored active project
 	out.federationHubCursor = 1
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeSelectHub, out.federationMode)
@@ -556,8 +556,8 @@ func TestFederationEnroll_ActiveDaemonAsHubBlocked(t *testing.T) {
 	m.activeDaemon = m.daemonTargets[0]
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
-	out, _ = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter}) // adopt the pre-cursored active project
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // adopt the pre-cursored active project
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
 	assert.Contains(t, stripANSI(renderFederation(out)), "active daemon cannot be selected as hub")
@@ -597,9 +597,9 @@ func TestFederationEnroll_PlainHTTPHostnameRequiresCatalogAllowInsecure(t *testi
 	m.activeDaemon = m.daemonTargets[0]
 
 	out, _ := m.routeFederationViewKey(keyRune('n'))
-	out, _ = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter}) // adopt the pre-cursored active project
+	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter}) // adopt the pre-cursored active project
 	out.federationHubCursor = 1
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.Nil(t, cmd)
 	assert.Contains(t, stripANSI(renderFederation(out)), "allow_insecure")
@@ -952,7 +952,7 @@ func TestFederationLeavePreviewEscReturnsToList(t *testing.T) {
 	out, _ := m.routeFederationViewKey(keyRune('x'))
 	require.Equal(t, federationModeLeavePreview, out.federationMode)
 
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeList, out.federationMode)
@@ -990,7 +990,7 @@ func TestFederationLeaveEnterRevokesHubEnrollmentThenTearsDownSpoke(t *testing.T
 	out, _ := m.routeFederationViewKey(keyRune('x'))
 	require.Equal(t, federationModeLeavePreview, out.federationMode)
 
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	msg := cmd().(federationLeaveResultMsg)
 	out, refresh := updateModel(out, msg)
@@ -1049,7 +1049,7 @@ func TestFederationLeaveAbortsWhenOnlyForeignEnrollmentsMatchProject(t *testing.
 	out, _ := m.routeFederationViewKey(keyRune('x'))
 	require.Equal(t, federationModeLeavePreview, out.federationMode)
 
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	msg := cmd().(federationLeaveResultMsg)
 
@@ -1102,7 +1102,7 @@ func TestFederationLeaveDetachPreflightRefusalSkipsRevoke(t *testing.T) {
 	require.Equal(t, federationModeLeavePreview, out.federationMode)
 	require.NotEqual(t, "archive", out.federationLeaveDraft.Disposition, "this test covers the default detach path")
 
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	msg := cmd().(federationLeaveResultMsg)
 
@@ -1155,7 +1155,7 @@ func TestFederationLeaveArchivePreflightRefusalSkipsRevoke(t *testing.T) {
 	out, _ = out.routeFederationViewKey(keyRune('d')) // toggle disposition to archive
 	require.Equal(t, "archive", out.federationLeaveDraft.Disposition)
 
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	msg := cmd().(federationLeaveResultMsg)
 
@@ -1195,7 +1195,7 @@ func TestFederationLeaveLocalOnlySkipsHubRevoke(t *testing.T) {
 	out, _ = out.routeFederationViewKey(keyRune('l')) // toggle local-only
 	require.True(t, out.federationLeaveDraft.LocalOnly)
 
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	msg := cmd().(federationLeaveResultMsg)
 	out, _ = updateModel(out, msg)
@@ -1234,7 +1234,7 @@ func TestFederationLeaveHubRevokeFailureReturnsToPreview(t *testing.T) {
 	m.federationCursor = 0
 	out, _ := m.routeFederationViewKey(keyRune('x'))
 
-	out, cmd := out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.NotNil(t, cmd)
 	msg := cmd().(federationLeaveResultMsg)
 	out, next := updateModel(out, msg)
@@ -1678,7 +1678,7 @@ func TestFederationPreviewCreateReplicaUnaffectedWithoutUIDMatch(t *testing.T) {
 func typeFederationKeys(m Model, text string) Model {
 	out := m
 	for _, r := range text {
-		out, _ = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	return out
 }
@@ -1688,13 +1688,13 @@ func typeFederationKeys(m Model, text string) Model {
 // name and confirms. Non-adopt presses pass through unchanged.
 func enterThroughAdoptConfirm(t *testing.T, m Model) (Model, tea.Cmd) {
 	t.Helper()
-	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if out.federationMode != federationModeAdoptConfirm {
 		return out, cmd
 	}
 	require.Nil(t, cmd, "entering the adopt confirmation must not execute")
 	out = typeFederationKeys(out, out.federationDraft.SpokeProjectName)
-	return out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	return out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 }
 
 // TestFederationAdoptEnterOpensTypedConfirmation: adoption never executes on a
@@ -1703,7 +1703,7 @@ func enterThroughAdoptConfirm(t *testing.T, m Model) (Model, tea.Cmd) {
 func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
 	m, _ := setupFederationExecutionPreview(t, federationExecutionServerOptions{})
 
-	out, cmd := m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd, "adoption must not execute on bare enter")
 	assert.Equal(t, federationModeAdoptConfirm, out.federationMode)
 	rendered := stripANSI(renderFederation(out))
@@ -1711,13 +1711,13 @@ func TestFederationAdoptEnterOpensTypedConfirmation(t *testing.T) {
 	assert.Contains(t, rendered, "spoke-project")
 
 	out = typeFederationKeys(out, "wrong-name")
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeAdoptConfirm, out.federationMode)
 	assert.False(t, out.federationEnrollRunning)
 	require.Error(t, out.federationEnrollErr)
 
-	out, _ = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	assert.Equal(t, federationModePreview, out.federationMode)
 }
 
@@ -1739,14 +1739,14 @@ func TestFederationAdoptConfirmTypesSpaces(t *testing.T) {
 
 	t.Run("runeless KeySpace appends a space", func(t *testing.T) {
 		m := typeFederationKeys(newConfirm(), "spoke")
-		m, _ = m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeySpace})
+		m, _ = m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 		m = typeFederationKeys(m, "project")
 		assert.Equal(t, "spoke project", m.federationAdoptConfirmInput)
 	})
 
 	t.Run("unix-shape KeySpace with rune appends one space", func(t *testing.T) {
 		m := typeFederationKeys(newConfirm(), "spoke")
-		m, _ = m.routeFederationViewKey(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+		m, _ = m.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 		m = typeFederationKeys(m, "project")
 		assert.Equal(t, "spoke project", m.federationAdoptConfirmInput)
 	})

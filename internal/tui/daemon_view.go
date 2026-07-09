@@ -3,7 +3,7 @@ package tui
 import (
 	"context"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type daemonRow struct {
@@ -42,7 +42,7 @@ func (m Model) transitionToDaemons() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) routeDaemonsViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeDaemonsViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	rows := daemonRows(m.daemonTargets, m.activeDaemon)
 	if next, ok := m.cursorMoveDaemons(msg, rows); ok {
 		return next, nil
@@ -67,7 +67,7 @@ func switchDaemonCmd(target daemonTarget, attempt uint64) tea.Cmd {
 	}
 }
 
-func (m Model) cursorMoveDaemons(msg tea.KeyMsg, rows []daemonRow) (Model, bool) {
+func (m Model) cursorMoveDaemons(msg tea.KeyPressMsg, rows []daemonRow) (Model, bool) {
 	switch msg.String() {
 	case "j", "down":
 		if m.daemonCursor < len(rows)-1 {

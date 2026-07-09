@@ -1,10 +1,10 @@
 package tui
 
 import (
-	"io"
+	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 func TestResolveColorMode_NoColorOverridesAll(t *testing.T) {
@@ -43,22 +43,32 @@ func TestResolveColorMode_InvalidFallsBackToAuto(t *testing.T) {
 }
 
 func TestApplyColorMode_NoneStripsForeground(t *testing.T) {
-	applyColorMode(colorNone, io.Discard)
+	applyColorMode(colorNone, false)
+	// Lip Gloss v2 styles always emit attribute sequences (bold etc.);
+	// colorNone's contract is that no COLOR is set — the text content
+	// must survive an ANSI strip unchanged and carry no foreground.
+	if fg := titleStyle.GetForeground(); fg != nil && fg != (lipgloss.NoColor{}) {
+		t.Fatalf("colorNone must not set a foreground, got %v", fg)
+	}
 	rendered := titleStyle.Render("hello")
-	if rendered != "hello" {
-		t.Fatalf("colorNone should render plain text, got %q", rendered)
+	if got := stripANSI(rendered); got != "hello" {
+		t.Fatalf("colorNone should render plain text after ANSI strip, got %q", got)
+	}
+	if strings.Contains(rendered, "\x1b[3") || strings.Contains(rendered, "\x1b[9") ||
+		strings.Contains(rendered, "38;") {
+		t.Fatalf("colorNone rendered a color sequence: %q", rendered)
 	}
 }
 
 // TestApplyColorMode_RebuildsAllStyles guards against silently
 // forgetting a style var in applyColorMode (which would leak the prior
 // mode's value across boots). We pre-poison every var with a sentinel
-// foreground (a real lipgloss.Color) so that GetForeground returns
+// foreground (a concrete RGB color) so that GetForeground returns
 // that exact value. After applyColorMode(colorNone) every var must
 // have shed the sentinel foreground (colorNone leaves Foreground unset
 // or a different value entirely).
 func TestApplyColorMode_RebuildsAllStyles(t *testing.T) {
-	sentinelColor := lipgloss.Color("999")
+	sentinelColor := lipgloss.Color("#0f0f0f")
 	sentinel := lipgloss.NewStyle().Foreground(sentinelColor)
 	titleStyle = sentinel
 	subtleStyle = sentinel
@@ -93,7 +103,7 @@ func TestApplyColorMode_RebuildsAllStyles(t *testing.T) {
 	panelActiveBorder = sentinelColor
 	panelInactiveBorder = sentinelColor
 
-	applyColorMode(colorNone, io.Discard)
+	applyColorMode(colorNone, false)
 
 	all := []lipgloss.Style{
 		titleStyle, subtleStyle, statusStyle, selectedStyle,
@@ -106,14 +116,14 @@ func TestApplyColorMode_RebuildsAllStyles(t *testing.T) {
 		normalRowStyle, footerBarStyle, modalBoxStyle,
 	}
 	for i, s := range all {
-		if fg, ok := s.GetForeground().(lipgloss.Color); ok && fg == sentinelColor {
-			t.Fatalf("style %d not rebuilt by applyColorMode(colorNone): retained sentinel %q", i, fg)
+		if fg := s.GetForeground(); fg == sentinelColor {
+			t.Fatalf("style %d not rebuilt by applyColorMode(colorNone): retained sentinel %v", i, fg)
 		}
 	}
-	if c, ok := panelActiveBorder.(lipgloss.Color); ok && c == sentinelColor {
+	if panelActiveBorder == sentinelColor {
 		t.Fatal("panelActiveBorder not rebuilt by applyColorMode(colorNone)")
 	}
-	if c, ok := panelInactiveBorder.(lipgloss.Color); ok && c == sentinelColor {
+	if panelInactiveBorder == sentinelColor {
 		t.Fatal("panelInactiveBorder not rebuilt by applyColorMode(colorNone)")
 	}
 }
@@ -124,7 +134,7 @@ func TestApplyColorMode_RebuildsAllStyles(t *testing.T) {
 // Earlier the codes were gray (243/245) — that didn't differentiate
 // from statusStyle.
 func TestApplyColorMode_DeletedStyleIsRedFaint(t *testing.T) {
-	applyColorMode(colorDark, io.Discard)
+	applyColorMode(colorDark, true)
 	assertStyleForeground(t, deletedStyle, "deletedStyle dark", "196")
 	if !deletedStyle.GetFaint() {
 		t.Fatal("deletedStyle must be faint so the red doesn't read as an error chip")
@@ -132,11 +142,11 @@ func TestApplyColorMode_DeletedStyleIsRedFaint(t *testing.T) {
 }
 
 func TestApplyColorMode_StatusColorsStayDistinctInWarmDisplays(t *testing.T) {
-	applyColorMode(colorDark, io.Discard)
+	applyColorMode(colorDark, true)
 	assertStyleForeground(t, openStyle, "openStyle dark", "46")
 	assertStyleForeground(t, closedStyle, "closedStyle dark", "245")
 
-	applyColorMode(colorLight, io.Discard)
+	applyColorMode(colorLight, false)
 	assertStyleForeground(t, closedStyle, "closedStyle light", "240")
 }
 
@@ -145,7 +155,7 @@ func TestApplyColorMode_StatusColorsStayDistinctInWarmDisplays(t *testing.T) {
 // vars even though the first usage lands in M3a — locking the values
 // here keeps them honest.
 func TestApplyColorMode_PanelBorderColorsBound(t *testing.T) {
-	applyColorMode(colorDark, io.Discard)
+	applyColorMode(colorDark, true)
 	if panelActiveBorder == nil {
 		t.Fatal("panelActiveBorder must be bound by applyColorMode(colorDark)")
 	}

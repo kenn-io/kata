@@ -9,5 +9,5 @@
 package tui
 
 import (
-	_ "github.com/charmbracelet/x/exp/teatest"
+	_ "github.com/charmbracelet/x/exp/teatest/v2"
 )

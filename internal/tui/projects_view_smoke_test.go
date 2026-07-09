@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -53,13 +53,13 @@ func TestSmoke_ProjectsViewLoop(t *testing.T) {
 
 	// 4. Enter on the sentinel transitions to viewList in all-projects scope.
 	m.projectsCursor = 0
-	nextModel, cmd := m.routeProjectsViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	nextModel, cmd := m.routeProjectsViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Equal(t, viewList, nextModel.view)
 	assert.True(t, nextModel.scope.allProjects)
 	require.NotNil(t, cmd, "drill-in must dispatch fetchInitial")
 
 	// 5. P from the resulting viewList returns to viewProjects with scope preserved.
-	nm2, cmd2 := updateModel(nextModel, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	nm2, cmd2 := updateModel(nextModel, tea.KeyPressMsg{Code: 'P', Text: "P"})
 	assert.Equal(t, viewProjects, nm2.view)
 	assert.True(t, nm2.scope.allProjects, "scope preserved on P-back")
 	require.NotNil(t, cmd2, "P must dispatch fetchProjectsWithStats")

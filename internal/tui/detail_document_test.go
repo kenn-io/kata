@@ -1,12 +1,11 @@
 package tui
 
 import (
-	"io"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 func TestDetailDocumentPage80x50LayoutSignals(t *testing.T) {
@@ -82,7 +81,7 @@ func TestDetailCompactSheet_UsesDenseRhythmAndNoDecorativeRules(t *testing.T) {
 // issue body — the redesign drops them so the page reads as a quiet
 // document.
 func TestDetailCompactSheet_AdaptiveSurfaces(t *testing.T) {
-	applyColorMode(colorDark, io.Discard)
+	applyColorMode(colorDark, true)
 	if styleHasBackground(detailMetaStyle) {
 		t.Fatal("detailMetaStyle should not paint a background slab in color modes")
 	}
@@ -93,7 +92,7 @@ func TestDetailCompactSheet_AdaptiveSurfaces(t *testing.T) {
 		t.Fatal("markdown code blocks need a subtle background in color modes")
 	}
 
-	applyColorMode(colorNone, io.Discard)
+	applyColorMode(colorNone, false)
 	if styleHasBackground(detailMetaStyle) {
 		t.Fatal("detailMetaStyle must not paint a background in colorNone")
 	}
@@ -108,39 +107,26 @@ func TestDetailCompactSheet_AdaptiveSurfaces(t *testing.T) {
 func TestMarkdownCodeBlockBackground_RespectsAutoDetectedBackground(t *testing.T) {
 	oldMode := activeColorMode
 	oldDark := activeHasDarkBackground
-	oldStyle := markdownCodeBlockStyle
-	defer func() {
-		activeColorMode = oldMode
-		activeHasDarkBackground = oldDark
-		markdownCodeBlockStyle = oldStyle
-	}()
+	defer func() { applyColorMode(oldMode, oldDark) }()
 
-	activeColorMode = colorAuto
-	markdownCodeBlockStyle = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{
-		Light: "252",
-		Dark:  "236",
-	})
-
-	activeHasDarkBackground = false
+	// In v2 the light/dark pick happens inside applyColorMode (driven
+	// by tea.BackgroundColorMsg in colorAuto), not at read time.
+	applyColorMode(colorAuto, false)
 	if bg := markdownCodeBlockBackground(); bg == nil || *bg != "252" {
 		t.Fatalf("light terminal background = %v, want 252", bg)
 	}
-	activeHasDarkBackground = true
+	applyColorMode(colorAuto, true)
 	if bg := markdownCodeBlockBackground(); bg == nil || *bg != "236" {
 		t.Fatalf("dark terminal background = %v, want 236", bg)
 	}
 }
 
 func styleHasBackground(s lipgloss.Style) bool {
-	switch bg := s.GetBackground().(type) {
+	switch s.GetBackground().(type) {
 	case nil:
 		return false
 	case lipgloss.NoColor:
 		return false
-	case lipgloss.Color:
-		return string(bg) != ""
-	case lipgloss.AdaptiveColor:
-		return bg.Light != "" || bg.Dark != ""
 	default:
 		return true
 	}

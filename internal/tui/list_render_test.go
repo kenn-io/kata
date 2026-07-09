@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"io"
 	"strings"
 	"testing"
 	"unicode"
@@ -285,7 +284,7 @@ func TestRenderLabelChips_NewlineInLabelDoesNotBreakRow(t *testing.T) {
 }
 
 func TestDisclosureGlyph(t *testing.T) {
-	applyColorMode(colorAuto, io.Discard)
+	applyColorMode(colorAuto, true)
 	if got := disclosureGlyph(false, false); got != " " {
 		t.Fatalf("leaf glyph = %q, want blank", got)
 	}
@@ -310,7 +309,7 @@ func TestDisclosureGlyph(t *testing.T) {
 // gave leaf children only blank space, making a single child hard to
 // distinguish from an unrelated sibling row below.
 func TestNavTreeSlot_ChildGuides(t *testing.T) {
-	applyColorMode(colorAuto, io.Discard)
+	applyColorMode(colorAuto, true)
 	parent := queueRow{depth: 0, hasChildren: true, expanded: true}
 	got := stripANSI(navTreeSlot(parent))
 	if got != "▾" {
@@ -500,7 +499,7 @@ func TestRenderListBody_SingleProjectOmitsPrefix(t *testing.T) {
 }
 
 func TestRenderListBody_HeaderBackgroundReplacesSeparatorRule(t *testing.T) {
-	applyColorMode(colorDark, io.Discard)
+	applyColorMode(colorDark, true)
 	if !styleHasBackground(tableHeaderStyle) {
 		t.Fatal("tableHeaderStyle must carry a background in color modes")
 	}
@@ -531,7 +530,7 @@ func TestListView_BodyBudgetCountsOnlyTableHeader(t *testing.T) {
 }
 
 func TestRenderListBody_EmptyStateDoesNotRenderSeparatorRule(t *testing.T) {
-	applyColorMode(colorDark, io.Discard)
+	applyColorMode(colorDark, true)
 	lm := listModel{}
 	got := stripANSI(lm.renderBody(80, 6, viewChrome{}))
 	for _, line := range strings.Split(got, "\n") {
@@ -570,7 +569,7 @@ func TestListTableHeaders_UsesSingleNavGutter(t *testing.T) {
 }
 
 func TestBuildRows_FoldsSelectionContextAndDisclosureIntoNavCell(t *testing.T) {
-	applyColorMode(colorNone, io.Discard)
+	applyColorMode(colorNone, false)
 	rows := buildRows([]queueRow{
 		{
 			issue:       Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open", Title: "context parent"},

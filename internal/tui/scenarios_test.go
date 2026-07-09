@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // scenarios_test.go drives the full Model dispatch path (Update +
@@ -117,12 +117,12 @@ func scenarioOpenDetail(t *testing.T, m Model, body string) Model {
 	return out.(Model)
 }
 
-// pressKey dispatches a tea.KeyMsg through Model.Update and returns
+// pressKey dispatches a tea.KeyPressMsg through Model.Update and returns
 // the new model. Drains a single follow-up Cmd via the same loop
 // pattern Update would use; for the scenarios in this file the
 // follow-ups are nil (key handlers in scope return nil cmds) so the
 // drain is defensive.
-func pressKey(t *testing.T, m Model, msg tea.KeyMsg) Model {
+func pressKey(t *testing.T, m Model, msg tea.KeyPressMsg) Model {
 	t.Helper()
 	out, _ := m.Update(msg)
 	return out.(Model)
@@ -130,12 +130,12 @@ func pressKey(t *testing.T, m Model, msg tea.KeyMsg) Model {
 
 func pressRune(t *testing.T, m Model, r rune) Model {
 	t.Helper()
-	return pressKey(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	return pressKey(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
 }
 
 // pressN repeats a key message n times. Convenience for scrolling
 // tests where one PgDn is not enough to reach the bottom.
-func pressN(t *testing.T, m Model, msg tea.KeyMsg, n int) Model {
+func pressN(t *testing.T, m Model, msg tea.KeyPressMsg, n int) Model {
 	t.Helper()
 	for i := 0; i < n; i++ {
 		m = pressKey(t, m, msg)
@@ -143,10 +143,10 @@ func pressN(t *testing.T, m Model, msg tea.KeyMsg, n int) Model {
 	return m
 }
 
-// view is sugar for stripANSI(m.View()). Most assertions are easier
+// view is sugar for stripANSI(m.viewContent()). Most assertions are easier
 // against plain UTF-8 because color modes can differ between dev and
 // CI but the textual layout is the same.
-func view(m Model) string { return stripANSI(m.View()) }
+func view(m Model) string { return stripANSI(m.viewContent()) }
 
 // TestScenario_ReadAnIssue_BodyScrollsOnPageDown is the regression
 // for the body-scroll bug fixed in a583806. handleUp/handleDown
@@ -159,7 +159,7 @@ func TestScenario_ReadAnIssue_BodyScrollsOnPageDown(t *testing.T) {
 	body := strings.Repeat("scrollable line\n", 60) + "TAIL_MARKER"
 	m := setupDetailScenario(t, 120, 30, body)
 	assertViewMissing(t, m, "TAIL_MARKER")
-	m = pressN(t, m, tea.KeyMsg{Type: tea.KeyPgDown}, 16)
+	m = pressN(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown}, 16)
 	assertViewContains(t, m, "TAIL_MARKER")
 }
 
@@ -170,7 +170,7 @@ func TestScenario_ReadAnIssue_BodyScrollsOnPageDown(t *testing.T) {
 func TestScenario_ReadAnIssue_PageUpClampsAtTop(t *testing.T) {
 	body := "FIRST_LINE_MARKER\n" + strings.Repeat("filler line\n", 30)
 	m := setupDetailScenario(t, 120, 30, body)
-	m = pressN(t, m, tea.KeyMsg{Type: tea.KeyPgUp}, 5)
+	m = pressN(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp}, 5)
 	assertViewContains(t, m, "FIRST_LINE_MARKER")
 	if m.detail.scroll != 0 {
 		t.Fatalf("dm.scroll = %d after PgUp at top, want 0", m.detail.scroll)
@@ -188,7 +188,7 @@ func TestScenario_ReadAnIssue_ArrowKeysScrollOnShortTerminal(t *testing.T) {
 	body := strings.Repeat("scrollable line\n", 80) + "ARROW_TAIL_MARKER"
 	m := setupDetailScenario(t, 120, 24, body)
 	assertViewMissing(t, m, "ARROW_TAIL_MARKER")
-	m = pressN(t, m, tea.KeyMsg{Type: tea.KeyDown}, 80)
+	m = pressN(t, m, tea.KeyPressMsg{Code: tea.KeyDown}, 80)
 	assertViewContains(t, m, "ARROW_TAIL_MARKER")
 }
 
@@ -200,9 +200,9 @@ func TestScenario_ReadAnIssue_ArrowKeysScrollOnShortTerminal(t *testing.T) {
 func TestScenario_NavigateTabs_TabAdvancesActiveSection(t *testing.T) {
 	m := setupDetailScenario(t, 120, 30, "short body")
 	assertViewContains(t, m, "[ Comments (1) ]")
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	assertViewContains(t, m, "[ Events (1) ]")
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyTab})
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	assertViewContains(t, m, "[ Links (0) ]")
 }
 
@@ -215,7 +215,7 @@ func TestScenario_EscReturnsFromStackedDetailToList(t *testing.T) {
 	if m.view != viewDetail {
 		t.Fatalf("setup: view=%v, want viewDetail", m.view)
 	}
-	m = sendKeyAndDrain(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = sendKeyAndDrain(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.view != viewList {
 		t.Fatalf("Esc did not return to list: view=%v, want viewList", m.view)
 	}
@@ -229,7 +229,7 @@ func TestScenario_EscReturnsFromStackedDetailToList(t *testing.T) {
 func TestScenario_EscReturnsFromSplitDetailToList(t *testing.T) {
 	m := setupDetailScenario(t, 200, 40, "short body")
 	assertViewState(t, m, layoutSplit, viewDetail, focusDetail)
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.focus != focusList {
 		t.Fatalf("Esc did not return focus to list: focus=%v", m.focus)
 	}
@@ -257,7 +257,7 @@ func TestScenario_EscPopsSplitDetailNavStackBeforeLeavingPane(t *testing.T) {
 	m.focus = focusDetail
 	m.view = viewDetail
 
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.focus != focusDetail {
 		t.Fatalf("Esc with nav stack moved focus=%v, want focusDetail", m.focus)
 	}
@@ -273,7 +273,7 @@ func TestScenario_EscPopsSplitDetailNavStackBeforeLeavingPane(t *testing.T) {
 func TestScenario_BackspaceReturnsFromSplitDetailToList(t *testing.T) {
 	m := setupDetailScenario(t, 200, 40, "short body")
 	assertViewState(t, m, layoutSplit, viewDetail, focusDetail)
-	m = sendKeyAndDrain(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = sendKeyAndDrain(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if m.view != viewList {
 		t.Fatalf("Backspace did not return view to list: view=%v", m.view)
 	}
@@ -410,7 +410,7 @@ func TestScenario_LowercaseLOpensLinkPromptInDetail(t *testing.T) {
 // iteration. Stops if the cmd is nil OR the cmd's first message is
 // not consumed (e.g. a tea.Batch — the test doesn't try to
 // recursively unwrap; flag it as a sign the helper needs extending).
-func sendKeyAndDrain(t *testing.T, m Model, msg tea.KeyMsg) Model {
+func sendKeyAndDrain(t *testing.T, m Model, msg tea.KeyPressMsg) Model {
 	t.Helper()
 	out, cmd := m.Update(msg)
 	m = out.(Model)
@@ -473,10 +473,10 @@ func TestScenario_BodyScrollWorksWhileChildrenFocused(t *testing.T) {
 	// from Comments gets us to Events, and Shift+Tab from Comments
 	// goes to Children. We use Shift+Tab so the test doesn't
 	// depend on which tab cycleDetailFocus(1) lands on.
-	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = pressKey(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if m.detail.detailFocus != focusChildren {
 		t.Fatalf("setup: focus = %v, want focusChildren", m.detail.detailFocus)
 	}
-	m = pressN(t, m, tea.KeyMsg{Type: tea.KeyPgDown}, 16)
+	m = pressN(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown}, 16)
 	assertViewContains(t, m, "BODY_TAIL")
 }

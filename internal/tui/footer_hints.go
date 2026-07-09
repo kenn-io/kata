@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -306,7 +306,8 @@ func renderHelpTable(rows [][]helpItem, width int) string {
 		return ""
 	}
 
-	borderColor := lipgloss.AdaptiveColor{Light: "248", Dark: "242"}
+	borderColor := lipgloss.LightDark(activeHasDarkBackground)(
+		lipgloss.Color("248"), lipgloss.Color("242"))
 	cellStyle := lipgloss.NewStyle()
 	cellWithBorder := lipgloss.NewStyle().
 		PaddingLeft(1).
@@ -349,6 +350,8 @@ func renderHelpTable(rows [][]helpItem, width int) string {
 			if col == 0 || (row < len(empty) && col < len(empty[row]) && empty[row][col]) {
 				return cellStyle.Width(minW)
 			}
+			// minW content + 1 padding + 1 for the left border (width is
+			// border-box in Lip Gloss v2).
 			return cellWithBorder.Width(minW + 2)
 		}).
 		Wrap(false)

@@ -3,11 +3,11 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func mouseLeftClick(x, y int) tea.MouseMsg {
-	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
 }
 
 func mouseWheelDown() tea.MouseMsg {
@@ -15,18 +15,24 @@ func mouseWheelDown() tea.MouseMsg {
 }
 
 func mouseWheelDownAt(x int) tea.MouseMsg {
-	return tea.MouseMsg{X: x, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown}
+	return tea.MouseWheelMsg{X: x, Button: tea.MouseWheelDown}
 }
 
 func mouseWheelUp() tea.MouseMsg {
-	return tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp}
+	return tea.MouseWheelMsg{Button: tea.MouseWheelUp}
 }
 
-func TestProgramOpts_MouseDisabledByDefault(t *testing.T) {
-	without := programOpts(t.Context(), Options{})
-	with := programOpts(t.Context(), Options{Mouse: true})
-	if len(with) != len(without)+1 {
-		t.Fatalf("programOpts with mouse len=%d, want disabled len %d + 1", len(with), len(without))
+func TestViewMouseModeFollowsOption(t *testing.T) {
+	without := initialModel(Options{}).View()
+	if without.MouseMode != tea.MouseModeNone {
+		t.Fatalf("mouse mode without opt-in = %v, want MouseModeNone", without.MouseMode)
+	}
+	with := initialModel(Options{Mouse: true}).View()
+	if with.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("mouse mode with opt-in = %v, want MouseModeCellMotion", with.MouseMode)
+	}
+	if !with.AltScreen || !without.AltScreen {
+		t.Fatal("TUI must always declare the alt screen on its View")
 	}
 }
 

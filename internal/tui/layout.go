@@ -1,6 +1,6 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import tea "charm.land/bubbletea/v2"
 
 // layoutMode discriminates between the stacked single-view layout
 // (the M1-M5 default) and the M6 split-pane layout that renders the

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // LabelCount mirrors the daemon's LabelsListResponse.Body.Labels wire

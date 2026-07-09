@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	hubfederation "go.kenn.io/kata/internal/federation"
 )
 
@@ -245,7 +245,7 @@ func (m Model) handleFederationEnrollResult(msg federationEnrollResultMsg) (Mode
 	return m, m.fetchFederationStatus()
 }
 
-func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	rows := federationSpokeStatuses(m.federationStatuses)
 	switch m.federationMode {
 	case federationModeDetail:
@@ -299,7 +299,7 @@ func (m Model) routeFederationViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) routeFederationDetailKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationDetailKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace":
 		m.federationMode = federationModeList
@@ -320,7 +320,7 @@ func (m Model) routeFederationDetailKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) routeFederationLocalProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationLocalProjectKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	rows := federationLocalProjectRows(m)
 	if next, ok := nextFederationCursor(msg, m.federationLocalProjectCursor, len(rows)); ok {
 		m.federationLocalProjectCursor = next
@@ -362,7 +362,7 @@ func (m Model) routeFederationLocalProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) routeFederationHubKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationHubKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	rows := federationHubRows(m)
 	if next, ok := nextFederationCursor(msg, m.federationHubCursor, len(rows)); ok {
 		m.federationHubCursor = next
@@ -386,7 +386,7 @@ func (m Model) routeFederationHubKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) routeFederationHubProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationHubProjectKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	count := federationHubProjectRowCount(m)
 	if next, ok := nextFederationCursor(msg, m.federationHubProjectCursor, count); ok {
 		m.federationHubProjectCursor = next
@@ -402,7 +402,7 @@ func (m Model) routeFederationHubProjectKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) routeFederationBrowseHubsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationBrowseHubsKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	count := len(m.federationHubProjects)
 	if next, ok := nextFederationCursor(msg, m.federationHubProjectCursor, count); ok {
 		m.federationHubProjectCursor = next
@@ -418,7 +418,7 @@ func (m Model) routeFederationBrowseHubsKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) routeFederationPreviewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationPreviewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace":
 		m.federationMode = federationModeSelectHubProject
@@ -446,14 +446,14 @@ func (m Model) routeFederationPreviewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 // routeFederationAdoptConfirmKey is a single-field typed confirmation: the
 // operator must type the local project's name exactly before an adoption
 // executes. Esc returns to the preview.
-func (m Model) routeFederationAdoptConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+func (m Model) routeFederationAdoptConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
 		m.federationAdoptConfirmInput = ""
 		m.federationEnrollErr = nil
 		m.federationMode = federationModePreview
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		if m.federationEnrollRunning {
 			return m, nil
 		}
@@ -466,26 +466,23 @@ func (m Model) routeFederationAdoptConfirmKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.federationEnrollRunning = true
 		m.federationEnrollErr = nil
 		return m, m.executeFederationEnrollment(m.federationEnrollAttempt)
-	case tea.KeyBackspace:
+	case "backspace":
 		if r := []rune(m.federationAdoptConfirmInput); len(r) > 0 {
 			m.federationAdoptConfirmInput = string(r[:len(r)-1])
 		}
 		return m, nil
-	case tea.KeySpace:
-		// bubbletea v1.3.10 delivers KeySpace with Runes{' '} (a back-compat
-		// detail) and Windows sends KeyRunes, so msg.Runes works today —
-		// append the literal so a runeless KeySpace from another backend or a
-		// future library version cannot silently drop the character.
-		m.federationAdoptConfirmInput += " "
-		return m, nil
-	case tea.KeyRunes:
-		m.federationAdoptConfirmInput += string(msg.Runes)
+	}
+	// Printable input (including space) arrives with Text populated in
+	// Bubble Tea v2; anything else (arrows, function keys) leaves Text
+	// empty and falls through as a no-op.
+	if msg.Text != "" {
+		m.federationAdoptConfirmInput += msg.Text
 		return m, nil
 	}
 	return m, nil
 }
 
-func (m Model) routeFederationRecoveryKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationRecoveryKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "R":
 		m.federationRecovery.Reveal = true
@@ -497,7 +494,7 @@ func (m Model) routeFederationRecoveryKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) routeFederationResultKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationResultKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "enter":
 		m.federationMode = federationModeList
@@ -531,7 +528,7 @@ func (m Model) startFederationLeave(row FederationProjectStatus) (Model, tea.Cmd
 	return m, nil
 }
 
-func (m Model) routeFederationLeavePreviewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeFederationLeavePreviewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "backspace":
 		m.federationMode = federationModeList
@@ -768,7 +765,7 @@ func federationLeaveHubError(err error) error {
 	return fmt.Errorf("hub revoke failed: %w; retry with local-only to tear down locally, then revoke on the hub later", err)
 }
 
-func (m Model) cursorMoveFederation(msg tea.KeyMsg, rows []FederationProjectStatus) (Model, bool) {
+func (m Model) cursorMoveFederation(msg tea.KeyPressMsg, rows []FederationProjectStatus) (Model, bool) {
 	switch msg.String() {
 	case "j", "down":
 		if m.federationCursor < len(rows)-1 {
@@ -1404,7 +1401,7 @@ func localProjectFederationBinding(
 	return FederationProjectStatus{}, false
 }
 
-func nextFederationCursor(msg tea.KeyMsg, cursor, count int) (int, bool) {
+func nextFederationCursor(msg tea.KeyPressMsg, cursor, count int) (int, bool) {
 	switch msg.String() {
 	case "j", "down":
 		return clampFederationIndex(cursor+1, count, 0), true

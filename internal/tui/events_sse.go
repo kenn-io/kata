@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // sseClient is the subset of *http.Client startSSE needs. Defining it

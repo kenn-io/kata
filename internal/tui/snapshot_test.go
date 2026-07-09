@@ -3,7 +3,6 @@ package tui
 import (
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,12 +39,12 @@ func snapshotInit(t *testing.T) func() {
 	t.Helper()
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
-	applyDefaultColorMode(io.Discard)
+	applyDefaultColorMode()
 	prior := renderNow
 	renderNow = func() time.Time { return snapshotFixedNow }
 	return func() {
 		renderNow = prior
-		applyDefaultColorMode(io.Discard)
+		applyDefaultColorMode()
 	}
 }
 
@@ -85,6 +84,12 @@ func assertGolden(t *testing.T, name, got string) {
 }
 
 func normalizeGoldenSnapshot(s string) string {
+	// Strip ANSI first: Lip Gloss v2 styles always emit attribute
+	// sequences (bold/faint/reverse) — profile downsampling moved from
+	// style-build time into Bubble Tea's compositor — so colorNone
+	// output is no longer escape-free by construction. Goldens stay
+	// plain UTF-8 text.
+	s = stripANSI(s)
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		lines[i] = strings.TrimRight(line, " ")
@@ -624,7 +629,7 @@ func TestSnapshot_LabelPrompt_MenuOpen(t *testing.T) {
 			{Label: "epsilon", Count: 1},
 		},
 	}
-	got := m.View()
+	got := m.viewContent()
 	assertGolden(t, "label-prompt-menu-open", got)
 }
 
@@ -636,7 +641,7 @@ func TestSnapshot_LabelPrompt_Loading(t *testing.T) {
 	m.projectLabels.byProject[7] = labelCacheEntry{
 		pid: 7, gen: 1, fetching: true,
 	}
-	got := m.View()
+	got := m.viewContent()
 	assertGolden(t, "label-prompt-loading", got)
 }
 
@@ -648,7 +653,7 @@ func TestSnapshot_LabelPrompt_Error(t *testing.T) {
 	m.projectLabels.byProject[7] = labelCacheEntry{
 		pid: 7, gen: 1, err: errStub("daemon 500"),
 	}
-	got := m.View()
+	got := m.viewContent()
 	assertGolden(t, "label-prompt-error", got)
 }
 
@@ -660,7 +665,7 @@ func TestSnapshot_LabelPrompt_Empty(t *testing.T) {
 	m.projectLabels.byProject[7] = labelCacheEntry{
 		pid: 7, gen: 1, fetching: false,
 	}
-	got := m.View()
+	got := m.viewContent()
 	assertGolden(t, "label-prompt-empty", got)
 }
 
@@ -681,7 +686,7 @@ func TestSnapshot_LabelPrompt_Scroll(t *testing.T) {
 		pid: 7, gen: 1, labels: suggestions,
 	}
 	m.input.suggestHighlight = 9
-	got := m.View()
+	got := m.viewContent()
 	assertGolden(t, "label-prompt-scroll", got)
 }
 
@@ -710,7 +715,7 @@ func snapSplitModel(width, height int, focus focusPane) Model {
 func TestSnapshot_Split_Wide(t *testing.T) {
 	defer snapshotInit(t)()
 	m := snapSplitModel(160, 40, focusList)
-	got := m.View()
+	got := m.viewContent()
 	assertGolden(t, "list-detail-split-wide", got)
 }
 
@@ -720,7 +725,7 @@ func TestSnapshot_Split_Wide(t *testing.T) {
 func TestSnapshot_Split_FocusDetail(t *testing.T) {
 	defer snapshotInit(t)()
 	m := snapSplitModel(160, 40, focusDetail)
-	got := m.View()
+	got := m.viewContent()
 	assertGolden(t, "list-detail-split-focus-detail", got)
 }
 
@@ -730,7 +735,7 @@ func TestSnapshot_Split_FocusDetail(t *testing.T) {
 func TestSnapshot_Split_AtBreakpoint(t *testing.T) {
 	defer snapshotInit(t)()
 	m := snapSplitModel(140, 36, focusList)
-	got := m.View()
+	got := m.viewContent()
 	assertGolden(t, "list-detail-split-resize-collapse", got)
 }
 

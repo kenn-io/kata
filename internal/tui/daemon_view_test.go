@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,7 +46,7 @@ func TestDaemonView_EscReturnsToPreviousView(t *testing.T) {
 	m.detail = detailModel{issue: &Issue{ShortID: "abc1"}}
 
 	out, _ := updateModel(m, keyRune('D'))
-	out, cmd := out.routeDaemonsViewKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, cmd := out.routeDaemonsViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, viewDetail, out.view)
@@ -62,9 +62,9 @@ func TestDaemonView_CursorMovement(t *testing.T) {
 	assert.Equal(t, 2, out.daemonCursor)
 	out, _ = out.routeDaemonsViewKey(keyRune('k'))
 	assert.Equal(t, 1, out.daemonCursor)
-	out, _ = out.routeDaemonsViewKey(tea.KeyMsg{Type: tea.KeyHome})
+	out, _ = out.routeDaemonsViewKey(tea.KeyPressMsg{Code: tea.KeyHome})
 	assert.Equal(t, 0, out.daemonCursor)
-	out, _ = out.routeDaemonsViewKey(tea.KeyMsg{Type: tea.KeyEnd})
+	out, _ = out.routeDaemonsViewKey(tea.KeyPressMsg{Code: tea.KeyEnd})
 	assert.Equal(t, 2, out.daemonCursor)
 }
 
@@ -122,7 +122,7 @@ func TestDaemonView_EnterDispatchesSwitchCommand(t *testing.T) {
 	m := setupDaemonView()
 	m.daemonCursor = 2
 
-	out, cmd := m.routeDaemonsViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.routeDaemonsViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	require.NotNil(t, cmd)
 	assert.Equal(t, viewDaemons, out.view, "view should remain until connection succeeds")
@@ -233,7 +233,7 @@ func TestDaemonSwitchToEmptyDaemonEscReturnsToSelector(t *testing.T) {
 	require.Nil(t, cmd)
 	require.Equal(t, viewEmpty, out.view)
 
-	out, cmd = updateModel(out, tea.KeyMsg{Type: tea.KeyEsc})
+	out, cmd = updateModel(out, tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	require.Nil(t, cmd)
 	assert.Equal(t, viewDaemons, out.view)

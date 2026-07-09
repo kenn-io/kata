@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 )
 
@@ -156,19 +156,12 @@ func buildRunModel(opts Options, c *Client, bi bootInit, conns ...daemonConnecti
 }
 
 // programOpts returns the tea.ProgramOption slice for tea.NewProgram.
-// Splitting this off Run keeps Run's cyclomatic complexity within the
-// project's ≤8 limit.
+// Alt screen and mouse mode are no longer options here — Bubble Tea v2
+// moved them to declarative tea.View fields, set on every frame by
+// Model.View.
 func programOpts(ctx context.Context, opts Options) []tea.ProgramOption {
 	out := []tea.ProgramOption{
 		tea.WithContext(ctx),
-		tea.WithAltScreen(),
-	}
-	if opts.Mouse {
-		// Opt-in only: mouse tracking blocks native text selection in many
-		// terminals. CellMotion captures clicks/releases/wheel without idle
-		// all-motion churn; users can hold Option (macOS) or Shift (Linux)
-		// to bypass tracking for native selection.
-		out = append(out, tea.WithMouseCellMotion())
 	}
 	if opts.Stdout != nil {
 		out = append(out, tea.WithOutput(opts.Stdout))

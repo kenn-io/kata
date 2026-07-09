@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // renderSplit composes the M6 split-pane layout: a 68-cell list
@@ -109,7 +109,8 @@ func splitDetailEmptyHint(innerW, innerH int) string {
 // splitPaneStyle returns the border style for one pane. The focused
 // pane uses panelActiveBorder (magenta); the inactive pane uses
 // panelInactiveBorder (gray). Width/Height set the OUTER dimensions
-// so callers know how much space the rendered string occupies.
+// so callers know how much space the rendered string occupies —
+// Lip Gloss v2 sizes border-box, so the outer dims are passed as-is.
 func splitPaneStyle(focused bool, paneW, paneH int) lipgloss.Style {
 	border := panelInactiveBorder
 	if focused {
@@ -118,8 +119,8 @@ func splitPaneStyle(focused bool, paneW, paneH int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(border).
-		Width(paneW - 2).
-		Height(paneH - 2)
+		Width(paneW).
+		Height(paneH)
 }
 
 // renderSplitInfoLine renders the shared info line at the bottom of

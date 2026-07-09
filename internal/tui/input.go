@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 )
 
 // inputKind discriminates which input shell is active. Plan 7 §"Input
@@ -291,16 +291,16 @@ func (s *inputState) activeField() *inputField {
 // The Update path returns actionNone for those keys; the caller's
 // suggestion source (m.suggestionsForPrompt) is consulted at render
 // time to project the new highlight.
-func (s inputState) Update(msg tea.KeyMsg) (inputState, inputAction) {
+func (s inputState) Update(msg tea.KeyPressMsg) (inputState, inputAction) {
 	if s.kind.isCenteredForm() {
 		return s.updateForm(msg)
 	}
-	switch msg.Type {
-	case tea.KeyEnter:
+	switch msg.String() {
+	case "enter":
 		return s, actionCommit
-	case tea.KeyEsc:
+	case "esc":
 		return s, actionCancel
-	case tea.KeyCtrlU:
+	case "ctrl+u":
 		if f := s.activeField(); f != nil {
 			f.setValue("")
 		}
@@ -334,15 +334,15 @@ func isLabelPromptKind(k inputKind) bool {
 // length here. ⇥ is a no-op when the buffer is empty (no completion
 // target candidate yet); the renderer surfaces the suggestion list
 // either way.
-func (s inputState) handleSuggestKey(msg tea.KeyMsg) (inputState, bool) {
-	switch msg.Type {
-	case tea.KeyUp:
+func (s inputState) handleSuggestKey(msg tea.KeyPressMsg) (inputState, bool) {
+	switch msg.String() {
+	case "up":
 		s.suggestHighlight--
 		return s, true
-	case tea.KeyDown:
+	case "down":
 		s.suggestHighlight++
 		return s, true
-	case tea.KeyTab:
+	case "tab":
 		// Tab completion of the buffer happens at the Model layer
 		// where the suggestion list (LabelCount slice) is in scope.
 		// Here we just signal "handled" so the textinput doesn't
@@ -372,7 +372,7 @@ func (s inputState) handleSuggestKey(msg tea.KeyMsg) (inputState, bool) {
 // The filter form (Plan 8 commit 5a) honors ctrl+r as a reset gesture
 // (zeros every field; preFilter intact for esc) and routes ←/→/space
 // through the radio when the Status field is active.
-func (s inputState) updateForm(msg tea.KeyMsg) (inputState, inputAction) {
+func (s inputState) updateForm(msg tea.KeyPressMsg) (inputState, inputAction) {
 	if next, action, handled := s.handleFormControlKey(msg); handled {
 		return next, action
 	}
@@ -393,22 +393,22 @@ func (s inputState) updateForm(msg tea.KeyMsg) (inputState, inputAction) {
 // consumed (the action may still be actionNone for absorbed gestures
 // like ctrl+r and the saving=true ctrl+s gate).
 func (s inputState) handleFormControlKey(
-	msg tea.KeyMsg,
+	msg tea.KeyPressMsg,
 ) (inputState, inputAction, bool) {
-	switch msg.Type {
-	case tea.KeyCtrlS:
+	switch msg.String() {
+	case "ctrl+s":
 		if s.saving {
 			return s, actionNone, true
 		}
 		return s, actionCommit, true
-	case tea.KeyEsc:
+	case "esc":
 		return s, actionCancel, true
-	case tea.KeyCtrlE:
+	case "ctrl+e":
 		if !s.ctrlEAllowed() {
 			return s, actionNone, true
 		}
 		return s, actionEditorHandoff, true
-	case tea.KeyCtrlR:
+	case "ctrl+r":
 		if s.kind == inputFilterForm {
 			return s.resetFilterFields(), actionNone, true
 		}
@@ -419,17 +419,17 @@ func (s inputState) handleFormControlKey(
 // handleFormNavKey handles tab / shift+tab / enter for field cycling.
 // Returns handled=true when the key was consumed by the navigation
 // layer; otherwise the caller falls through to the next handler.
-func (s inputState) handleFormNavKey(msg tea.KeyMsg) (inputState, bool) {
-	switch msg.Type {
-	case tea.KeyTab:
+func (s inputState) handleFormNavKey(msg tea.KeyPressMsg) (inputState, bool) {
+	switch msg.String() {
+	case "tab":
 		if s.shouldCycleFields() {
 			return s.advanceField(1), true
 		}
-	case tea.KeyShiftTab:
+	case "shift+tab":
 		if s.shouldCycleFields() {
 			return s.advanceField(-1), true
 		}
-	case tea.KeyEnter:
+	case "enter":
 		if s.shouldAdvanceOnEnter() {
 			return s.advanceField(1), true
 		}
@@ -441,15 +441,15 @@ func (s inputState) handleFormNavKey(msg tea.KeyMsg) (inputState, bool) {
 // only when the active field is fieldRadio; other fields fall through
 // so arrow keys move the textinput cursor and space inserts a literal
 // space character. handled=true means the key was consumed.
-func (s inputState) handleRadioKey(msg tea.KeyMsg) (inputState, bool) {
+func (s inputState) handleRadioKey(msg tea.KeyPressMsg) (inputState, bool) {
 	f := s.activeField()
 	if f == nil || f.kind != fieldRadio {
 		return s, false
 	}
-	switch msg.Type {
-	case tea.KeyLeft:
+	switch msg.String() {
+	case "left":
 		f.radio.cycle(-1)
-	case tea.KeyRight, tea.KeySpace:
+	case "right", "space":
 		f.radio.cycle(1)
 	default:
 		return s, false
@@ -458,13 +458,13 @@ func (s inputState) handleRadioKey(msg tea.KeyMsg) (inputState, bool) {
 	return s, true
 }
 
-func (s inputState) handleLockedFieldKey(msg tea.KeyMsg) (inputState, bool) {
+func (s inputState) handleLockedFieldKey(msg tea.KeyPressMsg) (inputState, bool) {
 	f := s.activeField()
 	if f == nil || !f.locked {
 		return s, false
 	}
-	switch msg.Type {
-	case tea.KeyBackspace, tea.KeyDelete, tea.KeyCtrlU:
+	switch msg.String() {
+	case "backspace", "delete", "ctrl+u":
 		f.setValue("")
 		f.locked = false
 		s.fields[s.active] = *f
@@ -549,12 +549,14 @@ func (s inputState) advanceField(delta int) inputState {
 	return s
 }
 
-// delegateToField forwards a key into the active field's bubbles
-// model so paste, cursor motion, backspace, arrow keys all work.
-// fieldRadio carries no bubbles model (the navigation/cycling keys
-// are intercepted upstream by handleRadioKey) so the call is a no-op
-// for that kind.
-func (s inputState) delegateToField(msg tea.KeyMsg) (inputState, inputAction) {
+// delegateToField forwards a message into the active field's bubbles
+// model so paste, cursor motion, backspace, arrow keys all work. It
+// accepts tea.Msg (not just key presses) because Bubble Tea v2
+// delivers pastes as tea.PasteMsg, which the bubbles models ingest
+// directly. fieldRadio carries no bubbles model (the navigation/
+// cycling keys are intercepted upstream by handleRadioKey) so the
+// call is a no-op for that kind.
+func (s inputState) delegateToField(msg tea.Msg) (inputState, inputAction) {
 	f := s.activeField()
 	if f == nil {
 		return s, actionNone

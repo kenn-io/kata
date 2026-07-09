@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // TestSSEParser_KeepalivesAreSkipped: a leading ": keepalive\n\n" must

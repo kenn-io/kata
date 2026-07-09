@@ -1,11 +1,10 @@
 package tui
 
 import (
-	"io"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // narrowHintMarker is the substring that uniquely identifies the
@@ -20,10 +19,10 @@ func narrowTestSetup(t *testing.T) (Model, func()) {
 	t.Helper()
 	t.Setenv("KATA_COLOR_MODE", "none")
 	t.Setenv("NO_COLOR", "")
-	applyDefaultColorMode(io.Discard)
+	applyDefaultColorMode()
 	m := initialModel(Options{})
 	m.list.loading = false
-	cleanup := func() { applyDefaultColorMode(io.Discard) }
+	cleanup := func() { applyDefaultColorMode() }
 	return m, cleanup
 }
 
@@ -32,7 +31,7 @@ func narrowTestSetup(t *testing.T) (Model, func()) {
 // pattern that the narrow-terminal tests repeat for both polarities.
 func assertHintVisible(t *testing.T, m Model, want bool) {
 	t.Helper()
-	view := m.View()
+	view := m.viewContent()
 	got := strings.Contains(view, narrowHintMarker)
 	if got == want {
 		return
@@ -66,7 +65,7 @@ func TestNarrowTerminal_ShortHeightRendersNormally(t *testing.T) {
 
 	m = resizeModel(m, 120, 12)
 	assertHintVisible(t, m, false)
-	if got := m.View(); !strings.Contains(got, "short pane") {
+	if got := m.viewContent(); !strings.Contains(got, "short pane") {
 		t.Fatalf("short-height view missing list content; got:\n%s", got)
 	}
 }
@@ -125,7 +124,7 @@ func TestNarrowTerminal_CtrlCStillQuits(t *testing.T) {
 	defer cleanup()
 
 	m = resizeModel(m, 60, 12)
-	_, cmd := updateModel(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := updateModel(m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("ctrl+c at narrow size produced no cmd; expected tea.Quit")
 	}
@@ -170,7 +169,7 @@ func TestNarrowTerminal_QuitConfirmModalOverlaysHint(t *testing.T) {
 	}
 	// Now resize below threshold while the modal is still open.
 	m = resizeModel(m, 60, 24)
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "[Y]") {
 		t.Fatalf("quit-confirm modal hidden by narrow short-circuit; got:\n%s", view)
 	}
@@ -195,7 +194,7 @@ func TestNarrowTerminal_DaemonViewShowsHintAndToast(t *testing.T) {
 	m.daemonTargets = []daemonTarget{{Name: "shared", URL: "https://daemon.example"}}
 	m.toast = &toast{text: "daemon failed", level: toastError}
 
-	view := m.View()
+	view := m.viewContent()
 
 	if !strings.Contains(view, narrowHintMarker) {
 		t.Fatalf("daemon view at narrow width must show stable too-narrow hint; got:\n%s", view)

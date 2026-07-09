@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // fetchIssue wraps Client.GetIssueDetail for the Enter-jump path. The 5s

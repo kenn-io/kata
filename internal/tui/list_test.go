@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/exp/teatest"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/exp/teatest/v2"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -57,7 +57,7 @@ func setupListTeatest(t *testing.T) *teatest.TestModel {
 	tm.Send(tea.WindowSizeMsg{Width: 120, Height: 30})
 	tm.Send(initialFetchMsg{dispatchKey: cacheKey{limit: queueFetchLimit}, issues: listFixture()})
 	t.Cleanup(func() {
-		tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+		tm.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		tm.WaitFinished(t)
 	})
 	return tm
@@ -131,9 +131,9 @@ func TestList_Cursor_DownAndUp(t *testing.T) {
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 		return strings.Contains(string(b), "purge stale tokens")
 	}, teatest.WithDuration(2*time.Second))
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	tm.Send(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	tm.Send(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	tm.Send(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 		for _, line := range strings.Split(string(b), "\n") {
 			if strings.Contains(line, "▶") && strings.Contains(line, "#bbb2") {

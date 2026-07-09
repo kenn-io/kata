@@ -1,6 +1,6 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import tea "charm.land/bubbletea/v2"
 
 const (
 	stackedListDataRowY   = 4
@@ -9,20 +9,32 @@ const (
 	mouseWheelScrollLines = 3
 )
 
+// routeMouse handles the press-shaped mouse messages: wheel steps and
+// left clicks. Bubble Tea v2 splits tea.MouseMsg into per-action types
+// (click/release/wheel/motion), so the v1 Action==Press filter is now
+// the type switch itself — release and motion messages fall through
+// untouched.
 func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
-	if !m.opts.Mouse || msg.Action != tea.MouseActionPress || !m.canQuit() {
+	if !m.opts.Mouse || !m.canQuit() {
 		return m, nil
 	}
 	if !m.mouseVisibleViewAcceptsInput() {
 		return m, nil
 	}
-	switch msg.Button {
-	case tea.MouseButtonWheelUp:
-		return m.mouseWheelAt(-1, msg.X)
-	case tea.MouseButtonWheelDown:
-		return m.mouseWheelAt(1, msg.X)
-	case tea.MouseButtonLeft:
-		return m.mouseLeftClick(msg.X, msg.Y)
+	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		mouse := msg.Mouse()
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			return m.mouseWheelAt(-1, mouse.X)
+		case tea.MouseWheelDown:
+			return m.mouseWheelAt(1, mouse.X)
+		}
+	case tea.MouseClickMsg:
+		mouse := msg.Mouse()
+		if mouse.Button == tea.MouseLeft {
+			return m.mouseLeftClick(mouse.X, mouse.Y)
+		}
 	}
 	return m, nil
 }

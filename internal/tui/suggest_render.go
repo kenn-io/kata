@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kata/internal/textsafe"
 )
@@ -43,10 +43,12 @@ func renderSuggestMenu(
 	rows, hasEntries := suggestMenuRows(s, suggestions, entry)
 	w := suggestMenuWidth(rows, hasEntries)
 	body := strings.Join(rows, "\n")
+	// w is the content width; +2 covers the side borders (Lip Gloss v2
+	// sizes border-box) so rows are never re-wrapped by the box.
 	box := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(panelActiveBorder).
-		Width(w).
+		Width(w + 2).
 		Render(body)
 	return box
 }

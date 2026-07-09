@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // renderInputBar formats the inline command bar as a bordered box.
@@ -19,7 +19,7 @@ func renderInputBar(s inputState, width int) string {
 	box := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(panelActiveBorder).
-		Width(width-2). // -2 for the side borders
+		Width(width). // border-box in v2: side borders count toward width
 		Padding(0, 1)
 	var body string
 	if field := s.activeField(); field != nil {
@@ -47,7 +47,7 @@ func renderPanelPrompt(s inputState, width int) string {
 	box := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(panelActiveBorder).
-		Width(width-2).
+		Width(width).
 		Padding(0, 1)
 	var body string
 	if field := s.activeField(); field != nil {
@@ -113,7 +113,9 @@ func renderFilterForm(s inputState, innerW int) string {
 		parts = append(parts, statusLine)
 	}
 	parts = append(parts, footer)
-	return modalBoxStyle.Width(innerW).Padding(0, 1).Render(strings.Join(parts, "\n"))
+	// Lip Gloss v2 sizes border-box: +2 keeps the interior at innerW,
+	// matching the v1 layout where the border sat outside the width.
+	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
 }
 
 // renderFilterField renders one row of the filter form: bold label
@@ -132,7 +134,7 @@ func renderFilterField(s inputState, idx, innerW int) string {
 	if f.kind == fieldRadio {
 		view = renderRadio(f.radio, idx == s.active)
 	} else {
-		f.input.Width = innerW - 2
+		f.input.SetWidth(innerW - 2)
 		view = f.input.View()
 	}
 	return label + "\n" + view
@@ -202,7 +204,9 @@ func renderSingleFieldForm(s inputState, innerW, innerH int) string {
 		parts = append(parts, statusLine)
 	}
 	parts = append(parts, footer)
-	return modalBoxStyle.Width(innerW).Padding(0, 1).Render(strings.Join(parts, "\n"))
+	// Lip Gloss v2 sizes border-box: +2 keeps the interior at innerW,
+	// matching the v1 layout where the border sat outside the width.
+	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
 }
 
 // renderNewIssueForm lays out the fields of the multi-field new-issue
@@ -245,7 +249,9 @@ func renderNewIssueForm(s inputState, innerW, innerH int) string {
 		parts = append(parts, statusLine)
 	}
 	parts = append(parts, footer)
-	return modalBoxStyle.Width(innerW).Padding(0, 1).Render(strings.Join(parts, "\n"))
+	// Lip Gloss v2 sizes border-box: +2 keeps the interior at innerW,
+	// matching the v1 layout where the border sat outside the width.
+	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
 }
 
 // renderNewIssueField renders one labeled field row. The label is
@@ -268,7 +274,7 @@ func renderNewIssueField(s inputState, idx, innerW int) string {
 	if f.kind == fieldMultiLine {
 		view = f.area.View()
 	} else {
-		f.input.Width = innerW - 2
+		f.input.SetWidth(innerW - 2)
 		view = f.input.View()
 	}
 	return label + "\n" + view

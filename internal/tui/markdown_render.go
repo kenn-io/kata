@@ -3,9 +3,8 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/glamour"
-	glamansi "github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/glamour/v2"
+	glamansi "charm.land/glamour/v2/ansi"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -120,21 +119,9 @@ func markdownStyleConfig() glamansi.StyleConfig {
 }
 
 func markdownCodeBlockBackground() *string {
-	if activeColorMode == colorNone {
+	if markdownCodeBlockBg == "" {
 		return nil
 	}
-	if bg, ok := markdownCodeBlockStyle.GetBackground().(lipgloss.Color); ok {
-		s := string(bg)
-		return &s
-	}
-	switch bg := markdownCodeBlockStyle.GetBackground().(type) {
-	case lipgloss.AdaptiveColor:
-		if activeColorMode == colorDark || activeHasDarkBackground {
-			s := bg.Dark
-			return &s
-		}
-		s := bg.Light
-		return &s
-	}
-	return nil
+	s := markdownCodeBlockBg
+	return &s
 }

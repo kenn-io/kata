@@ -9,8 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type viewID int
@@ -204,16 +204,17 @@ type Model struct {
 }
 
 // initialModel constructs the root Bubble Tea model. Style vars are
-// populated against opts.Stdout (or os.Stdout when nil) so unit tests
-// that bypass Run still see live styles. Run re-runs applyDefaultColorMode
-// once it has the opts.Stdout to pin color detection to the real stream.
+// populated up front (dark palette assumed) so unit tests that bypass
+// Run still see live styles; in colorAuto mode Init asks the terminal
+// for its background color through the event loop and Update restyles
+// when the answer lands.
 //
 // sseCh is allocated buffered (16) so a brief stall in Update does not
 // block the SSE goroutine on its forwardFrame send. cache is allocated
 // here rather than on first event so the SSE-driven invalidation never
 // has to nil-check it.
 func initialModel(opts Options) Model {
-	applyDefaultColorMode(opts.Stdout)
+	applyDefaultColorMode()
 	lm := newListModel()
 	lm.actor = resolveTUIActor()
 	uidFormat := parseUIDDisplayFormat(opts.DisplayUIDFormat)
@@ -260,23 +261,30 @@ func resolveTUIActor() string {
 // first frame is ready. The reader is replenished on every SSE message
 // in Update so the channel is continuously drained.
 func (m Model) Init() tea.Cmd {
-	// EnableBracketedPaste makes multi-rune pastes arrive as a single
-	// KeyMsg the textinput can ingest atomically (via its own
-	// Sanitize). Without it, every rune comes through as a separate
-	// keystroke — slow visible characters and any newline in the
-	// clipboard prematurely fires Enter on the inline new-issue row /
-	// command bars.
-	if m.view == viewEmpty || m.api == nil {
-		return tea.Batch(tea.EnableBracketedPaste, m.waitForSSE())
+	// Bracketed paste is on by default in Bubble Tea v2; pastes arrive
+	// as tea.PasteMsg and routeTopLevel forwards them to the active
+	// input, so no explicit enable command is needed anymore.
+	//
+	// In colorAuto mode, ask the terminal for its background color
+	// through the event loop — the v2 replacement for the v1-era
+	// blocking OSC probe at boot. Update restyles when the
+	// tea.BackgroundColorMsg answer lands.
+	cmds := []tea.Cmd{m.waitForSSE()}
+	if activeColorMode == colorAuto {
+		cmds = append(cmds, tea.RequestBackgroundColor)
 	}
-	if m.view == viewProjects {
+	switch {
+	case m.view == viewEmpty || m.api == nil:
+	case m.view == viewProjects:
 		// Boot landed on viewProjects (cwd unresolved + ≥1 project). The
 		// stats cache is already seeded by buildRunModel; skip fetchInitial
 		// (which would hit /api/v1/projects/0/issues with empty scope) and
 		// just drive SSE plus the projects-stats refetch on next event.
-		return tea.Batch(tea.EnableBracketedPaste, m.fetchProjects(), m.waitForSSE())
+		cmds = append(cmds, m.fetchProjects())
+	default:
+		cmds = append(cmds, m.fetchInitial(), m.fetchProjects())
 	}
-	return tea.Batch(tea.EnableBracketedPaste, m.fetchInitial(), m.fetchProjects(), m.waitForSSE())
+	return tea.Batch(cmds...)
 }
 
 // waitForSSE is the bridge from the SSE goroutine into the TEA loop. It
@@ -689,6 +697,26 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		// The terminal answered Init's in-loop background query. Only
+		// colorAuto consults the answer — explicit KATA_COLOR_MODE
+		// values already pinned the palette at boot.
+		if activeColorMode == colorAuto {
+			applyColorMode(colorAuto, msg.IsDark())
+		}
+		return m, nil, true
+	case tea.PasteMsg:
+		// Bubble Tea v2 delivers bracketed pastes as their own message
+		// type. Forward to the active input's bubbles model so a paste
+		// lands atomically (newlines included) instead of as
+		// keystrokes; without an open input the paste has no target.
+		if m.modal == modalNone && m.input.kind != inputNone {
+			m.input, _ = m.input.delegateToField(msg)
+			if m.input.kind.isCommandBar() {
+				m = m.applyLiveBarFilter()
+			}
+		}
+		return m, nil, true
 	case tea.MouseMsg:
 		next, cmd := m.routeMouse(msg)
 		return next, cmd, true
@@ -705,7 +733,7 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		m.detail = m.applyDetailViewportCache(m.detail)
 		m = m.applyListViewportCache()
 		return m, flipCmd, true
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Modal owns input when active. Enter the modal-specific
 		// handler before falling through to input/global routing.
 		if m.modal != modalNone {
@@ -970,7 +998,7 @@ func (m Model) openCommentForm() Model {
 // the visible-suggestion count here. Tab completes the buffer to the
 // highlighted suggestion's label (suggestion source is computed at
 // the Model level — see suggestionsForPrompt).
-func (m Model) routeInputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	prevKind := m.input.kind
 	next, action := m.input.Update(msg)
 	m.input = next
@@ -996,7 +1024,7 @@ func (m Model) routeInputKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 // completes the buffer to the highlighted suggestion's label. The
 // input layer signals "handled" for ↑/↓/⇥ but doesn't have the
 // suggestion list in scope; this is where the wrap + completion run.
-func (m Model) applyLabelPromptKey(msg tea.KeyMsg) Model {
+func (m Model) applyLabelPromptKey(msg tea.KeyPressMsg) Model {
 	all := m.suggestionsForPrompt(m.input)
 	buf := ""
 	if f := m.input.activeField(); f != nil {
@@ -1009,7 +1037,7 @@ func (m Model) applyLabelPromptKey(msg tea.KeyMsg) Model {
 	} else {
 		m.input.suggestHighlight = 0
 	}
-	if msg.Type == tea.KeyTab && n > 0 {
+	if msg.String() == "tab" && n > 0 {
 		picked := visible[m.input.suggestHighlight].Label
 		if f := m.input.activeField(); f != nil {
 			f.setValue(picked)
@@ -1103,7 +1131,7 @@ func (m Model) handoffToEditor() (Model, tea.Cmd) {
 // view: the detail pane only owns `e` / `c` when m.focus ==
 // focusDetail. This keeps the list-pane `c` (clear filters) reachable
 // when focus is on the list.
-func (m Model) routeDetailFormKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+func (m Model) routeDetailFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.detailIsActive() || m.detail.issue == nil {
 		return m, nil, false
 	}
@@ -1628,12 +1656,12 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 // focusDetail; esc from focusDetail → focusList) are checked AFTER
 // the global keys so `q` still opens the quit confirm and `?` still
 // toggles help in either focus state.
-func (m Model) routeGlobalKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.canQuit() {
 		return m, nil, false
 	}
 	// ctrl+c bypasses the confirm modal — fast quit for power users.
-	if msg.Type == tea.KeyCtrlC {
+	if msg.String() == "ctrl+c" {
 		return m, tea.Quit, true
 	}
 	if m.keymap.Quit.matches(msg) {
@@ -1649,7 +1677,7 @@ func (m Model) routeGlobalKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return next, cmd, true
 	}
 	if m.view == viewEmpty {
-		if msg.Type == tea.KeyEsc && m.prevView == viewDaemons {
+		if msg.String() == "esc" && m.prevView == viewDaemons {
 			m.view = viewDaemons
 			return m, nil, true
 		}
@@ -1687,15 +1715,15 @@ func (m Model) routeGlobalKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 //
 // In stacked layout the function is a no-op (the layout has only
 // one pane; tab/esc retain their per-view meanings).
-func (m Model) routeLayoutFocusKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if m.layout != layoutSplit {
 		return m, nil, false
 	}
-	if m.focus == focusList && msg.Type == tea.KeyTab && m.detail.issue != nil {
+	if m.focus == focusList && msg.String() == "tab" && m.detail.issue != nil {
 		m.focus = focusDetail
 		return m, nil, true
 	}
-	if m.focus == focusDetail && msg.Type == tea.KeyEsc {
+	if m.focus == focusDetail && msg.String() == "esc" {
 		if len(m.detail.navStack) > 0 {
 			return m, nil, false
 		}
@@ -2233,8 +2261,8 @@ func (m Model) canQuit() bool {
 // ctrl+c always fast-quits regardless of which modal is open — the
 // power-user escape hatch must not be trapped behind a confirmation
 // (roborev #111 finding 1).
-func (m Model) routeModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
-	if msg.Type == tea.KeyCtrlC {
+func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
 	switch m.modal {
@@ -2456,11 +2484,11 @@ func (m Model) dispatchToSplitPane(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
 		return m, withConnGen(cmd, m.connGen)
 	}
-	if _, ok := msg.(tea.KeyMsg); ok && m.focus == focusList {
+	if _, ok := msg.(tea.KeyPressMsg); ok && m.focus == focusList {
 		next, cmd := m.dispatchListKey(msg)
 		return next, cmd
 	}
-	if _, ok := msg.(tea.KeyMsg); ok && m.focus == focusDetail {
+	if _, ok := msg.(tea.KeyPressMsg); ok && m.focus == focusDetail {
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
 		return m, withConnGen(cmd, m.connGen)
@@ -2611,13 +2639,30 @@ func (m Model) handleDetailFollowTick(msg detailFollowTickMsg) (Model, tea.Cmd) 
 	)
 }
 
-// View returns the rendered string for the active sub-view. The list
-// view consumes its own SSE state + toast inline (via the M1 chrome);
-// other views still get the SSE/toast extras appended below since they
-// don't carry a status line of their own. Both extras render as empty
-// strings in the steady state so the view does not gain spurious blank
-// lines.
-func (m Model) View() string {
+// View wraps viewContent in the declarative tea.View that Bubble Tea
+// v2 renders from: the alt screen and (opt-in) mouse mode are View
+// fields now instead of program options, so they're declared on every
+// frame here rather than at tea.NewProgram time.
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	v.AltScreen = true
+	if m.opts.Mouse {
+		// Opt-in only: mouse tracking blocks native text selection in
+		// many terminals. CellMotion captures clicks/releases/wheel
+		// without idle all-motion churn; users can hold Option (macOS)
+		// or Shift (Linux) to bypass tracking for native selection.
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+	return v
+}
+
+// viewContent returns the rendered string for the active sub-view. The
+// list view consumes its own SSE state + toast inline (via the M1
+// chrome); other views still get the SSE/toast extras appended below
+// since they don't carry a status line of their own. Both extras render
+// as empty strings in the steady state so the view does not gain
+// spurious blank lines.
+func (m Model) viewContent() string {
 	// M5: degraded full-screen hint when the terminal is too narrow for
 	// readable table columns. Short terminals still render the active view:
 	// the list/detail renderers already have compact fallbacks, and blocking

@@ -6,7 +6,7 @@ import "testing"
 // containing both the "no kata projects" line and the kata init hint.
 func TestEmptyState_RendersHint(t *testing.T) {
 	m := setupEmptyView()
-	assertContainsAll(t, m.View(),
+	assertContainsAll(t, m.viewContent(),
 		"no kata projects registered yet",
 		"kata init",
 		"press q to quit",

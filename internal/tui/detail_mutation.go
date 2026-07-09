@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // handleMutationKey dispatches the mutation bindings. Close/reopen and
@@ -21,7 +21,7 @@ import (
 // the issue isn't ready yet, the press becomes a no-op rather than
 // triggering an unintended mutation.
 func (dm detailModel) handleMutationKey(
-	msg tea.KeyMsg, km keymap, api detailAPI,
+	msg tea.KeyPressMsg, km keymap, api detailAPI,
 ) (detailModel, tea.Cmd, bool) {
 	if next, cmd, ok := dm.handleStatusKey(msg, km, api); ok {
 		return next, cmd, true
@@ -39,7 +39,7 @@ func (dm detailModel) handleMutationKey(
 // handleStatusKey routes the keys that don't open a modal: close,
 // reopen, clear-owner. Each fires a single mutation immediately.
 func (dm detailModel) handleStatusKey(
-	msg tea.KeyMsg, km keymap, api detailAPI,
+	msg tea.KeyPressMsg, km keymap, api detailAPI,
 ) (detailModel, tea.Cmd, bool) {
 	switch {
 	case km.Close.matches(msg):
@@ -57,7 +57,7 @@ func (dm detailModel) handleStatusKey(
 // constructs the inputState centrally; dm itself holds no input
 // state any more (M3b retired dm.modal).
 func (dm detailModel) handleModalOpenKey(
-	msg tea.KeyMsg, km keymap,
+	msg tea.KeyPressMsg, km keymap,
 ) (detailModel, tea.Cmd, bool) {
 	var kind inputKind
 	switch {

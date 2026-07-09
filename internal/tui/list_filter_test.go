@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -107,11 +107,11 @@ func (f *fakeListAPI) SetPriority(
 	return f.setPriorityResult, f.setPriorityErr
 }
 
-// runeKey synthesizes a tea.KeyMsg for a single rune so tests don't
+// runeKey synthesizes a tea.KeyPressMsg for a single rune so tests don't
 // have to repeat the struct construction. Multi-character buffers are
 // fed one rune at a time to mirror real keystrokes.
-func runeKey(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+func runeKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
 // newListEnv returns the standard test trio for listModel.Update calls:
@@ -278,7 +278,7 @@ func TestList_Search_AccumulatesAndCommits(t *testing.T) {
 	if m.list.filter.Search != "abc" {
 		t.Fatalf("filter.Search = %q, want abc (live mirror)", m.list.filter.Search)
 	}
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.input.kind != inputNone {
 		t.Fatalf("input.kind = %v, want inputNone after Enter", m.input.kind)
 	}
@@ -305,7 +305,7 @@ func TestList_Search_EscCancels(t *testing.T) {
 		t.Fatalf("filter.Search = %q, want previousxyz (live during edit)",
 			m.list.filter.Search)
 	}
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.input.kind != inputNone {
 		t.Fatal("input.kind must be inputNone after Esc")
 	}
@@ -438,14 +438,14 @@ func TestList_ExpandCollapse(t *testing.T) {
 		},
 	}
 
-	lm, cmd := lm.Update(tea.KeyMsg{Type: tea.KeySpace}, km, api, sc)
+	lm, cmd := lm.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}, km, api, sc)
 	if cmd != nil {
 		t.Fatalf("space should not dispatch a command, got %T", cmd)
 	}
 	if len(lm.visibleRows()) != 2 {
 		t.Fatalf("expanded visible rows = %+v, want parent+child", lm.visibleRows())
 	}
-	lm, _ = lm.Update(tea.KeyMsg{Type: tea.KeySpace}, km, api, sc)
+	lm, _ = lm.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}, km, api, sc)
 	if len(lm.visibleRows()) != 1 {
 		t.Fatalf("collapsed visible rows = %+v, want parent only", lm.visibleRows())
 	}
@@ -455,7 +455,7 @@ func TestList_ExpandCollapse_LeafNoOp(t *testing.T) {
 	api, km, sc := newListEnv()
 	lm := listModel{issues: []Issue{{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1"}}}
 
-	next, cmd := lm.Update(tea.KeyMsg{Type: tea.KeySpace}, km, api, sc)
+	next, cmd := lm.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}, km, api, sc)
 	if cmd != nil {
 		t.Fatalf("space on leaf should not dispatch a command, got %T", cmd)
 	}
@@ -479,7 +479,7 @@ func TestList_ArrowExpandCollapse(t *testing.T) {
 		},
 	}
 
-	lm, cmd := lm.Update(tea.KeyMsg{Type: tea.KeyRight}, km, api, sc)
+	lm, cmd := lm.Update(tea.KeyPressMsg{Code: tea.KeyRight}, km, api, sc)
 	if cmd != nil {
 		t.Fatalf("right should not dispatch a command, got %T", cmd)
 	}
@@ -488,18 +488,18 @@ func TestList_ArrowExpandCollapse(t *testing.T) {
 	}
 
 	// Right on an already-expanded row is a no-op (and must not toggle).
-	lm, _ = lm.Update(tea.KeyMsg{Type: tea.KeyRight}, km, api, sc)
+	lm, _ = lm.Update(tea.KeyPressMsg{Code: tea.KeyRight}, km, api, sc)
 	if len(lm.visibleRows()) != 2 {
 		t.Fatalf("right again: visible rows = %+v, want still expanded", lm.visibleRows())
 	}
 
-	lm, _ = lm.Update(tea.KeyMsg{Type: tea.KeyLeft}, km, api, sc)
+	lm, _ = lm.Update(tea.KeyPressMsg{Code: tea.KeyLeft}, km, api, sc)
 	if len(lm.visibleRows()) != 1 {
 		t.Fatalf("after left: visible rows = %+v, want parent only", lm.visibleRows())
 	}
 
 	// Left on an already-collapsed row is a no-op.
-	lm, _ = lm.Update(tea.KeyMsg{Type: tea.KeyLeft}, km, api, sc)
+	lm, _ = lm.Update(tea.KeyPressMsg{Code: tea.KeyLeft}, km, api, sc)
 	if len(lm.visibleRows()) != 1 {
 		t.Fatalf("left again: visible rows = %+v, want still collapsed", lm.visibleRows())
 	}
@@ -512,11 +512,11 @@ func TestList_ArrowExpandCollapse_LeafNoOp(t *testing.T) {
 	api, km, sc := newListEnv()
 	lm := listModel{issues: []Issue{{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1"}}}
 
-	next, _ := lm.Update(tea.KeyMsg{Type: tea.KeyRight}, km, api, sc)
+	next, _ := lm.Update(tea.KeyPressMsg{Code: tea.KeyRight}, km, api, sc)
 	if len(next.expanded) != 0 {
 		t.Fatalf("right on leaf: expanded = %+v, want empty", next.expanded)
 	}
-	next, _ = lm.Update(tea.KeyMsg{Type: tea.KeyLeft}, km, api, sc)
+	next, _ = lm.Update(tea.KeyPressMsg{Code: tea.KeyLeft}, km, api, sc)
 	if len(next.expanded) != 0 {
 		t.Fatalf("left on leaf: expanded = %+v, want empty", next.expanded)
 	}
@@ -830,7 +830,7 @@ func TestList_BackspaceTrimsBuffer(t *testing.T) {
 	for _, r := range "abc" {
 		m, _ = stepModel(m, runeKey(r))
 	}
-	m, _ = stepModel(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if got := m.input.activeField().value(); got != "ab" {
 		t.Fatalf("bar value = %q, want ab", got)
 	}
@@ -1197,7 +1197,7 @@ func TestList_SetPriority_EscCancels(t *testing.T) {
 	}
 
 	lm, _ = lm.Update(runeKey('!'), km, api, sc)
-	lm, cmd := lm.Update(tea.KeyMsg{Type: tea.KeyEsc}, km, api, sc)
+	lm, cmd := lm.Update(tea.KeyPressMsg{Code: tea.KeyEsc}, km, api, sc)
 	if cmd != nil {
 		t.Fatalf("esc must not produce a cmd, got %T", cmd)
 	}

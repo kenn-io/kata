@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // fetchProjectsWithStats issues GET /api/v1/projects?include=stats and
@@ -127,7 +127,7 @@ func timeOrZero(t *time.Time) time.Time {
 // dispatches a manual refresh. Other keys are absorbed.
 //
 // Spec §1.4 (P/Esc/r), §5.4 (Enter), §6.2 (transition-driven refetch).
-func (m Model) routeProjectsViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) routeProjectsViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	rows := projectsRows(m.projectsByID, m.projectIdentByID, m.projectStats)
 	if next, ok := m.cursorMoveProjects(msg, rows); ok {
 		return next, nil
@@ -148,7 +148,7 @@ func (m Model) routeProjectsViewKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 // (model, false) otherwise so the caller can dispatch the remaining
 // keys. Extracted from routeProjectsViewKey to keep both functions
 // under the project's cyclomatic complexity ceiling (≤8).
-func (m Model) cursorMoveProjects(msg tea.KeyMsg, rows []projectsRow) (Model, bool) {
+func (m Model) cursorMoveProjects(msg tea.KeyPressMsg, rows []projectsRow) (Model, bool) {
 	switch msg.String() {
 	case "j", "down":
 		if m.projectsCursor < len(rows)-1 {

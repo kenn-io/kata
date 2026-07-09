@@ -3,14 +3,14 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"io"
+	"image/color"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // testIssueProjectID is the ProjectID used by the testIssue builder. It
@@ -130,7 +130,7 @@ func projectNotInitializedHandler(w http.ResponseWriter, _ *http.Request) {
 // duration of the test process. Tests that need ANSI-free output call
 // this so assertions can use plain string matching.
 func useNoColor(_ *testing.T) {
-	applyColorMode(colorNone, io.Discard)
+	applyColorMode(colorNone, false)
 }
 
 // renderBodyNoColor renders lm's body and strips ANSI escapes, the
@@ -158,23 +158,24 @@ func updateModel(m Model, msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // sendRune dispatches a single-rune KeyMsg through m.Update and returns
-// the resulting Model, collapsing the verbose tea.KeyMsg + type-assert
+// the resulting Model, collapsing the verbose tea.KeyPressMsg + type-assert
 // boilerplate to one call.
 func sendRune(m Model, r rune) Model {
 	nm, _ := updateModel(m, keyRune(r))
 	return nm
 }
 
-// keyRune builds a single-rune tea.KeyMsg for tests that route keys
+// keyRune builds a single-rune tea.KeyPressMsg for tests that route keys
 // directly (e.g. routeProjectsViewKey) rather than through m.Update.
-func keyRune(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+func keyRune(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
-// sendKey dispatches a typed-key KeyMsg (e.g. tea.KeyDown, tea.KeyTab,
-// tea.KeyEnter) through m.Update and returns the resulting Model.
-func sendKey(m Model, kt tea.KeyType) Model {
-	nm, _ := updateModel(m, tea.KeyMsg{Type: kt})
+// sendKey dispatches a special-key KeyPressMsg (e.g. tea.KeyDown,
+// tea.KeyTab, tea.KeyEnter — rune constants in Bubble Tea v2) through
+// m.Update and returns the resulting Model.
+func sendKey(m Model, code rune) Model {
+	nm, _ := updateModel(m, tea.KeyPressMsg{Code: code})
 	return nm
 }
 
@@ -281,31 +282,23 @@ func assertNotContains(t *testing.T, subject, substr, failMsg string) {
 	}
 }
 
-// assertStyleForeground fails t if style's foreground is not a
-// lipgloss.Color whose string value equals want. Collapses the recurring
-// type-assert + string-compare block in style tests.
+// assertStyleForeground fails t if style's foreground differs from the
+// color lipgloss.Color(want) resolves to. Collapses the recurring
+// compare block in style tests.
 func assertStyleForeground(t *testing.T, style lipgloss.Style, label, want string) {
 	t.Helper()
-	fg, ok := style.GetForeground().(lipgloss.Color)
-	if !ok {
-		t.Fatalf("%s foreground = %T, want lipgloss.Color", label, style.GetForeground())
-	}
-	if string(fg) != want {
-		t.Fatalf("%s foreground = %q, want %q", label, string(fg), want)
+	if got, wantC := style.GetForeground(), lipgloss.Color(want); got != wantC {
+		t.Fatalf("%s foreground = %v, want %v (%q)", label, got, wantC, want)
 	}
 }
 
-// assertTerminalColor fails t if tc is not a lipgloss.Color whose string
-// value equals want. Used for raw lipgloss.TerminalColor vars (e.g.
-// panel border colors) that aren't wrapped in a Style.
-func assertTerminalColor(t *testing.T, tc lipgloss.TerminalColor, label, want string) {
+// assertTerminalColor fails t if tc differs from the color
+// lipgloss.Color(want) resolves to. Used for raw color.Color vars
+// (e.g. panel border colors) that aren't wrapped in a Style.
+func assertTerminalColor(t *testing.T, tc color.Color, label, want string) {
 	t.Helper()
-	c, ok := tc.(lipgloss.Color)
-	if !ok {
-		t.Fatalf("%s = %T, want lipgloss.Color", label, tc)
-	}
-	if string(c) != want {
-		t.Fatalf("%s = %q, want %q", label, string(c), want)
+	if wantC := lipgloss.Color(want); tc != wantC {
+		t.Fatalf("%s = %v, want %v (%q)", label, tc, wantC, want)
 	}
 }
 

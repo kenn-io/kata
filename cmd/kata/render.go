@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"go.kenn.io/kata/internal/textsafe"
 )
 
@@ -27,11 +29,12 @@ type issueRow struct {
 // between the row list and the summary line.
 const footerRuleWidth = 50
 
-// rowRenderer holds lipgloss styles bound to one renderer/output
-// stream so color-capability detection (TTY, NO_COLOR, forced
-// profile in tests) is resolved once and reused across every row and
-// footer line it renders.
+// rowRenderer holds lipgloss styles plus the color profile detected
+// for the output stream (TTY, NO_COLOR, forced profile in tests).
+// Lip Gloss v2 has no per-stream renderer: styles render at full
+// fidelity and the profile-aware writer downsamples on write.
 type rowRenderer struct {
+	profile           colorprofile.Profile
 	idStyle           lipgloss.Style
 	blockedGlyphStyle lipgloss.Style
 	closedGlyphStyle  lipgloss.Style
@@ -46,31 +49,39 @@ type rowRenderer struct {
 	legendStyle       lipgloss.Style
 }
 
-// newRowRenderer builds a rowRenderer bound to w, detecting TTY /
-// NO_COLOR / color-profile capability from w itself (so piping to a
-// file or a NO_COLOR environment degrades to plain text).
+// newRowRenderer builds a rowRenderer for w, detecting TTY /
+// NO_COLOR / color-profile capability from w and the environment (so
+// piping to a file or a NO_COLOR environment degrades to plain text).
 func newRowRenderer(w io.Writer) *rowRenderer {
-	return newRowRendererFor(lipgloss.NewRenderer(w))
+	return newRowRendererFor(colorprofile.Detect(w, os.Environ()))
 }
 
-// newRowRendererFor builds a rowRenderer bound to an existing
-// lipgloss.Renderer. This is the test seam: callers can force a
-// color profile via r.SetColorProfile(...) before construction.
-func newRowRendererFor(r *lipgloss.Renderer) *rowRenderer {
+// newRowRendererFor builds a rowRenderer that downsamples to p on
+// write. This is the test seam: callers can force a color profile
+// (e.g. colorprofile.NoTTY for plain text) instead of detecting one.
+func newRowRendererFor(p colorprofile.Profile) *rowRenderer {
 	return &rowRenderer{
-		idStyle:           r.NewStyle().Foreground(lipgloss.Color("6")),
-		blockedGlyphStyle: r.NewStyle().Foreground(lipgloss.Color("1")),
-		closedGlyphStyle:  r.NewStyle().Foreground(lipgloss.Color("2")),
-		p0Style:           r.NewStyle().Bold(true).Foreground(lipgloss.Color("9")),
-		p1Style:           r.NewStyle().Foreground(lipgloss.Color("1")),
-		p2Style:           r.NewStyle().Foreground(lipgloss.Color("3")),
-		p4Style:           r.NewStyle().Faint(true),
-		epicChipStyle:     r.NewStyle().Foreground(lipgloss.Color("5")),
-		bugChipStyle:      r.NewStyle().Foreground(lipgloss.Color("1")),
-		ownerStyle:        r.NewStyle().Faint(true),
-		ruleStyle:         r.NewStyle().Faint(true),
-		legendStyle:       r.NewStyle().Faint(true),
+		profile:           p,
+		idStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
+		blockedGlyphStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+		closedGlyphStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
+		p0Style:           lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9")),
+		p1Style:           lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+		p2Style:           lipgloss.NewStyle().Foreground(lipgloss.Color("3")),
+		p4Style:           lipgloss.NewStyle().Faint(true),
+		epicChipStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
+		bugChipStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
+		ownerStyle:        lipgloss.NewStyle().Faint(true),
+		ruleStyle:         lipgloss.NewStyle().Faint(true),
+		legendStyle:       lipgloss.NewStyle().Faint(true),
 	}
+}
+
+// downsample wraps w so every styled line degrades to r.profile on
+// write (colors drop to the nearest representable value; NoTTY strips
+// ANSI entirely).
+func (r *rowRenderer) downsample(w io.Writer) io.Writer {
+	return &colorprofile.Writer{Forward: w, Profile: r.profile}
 }
 
 // renderRows writes one formatted line per row to w:
@@ -86,6 +97,7 @@ func (r *rowRenderer) renderRows(w io.Writer, rows []issueRow) error {
 	if len(rows) == 0 {
 		return nil
 	}
+	w = r.downsample(w)
 	idWidth := 4
 	ids := make([]string, len(rows))
 	for i, row := range rows {
@@ -236,6 +248,7 @@ func (r *rowRenderer) renderReadyFooter(w io.Writer, n int, truncated bool) erro
 }
 
 func (r *rowRenderer) renderFooter(w io.Writer, summary, legend string) error {
+	w = r.downsample(w)
 	rule := r.ruleStyle.Render(strings.Repeat("─", footerRuleWidth))
 	legendLine := r.legendStyle.Render(legend)
 	_, err := fmt.Fprintf(w, "\n%s\n%s\n\n%s\n", rule, summary, legendLine)

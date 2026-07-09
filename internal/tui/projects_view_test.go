@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +19,7 @@ func TestProjectsView_RendersWithoutPanic(t *testing.T) {
 	m := setupProjectsView()
 	m.width = 80 // narrower than the 120 default
 
-	out := m.View()
+	out := m.viewContent()
 	if out == "" {
 		t.Fatal("viewProjects must render a non-empty frame")
 	}
@@ -105,7 +105,7 @@ func TestProjectsView_RendersTable(t *testing.T) {
 		mockProject{ID: 2, Name: "roborev", Ident: "github.com/wesm/roborev", Stats: ProjectStatsSummary{Open: 7, Closed: 2, LastEventAt: &t1}},
 	)
 
-	out := m.View()
+	out := m.viewContent()
 	for _, want := range []string{
 		"kata / projects", "Project", "Open", "Closed", "Total", "Updated",
 		"All projects", "kata", "roborev",
@@ -117,7 +117,7 @@ func TestProjectsView_RendersTable(t *testing.T) {
 func TestProjectsView_FooterUsesAdaptiveHelpTable(t *testing.T) {
 	m := setupProjectsView(mockProject{ID: 1, Name: "alpha", Ident: "..."})
 
-	out := stripANSI(m.View())
+	out := stripANSI(m.viewContent())
 
 	assert.Contains(t, out, "▕")
 	assert.Contains(t, out, "F federation")
@@ -150,7 +150,7 @@ func TestProjectsView_FTransitionsToFederationWithHighlightedProjectSelected(t *
 	require.False(t, rows[out.federationLocalProjectCursor].createReplica)
 	assert.Equal(t, "beta-project", rows[out.federationLocalProjectCursor].project.Name)
 
-	out, cmd = out.routeFederationViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd = out.routeFederationViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, cmd)
 	assert.Equal(t, federationModeSelectHub, out.federationMode)
 	assert.Equal(t, int64(22), out.federationDraft.SpokeProjectID)
@@ -207,7 +207,9 @@ func TestProjectsView_ViewportClipsRowsToHeight(t *testing.T) {
 	}
 	m.projectsCursor = 10
 
-	out := m.View()
+	// Strip style SGRs: v2 styles always emit them, and the footer
+	// assertions match across key/desc style boundaries.
+	out := stripANSI(m.viewContent())
 	lines := strings.Split(out, "\n")
 	assert.LessOrEqual(t, len(lines), m.height, "render must fit within m.height")
 	assert.Contains(t, out, "F federation", "footer help table must remain visible")
@@ -221,7 +223,7 @@ func TestProjectsView_DashWhenNoEvents(t *testing.T) {
 	m := setupProjectsView(
 		mockProject{ID: 1, Name: "fresh", Ident: "github.com/wesm/fresh"},
 	)
-	out := m.View()
+	out := m.viewContent()
 	assert.Contains(t, out, "—", "nil LastEventAt must render as em-dash")
 }
 
@@ -234,11 +236,11 @@ func TestProjectsView_ProjectFooterOnHighlight(t *testing.T) {
 	)
 
 	m.projectsCursor = 0 // sentinel row
-	out := m.View()
+	out := m.viewContent()
 	assert.Contains(t, out, "issue queue across every registered project")
 
 	m.projectsCursor = 1 // kata row
-	out = m.View()
+	out = m.viewContent()
 	assert.Contains(t, out, "project: kata")
 }
 
@@ -279,7 +281,7 @@ func TestProjectsView_EnterOnProjectTransitions(t *testing.T) {
 	// projectsRows for ordering — alpha tiebreak means 'kata' first).
 	m.projectsCursor = 1
 
-	out, cmd := m.routeProjectsViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.routeProjectsViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Equal(t, viewList, out.view)
 	assert.False(t, out.scope.allProjects, "concrete project, not all-projects")
 	assert.Equal(t, int64(7), out.scope.projectID)
@@ -301,7 +303,7 @@ func TestProjectsView_EnterOnSentinelTransitions(t *testing.T) {
 	m.cache.put(cacheKey{projectID: 1}, []Issue{{UID: "01TEST-aaa1", ShortID: "aaa1"}})
 	m.projectsCursor = 0 // sentinel
 
-	out, cmd := m.routeProjectsViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.routeProjectsViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Equal(t, viewList, out.view)
 	assert.True(t, out.scope.allProjects)
 	assert.Zero(t, out.scope.projectID)
@@ -319,7 +321,7 @@ func TestProjectsView_EnterOnCurrentScopeIsIdempotent(t *testing.T) {
 	m.scope = homedScope(7, "kata")
 	m.projectsCursor = 1 // the kata row
 
-	out, cmd := m.routeProjectsViewKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.routeProjectsViewKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	assert.Equal(t, viewList, out.view, "transitions to viewList")
 	assert.Nil(t, cmd, "no refetch on idempotent re-select")
 	assert.False(t, out.cache.isStale(), "cache untouched on idempotent re-select")
@@ -332,7 +334,7 @@ func TestProjectsView_EscReturnsToPriorList(t *testing.T) {
 	m := setupProjectsView()
 	m.scope = homedScope(7, "kata")
 
-	out, cmd := m.routeProjectsViewKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, cmd := m.routeProjectsViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	assert.Equal(t, viewList, out.view, "Esc → viewList")
 	assert.Equal(t, int64(7), out.scope.projectID, "scope unchanged")
 	assert.Nil(t, cmd, "no refetch on Esc-back")
@@ -345,7 +347,7 @@ func TestProjectsView_EscNoOpOnBootEntry(t *testing.T) {
 	// Default scope is zero (empty=false, projectID=0, allProjects=false)
 	// — this represents the boot landing case.
 
-	out, cmd := m.routeProjectsViewKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, cmd := m.routeProjectsViewKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	assert.Equal(t, viewProjects, out.view, "Esc with no prior list → no transition")
 	assert.Nil(t, cmd)
 }

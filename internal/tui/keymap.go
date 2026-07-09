@@ -1,6 +1,6 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import tea "charm.land/bubbletea/v2"
 
 // keymap is the single source of truth for keybindings. The help view
 // reads from this same value so rendered help stays in lockstep with
@@ -60,7 +60,9 @@ func newKeymap() keymap {
 		ToggleIssueView: key{
 			Keys: []string{"v"}, Help: "toggle flat/nested view",
 		},
-		ExpandCollapse: key{Keys: []string{" "}, Help: "expand/collapse"},
+		// Bubble Tea v2 reports the space bar as "space" (v1 reported
+		// a literal " ").
+		ExpandCollapse: key{Keys: []string{"space"}, Help: "expand/collapse"},
 		Expand:         key{Keys: []string{"right"}, Help: "expand"},
 		Collapse:       key{Keys: []string{"left"}, Help: "collapse"},
 		ExpandAll:      key{Keys: []string{"E"}, Help: "expand/collapse all"},
@@ -97,7 +99,7 @@ func newKeymap() keymap {
 }
 
 // matches reports whether msg is one of k's bound keys.
-func (k key) matches(msg tea.KeyMsg) bool {
+func (k key) matches(msg tea.KeyPressMsg) bool {
 	s := msg.String()
 	for _, b := range k.Keys {
 		if s == b {
