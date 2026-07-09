@@ -987,6 +987,12 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 	if err != nil {
 		return nil, err
 	}
+	// Blocked is server-computed display state (ready predicate), kept
+	// separate from the full blocked_by relationship hydration above.
+	activelyBlocked, err := store.ActivelyBlockedIssueIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	// Gather peer ids referenced by any relationship slice so we can resolve
 	// each to a fully-populated LinkPeer in one pass.
 	names := &projectNames{store: store, byID: map[int64]string{project.ID: project.Name}}
@@ -1003,6 +1009,7 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 			Blocks:      peerSlice(peerCache, blocks[iss.ID]),
 			BlockedBy:   peerSlice(peerCache, blockedBy[iss.ID]),
 			Related:     peerSlice(peerCache, related[iss.ID]),
+			Blocked:     activelyBlocked[iss.ID],
 		}
 		if parentID, ok := parentNumbers[iss.ID]; ok {
 			if peer, ok := peerCache[parentID]; ok {

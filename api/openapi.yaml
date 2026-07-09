@@ -1753,6 +1753,8 @@ components:
       properties:
         author:
           type: string
+        blocked:
+          type: boolean
         blocked_by:
           items:
             $ref: "#/components/schemas/LinkPeer"

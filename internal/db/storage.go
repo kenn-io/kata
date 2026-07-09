@@ -120,6 +120,7 @@ type Storage interface {
 	ParentShortIDsByIssues(ctx context.Context, issueIDs []int64) (map[int64]string, error)
 	BlockNumbersByIssues(ctx context.Context, issueIDs []int64) (map[int64][]int64, error)
 	BlockedByNumbersByIssues(ctx context.Context, issueIDs []int64) (map[int64][]int64, error)
+	ActivelyBlockedIssueIDs(ctx context.Context, issueIDs []int64) (map[int64]bool, error)
 	RelatedNumbersByIssues(ctx context.Context, issueIDs []int64) (map[int64][]int64, error)
 
 	// recurrences

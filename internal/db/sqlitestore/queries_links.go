@@ -269,16 +269,17 @@ func (d *Store) appendBlockNumbersForChunk(
 	return nil
 }
 
-// BlockedByNumbersByIssues returns issue ID -> issue numbers that actively
-// block that issue. Inverse of BlockNumbersByIssues: for each issue X, the
+// BlockedByNumbersByIssues returns issue ID -> issue numbers that block
+// that issue. Inverse of BlockNumbersByIssues: for each issue X, the
 // returned numbers are the issues whose outgoing `blocks` link points
 // at X. Used by `kata list --json` to surface every relationship type
 // per row, not just outgoing blocks. Links are project-independent edges
-// (storage v16), so a blocker in another project is still returned — but
-// only carries ACTIVE blockers: a blocker whose project is archived
-// (projects.deleted_at IS NOT NULL) is excluded, mirroring ReadyIssues'
-// active-blocker predicate so `kata list` and `kata ready` agree on
-// whether an issue is actually blocked.
+// (storage v16), so this carries the FULL relationship set: a blocker in
+// another project — including one whose project is archived
+// (projects.deleted_at IS NOT NULL) — is still returned, because this is
+// relationship hydration, not display policy. Whether an issue is
+// "actively blocked" for display is a separate concern computed by
+// ActivelyBlockedIssueIDs, which mirrors the ready predicate.
 func (d *Store) BlockedByNumbersByIssues(
 	ctx context.Context, issueIDs []int64,
 ) (map[int64][]int64, error) {
@@ -306,10 +307,8 @@ func (d *Store) appendBlockedByNumbersForChunk(
 	          FROM links l
 	          JOIN issues blocker ON blocker.id = l.from_issue_id
 	          JOIN issues blocked ON blocked.id = l.to_issue_id
-	          JOIN projects bp ON bp.id = blocker.project_id
 	          WHERE l.type = 'blocks'
 	            AND blocker.deleted_at IS NULL
-	            AND bp.deleted_at IS NULL
 	            AND l.to_issue_id IN (` + placeholders + `)
 	          ORDER BY l.to_issue_id ASC, blocker.id ASC`
 	rows, err := d.QueryContext(ctx, query, args...)
@@ -323,6 +322,65 @@ func (d *Store) appendBlockedByNumbersForChunk(
 			return fmt.Errorf("scan blocked-by numbers by issues: %w", err)
 		}
 		out[blockedID] = append(out[blockedID], blockerNumber)
+	}
+	return rows.Err()
+}
+
+// ActivelyBlockedIssueIDs returns issue ID -> true for each input issue that
+// has at least one ACTIVE incoming `blocks` blocker, mirroring the ReadyIssues
+// predicate exactly: the blocker issue must be open, not soft-deleted, and its
+// project must not be archived (projects.deleted_at IS NULL). Issues with no
+// active blocker are absent from the map (callers treat absence as false). This
+// is the display-policy counterpart to BlockedByNumbersByIssues (which carries
+// the full relationship set): `kata list` renders the blocked glyph from this
+// so it agrees with `kata ready`. Chunks its inputs like the sibling
+// relationship queries.
+func (d *Store) ActivelyBlockedIssueIDs(
+	ctx context.Context, issueIDs []int64,
+) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	if len(issueIDs) == 0 {
+		return out, nil
+	}
+	for i := 0; i < len(issueIDs); i += relationshipChunkSize {
+		end := i + relationshipChunkSize
+		if end > len(issueIDs) {
+			end = len(issueIDs)
+		}
+		if err := d.appendActivelyBlockedForChunk(ctx, issueIDs[i:end], out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (d *Store) appendActivelyBlockedForChunk(
+	ctx context.Context, chunk []int64, out map[int64]bool,
+) error {
+	placeholders, args := relationshipChunkPlaceholders(chunk)
+	// Mirrors the ReadyIssues NOT EXISTS predicate: a row is actively blocked
+	// iff an incoming `blocks` link has an open, live blocker in a non-archived
+	// project. DISTINCT collapses multiple qualifying blockers to one row.
+	query := `SELECT DISTINCT l.to_issue_id
+	          FROM links l
+	          JOIN issues blocker ON blocker.id = l.from_issue_id
+	          JOIN projects bp ON bp.id = blocker.project_id
+	          WHERE l.type = 'blocks'
+	            AND blocker.status = 'open'
+	            AND blocker.deleted_at IS NULL
+	            AND bp.deleted_at IS NULL
+	            AND l.to_issue_id IN (` + placeholders + `)`
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("actively blocked issue ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var blockedID int64
+		if err := rows.Scan(&blockedID); err != nil {
+			return fmt.Errorf("scan actively blocked issue ids: %w", err)
+		}
+		out[blockedID] = true
 	}
 	return rows.Err()
 }

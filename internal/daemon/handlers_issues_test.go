@@ -2064,6 +2064,72 @@ func TestListIssues_BlockedByPeerCarriesStatus(t *testing.T) {
 	assert.Equal(t, "closed", byShort[blockedShort][0].Status)
 }
 
+// TestListIssues_BlockedFieldFollowsReadyPredicate pins the server-computed
+// `blocked` field: true when an issue has an open blocker in an active
+// project, false when the only blocker's project is archived — mirroring the
+// ready predicate. Crucially it also asserts wire completeness: the
+// archived-project blocker still appears in blocked_by (relationship
+// hydration is not display policy), so `kata show`/`kata list --json`
+// consumers see the full edge set even though the row reads as unblocked.
+func TestListIssues_BlockedFieldFollowsReadyPredicate(t *testing.T) {
+	env := testenv.New(t)
+	hubPID := initLocalWorkspace(t, env, "hub-project")
+	spokePID := mkProject(t, env, "", "spoke-project")
+
+	// Active blocker in the same project → blocked:true.
+	blockedActive := createIssueViaHTTP(t, env, hubPID, "blocked-active")
+	blockerActive := createIssueViaHTTP(t, env, hubPID, "blocker-active")
+	postLink(t, env, hubPID, blockerActive, "blocks", blockedActive)
+
+	// Blocker in a soon-to-be-archived project → blocked:false, but the edge
+	// must still hydrate into blocked_by.
+	blockedArchived := createIssueViaHTTP(t, env, hubPID, "blocked-archived")
+	blockerArchived := createIssueViaHTTP(t, env, spokePID, "blocker-archived")
+	_, err := env.DB.CreateLink(t.Context(), db.CreateLinkParams{
+		FromIssueID: blockerArchived, ToIssueID: blockedArchived,
+		Type: "blocks", Author: "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: spokePID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	blockedActiveShort := refForIssue(t, env, blockedActive)
+	blockedArchivedShort := refForIssue(t, env, blockedArchived)
+	blockerArchivedShort := refForIssue(t, env, blockerArchived)
+
+	var out struct {
+		Issues []struct {
+			ShortID   string         `json:"short_id"`
+			Blocked   bool           `json:"blocked"`
+			BlockedBy []linkPeerTest `json:"blocked_by,omitempty"`
+		} `json:"issues"`
+	}
+	envGetJSON(t, env, projectPath(hubPID)+"/issues", &out)
+	byShort := map[string]struct {
+		blocked   bool
+		blockedBy []linkPeerTest
+	}{}
+	for _, iss := range out.Issues {
+		byShort[iss.ShortID] = struct {
+			blocked   bool
+			blockedBy []linkPeerTest
+		}{iss.Blocked, iss.BlockedBy}
+	}
+
+	assert.True(t, byShort[blockedActiveShort].blocked,
+		"open blocker in an active project must set blocked:true")
+
+	archivedRow := byShort[blockedArchivedShort]
+	assert.False(t, archivedRow.blocked,
+		"blocker in an archived project must not set blocked (ready predicate)")
+	require.Len(t, archivedRow.blockedBy, 1,
+		"archived-project blocker edge must still hydrate into blocked_by")
+	assert.Equal(t, blockerArchivedShort, archivedRow.blockedBy[0].ShortID,
+		"blocked_by must carry the archived-project peer (wire completeness)")
+}
+
 // TestListAllIssues_AcrossProjects pins #22's wire contract: GET /api/v1/issues
 // with no project_id returns issues from every project, hydrating labels
 // per-issue across project boundaries.

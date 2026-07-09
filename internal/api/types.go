@@ -448,6 +448,11 @@ type IssueOut struct {
 	Blocks      []LinkPeer      `json:"blocks,omitempty"`
 	BlockedBy   []LinkPeer      `json:"blocked_by,omitempty"`
 	Related     []LinkPeer      `json:"related,omitempty"`
+	// Blocked reports whether this issue is actively blocked per the ready
+	// predicate: at least one open blocker in a non-archived project. It is
+	// server-computed display state, distinct from BlockedBy which carries
+	// the full (policy-free) set of blocker relationship edges.
+	Blocked bool `json:"blocked,omitempty"`
 }
 
 // ListIssuesResponse is the list payload. Plan 8 commit 5b: each row

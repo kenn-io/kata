@@ -1623,6 +1623,7 @@ func (i IssueLabel) Validate() error {
 
 type IssueOut struct {
 	Author        string         `json:"author" validate:"required"`
+	Blocked       *bool          `json:"blocked,omitempty"`
 	BlockedBy     []LinkPeer     `json:"blocked_by,omitempty"`
 	Blocks        []LinkPeer     `json:"blocks,omitempty"`
 	Body          string         `json:"body" validate:"required"`

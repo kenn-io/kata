@@ -46,6 +46,10 @@ func (s *Store) ActiveFederationQuarantinesByProject(_ context.Context, _ int64)
 	return nil, ErrNotImplementedPhase3
 }
 
+func (s *Store) ActivelyBlockedIssueIDs(_ context.Context, _ []int64) (map[int64]bool, error) {
+	return nil, ErrNotImplementedPhase3
+}
+
 func (s *Store) AddLabel(_ context.Context, _ int64, _ string, _ string) (db.IssueLabel, error) {
 	return db.IssueLabel{}, ErrNotImplementedPhase3
 }

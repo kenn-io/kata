@@ -119,9 +119,7 @@ func newListCmd() *cobra.Command {
 					Owner       *string  `json:"owner"`
 					Priority    *int64   `json:"priority"`
 					Labels      []string `json:"labels"`
-					BlockedBy   []struct {
-						Status string `json:"status"`
-					} `json:"blocked_by"`
+					Blocked     bool     `json:"blocked"`
 				} `json:"issues"`
 			}
 			if err := json.Unmarshal(bs, &b); err != nil {
@@ -158,22 +156,13 @@ func newListCmd() *cobra.Command {
 				if i.Owner != nil && *i.Owner != "" {
 					owner = *i.Owner
 				}
-				blocked := false
-				if i.Status == "open" {
-					for _, peer := range i.BlockedBy {
-						if peer.Status == "open" {
-							blocked = true
-							break
-						}
-					}
-				}
 				rows[idx] = issueRow{
 					ID:       i.ShortID,
 					Title:    i.Title,
 					Owner:    owner,
 					Priority: i.Priority,
 					Status:   i.Status,
-					Blocked:  blocked,
+					Blocked:  i.Blocked,
 					Labels:   i.Labels,
 				}
 			}
