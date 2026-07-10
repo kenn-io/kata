@@ -16,7 +16,7 @@ install:
 	go install -ldflags="$(LDFLAGS)" ./cmd/kata
 
 test:
-	go test $(GOFLAGS_TEST) ./...
+	env -u KATA_AUTH_TOKEN go test $(GOFLAGS_TEST) ./...
 
 # Regenerate the committed OpenAPI schema and generated Go client.
 # Drift tests fail if the OpenAPI artifacts or generated client differ from this output.
@@ -31,7 +31,7 @@ api-check:
 openapi: api-generate
 
 test-short:
-	go test -short $(GOFLAGS_TEST) ./...
+	env -u KATA_AUTH_TOKEN go test -short $(GOFLAGS_TEST) ./...
 
 test-stress:
 	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout 2m

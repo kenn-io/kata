@@ -737,7 +737,9 @@ func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) {
 }
 
 func TestFederationEnrollHTTPClientRequiresExplicitAllowInsecureForPlaintextHostname(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
 	client, err := federationEnrollHTTPClient(context.Background(), "http://hub.internal:7787", false)
 
@@ -763,6 +765,7 @@ func TestFederationEnrollCLIExplicitAllowInsecurePrintsJoinFlag(t *testing.T) {
 func TestFederationEnrollCLIPlaintextBearerErrorMentionsAllowInsecure(t *testing.T) {
 	env, dir, _ := setupCLIWorkspace(t)
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
 	_, err := runCLICapture(t, env, dir,
 		"--project", "fedlab",
@@ -1803,6 +1806,8 @@ func TestFederationLeaveRevokesAfterProjectsRemoveArchive(t *testing.T) {
 // restored opt-in the bearer transport refuses --hub-token before any I/O;
 // --allow-insecure is the explicit leave-time escape hatch.
 func TestFederationLeaveAllowInsecureFlag(t *testing.T) {
+	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
+
 	seed := func(t *testing.T, env *testenv.Env) {
 		t.Helper()
 		ctx := context.Background()
