@@ -1171,6 +1171,115 @@ func TestSyncFederationOnceResetBlockedByLocalEventCreatedDuringMetadataRefresh(
 	require.NoError(t, err)
 }
 
+func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
+	type scenario struct {
+		firstTaskBeforeEnrollment bool
+		peerTaskBeforeEnrollment  bool
+		eagerSync                 bool
+		peerSyncsFirst            bool
+	}
+	var scenarios []scenario
+	for _, firstBefore := range []bool{false, true} {
+		for _, peerBefore := range []bool{false, true} {
+			for _, eager := range []bool{false, true} {
+				for _, peerFirst := range []bool{false, true} {
+					scenarios = append(scenarios, scenario{firstBefore, peerBefore, eager, peerFirst})
+				}
+			}
+		}
+	}
+	require.Len(t, scenarios, 16)
+
+	for _, tc := range scenarios {
+		name := fmt.Sprintf("first_before=%t/peer_before=%t/eager=%t/peer_first=%t",
+			tc.firstTaskBeforeEnrollment, tc.peerTaskBeforeEnrollment, tc.eagerSync, tc.peerSyncsFirst)
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			hub := testenv.New(t)
+			spoke := testenv.New(t)
+			firstHub := matrixCreateHubProject(t, hub, "spoke-project")
+			peerHub := matrixCreateHubProject(t, hub, "peer-project")
+			firstLocal, err := spoke.DB.CreateProject(ctx, firstHub.Name)
+			require.NoError(t, err)
+			peerLocal, err := spoke.DB.CreateProject(ctx, peerHub.Name)
+			require.NoError(t, err)
+			firstEnrollment := matrixCreateEnrollment(t, hub, spoke, firstHub, "first-matrix-token")
+			peerEnrollment := matrixCreateEnrollment(t, hub, spoke, peerHub, "peer-matrix-token")
+			projects := []*matrixFederationProject{
+				{tag: "first", hub: firstHub, local: firstLocal,
+					credential: matrixCredential(hub.URL, firstHub.ID, firstEnrollment.Token),
+					before:     tc.firstTaskBeforeEnrollment},
+				{tag: "peer", hub: peerHub, local: peerLocal,
+					credential: matrixCredential(hub.URL, peerHub.ID, peerEnrollment.Token),
+					before:     tc.peerTaskBeforeEnrollment},
+			}
+			if tc.peerSyncsFirst {
+				projects[0], projects[1] = projects[1], projects[0]
+			}
+
+			for _, project := range projects {
+				if project.before {
+					project.issue = matrixCreateInitialState(t, spoke.DB, project.local, project.tag)
+				}
+			}
+			linked := false
+			if projects[0].issue.ID != 0 && projects[1].issue.ID != 0 {
+				matrixCreateCrossProjectLink(t, spoke.DB, projects[0].issue, projects[1].issue)
+				linked = true
+			}
+			syncEligible := func() {
+				for _, project := range projects {
+					if project.enrolled {
+						matrixSyncProject(t, spoke.DB, project)
+					}
+				}
+			}
+			for _, project := range projects {
+				matrixAdoptProject(t, hub.DB, spoke.DB, hub.URL, project)
+				if !project.before {
+					project.issue = matrixCreateInitialState(t, spoke.DB, project.local, project.tag)
+				}
+				if !linked && projects[0].issue.ID != 0 && projects[1].issue.ID != 0 {
+					matrixCreateCrossProjectLink(t, spoke.DB, projects[0].issue, projects[1].issue)
+					linked = true
+				}
+				if tc.eagerSync {
+					syncEligible()
+				}
+			}
+			require.True(t, linked)
+			for _, project := range projects {
+				project.issue = matrixApplyPostEnrollmentState(t, spoke.DB, project.issue, project.tag)
+				if tc.eagerSync {
+					syncEligible()
+				}
+			}
+			syncEligible()
+			syncEligible()
+
+			for _, project := range projects {
+				matrixAssertPortableState(t, hub.DB, project.hub.ID, project.issue.UID, project.tag)
+				matrixAssertPushDrained(t, spoke.DB, project.local.ID)
+			}
+			matrixAssertLinkCount(t, hub.DB, projects[0].issue.UID, projects[1].issue.UID, 1)
+			firstByTag := matrixProjectByTag(projects, "first")
+			peerByTag := matrixProjectByTag(projects, "peer")
+			matrixApplyHubFollowup(t, hub.DB, firstByTag, peerByTag)
+			syncEligible()
+			matrixAssertPulledFollowup(t, spoke.DB, firstByTag, peerByTag)
+			matrixAssertPullCursors(t, hub.DB, spoke.DB, projects)
+
+			beforeRepeat, err := spoke.DB.MaxEventID(ctx)
+			require.NoError(t, err)
+			syncEligible()
+			afterRepeat, err := spoke.DB.MaxEventID(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, beforeRepeat, afterRepeat)
+			matrixAssertLinkCount(t, hub.DB, projects[0].issue.UID, projects[1].issue.UID, 1)
+		})
+	}
+}
+
 func TestSyncFederationOncePushesAndAdvancesCursor(t *testing.T) {
 	ctx := context.Background()
 	hub := testenv.New(t)
@@ -3406,6 +3515,319 @@ func assertHubOriginEventCount(ctx context.Context, store *sqlitestore.Store, pr
 		return fmt.Errorf("origin event count = %d, want %d", got, want)
 	}
 	return nil
+}
+
+type matrixFederationProject struct {
+	tag        string
+	hub        db.Project
+	local      db.Project
+	issue      db.Issue
+	credential config.FederationCredential
+	before     bool
+	enrolled   bool
+}
+
+func matrixCreateHubProject(t *testing.T, hub *testenv.Env, name string) db.Project {
+	t.Helper()
+	project, err := hub.DB.CreateProject(context.Background(), name)
+	require.NoError(t, err)
+	_, err = hub.DB.EnableProjectFederation(context.Background(), project.ID, "tester")
+	require.NoError(t, err)
+	return project
+}
+
+func matrixCreateEnrollment(
+	t *testing.T,
+	hub, spoke *testenv.Env,
+	project db.Project,
+	token string,
+) db.CreatedFederationEnrollment {
+	t.Helper()
+	created, err := hub.DB.CreateFederationEnrollment(context.Background(), db.CreateFederationEnrollmentParams{
+		Token:                        token,
+		SpokeInstanceUID:             spoke.DB.InstanceUID(),
+		ProjectID:                    &project.ID,
+		Capabilities:                 "pull,push",
+		Actor:                        "tester",
+		AllowAdoptionSnapshotAuthors: true,
+	})
+	require.NoError(t, err)
+	return created
+}
+
+func matrixCredential(hubURL string, projectID int64, token string) config.FederationCredential {
+	return config.FederationCredential{
+		HubURL:       hubURL,
+		HubProjectID: projectID,
+		Token:        token,
+		Capabilities: "pull,push",
+	}
+}
+
+func matrixCreateInitialState(t *testing.T, store *sqlitestore.Store, project db.Project, tag string) db.Issue {
+	t.Helper()
+	owner := tag + "-initial-owner"
+	priority := int64(3)
+	issue, _, err := store.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     tag + " initial title",
+		Body:      tag + " initial body",
+		Author:    "tester",
+		Labels:    []string{tag + "-initial-label"},
+		Owner:     &owner,
+		Priority:  &priority,
+		Metadata: map[string]json.RawMessage{
+			"phase": json.RawMessage(`"initial"`),
+		},
+	})
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(context.Background(), db.CreateCommentParams{
+		IssueID: issue.ID,
+		Author:  "tester",
+		Body:    tag + " initial comment",
+	})
+	require.NoError(t, err)
+	_, _, changed, err := store.CloseIssue(context.Background(), issue.ID, "done", "tester", "initial close", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	issue, _, changed, err = store.ReopenIssue(context.Background(), issue.ID, "tester")
+	require.NoError(t, err)
+	require.True(t, changed)
+	_, err = store.PatchProjectMetadata(context.Background(), db.PatchProjectMetadataIn{
+		ProjectID: project.ID,
+		Actor:     "tester",
+		Patch: map[string]json.RawMessage{
+			"phase": json.RawMessage(`"` + tag + `-initial"`),
+		},
+	})
+	require.NoError(t, err)
+	return issue
+}
+
+func matrixCreateCrossProjectLink(t *testing.T, store *sqlitestore.Store, first, peer db.Issue) {
+	t.Helper()
+	_, _, err := store.CreateLinkAndEvent(context.Background(), db.CreateLinkParams{
+		FromIssueID: first.ID,
+		ToIssueID:   peer.ID,
+		Type:        "blocks",
+		Author:      "tester",
+	}, db.LinkEventParams{
+		EventType:    "issue.linked",
+		EventIssueID: first.ID,
+		FromShortID:  first.ShortID,
+		FromUID:      first.UID,
+		ToShortID:    peer.ShortID,
+		ToUID:        peer.UID,
+		Actor:        "tester",
+	})
+	require.NoError(t, err)
+}
+
+func matrixAdoptProject(
+	t *testing.T,
+	hub, spoke *sqlitestore.Store,
+	hubURL string,
+	project *matrixFederationProject,
+) {
+	t.Helper()
+	hubBinding, err := hub.FederationBindingByProject(context.Background(), project.hub.ID)
+	require.NoError(t, err)
+	result, err := spoke.AdoptProjectIntoFederation(context.Background(), db.AdoptProjectIntoFederationParams{
+		ProjectID:            project.local.ID,
+		HubURL:               hubURL,
+		HubProjectID:         project.hub.ID,
+		HubProjectUID:        project.hub.UID,
+		ReplayHorizonEventID: hubBinding.ReplayHorizonEventID,
+		Actor:                "tester",
+	})
+	require.NoError(t, err)
+	project.local = result.Project
+	if project.issue.ID != 0 {
+		project.issue, err = spoke.IssueByUID(context.Background(), project.issue.UID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+	}
+	project.enrolled = true
+}
+
+func matrixApplyPostEnrollmentState(
+	t *testing.T,
+	store *sqlitestore.Store,
+	issue db.Issue,
+	tag string,
+) db.Issue {
+	t.Helper()
+	title := tag + " final title"
+	body := tag + " final body"
+	owner := tag + "-final-owner"
+	priority := int64(1)
+	result, err := store.EditIssueAtomic(context.Background(), db.EditIssueAtomicParams{
+		IssueID: issue.ID, Actor: "tester", Title: &title, Body: &body,
+		Owner: &owner, SetPriority: &priority,
+	})
+	require.NoError(t, err)
+	_, _, err = store.AddLabelAndEvent(context.Background(), issue.ID, db.LabelEventParams{
+		EventType: "issue.labeled", Label: tag + "-final-label", Actor: "tester",
+	})
+	require.NoError(t, err)
+	_, err = store.PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
+		IssueID: issue.ID,
+		Actor:   "tester",
+		Patch: map[string]json.RawMessage{
+			"phase": json.RawMessage(`"final"`),
+		},
+	})
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(context.Background(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: tag + " final comment",
+	})
+	require.NoError(t, err)
+	return result.Issue
+}
+
+func matrixSyncProject(t *testing.T, spoke *sqlitestore.Store, project *matrixFederationProject) {
+	t.Helper()
+	binding, err := spoke.FederationBindingByProject(context.Background(), project.local.ID)
+	require.NoError(t, err)
+	require.NoError(t, SyncFederationOnce(context.Background(), spoke, binding, project.credential))
+}
+
+func matrixAssertPortableState(
+	t *testing.T,
+	hub *sqlitestore.Store,
+	hubProjectID int64,
+	issueUID, tag string,
+) {
+	t.Helper()
+	issue, err := hub.IssueByUID(context.Background(), issueUID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, hubProjectID, issue.ProjectID)
+	assert.Equal(t, tag+" final title", issue.Title)
+	assert.Equal(t, tag+" final body", issue.Body)
+	require.NotNil(t, issue.Owner)
+	assert.Equal(t, tag+"-final-owner", *issue.Owner)
+	require.NotNil(t, issue.Priority)
+	assert.Equal(t, int64(1), *issue.Priority)
+	assert.Equal(t, "open", issue.Status)
+	assert.JSONEq(t, `{"phase":"final"}`, string(issue.Metadata))
+	labels, err := hub.LabelsByIssue(context.Background(), issue.ID)
+	require.NoError(t, err)
+	var gotLabels []string
+	for _, label := range labels {
+		gotLabels = append(gotLabels, label.Label)
+	}
+	assert.ElementsMatch(t, []string{tag + "-initial-label", tag + "-final-label"}, gotLabels)
+	comments, err := hub.CommentsByIssue(context.Background(), issue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+	assert.Equal(t, tag+" initial comment", comments[0].Body)
+	assert.Equal(t, tag+" final comment", comments[1].Body)
+	project, err := hub.ProjectByID(context.Background(), hubProjectID)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"phase":"`+tag+`-initial"}`, string(project.Metadata))
+}
+
+func matrixAssertPushDrained(t *testing.T, spoke *sqlitestore.Store, projectID int64) {
+	t.Helper()
+	binding, err := spoke.FederationBindingByProject(context.Background(), projectID)
+	require.NoError(t, err)
+	pending, _, err := spoke.PendingFederationPushStats(
+		context.Background(), projectID, spoke.InstanceUID(), binding.PushCursorEventID)
+	require.NoError(t, err)
+	assert.Zero(t, pending)
+	_, err = spoke.ActiveFederationQuarantine(context.Background(), projectID, db.FederationQuarantineDirectionPush)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+}
+
+func matrixAssertLinkCount(t *testing.T, store *sqlitestore.Store, firstUID, peerUID string, want int) {
+	t.Helper()
+	var got int
+	require.NoError(t, store.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		  FROM links
+		 WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		firstUID, peerUID).Scan(&got))
+	assert.Equal(t, want, got)
+}
+
+func matrixProjectByTag(projects []*matrixFederationProject, tag string) *matrixFederationProject {
+	for _, project := range projects {
+		if project.tag == tag {
+			return project
+		}
+	}
+	panic("matrix project tag not found: " + tag)
+}
+
+func matrixApplyHubFollowup(
+	t *testing.T,
+	hub *sqlitestore.Store,
+	first, peer *matrixFederationProject,
+) {
+	t.Helper()
+	firstIssue, err := hub.IssueByUID(context.Background(), first.issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	title := "first hub followup"
+	_, err = hub.EditIssueAtomic(context.Background(), db.EditIssueAtomicParams{
+		IssueID: firstIssue.ID, Actor: "hub-operator", Title: &title,
+	})
+	require.NoError(t, err)
+	_, _, err = hub.CreateComment(context.Background(), db.CreateCommentParams{
+		IssueID: firstIssue.ID, Author: "hub-operator", Body: "first hub comment",
+	})
+	require.NoError(t, err)
+	peerIssue, err := hub.IssueByUID(context.Background(), peer.issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	_, _, err = hub.AddLabelAndEvent(context.Background(), peerIssue.ID, db.LabelEventParams{
+		EventType: "issue.labeled", Label: "peer-hub-label", Actor: "hub-operator",
+	})
+	require.NoError(t, err)
+	_, _, changed, err := hub.CloseIssue(
+		context.Background(), peerIssue.ID, "done", "hub-operator", "hub close", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+}
+
+func matrixAssertPulledFollowup(
+	t *testing.T,
+	spoke *sqlitestore.Store,
+	first, peer *matrixFederationProject,
+) {
+	t.Helper()
+	firstIssue, err := spoke.IssueByUID(context.Background(), first.issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, first.local.ID, firstIssue.ProjectID)
+	assert.Equal(t, "first hub followup", firstIssue.Title)
+	comments, err := spoke.CommentsByIssue(context.Background(), firstIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, comments, 3)
+	assert.Equal(t, "first hub comment", comments[2].Body)
+	peerIssue, err := spoke.IssueByUID(context.Background(), peer.issue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	assert.Equal(t, peer.local.ID, peerIssue.ProjectID)
+	assert.Equal(t, "closed", peerIssue.Status)
+	labels, err := spoke.LabelsByIssue(context.Background(), peerIssue.ID)
+	require.NoError(t, err)
+	var hasHubLabel bool
+	for _, label := range labels {
+		hasHubLabel = hasHubLabel || label.Label == "peer-hub-label"
+	}
+	assert.True(t, hasHubLabel)
+}
+
+func matrixAssertPullCursors(
+	t *testing.T,
+	hub, spoke *sqlitestore.Store,
+	projects []*matrixFederationProject,
+) {
+	t.Helper()
+	for _, project := range projects {
+		var hubHighWater int64
+		require.NoError(t, hub.QueryRowContext(context.Background(),
+			`SELECT COALESCE(MAX(id), 0) FROM events WHERE project_id = ?`, project.hub.ID).Scan(&hubHighWater))
+		binding, err := spoke.FederationBindingByProject(context.Background(), project.local.ID)
+		require.NoError(t, err)
+		assert.Equal(t, hubHighWater, binding.PullCursorEventID)
+	}
 }
 
 func createFederatedHubForPush(t *testing.T, env *testenv.Env) db.Project {
