@@ -164,7 +164,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 			continue
 		}
 		from, to := uid, link.ToIssueUID
-		if link.Incoming && link.Type == "blocks" {
+		if link.Incoming && link.Type != "related" {
 			from, to = to, from
 		}
 		author := link.Author

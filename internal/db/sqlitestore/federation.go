@@ -1412,11 +1412,19 @@ func federationIssueLabels(ctx context.Context, tx *sql.Tx, issueID int64) ([]st
 
 func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]createdLinkOut, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT l.type, peer.short_id, peer.uid, l.author
+		SELECT l.type, peer.short_id, peer.uid, 0 AS incoming, l.author
 		  FROM links l
 		  JOIN issues peer ON peer.id = l.to_issue_id
 		 WHERE l.from_issue_id = ?
-		 ORDER BY l.type ASC, peer.uid ASC`, issueID)
+		UNION ALL
+		SELECT l.type, peer.short_id, peer.uid,
+		       CASE WHEN l.type = 'related' THEN 0 ELSE 1 END AS incoming,
+		       l.author
+		  FROM links l
+		  JOIN issues peer ON peer.id = l.from_issue_id
+		 WHERE l.to_issue_id = ?
+		   AND peer.project_id <> (SELECT project_id FROM issues WHERE id = ?)
+		 ORDER BY type ASC, uid ASC, incoming ASC`, issueID, issueID, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("list federation snapshot links: %w", err)
 	}
@@ -1424,7 +1432,7 @@ func federationIssueLinks(ctx context.Context, tx *sql.Tx, issueID int64) ([]cre
 	var out []createdLinkOut
 	for rows.Next() {
 		var link createdLinkOut
-		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Author); err != nil {
+		if err := rows.Scan(&link.Type, &link.ToShortID, &link.ToIssueUID, &link.Incoming, &link.Author); err != nil {
 			return nil, fmt.Errorf("scan federation snapshot link: %w", err)
 		}
 		out = append(out, link)

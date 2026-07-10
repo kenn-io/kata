@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 type preparedFederationIngestEvent struct {
@@ -1075,8 +1076,17 @@ func payloadDeferredLinkIssueUIDs(
 	}
 	switch ev.Type {
 	case "issue.created", "issue.snapshot":
-		for _, uid := range payloadLinkIssueUIDs(ev) {
-			add(uid)
+		for _, link := range payloadLinks(ev) {
+			if err := validateFederationLinkType(link.Type); err != nil {
+				return nil, fmt.Errorf("links: %w", err)
+			}
+			if err := validateFederationLinkPeer(primaryIssueUID, link.ToIssueUID); err != nil {
+				return nil, fmt.Errorf("links: %w", err)
+			}
+			if ev.Type == "issue.created" && link.Type == "parent" && link.Incoming {
+				return nil, fmt.Errorf("%w: parent link cannot be incoming", db.ErrFederationIngestValidation)
+			}
+			add(link.ToIssueUID)
 		}
 	case "issue.linked", "issue.unlinked":
 		fromUID, fromOK, err := payloadLinkEndpointUID(payload, "from_uid", "from_issue_uid")
@@ -1089,6 +1099,13 @@ func payloadDeferredLinkIssueUIDs(
 		}
 		if !fromOK || !toOK {
 			return nil, fmt.Errorf("%w: %s missing link endpoint uid", db.ErrFederationIngestValidation, ev.Type)
+		}
+		linkType, ok := db.StringValue(payload["type"])
+		if !ok {
+			return nil, fmt.Errorf("%w: %s missing link type", db.ErrFederationIngestValidation, ev.Type)
+		}
+		if err := validateFederationLinkType(linkType); err != nil {
+			return nil, err
 		}
 		peerUID := ""
 		switch primaryIssueUID {
@@ -1103,6 +1120,9 @@ func payloadDeferredLinkIssueUIDs(
 		if ev.RelatedIssueUID != nil && *ev.RelatedIssueUID != peerUID {
 			return nil, fmt.Errorf("%w: %s related issue %s is not the opposite endpoint %s",
 				db.ErrFederationIngestValidation, ev.Type, *ev.RelatedIssueUID, peerUID)
+		}
+		if err := validateFederationLinkPeer(primaryIssueUID, peerUID); err != nil {
+			return nil, err
 		}
 		add(peerUID)
 	case "issue.links_changed":
@@ -1126,8 +1146,32 @@ func payloadDeferredLinkIssueUIDs(
 					db.ErrFederationIngestValidation, ev.Type, *ev.RelatedIssueUID)
 			}
 		}
+		for peerUID := range out {
+			if err := validateFederationLinkPeer(primaryIssueUID, peerUID); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return out, nil
+}
+
+func validateFederationLinkType(linkType string) error {
+	switch linkType {
+	case "parent", "blocks", "related":
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported link type %q", db.ErrFederationIngestValidation, linkType)
+	}
+}
+
+func validateFederationLinkPeer(primaryIssueUID, peerUID string) error {
+	if !katauid.Valid(peerUID) {
+		return fmt.Errorf("%w: invalid link peer uid %q", db.ErrFederationIngestValidation, peerUID)
+	}
+	if peerUID == primaryIssueUID {
+		return fmt.Errorf("%w: issue cannot link to itself", db.ErrFederationIngestValidation)
+	}
+	return nil
 }
 
 func payloadLinkEndpointUID(
@@ -1136,24 +1180,33 @@ func payloadLinkEndpointUID(
 ) (string, bool, error) {
 	canonical, canonicalOK := db.StringValue(payload[canonicalKey])
 	alternate, alternateOK := db.StringValue(payload[alternateKey])
+	if !canonicalOK && alternateOK {
+		return "", false, fmt.Errorf("%w: link endpoint must use %s",
+			db.ErrFederationIngestValidation, canonicalKey)
+	}
 	if canonicalOK && alternateOK && canonical != alternate {
 		return "", false, fmt.Errorf("%w: link endpoint uid disagreement", db.ErrFederationIngestValidation)
 	}
-	if canonicalOK {
-		return canonical, true, nil
+	return canonical, canonicalOK, nil
+}
+
+type payloadLink struct {
+	Type       string `json:"type"`
+	ToIssueUID string `json:"to_issue_uid"`
+	Incoming   bool   `json:"incoming"`
+}
+
+func payloadLinks(ev db.RemoteEvent) []payloadLink {
+	var created struct {
+		Links []payloadLink `json:"links"`
 	}
-	return alternate, alternateOK, nil
+	_ = json.Unmarshal(ev.Payload, &created)
+	return created.Links
 }
 
 func payloadLinkIssueUIDs(ev db.RemoteEvent) []string {
-	var created struct {
-		Links []struct {
-			ToIssueUID string `json:"to_issue_uid"`
-		} `json:"links"`
-	}
-	_ = json.Unmarshal(ev.Payload, &created)
 	var refs []string
-	for _, link := range created.Links {
+	for _, link := range payloadLinks(ev) {
 		if link.ToIssueUID != "" {
 			refs = append(refs, link.ToIssueUID)
 		}

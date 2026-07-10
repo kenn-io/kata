@@ -746,3 +746,63 @@ git commit -m "Harden deferred federation links"
 The commit body must explain why project-scoped authorization must bind every
 edge to the primary issue, why deferred peers are not primary identity, and why
 membership transitions reconcile before commit.
+
+---
+
+### Task 6: Preserve Destination-First Links and Reject Latent Invalid Edges
+
+**Files:**
+- Modify: `internal/db/fold.go:95-175`
+- Modify: `internal/db/sqlitestore/federation.go:1395-1440`
+- Modify: `internal/db/sqlitestore/federation_ingest.go:1060-1210`
+- Test: `internal/db/sqlitestore/federation_test.go`
+
+**Interfaces:**
+- Consumes: issue snapshot `links`, stored incident link rows, canonical
+  explicit-link endpoint fields, and `katauid.Valid`.
+- Produces: direction-complete federation snapshots and eager structural
+  validation for deferred peers.
+
+- [ ] **Step 1: Prove destination-first adoption loses an incoming edge**
+
+Create a cross-project `blocks` edge while both projects are standalone. Adopt
+the destination project first and the source project second through paths on
+the same normalized hub origin. Assert the edge exists after both projects
+join. Before the fix, adoption deletes local event history and the destination
+snapshot omits the incoming edge, so the assertion fails with zero links.
+
+- [ ] **Step 2: Snapshot every incident link with direction**
+
+Change `federationIssueLinks` to select both `from_issue_id = issueID` and
+`to_issue_id = issueID`. Outgoing rows use `incoming = false`. Incoming
+directional rows use `incoming = true`; incoming related rows remain false
+because the fold canonicalizes symmetric endpoints. Change snapshot folding to
+reverse every incoming directional link, including `parent`, while preserving
+related canonicalization.
+
+- [ ] **Step 3: Add malformed deferred-link regressions**
+
+After creating a valid primary issue, submit separate unresolved-peer link
+events with an unsupported type, a non-ULID peer, and a self-link. Each must
+return `db.ErrFederationIngestValidation` and leave the invalid event unstored.
+
+- [ ] **Step 4: Validate deferred structure before classifying absence**
+
+Require explicit and snapshot links to use `parent`, `blocks`, or `related`.
+Require every peer UID to pass `katauid.Valid` and differ from the primary
+issue. Apply the same peer rule to aggregated link-change payloads. Preserve
+the existing rule that created parent links cannot be incoming.
+
+- [ ] **Step 5: Reject alternate-only explicit endpoints**
+
+Add a regression using only `from_issue_uid` and `to_issue_uid`; it must fail
+with `db.ErrFederationIngestValidation`. Require canonical `from_uid` and
+`to_uid` because those are the fields `db.FoldEvents` reads. If alternate
+fields are also present, require them to agree with the canonical values.
+
+- [ ] **Step 6: Verify, commit, and re-review**
+
+Run the shuffled SQLite store suite, shuffled repository suite, lint, API,
+documentation, workflow, and diff checks. Commit without rewriting history,
+push, and run a fresh full branch review. Do not reply to or resolve the GitHub
+review comment without explicit user instruction.

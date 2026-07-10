@@ -55,6 +55,12 @@ envelope `related_issue_uid`, when present, must identify the opposite
 endpoint. Snapshot and aggregated link payloads treat their listed targets as
 peers of the primary issue. Only those peers may be unresolved.
 
+Deferred links must already be structurally valid before storage. Their type
+is one of `parent`, `blocks`, or `related`; every peer is a valid non-self issue
+UID; and explicit link events use the canonical `from_uid` and `to_uid` fields
+that the fold consumes. Deferral relaxes endpoint existence only, not payload
+shape or link semantics.
+
 Deferred peer UIDs are never promoted to known primary issues. Across ingest
 batches, the known-primary set comes from materialized issues and stored
 `issue.created` or `issue.snapshot` primary UIDs. Within one batch, only a
@@ -86,6 +92,12 @@ then reconciles the affected old and new groups. A standalone peer that becomes
 an enabled member therefore activates a previously deferred link immediately;
 moving, disabling, or leaving a member also removes link projection that the
 old group no longer owns.
+
+Federation baselines snapshot every incident link, not only links where the
+snapshot issue is the stored source endpoint. Directional incoming edges carry
+`incoming: true`; symmetric related edges retain canonical fold ordering. This
+preserves the durable edge event when adoption replaces local event history and
+the destination endpoint joins before the source endpoint.
 
 ## Data Flow
 
@@ -128,6 +140,9 @@ assertions:
 - a project-scoped event cannot mutate an edge between two unrelated issues;
 - a deferred peer cannot authorize a later primary-issue mutation;
 - enabling an existing peer project immediately materializes its deferred edge;
+- destination-first adoption preserves incoming cross-project edges;
+- malformed types, peer UIDs, self-links, and alternate-only endpoints fail at
+  ingest rather than after peer arrival;
 - unknown primary issues and existing poisoned-event cases remain rejected;
   and
 - same-project links continue to materialize and unlink correctly.
