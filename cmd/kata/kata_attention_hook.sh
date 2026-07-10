@@ -51,9 +51,17 @@ start)
   ;;
 claim)
   cmd="$(jq -r '.tool_input.command // empty' <<<"$input")"
-  # Only react to claims that actually happened in this Bash call.
-  ref="$(grep -oP 'kata\s+claim\s+\K[A-Za-z0-9/_-]+' <<<"$cmd" | head -1)" || true
+  # Match `kata claim <ref>` only in command position (line start or after a
+  # separator), not the string merely appearing inside echoed/quoted text.
+  ref="$(grep -oP '(?:^|[;&|(])\s*kata\s+claim\s+(?:--\S+\s+)*\K[A-Za-z0-9#_-]+' <<<"$cmd" | head -1)" || true
   [[ -n "${ref:-}" ]] || exit 0
+  # The command text alone doesn't prove the claim executed or succeeded
+  # (failed claims, unexecuted conditionals). Verify it took: the issue must
+  # now be owned by this session's actor — flooring attention on someone
+  # else's issue is the harmful false positive.
+  actor="$(kata whoami --format json 2>/dev/null | jq -r '.actor // empty')"
+  owner="$(kata show "$ref" --format json 2>/dev/null | jq -r '.issue.owner // empty')"
+  [[ -n "$actor" && "$owner" == "$actor" ]] || exit 0
   record_ref "$ref"
   ;;
 stop)
