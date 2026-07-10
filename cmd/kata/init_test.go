@@ -582,6 +582,79 @@ func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(string(content), agentsBlockBegin))
 }
 
+// TestInit_WithAgents_BlockIncludesWorkConventions pins the work.* conventions
+// section kata appends to its managed block, so an agent working a kata-tracked
+// issue finds the attention-signal recipe without leaving the guidance file.
+func TestInit_WithAgents_BlockIncludesWorkConventions(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	got := string(content)
+	assert.Contains(t, got, "## kata work.* conventions")
+	assert.Contains(t, got, "kata meta set <ref> work.attention ok")
+	assert.Contains(t, got, "work.attention_msg")
+	assert.Contains(t, got, "docs/operations/agent-orchestration.md")
+}
+
+// oldAgentsBlockBody is the managed-block body kata shipped before the work.*
+// conventions section was added. A repo initialized with an older kata carries
+// this verbatim between the markers; re-running --with-agents must upgrade it in
+// place. Kept as a literal so the refresh test does not tautologically rebuild
+// the current body.
+const oldAgentsBlockBody = "## kata issue tracker\n\n" +
+	"This project uses [kata](https://github.com/kenn-io/kata) as its shared issue\n" +
+	"ledger. Run `kata quickstart` at the start of each session for the full agent\n" +
+	"contract. The short version:\n\n" +
+	"- Search before creating: `kata search \"<keywords>\" --agent`.\n" +
+	"- Prefer updating existing issues over duplicates (`kata comment`, `kata label add`, `kata edit`).\n" +
+	"- Default to `--agent` for ordinary reads and mutations; use `--json` only when a script needs structured data.\n" +
+	"- Close only verified work: `kata close <ref> --done --message \"<scope + verification>\" --commit <sha>`.\n" +
+	"- If work is incomplete, label `needs-review` and comment what remains rather than closing.\n" +
+	"- Never `kata delete` or `kata purge` without explicit user authorization.\n"
+
+// TestInit_WithAgents_RefreshesPreWorkConventionsBlock is the upgrade path for a
+// repo that ran init before the work.* section existed: the file already carries
+// the marker-delimited block with the older body, and re-running --with-agents
+// must add the work.* section while leaving content outside the markers intact.
+func TestInit_WithAgents_RefreshesPreWorkConventionsBlock(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
+
+	stale := agentsBlockBegin + "\n" + oldAgentsBlockBody + agentsBlockEnd + "\n"
+	fixture := "# House rules\n\nKeep this line.\n\n" + stale + "\n## Trailing section\n\nAlso keep this.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AGENTS.md"), //nolint:gosec // test fixture under TempDir
+		[]byte(fixture), 0o644))
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	got := string(content)
+	assert.Contains(t, got, "## kata work.* conventions", "refresh must add the work.* section to an older block")
+	assert.Contains(t, got, "kata meta set <ref> work.attention ok")
+	assert.Contains(t, got, "# House rules", "content before the markers must survive")
+	assert.Contains(t, got, "Keep this line.")
+	assert.Contains(t, got, "## Trailing section", "content after the markers must survive")
+	assert.Contains(t, got, "Also keep this.")
+	assert.Equal(t, 1, strings.Count(got, agentsBlockBegin))
+}
+
 // beadsFixtureBlock is a stand-in for the integration block Beads writes into
 // AGENTS.md/CLAUDE.md. kata matches on the begin-marker prefix and the end
 // marker, so the trailing version/profile/hash here is representative.

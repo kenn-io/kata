@@ -598,7 +598,19 @@ const agentsBlockBody = "## kata issue tracker\n\n" +
 	"- Default to `--agent` for ordinary reads and mutations; use `--json` only when a script needs structured data.\n" +
 	"- Close only verified work: `kata close <ref> --done --message \"<scope + verification>\" --commit <sha>`.\n" +
 	"- If work is incomplete, label `needs-review` and comment what remains rather than closing.\n" +
-	"- Never `kata delete` or `kata purge` without explicit user authorization.\n"
+	"- Never `kata delete` or `kata purge` without explicit user authorization.\n\n" +
+	"## kata work.* conventions (agent orchestration)\n\n" +
+	"When working a kata-tracked issue, keep its `work.*` metadata truthful\n" +
+	"(see docs/operations/agent-orchestration.md for the full recipe):\n\n" +
+	"- On claim/start: `kata meta set <ref> work.attention ok`; if the work has a\n" +
+	"  dedicated branch, stamp it once with `kata meta set <ref> work.branch <branch>`.\n" +
+	"- Signal live state: `kata meta set <ref> work.attention stuck|needs-human|ok`\n" +
+	"  plus a one-line `work.attention_msg` saying why. Raise `stuck` when you cannot\n" +
+	"  proceed, `needs-human` when you want review; clear back to `ok` when unblocked.\n" +
+	"- Never stop with the signal stale: close the issue, or leave the attention\n" +
+	"  pair reflecting the hand-off.\n" +
+	"- Coordinators read `work.*` on issues they delegated; only the working agent\n" +
+	"  writes them. `work.*` on closed issues is meaningless.\n"
 
 // agentsManagedBlock returns the full marker-delimited block kata writes.
 func agentsManagedBlock() string {
