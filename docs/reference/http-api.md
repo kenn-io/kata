@@ -38,7 +38,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.5.0",
+  "api_schema_version": "0.6.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db"
@@ -70,6 +70,7 @@ response of an older daemon that predates it. Treat an **absent or empty**
 
 | Version | Change |
 | --- | --- |
+| `0.6.0` | Ready responses now return fully hydrated issues. Project-scoped ready rows are `IssueOut` instead of the slimmer `Issue` projection, and global ready rows (`ReadyGlobalIssueOut`, renamed from `ReadyGlobalIssue`) embed `IssueOut` plus `project_name` — so both gain `labels`, `qualified_id` (required), link peers (`parent`, `blocks`, `blocked_by`, `related`), `blocked`, and `child_counts`. Clients regenerated from the schema see the new component name; the shipped Go client keeps `ReadyGlobalIssue` as a deprecated alias. |
 | `0.5.0` | Added metadata patch endpoints for issues and projects, issue create metadata, and metadata-key filters on project issue lists. Generated clients can patch metadata with `If-Match` revisions, send initial metadata in create requests, and request selected metadata keys with the `meta` query parameter. |
 | `0.4.0` | Added semantic-search response mode metadata and embeddings health fields. Search responses now always include the effective `mode`; configured daemons may also report sanitized embedding reconciler status from `/health`, including backlog and provider HTTP status without raw provider diagnostics. |
 | `0.3.0` | Moved the author identity rewrite endpoint from `POST /api/v1/projects/{project_id}/federation/rewrite-author` to `POST /api/v1/projects/{project_id}/actions/rewrite-author`. The operation is project current-state hygiene rather than a federation command, so generated clients should use the project action route. |
