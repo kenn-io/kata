@@ -3,18 +3,22 @@ package main
 // treeRows reorders rows into parent/child tree order for human `kata
 // list` output, setting each row's TreePrefix to bd-style box-drawing
 // connectors ("├─ " / "└─ ", with "│  " / "   " continuation rails for
-// deeper levels). parents[i] names rows[i]'s parent by ID, "" for none.
+// deeper levels). keys[i] identifies rows[i] and parents[i] names its
+// parent ("" for none) — callers pass qualified ids for both, since
+// parent links can cross projects and a bare short_id is only unique
+// within one project (a foreign parent's short_id could collide with a
+// local issue).
 //
 // Roots keep their input order. A child whose parent is not in the
-// fetched set (the parent didn't match the active filter, or --limit
-// truncated it away) is rendered flat at top level rather than dropped.
-// Parent chains nest recursively; a visited guard keeps a (never
-// expected) parent cycle from looping or dropping rows — cycle members
-// degrade to flat top-level rows.
-func treeRows(rows []issueRow, parents []string) []issueRow {
+// fetched set (the parent didn't match the active filter, lives in
+// another project, or --limit truncated it away) is rendered flat at
+// top level rather than dropped. Parent chains nest recursively; a
+// visited guard keeps a (never expected) parent cycle from looping or
+// dropping rows — cycle members degrade to flat top-level rows.
+func treeRows(rows []issueRow, keys, parents []string) []issueRow {
 	index := make(map[string]int, len(rows))
-	for i, row := range rows {
-		index[row.ID] = i
+	for i := range rows {
+		index[keys[i]] = i
 	}
 	childrenOf := make(map[string][]int)
 	out := make([]issueRow, 0, len(rows))
@@ -26,7 +30,7 @@ func treeRows(rows []issueRow, parents []string) []issueRow {
 		row := rows[i]
 		row.TreePrefix = prefix
 		out = append(out, row)
-		kids := childrenOf[row.ID]
+		kids := childrenOf[keys[i]]
 		for k, child := range kids {
 			if visited[child] {
 				continue

@@ -121,7 +121,7 @@ func newListCmd() *cobra.Command {
 					Labels      []string `json:"labels"`
 					Blocked     bool     `json:"blocked"`
 					Parent      *struct {
-						ShortID string `json:"short_id"`
+						QualifiedID string `json:"qualified_id"`
 					} `json:"parent"`
 				} `json:"issues"`
 			}
@@ -154,6 +154,9 @@ func newListCmd() *cobra.Command {
 			// Unowned issues render as "(unowned)" so the trailing
 			// "(...)" cell is never empty.
 			rows := make([]issueRow, len(b.Issues))
+			// Tree keys are qualified ids: parent links can cross
+			// projects, and a bare short_id is only unique per project.
+			keys := make([]string, len(b.Issues))
 			parents := make([]string, len(b.Issues))
 			for idx, i := range b.Issues {
 				owner := "unowned"
@@ -169,11 +172,12 @@ func newListCmd() *cobra.Command {
 					Blocked:  i.Blocked,
 					Labels:   i.Labels,
 				}
+				keys[idx] = i.QualifiedID
 				if i.Parent != nil {
-					parents[idx] = i.Parent.ShortID
+					parents[idx] = i.Parent.QualifiedID
 				}
 			}
-			rows = treeRows(rows, parents)
+			rows = treeRows(rows, keys, parents)
 			renderer := newRowRenderer(cmd.OutOrStdout())
 			if err := renderer.renderRows(cmd.OutOrStdout(), rows); err != nil {
 				return err
