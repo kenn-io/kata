@@ -162,7 +162,7 @@ func TestRoot_Plan2VerbsAdvertised(t *testing.T) {
 	for _, verb := range []string{
 		"label", "labels",
 		"assign", "unassign",
-		"ready",
+		"ready", "next",
 	} {
 		_, ok := registered[verb]
 		assert.Truef(t, ok, "root must register subcommand %q", verb)

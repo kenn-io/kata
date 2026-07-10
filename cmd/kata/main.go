@@ -100,6 +100,7 @@ func newRootCmd() *cobra.Command {
 		newUnassignCmd(),
 		newClaimCmd(),
 		newReadyCmd(),
+		newNextCmd(),
 		newWaitCmd(),
 		newSyncCmd(),
 		newFederationCmd(),
