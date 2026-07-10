@@ -372,17 +372,17 @@ selector.
 
 Adoption preserves the current state of local issues, including closed and
 soft-deleted issues, comments, labels, metadata, priority, owner, and
-same-project links. It does not preserve the old local event history. Instead
+links. It does not preserve the old local event history. Instead
 it removes those pre-adoption local events, queues fresh snapshots for the hub
 with each issue's links embedded in the snapshot payloads, and reports how
-many snapshots were queued. Links between issues in the adopted project
-replicate to the hub. A link to an issue in another project does not: the hub
-rejects ingest batches that reference issues it does not have, so a
-cross-project link on an adopted issue can land the adoption push in
-quarantine (see Consistency limitations). Remove cross-project links from the
-project's issues before adopting. Adoption snapshot event actors are the
-bound federation actor. Snapshot payload authors and comment authors are
-preserved, so adopted issues keep their original displayed content authors.
+many snapshots were queued. The hub stores a cross-project link event even
+when its peer issue has not arrived yet and materializes the edge after both
+endpoint projects reach the same hub. Until then the edge is absent. Spoke
+projects that share links must use the same hub URL origin; different DNS names
+or IP aliases are intentionally separate federation groups. Adoption snapshot
+event actors are the bound federation actor. Snapshot payload authors and
+comment authors are preserved, so adopted issues keep their original displayed
+content authors.
 
 > **Preserving the pre-adoption timeline:** Adoption is a cutover, not an
 > in-place history merge. If you need the old local event timeline for audit or
@@ -652,6 +652,20 @@ quarantine created by older builds for `unsupported_federation_schema` is
 released automatically on sync after the spoke runs a fixed build; manual retry
 is for other fixed push-quarantine root causes.
 
+Older kata versions may have quarantined an otherwise valid batch because a
+cross-project link peer had not reached the hub. Upgrade the hub first, then
+the spoke. Release each affected push quarantine with `retry`, not `skip`:
+
+```sh
+kata federation quarantine retry <id> \
+  --confirm "RETRY FEDERATION BATCH <id>" \
+  --reason "peer links now use deferred same-hub reconciliation"
+```
+
+Retry leaves the push cursor unchanged and resends the original events. Once
+both endpoint projects reach the upgraded hub, the edge materializes
+automatically.
+
 Intentionally skip only when the operator accepts that local events will not be
 federated:
 
@@ -701,19 +715,14 @@ Federation has expected stale or deferred states:
 - Pushed event actors are bound to the enrollment actor. A buggy, old, or
   malicious spoke that pushes a different actor is rejected by the hub and the
   spoke records the failed batch in quarantine.
-- Links may span projects, but federation replicates one project per binding,
-  and link replication is scoped to the binding: an edge materializes only
-  when both endpoint issues belong to the same federated project. A
-  cross-project link does not propagate through federation — even when both
-  endpoint projects are federated between the same instances — and stays
-  local to the instance where it was created. Pushes are stricter: the hub
-  rejects a batch whose link payloads reference an issue it does not have
-  (unless that peer's snapshot arrives in the same batch), so a cross-project
-  link mutation on a push-enabled spoke, or an adoption snapshot embedding
-  one, can land the push batch in quarantine. Same-project edges are
-  unaffected: a baseline arriving over multiple poll pages defers an edge
-  whose peer snapshot is on a later page to a later materialization pass
-  rather than dropping it.
+- Links may span projects. A missing peer does not quarantine push: the event
+  and cursor advance while the edge remains absent. The edge materializes when
+  both endpoint projects are enabled through the same hub federation group.
+  Pulling clients must enroll both projects and use the same normalized hub URL
+  origin to project it locally. Unfederated peers, different hub origins, and
+  peers that never arrive stay absent. Malformed events, unknown primary
+  issues, actor violations, and hash conflicts remain permanent validation
+  failures and can quarantine push.
 
 ## Cutover notes
 

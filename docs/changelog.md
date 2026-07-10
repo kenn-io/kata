@@ -8,6 +8,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**Fixed**
+
+- Fixed a federation deadlock where two projects whose first pending batches
+  referenced each other's new issues could both become permanently
+  quarantined. Link peers now resolve eventually within the same hub
+  federation group; true validation failures remain quarantined.
+
 ## 0.9.0
 <small>2026-07-09</small>
 

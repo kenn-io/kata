@@ -205,9 +205,11 @@ On each spoke:
 
    Adoption preserves the current state of local issues, including closed and
    soft-deleted issues, comments, labels, metadata, priority, owner, and
-   same-project links. It does not preserve the old local event history.
+   links. It does not preserve the old local event history.
    Instead it removes those pre-adoption local events and queues fresh snapshots
-   for the hub with same-project links embedded in the snapshot payloads. After
+   for the hub with links embedded in the snapshot payloads. A cross-project
+   edge materializes after both endpoint projects reach the same hub; until
+   then its event is retained and the edge is absent. After
    adoption, existing issues are ordinary federated spoke issues. Future edits
    remain local-first; use live hub leases only when you want exclusive
    coordination.
@@ -301,6 +303,24 @@ If the response is lost after the hub commits, retrying the same batch is safe:
 the hub treats fully duplicated same-hash batches as successful and returns an
 advanced cursor. Permanent validation failures or hash conflicts record a
 quarantine on the spoke instead of retrying forever.
+
+### Cross-Project Link Convergence
+
+A missing link peer is not a permanent validation failure. The hub accepts the
+event, advances the push cursor, and keeps the edge absent until both endpoint
+issues are materialized inside one compatible federation group. Hub projects
+on one daemon form a group. Spoke projects form a group when they are enabled
+and their stored hub URLs have the same scheme, lowercase hostname, and
+effective port.
+
+Link folding and reconciliation run across the complete group whenever any
+member project materializes. The event log therefore acts as durable pending
+state: whichever endpoint arrives second causes the edge to appear. An
+unfederated peer, a peer on a different hub origin, or a peer that never arrives
+stays absent without blocking later events. Clients must enroll both endpoint
+projects through the same hub to project the edge locally. Different DNS names
+and IP aliases are deliberately different spoke groups even if they route to
+the same daemon.
 
 ## Leases And Write Gates
 
@@ -444,6 +464,11 @@ without advancing the push cursor, so the same local events are sent again on
 the next sync. Stale push quarantines whose stored error is the legacy
 `unsupported_federation_schema` response are released automatically on sync;
 operators use `retry` for other fixed push quarantines.
+
+Older builds may have quarantined a valid batch because a cross-project link
+peer had not reached the hub. After upgrading the hub and spoke, use `retry`,
+not `skip`. The original events are resent without advancing the cursor and
+the edge materializes when both endpoint projects reach the upgraded hub.
 
 Operators can also intentionally skip a quarantined batch:
 
