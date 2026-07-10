@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -95,12 +96,12 @@ func SyncFederationOnceWithPulledEvents(
 	if binding.PushEnabled {
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
-				if autoRetryLegacySchemaSkewQuarantine(q) {
+				if retry, reason := autoRetryFederationQuarantine(q); retry {
 					if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
 						ID:        q.ID,
 						ProjectID: binding.ProjectID,
 						Actor:     binding.Actor,
-						Reason:    "auto-retry after transient schema skew",
+						Reason:    reason,
 						Now:       time.Now().UTC(),
 					}); err != nil {
 						return recordFederationSyncError(ctx, store, binding.ProjectID, err)
@@ -493,9 +494,21 @@ func federationHubErrorCode(body string) string {
 	return envelope.Error.Code
 }
 
-func autoRetryLegacySchemaSkewQuarantine(q db.FederationQuarantine) bool {
-	return q.Direction == db.FederationQuarantineDirectionPush &&
-		strings.Contains(q.Error, `"code":"unsupported_federation_schema"`)
+var formerPeerReferenceQuarantine = regexp.MustCompile(
+	`federation ingest validation: event [0-9A-HJKMNP-TV-Z]{26} references unknown issue [0-9A-HJKMNP-TV-Z]{26}`,
+)
+
+func autoRetryFederationQuarantine(q db.FederationQuarantine) (bool, string) {
+	if q.Direction != db.FederationQuarantineDirectionPush {
+		return false, ""
+	}
+	if strings.Contains(q.Error, `"code":"unsupported_federation_schema"`) {
+		return true, "auto-retry after transient schema skew"
+	}
+	if formerPeerReferenceQuarantine.MatchString(q.Error) {
+		return true, "auto-retry after deferred link peer fix"
+	}
+	return false, ""
 }
 
 func recordFederationPushQuarantine(
