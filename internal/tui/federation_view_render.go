@@ -757,12 +757,6 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		fmt.Sprintf("pending claims: %d", row.PendingClaimCount),
 		fmt.Sprintf("live claims: %d", row.LiveClaimCount),
 		fmt.Sprintf("quarantine count: %d", row.ActiveQuarantineCount),
-		"reset blocker: "+sanitizeForLine(emptyDash(row.ResetBlocker)),
-		fmt.Sprintf("claim violations: %d unresolved, %d recent", row.UnresolvedViolationCount, row.RecentViolationCount),
-		"last pull success: "+formatOptionalTime(row.LastPullSuccessAt),
-		"last push success: "+formatOptionalTime(row.LastPushSuccessAt),
-		"last sync success: "+formatOptionalTime(row.LastSuccessfulSyncAt),
-		"last error: "+formatOptionalError(row),
 	)
 	for _, quarantine := range row.ActiveQuarantines {
 		body = append(body, fmt.Sprintf(
@@ -775,7 +769,16 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 			sanitizeForLine(quarantine.Error),
 		))
 	}
-	body = append(body, "", subtleStyle.Render("[esc] back  [r] refresh  [q] quit  [?] help"))
+	body = append(body,
+		"reset blocker: "+sanitizeForLine(emptyDash(row.ResetBlocker)),
+		fmt.Sprintf("claim violations: %d unresolved, %d recent", row.UnresolvedViolationCount, row.RecentViolationCount),
+		"last pull success: "+formatOptionalTime(row.LastPullSuccessAt),
+		"last push success: "+formatOptionalTime(row.LastPushSuccessAt),
+		"last sync success: "+formatOptionalTime(row.LastSuccessfulSyncAt),
+		"last error: "+formatOptionalError(row),
+		"",
+		subtleStyle.Render("[esc] back  [r] refresh  [q] quit  [?] help"),
+	)
 	return strings.Join(fitFederationLines(body, m.height), "\n")
 }
 

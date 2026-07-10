@@ -39,7 +39,6 @@ func TestFederationView_EscReturnsToPreviousView(t *testing.T) {
 func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federationCursor = 0
-	m.height = 40
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 
