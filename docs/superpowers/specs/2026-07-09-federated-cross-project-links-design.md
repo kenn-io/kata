@@ -67,6 +67,11 @@ fallback. Before group reconciliation writes any edge, the complete desired
 parent map must also satisfy the normal single-parent, acyclic, and
 `MaxParentDepth` invariants.
 
+Aggregated `issue.links_changed` UID fields are decoded strictly as well:
+parent fields are strings and add/remove fields are arrays containing only
+strings. Wrong containers, mixed element types, and wrong scalar types fail the
+originating batch instead of becoming an empty link delta.
+
 Deferred peer UIDs are never promoted to known primary issues. Across ingest
 batches, the known-primary set comes from materialized issues and stored
 `issue.created` or `issue.snapshot` primary UIDs. Within one batch, only a
@@ -151,6 +156,8 @@ assertions:
   ingest rather than after peer arrival;
 - malformed link JSON and deferred cross-project parent cycles are rejected
   before projection writes;
+- malformed aggregated link-change UID fields cannot advance the cursor as an
+  empty mutation;
 - unknown primary issues and existing poisoned-event cases remain rejected;
   and
 - same-project links continue to materialize and unlink correctly.

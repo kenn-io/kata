@@ -1050,19 +1050,16 @@ func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]json.RawMe
 	}
 	for _, key := range []string{
 		"from_uid", "to_uid", "from_issue_uid", "to_issue_uid",
-		"parent_set_uid", "parent_removed_uid",
 	} {
 		if uid, ok := db.StringValue(payload[key]); ok {
 			refs = append(refs, uid)
 		}
 	}
-	for _, key := range []string{
-		"blocks_added_uids", "blocks_removed_uids",
-		"blocked_by_added_uids", "blocked_by_removed_uids",
-		"related_added_uids", "related_removed_uids",
-	} {
-		refs = append(refs, db.StringSlice(payload[key])...)
+	changedRefs, err := payloadLinksChangedIssueUIDs(ev, payload)
+	if err != nil {
+		return nil, err
 	}
+	refs = append(refs, changedRefs...)
 	links, err := payloadLinks(ev)
 	if err != nil {
 		return nil, fmt.Errorf("%w: decode links: %v", db.ErrFederationIngestValidation, err)
@@ -1142,19 +1139,12 @@ func payloadDeferredLinkIssueUIDs(
 		}
 		add(peerUID)
 	case "issue.links_changed":
-		for _, key := range []string{"parent_set_uid", "parent_removed_uid"} {
-			if uid, ok := db.StringValue(payload[key]); ok {
-				add(uid)
-			}
+		peerUIDs, err := payloadLinksChangedIssueUIDs(ev, payload)
+		if err != nil {
+			return nil, err
 		}
-		for _, key := range []string{
-			"blocks_added_uids", "blocks_removed_uids",
-			"blocked_by_added_uids", "blocked_by_removed_uids",
-			"related_added_uids", "related_removed_uids",
-		} {
-			for _, uid := range db.StringSlice(payload[key]) {
-				add(uid)
-			}
+		for _, uid := range peerUIDs {
+			add(uid)
 		}
 		if ev.RelatedIssueUID != nil {
 			if _, ok := out[*ev.RelatedIssueUID]; !ok {
@@ -1169,6 +1159,45 @@ func payloadDeferredLinkIssueUIDs(
 		}
 	}
 	return out, nil
+}
+
+func payloadLinksChangedIssueUIDs(
+	ev db.RemoteEvent,
+	payload map[string]json.RawMessage,
+) ([]string, error) {
+	if ev.Type != "issue.links_changed" {
+		return nil, nil
+	}
+	var refs []string
+	for _, key := range []string{"parent_set_uid", "parent_removed_uid"} {
+		raw, ok := payload[key]
+		if !ok {
+			continue
+		}
+		var uid string
+		if err := json.Unmarshal(raw, &uid); err != nil {
+			return nil, fmt.Errorf("%w: %s must be a string: %v",
+				db.ErrFederationIngestValidation, key, err)
+		}
+		refs = append(refs, uid)
+	}
+	for _, key := range []string{
+		"blocks_added_uids", "blocks_removed_uids",
+		"blocked_by_added_uids", "blocked_by_removed_uids",
+		"related_added_uids", "related_removed_uids",
+	} {
+		raw, ok := payload[key]
+		if !ok {
+			continue
+		}
+		var uids []string
+		if err := json.Unmarshal(raw, &uids); err != nil {
+			return nil, fmt.Errorf("%w: %s must be an array of strings: %v",
+				db.ErrFederationIngestValidation, key, err)
+		}
+		refs = append(refs, uids...)
+	}
+	return refs, nil
 }
 
 func validateFederationLinkType(linkType string) error {

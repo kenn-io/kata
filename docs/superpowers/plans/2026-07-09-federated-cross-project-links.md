@@ -856,3 +856,35 @@ links so a failed federation batch remains atomic.
 Run the complete shuffled verification set, commit without history rewriting,
 push, and require a fresh full-branch review to pass. Leave existing GitHub
 comments and review state untouched.
+
+---
+
+### Task 8: Strictly Decode Aggregated Link-Change UIDs
+
+**Files:**
+- Modify: `internal/db/sqlitestore/federation_ingest.go:1035-1190`
+- Test: `internal/db/sqlitestore/federation_test.go`
+
+**Interfaces:**
+- Consumes: `issue.links_changed` parent UID scalars and add/remove UID arrays.
+- Produces: one strict UID extraction path used by referenced-issue validation
+  and deferred-peer classification.
+
+- [ ] **Step 1: Add malformed aggregate regressions**
+
+Submit `issue.links_changed` events with an object instead of a UID array, a
+mixed string/number UID array, and a numeric parent UID. Each must return
+`db.ErrFederationIngestValidation` without storing the event.
+
+- [ ] **Step 2: Decode aggregate UID fields strictly**
+
+Implement `payloadLinksChangedIssueUIDs`. Decode parent fields with
+`json.Unmarshal` into strings and add/remove fields into `[]string`. Wrap type
+errors with `db.ErrFederationIngestValidation`. Use the helper from both
+`payloadReferencedIssueUIDs` and `payloadDeferredLinkIssueUIDs` so permissive
+`db.StringValue` or `db.StringSlice` fallbacks cannot advance the cursor.
+
+- [ ] **Step 3: Verify, commit, and re-review**
+
+Run the full shuffled verification set, commit without rewriting history,
+push, and require the next complete branch review to pass.

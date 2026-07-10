@@ -3840,6 +3840,50 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
+		name         string
+		payloadField string
+	}{
+		{
+			name:         "rejects non-array links changed uid list",
+			payloadField: `"blocks_added_uids":{}`,
+		},
+		{
+			name:         "rejects mixed links changed uid list",
+			payloadField: `"related_added_uids":["%s",42]`,
+		},
+		{
+			name:         "rejects non-string links changed parent uid",
+			payloadField: `"parent_set_uid":42`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, ctx, p, spokeUID := setupFederationIngestHub(t)
+			primaryUID := newTestUID(t)
+			create := ingestIssueCreatedEvent(t, p.UID, p.Name, spokeUID, primaryUID, 100)
+			_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, create))
+			require.NoError(t, err)
+
+			payloadField := tc.payloadField
+			if strings.Contains(payloadField, "%s") {
+				payloadField = fmt.Sprintf(payloadField, newTestUID(t))
+			}
+			changed := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &primaryUID, nil,
+				"issue.links_changed", 101,
+				`{"issue_uid":"`+primaryUID+`",`+payloadField+`,"updated_at":"2026-05-23T12:01:00.000Z"}`)
+
+			_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+				ProjectID:        p.ID,
+				SpokeInstanceUID: spokeUID,
+				Events:           []db.FederationIngestEvent{{SourceEventID: 2, Event: changed}},
+			})
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+			assertIngestedEventCount(ctx, t, d, p.ID, 1)
+		})
+	}
+
+	for _, tc := range []struct {
 		name     string
 		linkType string
 		peerUID  func(*testing.T, string) string
