@@ -193,3 +193,53 @@ meaningless. kata does not prevent this. Detect it from the event stream: the
 `issue.metadata_updated` events name the actor, so two distinct actors writing
 `work.attention` on one issue is the tell. Fix the launcher wiring so each
 session gets its own tracking issue.
+
+## Adopting in your repo
+
+The fastest way to adopt the `work.*` convention is to paste a short contract
+into the repo's `AGENTS.md` / `CLAUDE.md` so every agent that touches the board
+follows the same protocol. The same snippet also works ad hoc: drop it into a
+session prompt when a repo has not adopted it yet, and the agent will honor the
+convention for that session. The draft below is deliberate, reference-grade
+prose — paste it essentially intact.
+
+```markdown
+## Kata `work.*` conventions (agent orchestration)
+
+This repo's kata board uses the `work.*` metadata contract — see kata's
+`docs/operations/agent-orchestration.md` for the full recipe.
+
+**When you work a kata-tracked issue:**
+
+- When you claim or start a kata issue, immediately mark it actively tracked:
+  `kata meta set <ref> work.attention ok` — this makes in-flight work visible
+  to coordinators and dashboards from the moment it is grabbed.
+- If the work happens on a dedicated branch, stamp it once:
+  `kata meta set <ref> work.branch <branch>` (or bind at creation:
+  `kata create ... --meta work.branch=<branch> --idempotency-key <key>`).
+- Keep your live state truthful on the issue:
+  `kata meta set <ref> work.attention stuck|needs-human|ok`, with a one-line
+  `kata meta set <ref> work.attention_msg "<why>"`. Raise `stuck` when you
+  cannot proceed, `needs-human` when you want input or review (you may keep
+  working), and clear back to `ok` when unblocked.
+- Never end a session with the signal stale: before stopping, either close
+  the issue or set the attention pair to reflect the hand-off.
+
+**When you delegate work as separate kata issues (fan-out/join):**
+
+- Create each sub-issue with `--meta work.branch=...` and an idempotency key;
+  capture refs from `--json` (`.issue.short_id`).
+- Join with `kata wait <refs> --until attention --any` (matches `needs-human`
+  or `stuck`; a close also completes the wait, and the reported reason
+  distinguishes which). Use `--timeout` so a wrapper can tell timeout from
+  satisfaction. As coordinator you read `work.*` — you never write it on
+  issues you delegated.
+
+**Always:** one writer per key; `work.*` on closed issues is meaningless —
+never write it there, ignore it when reading.
+```
+
+Instructions produce tendency, not contract: an agent may still forget to raise
+`needs-human` or clear a stale `ok`. For a reliability floor, pair the snippet
+with the launcher-installed hooks described earlier in this chapter, which keep
+the terminal attention signal truthful even when the agent says nothing.
