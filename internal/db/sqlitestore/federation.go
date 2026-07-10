@@ -821,7 +821,7 @@ func (d *Store) enableProjectFederation(ctx context.Context, projectID int64, ac
 			if err != nil {
 				return db.FederationBinding{}, err
 			}
-			if err := reconcileFederatedLinkGroup(ctx, tx, groupProjectIDs, groupProjectIDs, false, 0, nil); err != nil {
+			if err := reconcileFederatedLinkGroup(ctx, tx, groupProjectIDs, groupProjectIDs, 0, nil); err != nil {
 				return db.FederationBinding{}, err
 			}
 		}
@@ -1888,7 +1888,7 @@ func reconcileFederatedLinks(
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedLinkGroup(ctx, tx, projectIDs, projectIDs, false, currentProjectID, currentIssueIDs)
+	return reconcileFederatedLinkGroup(ctx, tx, projectIDs, projectIDs, currentProjectID, currentIssueIDs)
 }
 
 func reconcileFederatedLinkGroup(
@@ -1896,7 +1896,6 @@ func reconcileFederatedLinkGroup(
 	tx *sql.Tx,
 	desiredProjectIDs []int64,
 	ownedProjectIDs []int64,
-	includeBoundaryLinks bool,
 	currentProjectID int64,
 	currentIssueIDs map[string]int64,
 ) error {
@@ -1908,7 +1907,7 @@ func reconcileFederatedLinkGroup(
 	if err != nil {
 		return err
 	}
-	existing, err := federatedLinkRows(ctx, tx, ownedProjectIDs, includeBoundaryLinks)
+	existing, err := federatedLinkRows(ctx, tx, ownedProjectIDs)
 	if err != nil {
 		return err
 	}
@@ -2050,9 +2049,20 @@ func reconcileFederationBindingTransitionLinks(
 			return err
 		}
 		if err := reconcileFederatedLinkGroup(
-			ctx, tx, remainingProjectIDs, remainingProjectIDs, true, 0, nil,
+			ctx, tx, remainingProjectIDs, remainingProjectIDs, 0, nil,
 		); err != nil {
 			return err
+		}
+		stillMember := false
+		for _, projectID := range remainingProjectIDs {
+			stillMember = stillMember || projectID == previous.ProjectID
+		}
+		if !stillMember {
+			if err := removeFederatedBoundaryLinksBetweenProjectAndGroup(
+				ctx, tx, previous.ProjectID, remainingProjectIDs,
+			); err != nil {
+				return err
+			}
 		}
 	}
 	if !current.Enabled {
@@ -2065,7 +2075,38 @@ func reconcileFederationBindingTransitionLinks(
 	if err := removeIncompatibleFederatedBoundaryLinks(ctx, tx, current.ProjectID, currentProjectIDs); err != nil {
 		return err
 	}
-	return reconcileFederatedLinkGroup(ctx, tx, currentProjectIDs, currentProjectIDs, false, 0, nil)
+	return reconcileFederatedLinkGroup(ctx, tx, currentProjectIDs, currentProjectIDs, 0, nil)
+}
+
+func removeFederatedBoundaryLinksBetweenProjectAndGroup(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	groupProjectIDs []int64,
+) error {
+	if len(groupProjectIDs) == 0 {
+		return nil
+	}
+	placeholders, groupArgs := projectIDPlaceholders(groupProjectIDs)
+	args := make([]any, 0, 2+len(groupArgs)*2)
+	args = append(args, projectID)
+	args = append(args, groupArgs...)
+	args = append(args, projectID)
+	args = append(args, groupArgs...)
+	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM links
+		 WHERE id IN (
+			SELECT l.id
+			  FROM links l
+			  JOIN issues f ON f.id = l.from_issue_id
+			  JOIN issues t ON t.id = l.to_issue_id
+			 WHERE (f.project_id = ? AND t.project_id IN (`+placeholders+`))
+			    OR (t.project_id = ? AND f.project_id IN (`+placeholders+`))
+		 )`, args...); err != nil {
+		return fmt.Errorf("remove former federation group boundary links: %w", err)
+	}
+	return nil
 }
 
 func removeIncompatibleFederatedBoundaryLinks(
@@ -2256,17 +2297,11 @@ func federationGroupIssueIDs(
 	return out, nil
 }
 
-// federatedLinkRows normally returns links whose endpoints are both inside a
-// federation group. A group cannot delete a link owned by an event stream that
-// has not joined it. Binding transitions include boundary links touching the
-// remaining old group so cross-group projections are removed without deleting
-// same-project state from a detached project.
-func federatedLinkRows(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectIDs []int64,
-	includeBoundaryLinks bool,
-) (map[db.FoldLinkKey]federatedLinkRow, error) {
+// federatedLinkRows returns links whose endpoints are both inside a federation
+// group. A group cannot delete a link owned by an event stream that has not
+// joined it; binding transitions remove only the departing project's former
+// group boundaries through removeFederatedBoundaryLinksBetweenProjectAndGroup.
+func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map[db.FoldLinkKey]federatedLinkRow, error) {
 	if len(projectIDs) == 0 {
 		return map[db.FoldLinkKey]federatedLinkRow{}, nil
 	}
@@ -2274,10 +2309,6 @@ func federatedLinkRows(
 	queryArgs := make([]any, 0, len(args)*2)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
-	endpointOperator := "AND"
-	if includeBoundaryLinks {
-		endpointOperator = "OR"
-	}
 	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type, l.author
@@ -2285,7 +2316,7 @@ func federatedLinkRows(
 		  JOIN issues f ON f.id = l.from_issue_id
 		  JOIN issues t ON t.id = l.to_issue_id
 		 WHERE f.project_id IN (`+placeholders+`)
-		   `+endpointOperator+` t.project_id IN (`+placeholders+`)`, queryArgs...)
+		   AND t.project_id IN (`+placeholders+`)`, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated links: %w", err)
 	}
