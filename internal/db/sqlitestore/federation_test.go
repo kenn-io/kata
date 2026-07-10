@@ -5268,7 +5268,7 @@ func TestLeaveFederationReplicaDetachesSpoke(t *testing.T) {
 	}
 }
 
-func TestLeaveFederationReplicaReconcilesFormerGroupLinks(t *testing.T) {
+func TestLeaveFederationReplicaPreservesDetachedProjectState(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
 	firstProject := createProject(ctx, t, d, "spoke-project")
@@ -5287,16 +5287,23 @@ func TestLeaveFederationReplicaReconcilesFormerGroupLinks(t *testing.T) {
 
 	firstIssueUID := newTestUID(t)
 	secondIssueUID := newTestUID(t)
+	thirdIssueUID := newTestUID(t)
 	firstSnapshot := remoteEvent(t, firstProject.UID, firstProject.Name,
 		&firstIssueUID, nil, "issue.snapshot", "remote-agent", 100,
 		`{"uid":"`+firstIssueUID+`","short_id":"`+shortID(firstIssueUID)+`","title":"first","body":"","author":"remote-agent","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+secondIssueUID+`","author":"remote-agent"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
 	secondSnapshot := remoteEvent(t, secondProject.UID, secondProject.Name,
 		&secondIssueUID, nil, "issue.snapshot", "remote-agent", 101,
-		`{"uid":"`+secondIssueUID+`","short_id":"`+shortID(secondIssueUID)+`","title":"second","body":"","author":"remote-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+		`{"uid":"`+secondIssueUID+`","short_id":"`+shortID(secondIssueUID)+`","title":"second","body":"","author":"remote-agent","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+thirdIssueUID+`","author":"remote-agent"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+	thirdSnapshot := remoteEvent(t, secondProject.UID, secondProject.Name,
+		&thirdIssueUID, nil, "issue.snapshot", "remote-agent", 102,
+		`{"uid":"`+thirdIssueUID+`","short_id":"`+shortID(thirdIssueUID)+`","title":"third","body":"","author":"remote-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
 	inserted, err := d.InsertRemoteEvent(ctx, firstProject.ID, firstSnapshot)
 	require.NoError(t, err)
 	require.True(t, inserted)
 	inserted, err = d.InsertRemoteEvent(ctx, secondProject.ID, secondSnapshot)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	inserted, err = d.InsertRemoteEvent(ctx, secondProject.ID, thirdSnapshot)
 	require.NoError(t, err)
 	require.True(t, inserted)
 	require.NoError(t, d.MaterializeFederatedProject(ctx, firstProject.ID))
@@ -5305,6 +5312,10 @@ func TestLeaveFederationReplicaReconcilesFormerGroupLinks(t *testing.T) {
 		`SELECT count(*) FROM links
 		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
 		firstIssueUID, secondIssueUID)
+	assertRowCount(ctx, t, d, 1, "same-project link exists before leaving group",
+		`SELECT count(*) FROM links
+		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		secondIssueUID, thirdIssueUID)
 
 	_, err = d.LeaveFederationReplica(ctx, secondProject.ID)
 
@@ -5313,6 +5324,10 @@ func TestLeaveFederationReplicaReconcilesFormerGroupLinks(t *testing.T) {
 		`SELECT count(*) FROM links
 		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
 		firstIssueUID, secondIssueUID)
+	assertRowCount(ctx, t, d, 1, "leaving preserves the detached project's same-project link",
+		`SELECT count(*) FROM links
+		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		secondIssueUID, thirdIssueUID)
 }
 
 func TestLeaveFederationReplicaIdempotentWhenStandalone(t *testing.T) {
