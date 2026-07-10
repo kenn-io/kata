@@ -53,7 +53,7 @@ batch and the spoke records quarantine again. Once both sides are compatible,
 the same events drain through normal ingest. No schema migration, direct SQL
 repair, cursor skip, or event rewrite is introduced.
 
-## Lifecycle Matrix
+## Multi-Project Lifecycle Matrix
 
 The regression suite must exercise the lifecycle above the storage validator.
 It uses two neutral projects, `spoke-project` and `peer-project`, real local and
@@ -75,13 +75,38 @@ sync after task creation, enrollment, and link creation whenever a binding is
 eligible; batched scenarios defer synchronization until all scheduled local
 mutations and enrollments are complete.
 
+The matrix is the general portable federation contract, not only a link
+regression. Each task carries a representative state bundle. State written
+before enrollment must survive adoption snapshots; state written after
+enrollment must arrive as ordinary portable events. Across the rows, the bundle
+covers:
+
+- issue title and body updates;
+- labels, owner, priority, and issue metadata;
+- comments and open/closed/reopened status;
+- project metadata;
+- a cross-project `blocks` edge;
+- hub-to-spoke updates after the initial push converges; and
+- project isolation, independent cursors, and idempotent repeat sync.
+
 Every subtest must prove behavior, not only final storage shape:
 
 - both issues reach the hub;
+- the complete portable issue and project state matches on the hub regardless
+  of whether it traveled through an adoption snapshot or ordinary events;
 - both spoke push cursors drain to their local high-water marks;
 - neither project retains an active quarantine;
 - the cross-project edge materializes after both endpoint projects arrive; and
+- hub-authored follow-up mutations pull into the correct local project without
+  leaking into its peer;
+- each project's pull and push cursors advance independently; and
 - additional sync passes are idempotent.
+
+Claims and leases, recurrence expansion, issue moves, and destructive issue
+disposition are not folded into this matrix. They have distinct authorization
+or lifecycle contracts and retain their focused suites; combining them here
+would obscure whether a failure came from enrollment ordering or from those
+separate protocols.
 
 The focused recovery regression separately seeds a quarantine with the former
 peer-reference error, runs one sync against a compatible ingest endpoint, and
