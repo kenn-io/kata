@@ -4183,6 +4183,49 @@ func TestIngestClaimViolationWorkMutationCoverage(t *testing.T) {
 	}
 }
 
+func TestIngestClaimViolationAuditsCompatibleCrossProjectPeer(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	firstProject := createProject(ctx, t, d, "spoke-project")
+	secondProject := createProject(ctx, t, d, "peer-project")
+	firstIssue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: firstProject.ID,
+		Title:     "first",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	secondIssue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: secondProject.ID,
+		Title:     "second",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, firstProject.ID, "tester")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, secondProject.ID, "tester")
+	require.NoError(t, err)
+	_, err = d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: secondProject.ID,
+		IssueRef:  secondIssue.ShortID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: newTestUID(t), Holder: "holder"},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	spokeUID := newTestUID(t)
+	link := ingestEventWithPayload(t, firstProject.UID, firstProject.Name, spokeUID,
+		&firstIssue.UID, &secondIssue.UID, "issue.linked", 100,
+		`{"issue_uid":"`+firstIssue.UID+`","from_uid":"`+firstIssue.UID+`","to_uid":"`+secondIssue.UID+`","type":"blocks"}`)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(firstProject.ID, spokeUID, link))
+
+	require.NoError(t, err)
+	assertRowCount(ctx, t, d, 1, "peer claim violation emitted in owning project",
+		`SELECT count(*) FROM events
+		  WHERE project_id = ? AND issue_uid = ? AND type = 'claim.violated'`,
+		secondProject.ID, secondIssue.UID)
+}
+
 func TestIngestClaimViolationExpiresTimedClaimBeforeAudit(t *testing.T) {
 	d, ctx, p, spokeUID, issue, _ := setupIngestClaimIssue(t)
 	_, err := d.AcquireClaim(ctx, db.AcquireClaimParams{

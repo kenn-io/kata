@@ -931,3 +931,39 @@ with `[`; `null`, objects, and scalars are validation failures.
 
 Run the full shuffled verification set, commit without rewriting history,
 push, and require the next complete branch review to pass.
+
+---
+
+### Task 10: Audit Cross-Project Link Claims
+
+**Files:**
+- Modify: `internal/db/sqlitestore/claims.go`
+- Test: `internal/db/sqlitestore/federation_test.go`
+- Modify: `docs/design/federation.md`
+- Modify: `docs/operations/federation.md`
+
+**Interfaces:**
+- Consumes: compatible-group claim state for every materialized link endpoint.
+- Produces: endpoint-owning-project claim audit.
+
+**Compatibility decision:** Legacy v0.9 directional unlinks remain outside the
+supported contract. Do not add graph inference, payload rewriting, or another
+fallback for events missing `link_from_uid` and `link_to_uid`.
+
+- [ ] **Step 1: Prove the review finding**
+
+Add a link mutation whose peer has a claim in another compatible hub project.
+Confirm the owning project does not receive `claim.violated` before
+implementation.
+
+- [ ] **Step 2: Audit compatible-project link peers**
+
+Resolve claim-audit issue UIDs across the binding group. Pass each endpoint's
+owning project ID and name into the existing mutation audit so timed claims
+expire and violations are recorded in the correct project.
+
+- [ ] **Step 3: Verify, commit, and re-review**
+
+Run the full shuffled verification set with local auth environment variables
+unset, commit without rewriting history, push, and require the next complete
+branch review to pass.

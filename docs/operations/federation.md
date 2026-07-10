@@ -576,6 +576,9 @@ time and stop blocking edits once expired.
 The hub checks pushed work against live lease state at ingest time. Work that
 conflicts with another holder's live lease is kept, but the hub records
 `claim.violated`. Work on unleased issues is normal and is not a violation.
+Link mutations check both materialized endpoints in the compatible federation
+group, expire timed leases in each endpoint's owning project, and record any
+violation in that owning project.
 
 ## Operator commands
 
@@ -625,6 +628,14 @@ sync retries the same pending events automatically.
 Malformed schema declarations are not rolling-upgrade skew. Missing schema
 versions fail request validation, and explicit non-positive schema versions
 return `invalid_federation_schema`.
+
+Legacy v0.9 directional unlink payloads are also outside the supported ingest
+contract. `blocks` and `parent` unlinks must include storage-oriented
+`link_from_uid` and `link_to_uid`; the hub rejects events that omit them and
+never guesses orientation from the current graph. Such a validation quarantine
+is not released by upgrading or retrying because kata does not rewrite the
+stored event. Handle it through the normal explicit quarantine disposition
+workflow.
 
 Older kata builds may already have quarantined a batch after a transient
 schema-skew rejection. After upgrading the hub, upgrade and restart each spoke

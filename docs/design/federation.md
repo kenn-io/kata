@@ -272,6 +272,13 @@ Federation compatibility is asymmetric during rolling upgrades:
   `invalid_federation_schema`. These are protocol errors, not rolling-upgrade
   skew.
 
+This compatibility policy does not extend to legacy v0.9 directional unlink
+payloads. `issue.unlinked` events for `blocks` and `parent` must carry
+`link_from_uid` and `link_to_uid` in storage orientation. The hub rejects a
+payload that omits them; it does not infer orientation from current graph state
+or rewrite the event. This is a deliberate pre-1.0 contract boundary, not a
+transient version-skew condition.
+
 Upgrade hubs before push-enabled spokes when rolling out a new federation
 schema. If an older build already quarantined a batch because of transient
 schema skew, upgrade the hub and then restart each spoke on a build with this
@@ -352,6 +359,9 @@ time and stop blocking edits once expired.
 The hub checks pushed work against the live lease state at ingest time. Work
 that conflicts with another holder's live lease is not dropped; the hub records
 `claim.violated`. Work on unleased issues is normal and is not a violation.
+For link work, the audit checks every materialized endpoint in the compatible
+federation group and records the violation in the endpoint's owning project.
+Timed leases are expired in each affected owning project before that check.
 This is best-effort, not a causal proof that the work was unauthorized when
 originally performed. An offline edit that was covered at edit time can arrive
 after another holder acquires a lease and be marked violated because the hub

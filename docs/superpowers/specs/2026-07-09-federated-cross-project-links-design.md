@@ -79,6 +79,11 @@ edge orientation. Federation validates that both endpoint pairs describe the
 same issues and folds the storage-oriented pair, so deleting through the
 destination endpoint tombstones the actual `blocks` or `parent` edge.
 
+Legacy v0.9 directional unlink payloads without that storage pair are
+intentionally unsupported. Ingest rejects them instead of inferring direction
+from graph state or adding a compatibility read path. This is a deliberate
+pre-1.0 event-contract boundary.
+
 Deferred peer UIDs are never promoted to known primary issues. Across ingest
 batches, the known-primary set comes from materialized issues and stored
 `issue.created` or `issue.snapshot` primary UIDs. Within one batch, only a
@@ -88,6 +93,12 @@ validated create or snapshot adds its primary UID to that set.
 
 Issue, comment, label, and metadata projection remains project-scoped.
 Federated link projection becomes group-scoped.
+
+Best-effort claim-violation annotation follows that same group boundary for
+link mutations. Every materialized endpoint is resolved to its owning project,
+that project's timed claims are expired, and a live conflicting claim produces
+`claim.violated` in the endpoint's project rather than only in the project that
+carried the link event.
 
 After a member project materializes its project-scoped state, kata folds link
 events for the compatible federation group, resolves endpoint UIDs against
@@ -167,6 +178,8 @@ assertions:
   empty mutation;
 - destination-side directional unlinks remove the stored edge without losing
   primary-issue attribution;
+- legacy v0.9 directional unlinks without storage endpoints remain rejected;
+- claim-violation audit covers materialized link peers in compatible projects;
 - unknown primary issues and existing poisoned-event cases remain rejected;
   and
 - same-project links continue to materialize and unlink correctly.

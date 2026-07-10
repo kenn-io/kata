@@ -1141,9 +1141,8 @@ type federationIngestClaimAuditIssue struct {
 
 func (d *Store) annotateFederationIngestClaimWorkTx(
 	ctx context.Context,
-	tx claimStore,
+	tx *sql.Tx,
 	projectID int64,
-	projectName string,
 	ev db.RemoteEvent,
 ) ([]db.Event, error) {
 	issueUIDs, err := federationIngestClaimAuditIssueUIDs(ev)
@@ -1153,35 +1152,28 @@ func (d *Store) annotateFederationIngestClaimWorkTx(
 	if len(issueUIDs) == 0 {
 		return nil, nil
 	}
-	var events []db.Event
-	claimsExpired := false
-	ensureClaimsExpired := func() error {
-		if claimsExpired {
-			return nil
-		}
-		expiredEvents, err := d.expireTimedClaimsForProjectTx(ctx, tx, projectID, time.Now().UTC(), 0)
-		if err != nil {
-			return err
-		}
-		events = append(events, expiredEvents...)
-		claimsExpired = true
-		return nil
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+		federationBindingSelect+` WHERE project_id = ?`, projectID))
+	if err != nil {
+		return nil, err
 	}
+	groupProjectIDs, err := federationBindingGroupProjectIDs(ctx, tx, binding)
+	if err != nil {
+		return nil, err
+	}
+	var events []db.Event
 	for _, issue := range issueUIDs {
-		issueID, err := issueIDByUIDForClaimAuditTx(ctx, tx, projectID, issue.UID)
+		target, err := issueForClaimAuditInGroupTx(ctx, tx, groupProjectIDs, issue.UID)
 		if errors.Is(err, db.ErrNotFound) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		if err := ensureClaimsExpired(); err != nil {
-			return nil, err
-		}
 		auditEvents, err := d.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
-			ProjectID:         projectID,
-			ProjectName:       projectName,
-			IssueID:           issueID,
+			ProjectID:         target.ProjectID,
+			ProjectName:       target.ProjectName,
+			IssueID:           target.IssueID,
 			IssueUID:          issue.UID,
 			OffendingEventUID: ev.EventUID,
 			EventType:         ev.Type,
@@ -1353,17 +1345,41 @@ func enabledHubFederationBindingTx(ctx context.Context, tx claimStore, projectID
 	return enabled == 1 && role == string(db.FederationRoleHub), nil
 }
 
-func issueIDByUIDForClaimAuditTx(ctx context.Context, tx claimStore, projectID int64, issueUID string) (int64, error) {
-	var id int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT id FROM issues WHERE project_id = ? AND uid = ?`, projectID, issueUID).Scan(&id)
+type federationClaimAuditTarget struct {
+	IssueID     int64
+	ProjectID   int64
+	ProjectName string
+}
+
+func issueForClaimAuditInGroupTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectIDs []int64,
+	issueUID string,
+) (federationClaimAuditTarget, error) {
+	if len(projectIDs) == 0 {
+		return federationClaimAuditTarget{}, db.ErrNotFound
+	}
+	placeholders, projectArgs := projectIDPlaceholders(projectIDs)
+	args := make([]any, 0, len(projectArgs)+1)
+	args = append(args, issueUID)
+	args = append(args, projectArgs...)
+	var target federationClaimAuditTarget
+	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
+	err := tx.QueryRowContext(ctx, `
+		SELECT i.id, i.project_id, p.name
+		  FROM issues i
+		  JOIN projects p ON p.id = i.project_id
+		 WHERE i.uid = ?
+		   AND i.project_id IN (`+placeholders+`)`, args...).
+		Scan(&target.IssueID, &target.ProjectID, &target.ProjectName)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, db.ErrNotFound
+		return federationClaimAuditTarget{}, db.ErrNotFound
 	}
 	if err != nil {
-		return 0, fmt.Errorf("lookup claim audit issue: %w", err)
+		return federationClaimAuditTarget{}, fmt.Errorf("lookup claim audit issue: %w", err)
 	}
-	return id, nil
+	return target, nil
 }
 
 func latestClaimOffendingEventUIDTx(
