@@ -27,7 +27,7 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: go test -p 1 ./...
+        run: env -u KATA_AUTH_TOKEN go test -p 1 ./...
 
   windows:
     name: Windows
@@ -52,9 +52,10 @@ jobs:
         run: go vet ./...
 
       - name: Run tests
+        shell: bash
         env:
           KATA_TEST_FAST_SQLITE: "1"
-        run: go test -p 4 -vet=off ./...
+        run: env -u KATA_AUTH_TOKEN go test -p 4 -vet=off ./...
 
   lint:
     name: golangci-lint
@@ -89,7 +90,7 @@ jobs:
           persist-credentials: false
 
       - name: Run release script tests
-        run: make release-scripts-test
+        run: env -u KATA_AUTH_TOKEN make release-scripts-test
 
   nilaway:
     name: nilaway
@@ -130,7 +131,7 @@ jobs:
           cache: true
 
       - name: Run federation stress tests
-        run: make test-stress
+        run: env -u KATA_AUTH_TOKEN make test-stress
 
   federation-docker:
     name: Federation Docker tests
@@ -149,4 +150,4 @@ jobs:
           cache: true
 
       - name: Run federation Docker tests
-        run: make test-federation-docker
+        run: env -u KATA_AUTH_TOKEN make test-federation-docker
