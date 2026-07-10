@@ -1137,7 +1137,7 @@ func payloadDeferredLinkIssueUIDs(
 		if err := validateFederationLinkPeer(primaryIssueUID, peerUID); err != nil {
 			return nil, err
 		}
-		if err := validateFederationUnlinkStorageEndpoints(ev, payload, linkType, fromUID, toUID); err != nil {
+		if err := validateFederationUnlinkStorageEndpoints(ev, payload, fromUID, toUID); err != nil {
 			return nil, err
 		}
 		add(peerUID)
@@ -1210,7 +1210,7 @@ func payloadLinksChangedIssueUIDs(
 func validateFederationUnlinkStorageEndpoints(
 	ev db.RemoteEvent,
 	payload map[string]json.RawMessage,
-	linkType, fromUID, toUID string,
+	fromUID, toUID string,
 ) error {
 	if ev.Type != "issue.unlinked" {
 		return nil
@@ -1221,10 +1221,8 @@ func validateFederationUnlinkStorageEndpoints(
 		return fmt.Errorf("%w: issue.unlinked storage endpoints must be paired", db.ErrFederationIngestValidation)
 	}
 	if !fromPresent {
-		if linkType == "blocks" || linkType == "parent" {
-			return fmt.Errorf("%w: issue.unlinked missing directional storage endpoints",
-				db.ErrFederationIngestValidation)
-		}
+		// Older supported spokes stored only the attribution-oriented endpoint
+		// pair. Fold falls back to that pair when storage endpoints are absent.
 		return nil
 	}
 	linkFromUID, fromOK := db.StringValue(rawFrom)

@@ -411,7 +411,7 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 			return db.FederationBinding{}, err
 		}
 	}
-	previous, previousGroupProjectIDs, err := federationBindingTransitionState(ctx, tx, b.ProjectID)
+	previous, err := federationBindingTransitionState(ctx, tx, b.ProjectID)
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
@@ -449,9 +449,7 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(
-		ctx, tx, previous, previousGroupProjectIDs, binding,
-	); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, previous, binding); err != nil {
 		return db.FederationBinding{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -496,14 +494,6 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64) (db
 	if binding.Role != db.FederationRoleSpoke {
 		return db.LeaveFederationResult{}, db.ErrFederationNotSpoke
 	}
-	var previousGroupProjectIDs []int64
-	if binding.Enabled {
-		previousGroupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, binding)
-		if err != nil {
-			return db.LeaveFederationResult{}, err
-		}
-	}
-
 	for _, stmt := range []string{
 		`DELETE FROM federation_quarantine WHERE project_id = ?`,
 		`DELETE FROM federation_sync_status WHERE project_id = ?`,
@@ -516,9 +506,7 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64) (db
 	if err := clearProjectClaimStateTx(ctx, tx, projectID); err != nil {
 		return db.LeaveFederationResult{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(
-		ctx, tx, &binding, previousGroupProjectIDs, db.FederationBinding{},
-	); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, &binding, db.FederationBinding{}); err != nil {
 		return db.LeaveFederationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -869,7 +857,7 @@ func (d *Store) enableProjectFederation(ctx context.Context, projectID int64, ac
 	if err != nil {
 		return db.FederationBinding{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, nil, binding); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding); err != nil {
 		return db.FederationBinding{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2037,30 +2025,22 @@ func federationBindingTransitionState(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
-) (*db.FederationBinding, []int64, error) {
+) (*db.FederationBinding, error) {
 	previous, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if errors.Is(err, db.ErrNotFound) {
-		return nil, nil, nil
+		return nil, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if !previous.Enabled {
-		return &previous, nil, nil
-	}
-	projectIDs, err := federationBindingGroupProjectIDs(ctx, tx, previous)
-	if err != nil {
-		return nil, nil, err
-	}
-	return &previous, projectIDs, nil
+	return &previous, nil
 }
 
 func reconcileFederationBindingTransitionLinks(
 	ctx context.Context,
 	tx *sql.Tx,
 	previous *db.FederationBinding,
-	previousGroupProjectIDs []int64,
 	current db.FederationBinding,
 ) error {
 	if previous != nil && previous.Enabled {
@@ -2069,7 +2049,7 @@ func reconcileFederationBindingTransitionLinks(
 			return err
 		}
 		if err := reconcileFederatedLinkGroup(
-			ctx, tx, remainingProjectIDs, previousGroupProjectIDs, 0, nil,
+			ctx, tx, remainingProjectIDs, remainingProjectIDs, 0, nil,
 		); err != nil {
 			return err
 		}
@@ -2488,7 +2468,7 @@ func (d *Store) adoptProjectIntoFederation(
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
-	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, nil, binding); err != nil {
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 	project, err = scanProject(tx.QueryRowContext(ctx,
