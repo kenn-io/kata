@@ -5,6 +5,10 @@
 - Always Commit: Do not leave accepted repository changes uncommitted at the end of a task. Commit the completed work, or explicitly say why no commit was made.
 - Never Squash or Amend: Do not squash commits, amend commits, or otherwise rewrite git history unless the user explicitly asks for that history rewrite.
 - Do not commit rejected experiments. Revert them or ask before preserving them.
+- Never manually invoke `roborev review` in any form unless the user explicitly
+  asks for it. Never invoke a roborev skill (including `roborev-fix` or
+  `roborev-design-review-branch`) unless the user explicitly asks for that
+  skill.
 - Test First: Write a failing test before the implementation, then make it pass, then refactor (red, green, refactor). Don't add production code without a failing test that requires it.
 - No Private Project Data: Do not use private project, workspace, customer,
   host, or repository names in tests, docs, examples, planning documents,
