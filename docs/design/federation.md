@@ -452,6 +452,7 @@ relationship, and the enrollment recovery screen prints the actual join error
 - enrollment count on hubs
 - live and pending lease counts
 - active quarantine count and reset blocker
+- active quarantine summaries, including retained event UIDs and errors
 - unresolved lease violation count and recent violation summaries
 
 A daemon with no federation bindings returns an empty status list and prints
@@ -460,8 +461,20 @@ A daemon with no federation bindings returns an empty status list and prints
 ## Quarantine
 
 A spoke records an active quarantine when it sees a permanently poisoned push
-batch. Quarantine blocks further push and can block reset. Operators can inspect
-it with status and release it for retry after fixing the root cause:
+batch. Quarantine blocks further push and can block reset. Operators inspect
+active rows through the status-backed discovery commands before choosing a
+mutation:
+
+```bash
+kata federation quarantine list
+kata federation quarantine show <id>
+```
+
+The TUI renders retained quarantine summaries only in project detail so the
+compact binding list stays scannable. Operators must not edit SQLite to clear a
+row or move a cursor; recovery goes through the durable retry transition.
+
+After fixing a recoverable root cause, an operator can explicitly retry:
 
 ```bash
 kata federation quarantine retry <id> \
@@ -476,9 +489,13 @@ the next sync. Stale push quarantines whose stored error is the legacy
 operators use `retry` for other fixed push quarantines.
 
 Older builds may have quarantined a valid batch because a cross-project link
-peer had not reached the hub. After upgrading the hub and spoke, use `retry`,
-not `skip`. The original events are resent without advancing the cursor and
-the edge materializes when both endpoint projects reach the upgraded hub.
+peer had not reached the hub. A compatible spoke recognizes only that former
+peer-reference error shape, releases the quarantine through the same retry
+transition, and resends the original events without advancing the cursor.
+Current hubs retain a missing peer as deferred event-backed state, and the edge
+materializes when both endpoint projects arrive. Unknown-primary failures such
+as `issue.updated references unknown issue` do not match this recovery gate;
+they remain quarantined and stop push before network access.
 
 Operators can also intentionally skip a quarantined batch:
 

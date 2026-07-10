@@ -610,7 +610,11 @@ enrollment.
 
 `kata federation status` reports local bindings, enabled/push state, cursors,
 pending push depth, sync timestamps, enrollment counts, lease counts,
-quarantine counts, reset blockers, and recent lease violations.
+quarantine counts, reset blockers, and recent lease violations. Use
+`kata federation quarantine list` to inspect every active quarantine and
+`kata federation quarantine show <id>` to see its complete retained event UID
+list and error. The TUI shows the same retained errors in a spoke row's detail
+view.
 
 ## Compatibility and rolling upgrades
 
@@ -648,7 +652,25 @@ the push cursor.
 A spoke records active quarantine when it sees a permanently poisoned push
 batch. Quarantine blocks further push and can block reset.
 
-Inspect with status and retry after fixing the root cause:
+Inspect the retained event range and error before choosing any disposition:
+
+```sh
+kata federation quarantine list
+kata federation quarantine show <id>
+```
+
+Do not edit kata's SQLite database to clear a quarantine or advance a cursor.
+Those changes bypass the retry and audit transitions and can silently strand
+events. A compatible spoke automatically releases and resends a push
+quarantine whose retained error has the exact former cross-project peer
+validation shape. Current hubs accept a missing link peer as deferred state,
+so the original batch can advance and the edge materializes after both endpoint
+projects reach the same hub federation group.
+
+Unknown primary issues are different: errors such as `issue.updated references
+unknown issue` still indicate a poisoned mutation, remain quarantined, and stop
+before another network request. Fix the root cause and explicitly retry other
+recoverable push quarantines:
 
 ```sh
 kata federation quarantine retry <id> \
@@ -661,21 +683,9 @@ cursor, so the same local events are sent again on the next sync. Retrying a
 pull quarantine returns `federation_quarantine_retry_unsupported`. A stale push
 quarantine created by older builds for `unsupported_federation_schema` is
 released automatically on sync after the spoke runs a fixed build; manual retry
-is for other fixed push-quarantine root causes.
-
-Older kata versions may have quarantined an otherwise valid batch because a
-cross-project link peer had not reached the hub. Upgrade the hub first, then
-the spoke. Release each affected push quarantine with `retry`, not `skip`:
-
-```sh
-kata federation quarantine retry <id> \
-  --confirm "RETRY FEDERATION BATCH <id>" \
-  --reason "peer links now use deferred same-hub reconciliation"
-```
-
-Retry leaves the push cursor unchanged and resends the original events. Once
-both endpoint projects reach the upgraded hub, the edge materializes
-automatically.
+is for other fixed push-quarantine root causes. Older peer-validation
+quarantines also auto-release after both hub and spoke run compatible builds;
+their retry transition preserves the cursor and resends the original events.
 
 Intentionally skip only when the operator accepts that local events will not be
 federated:
@@ -720,6 +730,9 @@ Federation has expected stale or deferred states:
 - Future-schema push skew pauses push until the hub is upgraded. Stale
   schema-skew quarantines from older spoke builds auto-release after the spoke
   is upgraded and restarted.
+- Stale peer-validation quarantines from older builds auto-release when a
+  compatible spoke syncs against a compatible hub. Unknown-primary and other
+  validation failures remain blocked for operator diagnosis.
 - Purge causes spoke re-bootstrap.
 - Enrollment creation uses normal daemon auth; the generated enrollment token
   only authorizes the spoke transport grant and is not a user daemon API token.

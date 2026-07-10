@@ -8,12 +8,24 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**New features**
+
+- Added `kata federation quarantine list` and `show` so operators can inspect
+  project ownership, event ranges and UIDs, timestamps, and retained errors
+  before retrying or skipping. Federation project detail in the TUI now shows
+  the same retained quarantine errors.
+
 **Fixed**
 
 - Fixed a federation deadlock where two projects whose first pending batches
   referenced each other's new issues could both become permanently
   quarantined. Link peers now resolve eventually within the same hub
   federation group; true validation failures remain quarantined.
+- Automatically resend older push quarantines created by the former missing
+  link-peer validator after compatible hub and spoke builds are deployed,
+  without advancing the cursor. Multi-project coverage now crosses task
+  creation before and after enrollment, eager and batched sync, and both
+  project orderings.
 
 ## 0.9.0
 <small>2026-07-09</small>

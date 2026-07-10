@@ -457,6 +457,8 @@ kata federation enrollments list
 kata federation revoke <enrollment-id>
 kata federation lease acquire <issue-ref> [--ttl 30m]
 kata federation lease release <issue-ref>
+kata federation quarantine list
+kata federation quarantine show <id>
 kata federation quarantine retry <id> --confirm "RETRY FEDERATION BATCH <id>" --reason <text>
 kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --reason <text>
 ```
@@ -487,6 +489,13 @@ Issue edits on push-enabled federated spokes remain local-first; use
 `kata federation lease acquire` only when you want exclusive coordination on an
 issue. A live lease held by another actor blocks non-comment mutations until it
 is released or expires.
+
+`kata federation quarantine list` reports every active quarantine with its
+project, direction, event range, creation time, and retained error. Use
+`kata federation quarantine show <id>` for the complete event UID list before
+retrying or skipping. Retry preserves the push cursor and resends the same
+events; skip advances past the range and means those events will not reach the
+hub. Do not repair quarantine state by editing SQLite directly.
 
 ## Ref forms
 
