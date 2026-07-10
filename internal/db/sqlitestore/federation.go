@@ -2062,7 +2062,62 @@ func reconcileFederationBindingTransitionLinks(
 	if err != nil {
 		return err
 	}
+	if err := removeIncompatibleFederatedBoundaryLinks(ctx, tx, current.ProjectID, currentProjectIDs); err != nil {
+		return err
+	}
 	return reconcileFederatedLinkGroup(ctx, tx, currentProjectIDs, currentProjectIDs, false, 0, nil)
+}
+
+func removeIncompatibleFederatedBoundaryLinks(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	compatibleProjectIDs []int64,
+) error {
+	compatible := make(map[int64]struct{}, len(compatibleProjectIDs))
+	for _, id := range compatibleProjectIDs {
+		compatible[id] = struct{}{}
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT l.id,
+		       CASE WHEN f.project_id = ? THEN t.project_id ELSE f.project_id END AS peer_project_id
+		  FROM links l
+		  JOIN issues f ON f.id = l.from_issue_id
+		  JOIN issues t ON t.id = l.to_issue_id
+		  JOIN federation_bindings peer_binding
+		    ON peer_binding.project_id = CASE
+		         WHEN f.project_id = ? THEN t.project_id ELSE f.project_id
+		       END
+		   AND peer_binding.enabled = 1
+		 WHERE f.project_id <> t.project_id
+		   AND (f.project_id = ? OR t.project_id = ?)`,
+		projectID, projectID, projectID, projectID)
+	if err != nil {
+		return fmt.Errorf("list incompatible federation boundary links: %w", err)
+	}
+	var stale []int64
+	for rows.Next() {
+		var linkID, peerProjectID int64
+		if err := rows.Scan(&linkID, &peerProjectID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan incompatible federation boundary link: %w", err)
+		}
+		if _, ok := compatible[peerProjectID]; !ok {
+			stale = append(stale, linkID)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close incompatible federation boundary links: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate incompatible federation boundary links: %w", err)
+	}
+	for _, linkID := range stale {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, linkID); err != nil {
+			return fmt.Errorf("delete incompatible federation boundary link %d: %w", linkID, err)
+		}
+	}
+	return nil
 }
 
 func normalizedFederationHubOrigin(raw string) (string, error) {

@@ -2231,6 +2231,66 @@ func TestFederationMembershipDestinationFirstPreservesIncomingLink(t *testing.T)
 	})
 }
 
+func TestFederationMembershipDifferentOriginsRemoveLocalBoundaryLink(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	firstProject := createProject(ctx, t, d, "spoke-project")
+	peerProject := createProject(ctx, t, d, "peer-project")
+	firstIssue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: firstProject.ID,
+		Title:     "first",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	peerIssue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: peerProject.ID,
+		Title:     "peer",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+		FromIssueID: firstIssue.ID,
+		ToIssueID:   peerIssue.ID,
+		Type:        "blocks",
+		Author:      "tester",
+	}, db.LinkEventParams{
+		EventType:    "issue.linked",
+		EventIssueID: firstIssue.ID,
+		FromShortID:  firstIssue.ShortID,
+		FromUID:      firstIssue.UID,
+		ToShortID:    peerIssue.ShortID,
+		ToUID:        peerIssue.UID,
+		Actor:        "tester",
+	})
+	require.NoError(t, err)
+
+	_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:     firstProject.ID,
+		Role:          db.FederationRoleSpoke,
+		HubURL:        "https://hub-a.example",
+		HubProjectID:  41,
+		HubProjectUID: firstProject.UID,
+		Enabled:       true,
+	})
+	require.NoError(t, err)
+	assertRowCount(ctx, t, d, 1, "first enrollment preserves link to standalone peer",
+		`SELECT count(*) FROM links WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		firstIssue.UID, peerIssue.UID)
+
+	_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:     peerProject.ID,
+		Role:          db.FederationRoleSpoke,
+		HubURL:        "https://hub-b.example",
+		HubProjectID:  42,
+		HubProjectUID: peerProject.UID,
+		Enabled:       true,
+	})
+	require.NoError(t, err)
+	assertRowCount(ctx, t, d, 0, "incompatible peer enrollment removes boundary link",
+		`SELECT count(*) FROM links WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		firstIssue.UID, peerIssue.UID)
+}
+
 func TestUpsertFederationBindingReconcilesChangedGroupMembership(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
