@@ -17,7 +17,94 @@
 - Different DNS names or IP aliases remain different groups even when they reach the same daemon.
 - Use neutral names such as `spoke-project`, `peer-project`, and `hub.example` in tests and documentation.
 - Do not add bash content-assertion tests or tests of `net/url` behavior.
+- Every CI test command must remove `KATA_AUTH_TOKEN` from its process
+  environment; an empty value is not a substitute for unsetting it.
 - Recover old quarantines with retry, never skip, after compatible binaries are running.
+
+---
+
+### Task 0: Isolate CI Tests From Inherited Daemon Credentials
+
+**Files:**
+- Modify: `.github/workflows/test.yml:28-30`
+- Modify: `.github/workflows/test.yml:53-57`
+- Modify: `.github/workflows/test.yml:89-90`
+- Modify: `.github/workflows/test.yml:132-133`
+- Modify: `.github/workflows/test.yml:151-152`
+
+**Interfaces:**
+- Consumes: the existing GitHub Actions test commands on Ubuntu and Windows.
+- Produces: every CI test process starts without `KATA_AUTH_TOKEN`; build,
+  vet, lint, and publishing jobs keep their current environments.
+
+- [ ] **Step 1: Unset the token at every test command boundary**
+
+Change the five test entry points to:
+
+~~~yaml
+      - name: Run tests
+        run: env -u KATA_AUTH_TOKEN go test -p 1 ./...
+~~~
+
+~~~yaml
+      - name: Run tests
+        shell: bash
+        env:
+          KATA_TEST_FAST_SQLITE: "1"
+        run: env -u KATA_AUTH_TOKEN go test -p 4 -vet=off ./...
+~~~
+
+~~~yaml
+      - name: Run release script tests
+        run: env -u KATA_AUTH_TOKEN make release-scripts-test
+~~~
+
+~~~yaml
+      - name: Run federation stress tests
+        run: env -u KATA_AUTH_TOKEN make test-stress
+~~~
+
+~~~yaml
+      - name: Run federation Docker tests
+        run: env -u KATA_AUTH_TOKEN make test-federation-docker
+~~~
+
+Do not change build, vet, lint, nilaway, release, or publishing commands.
+
+- [ ] **Step 2: Validate the workflow as configuration**
+
+Run:
+
+~~~bash
+if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/test.yml; fi
+git diff --check
+~~~
+
+Expected: both commands exit zero. Do not add a test that greps or parses the
+workflow to assert its source text.
+
+- [ ] **Step 3: Prove the clean test environment fixes the untouched baseline**
+
+Run:
+
+~~~bash
+env -u KATA_AUTH_TOKEN go test -shuffle=on ./...
+~~~
+
+Expected: PASS. This is the same untouched baseline that failed when the
+developer shell's daemon credential was inherited.
+
+- [ ] **Step 4: Commit CI isolation**
+
+Use the mandatory `commit` skill, then:
+
+~~~bash
+git add .github/workflows/test.yml
+git commit -m "Isolate CI tests from daemon credentials"
+~~~
+
+The commit body must explain that inherited runner credentials override test
+fixtures and that commands remove the variable rather than setting it empty.
 
 ---
 
