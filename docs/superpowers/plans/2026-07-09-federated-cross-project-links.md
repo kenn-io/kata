@@ -888,3 +888,46 @@ errors with `db.ErrFederationIngestValidation`. Use the helper from both
 
 Run the full shuffled verification set, commit without rewriting history,
 push, and require the next complete branch review to pass.
+
+---
+
+### Task 9: Preserve Directional Unlink Orientation and Reject Null UID Lists
+
+**Files:**
+- Modify: `internal/db/fold.go:390-415`
+- Modify: `internal/db/sqlitestore/federation_ingest.go:1090-1240`
+- Modify: `internal/db/sqlitestore/queries_links.go:850-915`
+- Test: `internal/daemon/handlers_links_test.go`
+- Test: `internal/db/sqlitestore/federation_test.go`
+
+**Interfaces:**
+- Consumes: URL-oriented unlink fields, stored `db.Link` endpoints, and strict
+  aggregated UID-list JSON.
+- Produces: `link_from_uid`/`link_to_uid` storage orientation and explicit JSON
+  array enforcement.
+
+- [ ] **Step 1: Add destination-side unlink regressions**
+
+Create a cross-project `blocks` edge, submit an unlink attributed to its
+destination issue, and assert group folding removes the source-to-destination
+edge. Extend the daemon payload test to require URL-oriented `from_uid` and
+`to_uid` plus storage-oriented `link_from_uid` and `link_to_uid`.
+
+- [ ] **Step 2: Emit, validate, and fold storage endpoints**
+
+Add the stored link UIDs to `DeleteLinkAndEvent` payloads. For directional
+federation unlinks, require both fields, validate them as distinct ULIDs, and
+require their unordered pair to equal the user-facing endpoint pair. Keep the
+primary issue envelope unchanged. Make `db.FoldEvents` prefer the storage pair
+when applying unlink tombstones.
+
+- [ ] **Step 3: Reject null aggregate UID lists**
+
+Add a `blocks_removed_uids: null` regression. Before unmarshalling any
+aggregated UID-list field into `[]string`, require its trimmed JSON to begin
+with `[`; `null`, objects, and scalars are validation failures.
+
+- [ ] **Step 4: Verify, commit, and re-review**
+
+Run the full shuffled verification set, commit without rewriting history,
+push, and require the next complete branch review to pass.

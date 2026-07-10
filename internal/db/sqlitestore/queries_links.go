@@ -896,6 +896,8 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 		"from_uid":      ev.FromUID,
 		"to_short_id":   ev.ToShortID,
 		"to_uid":        ev.ToUID,
+		"link_from_uid": link.FromIssueUID,
+		"link_to_uid":   link.ToIssueUID,
 		"updated_at":    ts,
 	})
 	if err != nil {

@@ -70,7 +70,14 @@ parent map must also satisfy the normal single-parent, acyclic, and
 Aggregated `issue.links_changed` UID fields are decoded strictly as well:
 parent fields are strings and add/remove fields are arrays containing only
 strings. Wrong containers, mixed element types, and wrong scalar types fail the
-originating batch instead of becoming an empty link delta.
+originating batch instead of becoming an empty link delta. JSON `null` is not
+an array and is rejected for every UID-list field.
+
+Directional unlink events keep `issue_uid` and the user-facing `from_uid` for
+project attribution, while carrying `link_from_uid` and `link_to_uid` in stored
+edge orientation. Federation validates that both endpoint pairs describe the
+same issues and folds the storage-oriented pair, so deleting through the
+destination endpoint tombstones the actual `blocks` or `parent` edge.
 
 Deferred peer UIDs are never promoted to known primary issues. Across ingest
 batches, the known-primary set comes from materialized issues and stored
@@ -158,6 +165,8 @@ assertions:
   before projection writes;
 - malformed aggregated link-change UID fields cannot advance the cursor as an
   empty mutation;
+- destination-side directional unlinks remove the stored edge without losing
+  primary-issue attribution;
 - unknown primary issues and existing poisoned-event cases remain rejected;
   and
 - same-project links continue to materialize and unlink correctly.

@@ -352,12 +352,16 @@ func TestDeleteLink_EventPayloadOrientsFromURLIssue(t *testing.T) {
 		ToShortID   string `json:"to_short_id"`
 		FromUID     string `json:"from_uid"`
 		ToUID       string `json:"to_uid"`
+		LinkFromUID string `json:"link_from_uid"`
+		LinkToUID   string `json:"link_to_uid"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(lastEventPayload(t, env, pid, "issue.unlinked")), &pl))
 	assert.Equal(t, bIss.ShortID, pl.FromShortID, "from_short_id must be the URL issue (B)")
 	assert.Equal(t, aIss.ShortID, pl.ToShortID, "to_short_id must be the peer (A)")
 	assert.Equal(t, bIss.UID, pl.FromUID, "from_uid must be the URL issue (B)")
 	assert.Equal(t, aIss.UID, pl.ToUID, "to_uid must be the peer (A)")
+	assert.Equal(t, aIss.UID, pl.LinkFromUID, "link_from_uid must preserve storage direction")
+	assert.Equal(t, bIss.UID, pl.LinkToUID, "link_to_uid must preserve storage direction")
 }
 
 // TestCreateLink_ArchivedPeerIs409 pins that POST /links rejects a link whose

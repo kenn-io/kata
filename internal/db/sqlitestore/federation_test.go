@@ -2005,7 +2005,7 @@ func TestIngestFederationEventsConvergesCircularCrossProjectLinks(t *testing.T) 
 
 	unlink := ingestEventWithPayload(t, firstProject.UID, firstProject.Name, spokeUID,
 		&firstIssueUID, &secondIssueUID, "issue.unlinked", 102,
-		`{"issue_uid":"`+firstIssueUID+`","from_uid":"`+firstIssueUID+`","to_uid":"`+secondIssueUID+`","type":"blocks"}`)
+		`{"issue_uid":"`+firstIssueUID+`","from_uid":"`+firstIssueUID+`","to_uid":"`+secondIssueUID+`","link_from_uid":"`+firstIssueUID+`","link_to_uid":"`+secondIssueUID+`","type":"blocks"}`)
 	_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
 		ProjectID:        firstProject.ID,
 		SpokeInstanceUID: spokeUID,
@@ -2046,6 +2046,48 @@ func TestIngestFederationEventsRejectsDeferredCrossProjectParentCycle(t *testing
 	assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
 	assertRowCount(ctx, t, d, 0, "invalid parent cycle is not materialized",
 		`SELECT count(*) FROM links WHERE type = 'parent'`)
+}
+
+func TestIngestFederationEventsUnlinksDirectionalEdgeThroughDestination(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	firstProject := createProject(ctx, t, d, "spoke-project")
+	secondProject := createProject(ctx, t, d, "peer-project")
+	_, err := d.EnableProjectFederation(ctx, firstProject.ID, "tester")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, secondProject.ID, "tester")
+	require.NoError(t, err)
+
+	spokeUID := newTestUID(t)
+	firstIssueUID := newTestUID(t)
+	secondIssueUID := newTestUID(t)
+	first := ingestEventWithPayload(t, firstProject.UID, firstProject.Name, spokeUID,
+		&firstIssueUID, nil, "issue.created", 100,
+		`{"uid":"`+firstIssueUID+`","short_id":"`+shortID(firstIssueUID)+`","title":"first","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+secondIssueUID+`","author":"spoke"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(firstProject.ID, spokeUID, first))
+	require.NoError(t, err)
+	second := ingestIssueCreatedEvent(t, secondProject.UID, secondProject.Name, spokeUID, secondIssueUID, 101)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(secondProject.ID, spokeUID, second))
+	require.NoError(t, err)
+	assertRowCount(ctx, t, d, 1, "directional edge materialized",
+		`SELECT count(*) FROM links
+		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		firstIssueUID, secondIssueUID)
+
+	unlink := ingestEventWithPayload(t, secondProject.UID, secondProject.Name, spokeUID,
+		&secondIssueUID, &firstIssueUID, "issue.unlinked", 102,
+		`{"issue_uid":"`+secondIssueUID+`","from_uid":"`+secondIssueUID+`","to_uid":"`+firstIssueUID+`","link_from_uid":"`+firstIssueUID+`","link_to_uid":"`+secondIssueUID+`","type":"blocks"}`)
+	_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID:        secondProject.ID,
+		SpokeInstanceUID: spokeUID,
+		Events:           []db.FederationIngestEvent{{SourceEventID: 2, Event: unlink}},
+	})
+
+	require.NoError(t, err)
+	assertRowCount(ctx, t, d, 0, "destination-side unlink removes storage-oriented edge",
+		`SELECT count(*) FROM links
+		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		firstIssueUID, secondIssueUID)
 }
 
 func TestEnableProjectFederationReconcilesDeferredGroupLinks(t *testing.T) {
@@ -3846,6 +3888,10 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		{
 			name:         "rejects non-array links changed uid list",
 			payloadField: `"blocks_added_uids":{}`,
+		},
+		{
+			name:         "rejects null links changed uid list",
+			payloadField: `"blocks_removed_uids":null`,
 		},
 		{
 			name:         "rejects mixed links changed uid list",
