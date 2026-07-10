@@ -15,7 +15,7 @@ kata list --agent
 Set actor identity once:
 
 ```sh
-export KATA_AUTHOR=codex-wesm-laptop
+export KATA_AUTHOR=agent-a
 kata whoami --agent
 ```
 
@@ -58,15 +58,23 @@ kata edit abc4 --blocks d4ex --agent
 
 ## Claim work
 
-In multi-agent environments, find unowned ready work and claim it:
+In multi-agent environments, choose one unowned ready issue and claim it:
 
 ```sh
-kata ready --unowned --agent
+kata next --unowned --agent
 kata claim abc4 --agent
 ```
 
-The claim fails if another actor already claimed the issue. Treat that as a
-coordination signal and pick another issue.
+`next` applies the shared priority rules and returns at most one candidate. The
+claim fails if another actor already claimed the issue; treat that as a
+coordination signal and run `next` again.
+
+Use `ready` when you want to inspect a filtered queue instead of choosing one
+issue:
+
+```sh
+kata ready --unowned --label bug --no-label blocked --agent
+```
 
 Release ownership only when you are intentionally giving the work back:
 

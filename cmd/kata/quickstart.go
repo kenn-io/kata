@@ -85,8 +85,10 @@ Use kata as the shared issue ledger for this workspace.
 
 6. Find and claim available work (multi-agent environments):
 
-   # Find unclaimed work
-   kata ready --unowned --agent
+   # Choose one unclaimed issue
+   kata next --unowned --agent
+
+   # Inspect the filtered queue
    kata ready --unowned --label bug --no-label blocked --agent
 
    # Claim it (fails if already claimed by another actor)
@@ -159,6 +161,8 @@ a local daemon.
 const agentQuickstartCompactText = `Use kata as the shared issue ledger for this workspace.
 Do not create practice, tutorial, example, or scratchpad issues.
 Search before creating or updating work.
+Choose one unclaimed issue with kata next --unowned --agent.
+Inspect a filtered queue with kata ready --unowned --label bug --no-label blocked --agent.
 Default to --agent for ordinary kata reads and mutations in agent logs.
 Use --json only when your script needs complete structured data.
 If work is incomplete, label needs-review and comment with what remains.

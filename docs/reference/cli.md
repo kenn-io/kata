@@ -247,11 +247,38 @@ whole command, including project/ref resolution and polling.
 kata ready [--limit N] [--unowned] [--owner NAME]
 kata ready [--label LABEL] [--no-label LABEL]
 kata ready --all
+kata next [--unowned] [--owner NAME]
+kata next [--label LABEL] [--no-label LABEL]
+kata next [--all] [--full]
 ```
 
 `ready` returns open issues that do not have an open blocking predecessor.
 Filters combine with AND logic. `--all` lists ready issues across every
 non-archived project and cannot be combined with those filters or `--project`.
+
+`next` selects one issue from the same ready candidates. Selection is
+deterministic: any explicitly prioritized candidate beats every unprioritized
+candidate, and the lowest numeric priority wins (P0 before P1). Equal
+priorities retain the ready API's order. If no candidate has a priority,
+`next` returns the first row in that order. This selection does not reorder
+`kata ready`.
+
+The scoped `--unowned`, `--owner`, `--label`, and `--no-label` filters have the
+same meaning for `next` as for `ready`; `--unowned` and `--owner` are mutually
+exclusive. `next --all` searches all non-archived projects and, like
+`ready --all`, cannot be combined with `--project` or any scoped filter.
+`next` has no `--limit` flag because its result cardinality is always zero or
+one. Because there is no summary or footer to suppress, `--quiet` does not
+change either the selected record or the empty result.
+
+Compact output contains exactly one selected issue or a successful empty
+result. Human mode prints one ready-style row or `No ready issues.`; agent mode
+prints one `OK next ...` record or `OK next found=false`; JSON returns
+`{"kata_api_version":1,"issue":<selected-issue>}` or
+`{"kata_api_version":1,"issue":null}`. Global compact results use a qualified
+`example-project#abc4` reference. Pass `--full` to render the selected issue
+with the same detail and sections as `kata show`. An empty `next --full` result
+uses the same successful empty output as compact mode.
 
 ## External sync
 

@@ -118,7 +118,7 @@ A read emits an `OK <command> count=<n>` header followed by one row per record:
 
 ```text
 OK list count=3
-- issue=abc4 status=open priority=2 owner=wesm labels=bug,safari title="Fix login race"
+- issue=abc4 status=open priority=2 owner=agent-a labels=bug,safari title="Fix login race"
 - issue=def7 status=open labels=architecture title="Control channel"
 - issue=j9k2 status=closed title="Old task"
 ```
@@ -147,6 +147,42 @@ meanings, so these additions are purely additive and `agent_format` stays `1`.
 A daemon without `[search.embeddings]` always reports `mode=lexical` and never
 sets `degraded=`, so its output is unchanged apart from the appended `mode=`.
 
+#### Single-result `next`
+
+`kata next --agent` is an intentional exception to the usual read shape of a
+`count=<n>` header followed by *n* rows. It emits exactly one compact record
+when a ready issue is selected:
+
+```text
+OK next issue=abc4 priority=1 owner=agent-a title="Fix callback race"
+```
+
+The field order is `issue`, optional `priority`, optional `owner`, then
+`title`. Absent priority and owner values are omitted rather than rendered as
+sentinels. A cross-project selection uses a qualified value such as
+`issue=example-project#abc4`.
+
+An empty ready set is also a successful single record:
+
+```text
+OK next found=false
+```
+
+With `--full`, the success header identifies the selected ref and is followed
+by the same detail fields and sections as `kata show --agent`:
+
+```text
+OK next abc4
+Issue: abc4 "Fix callback race"
+Status: open
+Owner: agent-a
+Labels: bug
+Priority: 1
+```
+
+The show sections for labels, body, metadata, links, comments, and leases are
+included when present. Their existing ordering and omission rules apply.
+
 ### Events
 
 Non-tail reads use a header plus rows; tail mode is stream-safe and emits exactly
@@ -154,12 +190,12 @@ one line per event:
 
 ```text
 OK events count=2 next_after_id=44
-- id=42 type=issue.created issue=abc4 actor=wesm
+- id=42 type=issue.created issue=abc4 actor=agent-a
 - id=43 type=issue.commented issue=abc4 actor=codex
 ```
 
 ```text
-OK event id=42 type=issue.created issue=abc4 actor=wesm
+OK event id=42 type=issue.created issue=abc4 actor=agent-a
 ```
 
 `kata events --tail --json` is newline-delimited JSON; `kata events --tail

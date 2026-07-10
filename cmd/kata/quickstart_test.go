@@ -19,6 +19,8 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, out, "Use --json only when your script needs complete structured data")
 	assert.Contains(t, out, `kata search "login race" --agent`)
+	assert.Contains(t, out, "kata next --unowned --agent")
+	assert.Contains(t, out, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, out, `kata events --after 0 --limit 100 --agent`)
 }
 
@@ -48,6 +50,8 @@ func TestQuickstart_JSON(t *testing.T) {
 	assert.Contains(t, got.Quickstart, "kata agent quickstart")
 	assert.Contains(t, got.Quickstart, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, got.Quickstart, "Use --json only when your script needs complete structured data")
+	assert.Contains(t, got.Quickstart, "kata next --unowned --agent")
+	assert.Contains(t, got.Quickstart, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, got.Quickstart, "kata events --after 0 --limit 100 --agent")
 }
 
@@ -60,6 +64,8 @@ func TestQuickstart_AgentOutput(t *testing.T) {
 	assert.Contains(t, out, "Default to --agent for ordinary kata reads and mutations in agent logs.")
 	assert.Contains(t, out, "Use --json only when your script needs complete structured data.")
 	assert.Contains(t, out, "Do not create practice, tutorial, example, or scratchpad issues.")
+	assert.Contains(t, out, "kata next --unowned --agent")
+	assert.Contains(t, out, "kata ready --unowned --label bug --no-label blocked --agent")
 	assert.Contains(t, out, "Close each verified issue promptly; valid evidence keeps sibling close bursts admissible by default.")
 }
 
