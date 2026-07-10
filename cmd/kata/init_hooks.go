@@ -99,8 +99,10 @@ func ensureClaudeHookScript(path string) (bool, error) {
 
 // ensureExecutable restores the execute bits on the managed script when a
 // pre-existing copy lost them — content-identical but 0644 still means the
-// wired hooks never run. Reports whether the mode changed. No-op on Windows,
-// which has no Unix execute bits.
+// wired hooks never run. The owner bit specifically is what counts: Unix
+// checks only the owner class for the owning user, so group/other execute
+// bits alone leave the script unrunnable. Reports whether the mode changed.
+// No-op on Windows, which has no Unix execute bits.
 func ensureExecutable(path string) (bool, error) {
 	if runtime.GOOS == "windows" {
 		return false, nil
@@ -109,7 +111,7 @@ func ensureExecutable(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if fi.Mode()&0o111 != 0 {
+	if fi.Mode()&0o100 != 0 {
 		return false, nil
 	}
 	if err := os.Chmod(path, 0o755); err != nil { //nolint:gosec // hook script must be executable

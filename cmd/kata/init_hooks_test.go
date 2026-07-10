@@ -175,6 +175,29 @@ func TestApplyClaudeHooks_RestoresExecutableBit(t *testing.T) {
 	assert.False(t, changed, "mode correction must stay idempotent")
 }
 
+// TestApplyClaudeHooks_RestoresOwnerExecuteBit covers a script that carries
+// group/other execute bits but not the owner's: Unix checks only the owner
+// class for the owning user, so the file is not actually runnable and the
+// mode must still be corrected.
+func TestApplyClaudeHooks_RestoresOwnerExecuteBit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix execute bits on Windows")
+	}
+	dir := t.TempDir()
+	_, err := applyClaudeHooks(dir)
+	require.NoError(t, err)
+
+	scriptPath := filepath.Join(dir, ".claude", "hooks", "kata-attention.sh")
+	require.NoError(t, os.Chmod(scriptPath, 0o655)) //nolint:gosec // deliberately exec-for-group-only to exercise the owner-bit check
+
+	changed, err := applyClaudeHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed, "missing owner-execute bit is a change")
+	fi, err := os.Stat(scriptPath)
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&0o100, "owner-execute bit must be restored")
+}
+
 // TestApplyClaudeHooks_DriftedScriptRegainsExecutableBit covers drifted
 // content on a non-executable file: os.WriteFile does not touch an existing
 // file's mode, so the rewrite must fix it explicitly.
