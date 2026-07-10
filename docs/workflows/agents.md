@@ -25,8 +25,12 @@ Default to `--agent` for ordinary reads and mutations in agent logs. Use
 To make a workspace self-documenting for agents, run `kata init --with-agents`
 once. It writes a marker-delimited kata briefing into existing real `AGENTS.md`
 and `CLAUDE.md` files, or creates `AGENTS.md` when neither exists. The block
-points back at `kata quickstart`; re-running refreshes only kata's block. If a
-target file still carries a Beads integration block, kata leaves it untouched
+points back at `kata quickstart` and carries a short `work.*` attention
+conventions section (see
+[agent orchestration](../operations/agent-orchestration.md)); re-running
+refreshes only kata's block, so a repo initialized before that section shipped
+gains it on the next run. If a target file still carries a Beads integration
+block, kata leaves it untouched
 and writes a `<file>.kata-proposed` sidecar to adopt or discard — see
 [`--with-agents`](../get-started/quickstart.md#initialize-a-workspace). If
 `AGENTS.md` is a symlink, kata refuses to manage it before reading the target;

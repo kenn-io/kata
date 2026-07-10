@@ -30,9 +30,11 @@ deriving it from the git remote.
 Pass `--with-agents` to add or refresh kata's marker-delimited guidance block
 where coding agents look for workspace instructions. Existing real `AGENTS.md`
 and `CLAUDE.md` files are both refreshed; if neither exists, kata creates
-`AGENTS.md`. The block points coding agents at `kata quickstart` and the close
-discipline; re-running the command updates only kata's block and leaves other
-content untouched.
+`AGENTS.md`. The block points coding agents at `kata quickstart`, the close
+discipline, and the `work.*` attention conventions (see
+[agent orchestration](../operations/agent-orchestration.md)); re-running the
+command updates only kata's block and leaves other content untouched, so a
+repo initialized before the `work.*` section shipped gains it on the next run.
 
 When migrating from Beads, an existing `AGENTS.md` or real `CLAUDE.md` may still
 carry a Beads integration block. kata leaves that file untouched and writes a
