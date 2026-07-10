@@ -48,6 +48,18 @@ Federation ingest continues to reject:
 Only peer references used to describe links may be unresolved. An unknown
 primary issue is still a poisoned event rather than deferred work.
 
+Deferral does not expand a project-scoped federation credential. Every link
+mutation must involve the event's validated primary issue. For explicit
+`from_uid`/`to_uid` events, one endpoint must equal the primary issue and an
+envelope `related_issue_uid`, when present, must identify the opposite
+endpoint. Snapshot and aggregated link payloads treat their listed targets as
+peers of the primary issue. Only those peers may be unresolved.
+
+Deferred peer UIDs are never promoted to known primary issues. Across ingest
+batches, the known-primary set comes from materialized issues and stored
+`issue.created` or `issue.snapshot` primary UIDs. Within one batch, only a
+validated create or snapshot adds its primary UID to that set.
+
 ## Projection Architecture
 
 Issue, comment, label, and metadata projection remains project-scoped.
@@ -67,6 +79,13 @@ project.
 
 Same-project links use the same reconciliation path and retain their current
 observable behavior.
+
+Changing federation-group membership reconciles links in the same transaction
+as the binding change. Kata captures the old group, applies the new binding,
+then reconciles the affected old and new groups. A standalone peer that becomes
+an enabled member therefore activates a previously deferred link immediately;
+moving or disabling a member also removes link projection that the old group no
+longer owns.
 
 ## Data Flow
 
@@ -106,6 +125,9 @@ assertions:
   quarantine;
 - an unresolved peer remains absent without blocking later events;
 - projects assigned to different federation groups do not materialize an edge;
+- a project-scoped event cannot mutate an edge between two unrelated issues;
+- a deferred peer cannot authorize a later primary-issue mutation;
+- enabling an existing peer project immediately materializes its deferred edge;
 - unknown primary issues and existing poisoned-event cases remain rejected;
   and
 - same-project links continue to materialize and unlink correctly.

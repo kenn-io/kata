@@ -616,3 +616,130 @@ Expected: both projects report `active_quarantine=0`, pending push counts drain
 to zero, push cursors advance, and no new validation error appears. Finally,
 read both endpoint issues through the hub and confirm the cross-project
 relationship is present.
+
+---
+
+### Task 5: Enforce Deferred-Link Authorization and Membership Convergence
+
+**Files:**
+- Modify: `internal/db/sqlitestore/federation_ingest.go:942-1175`
+- Modify: `internal/db/sqlitestore/federation.go:383-455`
+- Modify: `internal/db/sqlitestore/federation.go:783-846`
+- Modify: `internal/db/sqlitestore/federation.go:1850-2110`
+- Test: `internal/db/sqlitestore/federation_test.go:1840-1940`
+- Test: `internal/db/sqlitestore/federation_test.go:3360-3540`
+
+**Interfaces:**
+- Consumes: the validated primary issue UID, link payload endpoint fields,
+  materialized issues, create/snapshot events, and old/new federation bindings.
+- Produces: endpoint-scoped peer deferral, a primary-only cross-batch known set,
+  and transactional old/new federation-group link reconciliation.
+
+- [ ] **Step 1: Add failing endpoint-authorization tests**
+
+Add validation subtests that create a valid primary issue in `spoke-project`,
+then submit `issue.linked` events where `from_uid` and `to_uid` are two other
+UIDs or where `related_issue_uid` disagrees with the opposite endpoint. Assert
+`db.ErrFederationIngestValidation`, zero accepted events from the invalid
+batch, and no link row between the unrelated UIDs.
+
+- [ ] **Step 2: Verify endpoint authorization fails red**
+
+Run:
+
+~~~bash
+go test ./internal/db/sqlitestore -run 'TestIngestFederationEvents_Validation/(rejects link whose primary is not an endpoint|rejects related issue that is not the opposite endpoint)$' -count=1
+~~~
+
+Expected: FAIL because the current deferral helper accepts every link-shaped
+UID without binding the edge to the event's validated primary issue.
+
+- [ ] **Step 3: Restrict deferral to authenticated link peers**
+
+Change `payloadDeferredLinkIssueUIDs(ev db.RemoteEvent, payload
+map[string]json.RawMessage, primaryIssueUID string) (map[string]struct{}, error)`
+to return a validation error with the peer set.
+For `issue.linked` and `issue.unlinked`, require both endpoint UIDs, require the
+primary issue to equal one endpoint, and require `RelatedIssueUID`, when set,
+to equal the other endpoint. For `issue.links_changed`, treat the payload's
+parent and link-delta UIDs as peers of the primary and require an envelope peer
+to be one of those UIDs. For create and snapshot payloads, defer only
+`links[].to_issue_uid`. Propagate validation errors before checking unknown
+references.
+
+- [ ] **Step 4: Add and run the consecutive-batch primary-identity test**
+
+In the first batch, accept a valid link from a materialized primary issue to an
+unknown peer. In the second batch, send `issue.updated` with that peer as its
+primary `issue_uid`. Assert the second batch returns
+`db.ErrFederationIngestValidation`, stores no second event, and does not create
+the peer issue.
+
+Run:
+
+~~~bash
+go test ./internal/db/sqlitestore -run '^TestIngestFederationEventsDeferredPeerDoesNotBecomeKnownPrimary$' -count=1
+~~~
+
+Expected before implementation: FAIL because `currentFederatedIssueUIDSet`
+includes stored `related_issue_uid` values.
+
+- [ ] **Step 5: Derive known primaries from primary-producing state only**
+
+Keep materialized issue UIDs, but change the stored-event query to select only
+non-null `issue_uid` values from `issue.created` and `issue.snapshot` events.
+Do not read `related_issue_uid`. Keep `rememberIngestIssueUIDs` limited to
+validated create and snapshot events so later events in the same batch retain
+their current behavior.
+
+- [ ] **Step 6: Add and run the membership-enable convergence test**
+
+Create two projects and issues while only the first project has an enabled hub
+binding. Store a deferred link event in the first project, assert the edge is
+absent, then call `EnableProjectFederation` for the existing peer project.
+Assert the link row appears before that call returns without ingesting another
+event.
+
+Run:
+
+~~~bash
+go test ./internal/db/sqlitestore -run '^TestEnableProjectFederationReconcilesDeferredGroupLinks$' -count=1
+~~~
+
+Expected before implementation: FAIL with zero matching link rows because
+binding creation does not trigger group link reconciliation.
+
+- [ ] **Step 7: Reconcile old and new groups inside binding transactions**
+
+Capture the enabled old group before changing a binding. After the binding is
+inserted or updated, resolve the enabled new group. Reconcile desired links for
+each affected group against existing links touching the union of its previous
+and current members, processing the old group before the new group. Use the
+same helper from `UpsertFederationBinding`, `EnableProjectFederation`, and
+adoption binding creation. An empty resulting group owns no desired links and
+therefore removes old group projection touching its former members.
+
+- [ ] **Step 8: Run focused and package verification**
+
+Run:
+
+~~~bash
+go test ./internal/db/sqlitestore -run 'Test(IngestFederationEvents|EnableProjectFederation|MaterializeFederatedProject)' -count=1
+go test ./internal/db/sqlitestore -count=1
+~~~
+
+Expected: PASS with the three new regressions and all existing federation
+tests green.
+
+- [ ] **Step 9: Commit review remediation**
+
+Use the mandatory `commit` skill, then:
+
+~~~bash
+git add internal/db/sqlitestore/federation_ingest.go internal/db/sqlitestore/federation.go internal/db/sqlitestore/federation_test.go docs/superpowers/specs/2026-07-09-federated-cross-project-links-design.md docs/superpowers/plans/2026-07-09-federated-cross-project-links.md
+git commit -m "Harden deferred federation links"
+~~~
+
+The commit body must explain why project-scoped authorization must bind every
+edge to the primary issue, why deferred peers are not primary identity, and why
+membership transitions reconcile before commit.
