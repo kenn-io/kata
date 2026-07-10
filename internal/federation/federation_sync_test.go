@@ -972,6 +972,34 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 	assert.Equal(t, "retry: auto-retry after deferred link peer fix", skipReason)
 }
 
+func TestAutoRetryFederationQuarantineRequiresExactFormerPeerMessage(t *testing.T) {
+	legacyMessage := "federation ingest validation: event " +
+		"01HZNQ7VFPK1XGD8R5MABCD4EA references unknown issue " +
+		"01HZNQ7VFPK1XGD8R5MABCD4EB"
+	for _, message := range []string{
+		"additional validation: " + legacyMessage,
+		legacyMessage + "; primary issue also missing",
+	} {
+		body, err := json.Marshal(api.ErrorEnvelope{
+			Status: http.StatusBadRequest,
+			Error: api.ErrorBody{
+				Code:    "validation",
+				Message: message,
+			},
+		})
+		require.NoError(t, err)
+
+		retry, reason := autoRetryFederationQuarantine(db.FederationQuarantine{
+			Direction: db.FederationQuarantineDirectionPush,
+			Error: "hub /api/v1/projects/42/federation/events:ingest returned 400: " +
+				string(body),
+		})
+
+		assert.False(t, retry)
+		assert.Empty(t, reason)
+	}
+}
+
 func TestSyncFederationOnceUnknownPrimaryQuarantineStillStopsBeforeNetwork(t *testing.T) {
 	ctx := context.Background()
 	spoke := testenv.New(t)

@@ -495,7 +495,7 @@ func federationHubErrorCode(body string) string {
 }
 
 var formerPeerReferenceQuarantine = regexp.MustCompile(
-	`federation ingest validation: event [0-9A-HJKMNP-TV-Z]{26} references unknown issue [0-9A-HJKMNP-TV-Z]{26}`,
+	`^federation ingest validation: event [0-9A-HJKMNP-TV-Z]{26} references unknown issue [0-9A-HJKMNP-TV-Z]{26}$`,
 )
 
 func autoRetryFederationQuarantine(q db.FederationQuarantine) (bool, string) {
@@ -505,10 +505,23 @@ func autoRetryFederationQuarantine(q db.FederationQuarantine) (bool, string) {
 	if strings.Contains(q.Error, `"code":"unsupported_federation_schema"`) {
 		return true, "auto-retry after transient schema skew"
 	}
-	if formerPeerReferenceQuarantine.MatchString(q.Error) {
+	hubError, ok := federationQuarantineHubError(q.Error)
+	if ok && hubError.Code == "validation" && formerPeerReferenceQuarantine.MatchString(hubError.Message) {
 		return true, "auto-retry after deferred link peer fix"
 	}
 	return false, ""
+}
+
+func federationQuarantineHubError(raw string) (api.ErrorBody, bool) {
+	start := strings.IndexByte(raw, '{')
+	if start < 0 {
+		return api.ErrorBody{}, false
+	}
+	var envelope api.ErrorEnvelope
+	if err := json.Unmarshal([]byte(raw[start:]), &envelope); err != nil {
+		return api.ErrorBody{}, false
+	}
+	return envelope.Error, true
 }
 
 func recordFederationPushQuarantine(
