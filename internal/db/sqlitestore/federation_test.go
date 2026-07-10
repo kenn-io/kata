@@ -1856,6 +1856,25 @@ func TestIngestFederationEvents(t *testing.T) {
 	})
 }
 
+func TestIngestFederationEventsDefersUnknownLinkPeer(t *testing.T) {
+	d, ctx, project, spokeUID := setupFederationIngestHub(t)
+	issueUID := newTestUID(t)
+	peerUID := newTestUID(t)
+	event := ingestEventWithPayload(t, project.UID, project.Name, spokeUID, &issueUID, nil,
+		"issue.created", 100,
+		`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"subject","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+peerUID+`","author":"spoke"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+
+	result, err := d.IngestFederationEvents(ctx, ingestParams(project.ID, spokeUID, event))
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Accepted)
+	issue, err := d.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	links, err := d.LinksByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	assert.Empty(t, links, "the peer is unresolved, so the edge must stay absent")
+}
+
 func TestIngestFederationEvents_Validation(t *testing.T) {
 	t.Run("rejects project uid mismatch", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
@@ -2664,7 +2683,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assertIngestedEventCount(ctx, t, d, p.ID, 0)
 	})
 
-	t.Run("rejects complete adoption baseline with unresolved open chunk snapshot link", func(t *testing.T) {
+	t.Run("accepts complete adoption baseline with unresolved open chunk snapshot link", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		markerValue := strings.Join([]string{"snapshot", "adoption", "missing", "link"}, "-")
 		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -2713,16 +2732,14 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 			Events:                           []db.FederationIngestEvent{{SourceEventID: 2, Event: second}},
 		})
 
-		require.Error(t, err)
-		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
-		assert.Contains(t, err.Error(), "unresolved snapshot link")
+		require.NoError(t, err)
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
 		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
-		assertIngestedEventCount(ctx, t, d, p.ID, 1)
+		assertIngestedEventCount(ctx, t, d, p.ID, 2)
 	})
 
-	t.Run("rejects metadata-only complete adoption baseline with unresolved open chunk snapshot link", func(t *testing.T) {
+	t.Run("accepts metadata-only complete adoption baseline with unresolved open chunk snapshot link", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		markerValue := strings.Join([]string{"snapshot", "adoption", "metadata", "missing"}, "-")
 		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -2770,16 +2787,14 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 			Events:                           []db.FederationIngestEvent{{SourceEventID: 2, Event: metadata}},
 		})
 
-		require.Error(t, err)
-		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
-		assert.Contains(t, err.Error(), "unresolved snapshot link")
+		require.NoError(t, err)
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
 		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
-		assertIngestedEventCount(ctx, t, d, p.ID, 1)
+		assertIngestedEventCount(ctx, t, d, p.ID, 2)
 	})
 
-	t.Run("rejects deferred snapshot link when only related envelope mentions missing issue", func(t *testing.T) {
+	t.Run("accepts deferred snapshot link when related envelope also mentions missing issue", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		markerValue := strings.Join([]string{"snapshot", "adoption", "related", "missing"}, "-")
 		created, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -2827,13 +2842,11 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 			Events:                           []db.FederationIngestEvent{{SourceEventID: 2, Event: metadata}},
 		})
 
-		require.Error(t, err)
-		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
-		assert.Contains(t, err.Error(), "unresolved snapshot link")
+		require.NoError(t, err)
 		authorized, err := d.AuthorizeFederationToken(ctx, markerValue, p.ID, "push")
 		require.NoError(t, err)
 		assert.False(t, authorized.AllowAdoptionSnapshotAuthors)
-		assertIngestedEventCount(ctx, t, d, p.ID, 1)
+		assertIngestedEventCount(ctx, t, d, p.ID, 2)
 	})
 
 	t.Run("recovers v22 imported open adoption baseline without terminal cursor", func(t *testing.T) {
@@ -3411,7 +3424,7 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.Equal(t, "after create", issue.Title)
 	})
 
-	t.Run("rejects related issue outside project", func(t *testing.T) {
+	t.Run("accepts related issue outside federation group without materializing edge", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
 		foreignProject, err := d.CreateProject(ctx, "foreign")
 		require.NoError(t, err)
@@ -3435,7 +3448,12 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 			},
 		})
 
-		require.Error(t, err)
+		require.NoError(t, err)
+		issue, err := d.IssueByUID(ctx, *base.IssueUID, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		links, err := d.LinksByIssue(ctx, issue.ID)
+		require.NoError(t, err)
+		assert.Empty(t, links)
 	})
 
 	for _, eventType := range []string{"issue.moved", "recurrence.created", "recurrence.updated", "recurrence.deleted"} {
