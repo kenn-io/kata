@@ -235,6 +235,39 @@ func TestApplyClaudeHooks_MalformedSettingsLeftUntouched(t *testing.T) {
 	assert.Equal(t, malformed, string(got), "malformed settings must not be clobbered")
 }
 
+// TestApplyClaudeHooks_RefusesSymlinkedClaudeDir covers a hostile repo that
+// commits .claude itself as a symlink to an outside directory (e.g. the
+// user's global ~/.claude): following it would install hooks and rewrite
+// settings outside the workspace.
+func TestApplyClaudeHooks_RefusesSymlinkedClaudeDir(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, ".claude")))
+
+	_, err := applyClaudeHooks(dir)
+	require.Error(t, err)
+
+	entries, err := os.ReadDir(outside)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "nothing may be written through the symlinked dir")
+}
+
+// TestApplyClaudeHooks_RefusesSymlinkedHooksDir is the same attack one level
+// down: .claude is real but .claude/hooks points outside the workspace.
+func TestApplyClaudeHooks_RefusesSymlinkedHooksDir(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o750))
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, ".claude", "hooks")))
+
+	_, err := applyClaudeHooks(dir)
+	require.Error(t, err)
+
+	entries, err := os.ReadDir(outside)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "nothing may be written through the symlinked dir")
+}
+
 func TestApplyClaudeHooks_RefusesSymlinkedSettings(t *testing.T) {
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")

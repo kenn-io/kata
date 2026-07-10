@@ -53,6 +53,14 @@ func claudeHookSpecs() []claudeHookSpec {
 // Returns whether anything changed; re-running on an installed workspace is
 // a no-op.
 func applyClaudeHooks(dir string) (bool, error) {
+	// Refuse symlinked parents before any write: a hostile repo can commit
+	// .claude (or .claude/hooks) as a symlink to an outside directory, and
+	// MkdirAll/WriteFile on paths beneath it would follow the link —
+	// rewriting the user's global Claude config or planting files at an
+	// attacker-chosen location. Matches the leaf-level symlink posture.
+	if err := refuseSymlinkComponents(dir, ".claude", "hooks"); err != nil {
+		return false, err
+	}
 	scriptChanged, err := ensureClaudeHookScript(
 		filepath.Join(dir, ".claude", "hooks", claudeHookScriptName))
 	if err != nil {
@@ -64,6 +72,26 @@ func applyClaudeHooks(dir string) (bool, error) {
 		return scriptChanged, err
 	}
 	return scriptChanged || settingsChanged, nil
+}
+
+// refuseSymlinkComponents walks the relative path components under root and
+// rejects any existing component that is a symlink. Components that do not
+// exist yet are fine — they will be created as real directories.
+func refuseSymlinkComponents(root string, parts ...string) error {
+	p := root
+	for _, part := range parts {
+		p = filepath.Join(p, part)
+		fi, err := os.Lstat(p)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			return nil
+		case err != nil:
+			return err
+		case fi.Mode()&os.ModeSymlink != 0:
+			return fmt.Errorf("refusing to manage symlinked %s", p)
+		}
+	}
+	return nil
 }
 
 // ensureClaudeHookScript writes the managed script, creating parent
