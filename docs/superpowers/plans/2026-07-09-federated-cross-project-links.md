@@ -715,9 +715,12 @@ Capture the enabled old group before changing a binding. After the binding is
 inserted or updated, resolve the enabled new group. Reconcile desired links for
 each affected group against existing links touching the union of its previous
 and current members, processing the old group before the new group. Use the
-same helper from `UpsertFederationBinding`, `EnableProjectFederation`, and
-adoption binding creation. An empty resulting group owns no desired links and
-therefore removes old group projection touching its former members.
+same helper from `UpsertFederationBinding`, `EnableProjectFederation`, adoption
+binding creation, and `LeaveFederationReplica`. An empty resulting group owns
+no desired links and therefore removes old group projection touching its former
+members. Add a leave regression that materializes a same-origin spoke link,
+detaches one endpoint project, and asserts the former-group edge is removed
+before leave returns.
 
 - [ ] **Step 8: Run focused and package verification**
 

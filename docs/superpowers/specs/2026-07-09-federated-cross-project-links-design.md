@@ -84,8 +84,8 @@ Changing federation-group membership reconciles links in the same transaction
 as the binding change. Kata captures the old group, applies the new binding,
 then reconciles the affected old and new groups. A standalone peer that becomes
 an enabled member therefore activates a previously deferred link immediately;
-moving or disabling a member also removes link projection that the old group no
-longer owns.
+moving, disabling, or leaving a member also removes link projection that the
+old group no longer owns.
 
 ## Data Flow
 

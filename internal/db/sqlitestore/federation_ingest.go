@@ -983,7 +983,10 @@ func validateFederationProjectEvent(
 	default:
 		return fmt.Errorf("%w: unsupported event type %s", db.ErrFederationIngestValidation, ev.Type)
 	}
-	deferredLinkUIDs := payloadDeferredLinkIssueUIDs(ev, payload)
+	deferredLinkUIDs, err := payloadDeferredLinkIssueUIDs(ev, payload, issueUID)
+	if err != nil {
+		return err
+	}
 	for _, ref := range payloadReferencedIssueUIDs(ev, payload) {
 		if ref == issueUID {
 			continue
@@ -1062,40 +1065,84 @@ func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]json.RawMe
 func payloadDeferredLinkIssueUIDs(
 	ev db.RemoteEvent,
 	payload map[string]json.RawMessage,
-) map[string]struct{} {
+	primaryIssueUID string,
+) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
 	add := func(uid string) {
 		if uid != "" {
 			out[uid] = struct{}{}
 		}
 	}
-	for _, key := range []string{
-		"from_uid", "to_uid", "from_issue_uid", "to_issue_uid",
-		"parent_set_uid", "parent_removed_uid",
-	} {
-		if uid, ok := db.StringValue(payload[key]); ok {
-			add(uid)
-		}
-	}
-	for _, key := range []string{
-		"blocks_added_uids", "blocks_removed_uids",
-		"blocked_by_added_uids", "blocked_by_removed_uids",
-		"related_added_uids", "related_removed_uids",
-	} {
-		for _, uid := range db.StringSlice(payload[key]) {
-			add(uid)
-		}
-	}
-	for _, uid := range payloadLinkIssueUIDs(ev) {
-		add(uid)
-	}
 	switch ev.Type {
-	case "issue.linked", "issue.unlinked", "issue.links_changed":
+	case "issue.created", "issue.snapshot":
+		for _, uid := range payloadLinkIssueUIDs(ev) {
+			add(uid)
+		}
+	case "issue.linked", "issue.unlinked":
+		fromUID, fromOK, err := payloadLinkEndpointUID(payload, "from_uid", "from_issue_uid")
+		if err != nil {
+			return nil, err
+		}
+		toUID, toOK, err := payloadLinkEndpointUID(payload, "to_uid", "to_issue_uid")
+		if err != nil {
+			return nil, err
+		}
+		if !fromOK || !toOK {
+			return nil, fmt.Errorf("%w: %s missing link endpoint uid", db.ErrFederationIngestValidation, ev.Type)
+		}
+		peerUID := ""
+		switch primaryIssueUID {
+		case fromUID:
+			peerUID = toUID
+		case toUID:
+			peerUID = fromUID
+		default:
+			return nil, fmt.Errorf("%w: %s primary issue %s is not a link endpoint",
+				db.ErrFederationIngestValidation, ev.Type, primaryIssueUID)
+		}
+		if ev.RelatedIssueUID != nil && *ev.RelatedIssueUID != peerUID {
+			return nil, fmt.Errorf("%w: %s related issue %s is not the opposite endpoint %s",
+				db.ErrFederationIngestValidation, ev.Type, *ev.RelatedIssueUID, peerUID)
+		}
+		add(peerUID)
+	case "issue.links_changed":
+		for _, key := range []string{"parent_set_uid", "parent_removed_uid"} {
+			if uid, ok := db.StringValue(payload[key]); ok {
+				add(uid)
+			}
+		}
+		for _, key := range []string{
+			"blocks_added_uids", "blocks_removed_uids",
+			"blocked_by_added_uids", "blocked_by_removed_uids",
+			"related_added_uids", "related_removed_uids",
+		} {
+			for _, uid := range db.StringSlice(payload[key]) {
+				add(uid)
+			}
+		}
 		if ev.RelatedIssueUID != nil {
-			add(*ev.RelatedIssueUID)
+			if _, ok := out[*ev.RelatedIssueUID]; !ok {
+				return nil, fmt.Errorf("%w: %s related issue %s is not a payload peer",
+					db.ErrFederationIngestValidation, ev.Type, *ev.RelatedIssueUID)
+			}
 		}
 	}
-	return out
+	return out, nil
+}
+
+func payloadLinkEndpointUID(
+	payload map[string]json.RawMessage,
+	canonicalKey, alternateKey string,
+) (string, bool, error) {
+	canonical, canonicalOK := db.StringValue(payload[canonicalKey])
+	alternate, alternateOK := db.StringValue(payload[alternateKey])
+	if canonicalOK && alternateOK && canonical != alternate {
+		return "", false, fmt.Errorf("%w: link endpoint uid disagreement", db.ErrFederationIngestValidation)
+	}
+	if canonicalOK {
+		return canonical, true, nil
+	}
+	return alternate, alternateOK, nil
 }
 
 func payloadLinkIssueUIDs(ev db.RemoteEvent) []string {
@@ -1120,10 +1167,11 @@ func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int6
 		return nil, err
 	}
 	eventRows, err := tx.QueryContext(ctx, `
-		SELECT issue_uid FROM events WHERE project_id = ? AND issue_uid IS NOT NULL
-		UNION
-		SELECT related_issue_uid FROM events WHERE project_id = ? AND related_issue_uid IS NOT NULL`,
-		projectID, projectID)
+		SELECT issue_uid
+		  FROM events
+		 WHERE project_id = ?
+		   AND issue_uid IS NOT NULL
+		   AND type IN ('issue.created', 'issue.snapshot')`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list event issue uids: %w", err)
 	}
