@@ -763,9 +763,19 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		"last push success: "+formatOptionalTime(row.LastPushSuccessAt),
 		"last sync success: "+formatOptionalTime(row.LastSuccessfulSyncAt),
 		"last error: "+formatOptionalError(row),
-		"",
-		subtleStyle.Render("[esc] back  [r] refresh  [q] quit  [?] help"),
 	)
+	for _, quarantine := range row.ActiveQuarantines {
+		body = append(body, fmt.Sprintf(
+			"quarantine #%d: %s events %d-%d at %s: %s",
+			quarantine.ID,
+			sanitizeForLine(quarantine.Direction),
+			quarantine.FirstEventID,
+			quarantine.LastEventID,
+			quarantine.CreatedAt.UTC().Format("2006-01-02 15:04:05Z"),
+			sanitizeForLine(quarantine.Error),
+		))
+	}
+	body = append(body, "", subtleStyle.Render("[esc] back  [r] refresh  [q] quit  [?] help"))
 	return strings.Join(fitFederationLines(body, m.height), "\n")
 }
 

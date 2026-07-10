@@ -39,6 +39,7 @@ func TestFederationView_EscReturnsToPreviousView(t *testing.T) {
 func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
 	m := setupFederationViewWithStatuses(federationStatusFixture("spoke-proj", "spoke"))
 	m.federationCursor = 0
+	m.height = 40
 
 	out, cmd := enterThroughAdoptConfirm(t, m)
 
@@ -48,6 +49,8 @@ func TestFederationView_EnterOpensSelectedStatusDetail(t *testing.T) {
 	assert.Contains(t, rendered, "hub project UID")
 	assert.Contains(t, rendered, "pull cursor")
 	assert.Contains(t, rendered, "credential")
+	assert.Contains(t, rendered, "quarantine #7: push events 11-13")
+	assert.Contains(t, rendered, "hub rejected deferred peer")
 }
 
 func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
@@ -70,6 +73,7 @@ func TestFederationView_RenderIncludesActiveSpokeStatus(t *testing.T) {
 	assert.Contains(t, rendered, "quarantine")
 	assert.Contains(t, rendered, "reset")
 	assert.Contains(t, rendered, "violations")
+	assert.NotContains(t, rendered, "hub rejected deferred peer")
 }
 
 func TestFederationView_ActiveLocalGlobalAuthDisplaysTokenActor(t *testing.T) {
@@ -1380,12 +1384,25 @@ func federationStatusFixture(projectName, role string) FederationProjectStatus {
 		PendingPushHighWaterEventID: 15,
 		PendingClaimCount:           1,
 		ActiveQuarantineCount:       1,
-		ResetBlocker:                "pending push",
-		UnresolvedViolationCount:    2,
-		RecentViolationCount:        2,
-		LastSuccessfulSyncAt:        &last,
-		LastPullSuccessAt:           &last,
-		LastPushSuccessAt:           &last,
+		ActiveQuarantines: []api.FederationQuarantineSummary{{
+			ID:           7,
+			Direction:    "push",
+			FirstEventID: 11,
+			LastEventID:  13,
+			EventUIDs: []string{
+				"01HZNQ7VFPK1XGD8R5MABCD4EA",
+				"01HZNQ7VFPK1XGD8R5MABCD4EB",
+				"01HZNQ7VFPK1XGD8R5MABCD4EC",
+			},
+			Error:     "hub rejected deferred peer",
+			CreatedAt: last.Add(time.Minute),
+		}},
+		ResetBlocker:             "pending push",
+		UnresolvedViolationCount: 2,
+		RecentViolationCount:     2,
+		LastSuccessfulSyncAt:     &last,
+		LastPullSuccessAt:        &last,
+		LastPushSuccessAt:        &last,
 	}
 }
 
