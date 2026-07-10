@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,7 +55,9 @@ func TestApplyClaudeHooks_FreshWorkspace(t *testing.T) {
 	scriptPath := filepath.Join(dir, ".claude", "hooks", "kata-attention.sh")
 	fi, err := os.Stat(scriptPath)
 	require.NoError(t, err)
-	assert.NotZero(t, fi.Mode()&0o111, "hook script must be executable")
+	if runtime.GOOS != "windows" { // NTFS has no Unix execute bits
+		assert.NotZero(t, fi.Mode()&0o111, "hook script must be executable")
+	}
 	script, err := os.ReadFile(scriptPath) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	for _, mode := range []string{"start)", "claim)", "stop)"} {
@@ -143,6 +146,54 @@ func TestApplyClaudeHooks_RewritesDriftedScript(t *testing.T) {
 	script, err := os.ReadFile(scriptPath) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Contains(t, string(script), "kata meta set")
+}
+
+// TestApplyClaudeHooks_RestoresExecutableBit covers a pre-existing script
+// with the right content but no execute permission (e.g. checked out through
+// a filter that dropped the bit): the apply must correct the mode and report
+// a change, or the wired hooks silently never run.
+func TestApplyClaudeHooks_RestoresExecutableBit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix execute bits on Windows")
+	}
+	dir := t.TempDir()
+	_, err := applyClaudeHooks(dir)
+	require.NoError(t, err)
+
+	scriptPath := filepath.Join(dir, ".claude", "hooks", "kata-attention.sh")
+	require.NoError(t, os.Chmod(scriptPath, 0o600)) // strip the execute bits
+
+	changed, err := applyClaudeHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed, "restoring the execute bit is a change")
+	fi, err := os.Stat(scriptPath)
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&0o111, "execute bit must be restored")
+
+	changed, err = applyClaudeHooks(dir)
+	require.NoError(t, err)
+	assert.False(t, changed, "mode correction must stay idempotent")
+}
+
+// TestApplyClaudeHooks_DriftedScriptRegainsExecutableBit covers drifted
+// content on a non-executable file: os.WriteFile does not touch an existing
+// file's mode, so the rewrite must fix it explicitly.
+func TestApplyClaudeHooks_DriftedScriptRegainsExecutableBit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix execute bits on Windows")
+	}
+	dir := t.TempDir()
+	hooksDir := filepath.Join(dir, ".claude", "hooks")
+	require.NoError(t, os.MkdirAll(hooksDir, 0o750))
+	scriptPath := filepath.Join(hooksDir, "kata-attention.sh")
+	require.NoError(t, os.WriteFile(scriptPath, []byte("#!/bin/sh\n# stale\n"), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	changed, err := applyClaudeHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	fi, err := os.Stat(scriptPath)
+	require.NoError(t, err)
+	assert.NotZero(t, fi.Mode()&0o111, "rewritten script must be executable")
 }
 
 func TestApplyClaudeHooks_MalformedSettingsLeftUntouched(t *testing.T) {

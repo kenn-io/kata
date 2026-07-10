@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // `kata init --with-hooks` installs the attention hooks from
@@ -78,12 +79,40 @@ func ensureClaudeHookScript(path string) (bool, error) {
 		return false, err
 	}
 	if exists && current == claudeHookScript {
-		return false, nil
+		return ensureExecutable(path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return false, err
 	}
 	if err := os.WriteFile(path, []byte(claudeHookScript), 0o755); err != nil { //nolint:gosec // hook script must be executable
+		return false, err
+	}
+	if exists {
+		// WriteFile's permission argument only applies at creation; a
+		// pre-existing drifted file keeps its old mode unless fixed here.
+		if _, err := ensureExecutable(path); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// ensureExecutable restores the execute bits on the managed script when a
+// pre-existing copy lost them — content-identical but 0644 still means the
+// wired hooks never run. Reports whether the mode changed. No-op on Windows,
+// which has no Unix execute bits.
+func ensureExecutable(path string) (bool, error) {
+	if runtime.GOOS == "windows" {
+		return false, nil
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	if fi.Mode()&0o111 != 0 {
+		return false, nil
+	}
+	if err := os.Chmod(path, 0o755); err != nil { //nolint:gosec // hook script must be executable
 		return false, err
 	}
 	return true, nil
