@@ -2100,6 +2100,66 @@ func TestIngestFederationEventsUnlinksDirectionalEdgeThroughDestination(t *testi
 		firstIssueUID, secondIssueUID)
 }
 
+func TestIngestFederationEventsAcceptsLegacyDestinationUnlinkRetry(t *testing.T) {
+	for _, linkType := range []string{"blocks", "parent"} {
+		t.Run(linkType, func(t *testing.T) {
+			d := openTestDB(t)
+			ctx := context.Background()
+			firstProject := createProject(ctx, t, d, "spoke-project")
+			secondProject := createProject(ctx, t, d, "peer-project")
+			_, err := d.EnableProjectFederation(ctx, firstProject.ID, "tester")
+			require.NoError(t, err)
+			_, err = d.EnableProjectFederation(ctx, secondProject.ID, "tester")
+			require.NoError(t, err)
+
+			spokeUID := newTestUID(t)
+			firstIssueUID := newTestUID(t)
+			secondIssueUID := newTestUID(t)
+			first := ingestEventWithPayload(t, firstProject.UID, firstProject.Name, spokeUID,
+				&firstIssueUID, nil, "issue.created", 100,
+				`{"uid":"`+firstIssueUID+`","short_id":"`+shortID(firstIssueUID)+`","title":"first","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"`+linkType+`","to_issue_uid":"`+secondIssueUID+`","author":"spoke"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+			_, err = d.IngestFederationEvents(ctx, ingestParams(firstProject.ID, spokeUID, first))
+			require.NoError(t, err)
+			second := ingestIssueCreatedEvent(t, secondProject.UID, secondProject.Name, spokeUID, secondIssueUID, 101)
+			_, err = d.IngestFederationEvents(ctx, ingestParams(secondProject.ID, spokeUID, second))
+			require.NoError(t, err)
+			assertRowCount(ctx, t, d, 1, "directional edge materialized",
+				`SELECT count(*) FROM links
+				  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = ?`,
+				firstIssueUID, secondIssueUID, linkType)
+
+			unlink := ingestEventWithPayload(t, secondProject.UID, secondProject.Name, spokeUID,
+				&secondIssueUID, &firstIssueUID, "issue.unlinked", 102,
+				`{"issue_uid":"`+secondIssueUID+`","from_uid":"`+secondIssueUID+`","to_uid":"`+firstIssueUID+`","type":"`+linkType+`"}`)
+			result, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+				ProjectID:        secondProject.ID,
+				SpokeInstanceUID: spokeUID,
+				Events:           []db.FederationIngestEvent{{SourceEventID: 2, Event: unlink}},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 1, result.Accepted)
+			assertRowCount(ctx, t, d, 0, "legacy destination-side unlink removes directional edge",
+				`SELECT count(*) FROM links
+				  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = ?`,
+				firstIssueUID, secondIssueUID, linkType)
+
+			retry, err := d.IngestFederationEvents(ctx, db.FederationIngestParams{
+				ProjectID:        secondProject.ID,
+				SpokeInstanceUID: spokeUID,
+				Events:           []db.FederationIngestEvent{{SourceEventID: 3, Event: unlink}},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 0, retry.Accepted)
+			assert.Equal(t, 1, retry.Duplicates)
+			assert.Equal(t, int64(3), retry.PushCursorEventID)
+			assertRowCount(ctx, t, d, 0, "legacy destination-side unlink retry keeps edge absent",
+				`SELECT count(*) FROM links
+				  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = ?`,
+				firstIssueUID, secondIssueUID, linkType)
+		})
+	}
+}
+
 func TestEnableProjectFederationReconcilesDeferredGroupLinks(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()

@@ -1222,7 +1222,8 @@ func validateFederationUnlinkStorageEndpoints(
 	}
 	if !fromPresent {
 		// Older supported spokes stored only the attribution-oriented endpoint
-		// pair. Fold falls back to that pair when storage endpoints are absent.
+		// pair. Fold resolves it against existing directional state when storage
+		// endpoints are absent.
 		return nil
 	}
 	linkFromUID, fromOK := db.StringValue(rawFrom)

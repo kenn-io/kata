@@ -403,6 +403,16 @@ func (p *FoldProjection) applyLinkEvent(e FoldEvent, payload map[string]json.Raw
 		linkTo, linkToOK := stringValue(payload["link_to_uid"])
 		if linkFromOK && linkToOK {
 			from, to = linkFrom, linkTo
+		} else if _, fromPresent := payload["link_from_uid"]; !fromPresent {
+			if _, toPresent := payload["link_to_uid"]; !toPresent && (typ == "blocks" || typ == "parent") {
+				// Legacy unlinks describe the edge from the event issue's point
+				// of view. Resolve a destination-side event against folded state.
+				forward := p.Links[FoldLinkKey{FromUID: from, ToUID: to, Type: typ}]
+				reverse := p.Links[FoldLinkKey{FromUID: to, ToUID: from, Type: typ}]
+				if !forward.Present && reverse.Present {
+					from, to = to, from
+				}
+			}
 		}
 	}
 	p.setLink(from, to, typ, present, clockOf(e), e.Actor)
