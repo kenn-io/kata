@@ -136,6 +136,96 @@ func TestHTTPFetcherIssuesPaginationUsesOriginGuardWithCanonicalCase(t *testing.
 	assert.Equal(t, []string{"/repos/example-owner/example-repo/issues", "/repos/Example-Owner/Example-Repo/issues"}, seenPaths)
 }
 
+func TestHTTPFetcherIssuesPaginationRewritesNumericRepositoryURLs(t *testing.T) {
+	tokenEnv := "EXAMPLE_" + "GITHUB_TOKEN"
+	t.Setenv(tokenEnv, "env-token")
+	var server *httptest.Server
+	var seenPaths []string
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertHTTPFetcherHeaders(t, r)
+		assert.Equal(t, "Bearer env-token", r.Header.Get("Authorization"))
+		seenPaths = append(seenPaths, r.URL.Path)
+		switch r.URL.Query().Get("page") {
+		case "":
+			assert.Equal(t, "/repos/example-owner/example-repo/issues", r.URL.Path)
+			w.Header().Set("Link", `<https://api.github.com/repositories/123456789012/issues?page=2>; rel="next"`)
+			writeHTTPFetcherTestResponse(t, w, `[{"id":101,"node_id":"I_first","number":1,"title":"first"}]`)
+		case "2":
+			assert.Equal(t, "/repos/example-owner/example-repo/issues", r.URL.Path)
+			writeHTTPFetcherTestResponse(t, w, `[{"id":102,"node_id":"I_second","number":2,"title":"second"}]`)
+		default:
+			t.Fatalf("unexpected numeric pagination page %q", r.URL.Query().Get("page"))
+		}
+	}))
+	defer server.Close()
+	serverURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	fetcher := NewHTTPFetcher(HTTPFetcherConfig{
+		Client: &http.Client{
+			Transport: &rewriteHostRoundTripper{
+				target: serverURL,
+				next:   server.Client().Transport,
+			},
+		},
+		CredentialResolver: NewCredentialResolver(config.GitHubSyncConfig{TokenEnv: tokenEnv}, &fakeCommandRunner{}),
+	})
+
+	issues, err := fetcher.Issues(context.Background(), Binding{
+		Host:  "github.com",
+		Owner: "example-owner",
+		Repo:  "example-repo",
+	}, nil)
+	require.NoError(t, err)
+
+	require.Len(t, issues, 2)
+	assert.Equal(t, []string{"/repos/example-owner/example-repo/issues", "/repos/example-owner/example-repo/issues"}, seenPaths)
+}
+
+func TestCanonicalGitHubPageURL(t *testing.T) {
+	githubBinding := Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}
+	enterpriseBinding := Binding{Host: "github.example.com", Owner: "example-owner", Repo: "example-repo"}
+
+	tests := []struct {
+		name    string
+		binding Binding
+		raw     string
+		want    string
+	}{
+		{
+			name:    "rewrites numeric repositories path",
+			binding: githubBinding,
+			raw:     "https://api.github.com/repositories/123456789012/issues?page=2",
+			want:    "https://api.github.com/repos/example-owner/example-repo/issues?page=2",
+		},
+		{
+			name:    "rewrites enterprise numeric repositories path",
+			binding: enterpriseBinding,
+			raw:     "https://github.example.com/api/v3/repositories/42/issues/7/comments?page=3",
+			want:    "https://github.example.com/api/v3/repos/example-owner/example-repo/issues/7/comments?page=3",
+		},
+		{
+			name:    "leaves canonical repos path unchanged",
+			binding: githubBinding,
+			raw:     "https://api.github.com/repos/example-owner/example-repo/issues?page=2",
+			want:    "https://api.github.com/repos/example-owner/example-repo/issues?page=2",
+		},
+		{
+			name:    "leaves empty URL unchanged",
+			binding: githubBinding,
+			raw:     "",
+			want:    "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := canonicalGitHubPageURL(tc.binding, tc.raw)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestHTTPFetcherCommentsPaginates(t *testing.T) {
 	var server *httptest.Server
 	var seenPages []string

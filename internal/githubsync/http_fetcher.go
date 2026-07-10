@@ -114,7 +114,7 @@ func (f *HTTPFetcher) Issues(ctx context.Context, binding Binding, since *time.T
 	if err != nil {
 		return nil, err
 	}
-	return fetchRESTPagesWithClient[Issue](ctx, f, client, requestURL, "GitHub issues")
+	return fetchRESTPagesWithClient[Issue](ctx, f, client, binding, requestURL, "GitHub issues")
 }
 
 // Comments reads issue comments over REST, following Link rel="next" pages.
@@ -134,10 +134,10 @@ func (f *HTTPFetcher) Comments(ctx context.Context, binding Binding, issueNumber
 	if err != nil {
 		return nil, err
 	}
-	return fetchRESTPagesWithClient[Comment](ctx, f, client, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber))
+	return fetchRESTPagesWithClient[Comment](ctx, f, client, binding, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber))
 }
 
-func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client *http.Client, firstURL, resource string) ([]T, error) {
+func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client *http.Client, binding Binding, firstURL, resource string) ([]T, error) {
 	var out []T
 	retryBudget := &gitHubRetryBudget{}
 	for nextURL := firstURL; nextURL != ""; {
@@ -155,6 +155,10 @@ func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client
 		}
 		out = append(out, page...)
 		nextURL, err = nextGitHubLinkURL(currentURL, headers.Get("Link"))
+		if err != nil {
+			return nil, err
+		}
+		nextURL, err = canonicalGitHubPageURL(binding, nextURL)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +211,7 @@ func (s *httpFetcherBindingSession) Issues(ctx context.Context, binding Binding,
 	if err != nil {
 		return nil, err
 	}
-	return fetchRESTPagesWithClient[Issue](ctx, s.fetcher, s.client, requestURL, "GitHub issues")
+	return fetchRESTPagesWithClient[Issue](ctx, s.fetcher, s.client, binding, requestURL, "GitHub issues")
 }
 
 func (s *httpFetcherBindingSession) Comments(ctx context.Context, binding Binding, issueNumber int) ([]Comment, error) {
@@ -226,7 +230,7 @@ func (s *httpFetcherBindingSession) Comments(ctx context.Context, binding Bindin
 	if err != nil {
 		return nil, err
 	}
-	return fetchRESTPagesWithClient[Comment](ctx, s.fetcher, s.client, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber))
+	return fetchRESTPagesWithClient[Comment](ctx, s.fetcher, s.client, binding, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber))
 }
 
 func (s *httpFetcherBindingSession) ParentData(ctx context.Context, binding Binding) (ParentData, error) {
@@ -411,6 +415,34 @@ func nextGitHubLinkURL(currentURL, linkHeader string) (string, error) {
 		return "", fmt.Errorf("parse GitHub next page URL: %w", err)
 	}
 	return base.ResolveReference(nextURL).String(), nil
+}
+
+// canonicalGitHubPageURL rewrites pagination URLs that GitHub returns in
+// numeric /repositories/{id}/... form back to the /repos/{owner}/{repo}/...
+// form so the credential egress guard can verify they target the bound
+// repository.
+func canonicalGitHubPageURL(binding Binding, raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse GitHub next page URL: %w", err)
+	}
+	segments := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
+	offset := 0
+	if binding.Host != "github.com" {
+		offset = 2
+	}
+	if len(segments) < offset+2 || segments[offset] != "repositories" {
+		return raw, nil
+	}
+	rewritten := append([]string{}, segments[:offset]...)
+	rewritten = append(rewritten, "repos", binding.Owner, binding.Repo)
+	rewritten = append(rewritten, segments[offset+2:]...)
+	u.Path = "/" + strings.Join(rewritten, "/")
+	u.RawPath = ""
+	return u.String(), nil
 }
 
 func nextGitHubLink(linkHeader string) string {
