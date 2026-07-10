@@ -19,7 +19,7 @@ current flag list in your installed binary.
 ## Workspace initialization
 
 ```sh
-kata init [--project <name>] [--with-agents]
+kata init [--project <name>] [--with-agents] [--with-hooks]
 kata init [--replace | --reassign]
 ```
 
@@ -41,6 +41,15 @@ added. Review the sidecar before replacing the original.
 
 A symlinked `AGENTS.md` is refused before it is read; replace it with a regular
 file before using `--with-agents`.
+
+Pass `--with-hooks` to install the `work.attention` harness hooks from the
+[agent orchestration recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
+into the workspace's Claude Code config: a managed script at
+`.claude/hooks/kata-attention.sh` plus the `.claude/settings.json` wiring that
+runs it at session start, after shell tool calls, and at session stop. The
+merge is additive — everything else in `settings.json` is preserved — and
+re-running refreshes only kata's managed pieces. Symlinked targets are refused,
+matching `--with-agents`.
 
 ## Issue lifecycle
 

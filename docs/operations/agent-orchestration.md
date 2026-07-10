@@ -111,6 +111,15 @@ truthful terminal signal, self-assertion is the finer-grained live signal. Both
 write the same two keys, and because attention is last-write-wins by design,
 whichever fired most recently is the state coordinators see.
 
+For Claude Code workspaces, `kata init --with-hooks` installs this wiring
+directly: a managed hook script under `.claude/hooks/` plus the
+`.claude/settings.json` entries that run it at session start (honoring
+`$KATA_REF` when a launcher passes one), after each shell tool call (treating
+the agent's own `kata claim <ref>` as ref discovery for hand-started sessions),
+and at session stop (the sweep that raises `needs-human` on refs still sitting
+at `ok`). Re-running the command refreshes the script and leaves the rest of
+`settings.json` untouched.
+
 ## Coordinate: wait and dashboards
 
 A delegating **coordinator** joins on sub-tasks with `kata wait`. Launch two

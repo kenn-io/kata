@@ -32,6 +32,13 @@ and writes a `<file>.kata-proposed` sidecar to adopt or discard — see
 `AGENTS.md` is a symlink, kata refuses to manage it before reading the target;
 replace it with a regular file before using `--with-agents`.
 
+Guidance files produce tendency, not contract: an agent can still end a session
+without updating its issue. For Claude Code workspaces,
+`kata init --with-hooks` additionally installs the
+[attention harness hooks](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
+that keep the `work.attention` signal truthful even when the agent says
+nothing.
+
 ## Search before creating
 
 ```sh
