@@ -1233,16 +1233,16 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 			require.NoError(t, err)
 			firstEnrollment := matrixCreateEnrollment(t, hub, spoke, firstHub, "first-matrix-token")
 			peerEnrollment := matrixCreateEnrollment(t, hub, spoke, peerHub, "peer-matrix-token")
-			projects := []*matrixFederationProject{
-				{tag: "first", hub: firstHub, local: firstLocal,
-					credential: matrixCredential(hub.URL, firstHub.ID, firstEnrollment.Token),
-					before:     tc.firstTaskBeforeEnrollment},
-				{tag: "peer", hub: peerHub, local: peerLocal,
-					credential: matrixCredential(hub.URL, peerHub.ID, peerEnrollment.Token),
-					before:     tc.peerTaskBeforeEnrollment},
-			}
+			first := &matrixFederationProject{tag: "first", hub: firstHub, local: firstLocal,
+				credential: matrixCredential(hub.URL, firstHub.ID, firstEnrollment.Token),
+				before:     tc.firstTaskBeforeEnrollment}
+			peer := &matrixFederationProject{tag: "peer", hub: peerHub, local: peerLocal,
+				credential: matrixCredential(hub.URL, peerHub.ID, peerEnrollment.Token),
+				before:     tc.peerTaskBeforeEnrollment}
+			projects := []*matrixFederationProject{first, peer}
+			syncOrder := []*matrixFederationProject{first, peer}
 			if tc.peerSyncsFirst {
-				projects[0], projects[1] = projects[1], projects[0]
+				syncOrder[0], syncOrder[1] = syncOrder[1], syncOrder[0]
 			}
 
 			for _, project := range projects {
@@ -1251,24 +1251,24 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 				}
 			}
 			linked := false
-			if projects[0].issue.ID != 0 && projects[1].issue.ID != 0 {
-				matrixCreateCrossProjectLink(t, spoke.DB, projects[0].issue, projects[1].issue)
+			if first.issue.ID != 0 && peer.issue.ID != 0 {
+				matrixCreateCrossProjectLink(t, spoke.DB, first.issue, peer.issue)
 				linked = true
 			}
 			syncEligible := func() {
-				for _, project := range projects {
+				for _, project := range syncOrder {
 					if project.enrolled {
 						matrixSyncProject(t, spoke.DB, project)
 					}
 				}
 			}
-			for _, project := range projects {
+			for _, project := range syncOrder {
 				matrixAdoptProject(t, hub.DB, spoke.DB, hub.URL, project)
 				if !project.before {
 					project.issue = matrixCreateInitialState(t, spoke.DB, project.local, project.tag)
 				}
-				if !linked && projects[0].issue.ID != 0 && projects[1].issue.ID != 0 {
-					matrixCreateCrossProjectLink(t, spoke.DB, projects[0].issue, projects[1].issue)
+				if !linked && first.issue.ID != 0 && peer.issue.ID != 0 {
+					matrixCreateCrossProjectLink(t, spoke.DB, first.issue, peer.issue)
 					linked = true
 				}
 				if tc.eagerSync {
@@ -1289,12 +1289,10 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 				matrixAssertPortableState(t, hub.DB, project.hub.ID, project.issue.UID, project.tag)
 				matrixAssertPushDrained(t, spoke.DB, project.local.ID)
 			}
-			matrixAssertLinkCount(t, hub.DB, projects[0].issue.UID, projects[1].issue.UID, 1)
-			firstByTag := matrixProjectByTag(projects, "first")
-			peerByTag := matrixProjectByTag(projects, "peer")
-			matrixApplyHubFollowup(t, hub.DB, firstByTag, peerByTag)
+			matrixAssertLinkCount(t, hub.DB, first.issue.UID, peer.issue.UID, 1)
+			matrixApplyHubFollowup(t, hub.DB, first, peer)
 			syncEligible()
-			matrixAssertPulledFollowup(t, spoke.DB, firstByTag, peerByTag)
+			matrixAssertPulledFollowup(t, spoke.DB, first, peer)
 			matrixAssertPullCursors(t, hub.DB, spoke.DB, projects)
 
 			beforeRepeat, err := spoke.DB.MaxEventID(ctx)
@@ -1303,7 +1301,7 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 			afterRepeat, err := spoke.DB.MaxEventID(ctx)
 			require.NoError(t, err)
 			assert.Equal(t, beforeRepeat, afterRepeat)
-			matrixAssertLinkCount(t, hub.DB, projects[0].issue.UID, projects[1].issue.UID, 1)
+			matrixAssertLinkCount(t, hub.DB, first.issue.UID, peer.issue.UID, 1)
 		})
 	}
 }
@@ -3775,15 +3773,6 @@ func matrixAssertLinkCount(t *testing.T, store *sqlitestore.Store, firstUID, pee
 		 WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
 		firstUID, peerUID).Scan(&got))
 	assert.Equal(t, want, got)
-}
-
-func matrixProjectByTag(projects []*matrixFederationProject, tag string) *matrixFederationProject {
-	for _, project := range projects {
-		if project.tag == tag {
-			return project
-		}
-	}
-	panic("matrix project tag not found: " + tag)
 }
 
 func matrixApplyHubFollowup(
