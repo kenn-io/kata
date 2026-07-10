@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -23,6 +25,18 @@ func createNextTestIssue(t *testing.T, env *testenv.Env, projectID int64, title 
 	}
 	created := postJSON[response](t, env.URL+"/api/v1/projects/"+itoa(projectID)+"/issues", payload)
 	return created.Issue.ShortID
+}
+
+func createFullNextTestIssue(t *testing.T, env *testenv.Env, dir, title string) string {
+	t.Helper()
+	ref := trimLine(runCLI(t, env, dir, "--as", "tester", "--quiet", "create", title,
+		"--body", "Detailed issue context.",
+		"--priority", "1",
+		"--label", "bug",
+		"--label", "ready",
+		"--meta", "work.mode=full"))
+	runCLI(t, env, dir, "--as", "tester", "comment", ref, "--body", "Detailed comment record.")
+	return ref
 }
 
 func TestNext_HumanSelectsP0AndPrintsOneReadyRow(t *testing.T) {
@@ -91,6 +105,92 @@ func TestNext_EmptyOutputs(t *testing.T) {
 		assert.Equal(t, "null", string(got["issue"]))
 		assert.NotContains(t, got, "issues")
 	})
+}
+
+func TestNext_HumanFullUsesShowDetail(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	ref := createFullNextTestIssue(t, env, dir, "full detail candidate")
+
+	out := runCLI(t, env, dir, "next", "--full")
+
+	assert.Contains(t, out, ref+"  full detail candidate  [open]  by tester")
+	assert.Contains(t, out, "Detailed issue context.")
+	assert.Contains(t, out, "--- comments ---")
+	assert.Contains(t, out, "Detailed comment record.")
+	assert.Contains(t, out, "--- labels ---")
+	assert.Contains(t, out, "bug, ready")
+	assert.Contains(t, out, "--- metadata ---")
+	assert.Contains(t, out, `work.mode = "full"`)
+	assert.NotContains(t, out, "• P1")
+}
+
+func TestNext_AgentFullUsesNextHeaderAndShowSections(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	ref := createFullNextTestIssue(t, env, dir, "agent full candidate")
+
+	out := runCLI(t, env, dir, "--agent", "next", "--full")
+
+	assert.True(t, strings.HasPrefix(out, "OK next "+ref+"\n"), out)
+	assert.Contains(t, out, "Issue: "+ref+` "agent full candidate"`)
+	assert.Contains(t, out, "Status: open\n")
+	assert.Contains(t, out, "Labels: bug,ready\n")
+	assert.Contains(t, out, "Priority: 1\n")
+	assert.Contains(t, out, "Body:\n```text\nDetailed issue context.\n```\n")
+	assert.Contains(t, out, "Comments:\n")
+	assert.Regexp(t, regexp.MustCompile(`(?m)^- uid=[0-9A-HJKMNP-TV-Z]{26} author=tester created_at=[^ \n]+$`), out)
+	assert.Contains(t, out, "Detailed comment record.")
+}
+
+func TestNext_JSONFullUsesShowEnvelope(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	ref := createFullNextTestIssue(t, env, dir, "json full candidate")
+
+	out := runCLI(t, env, dir, "--json", "next", "--full")
+	var got map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+
+	for _, key := range []string{"issue", "comments", "labels", "links"} {
+		assert.Contains(t, got, key)
+	}
+	assert.NotContains(t, got, "issues")
+	var issue map[string]any
+	require.NoError(t, json.Unmarshal(got["issue"], &issue))
+	assert.Equal(t, ref, issue["short_id"])
+	assert.Equal(t, "json full candidate", issue["title"])
+}
+
+func TestNext_AllFullResolvesQualifiedProject(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	peer := createIssue(t, env, pid, "local peer")
+	project, err := env.DB.CreateProject(context.Background(), "example-project")
+	require.NoError(t, err)
+	target := createNextTestIssue(t, env, project.ID, "global full candidate", ptrInt64(0))
+	postJSONOK(t, env.URL+"/api/v1/projects/"+itoa(project.ID)+"/issues/"+target+"/links",
+		map[string]any{"actor": "tester", "type": "related", "to_ref": "kata#" + peer})
+
+	out := runCLI(t, env, dir, "next", "--all", "--full")
+
+	assert.Contains(t, out, target+"  global full candidate  [open]  by tester")
+	assert.Contains(t, out, "related: kata#"+peer)
+}
+
+func TestNext_EmptyFullMatchesCompactOutputs(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "human", args: []string{"next"}},
+		{name: "agent", args: []string{"--agent", "next"}},
+		{name: "json", args: []string{"--json", "next"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env, dir, _ := setupCLIWorkspace(t)
+			compact := runCLI(t, env, dir, tt.args...)
+			fullArgs := append(append([]string(nil), tt.args...), "--full")
+			assert.Equal(t, compact, runCLI(t, env, dir, fullArgs...))
+		})
+	}
 }
 
 func TestNext_OwnershipAndLabelFiltersMirrorReady(t *testing.T) {

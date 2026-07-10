@@ -52,6 +52,9 @@ func newNextCmd() *cobra.Command {
 			if all {
 				issueRef = selected.ProjectName + "#" + selected.ShortID
 			}
+			if full {
+				return runShow(cmd, issueRef, "next")
+			}
 			switch mode {
 			case outputJSON:
 				return emitJSON(cmd.OutOrStdout(), struct {

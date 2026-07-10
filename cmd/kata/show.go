@@ -21,108 +21,112 @@ func newShowCmd() *cobra.Command {
 		Short: "show issue + comments",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, args[0])
-			if err != nil {
-				return err
-			}
-			client, err := httpClientFor(ctx, baseURL)
-			if err != nil {
-				return err
-			}
-			httpStatus, bs, err := httpDoJSON(ctx, client, http.MethodGet,
-				fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(ref.RefForAPI)), nil)
-			if err != nil {
-				return err
-			}
-			if httpStatus >= 400 {
-				return apiErrFromBody(httpStatus, bs)
-			}
-			mode := currentOutputMode()
-			if mode == outputJSON {
-				var buf bytes.Buffer
-				if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
-					return err
-				}
-				_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
-				return err
-			}
-			var b showResponseForCLI
-			if err := json.Unmarshal(bs, &b); err != nil {
-				return err
-			}
-			if mode == outputAgent {
-				return printShowAgent(cmd.OutOrStdout(), b, ref.ProjectName)
-			}
-			out := cmd.OutOrStdout()
-			if _, err := fmt.Fprintf(out, "%s  %s  [%s]  by %s\n",
-				b.Issue.ShortID,
-				textsafe.Line(b.Issue.Title),
-				b.Issue.Status,
-				textsafe.Line(b.Issue.Author)); err != nil {
-				return err
-			}
-			if err := printShowClaimLines(out, b.Lease, b.PendingLeases, b.LeaseHubNow); err != nil {
-				return err
-			}
-			if err := printShowClaimViolationLines(out, b.LeaseViolations); err != nil {
-				return err
-			}
-			if b.Issue.Body != "" {
-				if _, err := fmt.Fprintln(out); err != nil {
-					return err
-				}
-				if _, err := fmt.Fprintln(out, textsafe.Block(b.Issue.Body)); err != nil {
-					return err
-				}
-			}
-			if len(b.Comments) > 0 {
-				if _, err := fmt.Fprintln(out, "\n--- comments ---"); err != nil {
-					return err
-				}
-				for _, c := range b.Comments {
-					if _, err := fmt.Fprintf(out, "%s %s: %s\n",
-						textsafe.Line(c.UID), textsafe.Line(c.Author), textsafe.Block(c.Body)); err != nil {
-						return err
-					}
-				}
-			}
-			if len(b.Labels) > 0 {
-				if _, err := fmt.Fprintln(out, "\n--- labels ---"); err != nil {
-					return err
-				}
-				parts := make([]string, 0, len(b.Labels))
-				for _, l := range b.Labels {
-					parts = append(parts, textsafe.Line(l.Label))
-				}
-				if _, err := fmt.Fprintln(out, strings.Join(parts, ", ")); err != nil {
-					return err
-				}
-			}
-			if len(b.Links) > 0 {
-				if _, err := fmt.Fprintln(out, "\n--- links ---"); err != nil {
-					return err
-				}
-				for _, l := range b.Links {
-					label, other := linkLabelFromPOV(l.Type, b.Issue.UID, ref.ProjectName, l.From, l.To)
-					if _, err := fmt.Fprintf(out, "%s: %s\n", label, other); err != nil {
-						return err
-					}
-				}
-			}
-			if len(b.Issue.Metadata) > 0 {
-				if _, err := fmt.Fprintln(out, "\n--- metadata ---"); err != nil {
-					return err
-				}
-				for _, kv := range sortedMetadata(b.Issue.Metadata) {
-					if _, err := fmt.Fprintf(out, "%s = %s\n",
-						textsafe.Line(kv.key), textsafe.Line(kv.value)); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
+			return runShow(cmd, args[0], "show")
 		},
 	}
+}
+
+func runShow(cmd *cobra.Command, issueRef, agentOperation string) error {
+	ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, issueRef)
+	if err != nil {
+		return err
+	}
+	client, err := httpClientFor(ctx, baseURL)
+	if err != nil {
+		return err
+	}
+	httpStatus, bs, err := httpDoJSON(ctx, client, http.MethodGet,
+		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", baseURL, pid, url.PathEscape(ref.RefForAPI)), nil)
+	if err != nil {
+		return err
+	}
+	if httpStatus >= 400 {
+		return apiErrFromBody(httpStatus, bs)
+	}
+	mode := currentOutputMode()
+	if mode == outputJSON {
+		var buf bytes.Buffer
+		if err := emitJSON(&buf, json.RawMessage(bs)); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
+		return err
+	}
+	var b showResponseForCLI
+	if err := json.Unmarshal(bs, &b); err != nil {
+		return err
+	}
+	if mode == outputAgent {
+		return printShowAgent(cmd.OutOrStdout(), b, ref.ProjectName, agentOperation)
+	}
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(out, "%s  %s  [%s]  by %s\n",
+		b.Issue.ShortID,
+		textsafe.Line(b.Issue.Title),
+		b.Issue.Status,
+		textsafe.Line(b.Issue.Author)); err != nil {
+		return err
+	}
+	if err := printShowClaimLines(out, b.Lease, b.PendingLeases, b.LeaseHubNow); err != nil {
+		return err
+	}
+	if err := printShowClaimViolationLines(out, b.LeaseViolations); err != nil {
+		return err
+	}
+	if b.Issue.Body != "" {
+		if _, err := fmt.Fprintln(out); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(out, textsafe.Block(b.Issue.Body)); err != nil {
+			return err
+		}
+	}
+	if len(b.Comments) > 0 {
+		if _, err := fmt.Fprintln(out, "\n--- comments ---"); err != nil {
+			return err
+		}
+		for _, c := range b.Comments {
+			if _, err := fmt.Fprintf(out, "%s %s: %s\n",
+				textsafe.Line(c.UID), textsafe.Line(c.Author), textsafe.Block(c.Body)); err != nil {
+				return err
+			}
+		}
+	}
+	if len(b.Labels) > 0 {
+		if _, err := fmt.Fprintln(out, "\n--- labels ---"); err != nil {
+			return err
+		}
+		parts := make([]string, 0, len(b.Labels))
+		for _, l := range b.Labels {
+			parts = append(parts, textsafe.Line(l.Label))
+		}
+		if _, err := fmt.Fprintln(out, strings.Join(parts, ", ")); err != nil {
+			return err
+		}
+	}
+	if len(b.Links) > 0 {
+		if _, err := fmt.Fprintln(out, "\n--- links ---"); err != nil {
+			return err
+		}
+		for _, l := range b.Links {
+			label, other := linkLabelFromPOV(l.Type, b.Issue.UID, ref.ProjectName, l.From, l.To)
+			if _, err := fmt.Fprintf(out, "%s: %s\n", label, other); err != nil {
+				return err
+			}
+		}
+	}
+	if len(b.Issue.Metadata) > 0 {
+		if _, err := fmt.Fprintln(out, "\n--- metadata ---"); err != nil {
+			return err
+		}
+		for _, kv := range sortedMetadata(b.Issue.Metadata) {
+			if _, err := fmt.Fprintf(out, "%s = %s\n",
+				textsafe.Line(kv.key), textsafe.Line(kv.value)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // metadataKV is one rendered metadata entry: the flat key and its value as
@@ -193,8 +197,8 @@ type showResponseForCLI struct {
 	LeaseViolations []claimViolationForCLI `json:"lease_violations"`
 }
 
-func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject string) error {
-	if _, err := fmt.Fprintf(w, "OK show %s\n", b.Issue.ShortID); err != nil {
+func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation string) error {
+	if _, err := fmt.Fprintf(w, "OK %s %s\n", operation, b.Issue.ShortID); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, "Issue: %s %s\n", b.Issue.ShortID, agentValue(b.Issue.Title)); err != nil {
