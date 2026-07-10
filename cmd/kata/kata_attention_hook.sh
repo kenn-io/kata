@@ -30,9 +30,14 @@ state_dir="${XDG_RUNTIME_DIR:-/tmp}/kata-attention"
 state_file="$state_dir/$session_id"
 
 # record_ref remembers a ref for the stop sweep and floors its signal at ok:
-# tracked work is visible from the moment it is grabbed.
+# tracked work is visible from the moment it is grabbed. Refs that don't
+# resolve to an open issue are ignored — work.attention on closed issues is
+# meaningless, and a grepped ref may simply be wrong.
 record_ref() {
-  local ref="$1"
+  local ref status
+  ref="$1"
+  status="$(kata show "$ref" --format json 2>/dev/null | jq -r '.issue.status // empty')"
+  [[ -n "$status" && "$status" != "closed" ]] || return 0
   mkdir -p "$state_dir"
   grep -qxF "$ref" "$state_file" 2>/dev/null || echo "$ref" >>"$state_file"
   kata meta set "$ref" work.attention ok >/dev/null 2>&1 || true
