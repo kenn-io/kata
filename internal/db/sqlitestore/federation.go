@@ -2044,6 +2044,7 @@ func federationGroupIssueIDs(
 	currentIssueIDs map[string]int64,
 ) (map[string]int64, error) {
 	placeholders, args := projectIDPlaceholders(projectIDs)
+	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT uid, id, project_id
 		  FROM issues
@@ -2086,6 +2087,7 @@ func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map
 	queryArgs := make([]any, 0, len(args)*2)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
+	//nolint:gosec // IN values use generated ? placeholders with separately bound integer IDs.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type, l.author
 		  FROM links l

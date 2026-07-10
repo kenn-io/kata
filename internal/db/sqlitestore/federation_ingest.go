@@ -76,9 +76,7 @@ func (d *Store) ingestFederationEventsOnce(
 		if len(ev.Payload) == 0 {
 			ev.Payload = json.RawMessage(`{}`)
 		}
-		if err := validateFederationProjectEvent(
-			projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs,
-		); err != nil {
+		if err := validateFederationProjectEvent(projectUID, p.SpokeInstanceUID, ev, knownIssueUIDs); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if boundActor != "" && ev.Actor != boundActor {
