@@ -73,28 +73,52 @@ claim)
     fi
   done <<<"$cmd"
   [[ -n "$seg" ]] || exit 0
+  # Quoted spans are flag values (--comment "fix the bug"), never refs:
+  # collapse each to a placeholder so multi-word values don't shed junk
+  # tokens, while still occupying their token slot for flag-value skipping.
+  # The placeholder starts non-alphanumeric, so it can never probe as a ref.
+  quote_re='("[^"]*"|'\''[^'\'']*'\'')'
+  while [[ "$seg" =~ $quote_re ]]; do
+    seg="${seg/"${BASH_REMATCH[1]}"/ _quoted_ }"
+  done
   # The command text alone doesn't prove the claim executed, succeeded, or
-  # even which token was the ref (a flag's value looks the same). The daemon
-  # is the oracle for both problems: try each plausible token and record the
-  # first one that is an open issue owned by this session's actor — flooring
-  # attention on someone else's issue is the harmful false positive. Tokens
-  # must start alphanumeric, which also keeps a crafted dash-leading token
-  # from ever reaching kata as a flag.
+  # even which token was the ref (a flag's value looks the same). Skip the
+  # values of claim's value-bearing flags, then let the daemon arbitrate the
+  # rest: probe each plausible token and record the first that is an open
+  # issue owned by the claim's effective actor — flooring attention on
+  # someone else's issue is the harmful false positive. Tokens must start
+  # alphanumeric, which also keeps a crafted dash-leading token from ever
+  # reaching kata as a flag.
   actor="$(kata whoami --format json 2>/dev/null | jq -r '.actor // empty')"
-  [[ -n "$actor" ]] || exit 0
+  value_flag_re='^--(comment|as|format|project|workspace|daemon)$'
   token_re='^[A-Za-z0-9][A-Za-z0-9#_-]*$'
   read -ra tokens <<<"$seg"
   tried=0
+  skip_next=0
+  as_actor=""
+  prev=""
   for tok in "${tokens[@]}"; do
-    tok="${tok#[\"\']}"
-    tok="${tok%[\"\']}"
+    if ((skip_next)); then
+      # `--as <handle>` overrides the claim's actor; ownership must be
+      # checked against it rather than the ambient identity.
+      [[ "$prev" == "--as" ]] && as_actor="$tok"
+      skip_next=0
+      continue
+    fi
+    if [[ "$tok" =~ $value_flag_re ]]; then
+      prev="$tok"
+      skip_next=1
+      continue
+    fi
+    [[ "$tok" == --as=* ]] && { as_actor="${tok#--as=}"; continue; }
+    [[ "$tok" == -* ]] && continue
     [[ "$tok" =~ $token_re ]] || continue
     ((tried++ >= 4)) && break # bound the daemon probes on noisy segments
     info="$(kata show "$tok" --format json 2>/dev/null)"
     status="$(issue_status "$info")"
     [[ -n "$status" && "$status" != "closed" ]] || continue
     owner="$(jq -r '.issue.owner // empty' <<<"$info")"
-    [[ "$owner" == "$actor" ]] || continue
+    [[ -n "$owner" && ("$owner" == "$actor" || "$owner" == "$as_actor") ]] || continue
     remember_ref "$tok"
     break
   done
@@ -114,7 +138,19 @@ stop)
     fi
     status="$(issue_status "$info")"
     [[ -n "$status" && "$status" != "closed" ]] || continue # attention on closed issues is meaningless
-    current="$(kata meta get "$ref" work.attention --format json 2>/dev/null | jq -r '.value // empty')"
+    meta_out="$(kata meta get "$ref" work.attention --format json 2>/dev/null)"
+    rc=$?
+    if ((rc != 0)); then
+      # kata exits 4 when the key is genuinely absent — nothing to escalate.
+      # Any other failure (daemon unreachable, etc.) is transient: retry
+      # later rather than assuming the signal was handled.
+      ((rc == 4)) || remaining+=("$ref")
+      continue
+    fi
+    if ! current="$(jq -r '.value // empty' <<<"$meta_out" 2>/dev/null)"; then
+      remaining+=("$ref") # undecodable response: retry rather than assume
+      continue
+    fi
     if [[ "$current" == "ok" ]]; then
       # The session ended while the issue still claimed to be fine: the
       # agent never handed off, so raise the flag a coordinator can see.
