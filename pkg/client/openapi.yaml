@@ -2815,12 +2815,26 @@ components:
         - kind
         - other_uid
       type: object
-    ReadyGlobalIssue:
+    ReadyGlobalIssueOut:
       properties:
         author:
           type: string
+        blocked:
+          type: boolean
+        blocked_by:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          nullable: true
+          type: array
+        blocks:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          nullable: true
+          type: array
         body:
           type: string
+        child_counts:
+          $ref: "#/components/schemas/ChildCounts"
         closed_at:
           format: date-time
           type: string
@@ -2835,6 +2849,11 @@ components:
         id:
           format: int64
           type: integer
+        labels:
+          items:
+            type: string
+          nullable: true
+          type: array
         metadata:
           additionalProperties: true
           type: object
@@ -2842,6 +2861,8 @@ components:
           type: string
         owner:
           type: string
+        parent:
+          $ref: "#/components/schemas/LinkPeer"
         priority:
           format: int64
           type: integer
@@ -2852,9 +2873,16 @@ components:
           type: string
         project_uid:
           type: string
+        qualified_id:
+          type: string
         recurrence_id:
           format: int64
           type: integer
+        related:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          nullable: true
+          type: array
         revision:
           format: int64
           type: integer
@@ -2871,6 +2899,7 @@ components:
           type: string
       required:
         - project_name
+        - qualified_id
         - id
         - uid
         - project_id
@@ -2888,7 +2917,7 @@ components:
       properties:
         issues:
           items:
-            $ref: "#/components/schemas/ReadyGlobalIssue"
+            $ref: "#/components/schemas/ReadyGlobalIssueOut"
           nullable: true
           type: array
       required:
@@ -2898,7 +2927,7 @@ components:
       properties:
         issues:
           items:
-            $ref: "#/components/schemas/Issue"
+            $ref: "#/components/schemas/IssueOut"
           nullable: true
           type: array
       required:

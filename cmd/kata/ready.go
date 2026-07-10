@@ -51,6 +51,9 @@ func newReadyCmd() *cobra.Command {
 							agentRowIntField("priority", i.Priority),
 							agentOptionalRowField("owner", i.Owner),
 							agentRowField("title", i.Title),
+							// Appended last: agent field order is a
+							// stability contract; new fields go at the end.
+							agentRowListField("labels", i.Labels),
 						); err != nil {
 							return err
 						}
@@ -69,6 +72,7 @@ func newReadyCmd() *cobra.Command {
 						Owner:    owner,
 						Priority: i.Priority,
 						Status:   "open",
+						Labels:   i.Labels,
 					}
 				}
 				renderer := newRowRenderer(cmd.OutOrStdout())
@@ -97,6 +101,9 @@ func newReadyCmd() *cobra.Command {
 						agentRowIntField("priority", i.Priority),
 						agentOptionalRowField("owner", i.Owner),
 						agentRowField("title", i.Title),
+						// Appended last: agent field order is a
+						// stability contract; new fields go at the end.
+						agentRowListField("labels", i.Labels),
 					); err != nil {
 						return err
 					}
@@ -115,6 +122,7 @@ func newReadyCmd() *cobra.Command {
 					Owner:    ownerStr,
 					Priority: i.Priority,
 					Status:   "open",
+					Labels:   i.Labels,
 				}
 			}
 			renderer := newRowRenderer(cmd.OutOrStdout())

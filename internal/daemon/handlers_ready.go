@@ -33,8 +33,12 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
+		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, in.ProjectID, issues)
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
 		out := &api.ReadyResponse{}
-		out.Body.Issues = issues
+		out.Body.Issues = issueOuts
 		return out, nil
 	})
 
@@ -47,8 +51,20 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, api.NewError(500, "internal", err.Error(), "", nil)
 		}
+		bare := make([]db.Issue, len(issues))
+		for i, iss := range issues {
+			bare[i] = iss.Issue
+		}
+		issueOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, bare)
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		rows := make([]api.ReadyGlobalIssueOut, len(issueOuts))
+		for i, io := range issueOuts {
+			rows[i] = api.ReadyGlobalIssueOut{IssueOut: io, ProjectName: issues[i].ProjectName}
+		}
 		out := &api.ReadyGlobalResponse{}
-		out.Body.Issues = issues
+		out.Body.Issues = rows
 		return out, nil
 	})
 }

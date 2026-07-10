@@ -2708,22 +2708,30 @@ func (r ReachableGraphUnresolvedRef) Validate() error {
 	return errors
 }
 
-type ReadyGlobalIssue struct {
+type ReadyGlobalIssueOut struct {
 	Author        string         `json:"author" validate:"required"`
+	Blocked       *bool          `json:"blocked,omitempty"`
+	BlockedBy     []LinkPeer     `json:"blocked_by,omitempty"`
+	Blocks        []LinkPeer     `json:"blocks,omitempty"`
 	Body          string         `json:"body" validate:"required"`
+	ChildCounts   *ChildCounts   `json:"child_counts,omitempty"`
 	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
 	ClosedReason  *string        `json:"closed_reason,omitempty"`
 	CreatedAt     time.Time      `json:"created_at" validate:"required"`
 	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
 	ID            int64          `json:"id"`
+	Labels        []string       `json:"labels,omitempty"`
 	Metadata      map[string]any `json:"metadata"`
 	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
 	Owner         *string        `json:"owner,omitempty"`
+	Parent        *LinkPeer      `json:"parent,omitempty"`
 	Priority      *int64         `json:"priority,omitempty"`
 	ProjectID     int64          `json:"project_id"`
 	ProjectName   string         `json:"project_name" validate:"required"`
 	ProjectUID    *string        `json:"project_uid,omitempty"`
+	QualifiedID   string         `json:"qualified_id" validate:"required"`
 	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
+	Related       []LinkPeer     `json:"related,omitempty"`
 	Revision      int64          `json:"revision"`
 	ShortID       string         `json:"short_id" validate:"required"`
 	Status        string         `json:"status" validate:"required"`
@@ -2732,12 +2740,81 @@ type ReadyGlobalIssue struct {
 	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
 }
 
-func (r ReadyGlobalIssue) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+func (r ReadyGlobalIssueOut) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Author, "required"); err != nil {
+		errors = errors.Append("Author", err)
+	}
+	for i, item := range r.BlockedBy {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("BlockedBy[%d]", i), err)
+			}
+		}
+	}
+	for i, item := range r.Blocks {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Blocks[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(r.Body, "required"); err != nil {
+		errors = errors.Append("Body", err)
+	}
+	if r.ChildCounts != nil {
+		if v, ok := any(r.ChildCounts).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ChildCounts", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(r.CreatedAt, "required"); err != nil {
+		errors = errors.Append("CreatedAt", err)
+	}
+	if r.Parent != nil {
+		if v, ok := any(r.Parent).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Parent", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(r.ProjectName, "required"); err != nil {
+		errors = errors.Append("ProjectName", err)
+	}
+	if err := typesValidator.Var(r.QualifiedID, "required"); err != nil {
+		errors = errors.Append("QualifiedID", err)
+	}
+	for i, item := range r.Related {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Related[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(r.ShortID, "required"); err != nil {
+		errors = errors.Append("ShortID", err)
+	}
+	if err := typesValidator.Var(r.Status, "required"); err != nil {
+		errors = errors.Append("Status", err)
+	}
+	if err := typesValidator.Var(r.Title, "required"); err != nil {
+		errors = errors.Append("Title", err)
+	}
+	if err := typesValidator.Var(r.UID, "required"); err != nil {
+		errors = errors.Append("UID", err)
+	}
+	if err := typesValidator.Var(r.UpdatedAt, "required"); err != nil {
+		errors = errors.Append("UpdatedAt", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type ReadyGlobalResponseBody struct {
-	Issues []ReadyGlobalIssue `json:"issues,omitempty" validate:"required"`
+	Issues []ReadyGlobalIssueOut `json:"issues,omitempty" validate:"required"`
 }
 
 func (r ReadyGlobalResponseBody) Validate() error {
@@ -2756,7 +2833,7 @@ func (r ReadyGlobalResponseBody) Validate() error {
 }
 
 type ReadyResponseBody struct {
-	Issues []Issue `json:"issues,omitempty" validate:"required"`
+	Issues []IssueOut `json:"issues,omitempty" validate:"required"`
 }
 
 func (r ReadyResponseBody) Validate() error {

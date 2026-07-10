@@ -219,7 +219,7 @@ func TestOpenAPIDocumentJSONBlobShapes(t *testing.T) {
 		t.Fatalf("CreateIssueRequestBody.metadata additionalProperties = %#v, want true", createMeta.AdditionalProperties)
 	}
 	assertSchemaPropertyType(t, doc, "ProjectOut", "metadata", huma.TypeObject)
-	assertSchemaPropertyType(t, doc, "ReadyGlobalIssue", "metadata", huma.TypeObject)
+	assertSchemaPropertyType(t, doc, "ReadyGlobalIssueOut", "metadata", huma.TypeObject)
 	assertSchemaPropertyType(t, doc, "Recurrence", "template_labels", huma.TypeArray)
 	assertSchemaPropertyType(t, doc, "Recurrence", "template_metadata", huma.TypeObject)
 	assertSchemaPropertyType(t, doc, "RecurrenceTemplateUpdateInput", "metadata", huma.TypeObject)

@@ -87,6 +87,39 @@ func TestReady_AgentAllRowCarriesPriorityAndOmitsAbsentOwner(t *testing.T) {
 	assert.NotContains(t, out, "owner=")
 }
 
+// TestReady_AgentRowEmitsLabels pins that ready agent rows carry a
+// labels= field when the issue has labels. Per the agent stability
+// contract (docs/reference/agent-output.md) field order is part of the
+// contract and new fields append to the line, so labels goes AFTER the
+// pre-existing issue/priority/owner/title fields.
+func TestReady_AgentRowEmitsLabels(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "labeled ready")
+	runCLI(t, env, dir, "label", "add", ref, "bug")
+	runCLI(t, env, dir, "label", "add", ref, "epic")
+
+	out := runCLI(t, env, dir, "--agent", "ready")
+
+	assert.Contains(t, out,
+		`- issue=`+ref+` title="labeled ready" labels=bug,epic`,
+		"labels append after the existing fields, order-stable")
+}
+
+// TestReady_AgentAllRowEmitsLabels pins the same appended labels= field
+// on the --all agent path.
+func TestReady_AgentAllRowEmitsLabels(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "labeled global ready")
+	runCLI(t, env, dir, "label", "add", ref, "epic")
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "--agent", "ready", "--all")
+	require.NoError(t, err)
+
+	assert.Contains(t, out,
+		`- issue=kata#`+ref+` title="labeled global ready" labels=epic`,
+		"labels append after the existing fields, order-stable")
+}
+
 func TestReady_UnownedAndOwnerMutualExclusion(t *testing.T) {
 	env, dir := setupCLIEnv(t)
 	resetFlags(t)
@@ -173,6 +206,32 @@ func TestReady_HumanRowRendersPriorityChip(t *testing.T) {
 	out := runCLI(t, env, dir, "ready")
 
 	assert.Contains(t, out, "• P1")
+}
+
+// TestReady_HumanRowRendersLabelChips pins that a labeled ready issue
+// renders the well-known "[epic] " / "[bug] " chips in project-scoped
+// human output, now that the ready payload carries labels.
+func TestReady_HumanRowRendersLabelChips(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "broken thing")
+	runCLI(t, env, dir, "label", "add", ref, "bug")
+
+	out := runCLI(t, env, dir, "ready")
+
+	assert.Contains(t, out, "[bug] ")
+}
+
+// TestReady_AllHumanRowRendersLabelChips pins the same label-chip
+// rendering on the --all (global) human path.
+func TestReady_AllHumanRowRendersLabelChips(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "big effort")
+	runCLI(t, env, dir, "label", "add", ref, "epic")
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all")
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "[epic] ")
 }
 
 // TestReady_HumanFooterShowsSummaryAndLegend pins the ready footer: rule,

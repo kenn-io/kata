@@ -19,6 +19,7 @@ type readyIssueForCLI struct {
 	Title       string          `json:"title"`
 	Owner       *string         `json:"owner,omitempty"`
 	Priority    *int64          `json:"priority,omitempty"`
+	Labels      []string        `json:"labels"`
 }
 
 type readyOptions struct {

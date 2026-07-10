@@ -13,7 +13,8 @@ import (
 // fields the tests assert on.
 type readyResp struct {
 	Issues []struct {
-		ShortID string `json:"short_id"`
+		ShortID string   `json:"short_id"`
+		Labels  []string `json:"labels"`
 	} `json:"issues"`
 }
 
@@ -64,12 +65,33 @@ func TestReady_UnownedAndOwnerMutuallyExclusive(t *testing.T) {
 	assert.Equal(t, 400, status)
 }
 
+// TestReady_HydratesLabels pins that ready rows carry attached labels the
+// way list rows do, so `kata ready` human output can render label chips.
+func TestReady_HydratesLabels(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	labeled := createIssueViaHTTP(t, env, pid, "labeled")
+	createIssueViaHTTP(t, env, pid, "bare")
+	postLabel(t, env, pid, labeled, "epic")
+	postLabel(t, env, pid, labeled, "bug")
+	labeledShort := refForIssue(t, env, labeled)
+
+	out := getReady(t, env, pid, "")
+	byShort := map[string][]string{}
+	for _, i := range out.Issues {
+		byShort[i.ShortID] = i.Labels
+	}
+	assert.ElementsMatch(t, []string{"bug", "epic"}, byShort[labeledShort],
+		"ready rows carry the issue's labels")
+}
+
 // readyGlobalResp narrows the global response body to the fields these tests
 // assert on.
 type readyGlobalResp struct {
 	Issues []struct {
-		ShortID     string `json:"short_id"`
-		ProjectName string `json:"project_name"`
+		ShortID     string   `json:"short_id"`
+		ProjectName string   `json:"project_name"`
+		Labels      []string `json:"labels"`
 	} `json:"issues"`
 }
 
@@ -123,6 +145,39 @@ func TestReadyGlobal_ExcludesArchivedProjects(t *testing.T) {
 			"archived project's issues must not appear in /api/v1/ready")
 	}
 	_ = pid1
+}
+
+// TestReadyGlobal_HydratesLabelsAndKeepsProjectName pins that the global
+// ready payload gains labels while still carrying project_name on each row
+// (needed for qualified refs).
+func TestReadyGlobal_HydratesLabelsAndKeepsProjectName(t *testing.T) {
+	env := testenv.New(t)
+	pid1 := initLocalWorkspace(t, env, "kata")
+	pid2 := initWorkspaceViaHTTP(t, env, "https://github.com/wesm/other.git")
+	iss1 := createIssueViaHTTP(t, env, pid1, "p1 labeled")
+	iss2 := createIssueViaHTTP(t, env, pid2, "p2 labeled")
+	postLabel(t, env, pid1, iss1, "epic")
+	postLabel(t, env, pid2, iss2, "bug")
+	short1 := refForIssue(t, env, iss1)
+	short2 := refForIssue(t, env, iss2)
+
+	out := getReadyGlobal(t, env, "")
+	type row struct {
+		project string
+		labels  []string
+	}
+	byShort := map[string]row{}
+	for _, i := range out.Issues {
+		byShort[i.ShortID] = row{project: i.ProjectName, labels: i.Labels}
+	}
+	require.Contains(t, byShort, short1)
+	require.Contains(t, byShort, short2)
+	assert.NotEmpty(t, byShort[short1].project, "project_name kept on global rows")
+	assert.NotEmpty(t, byShort[short2].project, "project_name kept on global rows")
+	assert.Equal(t, []string{"epic"}, byShort[short1].labels,
+		"labels scoped to the right project's issue")
+	assert.Equal(t, []string{"bug"}, byShort[short2].labels,
+		"labels scoped to the right project's issue")
 }
 
 func TestReadyGlobal_LimitCapsTotalRows(t *testing.T) {

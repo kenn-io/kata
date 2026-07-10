@@ -966,10 +966,12 @@ type ReadyRequest struct {
 	ExcludeLabels []string `query:"exclude_label,omitempty"`
 }
 
-// ReadyResponse is the ready-issue list.
+// ReadyResponse is the ready-issue list. Rows are hydrated IssueOuts so
+// human/agent renderers get labels (and the other list-parity fields)
+// without a follow-up fetch per row.
 type ReadyResponse struct {
 	Body struct {
-		Issues []db.Issue `json:"issues"`
+		Issues []IssueOut `json:"issues"`
 	}
 }
 
@@ -979,12 +981,18 @@ type ReadyGlobalRequest struct {
 	Limit int `query:"limit,omitempty"`
 }
 
-// ReadyGlobalResponse is the cross-project ready-issue list. Each row
-// carries the project name so clients can render qualified refs
+// ReadyGlobalIssueOut is one cross-project ready row: a hydrated IssueOut
+// plus the project's canonical name so clients can render qualified refs
 // (<project>#<short_id>) without a separate lookup.
+type ReadyGlobalIssueOut struct {
+	IssueOut
+	ProjectName string `json:"project_name"`
+}
+
+// ReadyGlobalResponse is the cross-project ready-issue list.
 type ReadyGlobalResponse struct {
 	Body struct {
-		Issues []db.ReadyGlobalIssue `json:"issues"`
+		Issues []ReadyGlobalIssueOut `json:"issues"`
 	}
 }
 
