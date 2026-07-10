@@ -110,6 +110,21 @@ assertions:
   and
 - same-project links continue to materialize and unlink correctly.
 
+## CI Environment Isolation
+
+CI tests must not inherit `KATA_AUTH_TOKEN` from a runner or job environment.
+Every test entry point in `.github/workflows/test.yml` removes the variable at
+the command boundary with `env -u KATA_AUTH_TOKEN`. The Windows Go test step
+uses Bash so the same exact unset operation applies on every operating system.
+
+This applies to the main Go suite, the Windows Go suite, release-script tests,
+federation stress tests, and federation Docker tests. Build, vet, lint,
+release publication, and production commands are unchanged.
+
+The workflow change is verified by running `actionlint` when available and by
+running the repository test suite with the token absent. No test asserts
+workflow source text.
+
 ## Documentation
 
 The federation design and operations guides will describe deferred
