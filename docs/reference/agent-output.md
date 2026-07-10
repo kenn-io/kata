@@ -129,6 +129,33 @@ Empty reads emit the header with `count=0` and no rows:
 OK search count=0 query="login race"
 ```
 
+#### Federation quarantine discovery
+
+`kata federation quarantine list --agent` emits one row per active quarantine:
+
+```text
+OK federation-quarantine-list count=1
+- project=spoke-project project_id=7 quarantine_id=3 direction=push first_event=41 last_event=44 event_count=4 created_at=2026-07-10T12:00:00Z error="hub rejected batch"
+```
+
+The row field order is `project`, `project_id`, `quarantine_id`, `direction`,
+`first_event`, `last_event`, `event_count`, `created_at`, and `error`. An empty
+list emits only `OK federation-quarantine-list count=0`.
+
+`kata federation quarantine show <id> --agent` emits the owning project and
+batch summary followed by one row per quarantined event UID:
+
+```text
+OK federation-quarantine-show quarantine_id=3
+- project=spoke-project project_id=7 direction=push first_event=41 last_event=44 event_count=4 created_at=2026-07-10T12:00:00Z error="hub rejected batch"
+- event_uid=01HZNQ7VFPK1XGD8R5MABCD4EA
+- event_uid=01HZNQ7VFPK1XGD8R5MABCD4EB
+```
+
+The event UID rows preserve the order recorded for the quarantined batch.
+Operators can inspect these read-only commands before invoking the separately
+confirmed `quarantine retry` or `quarantine skip` mutation.
+
 `kata search` appends a `mode=` field to its header — `lexical`, `hybrid`, or
 `semantic` — reporting the strategy actually run. When the embedding endpoint is
 configured but could not serve a query, the search falls back to lexical and a

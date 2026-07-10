@@ -101,6 +101,80 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 	}
 }
 
+func TestFederationQuarantineListHumanAndShow(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	q, err := env.DB.ActiveFederationQuarantine(
+		context.Background(), project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+
+	list := requireCmdOutput(t, env, "federation", "quarantine", "list")
+	assert.Contains(t, list, "spoke-cli")
+	assert.Contains(t, list, fmt.Sprintf("quarantine #%d", q.ID))
+	assert.Contains(t, list, "push events 3-5")
+	assert.Contains(t, list, "3 events")
+	assert.Contains(t, list, "2026-05-23T12:08:00Z")
+	assert.Contains(t, list, "hub rejected batch")
+
+	show := requireCmdOutput(t, env, "federation", "quarantine", "show", strconv.FormatInt(q.ID, 10))
+	assert.Contains(t, show, "spoke-cli")
+	assert.Contains(t, show, fmt.Sprintf("quarantine #%d", q.ID))
+	for _, uid := range []string{"evt-3", "evt-4", "evt-5"} {
+		assert.Contains(t, show, uid)
+	}
+}
+
+func TestFederationQuarantineListAgentAndJSON(t *testing.T) {
+	env, project := setupFederationStatusCLIState(t)
+	q, err := env.DB.ActiveFederationQuarantine(
+		context.Background(), project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
+
+	agent := requireCmdOutput(t, env, "--agent", "federation", "quarantine", "list")
+	assert.Contains(t, agent, "OK federation-quarantine-list count=1")
+	assert.Contains(t, agent,
+		fmt.Sprintf("project=spoke-cli project_id=%d quarantine_id=%d direction=push first_event=3 last_event=5 event_count=3", project.ID, q.ID))
+	assert.Contains(t, agent, "error=\"hub rejected batch\"")
+
+	showAgent := requireCmdOutput(t, env, "--agent", "federation", "quarantine", "show", strconv.FormatInt(q.ID, 10))
+	assert.Contains(t, showAgent, fmt.Sprintf("OK federation-quarantine-show quarantine_id=%d", q.ID))
+	assert.Contains(t, showAgent, "event_uid=evt-3")
+	assert.Contains(t, showAgent, "event_uid=evt-4")
+	assert.Contains(t, showAgent, "event_uid=evt-5")
+
+	jsonOut := requireCmdOutput(t, env, "--json", "federation", "quarantine", "list")
+	var got struct {
+		KataAPIVersion int `json:"kata_api_version"`
+		Quarantines    []struct {
+			ProjectID   int64    `json:"project_id"`
+			ProjectName string   `json:"project_name"`
+			ID          int64    `json:"id"`
+			EventUIDs   []string `json:"event_uids"`
+			Error       string   `json:"error"`
+		} `json:"quarantines"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &got))
+	assert.Equal(t, 1, got.KataAPIVersion)
+	require.Len(t, got.Quarantines, 1)
+	assert.Equal(t, project.ID, got.Quarantines[0].ProjectID)
+	assert.Equal(t, "spoke-cli", got.Quarantines[0].ProjectName)
+	assert.Equal(t, q.ID, got.Quarantines[0].ID)
+	assert.Equal(t, []string{"evt-3", "evt-4", "evt-5"}, got.Quarantines[0].EventUIDs)
+	assert.Equal(t, "hub rejected batch", got.Quarantines[0].Error)
+}
+
+func TestFederationQuarantineListEmptyAndShowMissing(t *testing.T) {
+	env := testenv.New(t)
+
+	human := requireCmdOutput(t, env, "federation", "quarantine", "list")
+	assert.Contains(t, human, "no active federation quarantines")
+	agent := requireCmdOutput(t, env, "--agent", "federation", "quarantine", "list")
+	assert.Equal(t, "OK federation-quarantine-list count=0\n", agent)
+
+	_, err := runCmdOutput(t, env, "federation", "quarantine", "show", "99")
+	ce := requireCLIError(t, err, ExitNotFound)
+	assert.Equal(t, "federation_quarantine_not_found", ce.Code)
+}
+
 func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 	env, _, pid, ref := setupFederatedHubIssue(t, "status violation")
 	ctx := context.Background()

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1480,8 +1481,245 @@ func federationQuarantineCmd() *cobra.Command {
 		Use:   "quarantine",
 		Short: "manage federation quarantines",
 	}
-	cmd.AddCommand(federationQuarantineSkipCmd(), federationQuarantineRetryCmd())
+	cmd.AddCommand(
+		federationQuarantineListCmd(),
+		federationQuarantineShowCmd(),
+		federationQuarantineSkipCmd(),
+		federationQuarantineRetryCmd(),
+	)
 	return cmd
+}
+
+type federationQuarantineView struct {
+	ProjectID   int64  `json:"project_id"`
+	ProjectUID  string `json:"project_uid"`
+	ProjectName string `json:"project_name"`
+	api.FederationQuarantineSummary
+}
+
+func federationQuarantineListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "list active federation quarantines",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			body, err := loadFederationStatus(cmd.Context())
+			if err != nil {
+				return err
+			}
+			rows := federationQuarantineViews(body)
+			if flags.Quiet {
+				return nil
+			}
+			switch currentOutputMode() {
+			case outputJSON:
+				return emitJSON(cmd.OutOrStdout(), struct {
+					Quarantines []federationQuarantineView `json:"quarantines"`
+				}{Quarantines: rows})
+			case outputAgent:
+				return printFederationQuarantineListAgent(cmd, rows)
+			default:
+				return printFederationQuarantineList(cmd, rows)
+			}
+		},
+	}
+}
+
+func federationQuarantineShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show <id>",
+		Short: "show one active federation quarantine",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := parseFederationQuarantineID(args[0])
+			if err != nil {
+				return err
+			}
+			body, err := loadFederationStatus(cmd.Context())
+			if err != nil {
+				return err
+			}
+			row, err := federationQuarantineViewByID(body, id)
+			if err != nil {
+				return err
+			}
+			if flags.Quiet {
+				return nil
+			}
+			switch currentOutputMode() {
+			case outputJSON:
+				return emitJSON(cmd.OutOrStdout(), row)
+			case outputAgent:
+				return printFederationQuarantineShowAgent(cmd, row)
+			default:
+				return printFederationQuarantineShow(cmd, row)
+			}
+		},
+	}
+}
+
+func parseFederationQuarantineID(raw string) (int64, error) {
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, &cliError{
+			Message:  "quarantine id must be a positive integer",
+			Kind:     kindValidation,
+			ExitCode: ExitValidation,
+		}
+	}
+	return id, nil
+}
+
+func loadFederationStatus(ctx context.Context) (api.FederationStatusBody, error) {
+	baseURL, err := ensureDaemon(ctx)
+	if err != nil {
+		return api.FederationStatusBody{}, err
+	}
+	client, err := httpClientFor(ctx, baseURL)
+	if err != nil {
+		return api.FederationStatusBody{}, err
+	}
+	status, bs, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
+	if err != nil {
+		return api.FederationStatusBody{}, err
+	}
+	if status >= 400 {
+		return api.FederationStatusBody{}, apiErrFromBody(status, bs)
+	}
+	var body api.FederationStatusBody
+	if err := json.Unmarshal(bs, &body); err != nil {
+		return api.FederationStatusBody{}, err
+	}
+	return body, nil
+}
+
+func federationQuarantineViews(body api.FederationStatusBody) []federationQuarantineView {
+	rows := make([]federationQuarantineView, 0)
+	for _, status := range body.Statuses {
+		if flags.Project != "" && status.ProjectName != flags.Project {
+			continue
+		}
+		for _, quarantine := range status.ActiveQuarantines {
+			rows = append(rows, federationQuarantineView{
+				ProjectID:                   status.ProjectID,
+				ProjectUID:                  status.ProjectUID,
+				ProjectName:                 status.ProjectName,
+				FederationQuarantineSummary: quarantine,
+			})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].ProjectName != rows[j].ProjectName {
+			return rows[i].ProjectName < rows[j].ProjectName
+		}
+		return rows[i].ID < rows[j].ID
+	})
+	return rows
+}
+
+func federationQuarantineViewByID(body api.FederationStatusBody, id int64) (federationQuarantineView, error) {
+	for _, row := range federationQuarantineViews(body) {
+		if row.ID == id {
+			return row, nil
+		}
+	}
+	return federationQuarantineView{}, &cliError{
+		Message:  fmt.Sprintf("federation quarantine %d not found", id),
+		Code:     "federation_quarantine_not_found",
+		Kind:     kindNotFound,
+		ExitCode: ExitNotFound,
+	}
+}
+
+func printFederationQuarantineList(cmd *cobra.Command, rows []federationQuarantineView) error {
+	if len(rows) == 0 {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "no active federation quarantines")
+		return err
+	}
+	for _, row := range rows {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(),
+			"%s: quarantine #%d %s events %d-%d (%d events) at %s (%s)\n",
+			textsafe.Line(row.ProjectName),
+			row.ID,
+			textsafe.Line(row.Direction),
+			row.FirstEventID,
+			row.LastEventID,
+			len(row.EventUIDs),
+			row.CreatedAt.UTC().Format(time.RFC3339),
+			textsafe.Line(row.Error)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printFederationQuarantineListAgent(cmd *cobra.Command, rows []federationQuarantineView) error {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK federation-quarantine-list count=%d\n", len(rows)); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if err := writeAgentKVRow(cmd.OutOrStdout(),
+			agentRowField("project", row.ProjectName),
+			agentRowField("project_id", strconv.FormatInt(row.ProjectID, 10)),
+			agentRowField("quarantine_id", strconv.FormatInt(row.ID, 10)),
+			agentRowField("direction", row.Direction),
+			agentRowField("first_event", strconv.FormatInt(row.FirstEventID, 10)),
+			agentRowField("last_event", strconv.FormatInt(row.LastEventID, 10)),
+			agentRowField("event_count", strconv.Itoa(len(row.EventUIDs))),
+			agentRowField("created_at", row.CreatedAt.UTC().Format(time.RFC3339)),
+			agentRowField("error", row.Error),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printFederationQuarantineShow(cmd *cobra.Command, row federationQuarantineView) error {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\nquarantine #%d\n", textsafe.Line(row.ProjectName), row.ID); err != nil {
+		return err
+	}
+	lines := []string{
+		"direction: " + textsafe.Line(row.Direction),
+		fmt.Sprintf("events: %d-%d (%d events)", row.FirstEventID, row.LastEventID, len(row.EventUIDs)),
+		"created at: " + row.CreatedAt.UTC().Format(time.RFC3339),
+		"error: " + textsafe.Line(row.Error),
+	}
+	for _, line := range lines {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", line); err != nil {
+			return err
+		}
+	}
+	for _, uid := range row.EventUIDs {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "  event uid: %s\n", textsafe.Line(uid)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func printFederationQuarantineShowAgent(cmd *cobra.Command, row federationQuarantineView) error {
+	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK federation-quarantine-show quarantine_id=%d\n", row.ID); err != nil {
+		return err
+	}
+	if err := writeAgentKVRow(cmd.OutOrStdout(),
+		agentRowField("project", row.ProjectName),
+		agentRowField("project_id", strconv.FormatInt(row.ProjectID, 10)),
+		agentRowField("direction", row.Direction),
+		agentRowField("first_event", strconv.FormatInt(row.FirstEventID, 10)),
+		agentRowField("last_event", strconv.FormatInt(row.LastEventID, 10)),
+		agentRowField("event_count", strconv.Itoa(len(row.EventUIDs))),
+		agentRowField("created_at", row.CreatedAt.UTC().Format(time.RFC3339)),
+		agentRowField("error", row.Error),
+	); err != nil {
+		return err
+	}
+	for _, uid := range row.EventUIDs {
+		if err := writeAgentKVRow(cmd.OutOrStdout(), agentRowField("event_uid", uid)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func federationQuarantineSkipCmd() *cobra.Command {
@@ -1492,13 +1730,9 @@ func federationQuarantineSkipCmd() *cobra.Command {
 		Short: "skip a quarantined federation batch",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.ParseInt(args[0], 10, 64)
-			if err != nil || id <= 0 {
-				return &cliError{
-					Message:  "quarantine id must be a positive integer",
-					Kind:     kindValidation,
-					ExitCode: ExitValidation,
-				}
+			id, err := parseFederationQuarantineID(args[0])
+			if err != nil {
+				return err
 			}
 			expected := fmt.Sprintf("SKIP FEDERATION BATCH %d", id)
 			confirm, err := resolveConfirm(cmd, confirm, expected,
@@ -1521,16 +1755,14 @@ func federationQuarantineRetryCmd() *cobra.Command {
 		Use:   "retry <id>",
 		Short: "release a quarantined federation push batch for retry",
 		Long: "Release a quarantined push batch without advancing the push cursor.\n" +
-			"The same local events remain pending and are sent again on the next sync.",
+			"The same local events remain pending and are sent again on the next sync.\n" +
+			"Inspect active batches first with `kata federation quarantine list` and " +
+			"`kata federation quarantine show <id>`.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id, err := strconv.ParseInt(args[0], 10, 64)
-			if err != nil || id <= 0 {
-				return &cliError{
-					Message:  "quarantine id must be a positive integer",
-					Kind:     kindValidation,
-					ExitCode: ExitValidation,
-				}
+			id, err := parseFederationQuarantineID(args[0])
+			if err != nil {
+				return err
 			}
 			expected := fmt.Sprintf("RETRY FEDERATION BATCH %d", id)
 			confirm, err := resolveConfirm(cmd, confirm, expected,
@@ -1657,19 +1889,11 @@ func runFederationQuarantineRetry(ctx context.Context, cmd *cobra.Command, id in
 }
 
 func federationProjectForQuarantine(body api.FederationStatusBody, id int64) (int64, error) {
-	for _, status := range body.Statuses {
-		for _, quarantine := range status.ActiveQuarantines {
-			if quarantine.ID == id {
-				return status.ProjectID, nil
-			}
-		}
+	row, err := federationQuarantineViewByID(body, id)
+	if err != nil {
+		return 0, err
 	}
-	return 0, &cliError{
-		Message:  fmt.Sprintf("federation quarantine %d not found", id),
-		Code:     "federation_quarantine_not_found",
-		Kind:     kindNotFound,
-		ExitCode: ExitNotFound,
-	}
+	return row.ProjectID, nil
 }
 
 func printFederationStatus(cmd *cobra.Command, body api.FederationStatusBody) error {
