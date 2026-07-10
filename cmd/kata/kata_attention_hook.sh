@@ -59,50 +59,79 @@ start)
   ;;
 claim)
   cmd="$(jq -r '.tool_input.command // empty' <<<"$input")"
-  # Match `kata claim <ref>` only in command position (line start or after a
+  # Match `kata claim ...` only in command position (line start or after a
   # separator), not the string merely appearing inside echoed/quoted text.
-  # Bash ERE, not `grep -P` — BSD grep on macOS has no -P. The ref's first
-  # character must be alphanumeric so a crafted token can't reach kata as a
-  # flag.
-  claim_re='(^|[;&|(])[[:space:]]*kata[[:space:]]+claim[[:space:]]+(--[^[:space:]]+[[:space:]]+)*([A-Za-z0-9][A-Za-z0-9#_-]*)'
-  ref=""
+  # Bash ERE, not `grep -P` — BSD grep on macOS has no -P. Capture the whole
+  # argument segment: the ref may sit before or after flags, including
+  # value-bearing ones (`kata claim --as agent-a abc4`).
+  seg=""
+  claim_re='(^|[;&|(])[[:space:]]*kata[[:space:]]+claim[[:space:]]+([^;&|)]+)'
   while IFS= read -r line; do
     if [[ "$line" =~ $claim_re ]]; then
-      ref="${BASH_REMATCH[3]}"
+      seg="${BASH_REMATCH[2]}"
       break
     fi
   done <<<"$cmd"
-  [[ -n "$ref" ]] || exit 0
-  # The command text alone doesn't prove the claim executed or succeeded
-  # (failed claims, unexecuted conditionals). Verify it took: the issue must
-  # be open and owned by this session's actor — flooring attention on
-  # someone else's issue is the harmful false positive. One `kata show`
-  # serves both checks.
-  info="$(kata show "$ref" --format json 2>/dev/null)"
-  status="$(issue_status "$info")"
-  [[ -n "$status" && "$status" != "closed" ]] || exit 0
+  [[ -n "$seg" ]] || exit 0
+  # The command text alone doesn't prove the claim executed, succeeded, or
+  # even which token was the ref (a flag's value looks the same). The daemon
+  # is the oracle for both problems: try each plausible token and record the
+  # first one that is an open issue owned by this session's actor — flooring
+  # attention on someone else's issue is the harmful false positive. Tokens
+  # must start alphanumeric, which also keeps a crafted dash-leading token
+  # from ever reaching kata as a flag.
   actor="$(kata whoami --format json 2>/dev/null | jq -r '.actor // empty')"
-  owner="$(jq -r '.issue.owner // empty' <<<"$info")"
-  [[ -n "$actor" && "$owner" == "$actor" ]] || exit 0
-  remember_ref "$ref"
+  [[ -n "$actor" ]] || exit 0
+  token_re='^[A-Za-z0-9][A-Za-z0-9#_-]*$'
+  read -ra tokens <<<"$seg"
+  tried=0
+  for tok in "${tokens[@]}"; do
+    tok="${tok#[\"\']}"
+    tok="${tok%[\"\']}"
+    [[ "$tok" =~ $token_re ]] || continue
+    ((tried++ >= 4)) && break # bound the daemon probes on noisy segments
+    info="$(kata show "$tok" --format json 2>/dev/null)"
+    status="$(issue_status "$info")"
+    [[ -n "$status" && "$status" != "closed" ]] || continue
+    owner="$(jq -r '.issue.owner // empty' <<<"$info")"
+    [[ "$owner" == "$actor" ]] || continue
+    remember_ref "$tok"
+    break
+  done
   ;;
 stop)
   [[ -f "$state_file" ]] || exit 0
+  # Refs whose daemon calls fail mid-sweep are carried over so a later
+  # stop/idle firing can retry; dropping them with the state file would
+  # leave a stale ok in place for good. Refs that resolve (closed, already
+  # escalated, or escalated now) are dropped.
+  remaining=()
   while IFS= read -r ref; do
     [[ -n "$ref" ]] || continue
-    status="$(issue_status "$(kata show "$ref" --format json 2>/dev/null)")"
+    if ! info="$(kata show "$ref" --format json 2>/dev/null)" || [[ -z "$info" ]]; then
+      remaining+=("$ref") # daemon unreachable or transient failure: retry
+      continue
+    fi
+    status="$(issue_status "$info")"
     [[ -n "$status" && "$status" != "closed" ]] || continue # attention on closed issues is meaningless
     current="$(kata meta get "$ref" work.attention --format json 2>/dev/null | jq -r '.value // empty')"
     if [[ "$current" == "ok" ]]; then
       # The session ended while the issue still claimed to be fine: the
       # agent never handed off, so raise the flag a coordinator can see.
-      kata meta set "$ref" work.attention needs-human >/dev/null 2>&1 || true
+      if ! kata meta set "$ref" work.attention needs-human >/dev/null 2>&1; then
+        remaining+=("$ref")
+        continue
+      fi
       kata meta set "$ref" work.attention_msg "session ended without hand-off" >/dev/null 2>&1 || true
     fi
   done <"$state_file"
-  # The sweep is terminal for the session; drop its state rather than
-  # accumulating orphaned files.
-  rm -f "$state_file"
+  if ((${#remaining[@]} > 0)); then
+    printf '%s\n' "${remaining[@]}" >"$state_file"
+  else
+    # The sweep fully resolved; drop the session state rather than
+    # accumulating orphaned files.
+    rm -f "$state_file"
+  fi
   ;;
 esac
 exit 0
