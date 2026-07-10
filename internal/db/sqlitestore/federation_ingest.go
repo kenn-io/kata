@@ -988,7 +988,11 @@ func validateFederationProjectEvent(
 	if err != nil {
 		return err
 	}
-	for _, ref := range payloadReferencedIssueUIDs(ev, payload) {
+	referencedIssueUIDs, err := payloadReferencedIssueUIDs(ev, payload)
+	if err != nil {
+		return err
+	}
+	for _, ref := range referencedIssueUIDs {
 		if ref == issueUID {
 			continue
 		}
@@ -1039,7 +1043,7 @@ func payloadIssueUID(ev db.RemoteEvent, payload map[string]json.RawMessage) (str
 	return payloadUID, nil
 }
 
-func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]json.RawMessage) []string {
+func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]json.RawMessage) ([]string, error) {
 	var refs []string
 	if ev.RelatedIssueUID != nil && *ev.RelatedIssueUID != "" {
 		refs = append(refs, *ev.RelatedIssueUID)
@@ -1059,8 +1063,16 @@ func payloadReferencedIssueUIDs(ev db.RemoteEvent, payload map[string]json.RawMe
 	} {
 		refs = append(refs, db.StringSlice(payload[key])...)
 	}
-	refs = append(refs, payloadLinkIssueUIDs(ev)...)
-	return refs
+	links, err := payloadLinks(ev)
+	if err != nil {
+		return nil, fmt.Errorf("%w: decode links: %v", db.ErrFederationIngestValidation, err)
+	}
+	for _, link := range links {
+		if link.ToIssueUID != "" {
+			refs = append(refs, link.ToIssueUID)
+		}
+	}
+	return refs, nil
 }
 
 func payloadDeferredLinkIssueUIDs(
@@ -1076,7 +1088,11 @@ func payloadDeferredLinkIssueUIDs(
 	}
 	switch ev.Type {
 	case "issue.created", "issue.snapshot":
-		for _, link := range payloadLinks(ev) {
+		links, err := payloadLinks(ev)
+		if err != nil {
+			return nil, fmt.Errorf("%w: decode links: %v", db.ErrFederationIngestValidation, err)
+		}
+		for _, link := range links {
 			if err := validateFederationLinkType(link.Type); err != nil {
 				return nil, fmt.Errorf("links: %w", err)
 			}
@@ -1196,22 +1212,14 @@ type payloadLink struct {
 	Incoming   bool   `json:"incoming"`
 }
 
-func payloadLinks(ev db.RemoteEvent) []payloadLink {
+func payloadLinks(ev db.RemoteEvent) ([]payloadLink, error) {
 	var created struct {
 		Links []payloadLink `json:"links"`
 	}
-	_ = json.Unmarshal(ev.Payload, &created)
-	return created.Links
-}
-
-func payloadLinkIssueUIDs(ev db.RemoteEvent) []string {
-	var refs []string
-	for _, link := range payloadLinks(ev) {
-		if link.ToIssueUID != "" {
-			refs = append(refs, link.ToIssueUID)
-		}
+	if err := json.Unmarshal(ev.Payload, &created); err != nil {
+		return nil, err
 	}
-	return refs
+	return created.Links, nil
 }
 
 func currentFederatedIssueUIDSet(ctx context.Context, tx *sql.Tx, projectID int64) (map[string]struct{}, error) {

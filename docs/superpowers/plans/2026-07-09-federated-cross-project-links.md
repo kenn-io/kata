@@ -806,3 +806,53 @@ Run the shuffled SQLite store suite, shuffled repository suite, lint, API,
 documentation, workflow, and diff checks. Commit without rewriting history,
 push, and run a fresh full branch review. Do not reply to or resolve the GitHub
 review comment without explicit user instruction.
+
+---
+
+### Task 7: Reject Malformed Link JSON and Invalid Deferred Parent Graphs
+
+**Files:**
+- Modify: `internal/db/sqlitestore/claims.go:1210-1260`
+- Modify: `internal/db/sqlitestore/federation.go:1880-2020`
+- Modify: `internal/db/sqlitestore/federation_ingest.go:980-1220`
+- Test: `internal/db/sqlitestore/federation_test.go`
+
+**Interfaces:**
+- Consumes: decoded snapshot/create link payloads, folded desired link rows,
+  `db.MaxParentDepth`, and `db.ErrParentCycle`.
+- Produces: decode errors classified as federation ingest validation and parent
+  graph validation before any reconciliation write.
+
+- [ ] **Step 1: Add malformed link JSON regressions**
+
+Submit fresh snapshots whose `links` value is an object instead of an array and
+whose `incoming` field is a string instead of a boolean. Both must return
+`db.ErrFederationIngestValidation` and store no event. Verify they fail because
+the current decoder silently returns an empty or partially decoded link set.
+
+- [ ] **Step 2: Propagate link decoding errors**
+
+Change `payloadLinks` to return `([]payloadLink, error)`. Propagate decoding
+failures through referenced-UID collection, deferred-peer classification, and
+claim-audit reference extraction. Wrap the JSON error with
+`db.ErrFederationIngestValidation` at the ingest boundary.
+
+- [ ] **Step 3: Add a deferred cross-project parent-cycle regression**
+
+Store `first parent second` while `second` is unresolved, then ingest `second`
+with `second parent first` through another enabled project in the same group.
+The second batch must return `db.ErrFederationIngestValidation`, roll back, and
+leave zero materialized parent links.
+
+- [ ] **Step 4: Validate the folded parent graph before writes**
+
+Build a child-to-parent map from desired `parent` rows. Reject multiple parents,
+revisiting any node, or a chain that reaches `db.MaxParentDepth`. Perform this
+check after endpoint resolution and before deleting, updating, or inserting
+links so a failed federation batch remains atomic.
+
+- [ ] **Step 5: Verify, commit, and re-review**
+
+Run the complete shuffled verification set, commit without history rewriting,
+push, and require a fresh full-branch review to pass. Leave existing GitHub
+comments and review state untouched.

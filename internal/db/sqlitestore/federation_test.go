@@ -2018,6 +2018,36 @@ func TestIngestFederationEventsConvergesCircularCrossProjectLinks(t *testing.T) 
 		firstIssueUID, secondIssueUID)
 }
 
+func TestIngestFederationEventsRejectsDeferredCrossProjectParentCycle(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	firstProject := createProject(ctx, t, d, "spoke-project")
+	secondProject := createProject(ctx, t, d, "peer-project")
+	_, err := d.EnableProjectFederation(ctx, firstProject.ID, "tester")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, secondProject.ID, "tester")
+	require.NoError(t, err)
+
+	spokeUID := newTestUID(t)
+	firstIssueUID := newTestUID(t)
+	secondIssueUID := newTestUID(t)
+	first := ingestEventWithPayload(t, firstProject.UID, firstProject.Name, spokeUID,
+		&firstIssueUID, nil, "issue.created", 100,
+		`{"uid":"`+firstIssueUID+`","short_id":"`+shortID(firstIssueUID)+`","title":"first","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"parent","to_issue_uid":"`+secondIssueUID+`","author":"spoke"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(firstProject.ID, spokeUID, first))
+	require.NoError(t, err)
+
+	second := ingestEventWithPayload(t, secondProject.UID, secondProject.Name, spokeUID,
+		&secondIssueUID, nil, "issue.created", 101,
+		`{"uid":"`+secondIssueUID+`","short_id":"`+shortID(secondIssueUID)+`","title":"second","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"parent","to_issue_uid":"`+firstIssueUID+`","author":"spoke"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(secondProject.ID, spokeUID, second))
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+	assertRowCount(ctx, t, d, 0, "invalid parent cycle is not materialized",
+		`SELECT count(*) FROM links WHERE type = 'parent'`)
+}
+
 func TestEnableProjectFederationReconcilesDeferredGroupLinks(t *testing.T) {
 	d := openTestDB(t)
 	ctx := context.Background()
@@ -3775,6 +3805,39 @@ func TestIngestFederationEvents_Validation(t *testing.T) {
 		assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		assertIngestedEventCount(ctx, t, d, p.ID, 1)
 	})
+
+	for _, tc := range []struct {
+		name  string
+		links string
+	}{
+		{
+			name:  "rejects malformed snapshot links container",
+			links: `{}`,
+		},
+		{
+			name:  "rejects malformed snapshot link field",
+			links: `[{"type":"blocks","to_issue_uid":"%s","incoming":"yes"}]`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, ctx, p, spokeUID := setupFederationIngestHub(t)
+			issueUID := newTestUID(t)
+			peerUID := newTestUID(t)
+			links := tc.links
+			if strings.Contains(links, "%s") {
+				links = fmt.Sprintf(links, peerUID)
+			}
+			snapshot := ingestEventWithPayload(t, p.UID, p.Name, spokeUID, &issueUID, nil,
+				"issue.snapshot", 100,
+				`{"uid":"`+issueUID+`","short_id":"`+shortID(issueUID)+`","title":"subject","body":"","author":"spoke","status":"open","metadata":{},"links":`+links+`,"created_at":"2026-05-23T12:00:00.000Z"}`)
+
+			_, err := d.IngestFederationEvents(ctx, ingestParams(p.ID, spokeUID, snapshot))
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, db.ErrFederationIngestValidation)
+			assertIngestedEventCount(ctx, t, d, p.ID, 0)
+		})
+	}
 
 	for _, tc := range []struct {
 		name     string

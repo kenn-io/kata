@@ -1241,7 +1241,11 @@ func federationIngestClaimAuditIssueUIDs(ev db.RemoteEvent) ([]federationIngestC
 		add(federationIngestClaimAuditIssue{UID: issueUID, RequireClaim: true})
 	}
 	if ev.Type == "issue.created" || ev.Type == "issue.snapshot" || claimWorkMutationRequiresPeerClaim(ev.Type) {
-		for _, ref := range payloadReferencedIssueUIDs(ev, payload) {
+		refs, err := payloadReferencedIssueUIDs(ev, payload)
+		if err != nil {
+			return nil, err
+		}
+		for _, ref := range refs {
 			add(federationIngestClaimAuditIssue{
 				UID:          ref,
 				RequireClaim: true,

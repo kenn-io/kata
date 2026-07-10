@@ -1964,6 +1964,9 @@ func reconcileFederatedLinkGroup(
 		}
 		desired[row.key()] = row
 	}
+	if err := validateFederatedParentGraph(desired); err != nil {
+		return err
+	}
 	for key, row := range existing {
 		if _, ok := desired[key]; ok {
 			continue
@@ -1992,6 +1995,39 @@ func reconcileFederatedLinkGroup(
 			VALUES(?, ?, ?, ?, ?, ?)`,
 			row.fromID, row.toID, row.fromUID, row.toUID, row.typ, nonEmptyAuthor(row.author)); err != nil {
 			return fmt.Errorf("insert federated link %s %s->%s: %w", key.Type, key.FromUID, key.ToUID, err)
+		}
+	}
+	return nil
+}
+
+func validateFederatedParentGraph(desired map[db.FoldLinkKey]federatedLinkRow) error {
+	parents := map[string]string{}
+	for key := range desired {
+		if key.Type != "parent" {
+			continue
+		}
+		if existing, ok := parents[key.FromUID]; ok && existing != key.ToUID {
+			return fmt.Errorf("%w: issue %s has multiple parents", db.ErrFederationIngestValidation, key.FromUID)
+		}
+		parents[key.FromUID] = key.ToUID
+	}
+	for childUID := range parents {
+		current := childUID
+		seen := map[string]struct{}{}
+		for depth := 0; depth < db.MaxParentDepth; depth++ {
+			if _, ok := seen[current]; ok {
+				return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrParentCycle)
+			}
+			seen[current] = struct{}{}
+			parentUID, ok := parents[current]
+			if !ok {
+				break
+			}
+			current = parentUID
+			if depth == db.MaxParentDepth-1 {
+				return fmt.Errorf("%w: parent chain exceeds depth limit %d",
+					db.ErrFederationIngestValidation, db.MaxParentDepth)
+			}
 		}
 	}
 	return nil
