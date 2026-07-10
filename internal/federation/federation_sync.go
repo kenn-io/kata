@@ -96,7 +96,14 @@ func SyncFederationOnceWithPulledEvents(
 	if binding.PushEnabled {
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
-				if retry, reason := autoRetryFederationQuarantine(q); retry {
+				quarantinedEvents, eventErr := store.EventsByUIDs(ctx, binding.ProjectID, q.EventUIDs)
+				if eventErr != nil {
+					if errors.Is(eventErr, db.ErrNotFound) {
+						return recordFederationSyncError(ctx, store, binding.ProjectID, ErrFederationPushQuarantined)
+					}
+					return recordFederationSyncError(ctx, store, binding.ProjectID, eventErr)
+				}
+				if retry, reason := autoRetryFederationQuarantine(q, quarantinedEvents); retry {
 					if _, err := store.RetryFederationQuarantine(ctx, db.RetryFederationQuarantineParams{
 						ID:        q.ID,
 						ProjectID: binding.ProjectID,
@@ -495,10 +502,10 @@ func federationHubErrorCode(body string) string {
 }
 
 var formerPeerReferenceQuarantine = regexp.MustCompile(
-	`^federation ingest validation: event [0-9A-HJKMNP-TV-Z]{26} references unknown issue [0-9A-HJKMNP-TV-Z]{26}$`,
+	`^federation ingest validation: event ([0-9A-HJKMNP-TV-Z]{26}) references unknown issue ([0-9A-HJKMNP-TV-Z]{26})$`,
 )
 
-func autoRetryFederationQuarantine(q db.FederationQuarantine) (bool, string) {
+func autoRetryFederationQuarantine(q db.FederationQuarantine, events []db.Event) (bool, string) {
 	if q.Direction != db.FederationQuarantineDirectionPush {
 		return false, ""
 	}
@@ -506,10 +513,111 @@ func autoRetryFederationQuarantine(q db.FederationQuarantine) (bool, string) {
 		return true, "auto-retry after transient schema skew"
 	}
 	hubError, ok := federationQuarantineHubError(q.Error)
-	if ok && hubError.Code == "validation" && formerPeerReferenceQuarantine.MatchString(hubError.Message) {
-		return true, "auto-retry after deferred link peer fix"
+	if !ok || hubError.Code != "validation" {
+		return false, ""
+	}
+	match := formerPeerReferenceQuarantine.FindStringSubmatch(hubError.Message)
+	if len(match) != 3 {
+		return false, ""
+	}
+	for _, event := range events {
+		if event.UID == match[1] && federationQuarantineEventDefersLinkPeer(event, match[2]) {
+			return true, "auto-retry after deferred link peer fix"
+		}
 	}
 	return false, ""
+}
+
+func federationQuarantineEventDefersLinkPeer(event db.Event, peerUID string) bool {
+	if event.IssueUID == nil || *event.IssueUID == "" || *event.IssueUID == peerUID {
+		return false
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+		return false
+	}
+	supportedType := func(linkType string) bool {
+		return linkType == "parent" || linkType == "blocks" || linkType == "related"
+	}
+	switch event.Type {
+	case "issue.created", "issue.snapshot":
+		var links []struct {
+			Type       string `json:"type"`
+			ToIssueUID string `json:"to_issue_uid"`
+			Incoming   bool   `json:"incoming"`
+		}
+		if err := json.Unmarshal(payload["links"], &links); err != nil {
+			return false
+		}
+		for _, link := range links {
+			if supportedType(link.Type) && link.ToIssueUID == peerUID &&
+				(event.Type != "issue.created" || link.Type != "parent" || !link.Incoming) {
+				return true
+			}
+		}
+	case "issue.linked", "issue.unlinked":
+		fromUID, fromOK := federationQuarantinePayloadString(payload, "from_uid", "from_issue_uid")
+		toUID, toOK := federationQuarantinePayloadString(payload, "to_uid", "to_issue_uid")
+		linkType, typeOK := db.StringValue(payload["type"])
+		if !fromOK || !toOK || !typeOK || !supportedType(linkType) {
+			return false
+		}
+		var eventPeer string
+		switch *event.IssueUID {
+		case fromUID:
+			eventPeer = toUID
+		case toUID:
+			eventPeer = fromUID
+		default:
+			return false
+		}
+		if eventPeer != peerUID || (event.RelatedIssueUID != nil && *event.RelatedIssueUID != peerUID) {
+			return false
+		}
+		if event.Type == "issue.unlinked" && (linkType == "parent" || linkType == "blocks") {
+			linkFromUID, linkFromOK := db.StringValue(payload["link_from_uid"])
+			linkToUID, linkToOK := db.StringValue(payload["link_to_uid"])
+			matchesEndpoints := (linkFromUID == fromUID && linkToUID == toUID) ||
+				(linkFromUID == toUID && linkToUID == fromUID)
+			if !linkFromOK || !linkToOK || !matchesEndpoints {
+				return false
+			}
+		}
+		return true
+	case "issue.links_changed":
+		found := false
+		for _, key := range []string{"parent_set_uid", "parent_removed_uid"} {
+			if value, ok := db.StringValue(payload[key]); ok && value == peerUID {
+				found = true
+			}
+		}
+		for _, key := range []string{
+			"blocks_added_uids", "blocks_removed_uids",
+			"blocked_by_added_uids", "blocked_by_removed_uids",
+			"related_added_uids", "related_removed_uids",
+		} {
+			if raw, ok := payload[key]; ok {
+				var uids []string
+				if err := json.Unmarshal(raw, &uids); err != nil {
+					return false
+				}
+				for _, uid := range uids {
+					found = found || uid == peerUID
+				}
+			}
+		}
+		return found && (event.RelatedIssueUID == nil || *event.RelatedIssueUID == peerUID)
+	}
+	return false
+}
+
+func federationQuarantinePayloadString(payload map[string]json.RawMessage, keys ...string) (string, bool) {
+	for _, key := range keys {
+		if value, ok := db.StringValue(payload[key]); ok {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 func federationQuarantineHubError(raw string) (api.ErrorBody, bool) {

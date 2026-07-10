@@ -911,21 +911,45 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 		Enabled:              true,
 	})
 	require.NoError(t, err)
-	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+	localIssue, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "pending local",
 		Author:    "tester",
+	})
+	require.NoError(t, err)
+	peerProject, err := spoke.DB.CreateProject(ctx, "peer-project")
+	require.NoError(t, err)
+	peerIssue, _, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: peerProject.ID,
+		Title:     "pending peer",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, linkEvent, err := spoke.DB.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+		FromIssueID: localIssue.ID,
+		ToIssueID:   peerIssue.ID,
+		Type:        "blocks",
+		Author:      "tester",
+	}, db.LinkEventParams{
+		EventType:    "issue.linked",
+		EventIssueID: localIssue.ID,
+		FromShortID:  localIssue.ShortID,
+		FromUID:      localIssue.UID,
+		ToShortID:    peerIssue.ShortID,
+		ToUID:        peerIssue.UID,
+		Actor:        "tester",
 	})
 	require.NoError(t, err)
 	_, err = spoke.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
 		ProjectID:    project.ID,
 		Direction:    db.FederationQuarantineDirectionPush,
 		FirstEventID: localEvent.ID,
-		LastEventID:  localEvent.ID,
-		EventUIDs:    []string{localEvent.UID},
+		LastEventID:  linkEvent.ID,
+		EventUIDs:    []string{localEvent.UID, linkEvent.UID},
 		Error: `hub /api/v1/projects/42/federation/events:ingest returned 400: ` +
 			`{"status":400,"error":{"code":"validation","message":` +
-			`"federation ingest validation: event 01HZNQ7VFPK1XGD8R5MABCD4EA references unknown issue 01HZNQ7VFPK1XGD8R5MABCD4EB"}}`,
+			`"federation ingest validation: event ` + linkEvent.UID +
+			` references unknown issue ` + peerIssue.UID + `"}}`,
 		CreatedAt: time.Now().UTC(),
 	})
 	require.NoError(t, err)
@@ -936,11 +960,12 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 			ingestRequests++
 			var body api.FederationIngestEventsRequestBody
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			require.Len(t, body.Events, 1)
+			require.Len(t, body.Events, 2)
 			assert.Equal(t, localEvent.ID, body.Events[0].EventID)
+			assert.Equal(t, linkEvent.ID, body.Events[1].EventID)
 			require.NoError(t, json.NewEncoder(w).Encode(api.FederationIngestEventsBody{
-				Accepted:          1,
-				PushCursorEventID: localEvent.ID,
+				Accepted:          2,
+				PushCursorEventID: linkEvent.ID,
 			}))
 		case "/api/v1/projects/42/federation/events":
 			require.NoError(t, json.NewEncoder(w).Encode(api.PollEventsBody{NextAfterID: 49}))
@@ -960,7 +985,7 @@ func TestSyncFederationOnceAutoRetriesFormerPeerReferenceQuarantine(t *testing.T
 	assert.Equal(t, 1, ingestRequests)
 	binding, err = spoke.DB.FederationBindingByProject(ctx, project.ID)
 	require.NoError(t, err)
-	assert.Equal(t, localEvent.ID, binding.PushCursorEventID)
+	assert.Equal(t, linkEvent.ID, binding.PushCursorEventID)
 	_, err = spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	var skipReason string
@@ -993,11 +1018,71 @@ func TestAutoRetryFederationQuarantineRequiresExactFormerPeerMessage(t *testing.
 			Direction: db.FederationQuarantineDirectionPush,
 			Error: "hub /api/v1/projects/42/federation/events:ingest returned 400: " +
 				string(body),
-		})
+		}, nil)
 
 		assert.False(t, retry)
 		assert.Empty(t, reason)
 	}
+}
+
+func TestSyncFederationOnceNonLinkSecondaryReferenceQuarantineStillStopsBeforeNetwork(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	binding, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://127.0.0.1:1",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 50,
+		PullCursorEventID:    49,
+		PushEnabled:          true,
+		Actor:                "tester",
+		PushCursorEventID:    0,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	_, localEvent, err := spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "pending local",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	unknownPeerUID := "01HZNQ7VFPK1XGD8R5MABCD4EB"
+	_, err = spoke.DB.ExecContext(ctx,
+		`UPDATE events SET related_issue_uid = ? WHERE id = ?`, unknownPeerUID, localEvent.ID)
+	require.NoError(t, err)
+	_, err = spoke.DB.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+		ProjectID:    project.ID,
+		Direction:    db.FederationQuarantineDirectionPush,
+		FirstEventID: localEvent.ID,
+		LastEventID:  localEvent.ID,
+		EventUIDs:    []string{localEvent.UID},
+		Error: `hub /api/v1/projects/42/federation/events:ingest returned 400: ` +
+			`{"status":400,"error":{"code":"validation","message":"federation ingest validation: event ` +
+			localEvent.UID + ` references unknown issue ` + unknownPeerUID + `"}}`,
+		CreatedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	requests := 0
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(hub.Close)
+
+	err = SyncFederationOnce(ctx, spoke.DB, binding, config.FederationCredential{
+		HubURL:       hub.URL,
+		HubProjectID: 42,
+		Token:        "token",
+	})
+
+	require.ErrorIs(t, err, ErrFederationPushQuarantined)
+	assert.Equal(t, 0, requests)
+	_, err = spoke.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
+	require.NoError(t, err)
 }
 
 func TestSyncFederationOnceUnknownPrimaryQuarantineStillStopsBeforeNetwork(t *testing.T) {
@@ -1273,6 +1358,9 @@ func TestFederationMultiProjectEnrollmentSyncMatrix(t *testing.T) {
 				}
 				if tc.eagerSync {
 					syncEligible()
+					if tc.peerSyncsFirst && project == peer && !first.enrolled && linked {
+						matrixAssertLinkCount(t, spoke.DB, first.issue.UID, peer.issue.UID, 1)
+					}
 				}
 			}
 			require.True(t, linked)
