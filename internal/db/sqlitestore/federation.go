@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -1024,7 +1026,7 @@ func (d *Store) materializeFederatedProjectTx(ctx context.Context, tx *sql.Tx, p
 	if err := reconcileFederatedLabels(ctx, tx, projectID, issueIDs, projection); err != nil {
 		return err
 	}
-	if err := reconcileFederatedLinks(ctx, tx, projectID, issueIDs, projection); err != nil {
+	if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs); err != nil {
 		return err
 	}
 	if err := pruneFederatedIssues(ctx, tx, projectID, issueIDs); err != nil {
@@ -1847,8 +1849,26 @@ func (r federatedLinkRow) key() db.FoldLinkKey {
 	return db.FoldLinkKey{FromUID: r.fromUID, ToUID: r.toUID, Type: r.typ}
 }
 
-func reconcileFederatedLinks(ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection) error {
-	existing, err := federatedLinkRows(ctx, tx, projectID)
+func reconcileFederatedLinks(
+	ctx context.Context,
+	tx *sql.Tx,
+	binding db.FederationBinding,
+	currentProjectID int64,
+	currentIssueIDs map[string]int64,
+) error {
+	projectIDs, err := federationBindingGroupProjectIDs(ctx, tx, binding)
+	if err != nil {
+		return err
+	}
+	projection, err := federationGroupFoldProjection(ctx, tx, projectIDs)
+	if err != nil {
+		return err
+	}
+	issueIDs, err := federationGroupIssueIDs(ctx, tx, projectIDs, currentProjectID, currentIssueIDs)
+	if err != nil {
+		return err
+	}
+	existing, err := federatedLinkRows(ctx, tx, projectIDs)
 	if err != nil {
 		return err
 	}
@@ -1926,17 +1946,153 @@ func reconcileFederatedLinks(ctx context.Context, tx *sql.Tx, projectID int64, i
 	return nil
 }
 
-// federatedLinkRows returns the existing mirror links for a federated
-// project. Storage v16 dropped links.project_id, so the project scope now
-// comes from the endpoints: a federated mirror links two issues materialized
-// into the same shadow project, so both endpoints sit in projectID.
-func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectID int64) (map[db.FoldLinkKey]federatedLinkRow, error) {
+func normalizedFederationHubOrigin(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
+		return "", fmt.Errorf("invalid federation hub URL %q", raw)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	port := parsed.Port()
+	switch scheme {
+	case "http":
+		if port == "" {
+			port = "80"
+		}
+	case "https":
+		if port == "" {
+			port = "443"
+		}
+	default:
+		return "", fmt.Errorf("invalid federation hub URL %q: unsupported scheme %q", raw, parsed.Scheme)
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(parsed.Hostname()), port), nil
+}
+
+func federationBindingGroupProjectIDs(
+	ctx context.Context,
+	tx *sql.Tx,
+	current db.FederationBinding,
+) ([]int64, error) {
+	switch current.Role {
+	case db.FederationRoleHub:
+	case db.FederationRoleSpoke:
+	default:
+		return nil, fmt.Errorf("unsupported federation group role %q", current.Role)
+	}
+	currentOrigin := ""
+	if current.Role == db.FederationRoleSpoke {
+		var err error
+		currentOrigin, err = normalizedFederationHubOrigin(current.HubURL)
+		if err != nil {
+			return nil, err
+		}
+	}
+	rows, err := tx.QueryContext(ctx,
+		federationBindingSelect+` WHERE role = ? AND enabled = 1 ORDER BY project_id ASC`,
+		string(current.Role))
+	if err != nil {
+		return nil, fmt.Errorf("list federation group bindings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var projectIDs []int64
+	for rows.Next() {
+		candidate, err := scanFederationBinding(rows)
+		if err != nil {
+			return nil, err
+		}
+		if current.Role == db.FederationRoleSpoke {
+			candidateOrigin, err := normalizedFederationHubOrigin(candidate.HubURL)
+			if err != nil {
+				if candidate.ProjectID == current.ProjectID {
+					return nil, err
+				}
+				continue
+			}
+			if candidateOrigin != currentOrigin {
+				continue
+			}
+		}
+		projectIDs = append(projectIDs, candidate.ProjectID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate federation group bindings: %w", err)
+	}
+	return projectIDs, nil
+}
+
+func federationGroupFoldProjection(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectIDs []int64,
+) (db.FoldProjection, error) {
+	var events []db.FoldEvent
+	for _, projectID := range projectIDs {
+		projectEvents, err := federationFoldEvents(ctx, tx, projectID)
+		if err != nil {
+			return db.FoldProjection{}, err
+		}
+		events = append(events, projectEvents...)
+	}
+	return db.FoldEvents(events), nil
+}
+
+func federationGroupIssueIDs(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectIDs []int64,
+	currentProjectID int64,
+	currentIssueIDs map[string]int64,
+) (map[string]int64, error) {
+	placeholders, args := projectIDPlaceholders(projectIDs)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT uid, id, project_id
+		  FROM issues
+		 WHERE project_id IN (`+placeholders+`)
+		 ORDER BY project_id, id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list federation group issues: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int64{}
+	for rows.Next() {
+		var (
+			uid       string
+			issueID   int64
+			projectID int64
+		)
+		if err := rows.Scan(&uid, &issueID, &projectID); err != nil {
+			return nil, fmt.Errorf("scan federation group issue: %w", err)
+		}
+		if projectID == currentProjectID {
+			currentIssueID, ok := currentIssueIDs[uid]
+			if ok {
+				out[uid] = currentIssueID
+			}
+			continue
+		}
+		out[uid] = issueID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate federation group issues: %w", err)
+	}
+	return out, nil
+}
+
+// federatedLinkRows returns every existing link touching a federation group.
+// Group reconciliation owns both insertion and deletion so one member cannot
+// remove an edge represented by another member's event stream.
+func federatedLinkRows(ctx context.Context, tx *sql.Tx, projectIDs []int64) (map[db.FoldLinkKey]federatedLinkRow, error) {
+	placeholders, args := projectIDPlaceholders(projectIDs)
+	queryArgs := make([]any, 0, len(args)*2)
+	queryArgs = append(queryArgs, args...)
+	queryArgs = append(queryArgs, args...)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.id, l.from_issue_id, l.to_issue_id, l.from_issue_uid, l.to_issue_uid, l.type, l.author
 		  FROM links l
 		  JOIN issues f ON f.id = l.from_issue_id
 		  JOIN issues t ON t.id = l.to_issue_id
-		 WHERE f.project_id = ? AND t.project_id = ?`, projectID, projectID)
+		 WHERE f.project_id IN (`+placeholders+`)
+		    OR t.project_id IN (`+placeholders+`)`, queryArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated links: %w", err)
 	}

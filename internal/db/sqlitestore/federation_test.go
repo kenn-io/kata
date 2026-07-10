@@ -1875,6 +1875,56 @@ func TestIngestFederationEventsDefersUnknownLinkPeer(t *testing.T) {
 	assert.Empty(t, links, "the peer is unresolved, so the edge must stay absent")
 }
 
+func TestIngestFederationEventsConvergesCircularCrossProjectLinks(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	firstProject := createProject(ctx, t, d, "spoke-project")
+	secondProject := createProject(ctx, t, d, "peer-project")
+	_, err := d.EnableProjectFederation(ctx, firstProject.ID, "tester")
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, secondProject.ID, "tester")
+	require.NoError(t, err)
+
+	spokeUID := newTestUID(t)
+	firstIssueUID := newTestUID(t)
+	secondIssueUID := newTestUID(t)
+	first := ingestEventWithPayload(t, firstProject.UID, firstProject.Name, spokeUID,
+		&firstIssueUID, nil, "issue.created", 100,
+		`{"uid":"`+firstIssueUID+`","short_id":"`+shortID(firstIssueUID)+`","title":"first","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+secondIssueUID+`","author":"spoke"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+	firstResult, err := d.IngestFederationEvents(ctx, ingestParams(firstProject.ID, spokeUID, first))
+	require.NoError(t, err)
+	assert.Equal(t, 1, firstResult.Accepted)
+	assertRowCount(ctx, t, d, 0, "link waits for peer issue",
+		`SELECT count(*) FROM links
+		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		firstIssueUID, secondIssueUID)
+
+	second := ingestEventWithPayload(t, secondProject.UID, secondProject.Name, spokeUID,
+		&secondIssueUID, nil, "issue.created", 101,
+		`{"uid":"`+secondIssueUID+`","short_id":"`+shortID(secondIssueUID)+`","title":"second","body":"","author":"spoke","status":"open","metadata":{},"links":[{"type":"blocks","to_issue_uid":"`+firstIssueUID+`","incoming":true,"author":"spoke"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+	secondResult, err := d.IngestFederationEvents(ctx, ingestParams(secondProject.ID, spokeUID, second))
+	require.NoError(t, err)
+	assert.Equal(t, 1, secondResult.Accepted)
+	assertRowCount(ctx, t, d, 1, "deferred cross-project link materialized",
+		`SELECT count(*) FROM links
+		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		firstIssueUID, secondIssueUID)
+
+	unlink := ingestEventWithPayload(t, firstProject.UID, firstProject.Name, spokeUID,
+		&firstIssueUID, &secondIssueUID, "issue.unlinked", 102,
+		`{"issue_uid":"`+firstIssueUID+`","from_uid":"`+firstIssueUID+`","to_uid":"`+secondIssueUID+`","type":"blocks"}`)
+	_, err = d.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID:        firstProject.ID,
+		SpokeInstanceUID: spokeUID,
+		Events:           []db.FederationIngestEvent{{SourceEventID: 2, Event: unlink}},
+	})
+	require.NoError(t, err)
+	assertRowCount(ctx, t, d, 0, "cross-project unlink reconciled",
+		`SELECT count(*) FROM links
+		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`,
+		firstIssueUID, secondIssueUID)
+}
+
 func TestIngestFederationEvents_Validation(t *testing.T) {
 	t.Run("rejects project uid mismatch", func(t *testing.T) {
 		d, ctx, p, spokeUID := setupFederationIngestHub(t)
@@ -3697,6 +3747,79 @@ func TestMaterializeFederatedProject(t *testing.T) {
 		`SELECT count(*) FROM links
 		   WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = ?)
 		     AND type = 'related'`, p.ID)
+}
+
+func TestMaterializeFederatedProjectGroupsCrossProjectLinksByHubOrigin(t *testing.T) {
+	cases := []struct {
+		name      string
+		firstURL  string
+		secondURL string
+		wantLinks int
+	}{
+		{
+			name:      "same normalized hub origin",
+			firstURL:  "https://Hub.Example:443/path-a",
+			secondURL: "https://hub.example/path-b",
+			wantLinks: 1,
+		},
+		{
+			name:      "different hub origin",
+			firstURL:  "https://hub-a.example",
+			secondURL: "https://hub-b.example",
+			wantLinks: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := openTestDB(t)
+			ctx := context.Background()
+			firstProject := createProject(ctx, t, d, "spoke-project")
+			secondProject := createProject(ctx, t, d, "peer-project")
+			_, err := d.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID:     firstProject.ID,
+				Role:          db.FederationRoleSpoke,
+				HubURL:        tc.firstURL,
+				HubProjectID:  41,
+				HubProjectUID: firstProject.UID,
+				Enabled:       true,
+			})
+			require.NoError(t, err)
+			_, err = d.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID:     secondProject.ID,
+				Role:          db.FederationRoleSpoke,
+				HubURL:        tc.secondURL,
+				HubProjectID:  42,
+				HubProjectUID: secondProject.UID,
+				Enabled:       true,
+			})
+			require.NoError(t, err)
+
+			firstIssueUID := newTestUID(t)
+			secondIssueUID := newTestUID(t)
+			firstSnapshot := remoteEvent(t, firstProject.UID, firstProject.Name,
+				&firstIssueUID, nil, "issue.snapshot", "remote-agent", 100,
+				`{"uid":"`+firstIssueUID+`","short_id":"`+shortID(firstIssueUID)+`","title":"first","body":"","author":"remote-agent","status":"open","metadata":{},"links":[{"type":"related","to_issue_uid":"`+secondIssueUID+`","author":"remote-agent"}],"created_at":"2026-05-23T12:00:00.000Z"}`)
+			secondSnapshot := remoteEvent(t, secondProject.UID, secondProject.Name,
+				&secondIssueUID, nil, "issue.snapshot", "remote-agent", 101,
+				`{"uid":"`+secondIssueUID+`","short_id":"`+shortID(secondIssueUID)+`","title":"second","body":"","author":"remote-agent","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`)
+			inserted, err := d.InsertRemoteEvent(ctx, firstProject.ID, firstSnapshot)
+			require.NoError(t, err)
+			require.True(t, inserted)
+			inserted, err = d.InsertRemoteEvent(ctx, secondProject.ID, secondSnapshot)
+			require.NoError(t, err)
+			require.True(t, inserted)
+
+			require.NoError(t, d.MaterializeFederatedProject(ctx, firstProject.ID))
+			require.NoError(t, d.MaterializeFederatedProject(ctx, secondProject.ID))
+
+			assertRowCount(ctx, t, d, tc.wantLinks, "cross-project link count",
+				`SELECT count(*) FROM links
+				  WHERE type = 'related'
+				    AND (from_issue_uid = ? OR to_issue_uid = ?)
+				    AND (from_issue_uid = ? OR to_issue_uid = ?)`,
+				firstIssueUID, firstIssueUID, secondIssueUID, secondIssueUID)
+		})
+	}
 }
 
 func TestMaterializeFederatedProject_ReconcilesExistingRowsAndEdges(t *testing.T) {
