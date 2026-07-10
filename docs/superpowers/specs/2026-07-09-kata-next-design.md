@@ -45,7 +45,9 @@ or `--no-label`, and `--unowned` and `--owner` are mutually exclusive.
 
 There is no `--limit` flag because the command's result cardinality is always
 zero or one. Global output flags such as `--agent`, `--json`, `--format`, and
-`--quiet` retain their existing meanings.
+`--quiet` retain their existing meanings. Because `next` has no redundant
+summary or footer, `--quiet` does not suppress its selected row or its empty
+result; it has no additional effect on this command.
 
 ## Candidate Retrieval and Selection
 
@@ -75,9 +77,10 @@ CLI contract.
 ## Compact Output
 
 The default human output is one row from the existing ready/list row renderer,
-including the open glyph, ID, title, optional priority chip, and optional owner.
+including the open glyph, ID, title, optional priority chip, and owner marker.
 It has no list summary or legend footer. Global results use a qualified
-`project#short_id` reference.
+`project#short_id` reference. The shared renderer displays `(-)` when the issue
+has no owner, matching `ready`.
 
 Agent output is a single key/value record:
 
@@ -86,7 +89,9 @@ OK next issue=abc4 priority=1 owner=agent-a title="Fix callback race"
 ```
 
 `priority` and `owner` are omitted when absent. A global result uses the
-qualified reference in `issue`.
+qualified reference in `issue`. The agent-output reference documents this
+single-result shape as an intentional exception to the normal read-command
+`count=<n>` header plus row sequence.
 
 JSON output is a single-result envelope rather than the ready list envelope:
 
@@ -159,5 +164,5 @@ qualified references; empty output in every mode; ownership and label filters;
 the validation combinations inherited from `ready`; and `--full` output in all
 three modes. Existing ready and show tests guard their output contracts during
 the helper refactors. Documentation updates add `next` and `--full` to the CLI
-reference and use the single-result command in the agent workflow where one
-issue is desired.
+reference, document its single-result agent contract, and use the command in
+the agent workflow where one issue is desired.
