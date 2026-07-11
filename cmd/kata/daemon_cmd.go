@@ -39,6 +39,10 @@ func newDaemonCmd() *cobra.Command {
 
 const daemonTelemetryHeartbeatInterval = 24 * time.Hour
 
+// daemonRestartShutdownTimeout covers the sequential 10-second HTTP and hook
+// shutdown budgets, plus a small allowance for the remaining process cleanup.
+const daemonRestartShutdownTimeout = 25 * time.Second
+
 var newTelemetryReporter = func(opts telemetry.Options) telemetry.Client {
 	return telemetry.NewReporterOrDisabled(opts)
 }
@@ -405,10 +409,17 @@ type daemonStopOutput struct {
 }
 
 func daemonRestartCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		listen           string
+		insecureReadonly bool
+	)
+	cmd := &cobra.Command{
 		Use:   "restart",
 		Short: "restart the daemon",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateDaemonReplacement(listen, insecureReadonly); err != nil {
+				return fmt.Errorf("restart: validate replacement: %w", err)
+			}
 			ns, err := daemon.NewNamespace()
 			if err != nil {
 				return err
@@ -427,10 +438,10 @@ func daemonRestartCmd() *cobra.Command {
 				}
 				pids = append(pids, rec.PID)
 			}
-			if err := waitForDaemonProcesses(cmd.Context(), pids, 3*time.Second); err != nil {
+			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartShutdownTimeout); err != nil {
 				return err
 			}
-			out, err := startDetachedDaemon(cmd.Context(), "", false)
+			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly)
 			if err != nil {
 				return err
 			}
@@ -460,6 +471,27 @@ func daemonRestartCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().StringVar(&listen, "listen", "",
+		"bind the replacement daemon to host:port (overrides config.toml)")
+	cmd.Flags().BoolVar(&insecureReadonly, "insecure-readonly", false,
+		"permit unauthenticated GETs on non-loopback TCP when no token is configured (DEV ONLY)")
+	return cmd
+}
+
+func validateDaemonReplacement(listen string, insecureReadonly bool) error {
+	dcfg, err := config.ReadDaemonConfig()
+	if err != nil {
+		return err
+	}
+	listen = effectiveDaemonListenWithConfig(listen, dcfg)
+	ns, err := daemon.NewNamespace()
+	if err != nil {
+		return err
+	}
+	if _, err := chooseEndpoint(ns, listen); err != nil {
+		return err
+	}
+	return daemon.CheckAuthStartup(listen, dcfg.Auth, insecureReadonly)
 }
 
 type daemonRestartOutput struct {
