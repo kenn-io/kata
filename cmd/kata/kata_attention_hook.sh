@@ -73,13 +73,22 @@ claim)
     fi
   done <<<"$cmd"
   [[ -n "$seg" ]] || exit 0
-  # Quoted spans are flag values (--comment "fix the bug"), never refs:
-  # collapse each to a placeholder so multi-word values don't shed junk
-  # tokens, while still occupying their token slot for flag-value skipping.
-  # The placeholder starts non-alphanumeric, so it can never probe as a ref.
+  # Unwrap quoted spans: a single-word span is a real argument (`kata claim
+  # "abc4"`, `--as "agent-a"`) and keeps its content; a multi-word span is
+  # prose (--comment "fix the bug") and collapses to a placeholder so it
+  # doesn't shed junk tokens, while still occupying its token slot for
+  # flag-value skipping. The placeholder starts non-alphanumeric, so it can
+  # never probe as a ref.
   quote_re='("[^"]*"|'\''[^'\'']*'\'')'
+  word_re='^[^[:space:]"'\'']+$'
   while [[ "$seg" =~ $quote_re ]]; do
-    seg="${seg/"${BASH_REMATCH[1]}"/ _quoted_ }"
+    span="${BASH_REMATCH[1]}"
+    inner="${span:1:${#span}-2}"
+    if [[ "$inner" =~ $word_re ]]; then
+      seg="${seg/"$span"/ $inner }"
+    else
+      seg="${seg/"$span"/ _quoted_ }"
+    fi
   done
   # The command text alone doesn't prove the claim executed, succeeded, or
   # even which token was the ref (a flag's value looks the same). Skip the
@@ -112,6 +121,12 @@ claim)
     fi
     [[ "$tok" == --as=* ]] && { as_actor="${tok#--as=}"; continue; }
     [[ "$tok" == -* ]] && continue
+    # A literal $KATA_REF the agent typed can be resolved from the hook's own
+    # environment when a launcher exported it.
+    # shellcheck disable=SC2016 # matching the literal text the agent typed
+    if [[ "$tok" == '$KATA_REF' || "$tok" == '${KATA_REF}' ]]; then
+      tok="${KATA_REF:-}"
+    fi
     [[ "$tok" =~ $token_re ]] || continue
     ((tried++ >= 4)) && break # bound the daemon probes on noisy segments
     info="$(kata show "$tok" --format json 2>/dev/null)"
