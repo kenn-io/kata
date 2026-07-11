@@ -30,10 +30,11 @@ const (
 // aborts so the reconciler can back off instead of stamping the corpus as
 // skipped. Every non-400 error aborts unconditionally — an auth failure must
 // never stamp anything.
-func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch, encodeBatch int) (kitvec.FillStats, error) {
+func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch, encodeBatch int, onDocument func()) (kitvec.FillStats, error) {
 	split := kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap}
 	batch := kitvec.BatchOptions{BatchSize: encodeBatch}
-	return kitvec.Fill(ctx, ix.store, key, enc, kitvec.FillOptions[string]{
+	store := progressStore{Store: ix.store, onDocument: onDocument}
+	return kitvec.Fill(ctx, store, key, enc, kitvec.FillOptions[string]{
 		ScanBatch: scanBatch,
 		Split:     split,
 		Batch:     batch,
@@ -45,6 +46,21 @@ func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, sc
 			return ix.contentSpecific400(ctx, doc, enc, split, batch)
 		},
 	})
+}
+
+type progressStore struct {
+	kitvec.Store[string, string]
+	onDocument func()
+}
+
+func (s progressStore) SaveVectors(ctx context.Context, gen, doc string, revision any, vectors []kitvec.ChunkVector) error {
+	if err := s.Store.SaveVectors(ctx, gen, doc, revision, vectors); err != nil {
+		return err
+	}
+	if s.onDocument != nil {
+		s.onDocument()
+	}
+	return nil
 }
 
 // contentSpecific400 reports whether a 400 from encoding doc is provably

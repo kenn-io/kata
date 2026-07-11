@@ -51,6 +51,9 @@ type fakeEmbedder struct {
 	dims      int
 	err       error
 	failAfter int
+	blockAt   int
+	blocked   chan struct{}
+	release   chan struct{}
 	calls     int
 	n         int
 }
@@ -62,6 +65,10 @@ func (f *fakeEmbedder) BatchSize() int { return 64 }
 func (f *fakeEmbedder) EncodeFunc() kitvec.EncodeFunc {
 	return func(_ context.Context, texts []string) ([][]float32, error) {
 		f.calls++
+		if f.calls == f.blockAt {
+			close(f.blocked)
+			<-f.release
+		}
 		if f.err != nil && f.calls > f.failAfter {
 			return nil, f.err
 		}
@@ -207,6 +214,45 @@ func TestReconcileErrorReportsPendingBacklog(t *testing.T) {
 	}
 	if h := r.Health(); h.Backlog != 2 {
 		t.Fatalf("backlog after failed fill = %d, want 2 (documents still pending)", h.Backlog)
+	}
+}
+
+func TestReconcileReportsProgressDuringFill(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, _ := store.CreateProject(ctx, "spoke-project")
+	for i := 0; i < 2; i++ {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idx := openTestVectorIndex(t)
+	release := make(chan struct{})
+	defer func() {
+		if release != nil {
+			close(release)
+		}
+	}()
+	emb := &fakeEmbedder{
+		model:   "m1",
+		dims:    2,
+		blockAt: 2,
+		blocked: make(chan struct{}),
+		release: release,
+	}
+	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 1})
+
+	done := make(chan error, 1)
+	go func() { done <- r.reconcileOnce(ctx) }()
+	<-emb.blocked
+
+	if h := r.Health(); h.Backlog != 1 {
+		t.Fatalf("backlog while second document is encoding = %d, want 1", h.Backlog)
+	}
+	close(release)
+	release = nil
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

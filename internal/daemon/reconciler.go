@@ -175,7 +175,7 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		return err
 	}
 	r.setBacklog(backlog)
-	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.emb.BatchSize()); err != nil {
+	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.emb.BatchSize(), r.markDocumentFilled); err != nil {
 		if backlog, berr := r.idx.Backlog(ctx, key); berr == nil {
 			r.setBacklog(backlog)
 		}
@@ -194,6 +194,12 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	r.setBacklog(backlog)
 	r.markSuccess()
 	return nil
+}
+
+func (r *Reconciler) markDocumentFilled() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.health.Backlog--
 }
 
 func (r *Reconciler) markSuccess() {

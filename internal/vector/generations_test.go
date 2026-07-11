@@ -21,7 +21,7 @@ func fillAll(t *testing.T, ix *Index, key string) {
 		}
 		return out, nil
 	}
-	if _, err := ix.Fill(context.Background(), key, enc, 0, 0); err != nil {
+	if _, err := ix.Fill(context.Background(), key, enc, 0, 0, nil); err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 }

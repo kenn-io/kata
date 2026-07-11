@@ -51,7 +51,7 @@ func TestFillEmbedsChunksAndQueryFindsThem(t *testing.T) {
 		}
 		return out, nil
 	}
-	stats, err := ix.Fill(ctx, key, enc, 0, 0)
+	stats, err := ix.Fill(ctx, key, enc, 0, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestFillAbortsOnRequestLevel400(t *testing.T) {
 	enc := func(_ context.Context, _ []string) ([][]float32, error) {
 		return nil, &embedding.APIError{StatusCode: 400, Body: "invalid model"}
 	}
-	stats, err := ix.Fill(ctx, key, enc, 0, 0)
+	stats, err := ix.Fill(ctx, key, enc, 0, 0, nil)
 	var apiErr *embedding.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Fatalf("request-level 400 must abort the fill, got %v", err)
@@ -129,7 +129,7 @@ func TestFillAbortsOnBatchShape400(t *testing.T) {
 		}
 		return [][]float32{{1, 0, 0, 0}}, nil
 	}
-	stats, err := ix.Fill(ctx, key, enc, 0, 0)
+	stats, err := ix.Fill(ctx, key, enc, 0, 0, nil)
 	var apiErr *embedding.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Fatalf("shape-level 400 must abort the fill, got %v", err)
@@ -162,7 +162,7 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 		}
 		return out, nil
 	}
-	stats, err := ix.Fill(ctx, key, enc, 0, 0)
+	stats, err := ix.Fill(ctx, key, enc, 0, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	authFail := func(_ context.Context, _ []string) ([][]float32, error) {
 		return nil, &embedding.APIError{StatusCode: 401, Body: "no"}
 	}
-	_, err = ix.Fill(ctx, key, authFail, 0, 0)
+	_, err = ix.Fill(ctx, key, authFail, 0, 0, nil)
 	var apiErr *embedding.APIError
 	if err == nil || !errors.As(err, &apiErr) || apiErr.StatusCode != 401 {
 		t.Fatalf("401 must abort the fill, got %v", err)
