@@ -147,6 +147,20 @@ func (ix *Index) Backlog(ctx context.Context, key string) (int64, error) {
 	return n, nil
 }
 
+// Coverage counts mirror rows stamped at their current revision for key and
+// rows still awaiting that generation.
+func (ix *Index) Coverage(ctx context.Context, key string) (embedded, backlog int64, err error) {
+	backlog, err = ix.Backlog(ctx, key)
+	if err != nil {
+		return 0, 0, err
+	}
+	var total int64
+	if err := ix.db.QueryRowContext(ctx, `SELECT count(*) FROM issue_mirror`).Scan(&total); err != nil {
+		return 0, 0, fmt.Errorf("vector: coverage: %w", err)
+	}
+	return total - backlog, backlog, nil
+}
+
 func (ix *Index) generationState(ctx context.Context, key string) (string, error) {
 	var state string
 	err := ix.db.QueryRowContext(ctx, fmt.Sprintf(

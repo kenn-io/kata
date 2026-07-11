@@ -54,6 +54,7 @@ type fakeEmbedder struct {
 	blockAt   int
 	blocked   chan struct{}
 	release   chan struct{}
+	onCall    func(int)
 	calls     int
 	n         int
 }
@@ -65,6 +66,9 @@ func (f *fakeEmbedder) BatchSize() int { return 64 }
 func (f *fakeEmbedder) EncodeFunc() kitvec.EncodeFunc {
 	return func(_ context.Context, texts []string) ([][]float32, error) {
 		f.calls++
+		if f.onCall != nil {
+			f.onCall(f.calls)
+		}
 		if f.calls == f.blockAt {
 			close(f.blocked)
 			<-f.release
@@ -246,13 +250,113 @@ func TestReconcileReportsProgressDuringFill(t *testing.T) {
 	go func() { done <- r.reconcileOnce(ctx) }()
 	<-emb.blocked
 
-	if h := r.Health(); h.Backlog != 1 {
-		t.Fatalf("backlog while second document is encoding = %d, want 1", h.Backlog)
+	if h := r.Health(); h.Backlog != 1 || h.Embedded != 1 {
+		t.Fatalf("health while second document is encoding = %+v, want backlog 1 and embedded 1", h)
 	}
 	close(release)
 	release = nil
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReconcileReportsSmoothedRateAndETA(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, _ := store.CreateProject(ctx, "spoke-project")
+	for i := 0; i < 3; i++ {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idx := openTestVectorIndex(t)
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	release := make(chan struct{})
+	defer func() {
+		if release != nil {
+			close(release)
+		}
+	}()
+	emb := &fakeEmbedder{
+		model:   "m1",
+		dims:    2,
+		blockAt: 3,
+		blocked: make(chan struct{}),
+		release: release,
+		onCall: func(call int) {
+			if call == 1 {
+				now = now.Add(2 * time.Second)
+			} else {
+				now = now.Add(time.Second)
+			}
+		},
+	}
+	r := NewReconciler(store, idx, emb, ReconcilerConfig{
+		BatchSize: 1,
+		Now:       func() time.Time { return now },
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- r.reconcileOnce(ctx) }()
+	<-emb.blocked
+
+	h := r.Health()
+	if h.Embedded != 2 || h.Backlog != 1 {
+		t.Fatalf("health counts while third document is encoding = %+v", h)
+	}
+	if h.RatePerSecond == nil || h.ETASeconds == nil {
+		t.Fatalf("health must report rate and ETA after two progress samples: %+v", h)
+	}
+	if diff := *h.RatePerSecond - 0.65; diff < -0.001 || diff > 0.001 {
+		t.Fatalf("smoothed rate = %f, want 0.65 docs/s", *h.RatePerSecond)
+	}
+	if *h.ETASeconds != 2 {
+		t.Fatalf("ETA = %d seconds, want 2", *h.ETASeconds)
+	}
+	if h.StartedAt == nil || h.LastProgressAt == nil {
+		t.Fatalf("health must expose progress timestamps: %+v", h)
+	}
+
+	close(release)
+	release = nil
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEmbeddingProgressEstimatorResetsAcrossDiscontinuities(t *testing.T) {
+	tests := []struct {
+		name       string
+		generation string
+		embedded   int64
+		backlog    int64
+	}{
+		{name: "generation change", generation: "m2", embedded: 2, backlog: 1},
+		{name: "total change", generation: "m1", embedded: 2, backlog: 2},
+		{name: "progress moved backward", generation: "m1", embedded: 1, backlog: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+			r := NewReconciler(nil, nil, nil, ReconcilerConfig{Now: func() time.Time { return now }})
+			r.setCoverage("m1", 0, 3)
+			now = now.Add(time.Second)
+			r.markDocumentFilled()
+			now = now.Add(time.Second)
+			r.markDocumentFilled()
+			if h := r.Health(); h.RatePerSecond == nil || h.ETASeconds == nil {
+				t.Fatalf("expected established estimate before reset: %+v", h)
+			}
+
+			r.setCoverage(tt.generation, tt.embedded, tt.backlog)
+			h := r.Health()
+			if h.RatePerSecond != nil || h.ETASeconds != nil || h.LastProgressAt != nil {
+				t.Fatalf("progress estimate survived discontinuity: %+v", h)
+			}
+			if h.StartedAt == nil {
+				t.Fatalf("reset backfill must enter estimating state: %+v", h)
+			}
+		})
 	}
 }
 

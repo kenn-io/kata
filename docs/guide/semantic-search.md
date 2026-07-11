@@ -108,8 +108,15 @@ Either way the staleness is brief and bounded by reconciler lag.
 You can watch the reconciler in `kata health --json` under `embeddings`:
 
 - `configured` — whether an endpoint is set;
+- `embedded` — how many issues are embedded at their current revision for the
+  configured generation;
 - `backlog` — how many issues are waiting to be (re-)embedded; decreases as
   each issue is persisted and trends to 0;
+- `rate_per_second` and `eta_seconds` — a smoothed measured rate and estimated
+  time remaining; omitted until at least two positive progress samples exist;
+- `started_at` and `last_progress_at` — when the current backfill began and
+  when its most recent issue was persisted, useful for distinguishing slow
+  progress from a stalled endpoint;
 - `last_success_at` — when the reconciler last completed a batch;
 - `last_error_status` — the HTTP status of the most recent embedding-endpoint
   error response, if any. It is set only when the endpoint answered with an

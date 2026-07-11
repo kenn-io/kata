@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type ReconcilerConfig struct {
 	SweepEvery time.Duration // periodic safety sweep; default 5m
 	MinBackoff time.Duration // default 1s
 	MaxBackoff time.Duration // default 5m
+	Now        func() time.Time
 }
 
 // ReconcilerHealth is the operator-visible state surfaced in /health.
@@ -34,7 +36,12 @@ type ReconcilerHealth struct {
 	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
 	LastError       string     `json:"-"`
 	LastErrorStatus int        `json:"last_error_status,omitempty"`
+	Embedded        int64      `json:"embedded"`
 	Backlog         int64      `json:"backlog"`
+	RatePerSecond   *float64   `json:"rate_per_second,omitempty"`
+	ETASeconds      *int64     `json:"eta_seconds,omitempty"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
 }
 
 // Reconciler keeps the vector sidecar's active generation fresh: it mirrors
@@ -46,10 +53,24 @@ type Reconciler struct {
 	emb   embedder
 	cfg   ReconcilerConfig
 	wake  chan struct{}
+	now   func() time.Time
 
-	mu     sync.Mutex
-	health ReconcilerHealth
+	mu       sync.Mutex
+	health   ReconcilerHealth
+	progress embeddingProgress
 }
+
+type embeddingProgress struct {
+	generation   string
+	total        int64
+	lastEmbedded int64
+	lastAt       time.Time
+	startedAt    time.Time
+	rate         float64
+	samples      int
+}
+
+const progressRateAlpha = 0.3
 
 // NewReconciler constructs a reconciler. It does no I/O.
 func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg ReconcilerConfig) *Reconciler {
@@ -62,12 +83,16 @@ func NewReconciler(store db.Storage, idx *vector.Index, emb embedder, cfg Reconc
 	if cfg.MaxBackoff <= 0 {
 		cfg.MaxBackoff = 5 * time.Minute
 	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	return &Reconciler{
 		store:  store,
 		idx:    idx,
 		emb:    emb,
 		cfg:    cfg,
 		wake:   make(chan struct{}, 1),
+		now:    cfg.Now,
 		health: ReconcilerHealth{Configured: true},
 	}
 }
@@ -92,6 +117,14 @@ func (r *Reconciler) Health() ReconcilerHealth {
 	if r.health.LastSuccessAt != nil {
 		t := *r.health.LastSuccessAt
 		h.LastSuccessAt = &t
+	}
+	if r.health.StartedAt != nil {
+		t := *r.health.StartedAt
+		h.StartedAt = &t
+	}
+	if r.health.LastProgressAt != nil {
+		t := *r.health.LastProgressAt
+		h.LastProgressAt = &t
 	}
 	return h
 }
@@ -169,15 +202,15 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	}
 	// Publish the pending count before the fill so /health reports the real
 	// backlog during a long backfill instead of the previous cycle's value.
-	backlog, err := r.idx.Backlog(ctx, key)
+	embedded, backlog, err := r.idx.Coverage(ctx, key)
 	if err != nil {
 		r.markError(err)
 		return err
 	}
-	r.setBacklog(backlog)
+	r.setCoverage(key, embedded, backlog)
 	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.emb.BatchSize(), r.markDocumentFilled); err != nil {
-		if backlog, berr := r.idx.Backlog(ctx, key); berr == nil {
-			r.setBacklog(backlog)
+		if embedded, backlog, coverageErr := r.idx.Coverage(ctx, key); coverageErr == nil {
+			r.setCoverage(key, embedded, backlog)
 		}
 		r.markError(err)
 		return err
@@ -186,12 +219,12 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		r.markError(err)
 		return err
 	}
-	backlog, err = r.idx.Backlog(ctx, key)
+	embedded, backlog, err = r.idx.Coverage(ctx, key)
 	if err != nil {
 		r.markError(err)
 		return err
 	}
-	r.setBacklog(backlog)
+	r.setCoverage(key, embedded, backlog)
 	r.markSuccess()
 	return nil
 }
@@ -199,7 +232,9 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 func (r *Reconciler) markDocumentFilled() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.health.Embedded++
 	r.health.Backlog--
+	r.recordProgressLocked(r.health.Embedded, r.now())
 }
 
 func (r *Reconciler) markSuccess() {
@@ -215,6 +250,7 @@ func (r *Reconciler) markError(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.health.LastError = err.Error()
+	r.health.ETASeconds = nil
 	var apiErr *embedding.APIError
 	if errors.As(err, &apiErr) {
 		r.health.LastErrorStatus = apiErr.StatusCode
@@ -223,8 +259,70 @@ func (r *Reconciler) markError(err error) {
 	}
 }
 
-func (r *Reconciler) setBacklog(n int64) {
+func (r *Reconciler) setCoverage(generation string, embedded, backlog int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.health.Backlog = n
+	r.health.Embedded = embedded
+	r.health.Backlog = backlog
+	if backlog == 0 {
+		r.resetProgressLocked()
+		return
+	}
+	total := embedded + backlog
+	if r.progress.generation != generation || r.progress.total != total ||
+		embedded < r.progress.lastEmbedded || r.progress.startedAt.IsZero() {
+		now := r.now()
+		r.progress = embeddingProgress{
+			generation:   generation,
+			total:        total,
+			lastEmbedded: embedded,
+			lastAt:       now,
+			startedAt:    now,
+		}
+		r.health.StartedAt = &now
+		r.health.LastProgressAt = nil
+		r.health.RatePerSecond = nil
+		r.health.ETASeconds = nil
+		return
+	}
+	if embedded > r.progress.lastEmbedded {
+		r.recordProgressLocked(embedded, r.now())
+	}
+}
+
+func (r *Reconciler) recordProgressLocked(embedded int64, now time.Time) {
+	delta := embedded - r.progress.lastEmbedded
+	elapsed := now.Sub(r.progress.lastAt).Seconds()
+	r.progress.lastEmbedded = embedded
+	r.progress.lastAt = now
+	r.health.LastProgressAt = &now
+	if delta <= 0 || elapsed <= 0 {
+		return
+	}
+	instantRate := float64(delta) / elapsed
+	if r.progress.samples == 0 {
+		r.progress.rate = instantRate
+	} else {
+		r.progress.rate = progressRateAlpha*instantRate + (1-progressRateAlpha)*r.progress.rate
+	}
+	r.progress.samples++
+	if r.progress.samples < 2 {
+		return
+	}
+	rate := r.progress.rate
+	r.health.RatePerSecond = &rate
+	if r.health.Backlog > 0 {
+		eta := int64(math.Ceil(float64(r.health.Backlog) / rate))
+		r.health.ETASeconds = &eta
+	} else {
+		r.health.ETASeconds = nil
+	}
+}
+
+func (r *Reconciler) resetProgressLocked() {
+	r.progress = embeddingProgress{}
+	r.health.RatePerSecond = nil
+	r.health.ETASeconds = nil
+	r.health.StartedAt = nil
+	r.health.LastProgressAt = nil
 }

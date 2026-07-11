@@ -782,14 +782,30 @@ components:
           type: integer
         configured:
           type: boolean
+        embedded:
+          format: int64
+          type: integer
+        eta_seconds:
+          format: int64
+          type: integer
         last_error_status:
           format: int64
           type: integer
+        last_progress_at:
+          format: date-time
+          type: string
         last_success_at:
+          format: date-time
+          type: string
+        rate_per_second:
+          format: double
+          type: number
+        started_at:
           format: date-time
           type: string
       required:
         - configured
+        - embedded
         - backlog
       type: object
     EnableIssueSyncRequestBody:

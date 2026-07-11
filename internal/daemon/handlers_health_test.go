@@ -46,6 +46,10 @@ func TestHealth_OmitsEmbeddingsWhenUnconfigured(t *testing.T) {
 func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 	d := openTestDB(t)
 	last := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
+	started := last.Add(-time.Minute)
+	lastProgress := last.Add(-time.Second)
+	rate := 2.5
+	eta := int64(2)
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB:        d.db,
 		StartedAt: d.now,
@@ -55,7 +59,12 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 				LastSuccessAt:   &last,
 				LastError:       "provider reflected issue body: secret project content",
 				LastErrorStatus: 400,
+				Embedded:        7,
 				Backlog:         5,
+				RatePerSecond:   &rate,
+				ETASeconds:      &eta,
+				StartedAt:       &started,
+				LastProgressAt:  &lastProgress,
 			}
 		},
 	})
@@ -66,7 +75,16 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
 	require.NotNil(t, body.Embeddings, "embeddings health must surface when ReconcilerHealth is wired")
 	assert.True(t, body.Embeddings.Configured)
+	assert.Equal(t, int64(7), body.Embeddings.Embedded)
 	assert.Equal(t, int64(5), body.Embeddings.Backlog)
+	require.NotNil(t, body.Embeddings.RatePerSecond)
+	assert.InDelta(t, 2.5, *body.Embeddings.RatePerSecond, 0.001)
+	require.NotNil(t, body.Embeddings.ETASeconds)
+	assert.Equal(t, int64(2), *body.Embeddings.ETASeconds)
+	require.NotNil(t, body.Embeddings.StartedAt)
+	assert.True(t, body.Embeddings.StartedAt.Equal(started))
+	require.NotNil(t, body.Embeddings.LastProgressAt)
+	assert.True(t, body.Embeddings.LastProgressAt.Equal(lastProgress))
 	assert.Equal(t, 400, body.Embeddings.LastErrorStatus)
 	require.NotNil(t, body.Embeddings.LastSuccessAt)
 	assert.True(t, body.Embeddings.LastSuccessAt.Equal(last))

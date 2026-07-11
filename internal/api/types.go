@@ -51,7 +51,12 @@ type EmbeddingsHealth struct {
 	Configured      bool       `json:"configured"`
 	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
 	LastErrorStatus int        `json:"last_error_status,omitempty"`
+	Embedded        int64      `json:"embedded"`
 	Backlog         int64      `json:"backlog"`
+	RatePerSecond   *float64   `json:"rate_per_second,omitempty"`
+	ETASeconds      *int64     `json:"eta_seconds,omitempty"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
 }
 
 // InstanceResponse mirrors /api/v1/instance. Surfaces the local kata
