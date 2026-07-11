@@ -30,7 +30,7 @@ const (
 // aborts so the reconciler can back off instead of stamping the corpus as
 // skipped. Every non-400 error aborts unconditionally — an auth failure must
 // never stamp anything.
-func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch, encodeBatch int, onDocument func()) (kitvec.FillStats, error) {
+func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch, encodeBatch int, onDocument func(bool)) (kitvec.FillStats, error) {
 	split := kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap}
 	batch := kitvec.BatchOptions{BatchSize: encodeBatch}
 	store := progressStore{Store: ix.store, onDocument: onDocument}
@@ -50,7 +50,7 @@ func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, sc
 
 type progressStore struct {
 	kitvec.Store[string, string]
-	onDocument func()
+	onDocument func(bool)
 }
 
 func (s progressStore) SaveVectors(ctx context.Context, gen, doc string, revision any, vectors []kitvec.ChunkVector) error {
@@ -58,7 +58,7 @@ func (s progressStore) SaveVectors(ctx context.Context, gen, doc string, revisio
 		return err
 	}
 	if s.onDocument != nil {
-		s.onDocument()
+		s.onDocument(len(vectors) > 0)
 	}
 	return nil
 }

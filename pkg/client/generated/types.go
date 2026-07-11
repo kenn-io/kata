@@ -966,6 +966,7 @@ type EmbeddingsHealth struct {
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
 	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
 	RatePerSecond   *float64   `json:"rate_per_second,omitempty"`
+	Skipped         int64      `json:"skipped"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 }
 

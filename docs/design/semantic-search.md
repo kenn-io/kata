@@ -241,16 +241,15 @@ Failure classes:
   health.
 - 429 — honor `Retry-After` when present, otherwise normal backoff.
 - 5xx / timeouts / connection errors — exponential backoff, 1s doubling to a
-  5m cap. The backlog gauge is a snapshot, not a live counter: it is
-  published before each fill starts and refreshed when a fill fails partway
-  (and again after success), so `/health` shows the pending count as of the
-  cycle's start during a long backfill — never the previous cycle's value,
-  and never a stale zero across an outage — while documents stamped by an
-  in-flight fill are reflected at the next snapshot.
+  5m cap. The backlog gauge is published before each fill starts, decreases
+  after every successfully persisted document, and is refreshed when a fill
+  fails partway and after success. `/health` therefore exposes live progress
+  during a long backfill without reporting stale zero across an outage.
 
-Reconciler health — `{configured, last_success_at, last_error_status, backlog}` —
-joins the `/health` payload (following the `api_schema_version` reporting
-precedent) and is the operator's view of index freshness.
+Reconciler health includes current-generation embedded, skipped, and pending
+coverage plus progress timing and ETA alongside provider status. It joins the
+`/health` payload (following the `api_schema_version` reporting precedent) and
+is the operator's view of index freshness.
 
 ### Freshness contract
 

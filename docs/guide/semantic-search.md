@@ -110,6 +110,8 @@ You can watch the reconciler in `kata health --json` under `embeddings`:
 - `configured` — whether an endpoint is set;
 - `embedded` — how many issues are embedded at their current revision for the
   configured generation;
+- `skipped` — how many issues were deliberately stamped without vectors after
+  the configured model rejected their content;
 - `backlog` — how many issues are waiting to be (re-)embedded; decreases as
   each issue is persisted and trends to 0;
 - `rate_per_second` and `eta_seconds` — a smoothed measured rate and estimated

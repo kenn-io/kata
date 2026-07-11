@@ -800,12 +800,16 @@ components:
         rate_per_second:
           format: double
           type: number
+        skipped:
+          format: int64
+          type: integer
         started_at:
           format: date-time
           type: string
       required:
         - configured
         - embedded
+        - skipped
         - backlog
       type: object
     EnableIssueSyncRequestBody:

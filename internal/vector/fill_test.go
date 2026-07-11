@@ -169,6 +169,13 @@ func TestFillSkipsOnlyContentRejectedDocs(t *testing.T) {
 	if stats.Skipped != 1 || stats.Documents != 1 {
 		t.Fatalf("stats = %+v; want 1 skipped, 1 embedded", stats)
 	}
+	embedded, skipped, backlog, err := ix.Coverage(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embedded != 1 || skipped != 1 || backlog != 0 {
+		t.Fatalf("coverage = embedded %d, skipped %d, backlog %d; want 1, 1, 0", embedded, skipped, backlog)
+	}
 
 	// Auth failure: 401 aborts the fill, nothing is stamped as skipped.
 	seedMirror(t, ix, "u3", 1)

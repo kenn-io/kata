@@ -53,6 +53,7 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 				LastSuccessAt:   h.LastSuccessAt,
 				LastErrorStatus: h.LastErrorStatus,
 				Embedded:        h.Embedded,
+				Skipped:         h.Skipped,
 				Backlog:         h.Backlog,
 				RatePerSecond:   h.RatePerSecond,
 				ETASeconds:      h.ETASeconds,

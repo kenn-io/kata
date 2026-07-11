@@ -339,16 +339,16 @@ func TestEmbeddingProgressEstimatorResetsAcrossDiscontinuities(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
 			r := NewReconciler(nil, nil, nil, ReconcilerConfig{Now: func() time.Time { return now }})
-			r.setCoverage("m1", 0, 3)
+			r.setCoverage("m1", 0, 0, 3)
 			now = now.Add(time.Second)
-			r.markDocumentFilled()
+			r.markDocumentFilled(true)
 			now = now.Add(time.Second)
-			r.markDocumentFilled()
+			r.markDocumentFilled(true)
 			if h := r.Health(); h.RatePerSecond == nil || h.ETASeconds == nil {
 				t.Fatalf("expected established estimate before reset: %+v", h)
 			}
 
-			r.setCoverage(tt.generation, tt.embedded, tt.backlog)
+			r.setCoverage(tt.generation, tt.embedded, 0, tt.backlog)
 			h := r.Health()
 			if h.RatePerSecond != nil || h.ETASeconds != nil || h.LastProgressAt != nil {
 				t.Fatalf("progress estimate survived discontinuity: %+v", h)

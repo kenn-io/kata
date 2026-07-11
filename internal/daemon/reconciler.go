@@ -37,6 +37,7 @@ type ReconcilerHealth struct {
 	LastError       string     `json:"-"`
 	LastErrorStatus int        `json:"last_error_status,omitempty"`
 	Embedded        int64      `json:"embedded"`
+	Skipped         int64      `json:"skipped"`
 	Backlog         int64      `json:"backlog"`
 	RatePerSecond   *float64   `json:"rate_per_second,omitempty"`
 	ETASeconds      *int64     `json:"eta_seconds,omitempty"`
@@ -61,13 +62,13 @@ type Reconciler struct {
 }
 
 type embeddingProgress struct {
-	generation   string
-	total        int64
-	lastEmbedded int64
-	lastAt       time.Time
-	startedAt    time.Time
-	rate         float64
-	samples      int
+	generation    string
+	total         int64
+	lastProcessed int64
+	lastAt        time.Time
+	startedAt     time.Time
+	rate          float64
+	samples       int
 }
 
 const progressRateAlpha = 0.3
@@ -202,15 +203,15 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 	}
 	// Publish the pending count before the fill so /health reports the real
 	// backlog during a long backfill instead of the previous cycle's value.
-	embedded, backlog, err := r.idx.Coverage(ctx, key)
+	embedded, skipped, backlog, err := r.idx.Coverage(ctx, key)
 	if err != nil {
 		r.markError(err)
 		return err
 	}
-	r.setCoverage(key, embedded, backlog)
+	r.setCoverage(key, embedded, skipped, backlog)
 	if _, err := r.idx.Fill(ctx, key, r.emb.EncodeFunc(), r.cfg.BatchSize, r.emb.BatchSize(), r.markDocumentFilled); err != nil {
-		if embedded, backlog, coverageErr := r.idx.Coverage(ctx, key); coverageErr == nil {
-			r.setCoverage(key, embedded, backlog)
+		if embedded, skipped, backlog, coverageErr := r.idx.Coverage(ctx, key); coverageErr == nil {
+			r.setCoverage(key, embedded, skipped, backlog)
 		}
 		r.markError(err)
 		return err
@@ -219,22 +220,26 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) error {
 		r.markError(err)
 		return err
 	}
-	embedded, backlog, err = r.idx.Coverage(ctx, key)
+	embedded, skipped, backlog, err = r.idx.Coverage(ctx, key)
 	if err != nil {
 		r.markError(err)
 		return err
 	}
-	r.setCoverage(key, embedded, backlog)
+	r.setCoverage(key, embedded, skipped, backlog)
 	r.markSuccess()
 	return nil
 }
 
-func (r *Reconciler) markDocumentFilled() {
+func (r *Reconciler) markDocumentFilled(embedded bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.health.Embedded++
+	if embedded {
+		r.health.Embedded++
+	} else {
+		r.health.Skipped++
+	}
 	r.health.Backlog--
-	r.recordProgressLocked(r.health.Embedded, r.now())
+	r.recordProgressLocked(r.health.Embedded+r.health.Skipped, r.now())
 }
 
 func (r *Reconciler) markSuccess() {
@@ -259,25 +264,27 @@ func (r *Reconciler) markError(err error) {
 	}
 }
 
-func (r *Reconciler) setCoverage(generation string, embedded, backlog int64) {
+func (r *Reconciler) setCoverage(generation string, embedded, skipped, backlog int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.health.Embedded = embedded
+	r.health.Skipped = skipped
 	r.health.Backlog = backlog
 	if backlog == 0 {
 		r.resetProgressLocked()
 		return
 	}
-	total := embedded + backlog
+	processed := embedded + skipped
+	total := processed + backlog
 	if r.progress.generation != generation || r.progress.total != total ||
-		embedded < r.progress.lastEmbedded || r.progress.startedAt.IsZero() {
+		processed < r.progress.lastProcessed || r.progress.startedAt.IsZero() {
 		now := r.now()
 		r.progress = embeddingProgress{
-			generation:   generation,
-			total:        total,
-			lastEmbedded: embedded,
-			lastAt:       now,
-			startedAt:    now,
+			generation:    generation,
+			total:         total,
+			lastProcessed: processed,
+			lastAt:        now,
+			startedAt:     now,
 		}
 		r.health.StartedAt = &now
 		r.health.LastProgressAt = nil
@@ -285,15 +292,15 @@ func (r *Reconciler) setCoverage(generation string, embedded, backlog int64) {
 		r.health.ETASeconds = nil
 		return
 	}
-	if embedded > r.progress.lastEmbedded {
-		r.recordProgressLocked(embedded, r.now())
+	if processed > r.progress.lastProcessed {
+		r.recordProgressLocked(processed, r.now())
 	}
 }
 
-func (r *Reconciler) recordProgressLocked(embedded int64, now time.Time) {
-	delta := embedded - r.progress.lastEmbedded
+func (r *Reconciler) recordProgressLocked(processed int64, now time.Time) {
+	delta := processed - r.progress.lastProcessed
 	elapsed := now.Sub(r.progress.lastAt).Seconds()
-	r.progress.lastEmbedded = embedded
+	r.progress.lastProcessed = processed
 	r.progress.lastAt = now
 	r.health.LastProgressAt = &now
 	if delta <= 0 || elapsed <= 0 {

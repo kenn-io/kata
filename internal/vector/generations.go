@@ -147,18 +147,29 @@ func (ix *Index) Backlog(ctx context.Context, key string) (int64, error) {
 	return n, nil
 }
 
-// Coverage counts mirror rows stamped at their current revision for key and
-// rows still awaiting that generation.
-func (ix *Index) Coverage(ctx context.Context, key string) (embedded, backlog int64, err error) {
+// Coverage counts current-revision mirror rows with vectors, rows deliberately
+// stamped without vectors, and rows still awaiting key.
+func (ix *Index) Coverage(ctx context.Context, key string) (embedded, skipped, backlog int64, err error) {
 	backlog, err = ix.Backlog(ctx, key)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	var total int64
 	if err := ix.db.QueryRowContext(ctx, `SELECT count(*) FROM issue_mirror`).Scan(&total); err != nil {
-		return 0, 0, fmt.Errorf("vector: coverage: %w", err)
+		return 0, 0, 0, fmt.Errorf("vector: coverage total: %w", err)
 	}
-	return total - backlog, backlog, nil
+	err = ix.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT count(*) FROM issue_mirror m
+		WHERE EXISTS (
+		  SELECT 1 FROM %s_stamps s
+		  JOIN %s_generations g ON g.ordinal = s.ordinal
+		  JOIN %s_chunks c ON c.ordinal = s.ordinal AND c.doc_key = s.doc_key
+		  WHERE g.gen_key = ? AND s.doc_key = m.issue_uid AND s.revision = m.content_revision
+		)`, vectorsPrefix, vectorsPrefix, vectorsPrefix), key).Scan(&embedded)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("vector: coverage embedded: %w", err)
+	}
+	return embedded, total - backlog - embedded, backlog, nil
 }
 
 func (ix *Index) generationState(ctx context.Context, key string) (string, error) {

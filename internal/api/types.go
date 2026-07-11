@@ -52,6 +52,7 @@ type EmbeddingsHealth struct {
 	LastSuccessAt   *time.Time `json:"last_success_at,omitempty"`
 	LastErrorStatus int        `json:"last_error_status,omitempty"`
 	Embedded        int64      `json:"embedded"`
+	Skipped         int64      `json:"skipped"`
 	Backlog         int64      `json:"backlog"`
 	RatePerSecond   *float64   `json:"rate_per_second,omitempty"`
 	ETASeconds      *int64     `json:"eta_seconds,omitempty"`

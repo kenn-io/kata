@@ -60,6 +60,7 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 				LastError:       "provider reflected issue body: secret project content",
 				LastErrorStatus: 400,
 				Embedded:        7,
+				Skipped:         1,
 				Backlog:         5,
 				RatePerSecond:   &rate,
 				ETASeconds:      &eta,
@@ -76,6 +77,7 @@ func TestHealth_IncludesEmbeddingsWhenConfigured(t *testing.T) {
 	require.NotNil(t, body.Embeddings, "embeddings health must surface when ReconcilerHealth is wired")
 	assert.True(t, body.Embeddings.Configured)
 	assert.Equal(t, int64(7), body.Embeddings.Embedded)
+	assert.Equal(t, int64(1), body.Embeddings.Skipped)
 	assert.Equal(t, int64(5), body.Embeddings.Backlog)
 	require.NotNil(t, body.Embeddings.RatePerSecond)
 	assert.InDelta(t, 2.5, *body.Embeddings.RatePerSecond, 0.001)
