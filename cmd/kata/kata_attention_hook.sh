@@ -85,10 +85,18 @@ claim)
     span="${BASH_REMATCH[1]}"
     inner="${span:1:${#span}-2}"
     if [[ "$inner" =~ $word_re ]]; then
-      seg="${seg/"$span"/ $inner }"
+      repl=" $inner "
     else
-      seg="${seg/"$span"/ _quoted_ }"
+      repl=" _quoted_ "
     fi
+    # Rebuild around the span with anchored prefix/suffix expansions rather
+    # than ${seg/pattern/}: quoted-pattern substitution mis-handles
+    # backslashes and slashes on older bash (3.2 still ships on macOS). If
+    # the span somehow fails to anchor, bail rather than loop — a hung hook
+    # stalls the whole agent session.
+    prefix="${seg%%"$span"*}"
+    [[ "$prefix" != "$seg" ]] || break
+    seg="${prefix}${repl}${seg#*"$span"}"
   done
   # The command text alone doesn't prove the claim executed, succeeded, or
   # even which token was the ref (a flag's value looks the same). Skip the
