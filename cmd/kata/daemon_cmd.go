@@ -33,7 +33,7 @@ import (
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "manage the kata daemon"}
-	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonStopCmd(), daemonReloadCmd(), daemonLogsCmd())
+	cmd.AddCommand(daemonStartCmd(), daemonStatusCmd(), daemonStopCmd(), daemonRestartCmd(), daemonReloadCmd(), daemonLogsCmd())
 	return cmd
 }
 
@@ -300,16 +300,28 @@ func daemonStatusCmd() *cobra.Command {
 				return emitJSON(cmd.OutOrStdout(), out)
 			}
 			if len(out.Daemons) == 0 {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "no daemon running")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No kata daemon is running.")
 				return nil
 			}
 			for _, d := range out.Daemons {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "daemon pid=%d version=%s address=%s db=%s started_at=%s\n",
-					d.PID, d.Version, d.Address, d.DBPath, d.StartedAt.Format(time.RFC3339))
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kata running at %s\n", daemonStatusAddress(d.Address))
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  pid:     %d\n", d.PID)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  version: %s\n", d.Version)
+				if !d.StartedAt.IsZero() {
+					uptime := time.Since(d.StartedAt).Round(time.Second)
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  uptime:  %s\n", uptime)
+				}
 			}
 			return nil
 		},
 	}
+}
+
+func daemonStatusAddress(address string) string {
+	if strings.Contains(address, "://") {
+		return address
+	}
+	return "http://" + address
 }
 
 type daemonStatusOutput struct {
@@ -390,6 +402,100 @@ type daemonStopOutput struct {
 	Action  string `json:"action"`
 	Stopped int    `json:"stopped"`
 	PIDs    []int  `json:"pids"`
+}
+
+func daemonRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart",
+		Short: "restart the daemon",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ns, err := daemon.NewNamespace()
+			if err != nil {
+				return err
+			}
+			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+			if err != nil {
+				return err
+			}
+			pids := make([]int, 0, len(recs))
+			for _, rec := range recs {
+				if !kitdaemon.ProcessAlive(rec.PID) {
+					continue
+				}
+				if err := daemon.SignalDaemonStop(rec, ns.DBHash); err != nil {
+					return fmt.Errorf("restart: stop pid %d: %w", rec.PID, err)
+				}
+				pids = append(pids, rec.PID)
+			}
+			if err := waitForDaemonProcesses(cmd.Context(), pids, 3*time.Second); err != nil {
+				return err
+			}
+			out, err := startDetachedDaemon(cmd.Context(), "", false)
+			if err != nil {
+				return err
+			}
+			switch currentOutputMode() {
+			case outputJSON:
+				return emitJSON(cmd.OutOrStdout(), daemonRestartOutput{
+					Action:  "restart",
+					Stopped: len(pids),
+					PIDs:    pids,
+					PID:     out.PID,
+					Address: out.Address,
+					DBPath:  out.DBPath,
+				})
+			case outputAgent:
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK daemon action=restart pid=%d stopped=%d", out.PID, len(pids))
+				if len(pids) > 0 {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), " pids=%s", agentValue(joinInts(pids, ",")))
+				}
+				_, _ = fmt.Fprintln(cmd.OutOrStdout())
+			case outputHuman:
+				if len(pids) == 0 {
+					_, err = fmt.Fprintf(cmd.OutOrStdout(), "started pid=%d address=%s (was not running)\n", out.PID, out.Address)
+				} else {
+					_, err = fmt.Fprintf(cmd.OutOrStdout(), "restarted pid=%d address=%s\n", out.PID, out.Address)
+				}
+			}
+			return err
+		},
+	}
+}
+
+type daemonRestartOutput struct {
+	Action  string `json:"action"`
+	Stopped int    `json:"stopped"`
+	PIDs    []int  `json:"pids"`
+	PID     int    `json:"pid"`
+	Address string `json:"address"`
+	DBPath  string `json:"db_path,omitempty"`
+}
+
+func waitForDaemonProcesses(ctx context.Context, pids []int, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
+		allStopped := true
+		for _, pid := range pids {
+			if kitdaemon.ProcessAlive(pid) {
+				allStopped = false
+				break
+			}
+		}
+		if allStopped {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("daemon did not stop within %s", timeout)
+		case <-tick.C:
+		}
+	}
 }
 
 func joinInts(values []int, sep string) string {
