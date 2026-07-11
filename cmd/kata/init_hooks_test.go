@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -266,6 +267,39 @@ func TestApplyClaudeHooks_RefusesSymlinkedHooksDir(t *testing.T) {
 	entries, err := os.ReadDir(outside)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "nothing may be written through the symlinked dir")
+}
+
+// TestApplyClaudeHooks_MigratesStopWiringToSessionEnd covers upgrading a
+// workspace installed by an older kata that wired the sweep to the Stop
+// event (which fires every turn): the refresh must move kata's wiring to
+// SessionEnd and prune the obsolete Stop entry, without touching the user's
+// own Stop hooks.
+func TestApplyClaudeHooks_MigratesStopWiringToSessionEnd(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
+	legacy := `{
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "notify.sh"}]},
+      {"hooks": [{"type": "command", "command": ` + strconv.Quote(claudeHookCommand("stop")) + `}]}
+    ]
+  }
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(legacy), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	changed, err := applyClaudeHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	settings := readSettings(t, dir)
+	assert.NotContains(t, hookCommands(t, settings, "Stop"), claudeHookCommand("stop"), "obsolete Stop wiring must be pruned")
+	assert.Contains(t, hookCommands(t, settings, "Stop"), "notify.sh", "user's own Stop hook must survive")
+	assert.Contains(t, hookCommands(t, settings, "SessionEnd"), claudeHookCommand("stop"))
+
+	changed, err = applyClaudeHooks(dir)
+	require.NoError(t, err)
+	assert.False(t, changed, "migration must be idempotent")
 }
 
 // TestApplyClaudeHooks_NullSettingsRejected covers a settings.json holding

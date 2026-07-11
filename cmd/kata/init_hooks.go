@@ -175,7 +175,10 @@ func ensureClaudeSettingsHooks(path string) (bool, error) {
 		}
 	}
 
-	changed := false
+	// Migrate wiring from earlier layouts: older installs registered the
+	// sweep on Stop (which fires every turn, not at session end); leaving it
+	// would keep the mid-session false alerts alive on upgraded workspaces.
+	changed := pruneClaudeHook(settings, "Stop", claudeHookCommand("stop"))
 	for _, spec := range claudeHookSpecs() {
 		c, err := upsertClaudeHook(settings, spec)
 		if err != nil {
@@ -246,6 +249,52 @@ func upsertClaudeHook(settings map[string]any, spec claudeHookSpec) (bool, error
 	}
 	hooks[spec.Event] = append(groups, group)
 	return true, nil
+}
+
+// pruneClaudeHook removes kata's own obsolete wiring: every hook entry under
+// event whose command equals command. Groups and events left empty by the
+// prune are dropped; anything user-owned is untouched. Reports whether the
+// settings changed.
+func pruneClaudeHook(settings map[string]any, event, command string) bool {
+	hooks, _ := settings["hooks"].(map[string]any)
+	groups, _ := hooks[event].([]any)
+	if len(groups) == 0 {
+		return false
+	}
+	changed := false
+	var keptGroups []any
+	for _, g := range groups {
+		gm, ok := g.(map[string]any)
+		if !ok {
+			keptGroups = append(keptGroups, g)
+			continue
+		}
+		entries, _ := gm["hooks"].([]any)
+		var kept []any
+		for _, e := range entries {
+			if em, ok := e.(map[string]any); ok && em["command"] == command {
+				changed = true
+				continue
+			}
+			kept = append(kept, e)
+		}
+		if len(kept) == 0 && len(entries) > 0 {
+			continue // group held only kata's wiring; drop it entirely
+		}
+		if len(kept) != len(entries) {
+			gm["hooks"] = kept
+		}
+		keptGroups = append(keptGroups, gm)
+	}
+	if !changed {
+		return false
+	}
+	if len(keptGroups) == 0 {
+		delete(hooks, event)
+	} else {
+		hooks[event] = keptGroups
+	}
+	return true
 }
 
 // ensureObject returns m[key] as an object, creating it when absent.
