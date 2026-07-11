@@ -674,39 +674,83 @@ func TestDaemonRestart_ValidatesReplacementBeforeStopping(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the test helper does not install the Windows daemon stop event watcher")
 	}
-	resetFlags(t)
-	tmp := setupKataEnv(t)
-	require.NoError(t, os.WriteFile(filepath.Join(tmp, "config.toml"),
-		[]byte("listen = \"100.64.0.5:7777\"\n"), 0o600))
-
-	child := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
-	child.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
-	require.NoError(t, child.Start())
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
-	t.Cleanup(func() {
-		_ = child.Process.Kill()
-		<-exited
-	})
-	writeRuntimePID(t, tmp, child.Process.Pid)
-
-	orig := startDetachedDaemon
-	t.Cleanup(func() { startDetachedDaemon = orig })
-	startCalled := false
-	startDetachedDaemon = func(context.Context, string, bool) (daemonStartOutput, error) {
-		startCalled = true
-		return daemonStartOutput{}, errors.New("replacement startup attempted")
+	tests := []struct {
+		name    string
+		setup   func(*testing.T, string)
+		wantErr string
+	}{
+		{
+			name: "auth config",
+			setup: func(t *testing.T, tmp string) {
+				require.NoError(t, os.WriteFile(filepath.Join(tmp, "config.toml"),
+					[]byte("listen = \"100.64.0.5:7777\"\n"), 0o600))
+			},
+			wantErr: "pass --insecure-readonly",
+		},
+		{
+			name: "storage DSN",
+			setup: func(t *testing.T, _ string) {
+				t.Setenv("KATA_DSN", "postgres://db.example/kata")
+			},
+			wantErr: "postgres backend is not selectable",
+		},
+		{
+			name: "hooks config",
+			setup: func(t *testing.T, tmp string) {
+				require.NoError(t, os.WriteFile(filepath.Join(tmp, "hooks.toml"),
+					[]byte("[[hook]\nevent =\n"), 0o600))
+			},
+			wantErr: "parse hooks config",
+		},
+		{
+			name: "embedding config",
+			setup: func(t *testing.T, tmp string) {
+				require.NoError(t, os.WriteFile(filepath.Join(tmp, "config.toml"), []byte(`
+[search.embeddings]
+base_url = "http://embedding.example"
+model = "example-model"
+`), 0o600))
+			},
+			wantErr: "embedding client",
+		},
 	}
 
-	_, _, err := executeRootCapture(t, context.Background(), "daemon", "restart")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetFlags(t)
+			tmp := setupKataEnv(t)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "pass --insecure-readonly")
-	assert.False(t, startCalled)
-	assert.True(t, kitdaemon.ProcessAlive(child.Process.Pid), "invalid replacement config must leave the daemon running")
+			child := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
+			child.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
+			require.NoError(t, child.Start())
+			exited := make(chan struct{})
+			go func() {
+				_ = child.Wait()
+				close(exited)
+			}()
+			t.Cleanup(func() {
+				_ = child.Process.Kill()
+				<-exited
+			})
+			writeRuntimePID(t, tmp, child.Process.Pid)
+			tt.setup(t, tmp)
+
+			orig := startDetachedDaemon
+			t.Cleanup(func() { startDetachedDaemon = orig })
+			startCalled := false
+			startDetachedDaemon = func(context.Context, string, bool) (daemonStartOutput, error) {
+				startCalled = true
+				return daemonStartOutput{}, errors.New("replacement startup attempted")
+			}
+
+			_, _, err := executeRootCapture(t, context.Background(), "daemon", "restart")
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.False(t, startCalled)
+			assert.True(t, kitdaemon.ProcessAlive(child.Process.Pid), "invalid replacement config must leave the daemon running")
+		})
+	}
 }
 
 func TestDaemonReload_AgentReportsReloadedPID(t *testing.T) {

@@ -27,18 +27,29 @@ import (
 // schema/bootstrap tests, but its domain methods are still stubs.
 var ErrPostgresNotSelectable = errors.New("postgres backend is not selectable until db.Storage methods are implemented")
 
+// Validate reports whether dsn selects a storage backend this binary can
+// start without opening or mutating the database.
+func Validate(dsn string) error {
+	scheme, _, hasScheme := splitScheme(dsn)
+	switch {
+	case hasScheme && (scheme == "postgres" || scheme == "postgresql"):
+		return ErrPostgresNotSelectable
+	case hasScheme && scheme != "sqlite":
+		return fmt.Errorf("unsupported dsn scheme %q", scheme)
+	default:
+		return nil
+	}
+}
+
 // Open selects a storage backend from the DSN and returns a ready-to-use
 // db.Storage. SQLite DSNs at a pre-current schema_version are upgraded through
 // internal/jsonl.AutoCutover before the backend handle is opened.
 func Open(ctx context.Context, dsn string, opts ...db.OpenOption) (db.Storage, error) {
 	cfg := db.ApplyOpenOptions(opts...)
-	scheme, _, hasScheme := splitScheme(dsn)
-	switch {
-	case hasScheme && (scheme == "postgres" || scheme == "postgresql"):
-		return nil, ErrPostgresNotSelectable
-	case hasScheme && scheme != "sqlite":
-		return nil, fmt.Errorf("unsupported dsn scheme %q", scheme)
+	if err := Validate(dsn); err != nil {
+		return nil, err
 	}
+	_, _, hasScheme := splitScheme(dsn)
 	path := dsn
 	if hasScheme {
 		path = strings.TrimPrefix(dsn, "sqlite://")
