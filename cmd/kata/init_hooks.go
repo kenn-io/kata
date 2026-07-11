@@ -38,12 +38,14 @@ type claudeHookSpec struct {
 	Command string
 }
 
-// claudeHookSpecs returns the three wirings --with-hooks manages.
+// claudeHookSpecs returns the three wirings --with-hooks manages. The
+// terminal sweep rides SessionEnd, not Stop: Stop fires after every response
+// turn, which would flip ordinary mid-session pauses to needs-human.
 func claudeHookSpecs() []claudeHookSpec {
 	return []claudeHookSpec{
 		{Event: "SessionStart", Command: claudeHookCommand("start")},
 		{Event: "PostToolUse", Matcher: "Bash", Command: claudeHookCommand("claim")},
-		{Event: "Stop", Command: claudeHookCommand("stop")},
+		{Event: "SessionEnd", Command: claudeHookCommand("stop")},
 	}
 }
 
@@ -165,6 +167,11 @@ func ensureClaudeSettingsHooks(path string) (bool, error) {
 	if exists {
 		if err := json.Unmarshal([]byte(content), &settings); err != nil {
 			return false, fmt.Errorf("parse %s: %w (fix or remove it, then re-run)", path, err)
+		}
+		// `null` is valid JSON and decodes to a nil map, which the merge
+		// below would panic assigning into.
+		if settings == nil {
+			return false, fmt.Errorf("parse %s: settings root is not an object (fix or remove it, then re-run)", path)
 		}
 	}
 

@@ -68,7 +68,7 @@ func TestApplyClaudeHooks_FreshWorkspace(t *testing.T) {
 	settings := readSettings(t, dir)
 	assert.Contains(t, hookCommands(t, settings, "SessionStart"), claudeHookCommand("start"))
 	assert.Contains(t, hookCommands(t, settings, "PostToolUse"), claudeHookCommand("claim"))
-	assert.Contains(t, hookCommands(t, settings, "Stop"), claudeHookCommand("stop"))
+	assert.Contains(t, hookCommands(t, settings, "SessionEnd"), claudeHookCommand("stop"))
 
 	// The PostToolUse wiring is scoped to Bash tool calls.
 	hooks := settings["hooks"].(map[string]any)
@@ -106,7 +106,7 @@ func TestApplyClaudeHooks_PreservesExistingSettings(t *testing.T) {
 	assert.Contains(t, hookCommands(t, settings, "Stop"), "notify.sh")
 	// kata's wiring is appended alongside.
 	assert.Contains(t, hookCommands(t, settings, "PostToolUse"), claudeHookCommand("claim"))
-	assert.Contains(t, hookCommands(t, settings, "Stop"), claudeHookCommand("stop"))
+	assert.Contains(t, hookCommands(t, settings, "SessionEnd"), claudeHookCommand("stop"))
 	assert.Contains(t, hookCommands(t, settings, "SessionStart"), claudeHookCommand("start"))
 }
 
@@ -266,6 +266,24 @@ func TestApplyClaudeHooks_RefusesSymlinkedHooksDir(t *testing.T) {
 	entries, err := os.ReadDir(outside)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "nothing may be written through the symlinked dir")
+}
+
+// TestApplyClaudeHooks_NullSettingsRejected covers a settings.json holding
+// the valid JSON document `null`: it decodes to a nil map and the merge must
+// report the unexpected shape rather than panic on assignment.
+func TestApplyClaudeHooks_NullSettingsRejected(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o750))
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	require.NoError(t, os.WriteFile(settingsPath, []byte("null\n"), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	_, err := applyClaudeHooks(dir)
+	require.Error(t, err)
+
+	got, err := os.ReadFile(settingsPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "null\n", string(got), "null settings must not be clobbered")
 }
 
 func TestApplyClaudeHooks_RefusesSymlinkedSettings(t *testing.T) {

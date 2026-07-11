@@ -116,7 +116,7 @@ directly: a managed hook script under `.claude/hooks/` plus the
 `.claude/settings.json` entries that run it at session start (honoring
 `$KATA_REF` when a launcher passes one), after each shell tool call (treating
 the agent's own `kata claim <ref>` as ref discovery for hand-started sessions),
-and at session stop (the sweep that raises `needs-human` on refs still sitting
+and at session end (the sweep that raises `needs-human` on refs still sitting
 at `ok`). Re-running the command refreshes the script and leaves the rest of
 `settings.json` untouched.
 

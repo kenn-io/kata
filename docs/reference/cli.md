@@ -46,7 +46,7 @@ Pass `--with-hooks` to install the `work.attention` harness hooks from the
 [agent orchestration recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 into the workspace's Claude Code config: a managed script at
 `.claude/hooks/kata-attention.sh` plus the `.claude/settings.json` wiring that
-runs it at session start, after shell tool calls, and at session stop. The
+runs it at session start, after shell tool calls, and at session end. The
 merge is additive — everything else in `settings.json` is preserved — and
 re-running refreshes only kata's managed pieces. Symlinked targets are refused,
 matching `--with-agents`.

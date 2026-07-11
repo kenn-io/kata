@@ -12,7 +12,7 @@
 # Wiring (.claude/settings.json):
 #   SessionStart       -> kata-attention.sh start   ($KATA_REF, when launched)
 #   PostToolUse [Bash] -> kata-attention.sh claim   (watch for `kata claim`)
-#   Stop               -> kata-attention.sh stop    (sweep: still ok -> needs-human)
+#   SessionEnd         -> kata-attention.sh stop   (sweep: still ok -> needs-human)
 #
 # Hook stdin is Claude Code's hook JSON; needs jq + kata on PATH.
 
