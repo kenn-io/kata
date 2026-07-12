@@ -399,9 +399,34 @@ kata daemon logs --hooks [--tail]
 kata health
 kata whoami
 kata quickstart
-kata version
+kata version [--json]
 kata tui
 ```
+
+`kata version --json` is a local-only machine-readable version check. It does
+not require a workspace or a running daemon. The output is a single JSON object:
+
+```json
+{
+  "kata_api_version": 1,
+  "tool": "kata",
+  "version": "v0.6.0",
+  "commit": "abcdef0",
+  "built": "2026-07-12T12:00:00Z",
+  "go": "go1.25.0",
+  "os": "linux",
+  "arch": "amd64",
+  "agent_format": 1
+}
+```
+
+`tool` is the canonical tool name. `version` is the semantic version for a
+release build; development builds may report a development identifier.
+`commit` and `built` identify the source revision and build time, while `go`,
+`os`, and `arch` describe the build runtime and target. `agent_format` is the
+version of the agent-readable text contract. Consumers should use
+`kata_api_version` to select the JSON schema and ignore additional fields they
+do not recognize. Plain `kata version` retains its human-readable output.
 
 Local commands auto-start the daemon when appropriate. `daemon start` starts a
 background daemon and returns after startup is confirmed. Use

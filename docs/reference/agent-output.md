@@ -61,8 +61,9 @@ $ kata version --agent
 OK version version=0.0.0 agent_format=1
 ```
 
-The same value appears as `agent_format` in `kata version --json`. Ordinary
-command output does not repeat the version, to keep transcripts small.
+The same value appears as `agent_format` in `kata version --json`; the complete
+JSON schema is documented in the [CLI reference](cli.md#daemon-and-diagnostics).
+Ordinary command output does not repeat the version, to keep transcripts small.
 
 ## Errors
 
