@@ -16,9 +16,10 @@ import (
 
 type fakeAttnDaemon struct {
 	lookups            map[string]attnLookup
+	lookupSequence     []attnLookup
 	lookupRefs         []string
 	conditionalWrites  []conditionalMetaWrite
-	failConditionalSet bool
+	conditionalResults []attnWriteResult
 }
 
 type conditionalMetaWrite struct {
@@ -29,17 +30,24 @@ type conditionalMetaWrite struct {
 
 func (f *fakeAttnDaemon) lookup(ref string) attnLookup {
 	f.lookupRefs = append(f.lookupRefs, ref)
+	if call := len(f.lookupRefs) - 1; call < len(f.lookupSequence) {
+		return f.lookupSequence[call]
+	}
 	if lookup, ok := f.lookups[ref]; ok {
 		return lookup
 	}
 	return attnLookup{kind: lookupGone}
 }
 
-func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, revision int64) bool {
+func (f *fakeAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, revision int64) attnWriteResult {
+	call := len(f.conditionalWrites)
 	f.conditionalWrites = append(f.conditionalWrites, conditionalMetaWrite{
 		ref: ref, patch: patch, revision: revision,
 	})
-	return !f.failConditionalSet
+	if call < len(f.conditionalResults) {
+		return f.conditionalResults[call]
+	}
+	return attnWriteApplied
 }
 
 func TestAttnStart_ConditionallySetsOnlyAttentionOKForOpenIssue(t *testing.T) {
@@ -72,6 +80,24 @@ func TestAttnStart_SkipsMissingAndTransientIssues(t *testing.T) {
 			assert.Empty(t, d.conditionalWrites)
 		})
 	}
+}
+
+func TestAttnStart_RetriesOnceAfterRevisionConflict(t *testing.T) {
+	d := &fakeAttnDaemon{
+		lookupSequence: []attnLookup{
+			{kind: lookupOpen, revision: 13},
+			{kind: lookupOpen, revision: 14},
+		},
+		conditionalResults: []attnWriteResult{attnWriteConflict},
+	}
+
+	attnStart(d, "abc4")
+
+	assert.Equal(t, []string{"abc4", "abc4"}, d.lookupRefs)
+	assert.Equal(t, []conditionalMetaWrite{
+		{ref: "abc4", patch: map[string]string{attentionKey: attnValueOK}, revision: 13},
+		{ref: "abc4", patch: map[string]string{attentionKey: attnValueOK}, revision: 14},
+	}, d.conditionalWrites)
 }
 
 func TestAttnEnd_AtomicallySetsHandoffForOpenOKIssue(t *testing.T) {
@@ -112,6 +138,21 @@ func TestAttnEnd_SkipsNonActionableIssues(t *testing.T) {
 			assert.Empty(t, d.conditionalWrites)
 		})
 	}
+}
+
+func TestAttnEnd_RechecksAttentionAfterRevisionConflict(t *testing.T) {
+	d := &fakeAttnDaemon{
+		lookupSequence: []attnLookup{
+			{kind: lookupOpen, hasAttn: true, attention: attnValueOK, revision: 17},
+			{kind: lookupOpen, hasAttn: true, attention: attnValueNeedsHuman, revision: 18},
+		},
+		conditionalResults: []attnWriteResult{attnWriteConflict},
+	}
+
+	attnEnd(d, "abc4")
+
+	assert.Equal(t, []string{"abc4", "abc4"}, d.lookupRefs)
+	assert.Len(t, d.conditionalWrites, 1)
 }
 
 func TestAttentionHooks_IgnoreEmptyAndDashLeadingRefs(t *testing.T) {
@@ -160,12 +201,12 @@ func TestAttentionHookCommand_InvalidInvocationsExitZeroWithoutDaemonActivity(t 
 	assert.Zero(t, requests.Load())
 }
 
-func TestAttnEnd_ConflictDoesNotRetry(t *testing.T) {
+func TestAttnEnd_WriteFailureDoesNotRetry(t *testing.T) {
 	d := &fakeAttnDaemon{
 		lookups: map[string]attnLookup{
 			"abc4": {kind: lookupOpen, hasAttn: true, attention: attnValueOK, revision: 23},
 		},
-		failConditionalSet: true,
+		conditionalResults: []attnWriteResult{attnWriteFailed},
 	}
 
 	attnEnd(d, "abc4")
@@ -211,12 +252,12 @@ func TestLiveAttnDaemon_ConditionalSetSendsOnlyActorPatchAndIfMatch(t *testing.T
 	flags.Project = "example-project"
 	flags.As = "agent-a"
 	d := &liveAttnDaemon{cmd: cmd}
-	ok := d.setMetaIfRevision("abc4", map[string]string{
+	result := d.setMetaIfRevision("abc4", map[string]string{
 		attentionKey:    attnValueNeedsHuman,
 		attentionMsgKey: attnHandoffMsg,
 	}, 17)
 
-	assert.True(t, ok)
+	assert.Equal(t, attnWriteApplied, result)
 	assert.True(t, requestSeen)
 }
 

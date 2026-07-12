@@ -23,6 +23,7 @@ const (
 	attnValueOK         = "ok"
 	attnValueNeedsHuman = "needs-human"
 	attnHandoffMsg      = "session ended without hand-off"
+	attnWriteAttempts   = 2
 )
 
 func newAttentionHookCmd() *cobra.Command {
@@ -82,8 +83,16 @@ type attnLookup struct {
 
 type attnDaemon interface {
 	lookup(ref string) attnLookup
-	setMetaIfRevision(ref string, patch map[string]string, revision int64) bool
+	setMetaIfRevision(ref string, patch map[string]string, revision int64) attnWriteResult
 }
+
+type attnWriteResult uint8
+
+const (
+	attnWriteFailed attnWriteResult = iota
+	attnWriteApplied
+	attnWriteConflict
+)
 
 func attentionRef(kataRef string) (string, bool) {
 	ref := strings.TrimSpace(kataRef)
@@ -97,9 +106,14 @@ func attnStart(d attnDaemon, kataRef string) {
 	if !ok {
 		return
 	}
-	lookup := d.lookup(ref)
-	if lookup.kind == lookupOpen {
-		d.setMetaIfRevision(ref, map[string]string{attentionKey: attnValueOK}, lookup.revision)
+	for range attnWriteAttempts {
+		lookup := d.lookup(ref)
+		if lookup.kind != lookupOpen {
+			return
+		}
+		if d.setMetaIfRevision(ref, map[string]string{attentionKey: attnValueOK}, lookup.revision) != attnWriteConflict {
+			return
+		}
 	}
 }
 
@@ -111,14 +125,18 @@ func attnEnd(d attnDaemon, kataRef string) {
 	if !ok {
 		return
 	}
-	lookup := d.lookup(ref)
-	if lookup.kind != lookupOpen || !lookup.hasAttn || lookup.attention != attnValueOK {
-		return
+	for range attnWriteAttempts {
+		lookup := d.lookup(ref)
+		if lookup.kind != lookupOpen || !lookup.hasAttn || lookup.attention != attnValueOK {
+			return
+		}
+		if d.setMetaIfRevision(ref, map[string]string{
+			attentionKey:    attnValueNeedsHuman,
+			attentionMsgKey: attnHandoffMsg,
+		}, lookup.revision) != attnWriteConflict {
+			return
+		}
 	}
-	d.setMetaIfRevision(ref, map[string]string{
-		attentionKey:    attnValueNeedsHuman,
-		attentionMsgKey: attnHandoffMsg,
-	}, lookup.revision)
 }
 
 // liveAttnDaemon resolves refs and reads/writes metadata through the running
@@ -171,21 +189,21 @@ func (l *liveAttnDaemon) lookup(ref string) attnLookup {
 	return lookup
 }
 
-func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, revision int64) bool {
+func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, revision int64) attnWriteResult {
 	ctx, baseURL, pid, resolved, err := resolveIssueRefForCommand(l.cmd, ref)
 	if err != nil {
-		return false
+		return attnWriteFailed
 	}
 	client, err := httpClientFor(ctx, baseURL)
 	if err != nil {
-		return false
+		return attnWriteFailed
 	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	rawPatch := make(map[string]json.RawMessage, len(patch))
 	for key, value := range patch {
 		valueJSON, err := json.Marshal(value)
 		if err != nil {
-			return false
+			return attnWriteFailed
 		}
 		rawPatch[key] = json.RawMessage(valueJSON)
 	}
@@ -195,5 +213,14 @@ func (l *liveAttnDaemon) setMetaIfRevision(ref string, patch map[string]string, 
 			"actor": actor,
 			"patch": rawPatch,
 		}, map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, revision)})
-	return err == nil && status < http.StatusBadRequest
+	if err != nil {
+		return attnWriteFailed
+	}
+	if status == http.StatusPreconditionFailed {
+		return attnWriteConflict
+	}
+	if status >= http.StatusBadRequest {
+		return attnWriteFailed
+	}
+	return attnWriteApplied
 }

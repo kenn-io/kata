@@ -113,11 +113,11 @@ func TestE2E_AttentionHook_ConditionalEndRejectsConcurrentChange(t *testing.T) {
 	// A deliberate hand-off after lookup advances the revision. The stale
 	// If-Match must reject the hook patch and preserve the newer value.
 	runCLI(t, env, dir, "meta", "set", ref, attentionKey, "stuck")
-	ok := d.setMetaIfRevision(ref, map[string]string{
+	result := d.setMetaIfRevision(ref, map[string]string{
 		attentionKey:    attnValueNeedsHuman,
 		attentionMsgKey: attnHandoffMsg,
 	}, lookup.revision)
-	assert.False(t, ok)
+	assert.Equal(t, attnWriteConflict, result)
 
 	value, exists := attnMetaValue(t, env, pid, ref, attentionKey)
 	require.True(t, exists)
