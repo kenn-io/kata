@@ -13,3 +13,23 @@ docs/**/__pycache__/**
 docs/.zensical-build.*
 docs/zensical-public-docs.*
 docs/superpowers
+
+# Editor state, backup files, and local test output at any docs depth.
+docs/.idea
+docs/**/.idea/**
+docs/.vscode
+docs/**/.vscode/**
+docs/*.swp
+docs/**/*.swp
+docs/*~
+docs/**/*~
+docs/.DS_Store
+docs/**/.DS_Store
+docs/.kata.local.toml
+docs/**/.kata.local.toml
+docs/*.test
+docs/**/*.test
+docs/*.out
+docs/**/*.out
+docs/coverage.out
+docs/**/coverage.out
