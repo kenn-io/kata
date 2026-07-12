@@ -251,6 +251,8 @@ sleep 0.3
 capture "federation-tui/list"
 
 send "n"
+wait_until "Select local spoke project"
+send "Enter"
 wait_until "Select hub daemon"
 sleep 0.3
 capture "federation-tui/select-hub"
@@ -268,6 +270,9 @@ wait_until "Operation: adopt existing local project"
 sleep 0.3
 capture "federation-tui/preview"
 
+send "Enter"
+wait_until "Confirm Adoption"
+send "demo-spoke-project"
 send "Enter"
 wait_until "Enrollment Result" 45
 sleep 0.5

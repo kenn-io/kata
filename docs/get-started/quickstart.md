@@ -121,6 +121,11 @@ kata comment abc4 --body "Reproduced on macOS."
 Priorities run from `0` to `4`; `0` is highest. Omit priority when it is not
 useful.
 
+Human `kata list` output groups fetched children beneath their fetched parents
+with tree connectors. A child remains a top-level row when its parent is outside
+the active filters or `--limit` result, so filtering never hides a matching
+issue. JSON and agent output preserve the API's flat order for scripts.
+
 ## Use relationships
 
 Relationships are attached to `kata create` and `kata edit`. They are framed
@@ -146,7 +151,17 @@ relationship flags are repeatable.
 
 ## Find ready work
 
-`kata ready` lists open issues with no open predecessor blocking them:
+`kata next` chooses the highest-priority open issue with no open predecessor
+blocking it:
+
+```sh
+kata next
+kata next --unowned --label backend
+```
+
+Lower numeric priorities win, explicitly prioritized issues beat unprioritized
+ones, and ties preserve ready-list order. Use `kata ready` when you want to
+inspect the queue instead of choosing one issue:
 
 ```sh
 kata ready

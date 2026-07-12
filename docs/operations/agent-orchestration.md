@@ -117,8 +117,10 @@ exec-form lifecycle hooks in `.claude/settings.json`: `SessionStart` runs
 context compaction), and `SessionEnd` runs `kata attention-hook end` only for
 terminal exits rather than clear/resume transitions.
 Both use the launcher-provided `KATA_REF` and intentionally do nothing when it
-is absent. Re-running the command is a no-op, and symlinked `.claude` or
-`settings.json` paths are refused.
+is absent. The hook logic lives in the installed `kata` binary, so the approved
+exec-form command does not delegate to a repository script whose contents can
+change independently. Re-running the command is a no-op, and symlinked
+`.claude` or `settings.json` paths are refused.
 
 ## Coordinate: wait and dashboards
 

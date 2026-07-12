@@ -8,24 +8,79 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+## 0.10.0
+<small>2026-07-11</small>
+
+kata 0.10.0 makes ready-work selection priority-aware, carries cross-project
+relationships through federation, and improves daemon and agent-workflow
+operations.
+
 **New features**
 
+- Added `kata next`, which deterministically selects one ready issue. Explicit
+  priorities beat unprioritized work, lower numeric priorities win, and ties
+  retain the ready API's order. It supports the scoped `ready` filters,
+  cross-project `--all` selection, compact human/agent/JSON output, and
+  `--full` issue detail.
+- Rendered parent/child trees in human `kata list` output with box-drawing
+  connectors while preserving server order in JSON and agent output. Children
+  whose parent is outside the fetched result remain visible at the top level.
+- Added `kata daemon restart`. It validates replacement settings before
+  stopping the current local daemon, waits for graceful shutdown, and starts a
+  replacement with configured or explicitly repeated listener settings.
+- Synchronized cross-project links across federated projects. Link events are
+  retained when a peer has not arrived yet, then materialize after both
+  endpoint projects join the same hub federation group regardless of project
+  enrollment or synchronization order.
 - Added `kata federation quarantine list` and `show` so operators can inspect
   project ownership, event ranges and UIDs, timestamps, and retained errors
   before retrying or skipping. Federation project detail in the TUI now shows
   the same retained quarantine errors.
 
-**Fixed**
+**Improvements**
+
+- Reported live semantic-search backfill progress through the `/health`
+  `embeddings` object, including start and last-progress timestamps plus a
+  smoothed processing rate and ETA once enough progress samples exist.
+- Improved human `kata daemon status` output with the daemon address, PID,
+  binary version, and uptime. JSON status includes the database path and start
+  time for programmatic diagnostics.
+- Added `kata init --with-hooks` for Claude Code workspaces and moved the
+  attention lifecycle logic into the installed `kata` binary. The generated
+  exec-form hooks no longer depend on a repository script whose contents could
+  change behind an already approved command.
+- Extended the managed block written by `kata init --with-agents` with the
+  `work.branch`, `work.attention`, and `work.attention_msg` conventions.
+  Re-running the command refreshes an older managed block in place.
+- Improved `kata wait --timeout` and `--poll-interval` validation: a bare
+  number remains rejected as ambiguous, but the error now suggests the
+  seconds-qualified spelling and lists supported duration units.
+
+**Bug fixes**
 
 - Fixed a federation deadlock where two projects whose first pending batches
   referenced each other's new issues could both become permanently
-  quarantined. Link peers now resolve eventually within the same hub
-  federation group; true validation failures remain quarantined.
-- Automatically resend older push quarantines created by the former missing
-  link-peer validator after compatible hub and spoke builds are deployed,
-  without advancing the cursor. Multi-project coverage now crosses task
-  creation before and after enrollment, eager and batched sync, and both
-  project orderings.
+  quarantined. Compatible spokes also resend older push quarantines created by
+  the former missing-peer validator without advancing the cursor; unrelated
+  validation failures remain quarantined.
+- Preserved labels in project-scoped and cross-project `kata ready` results by
+  returning the same hydrated issue projection used elsewhere in the API.
+- Fixed GitHub issue and comment pagination when a `Link` header uses GitHub's
+  numeric `/repositories/{id}/...` URL form. kata rewrites that form to the
+  bound owner/repository path before applying its credential egress guard.
+
+**Acknowledgements**
+
+- Thanks to [Matthew Jacobs](https://github.com/mjacobs) for parent/child list
+  rendering, ready-result labels, duration guidance, `work.*` managed guidance,
+  and the binary-backed attention hooks.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for
+  federated cross-project link convergence, quarantine recovery and discovery,
+  and live embedding progress reporting.
+- Thanks to [Wes McKinney](https://github.com/wesm) for priority-aware
+  `kata next`, daemon restart, and daemon status improvements.
+- Thanks to [Barret Schloerke](https://github.com/schloerke) for numeric GitHub
+  pagination URL support.
 
 ## 0.9.0
 <small>2026-07-09</small>

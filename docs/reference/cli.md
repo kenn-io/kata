@@ -91,6 +91,12 @@ For `kata list`, `--meta` is repeatable. A bare key filters on presence,
 while `key=value` filters on string equality. Multiple filters combine with
 AND logic.
 
+Human `kata list` output groups fetched children beneath their fetched parents
+with box-drawing connectors. When a parent is absent because it did not match
+the filters, belongs to another project, or fell outside `--limit`, its child
+stays visible as a top-level row. JSON and agent output remain flat in the
+server's order.
+
 By default `kata search` runs lexical (FTS) search. When the daemon has
 [semantic search](../guide/semantic-search.md) configured, search
 automatically fuses lexical and vector results. The mode flags are mutually
@@ -253,6 +259,10 @@ kata wait <ref> [<ref>...] [--until closed|attention|needs-human|stuck] \
 `--all` (waiting for every ref). In attention modes, a closed issue also
 completes the wait. A timeout exits with a dedicated nonzero code and covers the
 whole command, including project/ref resolution and polling.
+
+Both duration flags require an explicit unit using Go duration syntax, such as
+`30s`, `5m`, or `1h30m`. A bare number is ambiguous and rejected; the error
+suggests the equivalent seconds-qualified spelling.
 
 ## Ready work
 
