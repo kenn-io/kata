@@ -409,7 +409,7 @@ not require a workspace or a running daemon. The output is a single JSON object:
 ```json
 {
   "kata_api_version": 1,
-  "tool": "kata",
+  "name": "kata",
   "version": "v0.6.0",
   "commit": "abcdef0",
   "built": "2026-07-12T12:00:00Z",
@@ -420,7 +420,7 @@ not require a workspace or a running daemon. The output is a single JSON object:
 }
 ```
 
-`tool` is the canonical tool name. `version` is the semantic version for a
+`name` is the canonical tool name. `version` is the semantic version for a
 release build; development builds may report a development identifier.
 `commit` and `built` identify the source revision and build time, while `go`,
 `os`, and `arch` describe the build runtime and target. `agent_format` is the

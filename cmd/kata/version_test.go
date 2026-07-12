@@ -51,7 +51,7 @@ func TestVersion_JSONEnvelope(t *testing.T) {
 
 	var got struct {
 		APIVersion int    `json:"kata_api_version"`
-		Tool       string `json:"tool"`
+		Name       string `json:"name"`
 		Version    string `json:"version"`
 		Commit     string `json:"commit"`
 		Built      string `json:"built"`
@@ -61,7 +61,7 @@ func TestVersion_JSONEnvelope(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(out, &got))
 	assert.Equal(t, 1, got.APIVersion)
-	assert.Equal(t, "kata", got.Tool)
+	assert.Equal(t, "kata", got.Name)
 	assert.Equal(t, "v0.0.1-test", got.Version)
 	assert.Equal(t, "abc1234", got.Commit)
 	assert.Equal(t, "2026-05-12T11:17:12Z", got.Built)

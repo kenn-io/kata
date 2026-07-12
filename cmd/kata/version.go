@@ -25,7 +25,7 @@ func newVersionCmd() *cobra.Command {
 			case outputJSON:
 				var buf bytes.Buffer
 				payload := map[string]any{
-					"tool":         "kata",
+					"name":         "kata",
 					"version":      version.Version,
 					"commit":       version.Commit,
 					"built":        version.BuildDate,
