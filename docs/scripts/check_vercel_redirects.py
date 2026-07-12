@@ -136,16 +136,23 @@ def main() -> None:
         "docs/.zensical-build.example.toml",
         "docs/zensical-public-docs.example/index.md",
         "docs/.idea/workspace.xml",
+        "docs/guide/.idea/workspace.xml",
         "docs/.vscode/settings.json",
+        "docs/guide/.vscode/settings.json",
         "docs/notes.swp",
         "docs/guide/notes.swp",
         "docs/draft~",
+        "docs/guide/draft~",
         "docs/.DS_Store",
+        "docs/guide/.DS_Store",
         "docs/.kata.local.toml",
+        "docs/guide/.kata.local.toml",
         "docs/check.test",
+        "docs/guide/check.test",
         "docs/check.out",
         "docs/guide/check.out",
         "docs/coverage.out",
+        "docs/guide/coverage.out",
     )
     for path in required_paths:
         if not deployment_includes(rules, path):
