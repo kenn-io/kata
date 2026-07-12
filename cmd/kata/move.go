@@ -131,7 +131,7 @@ func httpDoJSONHeaders(ctx context.Context, client *http.Client, method, path st
 		}
 		rdr = bytes.NewReader(bs)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, path, rdr) //nolint:gosec // daemon targets come from trusted routing; external refs are path-escaped
 	if err != nil {
 		return 0, nil, err
 	}

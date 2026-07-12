@@ -174,7 +174,7 @@ func httpDoJSON(ctx context.Context, client *http.Client, method, url string, bo
 		}
 		rdr = bytes.NewReader(bs)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, url, rdr) //nolint:gosec // daemon targets come from trusted routing; external refs are path-escaped
 	if err != nil {
 		return 0, nil, err
 	}

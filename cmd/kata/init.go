@@ -23,6 +23,7 @@ type initOptions struct {
 	Replace    bool
 	Reassign   bool
 	WithAgents bool
+	WithHooks  bool
 }
 
 // callInitOpts is the parameter bag passed to callInit.
@@ -31,6 +32,7 @@ type callInitOpts struct {
 	Replace    bool
 	Reassign   bool
 	WithAgents bool
+	WithHooks  bool
 }
 
 // cliError is a structured error that carries an exit code for main().
@@ -139,6 +141,7 @@ get committed.`,
 	cmd.Flags().BoolVar(&opts.Replace, "replace", false, "overwrite .kata.toml binding when it conflicts")
 	cmd.Flags().BoolVar(&opts.Reassign, "reassign", false, "move an existing alias to this project")
 	cmd.Flags().BoolVar(&opts.WithAgents, "with-agents", false, "write kata agent guidance into AGENTS.md/CLAUDE.md in the workspace")
+	cmd.Flags().BoolVar(&opts.WithHooks, "with-hooks", false, "install work.attention harness hooks into the workspace's Claude Code config (.claude/)")
 
 	return cmd
 }
@@ -305,8 +308,15 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 			warnAgentsUpdate(err)
 		}
 	}
+	hooksChanged := false
+	if opts.WithHooks {
+		hooksChanged, err = applyClaudeHooks(dest)
+		if err != nil {
+			warnHooksUpdate(err)
+		}
+	}
 
-	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged)
+	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged || hooksChanged)
 }
 
 // runStartPathInit is the fallback used when the client cannot derive a name
@@ -356,10 +366,17 @@ func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callI
 			warnAgentsUpdate(err)
 		}
 	}
+	hooksChanged := false
+	if opts.WithHooks {
+		hooksChanged, err = applyClaudeHooks(gitignoreDir)
+		if err != nil {
+			warnHooksUpdate(err)
+		}
+	}
 
 	// The path-based daemon flow writes workspace files remotely and exposes no
 	// local file-change bit today; project creation is the closest stable signal.
-	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged || agentsChanged)
+	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged || agentsChanged || hooksChanged)
 }
 
 func warnGitignoreUpdate(err error) {
@@ -374,6 +391,13 @@ func warnAgentsUpdate(err error) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "kata: warning: could not update agent guidance: %v\n", err)
+}
+
+func warnHooksUpdate(err error) {
+	if currentOutputMode() != outputHuman {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "kata: warning: could not install attention hooks: %v\n", err)
 }
 
 // warnBeadsConflict tells the user kata declined to edit a file in place

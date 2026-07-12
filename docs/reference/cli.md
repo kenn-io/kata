@@ -19,7 +19,7 @@ current flag list in your installed binary.
 ## Workspace initialization
 
 ```sh
-kata init [--project <name>] [--with-agents]
+kata init [--project <name>] [--with-agents] [--with-hooks]
 kata init [--replace | --reassign]
 ```
 
@@ -43,6 +43,17 @@ added. Review the sidecar before replacing the original.
 
 A symlinked `AGENTS.md` is refused before it is read; replace it with a regular
 file before using `--with-agents`.
+
+Pass `--with-hooks` to install the `work.attention` lifecycle hooks from the
+[agent orchestration recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
+into the workspace's Claude Code config. It additively installs two exec-form
+entries in `.claude/settings.json`: `SessionStart` runs `kata attention-hook
+start` for new, resumed, and cleared sessions (but not context compaction), and
+`SessionEnd` runs `kata attention-hook end` only for terminal exits rather
+than clear/resume transitions. Both use the
+launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
+Everything else in `settings.json` is preserved, re-running is a no-op, and a
+symlinked `settings.json` or `.claude` directory is refused.
 
 ## Issue lifecycle
 

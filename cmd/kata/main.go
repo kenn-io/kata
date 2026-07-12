@@ -99,6 +99,7 @@ func newRootCmd() *cobra.Command {
 		newAssignCmd(),
 		newUnassignCmd(),
 		newClaimCmd(),
+		newAttentionHookCmd(),
 		newReadyCmd(),
 		newNextCmd(),
 		newWaitCmd(),

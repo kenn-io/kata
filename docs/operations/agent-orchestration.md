@@ -111,6 +111,15 @@ truthful terminal signal, self-assertion is the finer-grained live signal. Both
 write the same two keys, and because attention is last-write-wins by design,
 whichever fired most recently is the state coordinators see.
 
+For Claude Code workspaces, `kata init --with-hooks` additively installs two
+exec-form lifecycle hooks in `.claude/settings.json`: `SessionStart` runs
+`kata attention-hook start` for new, resumed, and cleared sessions (but not
+context compaction), and `SessionEnd` runs `kata attention-hook end` only for
+terminal exits rather than clear/resume transitions.
+Both use the launcher-provided `KATA_REF` and intentionally do nothing when it
+is absent. Re-running the command is a no-op, and symlinked `.claude` or
+`settings.json` paths are refused.
+
 ## Coordinate: wait and dashboards
 
 A delegating **coordinator** joins on sub-tasks with `kata wait`. Launch two

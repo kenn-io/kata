@@ -36,6 +36,16 @@ and writes a `<file>.kata-proposed` sidecar to adopt or discard — see
 `AGENTS.md` is a symlink, kata refuses to manage it before reading the target;
 replace it with a regular file before using `--with-agents`.
 
+Guidance files produce tendency, not contract: an agent can still end a session
+without updating its issue. For Claude Code workspaces,
+`kata init --with-hooks` additionally installs the
+[attention harness hooks](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
+as two exec-form lifecycle entries: `SessionStart` runs `kata attention-hook
+start` for new, resumed, and cleared sessions (but not context compaction), and
+`SessionEnd` runs `kata attention-hook end` only for terminal exits rather
+than clear/resume transitions. Both use the
+launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
+
 ## Search before creating
 
 ```sh
