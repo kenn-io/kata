@@ -64,9 +64,11 @@ docs toolchain changes.
 
 Root-linked CLI deployments use the repository-root `.vercelignore` to upload
 only the `docs/` project inputs, including the screenshots hydrated before the
-deploy. Generated output and machine-local state under `docs/` are excluded.
-Keep Vercel's “Include source files outside of the Root Directory” setting
-disabled because the docs build is self-contained.
+deploy. Vercel's source bundle lacks Git metadata, so the remote build cannot
+hydrate the assets branch itself and depends on those pre-hydrated screenshots.
+Generated output and machine-local state under `docs/` are excluded. Keep
+Vercel's “Include source files outside of the Root Directory” setting disabled
+because the docs build is self-contained.
 
 ## CLI deployment
 
