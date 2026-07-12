@@ -62,6 +62,12 @@ package = false
 Update `docs/pyproject.toml` and refresh `docs/uv.lock` together whenever the
 docs toolchain changes.
 
+Root-linked CLI deployments use the repository-root `.vercelignore` to upload
+only the `docs/` project inputs, including the screenshots hydrated before the
+deploy. Generated output and machine-local state under `docs/` are excluded.
+Keep Vercel's “Include source files outside of the Root Directory” setting
+disabled because the docs build is self-contained.
+
 ## CLI deployment
 
 After the Vercel GitHub integration is disconnected, deploy the docs project

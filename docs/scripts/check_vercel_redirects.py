@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import fnmatch
 import json
 import math
 import pathlib
@@ -9,6 +10,7 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 VERCEL = ROOT / "vercel.json"
+VERCELIGNORE = ROOT.parent / ".vercelignore"
 
 TEMPORARY = {
     "/install.sh": "https://raw.githubusercontent.com/kenn-io/kata/main/scripts/install.sh",
@@ -59,6 +61,33 @@ def load_vercel() -> dict[str, Any]:
     return data
 
 
+def load_vercelignore() -> list[str]:
+    try:
+        lines = VERCELIGNORE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        fail("missing repository-root .vercelignore")
+    return [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
+
+
+def ignore_rule_matches(rule: str, path: str) -> bool:
+    pattern = rule.lstrip("/").rstrip("/")
+    if pattern == "*":
+        return True
+    if any(character in pattern for character in "*?["):
+        return fnmatch.fnmatchcase(path, pattern)
+    return path == pattern or path.startswith(f"{pattern}/")
+
+
+def deployment_includes(rules: list[str], path: str) -> bool:
+    ignored = False
+    for raw_rule in rules:
+        negated = raw_rule.startswith("!")
+        rule = raw_rule[1:] if negated else raw_rule
+        if ignore_rule_matches(rule, path):
+            ignored = not negated
+    return not ignored
+
+
 def collect_redirects(data: dict[str, object]) -> dict[str, dict[str, object]]:
     raw_redirects = data.get("redirects", [])
     if not isinstance(raw_redirects, list):
@@ -86,6 +115,34 @@ def collect_redirects(data: dict[str, object]) -> dict[str, dict[str, object]]:
 
 
 def main() -> None:
+    rules = load_vercelignore()
+    required_paths = (
+        "docs/index.md",
+        "docs/vercel.json",
+        "docs/assets/screenshots/tui/hero.svg",
+    )
+    excluded_paths = (
+        "cmd/kata/main.go",
+        ".superpowers/sdd/progress.md",
+        "docs/site/index.html",
+        "docs/superpowers/plans/example.md",
+        "docs/.venv/bin/zensical",
+        "docs/.cache/build-entry",
+        "docs/.env.local",
+        "docs/.env.preview.local",
+        "docs/.vercel/project.json",
+        "docs/__pycache__/module.pyc",
+        "docs/scripts/__pycache__/checker.pyc",
+        "docs/.zensical-build.example.toml",
+        "docs/zensical-public-docs.example/index.md",
+    )
+    for path in required_paths:
+        if not deployment_includes(rules, path):
+            fail(f"Vercel deployment must include {path}")
+    for path in excluded_paths:
+        if deployment_includes(rules, path):
+            fail(f"Vercel deployment must exclude {path}")
+
     data = load_vercel()
     if "framework" not in data or data["framework"] is not None:
         fail("vercel framework must be null")

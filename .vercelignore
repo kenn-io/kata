@@ -1,0 +1,15 @@
+# The Vercel project is linked at the repository root but builds from docs/.
+/*
+!docs
+
+# Build and machine-local state under the allowed docs tree.
+docs/site
+docs/.venv
+docs/.cache
+docs/.env*.local
+docs/.vercel
+docs/__pycache__
+docs/**/__pycache__/**
+docs/.zensical-build.*
+docs/zensical-public-docs.*
+docs/superpowers
