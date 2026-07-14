@@ -44,6 +44,31 @@ func TestEmbedNormalizesVectors(t *testing.T) {
 	}
 }
 
+func TestEmbedRejectsNullComponent(t *testing.T) {
+	// encoding/json leaves a float32 untouched when the JSON element is null,
+	// so without decode-level rejection a null component silently becomes 0
+	// and the corrupted vector is stamped as complete.
+	srv := newFakeServer(t, 200, `{"data":[{"embedding":[0.5,null]}]}`, "")
+	defer srv.Close()
+	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	_, err := c.Embed(context.Background(), []string{"x"})
+	if err == nil || !strings.Contains(err.Error(), "null") {
+		t.Fatalf("want null-component error, got %v", err)
+	}
+}
+
+func TestEmbedRejectsZeroNormVector(t *testing.T) {
+	// A zero-norm vector cannot participate in cosine distance; persisting it
+	// poisons search rankings with no signal that a re-embed is needed.
+	srv := newFakeServer(t, 200, `{"data":[{"embedding":[0,0]}]}`, "")
+	defer srv.Close()
+	c, _ := New(Config{BaseURL: srv.URL, Model: "m", Dims: 2})
+	_, err := c.Embed(context.Background(), []string{"x"})
+	if err == nil || !strings.Contains(err.Error(), "zero norm") {
+		t.Fatalf("want zero-norm error, got %v", err)
+	}
+}
+
 func TestEmbedDimsMismatchErrors(t *testing.T) {
 	srv := newFakeServer(t, 200, `{"data":[{"embedding":[1,2,3]}]}`, "")
 	defer srv.Close()
@@ -167,7 +192,10 @@ func TestEmbedBatchesPreserveOrder(t *testing.T) {
 		t.Fatalf("server received %d calls, want 3", calls)
 	}
 	for i := range inputs {
-		want := normalize([]float32{float32(i + 1), 1})
+		want, err := normalize([]float32{float32(i + 1), 1})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if math.Abs(float64(vecs[i][0]-want[0])) > 1e-6 || math.Abs(float64(vecs[i][1]-want[1])) > 1e-6 {
 			t.Fatalf("vec[%d] = %v, want %v (out of order or wrong batch)", i, vecs[i], want)
 		}

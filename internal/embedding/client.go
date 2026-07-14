@@ -151,8 +151,30 @@ type embedRequest struct {
 
 type embedResponse struct {
 	Data []struct {
-		Embedding []float32 `json:"embedding"`
+		Embedding embeddingVector `json:"embedding"`
 	} `json:"data"`
+}
+
+// embeddingVector rejects null components at decode time. encoding/json
+// leaves a float32 untouched for a JSON null, so a plain []float32 would
+// silently turn a null component into 0 and the corrupted vector would be
+// persisted as complete.
+type embeddingVector []float32
+
+func (v *embeddingVector) UnmarshalJSON(b []byte) error {
+	var elements []*float32
+	if err := json.Unmarshal(b, &elements); err != nil {
+		return err
+	}
+	out := make([]float32, len(elements))
+	for i, e := range elements {
+		if e == nil {
+			return fmt.Errorf("component %d is null", i)
+		}
+		out[i] = *e
+	}
+	*v = out
+	return nil
 }
 
 // APIError is a non-2xx response from the embedding endpoint.
@@ -234,7 +256,11 @@ func (c *Client) embedBatch(ctx context.Context, texts []string) ([][]float32, e
 		if len(d.Embedding) != c.dims {
 			return nil, fmt.Errorf("embedding: vector dims %d != configured %d", len(d.Embedding), c.dims)
 		}
-		vecs[i] = normalize(d.Embedding)
+		normalized, err := normalize(d.Embedding)
+		if err != nil {
+			return nil, fmt.Errorf("embedding: vector %d: %w", i, err)
+		}
+		vecs[i] = normalized
 	}
 	return vecs, nil
 }
@@ -257,18 +283,21 @@ func parseRetryAfter(h string) time.Duration {
 	return 0
 }
 
-func normalize(v []float32) []float32 {
+// normalize L2-normalizes v. A zero-norm vector is an error: it cannot
+// participate in cosine distance, and persisting it would poison search
+// rankings with no signal that a re-embed is needed.
+func normalize(v []float32) ([]float32, error) {
 	var sum float64
 	for _, x := range v {
 		sum += float64(x) * float64(x)
 	}
 	if sum == 0 {
-		return v
+		return nil, fmt.Errorf("zero norm")
 	}
 	inv := float32(1 / math.Sqrt(sum))
 	out := make([]float32, len(v))
 	for i, x := range v {
 		out[i] = x * inv
 	}
-	return out
+	return out, nil
 }
