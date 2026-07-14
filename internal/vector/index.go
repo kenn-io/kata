@@ -16,8 +16,14 @@ import (
 )
 
 // mirrorSchemaVersion guards the kata-owned tables in the sidecar. Bump it
-// when issue_mirror or vector_meta change shape; mismatch deletes the file.
-const mirrorSchemaVersion = "1"
+// when issue_mirror or vector_meta change shape, or to discard stored vectors
+// that a since-fixed bug may have poisoned; mismatch deletes the file and the
+// daemon re-embeds from kata.db.
+//
+// 2: discard vectors written before the embedding client rejected null
+// components and zero-norm vectors; stamped-invalid vectors are otherwise
+// served forever.
+const mirrorSchemaVersion = "2"
 
 const vectorsPrefix = "issue_vectors"
 
