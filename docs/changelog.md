@@ -36,8 +36,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   candidate, with a separately configured lab-only insecure opt-in.
 - Added a dedicated PostgreSQL CI service job that cannot silently skip backend
   conformance and operator-ceremony tests when Docker discovery is unavailable.
-- Made the generic Windows lane skip automatic PostgreSQL testcontainers
-  immediately while preserving fail-hard coverage in the explicit service job.
+- Made generic CI lanes skip automatic PostgreSQL testcontainers immediately
+  while preserving local autostart and fail-hard coverage in the explicit
+  service job.
 - Added a real-daemon federation matrix proving bidirectional synchronization,
   durable restart recovery, and lease-authorized edits across every SQLite and
   PostgreSQL hub/spoke pairing.

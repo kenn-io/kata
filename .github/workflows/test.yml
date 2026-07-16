@@ -27,6 +27,8 @@ jobs:
           cache: true
 
       - name: Run tests
+        env:
+          KATA_TEST_POSTGRES_AUTO_CONTAINER: "0"
         run: env -u KATA_AUTH_TOKEN go test -p 1 ./...
 
   postgres:

@@ -19,6 +19,8 @@ import (
 
 var postgresDatabaseCounter atomic.Uint64
 
+const postgresAutoContainerEnv = "KATA_TEST_POSTGRES_AUTO_CONTAINER"
+
 // NewPostgresContainer starts a pgvector-enabled PostgreSQL 17 container, waits for it to
 // become ready, and returns the DSN string plus a cleanup function. Callers
 // must register the cleanup via t.Cleanup themselves so test ordering stays
@@ -40,8 +42,8 @@ func NewPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
 	if baseDSN != "" {
 		return newIsolatedPostgresDatabase(ctx, t, baseDSN)
 	}
-	if skipAutomaticPostgresContainer(runtime.GOOS, baseDSN) {
-		t.Skip("automatic PostgreSQL testcontainers are disabled on Windows; use KATA_TEST_POSTGRES_DSN to run PostgreSQL tests")
+	if skipAutomaticPostgresContainer(runtime.GOOS, baseDSN, os.Getenv(postgresAutoContainerEnv)) {
+		t.Skip("automatic PostgreSQL testcontainers are disabled; use KATA_TEST_POSTGRES_DSN to run PostgreSQL tests")
 	}
 	container, err := postgres.Run(ctx,
 		"pgvector/pgvector:pg17",
@@ -68,8 +70,8 @@ func NewPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
 	return dsn, cleanup
 }
 
-func skipAutomaticPostgresContainer(goos, explicitDSN string) bool {
-	return goos == "windows" && explicitDSN == ""
+func skipAutomaticPostgresContainer(goos, explicitDSN, autostart string) bool {
+	return explicitDSN == "" && (goos == "windows" || autostart == "0")
 }
 
 // newIsolatedPostgresDatabase turns the explicit CI service DSN into one
