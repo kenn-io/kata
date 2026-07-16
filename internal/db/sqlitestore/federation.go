@@ -568,7 +568,7 @@ func (d *Store) AdvanceFederationPullCursor(ctx context.Context, projectID, next
 	return d.RetryTransient(ctx, func() error {
 		res, err := d.ExecContext(ctx, `
 			UPDATE federation_bindings
-			   SET pull_cursor_event_id = ?,
+			   SET pull_cursor_event_id = MAX(pull_cursor_event_id, ?),
 			       last_sync_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 			 WHERE project_id = ?`,

@@ -119,11 +119,10 @@ func (s *Store) AdvanceFederationPushCursor(ctx context.Context, projectID, next
 
 func (s *Store) updateFederationCursor(ctx context.Context, projectID, nextCursor int64, push bool) error {
 	column := "pull_cursor_event_id"
-	expression := `$1`
 	if push {
 		column = "push_cursor_event_id"
-		expression = `GREATEST(push_cursor_event_id,$1)`
 	}
+	expression := `GREATEST(` + column + `,$1)`
 	//nolint:gosec // column and expression are selected from the fixed cases above.
 	query := `UPDATE federation_bindings SET ` + column + `=` + expression + `,
 last_sync_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),

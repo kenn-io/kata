@@ -150,6 +150,9 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	if err := store.AdvanceFederationPullCursor(ctx, spoke.ID, 20); err != nil {
 		return err
 	}
+	if err := store.AdvanceFederationPullCursor(ctx, spoke.ID, 15); err != nil {
+		return err
+	}
 	if err := store.AdvanceFederationPushCursor(ctx, spoke.ID, 30); err != nil {
 		return err
 	}
