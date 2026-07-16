@@ -106,6 +106,7 @@ func TestDBHashSQLitePathUnchanged(t *testing.T) {
 }
 
 func TestDBHashPostgresUsesCredentialFreeCanonicalForm(t *testing.T) {
+	clearPostgresRoutingEnv(t)
 	full := "postgres://user:SECRET@db.example.com:5432/kata?sslmode=require" //nolint:gosec // fixture proves the credential never reaches the hash
 	got := config.DBHash(full)
 	// Stable effective-target identity, independent of credentials, incidental
@@ -117,6 +118,7 @@ func TestDBHashPostgresUsesCredentialFreeCanonicalForm(t *testing.T) {
 }
 
 func TestStorageHashPostgresIncludesNormalizedSchema(t *testing.T) {
+	clearPostgresRoutingEnv(t)
 	dsn := "postgres://user@db.example.com/kata?sslmode=verify-full"
 
 	defaultSchema := config.StorageHash(dsn, "")
@@ -127,6 +129,7 @@ func TestStorageHashPostgresIncludesNormalizedSchema(t *testing.T) {
 }
 
 func TestStorageHashPostgresPreservesSingleTargetRuntimeNamespace(t *testing.T) {
+	clearPostgresRoutingEnv(t)
 	assert.Equal(t, "a396fd24cff8",
 		config.StorageHash(
 			"postgres://user:secret@db.example.com:5432/kata?sslmode=verify-full", //nolint:gosec // fixed credential fixture proves it cannot alter the legacy namespace
@@ -136,6 +139,7 @@ func TestStorageHashPostgresPreservesSingleTargetRuntimeNamespace(t *testing.T) 
 }
 
 func TestStorageHashPostgresPreservesEncodedDatabaseRuntimeNamespace(t *testing.T) {
+	clearPostgresRoutingEnv(t)
 	tests := []struct {
 		name string
 		dsn  string
@@ -162,6 +166,7 @@ func TestStorageHashPostgresPreservesEncodedDatabaseRuntimeNamespace(t *testing.
 }
 
 func TestStorageHashPostgresIncludesEffectiveRoutingTargets(t *testing.T) {
+	clearPostgresRoutingEnv(t)
 	firstSocket := "postgres://user@/kata?host=/var/run/postgresql-a&sslmode=disable"
 	secondSocket := "postgres://user@/kata?host=/var/run/postgresql-b&sslmode=disable"
 
@@ -176,6 +181,7 @@ func TestStorageHashPostgresIncludesEffectiveRoutingTargets(t *testing.T) {
 }
 
 func TestStorageHashPostgresIncludesFallbackTargets(t *testing.T) {
+	clearPostgresRoutingEnv(t)
 	firstFallback := "postgres://user@primary.example/kata?host=primary.example,standby-a.example&port=5432,5433&sslmode=verify-full"
 	secondFallback := "postgres://user@primary.example/kata?host=primary.example,standby-b.example&port=5432,5433&sslmode=verify-full"
 
@@ -183,6 +189,63 @@ func TestStorageHashPostgresIncludesFallbackTargets(t *testing.T) {
 		config.StorageHash(firstFallback, "kata"),
 		config.StorageHash(secondFallback, "kata"),
 		"different fallback servers must never share a daemon namespace")
+}
+
+func TestStorageHashPostgresIncludesAmbientRouting(t *testing.T) {
+	tests := []struct {
+		name   string
+		dsn    string
+		env    string
+		first  string
+		second string
+	}{
+		{
+			name: "host",
+			dsn:  "postgres:///kata?sslmode=disable",
+			env:  "PGHOST", first: "/var/run/postgresql-a", second: "/var/run/postgresql-b",
+		},
+		{
+			name: "port",
+			dsn:  "postgres://db.example.com/kata?sslmode=verify-full",
+			env:  "PGPORT", first: "5433", second: "5434",
+		},
+		{
+			name: "database",
+			dsn:  "postgres://db.example.com/?sslmode=verify-full",
+			env:  "PGDATABASE", first: "kata_a", second: "kata_b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearPostgresRoutingEnv(t)
+			t.Setenv(tt.env, tt.first)
+			first := config.StorageHash(tt.dsn, "kata")
+			t.Setenv(tt.env, tt.second)
+			second := config.StorageHash(tt.dsn, "kata")
+			assert.NotEqual(t, first, second,
+				"ambient PostgreSQL routing must identify the effective daemon target")
+		})
+	}
+}
+
+func TestStorageHashPostgresIgnoresAmbientRoutingOverriddenByURL(t *testing.T) {
+	clearPostgresRoutingEnv(t)
+	dsn := "postgres://db.example.com:5432/kata?sslmode=verify-full"
+	want := config.StorageHash(dsn, "kata")
+
+	t.Setenv("PGHOST", "other.example")
+	t.Setenv("PGPORT", "5433")
+	t.Setenv("PGDATABASE", "other_database")
+	assert.Equal(t, want, config.StorageHash(dsn, "kata"),
+		"irrelevant ambient settings must not split an explicit PostgreSQL target")
+}
+
+func clearPostgresRoutingEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"PGHOST", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE"} {
+		t.Setenv(name, "")
+	}
 }
 
 func TestRuntimeDir_NamespaceIsDBHashUnderHome(t *testing.T) {
