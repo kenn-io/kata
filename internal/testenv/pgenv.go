@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,8 +36,12 @@ var postgresDatabaseCounter atomic.Uint64
 //nolint:revive // t is the canonical first arg for testing helpers
 func NewPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
 	t.Helper()
-	if baseDSN := os.Getenv("KATA_TEST_POSTGRES_DSN"); baseDSN != "" {
+	baseDSN := os.Getenv("KATA_TEST_POSTGRES_DSN")
+	if baseDSN != "" {
 		return newIsolatedPostgresDatabase(ctx, t, baseDSN)
+	}
+	if skipAutomaticPostgresContainer(runtime.GOOS, baseDSN) {
+		t.Skip("automatic PostgreSQL testcontainers are disabled on Windows; use KATA_TEST_POSTGRES_DSN to run PostgreSQL tests")
 	}
 	container, err := postgres.Run(ctx,
 		"pgvector/pgvector:pg17",
@@ -61,6 +66,10 @@ func NewPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
 		_ = container.Terminate(context.Background())
 	}
 	return dsn, cleanup
+}
+
+func skipAutomaticPostgresContainer(goos, explicitDSN string) bool {
+	return goos == "windows" && explicitDSN == ""
 }
 
 // newIsolatedPostgresDatabase turns the explicit CI service DSN into one

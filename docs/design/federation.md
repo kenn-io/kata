@@ -12,6 +12,15 @@ strict online-only arbitration. Federation deliberately chooses local-first
 availability, durable offline queues, and deterministic convergence for routine
 work, with documented consistency limits.
 
+The storage backend is local to each daemon and is not part of federation
+identity or enrollment. SQLite and PostgreSQL daemons use the same event,
+snapshot, cursor, credential, and lease protocols, so every hub/spoke backend
+pair must interoperate without backend-specific flags. Real-daemon CI covers
+SQLite/SQLite, SQLite/PostgreSQL, PostgreSQL/SQLite, and
+PostgreSQL/PostgreSQL pairs through initial snapshot, bidirectional mutations,
+idempotent retry, lease-authorized edits, restart recovery, and final
+visible-state convergence.
+
 ## Terms
 
 - **Hub**: the authoritative daemon for a federated project. It owns enrollment
@@ -99,8 +108,8 @@ need the private-network trust opt-in.
   lease retry, failpoints, and federation runner tests.
 - `cmd/kata`: federation operator CLI, lease CLI, daemon runner startup, and
   normal CLI client wiring.
-- `e2e` and `docker/federation`: multi-daemon, randomized stress, failpoint, and
-  Docker Compose smoke coverage.
+- `e2e` and `docker/federation`: multi-daemon, mixed-storage matrix, randomized
+  stress, failpoint, and Docker Compose smoke coverage.
 
 ## Setup Model
 

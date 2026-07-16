@@ -71,6 +71,7 @@ jobs:
           ./internal/daemon
           ./internal/vector
           ./cmd/kata
+          ./e2e
 
   windows:
     name: Windows

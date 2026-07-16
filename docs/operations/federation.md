@@ -3,6 +3,11 @@
 Federation lets multiple kata daemons share selected projects while each user
 keeps a local daemon and local database. It is opt-in per project.
 
+The hub and each spoke may independently use SQLite or PostgreSQL. Federation
+does not negotiate storage backends and needs no backend-specific flags: all
+supported combinations exchange the same events, snapshots, cursors, and
+leases.
+
 Use federation when local-first availability and durable offline queues matter
 more than immediate single-copy reads. Use a shared daemon instead when users
 need centralized authorization, strict online-only arbitration, or globally

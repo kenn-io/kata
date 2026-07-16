@@ -1,0 +1,28 @@
+package testenv
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestSkipAutomaticPostgresContainer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		goos        string
+		explicitDSN string
+		want        bool
+	}{
+		{name: "windows without service", goos: "windows", want: true},
+		{name: "windows explicit service", goos: "windows", explicitDSN: "postgres://service/kata", want: false},
+		{name: "linux without service", goos: "linux", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, skipAutomaticPostgresContainer(tc.goos, tc.explicitDSN))
+		})
+	}
+}
