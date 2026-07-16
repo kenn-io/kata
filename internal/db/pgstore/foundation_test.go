@@ -259,6 +259,47 @@ func TestBootstrapMultipleSchemasSharesUnaccent(t *testing.T) {
 	}
 }
 
+func TestBootstrapRejectsPreexistingSchemaObjectsBeforeExecutingThem(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	_, err = admin.ExecContext(ctx, `
+		CREATE SCHEMA shadow_store;
+		CREATE FUNCTION shadow_store.to_regtype(text) RETURNS regtype
+		LANGUAGE plpgsql AS $$
+		BEGIN
+			RAISE EXCEPTION 'preexisting shadow function executed';
+		END
+		$$;
+		CREATE VIEW shadow_store.meta AS
+		SELECT 'schema_version'::text AS key,
+		       shadow_store.to_regtype('text')::text AS value;
+	`)
+	require.NoError(t, err)
+
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: "shadow_store", SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	assert.Nil(t, store)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `postgres schema "shadow_store" exists without migration metadata`)
+	assert.NotContains(t, err.Error(), "preexisting shadow function executed")
+
+	var functionStillExists bool
+	err = admin.QueryRowContext(ctx, `
+		SELECT to_regprocedure('shadow_store.to_regtype(text)') IS NOT NULL
+	`).Scan(&functionStillExists)
+	require.NoError(t, err)
+	assert.True(t, functionStillExists, "rejected bootstrap must not alter pre-existing objects")
+}
+
 func TestBootstrapRejectsUnshippedOlderPostgresVersion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")

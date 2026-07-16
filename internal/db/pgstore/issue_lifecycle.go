@@ -20,6 +20,7 @@ func (s *Store) EditIssue(ctx context.Context, params db.EditIssueParams) (db.Is
 	var event *db.Event
 	var changed bool
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		issue, event, changed = db.Issue{}, nil, false
 		current, project, err := lockedIssueTx(ctx, tx, params.IssueID, false)
 		if err != nil {
 			return err
@@ -138,6 +139,7 @@ func (s *Store) updateIssueAttribute(
 	var event *db.Event
 	var changed bool
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		issue, event, changed = db.Issue{}, nil, false
 		current, project, err := lockedIssueTx(ctx, tx, issueID, false)
 		if err != nil {
 			return err
@@ -179,6 +181,7 @@ func (s *Store) ClaimOwner(ctx context.Context, issueID int64, actor string, for
 	actor = strings.TrimSpace(actor)
 	var result db.ClaimResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		result = db.ClaimResult{}
 		current, project, err := lockedIssueTx(ctx, tx, issueID, false)
 		if err != nil {
 			return err
@@ -238,13 +241,28 @@ func (s *Store) CloseIssueWithEvents(
 	message string,
 	evidence []db.Evidence,
 ) (db.Issue, []db.Event, bool, error) {
+	return s.closeIssueWithEvents(
+		ctx, issueID, reason, actor, message, evidence, s.withSerializableTx,
+	)
+}
+
+func (s *Store) closeIssueWithEvents(
+	ctx context.Context,
+	issueID int64,
+	reason string,
+	actor string,
+	message string,
+	evidence []db.Evidence,
+	runTx func(context.Context, transactionFunc) error,
+) (db.Issue, []db.Event, bool, error) {
 	if reason == "" {
 		return db.Issue{}, nil, false, fmt.Errorf("close reason is required")
 	}
 	var issue db.Issue
 	var events []db.Event
 	var changed bool
-	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	err := runTx(ctx, func(tx *sql.Tx) error {
+		issue, events, changed = db.Issue{}, nil, false
 		current, project, err := lockedIssueTx(ctx, tx, issueID, false)
 		if err != nil {
 			return err
@@ -346,6 +364,7 @@ func (s *Store) RestoreIssue(ctx context.Context, issueID int64, actor string) (
 	var event *db.Event
 	var changed bool
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		issue, event, changed = db.Issue{}, nil, false
 		current, project, err := lockedIssueTx(ctx, tx, issueID, true)
 		if err != nil {
 			return err
@@ -379,6 +398,7 @@ func (s *Store) transitionIssue(ctx context.Context, issueID int64, actor string
 	var event *db.Event
 	var changed bool
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		issue, event, changed = db.Issue{}, nil, false
 		current, project, err := lockedIssueTx(ctx, tx, issueID, deleteIssue)
 		if err != nil {
 			return err
@@ -427,6 +447,9 @@ func lockedIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, includeDelete
 	project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR SHARE`, issue.ProjectID))
 	if err != nil {
 		return db.Issue{}, db.Project{}, err
+	}
+	if project.DeletedAt != nil {
+		return db.Issue{}, db.Project{}, db.ErrNotFound
 	}
 	if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
 		return db.Issue{}, db.Project{}, err

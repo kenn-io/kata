@@ -276,31 +276,39 @@ func (s *Store) bootstrap(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("create postgres schema %q: %w", s.schema, err)
 		}
 	}
-	// The canonical schema defines a SECURITY DEFINER adoption helper with
-	// SET search_path FROM CURRENT. Pin trusted schemas explicitly and put
-	// pg_temp last so runtime-owned temporary objects cannot shadow its targets.
+	// Inspect metadata with pg_catalog first. A pre-existing schema is not
+	// trusted until its Kata migration metadata has been validated below.
 	if _, err := tx.ExecContext(ctx,
-		`SET LOCAL search_path TO `+quoteIdentifier(s.schema)+`, pg_catalog, pg_temp`); err != nil {
+		`SET LOCAL search_path TO pg_catalog, `+quoteIdentifier(s.schema)+`, pg_temp`); err != nil {
 		return false, fmt.Errorf("select postgres schema %q: %w", s.schema, err)
 	}
 
+	if schemaExists {
+		trustedMetadata, err := trustedMetadataTableExistsTx(ctx, tx, s.schema)
+		if err != nil {
+			return false, err
+		}
+		if !trustedMetadata {
+			return false, fmt.Errorf("postgres schema %q exists without migration metadata", s.schema)
+		}
+	}
 	current, err := currentVersionTx(ctx, tx, s.schema)
 	if err != nil {
 		return false, err
 	}
 	if current == 0 && schemaExists {
-		var hasTables bool
-		if err := tx.QueryRowContext(ctx,
-			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1)`, s.schema).
-			Scan(&hasTables); err != nil {
-			return false, fmt.Errorf("inspect postgres schema %q tables: %w", s.schema, err)
-		}
-		if hasTables {
-			return false, fmt.Errorf("postgres schema %q exists without migration metadata", s.schema)
-		}
+		return false, fmt.Errorf("postgres schema %q exists without migration metadata", s.schema)
 	}
 	if current > currentBinary {
 		return false, fmt.Errorf("postgres schema_version %d is newer than binary schema %d", current, currentBinary)
+	}
+	// Unqualified CREATE statements target the first search-path schema. At
+	// this point the application schema is trusted: this transaction created
+	// it, or it already carries valid Kata migration metadata. This also pins
+	// the SECURITY DEFINER adoption helper's captured path with pg_temp last.
+	if _, err := tx.ExecContext(ctx,
+		`SET LOCAL search_path TO `+quoteIdentifier(s.schema)+`, pg_catalog, pg_temp`); err != nil {
+		return false, fmt.Errorf("select trusted postgres schema %q: %w", s.schema, err)
 	}
 
 	if current == 0 {
@@ -380,7 +388,8 @@ func currentVersionTx(ctx context.Context, tx *sql.Tx, schema string) (int, erro
 		return 0, nil
 	}
 	var value string
-	err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&value)
+	query := `SELECT value FROM ` + quoteIdentifier(schema) + `.meta WHERE key = 'schema_version'`
+	err := tx.QueryRowContext(ctx, query).Scan(&value) // #nosec G202 -- schema is validated and quoted.
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -392,6 +401,27 @@ func currentVersionTx(ctx context.Context, tx *sql.Tx, schema string) (int, erro
 		return 0, fmt.Errorf("parse schema_version %q: %w", value, err)
 	}
 	return version, nil
+}
+
+func trustedMetadataTableExistsTx(ctx context.Context, tx *sql.Tx, schema string) (bool, error) {
+	var trusted bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			  FROM pg_catalog.pg_namespace n
+			  JOIN pg_catalog.pg_class c
+			    ON c.relnamespace = n.oid AND c.relname = 'meta'
+			 WHERE n.nspname = $1
+			   AND n.nspowner = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user)
+			   AND c.relowner = n.nspowner
+			   AND c.relkind IN ('r', 'p')
+			   AND NOT c.relrowsecurity
+			   AND NOT c.relforcerowsecurity
+		)`, schema).Scan(&trusted)
+	if err != nil {
+		return false, fmt.Errorf("inspect postgres schema %q migration metadata owner: %w", schema, err)
+	}
+	return trusted, nil
 }
 
 // ensureInstanceUID is the single ownership rule for meta.instance_uid: if
