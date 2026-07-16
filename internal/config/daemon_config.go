@@ -513,7 +513,7 @@ func applyPostgresStorageEnv(cfg *PostgresStorageConfig) {
 	if v := strings.TrimSpace(os.Getenv("KATA_POSTGRES_SCHEMA_MODE")); v != "" {
 		cfg.Mode = v
 	}
-	if v := strings.TrimSpace(os.Getenv("KATA_POSTGRES_SCHEMA_OWNER")); v != "" {
+	if v := os.Getenv("KATA_POSTGRES_SCHEMA_OWNER"); v != "" {
 		cfg.SchemaOwner = v
 	}
 	if EnvTruthy("KATA_POSTGRES_ALLOW_INSECURE") {

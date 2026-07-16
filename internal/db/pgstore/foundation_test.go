@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-func TestConfigValidateRejectsUnsafeSchemaNames(t *testing.T) {
+func TestConfigValidatePostgresIdentifiers(t *testing.T) {
 	t.Parallel()
 
 	for _, schema := range []string{
@@ -50,15 +51,24 @@ func TestConfigValidateRejectsUnsafeSchemaNames(t *testing.T) {
 		})
 	}
 
-	for _, owner := range []string{"MixedCase", "role-with-dash", "two roles", "1owner"} {
+	for _, owner := range []string{"MixedCase", "role-with-dash", "two roles", "1owner", " role "} {
 		t.Run("owner/"+owner, func(t *testing.T) {
 			t.Parallel()
 			err := (pgstore.Config{
 				Schema: "kata", SchemaMode: pgstore.SchemaModeValidate, SchemaOwner: owner,
 			}).Validate()
-			assert.Error(t, err)
+			assert.NoError(t, err)
 		})
 	}
+
+	err := (pgstore.Config{
+		Schema: "kata", SchemaMode: pgstore.SchemaModeValidate,
+		SchemaOwner: strings.Repeat("a", 64),
+	}).Validate()
+	assert.ErrorContains(t, err, "exceeds 63 bytes")
+
+	cfg := pgstore.ConfigFromValues("kata", "validate", " Exact Role ", false)
+	assert.Equal(t, " Exact Role ", cfg.SchemaOwner)
 }
 
 func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.T) {

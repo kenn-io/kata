@@ -10,7 +10,6 @@ import (
 const DefaultSchema = "kata"
 
 var schemaNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
-var postgresRoleNamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
 
 // SchemaMode controls whether OpenWithConfig may install missing migration
 // assets or must only validate an installation prepared by another role.
@@ -49,7 +48,7 @@ func ConfigFromValues(schema, mode, schemaOwner string, allowInsecure bool) Conf
 	if mode = strings.TrimSpace(mode); mode != "" {
 		cfg.SchemaMode = SchemaMode(mode)
 	}
-	cfg.SchemaOwner = strings.TrimSpace(schemaOwner)
+	cfg.SchemaOwner = schemaOwner
 	cfg.AllowInsecure = allowInsecure
 	return cfg
 }
@@ -63,8 +62,8 @@ func (c Config) Validate() error {
 	if c.Schema == "public" || c.Schema == "information_schema" || strings.HasPrefix(c.Schema, "pg_") {
 		return fmt.Errorf("invalid postgres schema %q: system and ambient schemas are not allowed", c.Schema)
 	}
-	if c.SchemaOwner != "" && !postgresRoleNamePattern.MatchString(c.SchemaOwner) {
-		return fmt.Errorf("invalid postgres schema owner %q: require a lowercase role identifier of at most 63 bytes", c.SchemaOwner)
+	if len(c.SchemaOwner) > 63 {
+		return fmt.Errorf("invalid postgres schema owner %q: role identifier exceeds 63 bytes", c.SchemaOwner)
 	}
 	switch c.SchemaMode {
 	case SchemaModeBootstrap, SchemaModeValidate:
