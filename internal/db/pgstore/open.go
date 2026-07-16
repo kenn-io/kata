@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -86,7 +84,7 @@ func openInternal(
 		}
 		return nil, fmt.Errorf("parse pgx config for %s", redacted)
 	}
-	if err := validatePostgresTransport(connConfig, dsn, pgConfig.AllowInsecure); err != nil {
+	if err := validatePostgresTransport(connConfig, pgConfig.AllowInsecure); err != nil {
 		return nil, err
 	}
 	if connConfig.RuntimeParams == nil {
@@ -169,7 +167,7 @@ func newPostgresPool(connConfig pgx.ConnConfig, maxOpen, maxIdle int) *sql.DB {
 	return pool
 }
 
-func validatePostgresTransport(connConfig *pgx.ConnConfig, dsn string, allowInsecure bool) error {
+func validatePostgresTransport(connConfig *pgx.ConnConfig, allowInsecure bool) error {
 	if allowInsecure {
 		return nil
 	}
@@ -177,16 +175,15 @@ func validatePostgresTransport(connConfig *pgx.ConnConfig, dsn string, allowInse
 		host        string
 		verifiedTLS bool
 	}
-	verifyFull := postgresSSLMode(dsn) == "verify-full"
 	candidates := make([]candidate, 0, 1+len(connConfig.Fallbacks))
 	candidates = append(candidates, candidate{
 		host:        connConfig.Host,
-		verifiedTLS: verifyFull && tlsVerifiesHost(connConfig.Host, connConfig.TLSConfig),
+		verifiedTLS: tlsVerifiesHost(connConfig.Host, connConfig.TLSConfig),
 	})
 	for _, fallback := range connConfig.Fallbacks {
 		candidates = append(candidates, candidate{
 			host:        fallback.Host,
-			verifiedTLS: verifyFull && tlsVerifiesHost(fallback.Host, fallback.TLSConfig),
+			verifiedTLS: tlsVerifiesHost(fallback.Host, fallback.TLSConfig),
 		})
 	}
 	for _, candidate := range candidates {
@@ -203,18 +200,6 @@ func validatePostgresTransport(connConfig *pgx.ConnConfig, dsn string, allowInse
 func tlsVerifiesHost(host string, cfg *tls.Config) bool {
 	return cfg != nil && !cfg.InsecureSkipVerify && cfg.ServerName != "" &&
 		strings.EqualFold(strings.TrimSuffix(cfg.ServerName, "."), strings.TrimSuffix(host, "."))
-}
-
-var keywordSSLMode = regexp.MustCompile(`(?:^|\s)sslmode=(?:verify-full|'verify-full'|"verify-full")(?:\s|$)`)
-
-func postgresSSLMode(dsn string) string {
-	if u, err := url.Parse(dsn); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
-		return strings.ToLower(strings.TrimSpace(u.Query().Get("sslmode")))
-	}
-	if keywordSSLMode.MatchString(dsn) {
-		return "verify-full"
-	}
-	return ""
 }
 
 func (s *Store) acquireServingLease(ctx context.Context) error {
