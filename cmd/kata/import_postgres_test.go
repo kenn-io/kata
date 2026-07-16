@@ -109,3 +109,30 @@ func TestImportPostgresFailurePreservesPreexistingEmptySchema(t *testing.T) {
 		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'preexisting_store')`).Scan(&exists))
 	assert.True(t, exists, "failed import must not drop a schema it did not create")
 }
+
+func TestFreshPostgresCleanupSurvivesCanceledImportContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	setupKataEnv(t)
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_POSTGRES_SCHEMA", "canceled_restore")
+	store, err := storeopen.Open(ctx, dsn)
+	require.NoError(t, err)
+	uid := store.InstanceUID()
+	require.NoError(t, store.Close())
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	require.NoError(t, removeFreshPostgresTargetAfterFailure(canceled, dsn, uid))
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var exists bool
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'canceled_restore')`).Scan(&exists))
+	assert.False(t, exists)
+}

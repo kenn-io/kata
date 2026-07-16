@@ -116,6 +116,16 @@ func TestDBHashPostgresUsesCredentialFreeCanonicalForm(t *testing.T) {
 	assert.Equal(t, got, config.DBHash("postgres://db.example.com/kata"))
 }
 
+func TestStorageHashPostgresIncludesNormalizedSchema(t *testing.T) {
+	dsn := "postgres://user@db.example.com/kata?sslmode=verify-full"
+
+	defaultSchema := config.StorageHash(dsn, "")
+	assert.Equal(t, defaultSchema, config.StorageHash(dsn, " kata "))
+	assert.NotEqual(t, defaultSchema, config.StorageHash(dsn, "archive"))
+	assert.Equal(t, config.StorageHash(dsn, "archive"),
+		config.StorageHash("postgres://other@db.example.com/kata?application_name=x", "archive"))
+}
+
 func TestRuntimeDir_NamespaceIsDBHashUnderHome(t *testing.T) {
 	home := setupTestHome(t)
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))

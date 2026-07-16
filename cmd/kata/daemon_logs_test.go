@@ -91,6 +91,21 @@ func setupHooksDir(t *testing.T) (home, hooksDir, dbHash string) {
 	return
 }
 
+func TestHookRunsRootSeparatesPostgresSchemas(t *testing.T) {
+	home := setupKataEnv(t)
+	t.Setenv("KATA_DSN", "postgres://user@db.example/kata?sslmode=verify-full")
+	t.Setenv("KATA_POSTGRES_SCHEMA", "alpha")
+	alpha, err := hookRunsRoot()
+	require.NoError(t, err)
+	t.Setenv("KATA_POSTGRES_SCHEMA", "beta")
+	beta, err := hookRunsRoot()
+	require.NoError(t, err)
+
+	assert.NotEqual(t, alpha, beta)
+	assert.True(t, strings.HasPrefix(alpha, filepath.Join(home, "hooks")))
+	assert.True(t, strings.HasPrefix(beta, filepath.Join(home, "hooks")))
+}
+
 func TestDaemonLogs_Hooks_PrintsChronological(t *testing.T) {
 	_, dir, _ := setupHooksDir(t)
 	writeRuns(t, dir, map[string][]map[string]any{

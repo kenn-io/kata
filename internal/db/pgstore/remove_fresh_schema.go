@@ -28,7 +28,7 @@ func RemoveFreshSchemaWithConfig(
 	if err := pgConfig.Validate(); err != nil {
 		return err
 	}
-	store, err := openInternal(ctx, dsn, pgConfig, false, true)
+	store, err := openInternal(ctx, dsn, pgConfig, false, false, true)
 	if err != nil {
 		return err
 	}

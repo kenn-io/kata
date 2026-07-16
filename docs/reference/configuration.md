@@ -314,11 +314,12 @@ Issue text is chunked before embedding rather than embedded as a single
 truncated vector, so long issues get full semantic coverage instead of losing
 everything past a fixed length cutoff.
 
-Embeddings live in a SQLite sidecar database the daemon creates next to the
-main database the first time this section is configured, named after it —
-`kata.vectors.db` for the default `kata.db`. It holds only derived state and
-is safe to delete at any time — the daemon rebuilds it by re-embedding on
-the next reconcile — so exclude it from backups; back up `kata.db` as usual.
+With SQLite, embeddings live in a sidecar database the daemon creates next to
+the main database (`kata.vectors.db` for the default `kata.db`). With
+PostgreSQL, they live in pgvector `halfvec` tables in the selected Kata schema;
+see [PostgreSQL operations](../operations/postgres.md) for extension and role
+requirements. Both forms are derived state and are rebuilt by re-embedding;
+portable JSONL exports do not include vectors.
 
 Upgrading to a kata version that changes embedding storage re-embeds every
 issue from scratch on the first daemon start after the upgrade. The rebuilt
@@ -328,7 +329,7 @@ remaining coverage. An ordinary reconciler backlog with an active index does
 not degrade search — fresh or edited issues simply lack semantic recall
 until they are embedded. Search degrades (labeled in `auto` mode, 503 for
 explicit `--hybrid`/`--semantic`) only when the vector leg is unavailable:
-no index has been activated yet (a fresh sidecar before the first reconcile
+no index has been activated yet (fresh vector storage before the first reconcile
 cycle) or the model changed and its replacement index is still backfilling.
 
 Changing `model`, `dims`, or `fingerprint_salt` builds a new index generation

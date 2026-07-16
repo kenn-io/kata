@@ -111,6 +111,11 @@ func (s *Store) pgReplayClearTarget(
 	tx *sql.Tx,
 	opts db.ImportOptions,
 ) (string, error) {
+	if _, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"kata:pgstore:serving:"+s.schema); err != nil {
+		return "", fmt.Errorf("quiesce serving daemons for import: %w", mapSQLError(err, nil))
+	}
 	if err := acquireSchemaMigrationLock(ctx, tx); err != nil {
 		return "", fmt.Errorf("lock schema migrations for import: %w", mapSQLError(err, nil))
 	}

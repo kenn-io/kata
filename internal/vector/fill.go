@@ -33,7 +33,7 @@ const (
 func (ix *Index) Fill(ctx context.Context, key string, enc kitvec.EncodeFunc, scanBatch, encodeBatch int, onDocument func(bool)) (kitvec.FillStats, error) {
 	split := kitvec.SplitOptions{MaxRunes: splitMaxRunes, Overlap: splitOverlap}
 	batch := kitvec.BatchOptions{BatchSize: encodeBatch}
-	store := progressStore{Store: ix.store, onDocument: onDocument}
+	store := progressStore{Store: ix.flowStore, onDocument: onDocument}
 	return kitvec.Fill(ctx, store, key, enc, kitvec.FillOptions[string]{
 		ScanBatch: scanBatch,
 		Split:     split,
@@ -72,8 +72,11 @@ func (s progressStore) SaveVectors(ctx context.Context, gen, doc string, revisio
 // document pending by aborting the fill.
 func (ix *Index) contentSpecific400(ctx context.Context, doc string, enc kitvec.EncodeFunc, split kitvec.SplitOptions, batch kitvec.BatchOptions) bool {
 	var content string
-	if err := ix.db.QueryRowContext(ctx,
-		`SELECT content FROM issue_mirror WHERE issue_uid = ?`, doc).Scan(&content); err != nil {
+	query := `SELECT content FROM issue_mirror WHERE issue_uid = ?`
+	if ix.pg != nil {
+		query = `SELECT content FROM issue_vector_mirror WHERE issue_uid = $1`
+	}
+	if err := ix.db.QueryRowContext(ctx, query, doc).Scan(&content); err != nil {
 		return false
 	}
 	chunks := kitvec.Split(content, split)

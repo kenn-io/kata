@@ -17,8 +17,8 @@ command flags see the [CLI reference](../reference/cli.md).
 
 When you configure an embedding endpoint, the daemon embeds each issue's title
 and body, chunking long text instead of truncating it so long issues get full
-coverage, and stores the resulting vectors in a sidecar database next to the
-main one. A search then runs two legs and fuses them:
+coverage, and stores the resulting vectors in backend-native derived storage.
+A search then runs two legs and fuses them:
 
 - the **lexical leg** — the existing full-text search, unchanged; and
 - the **vector leg** — embeds your query and finds issues whose vectors are
@@ -169,10 +169,11 @@ API key is only ever sent to the configured `base_url` origin.
 
 Embeddings are local derived state and **do not federate**: each daemon embeds
 only what it stores, and no vectors are sent to or pulled from federated hubs.
-They live in a sidecar database, not in `kata.db`, and are not included in
-JSONL [backup/export](../operations/backup-restore.md) — a restore or a
-storage-format upgrade re-embeds from scratch rather than carrying vectors
-forward. Archives exported by older kata versions that still contain
+SQLite keeps them in a sidecar database; PostgreSQL keeps them in pgvector
+tables in its selected Kata schema. They are not included in JSONL
+[backup/export](../operations/backup-restore.md) — a restore or a storage-format
+upgrade re-embeds from scratch rather than carrying vectors forward. Archives
+exported by older kata versions that still contain
 embedding records import cleanly: those records are skipped and the
 reconciler rebuilds the vectors.
 
@@ -180,10 +181,9 @@ reconciler rebuilds the vectors.
 
 - Only issue **title and body** are embedded today; comments are searchable
   lexically but a paraphrase that lives only in a comment will not vector-match.
-- Semantic search requires the SQLite backend. A daemon configured with a
-  non-SQLite database and `[search.embeddings]` set fails to start with a
-  configuration error. PostgreSQL lexical search is supported; only its
-  embedding/vector path remains unavailable.
+- PostgreSQL semantic search requires pgvector 0.7 or later. Its first
+  implementation uses bounded exact cosine scans; SQLite uses sqlite-vec KNN.
+  See [PostgreSQL operations](../operations/postgres.md) for setup.
 
 For the design rationale and internals, see the
 [semantic search design note](../design/semantic-search.md).

@@ -18,7 +18,7 @@ import (
 
 var postgresDatabaseCounter atomic.Uint64
 
-// NewPostgresContainer starts a postgres:17-alpine container, waits for it to
+// NewPostgresContainer starts a pgvector-enabled PostgreSQL 17 container, waits for it to
 // become ready, and returns the DSN string plus a cleanup function. Callers
 // must register the cleanup via t.Cleanup themselves so test ordering stays
 // predictable. The container lives for the test's lifetime; cleanup tears it
@@ -39,7 +39,7 @@ func NewPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
 		return newIsolatedPostgresDatabase(ctx, t, baseDSN)
 	}
 	container, err := postgres.Run(ctx,
-		"postgres:17-alpine",
+		"pgvector/pgvector:pg17",
 		postgres.WithDatabase("kata_test"),
 		postgres.WithUsername("kata"),
 		postgres.WithPassword("kata"),

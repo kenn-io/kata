@@ -42,6 +42,22 @@ func TestNamespace_SocketDirHonorsXDGRuntimeDir(t *testing.T) {
 	assert.Equal(t, filepath.Join(xdg, "kata", ns.DBHash), ns.SocketDir)
 }
 
+func TestNamespaceSeparatesPostgresSchemas(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_DSN", "postgres://user@db.example/kata?sslmode=verify-full")
+	t.Setenv("KATA_POSTGRES_SCHEMA", "alpha")
+	alpha, err := daemon.NewNamespace()
+	require.NoError(t, err)
+
+	t.Setenv("KATA_POSTGRES_SCHEMA", "beta")
+	beta, err := daemon.NewNamespace()
+	require.NoError(t, err)
+
+	assert.NotEqual(t, alpha.DBHash, beta.DBHash)
+	assert.NotEqual(t, alpha.DataDir, beta.DataDir)
+	assert.NotEqual(t, alpha.SocketDir, beta.SocketDir)
+}
+
 func TestNamespace_SocketDirFallsBackToTmpDir(t *testing.T) {
 	setupMockEnv(t)
 	t.Setenv("XDG_RUNTIME_DIR", "")

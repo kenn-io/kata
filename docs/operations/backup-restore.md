@@ -56,7 +56,11 @@ kata import --input backups/kata-20260531.jsonl \
 A missing `kata` schema is installed before the snapshot is replayed. An
 initialized target is refused unless `--force` is set; forced replay replaces
 all kata-owned state atomically and retains unrelated schemas in the database.
-Postgres credentials are redacted from command output and errors.
+Stop every daemon using that database and schema before restore. Each serving
+daemon holds a database advisory lease for its lifetime, and replay requires
+the exclusive counterpart, so a daemon on another host cannot retain a
+pre-restore identity while replacement is in progress. Postgres credentials
+are redacted from command output and errors.
 
 For a shared production database, also take a database-native snapshot before
 schema upgrades. JSONL is the portable logical backup; a managed snapshot or

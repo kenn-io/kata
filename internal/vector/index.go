@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 
+	kitvec "go.kenn.io/kit/vector"
 	"go.kenn.io/kit/vector/sqlitevec"
 )
 
@@ -29,9 +30,12 @@ const vectorsPrefix = "issue_vectors"
 
 // Index is the open sidecar database plus kit's store bound to it.
 type Index struct {
-	db    *sql.DB
-	store *sqlitevec.Store[string, string]
-	path  string
+	db        *sql.DB
+	store     *sqlitevec.Store[string, string]
+	flowStore kitvec.Store[string, string]
+	pg        *postgresIndex
+	path      string
+	ownsDB    bool
 }
 
 // Open opens (or creates) the sidecar at path. A mirror schema version
@@ -72,11 +76,26 @@ func Open(ctx context.Context, path string) (*Index, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("vector: init kit store: %w", err)
 	}
-	return &Index{db: db, store: store, path: path}, nil
+	return &Index{db: db, store: store, flowStore: store, path: path, ownsDB: true}, nil
+}
+
+// OpenPostgres binds the semantic index to canonical pgvector tables on an
+// already prepared Kata PostgreSQL pool. The caller retains ownership of db.
+func OpenPostgres(ctx context.Context, db *sql.DB) (*Index, error) {
+	pg := &postgresIndex{db: db}
+	if err := pg.validate(ctx); err != nil {
+		return nil, err
+	}
+	return &Index{db: db, flowStore: pg, pg: pg}, nil
 }
 
 // Close releases the sidecar handle.
-func (ix *Index) Close() error { return ix.db.Close() }
+func (ix *Index) Close() error {
+	if !ix.ownsDB {
+		return nil
+	}
+	return ix.db.Close()
+}
 
 func openSidecar(path string) (*sql.DB, error) {
 	sqlitevec.Register() // no-op on modernc builds; required on cgo builds

@@ -1121,8 +1121,9 @@ func TestVectorsPathForDSN(t *testing.T) {
 	if err != nil || withDB == got {
 		t.Fatalf("data and data.db must not share a sidecar: %q vs %q (%v)", got, withDB, err)
 	}
-	if _, err := vectorsPathForDSN("postgres://h/db"); err == nil {
-		t.Fatal("postgres DSN must error: sidecar embeddings are sqlite-only")
+	got, err = vectorsPathForDSN("postgres://h/db")
+	if err != nil || got != "" {
+		t.Fatalf("postgres uses canonical pgvector tables, got %q, %v", got, err)
 	}
 }
 

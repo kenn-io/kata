@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
@@ -193,7 +195,7 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 	}); err != nil {
 		_ = store.Close()
 		if installedFreshSchema {
-			return errors.Join(err, storeopen.RemoveFreshPostgresTarget(cmd.Context(), target, instanceUID))
+			return errors.Join(err, removeFreshPostgresTargetAfterFailure(cmd.Context(), target, instanceUID))
 		}
 		return err
 	}
@@ -201,6 +203,12 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 		return fmt.Errorf("close import target: %w", err)
 	}
 	return writeImportSuccess(cmd, identity)
+}
+
+func removeFreshPostgresTargetAfterFailure(parent context.Context, target, instanceUID string) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 10*time.Second)
+	defer cancel()
+	return storeopen.RemoveFreshPostgresTarget(ctx, target, instanceUID)
 }
 
 func writeImportSuccess(cmd *cobra.Command, target string) error {

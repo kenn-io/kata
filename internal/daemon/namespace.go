@@ -34,7 +34,11 @@ func NewNamespace() (*Namespace, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve runtime dir: %w", err)
 	}
-	hash := config.DBHash(dbPath)
+	pgConfig, err := config.KataPostgresStorageConfig(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("resolve postgres storage config: %w", err)
+	}
+	hash := config.StorageHash(dbPath, pgConfig.Schema)
 
 	socketDir := socketParent(hash)
 

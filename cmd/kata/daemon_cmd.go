@@ -709,13 +709,13 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	defer stopCleanup()
 
 	dbPath := startup.DBPath
-	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig)
+	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig, db.Serving())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = store.Close() }()
 
-	disp, daemonLog, err := setupHooks(store, dbPath, startup.KataHome, startup.HookConfig)
+	disp, daemonLog, err := setupHooks(store, ns.DBHash, startup.KataHome, startup.HookConfig)
 	if err != nil {
 		return err
 	}
@@ -937,9 +937,12 @@ func startFederationRunner(
 // .db swaps that suffix for .vectors.db, any other filename appends .vectors
 // — the outputs can never coincide (one ends in .vectors.db only when its
 // input ended in .db), so /x/data and /x/data.db get distinct sidecars.
-// Embeddings require the SQLite backend; other DSNs error so
-// startEmbeddingReconciler can refuse clearly instead of guessing a path.
+// SQLite keeps vectors in a derived sidecar. PostgreSQL stores them in its
+// canonical pgvector tables and therefore has no sidecar path.
 func vectorsPathForDSN(dsn string) (string, error) {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		return "", nil
+	}
 	path := strings.TrimPrefix(dsn, "sqlite://")
 	if strings.Contains(path, "://") {
 		return "", fmt.Errorf("semantic search requires the sqlite backend, got dsn %s", config.RedactDSN(dsn))
@@ -997,7 +1000,13 @@ func startEmbeddingReconciler(
 	if embedder == nil {
 		return nil, nil, nil, nil
 	}
-	idx, err := vector.Open(ctx, vectorsPath)
+	var idx *vector.Index
+	var err error
+	if postgresStore, ok := store.(*pgstore.Store); ok {
+		idx, err = vector.OpenPostgres(ctx, postgresStore.DB)
+	} else {
+		idx, err = vector.Open(ctx, vectorsPath)
+	}
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("embedding index: %w", err)
 	}
@@ -1193,7 +1202,7 @@ func listenFromPortEnv() (string, bool) {
 // hook configuration parsed during startup preflight.
 func setupHooks(
 	store db.Storage,
-	dbPath string,
+	dbHash string,
 	home string,
 	loaded hooks.LoadedConfig,
 ) (*hooks.Dispatcher, *log.Logger, error) {
@@ -1202,7 +1211,7 @@ func setupHooks(
 	}
 	daemonLog := log.New(os.Stderr, "kata-daemon: ", log.LstdFlags)
 	deps := hooks.DispatcherDeps{
-		DBHash:          config.DBHash(dbPath),
+		DBHash:          dbHash,
 		KataHome:        home,
 		DaemonLog:       daemonLog,
 		AliasResolver:   makeAliasResolver(store),

@@ -8,6 +8,10 @@ type OpenConfig struct {
 	// backend-specific setup writes. Cutover and export paths use it for
 	// non-mutating inspection.
 	ReadOnly bool
+	// Serving holds the backend's process-lifetime serving fence. It is used by
+	// daemons, not short-lived CLI handles, so offline restore can quiesce every
+	// host before replacing state.
+	Serving bool
 }
 
 // OpenOption mutates an OpenConfig. The functional-options style keeps the
@@ -18,6 +22,11 @@ type OpenOption func(*OpenConfig)
 // ReadOnly opens the database without bootstrap or schema-version writes.
 func ReadOnly() OpenOption {
 	return func(c *OpenConfig) { c.ReadOnly = true }
+}
+
+// Serving marks a long-running daemon storage handle.
+func Serving() OpenOption {
+	return func(c *OpenConfig) { c.Serving = true }
 }
 
 // ApplyOpenOptions folds the variadic options into a fresh OpenConfig. Backends

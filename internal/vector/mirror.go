@@ -19,6 +19,9 @@ const mirrorPageSize = 500
 // puts the issue back in the feed, re-mirroring and re-embedding it. It
 // returns the number of rows written or removed.
 func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, error) {
+	if ix.pg != nil {
+		return ix.pg.refreshMirror(ctx, store)
+	}
 	changed := 0
 	seen := make(map[string]struct{})
 	afterID := int64(0)

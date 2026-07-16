@@ -12,7 +12,7 @@ documented.
 | `internal/daemon` | HTTP routes, daemon runtime, auth, SSE, federation routes. |
 | `internal/db` | Storage contract, backend implementations, schemas, projections, events, queries, federation state. |
 | `internal/embedding` | OpenAI-compatible embeddings client and text recipe (storage-free). |
-| `internal/vector` | `kata.vectors.db` sidecar: mirror, generation lifecycle, fill, KNN query (built on `go.kenn.io/kit/vector`). |
+| `internal/vector` | Backend-native semantic index: SQLite sidecar/sqlite-vec or canonical PostgreSQL/pgvector tables, plus mirror, generation lifecycle, fill, and query. |
 | `internal/client` | Client discovery, auto-start, remote daemon, bearer handling. |
 | `internal/tui` | Bubble Tea TUI. |
 | `internal/jsonl` | Export/import, cutover, fixture compatibility. |

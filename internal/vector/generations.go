@@ -15,6 +15,9 @@ import (
 // serving generation); any other state — absent, pending, retired — becomes
 // building, recreating the vec0 table if it was reclaimed.
 func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Generation) error {
+	if ix.pg != nil {
+		return ix.pg.ensureBuilding(ctx, key, gen)
+	}
 	state, err := ix.generationState(ctx, key)
 	if err != nil {
 		return err
@@ -35,6 +38,9 @@ func (ix *Index) EnsureBuilding(ctx context.Context, key string, gen kitvec.Gene
 // migrations, so the newest ordinal is always the intended survivor and
 // there is no rollback to an older generation.
 func (ix *Index) ActiveGeneration(ctx context.Context) (string, bool, error) {
+	if ix.pg != nil {
+		return ix.pg.activeGeneration(ctx)
+	}
 	var key string
 	err := ix.db.QueryRowContext(ctx, fmt.Sprintf(
 		`SELECT gen_key FROM %s_generations WHERE state = ? ORDER BY ordinal DESC LIMIT 1`,
@@ -54,6 +60,9 @@ func (ix *Index) ActiveGeneration(ctx context.Context) (string, bool, error) {
 // kit's bookkeeping tables. No-op when key is already the only active
 // generation.
 func (ix *Index) CutOver(ctx context.Context, key string) error {
+	if ix.pg != nil {
+		return ix.pg.cutOver(ctx, key)
+	}
 	rows, err := ix.db.QueryContext(ctx, fmt.Sprintf(
 		`SELECT gen_key, ordinal, state FROM %s_generations`, vectorsPrefix))
 	if err != nil {
@@ -133,6 +142,9 @@ func (ix *Index) reclaim(ctx context.Context, ordinal int64) error {
 // Backlog counts mirror rows not stamped at their current revision for key —
 // the operator-visible "documents awaiting embedding" gauge.
 func (ix *Index) Backlog(ctx context.Context, key string) (int64, error) {
+	if ix.pg != nil {
+		return ix.pg.backlog(ctx, key)
+	}
 	var n int64
 	err := ix.db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT count(*) FROM issue_mirror m
@@ -150,6 +162,9 @@ func (ix *Index) Backlog(ctx context.Context, key string) (int64, error) {
 // Coverage counts current-revision mirror rows with vectors, rows deliberately
 // stamped without vectors, and rows still awaiting key.
 func (ix *Index) Coverage(ctx context.Context, key string) (embedded, skipped, backlog int64, err error) {
+	if ix.pg != nil {
+		return ix.pg.coverage(ctx, key)
+	}
 	backlog, err = ix.Backlog(ctx, key)
 	if err != nil {
 		return 0, 0, 0, err

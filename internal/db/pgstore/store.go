@@ -35,7 +35,18 @@ type Store struct {
 	instanceUID          string
 	readOnly             bool
 	installedFreshSchema bool
+	servingConn          *sql.Conn
 	exportQ              exportQueryer
+}
+
+// Close releases a process-lifetime serving lease before closing the pool.
+func (s *Store) Close() error {
+	var leaseErr error
+	if s.servingConn != nil {
+		leaseErr = s.servingConn.Close()
+		s.servingConn = nil
+	}
+	return errors.Join(leaseErr, s.DB.Close())
 }
 
 type exportQueryer interface {
@@ -133,7 +144,7 @@ func PeekSchemaVersionWithConfig(ctx context.Context, dsn string, pgConfig Confi
 	if err := pgConfig.Validate(); err != nil {
 		return 0, err
 	}
-	s, err := openInternal(ctx, dsn, pgConfig, true, true)
+	s, err := openInternal(ctx, dsn, pgConfig, true, false, true)
 	if err != nil {
 		return 0, err
 	}

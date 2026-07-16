@@ -35,7 +35,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_DB: kata_test
           POSTGRES_USER: kata
@@ -68,6 +68,7 @@ jobs:
           ./internal/testenv
           ./internal/db/pgstore
           ./internal/db/storeopen
+          ./internal/vector
           ./cmd/kata
 
   windows:

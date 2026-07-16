@@ -14,7 +14,8 @@ production posture.
 - PostgreSQL 17 or later;
 - one database reserved for the service, or a database in which the dedicated
   kata schema can be isolated;
-- the `unaccent` extension installed in the `public` schema;
+- the `unaccent` extension and pgvector 0.7 or later installed in the `public`
+  schema;
 - server-identity-verified TLS for every remote database endpoint;
 - one schema-owner credential for `kata storage postgres migrate`;
 - one runtime credential for the daemon.
@@ -36,15 +37,18 @@ GRANT CREATE ON DATABASE kata TO kata_schema_owner;
 ```
 
 The schema owner needs `CREATE` on the database because the first preparation
-creates the dedicated schema and installs `unaccent`. Managed PostgreSQL
-services may require an administrator to install the extension first:
+creates the dedicated schema and installs `unaccent` and pgvector. Managed
+PostgreSQL services may require an administrator to install the extensions
+first:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 ```
 
-If `unaccent` already exists in another schema, move it to `public` as its owner
-before preparing Kata. The serving role does not need database-level `CREATE`.
+If either extension already exists in another schema, move it to `public` as
+its owner before preparing Kata. The serving role does not need database-level
+`CREATE`.
 
 Use the same schema-owner role for later upgrades. PostgreSQL default
 privileges are attached to the object-creating role, so silently changing the
@@ -119,6 +123,13 @@ export KATA_POSTGRES_SCHEMA_MODE='validate'
 In `validate` mode, every direct storage open—including daemon startup and
 offline export—requires the schema to exist at the binary's exact version and
 performs no DDL. Missing, older, newer, or unversioned schemas fail closed.
+
+When `[search.embeddings]` is configured, vectors are stored in canonical
+pgvector `halfvec` tables in the selected Kata schema. The runtime still needs
+only the table and sequence grants above. The first implementation performs a
+bounded exact cosine scan rather than creating model-dimension-specific ANN
+indexes, so model changes require no runtime DDL. pgvector's `halfvec` supports
+up to 4,000 dimensions.
 
 Check the runtime credential before starting the service:
 
@@ -204,9 +215,9 @@ successful schema upgrade:
 4. run `status` with the old runtime binary and credential;
 5. restart the old binary only after that check succeeds.
 
-A `pg_dump --schema=kata` archive does not include the `public.unaccent`
-extension or database roles. Install the extension and recreate roles before
-`pg_restore`, then reapply the grants above. See [Backup and
+A `pg_dump --schema=kata` archive does not include the `public.unaccent` or
+`public.vector` extensions or database roles. Install both extensions and
+recreate roles before `pg_restore`, then reapply the grants above. See [Backup and
 restore](backup-restore.md) for the portable JSONL workflow.
 
 ## Common failures

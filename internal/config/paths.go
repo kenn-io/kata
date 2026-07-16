@@ -70,6 +70,25 @@ func DBHash(dbPath string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
+// StorageHash identifies one logical storage target. PostgreSQL schemas are
+// independent databases from Kata's point of view even when they share a DSN,
+// so their runtime sockets and control files must not collide.
+func StorageHash(dsn, postgresSchema string) string {
+	if !strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://") {
+		return DBHash(dsn)
+	}
+	schema := strings.TrimSpace(postgresSchema)
+	if schema == "" {
+		schema = "kata"
+	}
+	identity, err := CanonicalDSNIdentity(dsn)
+	if err != nil {
+		identity = RedactDSN(dsn)
+	}
+	sum := sha256.Sum256([]byte(identity + "\x00schema=" + schema))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
 // RuntimeDir returns <KataHome>/runtime/<dbhash>. The directory is not created.
 func RuntimeDir() (string, error) {
 	home, err := KataHome()
@@ -80,7 +99,11 @@ func RuntimeDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "runtime", DBHash(db)), nil
+	pgConfig, err := KataPostgresStorageConfig(context.Background())
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "runtime", StorageHash(db, pgConfig.Schema)), nil
 }
 
 // HookConfigPath returns <KataHome>/hooks.toml. The file is not created here.

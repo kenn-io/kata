@@ -17,6 +17,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added `kata storage postgres migrate` and `status`, plus validation-only
   runtime configuration, so production deployments can separate schema-owner
   and serving credentials.
+- Added PostgreSQL semantic search with pgvector `halfvec` storage and the same
+  generation/fill contract as SQLite, covered end to end against a real
+  pgvector service.
 
 **Improvements**
 
@@ -31,6 +34,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   candidate, with a separately configured lab-only insecure opt-in.
 - Added a dedicated PostgreSQL CI service job that cannot silently skip backend
   conformance and operator-ceremony tests when Docker discovery is unavailable.
+- Isolated daemon namespaces by PostgreSQL schema, fenced restore against
+  daemons on every host, and made failed fresh-import cleanup survive request
+  cancellation.
 
 ## 0.10.0
 <small>2026-07-11</small>

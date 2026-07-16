@@ -422,7 +422,11 @@ func hookRunsRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return config.HookRootDir(config.DBHash(dbPath))
+	pgConfig, err := config.KataPostgresStorageConfig(context.Background())
+	if err != nil {
+		return "", err
+	}
+	return config.HookRootDir(config.StorageHash(dbPath, pgConfig.Schema))
 }
 
 // orderedRunsFiles returns the rotated runs files plus the active file

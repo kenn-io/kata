@@ -139,6 +139,49 @@ func TestImportReplayWaitsForConcurrentSchemaMigration(t *testing.T) {
 	assert.Zero(t, retainedRows, "replay must clear tables committed by a concurrent migration")
 }
 
+func TestImportReplayWaitsForServingDaemonAcrossConnections(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	serving, err := pgstore.Open(ctx, dsn, db.Serving())
+	require.NoError(t, err)
+	restore, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = restore.Close() })
+
+	result := make(chan error, 1)
+	go func() {
+		result <- restore.ImportReplay(ctx, []db.ImportRecord{{
+			Kind: db.ImportKindMeta,
+			Meta: &db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000044"},
+		}}, db.ImportOptions{})
+	}()
+
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := restore.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_catalog.pg_locks
+				WHERE locktype = 'advisory' AND mode = 'ExclusiveLock' AND NOT granted
+			)`).Scan(&waiting)
+		return err == nil && waiting
+	}, 5*time.Second, 10*time.Millisecond, "restore did not wait for the serving lease")
+
+	require.NoError(t, serving.Close())
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "restore remained blocked after serving daemon stopped")
+	}
+	require.NoError(t, restore.RefreshInstanceUID(ctx))
+	assert.Equal(t, "01KATA00000000000000000044", restore.InstanceUID())
+}
+
 func TestImportReplayRefusesCrossSchemaCascade(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
