@@ -11,6 +11,17 @@
   skill (including `roborev-fix` or `roborev-design-review-branch`) unless the
   user explicitly asks for that skill.
 - Test First: Write a failing test before the implementation, then make it pass, then refactor (red, green, refactor). Don't add production code without a failing test that requires it.
+- Explicit Database Change Consent: Do not add, remove, or modify a production
+  database migration or persisted database schema without the user's explicit
+  consent in the current conversation. This includes canonical/bootstrap DDL,
+  schema-version constants, migration assets and registries, migration or
+  cutover runners, and changes to tables, columns, indexes, constraints,
+  triggers, functions, extensions, or other persisted database objects. A
+  feature request, backend-completion request, green test suite, unreleased or
+  pre-alpha status, or editable-in-place schema snapshot does not imply this
+  consent. Before editing, state the exact backend and proposed persisted-state
+  changes and wait for approval. Ephemeral test-local DDL that does not define
+  product persisted state is exempt.
 - No Private Project Data: Do not use private project, workspace, customer,
   host, or repository names in tests, docs, examples, planning documents,
   design notes, issue or bug reports, review responses, PR text, or generated
