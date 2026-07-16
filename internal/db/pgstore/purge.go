@@ -29,6 +29,9 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 			`SELECT name FROM projects WHERE id = $1`, issue.ProjectID).Scan(&projectName); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := ensureProjectWritableTx(ctx, tx, issue.ProjectID); err != nil {
+			return err
+		}
 
 		var minEventID, maxEventID sql.NullInt64
 		if err := tx.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM events

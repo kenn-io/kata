@@ -214,8 +214,10 @@ var storageScenarios = []scenario{
 	{
 		name: "project relocation",
 		methods: []string{
-			"CreateIssue", "CreateLink", "CreateProject", "CreateRecurrence", "EventsAfter", "ImportMappingBySource",
-			"IssueByID", "LinkByEndpoints", "MaterializeNext", "MoveIssueProject", "UpsertImportMapping",
+			"AcquireClaim", "ClaimStatusReadOnly", "CountLiveClaims", "CountPendingClaims", "CreateIssue",
+			"CreateLink", "CreateProject", "CreateRecurrence", "EnqueuePendingClaim", "EventsAfter",
+			"ImportMappingBySource", "IssueByID", "LinkByEndpoints", "ListPendingClaimRequestsForIssue",
+			"MaterializeNext", "MoveIssueProject", "UpsertImportMapping",
 		},
 		run: checkProjectRelocation,
 	},
@@ -275,11 +277,11 @@ var storageScenarios = []scenario{
 		methods: []string{
 			"ActiveFederationQuarantine", "ActiveFederationQuarantinesByProject",
 			"AdvanceFederationPullCursor", "AdvanceFederationPushCursor", "AuthorizeFederationToken",
-			"ClearFederationSyncError", "CountActiveFederationEnrollments", "CreateFederationEnrollment",
+			"ClearFederationSyncError", "CloseIssueWithEvents", "CountActiveFederationEnrollments", "CreateFederationEnrollment",
 			"CreateIssue", "CreateLink", "CreateProject", "EnableFederationPush", "ExportFederationBindings",
 			"ExportFederationEnrollments", "ExportFederationQuarantine", "ExportFederationSyncStatus",
 			"FederationBindingByProject", "FederationSyncStatusByProject", "ListFederationBindings",
-			"ListFederationEnrollments", "LinkByEndpoints", "RecordFederationQuarantine", "RecordFederationSyncError",
+			"ListFederationEnrollments", "LinkByEndpoints", "PurgeIssue", "RecordFederationQuarantine", "RecordFederationSyncError",
 			"RecordFederationSyncPullStarted", "RecordFederationSyncPullSuccess",
 			"RecordFederationSyncPushStarted", "RecordFederationSyncPushSuccess",
 			"RecordFederationSyncReset", "RetryFederationQuarantine", "RevokeFederationEnrollment",

@@ -39,6 +39,14 @@ type Config struct {
 	Postgres pgstore.Config
 }
 
+// InstalledFreshPostgresSchema reports whether store's open created its
+// configured Postgres schema. False is the safe answer for other backends and
+// for Postgres schemas that already existed.
+func InstalledFreshPostgresSchema(store db.Storage) bool {
+	reporter, ok := store.(interface{ InstalledFreshSchema() bool })
+	return ok && reporter.InstalledFreshSchema()
+}
+
 // DefaultConfig returns the standalone storage startup policy.
 func DefaultConfig() Config {
 	return Config{Postgres: pgstore.DefaultConfig()}

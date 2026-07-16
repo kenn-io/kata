@@ -41,7 +41,8 @@ func (s *Store) importReplayTx(
 	records []db.ImportRecord,
 	opts db.ImportOptions,
 ) error {
-	if err := s.pgReplayClearTarget(ctx, tx, opts.RequireFreshTarget); err != nil {
+	preservedInstanceUID, err := s.pgReplayClearTarget(ctx, tx, opts)
+	if err != nil {
 		return err
 	}
 
@@ -84,6 +85,11 @@ func (s *Store) importReplayTx(
 	if err := pgReplayEnsureSystemProject(ctx, tx); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO meta(key,value) VALUES('instance_uid',$1) ON CONFLICT(key) DO NOTHING`,
+		preservedInstanceUID); err != nil {
+		return fmt.Errorf("restore target instance_uid: %w", mapSQLError(err, nil))
+	}
 	if err := s.replayAPITokens(ctx, tx); err != nil {
 		return err
 	}
@@ -96,43 +102,48 @@ func (s *Store) importReplayTx(
 	return nil
 }
 
-// pgReplayClearTarget makes replay an atomic whole-schema replacement while
-// retaining meta so NewInstance can preserve the target instance UID. The
+// pgReplayClearTarget makes replay an atomic whole-schema replacement. The
 // table inventory comes from the selected schema, so future migration-owned
-// tables participate without a second hand-maintained list.
-func (s *Store) pgReplayClearTarget(ctx context.Context, tx *sql.Tx, requireFresh bool) error {
+// tables participate without a second hand-maintained list. NewInstance keeps
+// the target identity in memory while meta is replaced with the snapshot.
+func (s *Store) pgReplayClearTarget(
+	ctx context.Context,
+	tx *sql.Tx,
+	opts db.ImportOptions,
+) (string, error) {
 	if err := acquireSchemaMigrationLock(ctx, tx); err != nil {
-		return fmt.Errorf("lock schema migrations for import: %w", mapSQLError(err, nil))
+		return "", fmt.Errorf("lock schema migrations for import: %w", mapSQLError(err, nil))
 	}
 	allTables, err := schemaTableNames(ctx, tx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if len(allTables) == 0 {
-		return nil
+		return "", nil
 	}
 	quotedAll := make([]string, len(allTables))
-	var truncated []string
 	for i, table := range allTables {
 		quotedAll[i] = quoteIdentifier(table)
-		if table != "meta" {
-			truncated = append(truncated, quoteIdentifier(table))
-		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`LOCK TABLE `+strings.Join(quotedAll, ", ")+` IN ACCESS EXCLUSIVE MODE`); err != nil {
-		return fmt.Errorf("lock import target tables: %w", mapSQLError(err, nil))
+		return "", fmt.Errorf("lock import target tables: %w", mapSQLError(err, nil))
 	}
-	if requireFresh {
+	if opts.RequireFreshTarget {
 		if err := validateFreshSchema(ctx, tx, allTables, s.instanceUID); err != nil {
-			return fmt.Errorf("import requires a fresh target: %w", err)
+			return "", fmt.Errorf("import requires a fresh target: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`TRUNCATE TABLE `+strings.Join(truncated, ", ")+` RESTART IDENTITY CASCADE`); err != nil {
-		return fmt.Errorf("clear import target: %w", mapSQLError(err, nil))
+	var preservedInstanceUID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&preservedInstanceUID); err != nil {
+		return "", fmt.Errorf("preserve target instance_uid: %w", mapSQLError(err, nil))
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx,
+		`TRUNCATE TABLE `+strings.Join(quotedAll, ", ")+` RESTART IDENTITY`); err != nil {
+		return "", fmt.Errorf("clear import target: %w", mapSQLError(err, nil))
+	}
+	return preservedInstanceUID, nil
 }
 
 func (s *Store) importReplayRecord(

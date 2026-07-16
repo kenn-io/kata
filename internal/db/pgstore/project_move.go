@@ -58,6 +58,14 @@ SET project_id = $1, short_id = $2, revision = $3, updated_at = $4
 WHERE id = $5`, target.ID, newShortID, newRevision, updatedAt, current.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE issue_claims SET project_id = $1 WHERE issue_id = $2`, target.ID, current.ID); err != nil {
+			return fmt.Errorf("rehome issue claims: %w", mapSQLError(err, nil))
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE pending_claim_requests SET project_id = $1 WHERE issue_id = $2`, target.ID, current.ID); err != nil {
+			return fmt.Errorf("rehome pending claim requests: %w", mapSQLError(err, nil))
+		}
 
 		if _, err := tx.ExecContext(ctx, `DELETE FROM import_mappings source
 WHERE source.issue_id = $1 AND source.project_id = $2

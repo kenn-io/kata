@@ -19,12 +19,16 @@ func pgReplayEvent(
 	if err := pgReplayFillEventIssueUIDs(ctx, tx, event); err != nil {
 		return err
 	}
-	projectName, projectUID, err := pgReplayEventProjectIdentity(ctx, tx, event)
+	currentProjectName, projectUID, err := pgReplayEventProjectIdentity(ctx, tx, event)
 	if err != nil {
 		return err
 	}
+	durableProjectName := event.ProjectName
+	if durableProjectName == "" || opts.RecomputeEventContentHash {
+		durableProjectName = currentProjectName
+	}
 	if err := db.PrepareReplayEvent(
-		event, projectUID, projectName, opts.RecomputeEventContentHash,
+		event, projectUID, durableProjectName, opts.RecomputeEventContentHash,
 	); err != nil {
 		return err
 	}
@@ -35,7 +39,7 @@ hlc_counter,content_hash,created_at
 ) OVERRIDING SYSTEM VALUE VALUES(
 $1,$2,$3,$4,$5,$6,COALESCE($7,(SELECT uid FROM issues WHERE id=$6)),
 $8,COALESCE($9,(SELECT uid FROM issues WHERE id=$8)),$10,$11,$12,$13,$14,$15,$16
-)`, event.ID, event.UID, event.OriginInstanceUID, event.ProjectID, projectName,
+)`, event.ID, event.UID, event.OriginInstanceUID, event.ProjectID, durableProjectName,
 		event.IssueID, event.IssueUID, event.RelatedIssueID, event.RelatedIssueUID,
 		event.Type, event.Actor, string(event.Payload), event.HLCPhysicalMS,
 		event.HLCCounter, event.ContentHash, event.CreatedAt)

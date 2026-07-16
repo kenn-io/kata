@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,25 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	})
 	if err != nil {
 		return fmt.Errorf("create target move mapping: %w", err)
+	}
+	now := time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
+	claimPrincipal := db.ClaimPrincipal{
+		HolderInstanceUID: store.InstanceUID(), Holder: "move-worker", ClientKind: "agent",
+	}
+	if _, err := store.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: source.ID, IssueRef: moving.UID, Principal: claimPrincipal,
+		ClaimKind: "hard", Now: now,
+	}); err != nil {
+		return fmt.Errorf("acquire move-surviving claim: %w", err)
+	}
+	if _, err := store.EnqueuePendingClaim(ctx, db.PendingClaimParams{
+		ProjectID: source.ID, IssueRef: moving.UID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: store.InstanceUID(), Holder: "queued-worker", ClientKind: "agent",
+		},
+		ClaimKind: "hard", Now: now,
+	}); err != nil {
+		return fmt.Errorf("enqueue move-surviving claim: %w", err)
 	}
 
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
@@ -119,6 +139,37 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	assert.Equal(t, &targetID, targetMapping.IssueID)
 	_, err = store.ImportMappingBySource(ctx, source.ID, "tracker", "issue", "collision")
 	assert.ErrorIs(t, err, db.ErrNotFound)
+	sourceLiveClaims, err := store.CountLiveClaims(ctx, source.ID)
+	if err != nil {
+		return err
+	}
+	targetLiveClaims, err := store.CountLiveClaims(ctx, target.ID)
+	if err != nil {
+		return err
+	}
+	assert.Zero(t, sourceLiveClaims)
+	assert.Equal(t, int64(1), targetLiveClaims)
+	claimStatus, err := store.ClaimStatusReadOnly(ctx, target.ID, moving.UID, now.Add(time.Minute))
+	if err != nil {
+		return err
+	}
+	assert.True(t, claimStatus.Held)
+	sourcePendingClaims, err := store.CountPendingClaims(ctx, source.ID)
+	if err != nil {
+		return err
+	}
+	targetPendingClaims, err := store.CountPendingClaims(ctx, target.ID)
+	if err != nil {
+		return err
+	}
+	assert.Zero(t, sourcePendingClaims)
+	assert.Equal(t, int64(1), targetPendingClaims)
+	pending, err := store.ListPendingClaimRequestsForIssue(ctx, target.ID, moving.UID, 10)
+	if err != nil {
+		return err
+	}
+	require.Len(t, pending, 1)
+	assert.Equal(t, target.ID, pending[0].ProjectID)
 
 	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: target.ID, Limit: 100})
 	if err != nil {

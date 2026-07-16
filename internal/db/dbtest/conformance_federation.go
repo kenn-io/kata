@@ -86,6 +86,12 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 		ProjectID: spoke.ID, Title: "must not write while pull-only", Author: "member",
 	})
 	assert.ErrorIs(t, err, db.ErrFederatedReadOnly)
+	_, _, _, err = store.CloseIssueWithEvents(
+		ctx, spokeIssue.ID, "done", "member", "must not close while pull-only", nil,
+	)
+	assert.ErrorIs(t, err, db.ErrFederatedReadOnly)
+	_, err = store.PurgeIssue(ctx, spokeIssue.ID, "member", nil)
+	assert.ErrorIs(t, err, db.ErrFederatedReadOnly)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID: peer.ID, Role: db.FederationRoleSpoke,
 		HubURL: "https://hub.example/another-path", HubProjectID: hub.ID, HubProjectUID: hub.UID,

@@ -30,11 +30,12 @@ import (
 // derived from it.
 type Store struct {
 	*sql.DB
-	dsn         string
-	schema      string
-	instanceUID string
-	readOnly    bool
-	exportQ     exportQueryer
+	dsn                  string
+	schema               string
+	instanceUID          string
+	readOnly             bool
+	installedFreshSchema bool
+	exportQ              exportQueryer
 }
 
 type exportQueryer interface {
@@ -79,6 +80,11 @@ func (s *Store) Path() string {
 // when the meta table exists (fresh DBs are bootstrapped and seeded in the
 // same call). Empty only on a read-only handle that hasn't run cacheInstanceUID.
 func (s *Store) InstanceUID() string { return s.instanceUID }
+
+// InstalledFreshSchema reports whether this open atomically created the
+// configured schema. Import cleanup uses this ownership proof so it never
+// drops a schema that predated the importing process.
+func (s *Store) InstalledFreshSchema() bool { return s.installedFreshSchema }
 
 // RefreshInstanceUID re-reads meta.instance_uid into the cached field. Used
 // after jsonl.Import overwrites the row.

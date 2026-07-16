@@ -425,7 +425,13 @@ func lockedIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, includeDelete
 		return db.Issue{}, db.Project{}, err
 	}
 	project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR SHARE`, issue.ProjectID))
-	return issue, project, err
+	if err != nil {
+		return db.Issue{}, db.Project{}, err
+	}
+	if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
+		return db.Issue{}, db.Project{}, err
+	}
+	return issue, project, nil
 }
 
 func issueEventInput(issue db.Issue, project db.Project, eventType, actor, payload string) eventInsert {

@@ -138,3 +138,121 @@ func TestImportReplayWaitsForConcurrentSchemaMigration(t *testing.T) {
 	require.NoError(t, migrator.QueryRowContext(ctx, `SELECT COUNT(*) FROM kata.late_state`).Scan(&retainedRows))
 	assert.Zero(t, retainedRows, "replay must clear tables committed by a concurrent migration")
 }
+
+func TestImportReplayRefusesCrossSchemaCascade(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "referenced-project")
+	require.NoError(t, err)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	_, err = admin.ExecContext(ctx, `CREATE SCHEMA unrelated`)
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, `CREATE TABLE unrelated.project_refs(
+			project_id bigint PRIMARY KEY REFERENCES kata.projects(id),
+			note text NOT NULL
+		)`)
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx,
+		`INSERT INTO unrelated.project_refs(project_id,note) VALUES($1,'must survive')`, project.ID)
+	require.NoError(t, err)
+
+	err = store.ImportReplay(ctx, []db.ImportRecord{{
+		Kind: db.ImportKindProject,
+		Project: &db.ProjectExport{
+			ID: 9, UID: "01KATA00000000000000000009", Name: "replacement",
+			CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+		},
+	}}, db.ImportOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "clear import target")
+
+	var note string
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT note FROM unrelated.project_refs WHERE project_id=$1`, project.ID).Scan(&note))
+	assert.Equal(t, "must survive", note)
+	_, err = store.ProjectByID(ctx, project.ID)
+	require.NoError(t, err, "failed replacement must roll back kata-owned state")
+}
+
+func TestImportReplayClearsTargetOnlyMetadata(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	_, err = store.ExecContext(ctx,
+		`INSERT INTO meta(key,value) VALUES('claim_status_refresh_error:old','stale')`)
+	require.NoError(t, err)
+
+	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{{
+		Kind: db.ImportKindMeta,
+		Meta: &db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000010"},
+	}}, db.ImportOptions{}))
+	var stale string
+	err = store.QueryRowContext(ctx,
+		`SELECT value FROM meta WHERE key='claim_status_refresh_error:old'`).Scan(&stale)
+	assert.ErrorIs(t, err, sql.ErrNoRows)
+	assert.Equal(t, "01KATA00000000000000000010", store.InstanceUID())
+
+	localUID := store.InstanceUID()
+	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{{
+		Kind: db.ImportKindMeta,
+		Meta: &db.MetaKV{Key: "instance_uid", Value: "01KATA00000000000000000011"},
+	}}, db.ImportOptions{NewInstance: true}))
+	assert.Equal(t, localUID, store.InstanceUID())
+}
+
+func TestImportReplayPreservesHistoricalEventProjectName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	const (
+		projectUID  = "01KATA00000000000000000012"
+		eventUID    = "01KATA00000000000000000013"
+		instanceUID = "01KATA00000000000000000014"
+		createdAt   = "2026-07-15T12:00:00.000Z"
+	)
+	payload := json.RawMessage(`{"name":"old-name"}`)
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID: eventUID, OriginInstanceUID: instanceUID, ProjectUID: projectUID,
+		ProjectName: "old-name", Type: "project.created", Actor: "operator",
+		HLCPhysicalMS: 1784116800000, CreatedAt: createdAt, Payload: payload,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{
+		{Kind: db.ImportKindMeta, Meta: &db.MetaKV{Key: "instance_uid", Value: instanceUID}},
+		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+			ID: 12, UID: projectUID, Name: "new-name", CreatedAt: createdAt,
+			Metadata: json.RawMessage(`{}`), Revision: 1,
+		}},
+		{Kind: db.ImportKindEvent, Event: &db.EventExport{
+			ID: 13, UID: eventUID, OriginInstanceUID: instanceUID, ProjectID: 12,
+			ProjectUID: projectUID, ProjectName: "old-name", Type: "project.created",
+			Actor: "operator", Payload: payload, HLCPhysicalMS: 1784116800000,
+			ContentHash: hash, CreatedAt: createdAt,
+		}},
+	}, db.ImportOptions{}))
+	var storedName string
+	require.NoError(t, store.QueryRowContext(ctx,
+		`SELECT project_name FROM events WHERE uid=$1`, eventUID).Scan(&storedName))
+	assert.Equal(t, "old-name", storedName)
+}

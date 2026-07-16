@@ -185,13 +185,14 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 	if err != nil {
 		return err
 	}
+	installedFreshSchema := storeopen.InstalledFreshPostgresSchema(store)
 	instanceUID := store.InstanceUID()
 	if err := jsonl.ImportWithOptions(cmd.Context(), in, store, jsonl.ImportOptions{
 		RequireFreshTarget: version == 0,
 		NewInstance:        newInstance,
 	}); err != nil {
 		_ = store.Close()
-		if version == 0 {
+		if installedFreshSchema {
 			return errors.Join(err, storeopen.RemoveFreshPostgresTarget(cmd.Context(), target, instanceUID))
 		}
 		return err

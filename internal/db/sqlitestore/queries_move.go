@@ -103,6 +103,14 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	); err != nil {
 		return out, err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE issue_claims SET project_id = ? WHERE issue_id = ?`, in.ToProjectID, in.IssueID); err != nil {
+		return out, fmt.Errorf("rehome issue claims: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE pending_claim_requests SET project_id = ? WHERE issue_id = ?`, in.ToProjectID, in.IssueID); err != nil {
+		return out, fmt.Errorf("rehome pending claim requests: %w", err)
+	}
 
 	// Rehome import_mappings rows for the moved issue. The UNIQUE constraint on
 	// import_mappings is (source, external_id, object_type, project_id). If the

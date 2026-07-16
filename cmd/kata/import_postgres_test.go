@@ -83,3 +83,29 @@ func TestImportPostgresFailureRemovesFreshTargetSchema(t *testing.T) {
 		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'restore_store')`).Scan(&exists))
 	assert.False(t, exists, "cleanup must remove the configured target schema")
 }
+
+func TestImportPostgresFailurePreservesPreexistingEmptySchema(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	home := setupKataEnv(t)
+	input := filepath.Join(home, "invalid.jsonl")
+	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_POSTGRES_SCHEMA", "preexisting_store")
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	_, err = admin.ExecContext(ctx, `CREATE SCHEMA preexisting_store`)
+	require.NoError(t, err)
+
+	_, err = runCmdOutput(t, nil, "import", "--input", input, "--target", dsn)
+	require.Error(t, err)
+
+	var exists bool
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'preexisting_store')`).Scan(&exists))
+	assert.True(t, exists, "failed import must not drop a schema it did not create")
+}

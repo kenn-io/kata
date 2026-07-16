@@ -131,10 +131,12 @@ func openInternal(
 		}
 		return s, nil
 	}
-	if err := s.prepareSchema(ctx, pgConfig.SchemaMode); err != nil {
+	installedFresh, err := s.prepareSchema(ctx, pgConfig.SchemaMode)
+	if err != nil {
 		_ = sdb.Close()
 		return nil, err
 	}
+	s.installedFreshSchema = installedFresh
 	if err := s.ensureInstanceUID(ctx); err != nil {
 		_ = sdb.Close()
 		return nil, err
@@ -198,9 +200,9 @@ func (s *Store) validateSystemProject(ctx context.Context) error {
 	return nil
 }
 
-func (s *Store) prepareSchema(ctx context.Context, mode SchemaMode) error {
+func (s *Store) prepareSchema(ctx context.Context, mode SchemaMode) (bool, error) {
 	if mode == SchemaModeValidate {
-		return s.validateSchema(ctx)
+		return false, s.validateSchema(ctx)
 	}
 	return s.bootstrap(ctx)
 }
@@ -208,76 +210,76 @@ func (s *Store) prepareSchema(ctx context.Context, mode SchemaMode) error {
 // bootstrap serializes schema installation with a transaction-scoped advisory
 // lock. Schema creation, every migration asset, and its version stamp commit
 // atomically, so another opener cannot observe a partial installation.
-func (s *Store) bootstrap(ctx context.Context) error {
+func (s *Store) bootstrap(ctx context.Context) (bool, error) {
 	currentBinary := db.CurrentSchemaVersion()
 	tx, err := s.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin schema bootstrap: %w", err)
+		return false, fmt.Errorf("begin schema bootstrap: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	if err := acquireSchemaMigrationLock(ctx, tx); err != nil {
-		return fmt.Errorf("lock schema migrations: %w", err)
+		return false, fmt.Errorf("lock schema migrations: %w", err)
 	}
 
 	var schemaExists bool
 	if err := tx.QueryRowContext(ctx,
 		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, s.schema).Scan(&schemaExists); err != nil {
-		return fmt.Errorf("inspect postgres schema %q: %w", s.schema, err)
+		return false, fmt.Errorf("inspect postgres schema %q: %w", s.schema, err)
 	}
 	if !schemaExists {
 		if _, err := tx.ExecContext(ctx, `CREATE SCHEMA `+quoteIdentifier(s.schema)); err != nil {
-			return fmt.Errorf("create postgres schema %q: %w", s.schema, err)
+			return false, fmt.Errorf("create postgres schema %q: %w", s.schema, err)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `SET LOCAL search_path TO `+quoteIdentifier(s.schema)); err != nil {
-		return fmt.Errorf("select postgres schema %q: %w", s.schema, err)
+		return false, fmt.Errorf("select postgres schema %q: %w", s.schema, err)
 	}
 
 	current, err := currentVersionTx(ctx, tx, s.schema)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if current == 0 && schemaExists {
 		var hasTables bool
 		if err := tx.QueryRowContext(ctx,
 			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1)`, s.schema).
 			Scan(&hasTables); err != nil {
-			return fmt.Errorf("inspect postgres schema %q tables: %w", s.schema, err)
+			return false, fmt.Errorf("inspect postgres schema %q tables: %w", s.schema, err)
 		}
 		if hasTables {
-			return fmt.Errorf("postgres schema %q exists without migration metadata", s.schema)
+			return false, fmt.Errorf("postgres schema %q exists without migration metadata", s.schema)
 		}
 	}
 	if current > currentBinary {
-		return fmt.Errorf("postgres schema_version %d is newer than binary schema %d", current, currentBinary)
+		return false, fmt.Errorf("postgres schema_version %d is newer than binary schema %d", current, currentBinary)
 	}
 
 	if current == 0 {
 		if _, err := tx.ExecContext(ctx, canonicalSchemaSQL); err != nil {
-			return fmt.Errorf("install canonical postgres schema: %w", err)
+			return false, fmt.Errorf("install canonical postgres schema: %w", err)
 		}
 		if err := recordSchemaVersion(ctx, tx, currentBinary, "canonical postgres schema"); err != nil {
-			return err
+			return false, err
 		}
 	} else {
 		migrations, err := migrationPath(current, currentBinary)
 		if err != nil {
-			return err
+			return false, err
 		}
 		for _, migration := range migrations {
 			if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
-				return fmt.Errorf("apply postgres migration %s: %w", migration.Name, err)
+				return false, fmt.Errorf("apply postgres migration %s: %w", migration.Name, err)
 			}
 			if err := recordSchemaVersion(ctx, tx, migration.ToVersion, migration.Name); err != nil {
-				return err
+				return false, err
 			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit schema bootstrap: %w", err)
+		return false, fmt.Errorf("commit schema bootstrap: %w", err)
 	}
-	return nil
+	return !schemaExists, nil
 }
 
 func recordSchemaVersion(ctx context.Context, tx *sql.Tx, version int, source string) error {
