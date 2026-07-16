@@ -68,10 +68,36 @@ type postgresConnectionTargetIdentity struct {
 // display-safe database label, this identity retains routing overrides and HA
 // fallbacks so two different servers cannot share daemon runtime state.
 func postgresTargetIdentity(dsn string) (string, error) {
+	canonical, err := CanonicalDSNIdentity(dsn)
+	if err != nil {
+		return "", err
+	}
+	identity, err := parsePostgresConnectionTargetIdentity(dsn)
+	if err != nil {
+		return "", err
+	}
+	canonicalIdentity, err := parsePostgresConnectionTargetIdentity(canonical)
+	if err != nil {
+		return "", err
+	}
+	if samePostgresConnectionTargetIdentity(identity, canonicalIdentity) {
+		// Preserve the original runtime namespace for ordinary DSNs. Only
+		// routing overrides that change pgx's effective targets need the new
+		// expanded identity.
+		return canonical, nil
+	}
+	body, err := json.Marshal(identity)
+	if err != nil {
+		return "", errors.New("encode postgres target identity")
+	}
+	return string(body), nil
+}
+
+func parsePostgresConnectionTargetIdentity(dsn string) (postgresConnectionTargetIdentity, error) {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		// pgx parse errors may echo credentials from the input.
-		return "", errors.New("parse postgres target identity: invalid dsn")
+		return postgresConnectionTargetIdentity{}, errors.New("parse postgres target identity: invalid dsn")
 	}
 	identity := postgresConnectionTargetIdentity{Database: cfg.Database}
 	seen := map[postgresConnectionTarget]struct{}{}
@@ -87,11 +113,19 @@ func postgresTargetIdentity(dsn string) (string, error) {
 	for _, fallback := range cfg.Fallbacks {
 		appendTarget(fallback.Host, fallback.Port)
 	}
-	body, err := json.Marshal(identity)
-	if err != nil {
-		return "", errors.New("encode postgres target identity")
+	return identity, nil
+}
+
+func samePostgresConnectionTargetIdentity(a, b postgresConnectionTargetIdentity) bool {
+	if a.Database != b.Database || len(a.Targets) != len(b.Targets) {
+		return false
 	}
-	return string(body), nil
+	for index := range a.Targets {
+		if a.Targets[index] != b.Targets[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // RedactDSN returns dsn with any password removed, safe for errors and logs.

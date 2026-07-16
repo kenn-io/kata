@@ -110,7 +110,7 @@ func TestDBHashPostgresUsesCredentialFreeCanonicalForm(t *testing.T) {
 	got := config.DBHash(full)
 	// Stable effective-target identity, independent of credentials, incidental
 	// query params, and the postgres default port (5432).
-	assert.Equal(t, "1870f89ca57a", got)
+	assert.Equal(t, "7d5d38a526ca", got)
 	assert.Equal(t, got, config.DBHash("postgres://other:pw2@db.example.com:5432/kata?application_name=x"))
 	// Explicit :5432 must hash the same as no-port (same logical DB).
 	assert.Equal(t, got, config.DBHash("postgres://db.example.com/kata"))
@@ -124,6 +124,15 @@ func TestStorageHashPostgresIncludesNormalizedSchema(t *testing.T) {
 	assert.NotEqual(t, defaultSchema, config.StorageHash(dsn, "archive"))
 	assert.Equal(t, config.StorageHash(dsn, "archive"),
 		config.StorageHash("postgres://other@db.example.com/kata?application_name=x", "archive"))
+}
+
+func TestStorageHashPostgresPreservesSingleTargetRuntimeNamespace(t *testing.T) {
+	assert.Equal(t, "a396fd24cff8",
+		config.StorageHash(
+			"postgres://user:secret@db.example.com:5432/kata?sslmode=verify-full", //nolint:gosec // fixed credential fixture proves it cannot alter the legacy namespace
+			"kata",
+		),
+		"ordinary single-target DSNs must keep the pre-routing-fix daemon namespace")
 }
 
 func TestStorageHashPostgresIncludesEffectiveRoutingTargets(t *testing.T) {

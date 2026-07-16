@@ -71,6 +71,7 @@ jobs:
           ./internal/db/pgstore
           ./internal/db/storeopen
           ./internal/daemon
+          ./internal/jsonl
           ./internal/vector
           ./cmd/kata
           ./e2e
