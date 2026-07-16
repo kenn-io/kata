@@ -135,6 +135,32 @@ func TestStorageHashPostgresPreservesSingleTargetRuntimeNamespace(t *testing.T) 
 		"ordinary single-target DSNs must keep the pre-routing-fix daemon namespace")
 }
 
+func TestStorageHashPostgresPreservesEncodedDatabaseRuntimeNamespace(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want string
+	}{
+		{
+			name: "fragment delimiter",
+			dsn:  "postgres://user@db.example.com/team%23blue?sslmode=verify-full",
+			want: "252a2d2691a5",
+		},
+		{
+			name: "query delimiter",
+			dsn:  "postgres://user@db.example.com/team%3Fblue?sslmode=verify-full",
+			want: "1f7c7b34c3e8",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, config.StorageHash(tt.dsn, "kata"),
+				"percent-encoded database names must keep the legacy daemon namespace")
+		})
+	}
+}
+
 func TestStorageHashPostgresIncludesEffectiveRoutingTargets(t *testing.T) {
 	firstSocket := "postgres://user@/kata?host=/var/run/postgresql-a&sslmode=disable"
 	secondSocket := "postgres://user@/kata?host=/var/run/postgresql-b&sslmode=disable"

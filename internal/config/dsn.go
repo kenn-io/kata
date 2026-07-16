@@ -76,7 +76,7 @@ func postgresTargetIdentity(dsn string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	canonicalIdentity, err := parsePostgresConnectionTargetIdentity(canonical)
+	canonicalIdentity, err := parsePostgresCanonicalTargetIdentity(dsn)
 	if err != nil {
 		return "", err
 	}
@@ -91,6 +91,25 @@ func postgresTargetIdentity(dsn string) (string, error) {
 		return "", errors.New("encode postgres target identity")
 	}
 	return string(body), nil
+}
+
+// parsePostgresCanonicalTargetIdentity derives the ordinary URL target from
+// the original parsed DSN while removing credentials and query overrides. It
+// must not reparse CanonicalDSNIdentity: that legacy display identity contains
+// decoded database-path characters, so a database name containing an encoded
+// '#' or '?' would be reinterpreted as URL syntax and split the runtime
+// namespace after an upgrade.
+func parsePostgresCanonicalTargetIdentity(dsn string) (postgresConnectionTargetIdentity, error) {
+	u, err := url.Parse(dsn)
+	if err != nil || ambiguousUserinfo(u) {
+		return postgresConnectionTargetIdentity{}, errors.New("parse postgres target identity: invalid dsn")
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	u.Fragment = ""
+	u.RawFragment = ""
+	return parsePostgresConnectionTargetIdentity(u.String())
 }
 
 func parsePostgresConnectionTargetIdentity(dsn string) (postgresConnectionTargetIdentity, error) {
