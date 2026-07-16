@@ -1,8 +1,11 @@
 # Backup and restore
 
-`kata export` writes the local database as JSONL. `kata import` rebuilds a
-database from that file. Use these commands for backups, machine moves, and
-schema cutovers.
+`kata export` writes the host-local database as JSONL. It is an offline storage
+operation, not a remote-daemon API: `KATA_SERVER`, a remote workspace target,
+or `--daemon` makes it fail before opening any local database. Run exports on
+the daemon host with that daemon's storage configuration. `kata import`
+rebuilds a database from that file. Use these commands for backups, machine
+moves, and schema cutovers.
 
 ## Use JSONL exports
 

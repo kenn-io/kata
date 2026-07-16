@@ -80,33 +80,40 @@ func RemoveFreshSchemaWithConfig(
 func validateNoExternalSchemaDependents(ctx context.Context, tx *sql.Tx) error {
 	var dependent string
 	err := tx.QueryRowContext(ctx, `
-		WITH external_dependents AS (
-			SELECT format('constraint %I.%I', n.nspname, c.conname) AS identity
-			FROM pg_catalog.pg_constraint c
-			JOIN pg_catalog.pg_namespace n ON n.oid = c.connamespace
-			JOIN pg_catalog.pg_class referenced ON referenced.oid = c.confrelid
-			JOIN pg_catalog.pg_namespace rn ON rn.oid = referenced.relnamespace
-			WHERE rn.nspname = current_schema() AND n.nspname <> current_schema()
-			UNION ALL
-			SELECT format('view %I.%I', n.nspname, v.relname)
-			FROM pg_catalog.pg_rewrite r
-			JOIN pg_catalog.pg_class v ON v.oid = r.ev_class
-			JOIN pg_catalog.pg_namespace n ON n.oid = v.relnamespace
-			JOIN pg_catalog.pg_depend d
-			  ON d.classid = 'pg_catalog.pg_rewrite'::regclass AND d.objid = r.oid
-			JOIN pg_catalog.pg_class referenced
-			  ON d.refclassid = 'pg_catalog.pg_class'::regclass AND d.refobjid = referenced.oid
-			JOIN pg_catalog.pg_namespace rn ON rn.oid = referenced.relnamespace
-			WHERE rn.nspname = current_schema() AND n.nspname <> current_schema()
-			  AND v.relkind IN ('v', 'm')
-			UNION ALL
-			SELECT format('inheriting relation %I.%I', n.nspname, child.relname)
-			FROM pg_catalog.pg_inherits i
-			JOIN pg_catalog.pg_class child ON child.oid = i.inhrelid
-			JOIN pg_catalog.pg_namespace n ON n.oid = child.relnamespace
-			JOIN pg_catalog.pg_class parent ON parent.oid = i.inhparent
-			JOIN pg_catalog.pg_namespace pn ON pn.oid = parent.relnamespace
-			WHERE pn.nspname = current_schema() AND n.nspname <> current_schema()
+		WITH RECURSIVE target_objects(classid, objid, objsubid) AS (
+			(
+				SELECT 'pg_catalog.pg_namespace'::regclass::oid,
+				       current_schema()::regnamespace::oid,
+				       0
+				UNION
+				SELECT d.classid, d.objid, d.objsubid
+				FROM pg_catalog.pg_depend d
+				WHERE d.refclassid = 'pg_catalog.pg_namespace'::regclass
+				  AND d.refobjid = current_schema()::regnamespace::oid
+			)
+			UNION
+			SELECT d.classid, d.objid, d.objsubid
+			FROM pg_catalog.pg_depend d
+			JOIN target_objects target
+			  ON target.classid = d.refclassid
+			 AND target.objid = d.refobjid
+			 AND (target.objsubid = 0 OR target.objsubid = d.refobjsubid)
+			WHERE d.deptype IN ('a', 'i')
+		), external_dependents AS (
+			SELECT pg_catalog.pg_describe_object(d.classid, d.objid, d.objsubid) AS identity
+			FROM pg_catalog.pg_depend d
+			JOIN target_objects target
+			  ON target.classid = d.refclassid
+			 AND target.objid = d.refobjid
+			 AND (target.objsubid = 0 OR target.objsubid = d.refobjsubid)
+			WHERE d.deptype <> 'p'
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM target_objects owned
+				WHERE owned.classid = d.classid
+				  AND owned.objid = d.objid
+				  AND (owned.objsubid = 0 OR owned.objsubid = d.objsubid)
+			  )
 		)
 		SELECT identity FROM external_dependents ORDER BY identity LIMIT 1`).Scan(&dependent)
 	if errors.Is(err, sql.ErrNoRows) {

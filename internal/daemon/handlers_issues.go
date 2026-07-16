@@ -94,6 +94,15 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 
+		// Hold one backend-wide project/key lock across lookup and commit. A
+		// daemon-local mutex is insufficient for PostgreSQL because several
+		// daemon processes can serve the same schema.
+		releaseIdempotency, err := cfg.DB.AcquireIdempotencyLock(ctx, in.ProjectID, in.IdempotencyKey)
+		if err != nil {
+			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		}
+		defer func() { _ = releaseIdempotency() }()
+
 		// Idempotency runs before the federated claim gate AND before
 		// look-alike: a retry of an already-successful create must return the
 		// stored reuse envelope, not re-run the claim gate (whose target claim
@@ -1099,13 +1108,6 @@ const (
 // (the caller should return it directly). Returns the relevant 409 wire error
 // for mismatch / soft-deleted cases. When IdempotencyKey is empty, returns
 // ("", nil, nil) so the caller falls through to the look-alike check.
-//
-// Known limitation: the lookup → CreateIssue is not atomic. Two concurrent
-// requests with the same Idempotency-Key can both miss the lookup and both
-// insert a fresh issue. Closing the race requires either a daemon-level
-// per-key mutex with bounded GC, or restructuring CreateIssue around
-// BEGIN IMMEDIATE with an in-TX re-lookup. Deferred from Plan 3 — small
-// in single-user CLI usage. Tracked under roborev Job 16791-1.
 func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIssueRequest,
 	links []db.InitialLink) (string, *api.MutationResponse, error) {
 	if in.IdempotencyKey == "" {

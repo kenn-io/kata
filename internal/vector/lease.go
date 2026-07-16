@@ -68,3 +68,35 @@ func (ix *Index) AcquireReconcilerLease(ctx context.Context) (func() error, erro
 		return errors.Join(unlockErr, conn.Close())
 	}, nil
 }
+
+// ValidateReconcilerLease checks that the exact PostgreSQL session used for
+// derived-state mutations still owns the schema's reconciler lease. SQLite
+// reconciliation has no cross-process lease and always succeeds.
+func (ix *Index) ValidateReconcilerLease(ctx context.Context) error {
+	if ix.pg == nil {
+		return nil
+	}
+	ix.pg.leaseMu.RLock()
+	conn := ix.pg.leaseConn
+	ix.pg.leaseMu.RUnlock()
+	if conn == nil {
+		return errors.New("vector: postgres reconciler lease is not held")
+	}
+	var held bool
+	err := conn.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_catalog.pg_locks
+			WHERE pid = pg_backend_pid()
+			  AND locktype = 'advisory'
+			  AND granted
+			  AND classid = (hashtext(current_database())::bigint & 4294967295)
+			  AND objid = (hashtext('kata:vector:reconciler:' || current_schema())::bigint & 4294967295)
+		)`).Scan(&held)
+	if err != nil {
+		return fmt.Errorf("vector: validate postgres reconciler lease: %w", err)
+	}
+	if !held {
+		return errors.New("vector: postgres reconciler lease was lost")
+	}
+	return nil
+}

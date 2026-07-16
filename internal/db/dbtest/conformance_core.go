@@ -305,6 +305,51 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("lookup missing idempotency key: %w", err)
 	}
 	assert.Nil(t, missing)
+
+	releaseFirst, err := store.AcquireIdempotencyLock(ctx, project.ID, "serialized-request")
+	if err != nil {
+		return fmt.Errorf("acquire first idempotency lock: %w", err)
+	}
+	firstReleased := false
+	defer func() {
+		if !firstReleased {
+			_ = releaseFirst()
+		}
+	}()
+	type lockResult struct {
+		release func() error
+		err     error
+	}
+	second := make(chan lockResult, 1)
+	lockCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	go func() {
+		release, err := store.AcquireIdempotencyLock(lockCtx, project.ID, "serialized-request")
+		second <- lockResult{release: release, err: err}
+	}()
+	select {
+	case result := <-second:
+		if result.release != nil {
+			_ = result.release()
+		}
+		return errors.New("second idempotency lock acquired before first release")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := releaseFirst(); err != nil {
+		return fmt.Errorf("release first idempotency lock: %w", err)
+	}
+	firstReleased = true
+	select {
+	case result := <-second:
+		if result.err != nil {
+			return fmt.Errorf("acquire second idempotency lock: %w", result.err)
+		}
+		if err := result.release(); err != nil {
+			return fmt.Errorf("release second idempotency lock: %w", err)
+		}
+	case <-lockCtx.Done():
+		return errors.New("second idempotency lock did not acquire after first release")
+	}
 	return nil
 }
 

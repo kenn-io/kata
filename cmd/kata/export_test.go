@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +14,51 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+func TestExportRejectsConfiguredRemoteBeforeReadingLocalStorage(t *testing.T) {
+	home := setupKataEnv(t)
+	dbPath := filepath.Join(home, "kata.db")
+	d := openKataTestDB(t, dbPath)
+	project, err := d.CreateProject(context.Background(), "local-project")
+	require.NoError(t, err)
+	_, _, err = d.CreateIssue(context.Background(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "must not be exported", Author: "tester",
+	})
+	require.NoError(t, err)
+	require.NoError(t, d.Close())
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(remote.Close)
+	t.Setenv("KATA_SERVER", remote.URL)
+	output := filepath.Join(home, "remote-export.jsonl")
+
+	_, err = runCmdOutput(t, nil, "export", "--output", output)
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, ce.Message, "host-local")
+	assert.Contains(t, ce.Message, "remote daemon")
+	_, statErr := os.Stat(output)
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestExportRejectsExplicitDaemonSelection(t *testing.T) {
+	home := setupKataEnv(t)
+	dbPath := filepath.Join(home, "kata.db")
+	d := openKataTestDB(t, dbPath)
+	require.NoError(t, d.Close())
+	output := filepath.Join(home, "selected-export.jsonl")
+
+	_, err := runCmdOutput(t, nil, "--daemon", "example", "export", "--output", output)
+	ce := requireCLIError(t, err, ExitValidation)
+	assert.Contains(t, ce.Message, "host-local")
+	assert.Contains(t, ce.Message, "--daemon")
+	_, statErr := os.Stat(output)
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
 
 func TestExportWritesJSONLToOutput(t *testing.T) {
 	home := setupKataEnv(t)

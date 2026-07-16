@@ -137,8 +137,8 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	for {
 		release, err := r.idx.AcquireReconcilerLease(ctx)
 		if err == nil {
-			defer func() { _ = release() }()
-			return r.runLeader(ctx)
+			err = r.runLeader(ctx)
+			err = errors.Join(err, release())
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -170,6 +170,9 @@ func (r *Reconciler) runLeader(ctx context.Context) error {
 			backoff = r.cfg.MinBackoff
 			timer.Reset(r.cfg.SweepEvery)
 		} else {
+			if leaseErr := r.idx.ValidateReconcilerLease(ctx); leaseErr != nil {
+				return errors.Join(err, leaseErr)
+			}
 			backoff = r.nextBackoff(backoff, err)
 			timer.Reset(backoff)
 		}

@@ -494,6 +494,10 @@ kata import --input PATH --target PATH_OR_POSTGRES_DSN [--force]
 kata import --source-format beads
 ```
 
+Export reads host-local storage directly. It refuses `--daemon` and configured
+remote server targets rather than silently exporting an unrelated local
+database; run it on the daemon host with the intended storage configuration.
+
 The kata-format `import` creates a fresh SQLite database at a target path or a
 fresh Postgres `kata` schema at a Postgres DSN; it is not a merge operation. An
 initialized target requires `--force`, which atomically replaces kata-owned

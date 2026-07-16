@@ -82,6 +82,7 @@ var alreadyImplemented = map[string]bool{
 	"AddLabelAndEvent":                     true, // labels.go
 	"ActivelyBlockedIssueIDs":              true, // relationship_queries.go
 	"AcquireClaim":                         true, // claims_core.go
+	"AcquireIdempotencyLock":               true, // idempotency_lock.go
 	"ApplyClaimStatus":                     true, // claims_pending.go
 	"AttachAlias":                          true, // aliases.go
 	"BatchProjectStats":                    true, // project_lifecycle.go

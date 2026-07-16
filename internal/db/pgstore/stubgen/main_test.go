@@ -38,7 +38,7 @@ type Storage interface { Only(context.Context) error }
 func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 	methods, err := CollectStorageMethodInventory("../../storage.go")
 	require.NoError(t, err)
-	require.Len(t, methods, 208)
+	require.Len(t, methods, 209)
 
 	var implemented []string
 	var stubbed []string
@@ -56,6 +56,7 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 	sort.Strings(implemented)
 	assert.Equal(t, []string{
 		"AcquireClaim",
+		"AcquireIdempotencyLock",
 		"ActiveFederationQuarantine",
 		"ActiveFederationQuarantinesByProject",
 		"ActivelyBlockedIssueIDs",

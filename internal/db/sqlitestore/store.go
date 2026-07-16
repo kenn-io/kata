@@ -40,10 +40,11 @@ var ErrSchemaCutoverRequired = errors.New("schema cutover required")
 // consistent snapshot even if other writers commit mid-export.
 type Store struct {
 	*sql.DB
-	path        string
-	instanceUID string
-	readOnly    bool
-	readQ       readQuerier
+	path             string
+	instanceUID      string
+	readOnly         bool
+	readQ            readQuerier
+	idempotencyLocks *idempotencyLockSet
 }
 
 // readQuerier is the read-only query surface shared between *sql.DB and *sql.Tx.
@@ -97,7 +98,7 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping %s: %w", path, err)
 	}
-	d := &Store{DB: sdb, path: path}
+	d := &Store{DB: sdb, path: path, idempotencyLocks: newIdempotencyLockSet()}
 	d.readQ = sdb
 	if err := d.bootstrap(ctx); err != nil {
 		_ = sdb.Close()
@@ -267,7 +268,7 @@ func openReadOnly(ctx context.Context, path string) (*Store, error) {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping read-only %s: %w", path, err)
 	}
-	s := &Store{DB: sdb, path: path, readOnly: true}
+	s := &Store{DB: sdb, path: path, readOnly: true, idempotencyLocks: newIdempotencyLockSet()}
 	s.readQ = sdb
 	return s, nil
 }

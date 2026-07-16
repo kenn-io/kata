@@ -29,6 +29,9 @@ func newExportCmd() *cobra.Command {
 		Short: "export the kata database as JSONL",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
+			if err := requireHostLocalExport(ctx); err != nil {
+				return err
+			}
 			if !allowRunningDaemon {
 				if err := refuseRunningDaemon(ctx); err != nil {
 					return err
@@ -78,6 +81,28 @@ func newExportCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&includeDeleted, "include-deleted", true, "include soft-deleted rows")
 	cmd.Flags().BoolVar(&allowRunningDaemon, "allow-running-daemon", false, "export even if a daemon is running")
 	return cmd
+}
+
+func requireHostLocalExport(ctx context.Context) error {
+	if flags.Daemon != "" {
+		return &cliError{
+			Message:  "export is a host-local storage operation and does not accept --daemon; run it on the daemon host with that daemon's storage configuration",
+			Kind:     kindValidation,
+			ExitCode: ExitValidation,
+		}
+	}
+	_, remote, err := client.ResolveRemote(ctx, workspaceStartForRemote())
+	if err != nil && !errors.Is(err, client.ErrRemoteUnavailable) {
+		return err
+	}
+	if remote || errors.Is(err, client.ErrRemoteUnavailable) {
+		return &cliError{
+			Message:  "export is a host-local storage operation and does not read from a remote daemon; run it on the daemon host after removing the remote server selection",
+			Kind:     kindValidation,
+			ExitCode: ExitValidation,
+		}
+	}
+	return nil
 }
 
 func writeExportOutput(ctx context.Context, d db.Storage, output string, opts jsonl.ExportOptions) error {

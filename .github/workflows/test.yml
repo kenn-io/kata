@@ -68,6 +68,7 @@ jobs:
           ./internal/testenv
           ./internal/db/pgstore
           ./internal/db/storeopen
+          ./internal/daemon
           ./internal/vector
           ./cmd/kata
 

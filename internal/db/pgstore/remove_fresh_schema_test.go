@@ -122,3 +122,41 @@ func TestRemoveFreshSchemaRefusesExternalDependents(t *testing.T) {
 		   )`).Scan(&constraintPresent))
 	assert.True(t, constraintPresent, "failed cleanup must preserve the external dependent")
 }
+
+func TestRemoveFreshSchemaRefusesExternalFunctionDependents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	instanceUID := store.InstanceUID()
+	require.NoError(t, store.Close())
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	_, err = admin.ExecContext(ctx, `
+		CREATE SCHEMA external_consumer;
+		CREATE FUNCTION external_consumer.rebuild_issue_search(p_issue_id BIGINT)
+		RETURNS void
+		LANGUAGE SQL
+		BEGIN ATOMIC
+			SELECT kata.rebuild_issue_search(p_issue_id);
+		END`)
+	require.NoError(t, err)
+
+	err = pgstore.RemoveFreshSchema(ctx, dsn, instanceUID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "external")
+	version, err := pgstore.PeekSchemaVersion(ctx, dsn)
+	require.NoError(t, err)
+	assert.Equal(t, db.CurrentSchemaVersion(), version)
+	var functionPresent bool
+	require.NoError(t, admin.QueryRowContext(ctx, `
+		SELECT to_regprocedure('external_consumer.rebuild_issue_search(bigint)') IS NOT NULL`).
+		Scan(&functionPresent))
+	assert.True(t, functionPresent, "failed cleanup must preserve the external function")
+}
