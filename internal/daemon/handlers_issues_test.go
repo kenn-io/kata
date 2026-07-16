@@ -56,6 +56,55 @@ func TestCreateIssue_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, bs, http.StatusForbidden, "bootstrap_token_write_forbidden")
 }
 
+func TestCreateIssue_InvalidTitleIs400(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		title string
+	}{
+		{name: "blank", title: " \t\n "},
+		{name: "nul", title: "before\x00after"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testenv.New(t)
+			projectID := mkProject(t, env, "github.com/test/invalid-title", "invalid-title")
+
+			resp, bs := envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues",
+				map[string]string{"actor": "tester", "title": tc.title}, nil)
+			assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
+			count, err := env.DB.CountOpenIssues(context.Background(), projectID)
+			require.NoError(t, err)
+			assert.Zero(t, count)
+		})
+	}
+}
+
+func TestEditIssue_InvalidTitleIs400AndPreservesIssue(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		title string
+	}{
+		{name: "blank", title: " \t\n "},
+		{name: "nul", title: "before\x00after"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testenv.New(t)
+			projectID := mkProject(t, env, "github.com/test/invalid-edit-title", "invalid-edit-title")
+			created, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+				ProjectID: projectID, Title: "original title", Author: "tester",
+			})
+			require.NoError(t, err)
+
+			resp, bs := envDoRaw(t, env, http.MethodPatch,
+				issueURLRef(projectID, created.ShortID, ""),
+				map[string]string{"actor": "tester", "title": tc.title}, nil)
+			assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
+			stored, err := env.DB.IssueByID(context.Background(), created.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "original title", stored.Title)
+		})
+	}
+}
+
 // TestGetIssue_ResolvesByShortID pins that /api/v1/projects/{pid}/issues/{ref}
 // accepts a short_id as the {ref} path component and renders QualifiedID in
 // the response.

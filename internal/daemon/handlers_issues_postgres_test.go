@@ -110,6 +110,42 @@ func TestCreateConcurrentIdempotencyAcrossPostgresDaemons(t *testing.T) {
 	assert.Equal(t, 1, createdEvents)
 }
 
+func TestPostgresCreateInvalidTitlesReturnBadRequest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "invalid-title-project")
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
+	t.Cleanup(func() { _ = server.Close() })
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	for _, title := range []string{" \t\n ", "before\x00after"} {
+		payload, err := json.Marshal(map[string]string{"actor": "worker", "title": title})
+		require.NoError(t, err)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			httpServer.URL+issuesURL(project.ID), bytes.NewReader(payload))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req) //nolint:gosec // httptest URL is test-controlled
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		assert.Equalf(t, http.StatusBadRequest, resp.StatusCode, "response: %s", body)
+	}
+	count, err := store.CountOpenIssues(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Zero(t, count)
+}
+
 func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")

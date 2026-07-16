@@ -55,6 +55,17 @@ func parseMetaFilters(raw []string) ([]db.MetaFilter, error) {
 	return out, nil
 }
 
+func validateIssueTitle(title string) error {
+	if strings.TrimSpace(title) == "" {
+		return api.NewError(400, "validation",
+			"title must contain at least one non-whitespace character", "", nil)
+	}
+	if strings.ContainsRune(title, '\x00') {
+		return api.NewError(400, "validation", "title must not contain NUL bytes", "", nil)
+	}
+	return nil
+}
+
 // registerIssuesHandlers installs the four issue routes (create/list/show/edit)
 // on humaAPI. CreateIssue writes both the issue row and the matching
 // issue.created event in one tx (see db.CreateIssue) so the response always
@@ -91,6 +102,9 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// rejected with a 400 rather than being silently absorbed by a reuse
 		// path. Mirrors the patch endpoint's invalid_metadata_value shape.
 		if err := validateCreateMetadata(in.Body.Metadata); err != nil {
+			return nil, err
+		}
+		if err := validateIssueTitle(in.Body.Title); err != nil {
 			return nil, err
 		}
 
@@ -377,6 +391,11 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		}
 		if err := validatePriorityRange(in.Body.SetPriority); err != nil {
 			return nil, err
+		}
+		if in.Body.Title != nil {
+			if err := validateIssueTitle(*in.Body.Title); err != nil {
+				return nil, err
+			}
 		}
 		if hasLinkChange {
 			if err := validateLinksDelta(in.Body.LinksDelta); err != nil {
