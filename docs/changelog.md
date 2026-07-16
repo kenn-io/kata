@@ -30,6 +30,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   failed first restores remove only an unchanged fresh schema.
 - Established the first released Postgres schema as the migration floor rather
   than retaining migrations for development-only versions that never shipped.
+- Added an append-only numbered migration convention and pre-commit history
+  guard for PostgreSQL schema changes after that release floor.
 - Required server-identity-verified TLS for every remote Postgres connection
   candidate, with a separately configured lab-only insecure opt-in.
 - Added a dedicated PostgreSQL CI service job that cannot silently skip backend

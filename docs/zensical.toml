@@ -54,6 +54,7 @@ nav = [
   ]},
   {"Development" = [
     {"Contributing" = "development/contributing.md"},
+    {"PostgreSQL migrations" = "development/postgres-migrations.md"},
     {"Deploying docs" = "development/deploying-docs.md"},
   ]},
 ]

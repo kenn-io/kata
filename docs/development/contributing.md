@@ -48,6 +48,10 @@ make test-stress
 make test-federation-docker
 ```
 
+The pre-commit hook protects released PostgreSQL migration history. Install
+the configured hooks with `prek install`; see [PostgreSQL
+migrations](postgres-migrations.md) before proposing a schema change.
+
 `make test-stress` runs randomized and failpoint tests. If Rapid prints a
 failing seed, reproduce it with the seed from the failure output:
 

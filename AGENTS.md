@@ -21,7 +21,9 @@
   pre-alpha status, or editable-in-place schema snapshot does not imply this
   consent. Before editing, state the exact backend and proposed persisted-state
   changes and wait for approval. Ephemeral test-local DDL that does not define
-  product persisted state is exempt.
+  product persisted state is exempt. After approval, follow
+  `docs/development/postgres-migrations.md` for PostgreSQL migration history
+  and verification rules.
 - No Private Project Data: Do not use private project, workspace, customer,
   host, or repository names in tests, docs, examples, planning documents,
   design notes, issue or bug reports, review responses, PR text, or generated
