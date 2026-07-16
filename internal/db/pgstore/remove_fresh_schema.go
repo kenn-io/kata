@@ -39,6 +39,9 @@ func RemoveFreshSchemaWithConfig(
 		return fmt.Errorf("begin fresh schema cleanup: %w", mapSQLError(err, nil))
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := acquireExclusiveServingLease(ctx, tx, pgConfig.Schema); err != nil {
+		return fmt.Errorf("quiesce serving daemons for fresh schema cleanup: %w", err)
+	}
 	if err := acquireSchemaMigrationLock(ctx, tx); err != nil {
 		return fmt.Errorf("lock fresh schema cleanup: %w", mapSQLError(err, nil))
 	}

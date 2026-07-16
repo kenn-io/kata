@@ -221,6 +221,13 @@ func (s *Store) acquireServingLease(ctx context.Context) error {
 	return nil
 }
 
+func acquireExclusiveServingLease(ctx context.Context, tx *sql.Tx, schema string) error {
+	_, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"kata:pgstore:serving:"+schema)
+	return mapSQLError(err, nil)
+}
+
 func isLocalPostgresHost(host string) bool {
 	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
 		return true

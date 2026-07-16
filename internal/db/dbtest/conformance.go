@@ -292,10 +292,11 @@ var storageScenarios = []scenario{
 	{
 		name: "federation event transport",
 		methods: []string{
-			"CommentsByIssue", "CreateComment", "CreateIssue", "CreateProject", "CreateProjectWithUID",
-			"EnableProjectFederation", "EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvent",
-			"IssueByUID", "PendingFederationPushEvents", "PendingFederationPushStats",
-			"ReconcileLocalFederationEcho", "UpsertFederationBinding",
+			"AddLabelAndEvent", "CommentsByIssue", "CreateComment", "CreateIssue", "CreateLinkAndEvent",
+			"CreateProject", "CreateProjectWithUID", "EditIssueAtomic", "EnableProjectFederation",
+			"EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvent", "IssueByUID",
+			"LabelByEndpoints", "LinkByEndpoints", "PendingFederationPushEvents",
+			"PendingFederationPushStats", "ReconcileLocalFederationEcho", "UpsertFederationBinding",
 		},
 		runWithBackend: checkFederationEventTransport,
 	},

@@ -548,6 +548,64 @@ func checkFederationEventTransport(t *testing.T, store db.Storage, backend Backe
 	require.Len(t, hubComments, 1)
 	assert.Equal(t, "bound-agent", hubComments[0].Author)
 
+	label, labelEvent, err := store.AddLabelAndEvent(ctx, boundIssue.ID, db.LabelEventParams{
+		Label: "triaged", EventType: "issue.labeled", Actor: "requesting-agent",
+	})
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "bound-agent", label.Author)
+	assert.Equal(t, "bound-agent", labelEvent.Actor)
+	storedLabel, err := store.LabelByEndpoints(ctx, boundIssue.ID, "triaged")
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "bound-agent", storedLabel.Author)
+
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "bound relationship peer", Author: "requesting-agent",
+	})
+	if err != nil {
+		return err
+	}
+	link, linkEvent, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{
+		FromIssueID: boundIssue.ID, ToIssueID: peer.ID, Type: "blocks", Author: "requesting-agent",
+	}, db.LinkEventParams{
+		EventType: "issue.linked", EventIssueID: boundIssue.ID,
+		FromShortID: boundIssue.ShortID, FromUID: boundIssue.UID,
+		ToShortID: peer.ShortID, ToUID: peer.UID, Actor: "requesting-agent",
+	})
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "bound-agent", link.Author)
+	assert.Equal(t, "bound-agent", linkEvent.Actor)
+	storedLink, err := store.LinkByEndpoints(ctx, boundIssue.ID, peer.ID, "blocks")
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "bound-agent", storedLink.Author)
+
+	atomicPeer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "bound atomic peer", Author: "requesting-agent",
+	})
+	if err != nil {
+		return err
+	}
+	atomicResult, err := store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{
+		IssueID: boundIssue.ID, Actor: "requesting-agent", AddRelated: []int64{atomicPeer.ID},
+	})
+	if err != nil {
+		return err
+	}
+	atomicLink, err := store.LinkByEndpoints(ctx, boundIssue.ID, atomicPeer.ID, "related")
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "bound-agent", atomicLink.Author)
+	require.Len(t, atomicResult.Events, 1)
+	assert.Equal(t, "bound-agent", atomicResult.Events[0].Actor)
+
 	localEcho := remoteEventFromStored(created)
 	found, err := store.ReconcileLocalFederationEcho(ctx, project.ID, localEcho)
 	if err != nil {

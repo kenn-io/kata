@@ -238,6 +238,42 @@ CREATE TRIGGER trg_issues_uid_immutable
   BEFORE UPDATE OF uid ON issues
   FOR EACH ROW EXECUTE FUNCTION enforce_uid_immutable();
 
+-- Existing-project federation adoption is the sole operation that may replace
+-- a project UID. Keep the runtime role unable to alter tables directly while
+-- exposing only this schema-owner operation. SET search_path FROM CURRENT
+-- captures the isolated schema selected by the migration connection.
+CREATE OR REPLACE FUNCTION rewrite_project_uid_for_adoption(
+  p_project_id BIGINT,
+  p_project_uid TEXT
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path FROM CURRENT
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = p_project_id) THEN
+    RAISE EXCEPTION 'project already has a federation binding';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM projects WHERE id = p_project_id AND deleted_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'active project not found';
+  END IF;
+
+  ALTER TABLE projects DISABLE TRIGGER trg_projects_uid_immutable;
+  BEGIN
+    UPDATE projects SET uid = p_project_uid WHERE id = p_project_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'project not found';
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    ALTER TABLE projects ENABLE TRIGGER trg_projects_uid_immutable;
+    RAISE;
+  END;
+  ALTER TABLE projects ENABLE TRIGGER trg_projects_uid_immutable;
+END $$;
+REVOKE ALL ON FUNCTION rewrite_project_uid_for_adoption(BIGINT, TEXT) FROM PUBLIC;
+
 CREATE TABLE issue_labels (
   issue_id   BIGINT NOT NULL REFERENCES issues(id),
   label      TEXT NOT NULL,

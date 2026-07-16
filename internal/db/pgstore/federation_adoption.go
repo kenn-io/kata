@@ -176,15 +176,8 @@ WHERE project_id=$1 AND origin_instance_uid=$2 AND `+pgFederationPushEventTypeCo
 
 func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, projectUID string) error {
 	if _, err := tx.ExecContext(ctx,
-		`ALTER TABLE projects DISABLE TRIGGER trg_projects_uid_immutable`); err != nil {
-		return fmt.Errorf("disable project uid immutability trigger for adoption: %w", mapSQLError(err, nil))
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE projects SET uid=$1 WHERE id=$2`, projectUID, projectID); err != nil {
-		return fmt.Errorf("update adopted project uid: %w", mapSQLError(err, nil))
-	}
-	if _, err := tx.ExecContext(ctx,
-		`ALTER TABLE projects ENABLE TRIGGER trg_projects_uid_immutable`); err != nil {
-		return fmt.Errorf("restore project uid immutability trigger after adoption: %w", mapSQLError(err, nil))
+		`SELECT rewrite_project_uid_for_adoption($1, $2)`, projectID, projectUID); err != nil {
+		return fmt.Errorf("rewrite project uid for adoption: %w", mapSQLError(err, nil))
 	}
 	return nil
 }

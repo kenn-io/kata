@@ -53,6 +53,10 @@ func (s *Store) CreateLinkAndEvent(
 		if actor == "" {
 			actor = params.Author
 		}
+		actor, err = effectiveLocalMutationActorTx(ctx, tx, project.ID, actor)
+		if err != nil {
+			return err
+		}
 		params.Author = actor
 		eventParams.Actor = actor
 		if err := prepareLinkInsertTx(ctx, tx, params, true); err != nil {
@@ -119,6 +123,10 @@ func (s *Store) DeleteLinkAndEvent(
 	var event db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		eventIssue, project, err := lockedIssueTx(ctx, tx, eventParams.EventIssueID, false)
+		if err != nil {
+			return err
+		}
+		eventParams.Actor, err = effectiveLocalMutationActorTx(ctx, tx, project.ID, eventParams.Actor)
 		if err != nil {
 			return err
 		}

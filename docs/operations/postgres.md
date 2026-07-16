@@ -86,6 +86,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE
   ON ALL TABLES IN SCHEMA kata TO kata_runtime;
 GRANT USAGE, SELECT, UPDATE
   ON ALL SEQUENCES IN SCHEMA kata TO kata_runtime;
+GRANT EXECUTE
+  ON FUNCTION kata.rewrite_project_uid_for_adoption(BIGINT, TEXT)
+  TO kata_runtime;
 
 ALTER DEFAULT PRIVILEGES FOR ROLE kata_schema_owner IN SCHEMA kata
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO kata_runtime;
@@ -94,9 +97,12 @@ ALTER DEFAULT PRIVILEGES FOR ROLE kata_schema_owner IN SCHEMA kata
 ```
 
 If the configured schema is not `kata`, substitute its exact name throughout.
-Re-run the two `GRANT ... ON ALL ...` statements after an upgrade when auditing
-an existing deployment; the default privileges cover newly created objects
-only when migrations run as `kata_schema_owner`.
+Re-run the two `GRANT ... ON ALL ...` statements and the exact function grant
+after an upgrade when auditing an existing deployment. The function grant is
+deliberately narrow: existing-project federation adoption needs to replace one
+otherwise immutable project UID, but the runtime role never receives table DDL
+authority. The default privileges cover newly created tables and sequences only
+when migrations run as `kata_schema_owner`.
 
 ## Configure the runtime
 

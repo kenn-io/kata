@@ -47,6 +47,10 @@ func (s *Store) AddLabelAndEvent(
 		if err != nil {
 			return err
 		}
+		params.Actor, err = effectiveLocalMutationActorTx(ctx, tx, project.ID, params.Actor)
+		if err != nil {
+			return err
+		}
 		issueLabel, err = scanLabel(tx.QueryRowContext(ctx,
 			`INSERT INTO issue_labels(issue_id, label, author) VALUES($1,$2,$3)
 			 RETURNING issue_id, label, author, created_at`, issue.ID, params.Label, params.Actor))
@@ -102,6 +106,10 @@ func (s *Store) RemoveLabelAndEvent(
 	var event db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		issue, project, err := lockedIssueTx(ctx, tx, issueID, false)
+		if err != nil {
+			return err
+		}
+		params.Actor, err = effectiveLocalMutationActorTx(ctx, tx, project.ID, params.Actor)
 		if err != nil {
 			return err
 		}

@@ -301,6 +301,14 @@ runtime role needs DML only. Chunk embeddings use unbounded `public.halfvec`
 so model dimensions can change without runtime DDL. Both forms are derived
 state and portable JSONL restore deliberately rebuilds them from issue content.
 
+Every PostgreSQL reconciler takes a database/schema-scoped advisory lease on a
+dedicated connection before touching this derived state and holds it for the
+reconciler lifetime. Additional daemon replicas remain blocked as standbys and
+take over when the connection closes. This prevents duplicate embedding calls
+and prevents differently configured replicas from repeatedly replacing each
+other's active generation. SQLite vector state is process-local and needs no
+equivalent lease.
+
 ### Generation lifecycle and cutover
 
 The desired generation is derived from config

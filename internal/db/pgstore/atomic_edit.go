@@ -24,6 +24,10 @@ func (s *Store) EditIssueAtomic(ctx context.Context, params db.EditIssueAtomicPa
 		if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
+		params.Actor, err = effectiveLocalMutationActorTx(ctx, tx, project.ID, params.Actor)
+		if err != nil {
+			return err
+		}
 		updatedAt := mutationTimestamp()
 
 		fieldPlan, err := db.PlanIssueFieldEdit(current, params.Title, params.Body, params.Owner, updatedAt)

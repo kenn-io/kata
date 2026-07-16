@@ -157,6 +157,55 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 	assert.Contains(t, err.Error(), "schema_version 999 does not match")
 }
 
+func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	const schema = "adoption_store"
+	owner, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	project, err := owner.CreateProject(ctx, "existing-project")
+	require.NoError(t, err)
+	require.NoError(t, owner.Close())
+
+	runtimeRole := fmt.Sprintf("adoption_runtime_%d", os.Getpid())
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`
+		CREATE ROLE %s LOGIN PASSWORD 'runtime-password';
+		REVOKE CREATE ON SCHEMA adoption_store FROM PUBLIC;
+		GRANT USAGE ON SCHEMA adoption_store TO %s;
+		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA adoption_store TO %s;
+		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA adoption_store TO %s;
+		GRANT EXECUTE ON FUNCTION adoption_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
+	`, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
+	require.NoError(t, err)
+
+	runtime, err := pgstore.OpenWithConfig(ctx,
+		postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"),
+		pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeValidate},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = runtime.Close() })
+	hubProjectUID := "01KATA00000000000000000077"
+	result, err := runtime.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 77,
+		HubProjectUID: hubProjectUID, ReplayHorizonEventID: 1, Actor: "adoption-agent",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, hubProjectUID, result.Project.UID)
+
+	_, err = runtime.ExecContext(ctx, `ALTER TABLE projects DISABLE TRIGGER trg_projects_uid_immutable`)
+	require.Error(t, err, "runtime role must remain unable to alter schema objects")
+}
+
 func TestBootstrapMultipleSchemasSharesUnaccent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")

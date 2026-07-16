@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,6 +77,95 @@ func TestPostgresPgvectorIndexesAndRanksSemanticIssue(t *testing.T) {
 	require.NotEmpty(t, rolledUp)
 	assert.Equal(t, target.UID, rolledUp[0].Doc)
 	assert.Greater(t, rolledUp[0].Score, float32(0.99))
+}
+
+func TestPostgresReconcilersElectOneLeaderPerSchema(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires pgvector testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "reconciler-leadership")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "serialize embedding work", Author: "operator",
+	})
+	require.NoError(t, err)
+
+	firstIndex, err := vector.OpenPostgres(ctx, store.DB)
+	require.NoError(t, err)
+	secondIndex, err := vector.OpenPostgres(ctx, store.DB)
+	require.NoError(t, err)
+	var firstCalls, secondCalls atomic.Int64
+	firstEmbedder := countedEmbedder(t, "leader-model", &firstCalls)
+	secondEmbedder := countedEmbedder(t, "standby-model", &secondCalls)
+	first := daemon.NewReconciler(store, firstIndex, firstEmbedder, daemon.ReconcilerConfig{
+		BatchSize: 64, SweepEvery: time.Hour,
+	})
+	second := daemon.NewReconciler(store, secondIndex, secondEmbedder, daemon.ReconcilerConfig{
+		BatchSize: 64, SweepEvery: time.Hour,
+	})
+
+	firstCtx, cancelFirst := context.WithCancel(ctx)
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- first.Run(firstCtx) }()
+	require.Eventually(t, func() bool {
+		return first.Health().LastSuccessAt != nil && firstCalls.Load() > 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	secondCtx, cancelSecond := context.WithCancel(ctx)
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- second.Run(secondCtx) }()
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := store.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_catalog.pg_locks
+				WHERE locktype = 'advisory' AND NOT granted
+			)`).Scan(&waiting)
+		return err == nil && waiting
+	}, 5*time.Second, 10*time.Millisecond, "standby did not wait for the reconciler lease")
+	assert.Zero(t, secondCalls.Load(), "standby reconciler must not submit embedding work")
+
+	cancelFirst()
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		require.FailNow(t, "leader reconciler did not stop")
+	}
+	require.Eventually(t, func() bool {
+		return second.Health().LastSuccessAt != nil && secondCalls.Load() > 0
+	}, 5*time.Second, 10*time.Millisecond, "standby did not take over after leader stopped")
+	cancelSecond()
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		require.FailNow(t, "successor reconciler did not stop")
+	}
+}
+
+func countedEmbedder(t *testing.T, model string, calls *atomic.Int64) *embedding.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var request struct {
+			Input []string `json:"input"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		data := make([]map[string]any, len(request.Input))
+		for i := range request.Input {
+			data[i] = map[string]any{"embedding": []float32{1, 0}}
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": data}))
+	}))
+	t.Cleanup(server.Close)
+	client, err := embedding.New(embedding.Config{BaseURL: server.URL, Model: model, Dims: 2})
+	require.NoError(t, err)
+	return client
 }
 
 func mappedEmbedder(t *testing.T, vectorFor func(string) []float32) *embedding.Client {
