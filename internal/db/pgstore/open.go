@@ -291,7 +291,11 @@ func (s *Store) bootstrap(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("create postgres schema %q: %w", s.schema, err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `SET LOCAL search_path TO `+quoteIdentifier(s.schema)); err != nil {
+	// The canonical schema defines a SECURITY DEFINER adoption helper with
+	// SET search_path FROM CURRENT. Pin trusted schemas explicitly and put
+	// pg_temp last so runtime-owned temporary objects cannot shadow its targets.
+	if _, err := tx.ExecContext(ctx,
+		`SET LOCAL search_path TO `+quoteIdentifier(s.schema)+`, pg_catalog, pg_temp`); err != nil {
 		return false, fmt.Errorf("select postgres schema %q: %w", s.schema, err)
 	}
 

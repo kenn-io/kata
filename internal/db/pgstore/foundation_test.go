@@ -195,6 +195,36 @@ func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = runtime.Close() })
 	hubProjectUID := "01KATA00000000000000000077"
+	conn, err := runtime.Conn(ctx)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `
+		CREATE TEMP TABLE federation_bindings (project_id BIGINT);
+		CREATE TEMP TABLE projects (id BIGINT PRIMARY KEY, uid TEXT, deleted_at TEXT);
+		CREATE FUNCTION pg_temp.allow_uid_update() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			RETURN NEW;
+		END $$;
+		CREATE TRIGGER trg_projects_uid_immutable
+			BEFORE UPDATE OF uid ON projects
+			FOR EACH ROW EXECUTE FUNCTION pg_temp.allow_uid_update();
+	`)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx,
+		`INSERT INTO projects(id, uid) VALUES ($1, '01KATA00000000000000000001')`, project.ID)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx,
+		`SELECT adoption_store.rewrite_project_uid_for_adoption($1, $2)`, project.ID, hubProjectUID)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `DISCARD TEMP`)
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+
+	var adoptedUID string
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT uid FROM adoption_store.projects WHERE id=$1`, project.ID).Scan(&adoptedUID))
+	require.Equal(t, hubProjectUID, adoptedUID,
+		"temporary relations owned by the runtime role must not shadow adoption targets")
+
 	result, err := runtime.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
 		ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 77,
 		HubProjectUID: hubProjectUID, ReplayHorizonEventID: 1, Actor: "adoption-agent",

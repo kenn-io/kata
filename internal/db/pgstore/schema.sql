@@ -241,7 +241,7 @@ CREATE TRIGGER trg_issues_uid_immutable
 -- Existing-project federation adoption is the sole operation that may replace
 -- a project UID. Keep the runtime role unable to alter tables directly while
 -- exposing only this schema-owner operation. SET search_path FROM CURRENT
--- captures the isolated schema selected by the migration connection.
+-- captures the trusted schema, pg_catalog, pg_temp order pinned by bootstrap.
 CREATE OR REPLACE FUNCTION rewrite_project_uid_for_adoption(
   p_project_id BIGINT,
   p_project_uid TEXT
