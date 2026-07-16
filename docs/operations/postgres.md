@@ -130,6 +130,13 @@ In `validate` mode, every direct storage open—including daemon startup and
 offline export—requires the schema to exist at the binary's exact version and
 performs no DDL. Missing, older, newer, or unversioned schemas fail closed.
 
+Budget up to 29 PostgreSQL connections per daemon process: the primary query
+pool allows 25 and a separate four-connection coordination pool serializes
+idempotent creates across replicas. Keeping coordination separate prevents a
+burst of distinct idempotency keys from reserving every query connection while
+their mutations wait for the same pool. Multiply this budget by the maximum
+number of daemon replicas that can reach one database.
+
 When `[search.embeddings]` is configured, vectors are stored in canonical
 pgvector `halfvec` tables in the selected Kata schema. The runtime still needs
 only the table and sequence grants above. The first implementation performs a

@@ -36,6 +36,7 @@ type Store struct {
 	readOnly             bool
 	installedFreshSchema bool
 	servingConn          *sql.Conn
+	idempotencyDB        *sql.DB
 	exportQ              exportQueryer
 }
 
@@ -46,7 +47,12 @@ func (s *Store) Close() error {
 		leaseErr = s.servingConn.Close()
 		s.servingConn = nil
 	}
-	return errors.Join(leaseErr, s.DB.Close())
+	var idempotencyErr error
+	if s.idempotencyDB != nil {
+		idempotencyErr = s.idempotencyDB.Close()
+		s.idempotencyDB = nil
+	}
+	return errors.Join(leaseErr, idempotencyErr, s.DB.Close())
 }
 
 type exportQueryer interface {

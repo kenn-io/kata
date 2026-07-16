@@ -25,9 +25,11 @@ import (
 // deployments. Future phases may expose these through DSN params or
 // [storage] config.
 const (
-	defaultMaxOpenConns    = 25
-	defaultMaxIdleConns    = 5
-	defaultConnMaxIdleTime = 5 * time.Minute
+	defaultMaxOpenConns     = 25
+	defaultMaxIdleConns     = 5
+	idempotencyMaxOpenConns = 4
+	idempotencyMaxIdleConns = 1
+	defaultConnMaxIdleTime  = 5 * time.Minute
 )
 
 // Open opens a PG connection pool against dsn using pgx's database/sql
@@ -105,11 +107,7 @@ func openInternal(
 		connConfig.RuntimeParams["default_transaction_read_only"] = "on"
 	}
 
-	connector := stdlib.GetConnector(*connConfig)
-	sdb := sql.OpenDB(connector)
-	sdb.SetMaxOpenConns(defaultMaxOpenConns)
-	sdb.SetMaxIdleConns(defaultMaxIdleConns)
-	sdb.SetConnMaxIdleTime(defaultConnMaxIdleTime)
+	sdb := newPostgresPool(*connConfig, defaultMaxOpenConns, defaultMaxIdleConns)
 	if err := sdb.PingContext(ctx); err != nil {
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping pgx: %w", err)
@@ -141,9 +139,14 @@ func openInternal(
 		return nil, err
 	}
 	s.installedFreshSchema = installedFresh
+	s.idempotencyDB = newPostgresPool(*connConfig, idempotencyMaxOpenConns, idempotencyMaxIdleConns)
+	if err := s.idempotencyDB.PingContext(ctx); err != nil {
+		_ = s.Close()
+		return nil, fmt.Errorf("ping postgres idempotency coordinator: %w", err)
+	}
 	if serving {
 		if err := s.acquireServingLease(ctx); err != nil {
-			_ = sdb.Close()
+			_ = s.Close()
 			return nil, err
 		}
 	}
@@ -156,6 +159,14 @@ func openInternal(
 		return nil, err
 	}
 	return s, nil
+}
+
+func newPostgresPool(connConfig pgx.ConnConfig, maxOpen, maxIdle int) *sql.DB {
+	pool := sql.OpenDB(stdlib.GetConnector(connConfig))
+	pool.SetMaxOpenConns(maxOpen)
+	pool.SetMaxIdleConns(maxIdle)
+	pool.SetConnMaxIdleTime(defaultConnMaxIdleTime)
+	return pool
 }
 
 func validatePostgresTransport(connConfig *pgx.ConnConfig, dsn string, allowInsecure bool) error {

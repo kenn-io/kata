@@ -20,9 +20,12 @@ func (s *Store) AcquireIdempotencyLock(
 	if key == "" {
 		return func() error { return nil }, nil
 	}
+	if s.idempotencyDB == nil {
+		return nil, errors.New("postgres idempotency coordinator is unavailable")
+	}
 	lockIdentity := fmt.Sprintf("kata:pgstore:idempotency:%s:%d:%s", s.schema, projectID, key)
 	for {
-		conn, err := s.Conn(ctx)
+		conn, err := s.idempotencyDB.Conn(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("reserve postgres idempotency lock connection: %w", err)
 		}
