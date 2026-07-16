@@ -316,6 +316,34 @@ func checkClaimLeaseLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	assert.False(t, claimStatus.Held)
+
+	violatedIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: hubProject.ID, Title: "close records uncovered work", Author: "worker",
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := store.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: hubProject.ID, IssueRef: violatedIssue.UID, Principal: localPrincipal,
+		ClaimKind: "hard", Now: now.Add(23 * time.Hour),
+	}); err != nil {
+		return err
+	}
+	_, violationEvents, changed, err := store.CloseIssueWithEvents(
+		ctx, violatedIssue.ID, "done", "different-worker", "completed elsewhere", nil,
+	)
+	if err != nil {
+		return err
+	}
+	assert.True(t, changed)
+	require.Len(t, violationEvents, 3)
+	assert.Equal(t, []string{"issue.closed", "claim.violated", "claim.released"},
+		[]string{violationEvents[0].Type, violationEvents[1].Type, violationEvents[2].Type})
+	var violationPayload struct {
+		OffendingEventUID string `json:"offending_event_uid"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(violationEvents[1].Payload), &violationPayload))
+	assert.Equal(t, violationEvents[0].UID, violationPayload.OffendingEventUID)
 	return nil
 }
 

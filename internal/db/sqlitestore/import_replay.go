@@ -697,7 +697,11 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.Imp
 	if err := fillEventIssueUIDs(ctx, tx, e); err != nil {
 		return err // raw: preserves the "corrupt_event_fk: …" prefix asserted by import_test.go
 	}
-	projectName, projectUID, err := importedEventProjectIdentity(ctx, tx, e)
+	currentProjectName, projectUID, err := importedEventProjectIdentity(ctx, tx, e)
+	if err != nil {
+		return err
+	}
+	projectName, err := db.ReplayEventProjectName(e, currentProjectName, opts.RecomputeEventContentHash)
 	if err != nil {
 		return err
 	}

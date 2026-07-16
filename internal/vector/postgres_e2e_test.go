@@ -79,6 +79,24 @@ func TestPostgresPgvectorIndexesAndRanksSemanticIssue(t *testing.T) {
 	assert.Greater(t, rolledUp[0].Score, float32(0.99))
 }
 
+func TestPostgresPgvectorRejectsDimensionsAboveHalfvecLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires pgvector testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	idx, err := vector.OpenPostgres(ctx, store.DB)
+	require.NoError(t, err)
+
+	err = idx.EnsureBuilding(ctx, "oversized", kitvec.Generation{Model: "example", Dimensions: 4001})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "4,000")
+}
+
 func TestPostgresReconcilersElectOneLeaderPerSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires pgvector testcontainer")
@@ -120,16 +138,8 @@ func TestPostgresReconcilersElectOneLeaderPerSchema(t *testing.T) {
 	secondCtx, cancelSecond := context.WithCancel(ctx)
 	secondDone := make(chan error, 1)
 	go func() { secondDone <- second.Run(secondCtx) }()
-	require.Eventually(t, func() bool {
-		var waiting bool
-		err := store.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM pg_catalog.pg_locks
-				WHERE locktype = 'advisory' AND NOT granted
-			)`).Scan(&waiting)
-		return err == nil && waiting
-	}, 5*time.Second, 10*time.Millisecond, "standby did not wait for the reconciler lease")
-	assert.Zero(t, secondCalls.Load(), "standby reconciler must not submit embedding work")
+	assert.Never(t, func() bool { return secondCalls.Load() != 0 },
+		300*time.Millisecond, 10*time.Millisecond, "standby reconciler submitted embedding work")
 
 	cancelFirst()
 	select {

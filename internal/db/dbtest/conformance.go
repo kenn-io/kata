@@ -403,6 +403,16 @@ var storageScenarios = []scenario{
 		run: checkSnapshotReplayCompatibilityOptions,
 	},
 	{
+		name:    "snapshot replay preserves historical project names",
+		methods: []string{"EventsAfter", "ImportReplay", "ProjectByUID"},
+		run:     checkSnapshotReplayHistoricalProjectName,
+	},
+	{
+		name:    "snapshot replay rejects unsafe historical project names",
+		methods: []string{"ImportReplay", "ListProjects"},
+		run:     checkSnapshotReplayUnsafeHistoricalProjectName,
+	},
+	{
 		name: "snapshot replay atomic rejection",
 		methods: []string{
 			"CreateProject", "ImportReplay", "ListProjects", "ProjectByUID", "SystemProject",

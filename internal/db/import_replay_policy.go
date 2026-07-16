@@ -5,7 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	"go.kenn.io/kata/internal/config"
 )
+
+// ReplayEventProjectName selects the durable name covered by an event's
+// content hash. Current-version exports preserve the name recorded when the
+// event was emitted; compatibility cutovers deliberately substitute the
+// imported projection's current name before recomputing the hash.
+func ReplayEventProjectName(event *EventExport, currentName string, recomputeHash bool) (string, error) {
+	name := event.ProjectName
+	if name == "" || recomputeHash {
+		name = currentName
+	}
+	if err := config.ValidateProjectName(name); err != nil {
+		return "", fmt.Errorf("event %d project_name: %w", event.ID, err)
+	}
+	return name, nil
+}
 
 // ValidateImportRecords checks the normalized replay union before a backend
 // opens a transaction. A malformed envelope therefore cannot partially mutate

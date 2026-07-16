@@ -302,7 +302,7 @@ func (s *Store) CloseIssueWithEvents(
 		events, changed = []db.Event{created}, true
 		auditEvents, err := s.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
 			Project: project, Issue: current, EventType: "issue.closed", Actor: actor,
-			HolderInstanceUID: s.InstanceUID(),
+			HolderInstanceUID: s.InstanceUID(), OffendingEventUID: created.UID,
 		})
 		if err != nil {
 			return err

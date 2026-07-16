@@ -23,9 +23,11 @@ func pgReplayEvent(
 	if err != nil {
 		return err
 	}
-	durableProjectName := event.ProjectName
-	if durableProjectName == "" || opts.RecomputeEventContentHash {
-		durableProjectName = currentProjectName
+	durableProjectName, err := db.ReplayEventProjectName(
+		event, currentProjectName, opts.RecomputeEventContentHash,
+	)
+	if err != nil {
+		return err
 	}
 	if err := db.PrepareReplayEvent(
 		event, projectUID, durableProjectName, opts.RecomputeEventContentHash,

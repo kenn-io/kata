@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
@@ -16,6 +17,34 @@ import (
 
 type postgresIndex struct {
 	db *sql.DB
+
+	leaseMu   sync.RWMutex
+	leaseConn *sql.Conn
+}
+
+type postgresExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (p *postgresIndex) reconcilerExecutor() postgresExecutor {
+	p.leaseMu.RLock()
+	defer p.leaseMu.RUnlock()
+	if p.leaseConn != nil {
+		return p.leaseConn
+	}
+	return p.db
+}
+
+func (p *postgresIndex) beginReconcilerTx(ctx context.Context) (*sql.Tx, error) {
+	p.leaseMu.RLock()
+	conn := p.leaseConn
+	p.leaseMu.RUnlock()
+	if conn != nil {
+		return conn.BeginTx(ctx, nil)
+	}
+	return p.db.BeginTx(ctx, nil)
 }
 
 func (p *postgresIndex) validate(ctx context.Context) error {
@@ -71,7 +100,7 @@ func (p *postgresIndex) PendingForGeneration(ctx context.Context, gen string, li
 }
 
 func (p *postgresIndex) SaveVectors(ctx context.Context, gen, doc string, revision any, vectors []kitvec.ChunkVector) error {
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.beginReconcilerTx(ctx)
 	if err != nil {
 		return fmt.Errorf("vector: begin postgres vector save: %w", err)
 	}
@@ -217,7 +246,11 @@ func postgresVectorValue(vector kitvec.Vector) (string, error) {
 }
 
 func (p *postgresIndex) ensureBuilding(ctx context.Context, key string, gen kitvec.Generation) error {
-	_, err := p.db.ExecContext(ctx, `
+	if gen.Dimensions > 4000 {
+		return fmt.Errorf("vector: postgres halfvec dimensions must not exceed 4,000 (got %d)", gen.Dimensions)
+	}
+	executor := p.reconcilerExecutor()
+	_, err := executor.ExecContext(ctx, `
 		INSERT INTO issue_vector_generations(gen_key, model, dimensions, state)
 		VALUES($1, $2, $3, 'building')
 		ON CONFLICT(gen_key) DO UPDATE SET state = 'building'
@@ -229,7 +262,7 @@ func (p *postgresIndex) ensureBuilding(ctx context.Context, key string, gen kitv
 	}
 	var model string
 	var dimensions int
-	if err := p.db.QueryRowContext(ctx,
+	if err := executor.QueryRowContext(ctx,
 		`SELECT model, dimensions FROM issue_vector_generations WHERE gen_key = $1`, key).Scan(&model, &dimensions); err != nil {
 		return fmt.Errorf("vector: validate postgres generation %s: %w", key, err)
 	}
@@ -254,7 +287,7 @@ func (p *postgresIndex) activeGeneration(ctx context.Context) (string, bool, err
 }
 
 func (p *postgresIndex) cutOver(ctx context.Context, key string) error {
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.beginReconcilerTx(ctx)
 	if err != nil {
 		return fmt.Errorf("vector: begin postgres cutover: %w", err)
 	}
@@ -321,6 +354,7 @@ func (p *postgresIndex) coverage(ctx context.Context, key string) (embedded, ski
 }
 
 func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (int, error) {
+	executor := p.reconcilerExecutor()
 	changed := 0
 	seen := make(map[string]struct{})
 	var afterID int64
@@ -335,7 +369,7 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 		for _, issue := range page {
 			seen[issue.UID] = struct{}{}
 			afterID = issue.ID
-			result, err := p.db.ExecContext(ctx, `
+			result, err := executor.ExecContext(ctx, `
 				INSERT INTO issue_vector_mirror(issue_uid, project_uid, content, content_revision)
 				VALUES($1, $2, $3, $4)
 				ON CONFLICT(issue_uid) DO UPDATE SET
@@ -353,7 +387,7 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 			}
 		}
 	}
-	rows, err := p.db.QueryContext(ctx, `SELECT issue_uid FROM issue_vector_mirror`)
+	rows, err := executor.QueryContext(ctx, `SELECT issue_uid FROM issue_vector_mirror`)
 	if err != nil {
 		return changed, fmt.Errorf("vector: scan postgres mirror uids: %w", err)
 	}
@@ -375,7 +409,7 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 		return changed, err
 	}
 	for _, uid := range stale {
-		if _, err := p.db.ExecContext(ctx,
+		if _, err := executor.ExecContext(ctx,
 			`DELETE FROM issue_vector_mirror WHERE issue_uid = $1`, uid); err != nil {
 			return changed, fmt.Errorf("vector: delete postgres mirror row %s: %w", uid, err)
 		}

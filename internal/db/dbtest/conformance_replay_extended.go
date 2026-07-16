@@ -364,6 +364,93 @@ func checkSnapshotReplayCompatibilityOptions(t *testing.T, store db.Storage) err
 	return nil
 }
 
+func checkSnapshotReplayHistoricalProjectName(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	const (
+		currentName    = "renamed-project"
+		historicalName = "original-project"
+		created        = "2026-07-15T12:00:00.000Z"
+	)
+	payload := json.RawMessage(`{"name":"original-project"}`)
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
+		ProjectUID: replayProjectUID, ProjectName: historicalName,
+		Type: "project.created", Actor: "fixture-author",
+		HLCPhysicalMS: 1784102400000, CreatedAt: created, Payload: payload,
+	})
+	if err != nil {
+		return err
+	}
+	err = store.ImportReplay(ctx, []db.ImportRecord{
+		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+			ID: 5, UID: replayProjectUID, Name: currentName, CreatedAt: created,
+			Metadata: json.RawMessage(`{}`), Revision: 1,
+		}},
+		{Kind: db.ImportKindEvent, Event: &db.EventExport{
+			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
+			ProjectID: 5, ProjectUID: replayProjectUID, ProjectName: historicalName,
+			Type: "project.created", Actor: "fixture-author", Payload: payload,
+			HLCPhysicalMS: 1784102400000, ContentHash: hash, CreatedAt: created,
+		}},
+	}, db.ImportOptions{})
+	if err != nil {
+		return err
+	}
+	project, err := store.ProjectByUID(ctx, replayProjectUID)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, currentName, project.Name)
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 10})
+	if err != nil {
+		return err
+	}
+	require.Len(t, events, 1)
+	assert.Equal(t, historicalName, events[0].ProjectName)
+	assert.Equal(t, hash, events[0].ContentHash)
+	return nil
+}
+
+func checkSnapshotReplayUnsafeHistoricalProjectName(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	const (
+		unsafeName = "original\nproject"
+		created    = "2026-07-15T12:00:00.000Z"
+	)
+	payload := json.RawMessage(`{"name":"original project"}`)
+	hash, err := db.EventContentHash(db.EventHashInput{
+		UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
+		ProjectUID: replayProjectUID, ProjectName: unsafeName,
+		Type: "project.created", Actor: "fixture-author",
+		HLCPhysicalMS: 1784102400000, CreatedAt: created, Payload: payload,
+	})
+	if err != nil {
+		return err
+	}
+	err = store.ImportReplay(ctx, []db.ImportRecord{
+		{Kind: db.ImportKindProject, Project: &db.ProjectExport{
+			ID: 5, UID: replayProjectUID, Name: "safe-current-name", CreatedAt: created,
+			Metadata: json.RawMessage(`{}`), Revision: 1,
+		}},
+		{Kind: db.ImportKindEvent, Event: &db.EventExport{
+			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,
+			ProjectID: 5, ProjectUID: replayProjectUID, ProjectName: unsafeName,
+			Type: "project.created", Actor: "fixture-author", Payload: payload,
+			HLCPhysicalMS: 1784102400000, ContentHash: hash, CreatedAt: created,
+		}},
+	}, db.ImportOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-printable")
+	projects, listErr := store.ListProjects(ctx)
+	if listErr != nil {
+		return listErr
+	}
+	assert.Empty(t, projects, "unsafe durable event name must roll back replay")
+	return nil
+}
+
 func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	t.Helper()
 	ctx := context.Background()
