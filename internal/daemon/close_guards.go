@@ -135,10 +135,9 @@ func (r *guardRefRenderer) eventIssueRef(ctx context.Context, ev db.Event) (stri
 // Concurrency note (v1 trade-off): this guard runs as a read before the
 // close transaction. Two concurrent close requests under the same parent
 // can both pass the read at the limit boundary (each sees N-1 siblings)
-// and then serialize through CloseIssue's write — momentarily exceeding
-// the configured limit by one. SQLite's write lock serializes the
-// underlying issue.closed writes, and any subsequent close in the same
-// window still observes the now-elevated count and is refused. Refused
+// and then commit, momentarily exceeding the configured limit by the number
+// of in-flight requests. Any subsequent close in the same window observes
+// the now-elevated count and is refused. Refused
 // attempts that do hit the guard emit close.throttled audit events, so
 // the signal is preserved for operators reviewing the throttle's
 // effectiveness. v2 may fold the throttle check into the close
@@ -211,8 +210,8 @@ func CheckSiblingCloseThrottle(
 // Concurrency note (v1 trade-off): same race window as
 // CheckSiblingCloseThrottle — this is a read before the close
 // transaction, so two concurrent closes with identical messages can both
-// pass the read. SQLite serializes the closing writes, and the second
-// distinct close-with-this-message in the window is recorded; any later
+// pass the read and commit. The second distinct close-with-this-message in
+// the window is recorded; any later
 // close that re-runs the read sees the prior message and is refused.
 // close.throttled audit events fire for guarded attempts, so the signal
 // is preserved. v2 may move the check into the close transaction; for v1

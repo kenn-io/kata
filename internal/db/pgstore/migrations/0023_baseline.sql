@@ -18,7 +18,15 @@
 -- Table order is FK-dependency: parents before children. recurrences appears
 -- before issues because issues references recurrences.
 
-CREATE EXTENSION IF NOT EXISTS unaccent;
+CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public;
+DO $$
+BEGIN
+  IF (SELECT extnamespace FROM pg_extension WHERE extname = 'unaccent')
+       <> (SELECT oid FROM pg_namespace WHERE nspname = 'public') THEN
+    ALTER EXTENSION unaccent SET SCHEMA public;
+  END IF;
+END
+$$;
 
 -- Custom text-search config: unaccent over simple. Same lower-no-stem
 -- tokenization as SQLite's `unicode61 remove_diacritics 2`.
@@ -26,7 +34,7 @@ DROP TEXT SEARCH CONFIGURATION IF EXISTS kata_simple_unaccent;
 CREATE TEXT SEARCH CONFIGURATION kata_simple_unaccent (COPY = simple);
 ALTER TEXT SEARCH CONFIGURATION kata_simple_unaccent
   ALTER MAPPING FOR hword, hword_part, word
-  WITH unaccent, simple;
+  WITH public.unaccent, pg_catalog.simple;
 
 -- ----------------------------------------------------------------------
 -- meta: schema_version / instance_uid / created_by_version (key/value).
@@ -156,15 +164,16 @@ CREATE TABLE links (
   to_issue_id   BIGINT NOT NULL REFERENCES issues(id),
   from_issue_uid TEXT NOT NULL,
   to_issue_uid   TEXT NOT NULL,
-  type          TEXT NOT NULL CHECK(type IN ('parent','blocks','related')),
+  type          TEXT NOT NULL,
   author        TEXT NOT NULL,
   created_at    TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  UNIQUE(from_issue_id, to_issue_id, type),
-  CHECK (from_issue_id <> to_issue_id),
-  CHECK (length(from_issue_uid) = 26),
-  CHECK (length(to_issue_uid) = 26),
-  CHECK (length(trim(author)) > 0),
-  CHECK (type <> 'related' OR from_issue_id < to_issue_id)
+  CONSTRAINT links_unique_edge UNIQUE(from_issue_id, to_issue_id, type),
+  CONSTRAINT links_type_check CHECK(type IN ('parent','blocks','related')),
+  CONSTRAINT links_not_self_check CHECK (from_issue_id <> to_issue_id),
+  CONSTRAINT links_from_uid_length_check CHECK (length(from_issue_uid) = 26),
+  CONSTRAINT links_to_uid_length_check CHECK (length(to_issue_uid) = 26),
+  CONSTRAINT links_author_check CHECK (length(trim(author)) > 0),
+  CONSTRAINT links_related_order_check CHECK (type <> 'related' OR from_issue_id < to_issue_id)
 );
 CREATE UNIQUE INDEX uniq_one_parent_per_child
   ON links(from_issue_id) WHERE type = 'parent';
@@ -223,9 +232,9 @@ CREATE TABLE issue_labels (
   author     TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   PRIMARY KEY(issue_id, label),
-  CHECK (length(label) BETWEEN 1 AND 64),
-  CHECK (label !~ '[^a-z0-9._:-]'),
-  CHECK (length(trim(author)) > 0)
+  CONSTRAINT issue_labels_label_length_check CHECK (length(label) BETWEEN 1 AND 64),
+  CONSTRAINT issue_labels_label_charset_check CHECK (label !~ '[^a-z0-9._:-]'),
+  CONSTRAINT issue_labels_author_check CHECK (length(trim(author)) > 0)
 );
 CREATE INDEX idx_issue_labels_label ON issue_labels(label);
 
@@ -369,6 +378,8 @@ CREATE TABLE federation_bindings (
   pull_cursor_event_id    BIGINT NOT NULL DEFAULT 0,
   push_enabled            INTEGER NOT NULL DEFAULT 0 CHECK(push_enabled IN (0,1)),
   push_cursor_event_id    BIGINT NOT NULL DEFAULT 0 CHECK(push_cursor_event_id >= 0),
+  bound_actor             TEXT NOT NULL DEFAULT '',
+  allow_insecure          INTEGER NOT NULL DEFAULT 0 CHECK(allow_insecure IN (0,1)),
   enabled                 INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
   created_at              TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   updated_at              TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),

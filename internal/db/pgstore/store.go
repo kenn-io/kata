@@ -3,10 +3,10 @@
 // runtime params, bootstraps the canonical schema if the DB is fresh, and
 // returns a ready-to-use *Store.
 //
-// Domain methods are stubbed in stubs_gen.go for Phase 3 — queries land in
-// Phase 4. stubs_gen.go is regenerated from internal/db/storage.go's
-// Storage interface by ./stubgen; see that directory's main.go for the
-// allow-list of already-implemented methods.
+// Every db.Storage method has behavioral parity coverage shared with SQLite.
+// stubs_gen.go is regenerated from internal/db/storage.go by ./stubgen and
+// retains the compile-time interface assertion plus an inventory guard for
+// future interface growth.
 package pgstore
 
 //go:generate go run ./stubgen
@@ -21,6 +21,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib" // register pgx as the "pgx" sql driver
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
 )
 
 // Store wraps a pgx-backed *sql.DB. Use Open to construct one with pool +
@@ -30,8 +31,38 @@ import (
 type Store struct {
 	*sql.DB
 	dsn         string
+	schema      string
 	instanceUID string
 	readOnly    bool
+	exportQ     exportQueryer
+}
+
+type exportQueryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+// BeginExportSnapshot pins every Export* iterator to one read-only,
+// repeatable-read transaction. The caller must invoke the returned release
+// function before discarding the snapshot.
+func (s *Store) BeginExportSnapshot(ctx context.Context) (db.Storage, func() error, error) {
+	tx, err := s.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin export snapshot: %w", mapSQLError(err, nil))
+	}
+	snapshot := *s
+	snapshot.exportQ = tx
+	return &snapshot, tx.Rollback, nil
+}
+
+func (s *Store) exportQueryContext(
+	ctx context.Context,
+	query string,
+	args ...any,
+) (*sql.Rows, error) {
+	if s.exportQ != nil {
+		return s.exportQ.QueryContext(ctx, query, args...)
+	}
+	return s.QueryContext(ctx, query, args...)
 }
 
 // Path returns the credential-free DSN identity. Never returns the raw DSN —
@@ -75,18 +106,21 @@ func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// RetryTransient currently does no retries — pgstore's transient-error set is
-// out of Phase 3 scope. Phase 4 plugs in SQLSTATE-based retry per parent spec
-// §4. For now the op runs once and any error propagates.
-func (s *Store) RetryTransient(_ context.Context, op func() error) error {
-	return op()
+// RetryTransient retries a complete operation for the bounded set of
+// retry-safe Postgres SQLSTATEs. Callers must not wrap a single statement from
+// an already-open transaction; use the transaction helpers instead.
+func (s *Store) RetryTransient(ctx context.Context, op func() error) error {
+	return db.RetryTransient(ctx, IsTransient, op)
 }
 
 // PeekSchemaVersion opens dsn read-only, reads meta.schema_version (or 0 if
 // the meta table is absent), and closes the handle. Used by storeopen's
 // pre-Open schema-shape check.
 func PeekSchemaVersion(ctx context.Context, dsn string) (int, error) {
-	s, err := openInternal(ctx, dsn, true)
+	s, err := openInternal(ctx, dsn, Config{
+		Schema:     DefaultSchema,
+		SchemaMode: SchemaModeValidate,
+	}, true, true)
 	if err != nil {
 		return 0, err
 	}

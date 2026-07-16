@@ -33,7 +33,7 @@ func (d *Store) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 }
 
 func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
-	if err := validateImportBatch(p); err != nil {
+	if err := db.ValidateImportBatch(p); err != nil {
 		return db.ImportBatchResult{}, nil, err
 	}
 
@@ -122,7 +122,7 @@ func (d *Store) importBatch(ctx context.Context, p db.ImportBatchParams) (db.Imp
 		if state == nil {
 			continue
 		}
-		linkTypeFilter, reconcileLinks := importLinkReconcileFilter(p, state, item)
+		linkTypeFilter, reconcileLinks := db.ImportLinkReconcileFilter(p, item, state.created, state.sourceNewer)
 		if reconcileLinks {
 			linkEvents, n, err := d.reconcileImportLinks(ctx, tx, p, state.issue, item, states, projectName, linkTypeFilter)
 			if err != nil {
@@ -209,70 +209,6 @@ func (d *Store) normalizeBoundFederationImportActorTx(ctx context.Context, tx *s
 	return p, nil
 }
 
-func validateImportBatch(p db.ImportBatchParams) error {
-	if strings.TrimSpace(p.Source) == "" || strings.TrimSpace(p.Actor) == "" {
-		return fmt.Errorf("%w: source and actor are required", db.ErrImportValidation)
-	}
-	seenItems := map[string]struct{}{}
-	seenComments := map[string]struct{}{}
-	for _, item := range p.Items {
-		if strings.TrimSpace(item.ExternalID) == "" || strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.Author) == "" {
-			return fmt.Errorf("%w: external_id, title, and author are required", db.ErrImportValidation)
-		}
-		if item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() {
-			return fmt.Errorf("%w: created_at and updated_at are required", db.ErrImportValidation)
-		}
-		if item.UpdatedAt.Before(item.CreatedAt) {
-			return fmt.Errorf("%w: updated_at cannot be before created_at", db.ErrImportValidation)
-		}
-		if _, ok := seenItems[item.ExternalID]; ok {
-			return fmt.Errorf("%w: duplicate item external_id %q", db.ErrImportValidation, item.ExternalID)
-		}
-		seenItems[item.ExternalID] = struct{}{}
-		if item.Status != "open" && item.Status != "closed" {
-			return fmt.Errorf("%w: status must be open or closed", db.ErrImportValidation)
-		}
-		if item.ClosedAt != nil && item.ClosedAt.Before(item.CreatedAt) {
-			return fmt.Errorf("%w: closed_at cannot be before created_at", db.ErrImportValidation)
-		}
-		if item.Status == "open" && (item.ClosedReason != nil || item.ClosedAt != nil) {
-			return fmt.Errorf("%w: open issues cannot have closed fields", db.ErrImportValidation)
-		}
-		if item.Status == "closed" && item.ClosedAt == nil {
-			return fmt.Errorf("%w: closed issues require closed_at", db.ErrImportValidation)
-		}
-		if item.ClosedReason != nil && !validImportClosedReason(*item.ClosedReason) {
-			return fmt.Errorf("%w: closed_reason must be one of done, wontfix, duplicate, superseded, audit-no-change", db.ErrImportValidation)
-		}
-		if item.Priority != nil && (*item.Priority < 0 || *item.Priority > 4) {
-			return fmt.Errorf("%w: priority must be between 0 and 4", db.ErrImportValidation)
-		}
-		for _, label := range item.Labels {
-			if !validImportLabel(label) {
-				return fmt.Errorf("%w: invalid label %q", db.ErrImportValidation, label)
-			}
-		}
-		for _, c := range item.Comments {
-			if strings.TrimSpace(c.ExternalID) == "" || strings.TrimSpace(c.Author) == "" || strings.TrimSpace(c.Body) == "" || c.CreatedAt.IsZero() {
-				return fmt.Errorf("%w: comment external_id, author, body, and created_at are required", db.ErrImportValidation)
-			}
-			if _, ok := seenComments[c.ExternalID]; ok {
-				return fmt.Errorf("%w: duplicate comment external_id %q", db.ErrImportValidation, c.ExternalID)
-			}
-			seenComments[c.ExternalID] = struct{}{}
-		}
-		for _, l := range item.Links {
-			if l.Type != "blocks" && l.Type != "parent" && l.Type != "related" {
-				return fmt.Errorf("%w: link type must be parent|blocks|related", db.ErrImportValidation)
-			}
-			if strings.TrimSpace(l.TargetExternalID) == "" {
-				return fmt.Errorf("%w: link target_external_id is required", db.ErrImportValidation)
-			}
-		}
-	}
-	return nil
-}
-
 func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, projectName, projectUID string) (*importIssueState, *db.Event, error) {
 	mapping, found, err := adoptImportMapping(ctx, tx, p.ProjectID, p.Source, "issue", item.ExternalID, item.LegacyExternalIDs)
 	if err != nil {
@@ -322,7 +258,7 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 		}
 		return &importIssueState{item: item, issue: healed, healed: true}, &evt, nil
 	}
-	if importOwnsSameSourceVersionTitle(mapping, existing, item) {
+	if db.ImportOwnsSameSourceVersionTitle(mapping, existing, item) {
 		updated, evt, err := d.updateImportedPresentationTitle(ctx, tx, p, item, existing, projectName)
 		if err != nil {
 			return nil, nil, err
@@ -338,14 +274,6 @@ func (d *Store) importIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchPar
 		return nil, nil, err
 	}
 	return &importIssueState{item: item, issue: existing}, nil, nil
-}
-
-func importOwnsSameSourceVersionTitle(mapping db.ImportMapping, existing db.Issue, item db.ImportItem) bool {
-	if item.Title == existing.Title || mapping.SourceUpdatedAt == nil {
-		return false
-	}
-	return sameImportTimestamp(*mapping.SourceUpdatedAt, item.UpdatedAt) &&
-		sameImportTimestamp(existing.UpdatedAt, item.UpdatedAt)
 }
 
 func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, item db.ImportItem, projectName, projectUID string) (db.Issue, db.Event, error) {
@@ -369,7 +297,7 @@ func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO issues(uid, project_id, short_id, title, body, status, closed_reason, owner, author, created_at, updated_at, closed_at, priority)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		issueUID, p.ProjectID, shortID, item.Title, item.Body, item.Status, item.ClosedReason, normalizeOwner(item.Owner), item.Author, item.CreatedAt, item.UpdatedAt, item.ClosedAt, item.Priority)
+		issueUID, p.ProjectID, shortID, item.Title, item.Body, item.Status, item.ClosedReason, db.NormalizeImportOwner(item.Owner), item.Author, item.CreatedAt, item.UpdatedAt, item.ClosedAt, item.Priority)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("insert imported issue: %w", err)
 	}
@@ -383,7 +311,7 @@ func (d *Store) insertImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 		Title:        item.Title,
 		Body:         item.Body,
 		Author:       item.Author,
-		Owner:        normalizeOwner(item.Owner),
+		Owner:        db.NormalizeImportOwner(item.Owner),
 		Priority:     item.Priority,
 		Status:       item.Status,
 		ClosedReason: item.ClosedReason,
@@ -426,11 +354,11 @@ func (d *Store) updateImportedIssue(ctx context.Context, tx *sql.Tx, p db.Import
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE issues
 		SET title = ?, body = ?, status = ?, closed_reason = ?, owner = ?, created_at = ?, updated_at = ?, closed_at = ?, priority = ?`+bump+`
-		WHERE id = ?`, item.Title, item.Body, item.Status, item.ClosedReason, normalizeOwner(item.Owner), createdAt, item.UpdatedAt, item.ClosedAt, item.Priority, existing.ID)
+		WHERE id = ?`, item.Title, item.Body, item.Status, item.ClosedReason, db.NormalizeImportOwner(item.Owner), createdAt, item.UpdatedAt, item.ClosedAt, item.Priority, existing.ID)
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported issue: %w", err)
 	}
-	payload, err := importedIssueUpdatedPayload(p.Source, item.ExternalID, existing, item)
+	payload, err := db.ImportedIssueUpdatedPayload(p.Source, item.ExternalID, existing, item)
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
@@ -450,7 +378,7 @@ func (d *Store) updateImportedPresentationTitle(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("update imported title: %w", err)
 	}
-	payload, err := importedPresentationTitlePayload(p.Source, item.ExternalID, existing, item)
+	payload, err := db.ImportedPresentationTitlePayload(p.Source, item.ExternalID, existing, item)
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
@@ -465,21 +393,6 @@ func (d *Store) updateImportedPresentationTitle(ctx context.Context, tx *sql.Tx,
 	return updated, evt, nil
 }
 
-func importedPresentationTitlePayload(source, externalID string, existing db.Issue, item db.ImportItem) (string, error) {
-	payload := map[string]any{
-		"source":      source,
-		"external_id": externalID,
-		"updated_at":  item.UpdatedAt.UTC().Format(sqliteTimeFormat),
-		"title":       item.Title,
-		"old_title":   existing.Title,
-	}
-	bs, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal import title payload: %w", err)
-	}
-	return string(bs), nil
-}
-
 // healImportedCreatedAt repairs a row whose stored created_at is later than the
 // corrected source timestamp, without touching any other field. It emits an
 // issue.updated event carrying only created_at so event-folded and federated
@@ -489,7 +402,7 @@ func (d *Store) healImportedCreatedAt(ctx context.Context, tx *sql.Tx, p db.Impo
 	if err != nil {
 		return db.Issue{}, db.Event{}, fmt.Errorf("heal imported created_at: %w", err)
 	}
-	payload, err := importedCreatedAtHealedPayload(p.Source, item.ExternalID, existing, item)
+	payload, err := db.ImportedCreatedAtHealedPayload(p.Source, item.ExternalID, existing, item)
 	if err != nil {
 		return db.Issue{}, db.Event{}, err
 	}
@@ -502,20 +415,6 @@ func (d *Store) healImportedCreatedAt(ctx context.Context, tx *sql.Tx, p db.Impo
 		return db.Issue{}, db.Event{}, err
 	}
 	return healed, evt, nil
-}
-
-func importedCreatedAtHealedPayload(source, externalID string, existing db.Issue, item db.ImportItem) (string, error) {
-	payload := map[string]any{
-		"source":      source,
-		"external_id": externalID,
-		"created_at":  item.CreatedAt.UTC().Format(sqliteTimeFormat),
-		"updated_at":  existing.UpdatedAt.UTC().Format(sqliteTimeFormat),
-	}
-	bs, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal created_at heal payload: %w", err)
-	}
-	return string(bs), nil
 }
 
 func (d *Store) importComments(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, item db.ImportItem, projectName string) ([]db.Event, int, error) {
@@ -574,7 +473,7 @@ func (d *Store) reconcileImportLabels(ctx context.Context, tx *sql.Tx, p db.Impo
 	events := []db.Event{}
 	desired := map[string]string{}
 	for _, label := range dedupeStrings(item.Labels) {
-		desired[label] = importLabelExternalID(item.ExternalID, label)
+		desired[label] = db.ImportLabelExternalID(item.ExternalID, label)
 	}
 
 	rows, err := tx.QueryContext(ctx, `SELECT id, external_id, label FROM import_mappings WHERE project_id = ? AND source = ? AND object_type = 'label' AND issue_id = ?`, p.ProjectID, p.Source, issue.ID)
@@ -643,7 +542,7 @@ func (d *Store) insertLabelEvent(ctx context.Context, tx *sql.Tx, p db.ImportBat
 	payload, err := json.Marshal(map[string]any{
 		"issue_uid":   issue.UID,
 		"source":      p.Source,
-		"external_id": importLabelExternalID(itemExternalID, label),
+		"external_id": db.ImportLabelExternalID(itemExternalID, label),
 		"label":       label,
 		"updated_at":  updatedAt.UTC().Format(sqliteTimeFormat),
 	})
@@ -658,10 +557,10 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 	created := 0
 	desired := map[string]db.ImportLink{}
 	for _, l := range item.Links {
-		if !importLinkTypeAllowed(linkTypeFilter, l.Type) {
+		if !db.ImportLinkTypeAllowed(linkTypeFilter, l.Type) {
 			continue
 		}
-		desired[importLinkExternalID(item.ExternalID, l)] = l
+		desired[db.ImportLinkExternalID(item.ExternalID, l)] = l
 	}
 
 	rows, err := tx.QueryContext(ctx, `SELECT id, external_id, link_id FROM import_mappings WHERE project_id = ? AND source = ? AND object_type = 'link' AND issue_id = ?`, p.ProjectID, p.Source, issue.ID)
@@ -711,10 +610,10 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 		if m.linkID.Valid {
 			link, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE id = ?`, m.linkID.Int64))
 			if err == nil {
-				if !importLinkTypeAllowed(linkTypeFilter, link.Type) {
+				if !db.ImportLinkTypeAllowed(linkTypeFilter, link.Type) {
 					continue
 				}
-				if !importItemLinkTypeAuthoritative(item, link.Type) {
+				if !db.ImportItemLinkTypeAuthoritative(item, link.Type) {
 					continue
 				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID); err != nil {
@@ -728,7 +627,7 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 			} else if !errors.Is(err, db.ErrNotFound) {
 				return nil, 0, err
 			}
-		} else if !importLinkMappingExternalIDAllowed(item.ExternalID, m.externalID, linkTypeFilter) {
+		} else if !db.ImportLinkMappingExternalIDAllowed(item.ExternalID, m.externalID, linkTypeFilter) {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM import_mappings WHERE id = ?`, m.id); err != nil {
@@ -787,45 +686,6 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 	return events, created, nil
 }
 
-func importLinkReconcileFilter(p db.ImportBatchParams, state *importIssueState, item db.ImportItem) (map[string]bool, bool) {
-	if state.created || state.sourceNewer {
-		return nil, true
-	}
-	if len(p.ReconcileLinkTypesForUnchanged) == 0 {
-		return nil, false
-	}
-	filter := make(map[string]bool, len(p.ReconcileLinkTypesForUnchanged))
-	for linkType, enabled := range p.ReconcileLinkTypesForUnchanged {
-		if enabled && importItemLinkTypeAuthoritative(item, linkType) {
-			filter[linkType] = true
-		}
-	}
-	return filter, len(filter) > 0
-}
-
-func importLinkTypeAllowed(filter map[string]bool, linkType string) bool {
-	if filter == nil {
-		return true
-	}
-	return filter[linkType]
-}
-
-func importLinkMappingExternalIDAllowed(issueExternalID, linkExternalID string, filter map[string]bool) bool {
-	if filter == nil {
-		return true
-	}
-	prefix := issueExternalID + ":"
-	if !strings.HasPrefix(linkExternalID, prefix) {
-		return false
-	}
-	rest := strings.TrimPrefix(linkExternalID, prefix)
-	linkType, _, ok := strings.Cut(rest, ":")
-	if !ok {
-		return false
-	}
-	return filter[linkType]
-}
-
 func (d *Store) insertLinkEvent(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, projectName, eventType string, link db.Link, updatedAt time.Time) (db.Event, error) {
 	relatedID := link.ToIssueID
 	if relatedID == issue.ID {
@@ -867,146 +727,6 @@ func issueIdentByID(ctx context.Context, tx *sql.Tx, issueID int64) (string, str
 		return "", "", fmt.Errorf("lookup issue ident: %w", err)
 	}
 	return shortID, uid, nil
-}
-
-func importedIssueUpdatedPayload(source, externalID string, existing db.Issue, item db.ImportItem) (string, error) {
-	payload := map[string]any{
-		"source":      source,
-		"external_id": externalID,
-		"updated_at":  item.UpdatedAt.UTC().Format(sqliteTimeFormat),
-	}
-	if item.Title != existing.Title {
-		payload["title"] = item.Title
-		payload["old_title"] = existing.Title
-	}
-	if item.Body != existing.Body {
-		payload["body"] = item.Body
-	}
-	newOwner := normalizeOwner(item.Owner)
-	if !ownerEqual(existing.Owner, newOwner) {
-		if newOwner == nil {
-			payload["owner"] = nil
-		} else {
-			payload["owner"] = *newOwner
-		}
-		if existing.Owner == nil {
-			payload["old_owner"] = nil
-		} else {
-			payload["old_owner"] = *existing.Owner
-		}
-	}
-	if !priorityEqual(existing.Priority, item.Priority) {
-		if item.Priority == nil {
-			payload["priority"] = nil
-		} else {
-			payload["priority"] = *item.Priority
-		}
-		if existing.Priority == nil {
-			payload["old_priority"] = nil
-		} else {
-			payload["old_priority"] = *existing.Priority
-		}
-	}
-	if item.Status != existing.Status {
-		payload["status"] = item.Status
-	}
-	if !stringPtrEqual(existing.ClosedReason, item.ClosedReason) {
-		payload["closed_reason"] = stringPtrPayload(item.ClosedReason)
-	}
-	if !timePtrEqual(existing.ClosedAt, item.ClosedAt) {
-		payload["closed_at"] = stringPtrPayload(formatOptionalSQLiteTime(item.ClosedAt))
-	}
-	// created_at only heals earlier; emit it so projections fold the corrected
-	// creation time instead of keeping a stale synthetic value.
-	if item.CreatedAt.Before(existing.CreatedAt) {
-		payload["created_at"] = item.CreatedAt.UTC().Format(sqliteTimeFormat)
-	}
-	bs, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal import event payload: %w", err)
-	}
-	return string(bs), nil
-}
-
-func stringPtrEqual(a, b *string) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return *a == *b
-}
-
-func timePtrEqual(a, b *time.Time) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return a.UTC().Format(sqliteTimeFormat) == b.UTC().Format(sqliteTimeFormat)
-}
-
-func sameImportTimestamp(a, b time.Time) bool {
-	return a.UTC().Format(sqliteTimeFormat) == b.UTC().Format(sqliteTimeFormat)
-}
-
-func stringPtrPayload(s *string) any {
-	if s == nil {
-		return nil
-	}
-	return *s
-}
-
-func validImportClosedReason(reason string) bool {
-	switch reason {
-	case "done", "wontfix", "duplicate", "superseded", "audit-no-change":
-		return true
-	default:
-		return false
-	}
-}
-
-func validImportLabel(label string) bool {
-	if len(label) < 1 || len(label) > 64 {
-		return false
-	}
-	for _, r := range label {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
-		case r == '.' || r == '_' || r == ':' || r == '-':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func importLabelExternalID(issueExternalID, label string) string {
-	return issueExternalID + ":label:" + label
-}
-
-func importLinkExternalID(issueExternalID string, link db.ImportLink) string {
-	return issueExternalID + ":" + link.Type + ":" + link.TargetExternalID
-}
-
-func importItemLinkTypeAuthoritative(item db.ImportItem, linkType string) bool {
-	if item.LinkTypesAuthoritative == nil {
-		return true
-	}
-	if authoritative, ok := item.LinkTypesAuthoritative[linkType]; ok {
-		return authoritative
-	}
-	return true
-}
-
-func normalizeOwner(owner *string) *string {
-	if owner == nil || *owner == "" {
-		return nil
-	}
-	return owner
 }
 
 func importLinkMappingMatches(ctx context.Context, tx *sql.Tx, p db.ImportBatchParams, issue db.Issue, importLink db.ImportLink, states map[string]*importIssueState, linkID int64) (bool, error) {

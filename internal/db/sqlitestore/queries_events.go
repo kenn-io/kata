@@ -75,6 +75,30 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 	return out, rows.Err()
 }
 
+func eventsAfterTx(ctx context.Context, tx *sql.Tx, afterID int64) ([]db.Event, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
+             e.issue_id, e.issue_uid, i.short_id, e.related_issue_id, e.related_issue_uid, ri.short_id,
+             e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
+        FROM events e
+        JOIN projects p ON p.id = e.project_id
+        LEFT JOIN issues i ON i.id = e.issue_id OR (e.issue_id IS NULL AND e.issue_uid IS NOT NULL AND i.uid = e.issue_uid)
+        LEFT JOIN issues ri ON ri.id = e.related_issue_id OR (e.related_issue_id IS NULL AND e.related_issue_uid IS NOT NULL AND ri.uid = e.related_issue_uid)
+       WHERE e.id > ? ORDER BY e.id ASC`, afterID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var events []db.Event
+	for rows.Next() {
+		event, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
 // EventsByUIDs returns project events matching uids in insertion order. It is
 // used by federation ingest to broadcast only fresh rows after an all-or-
 // nothing insert commits.
@@ -253,24 +277,11 @@ func (d *Store) RecentSameMessageClose(
 		if p.Reason != "done" && p.Reason != "audit-no-change" {
 			continue
 		}
-		if normalizeMessageDB(p.Message) == normalizedMessage {
+		if db.NormalizeCloseMessage(p.Message) == normalizedMessage {
 			return &siblings[i], nil
 		}
 	}
 	return nil, nil
-}
-
-// normalizeMessageDB is the db-side mirror of the daemon's NormalizeMessage
-// (close_validation.go). It is intentionally duplicated rather than imported:
-// internal/api already imports internal/db, so the db package cannot reach
-// daemon without creating an import cycle. Keep these two implementations
-// in lockstep — if one changes, update the other.
-func normalizeMessageDB(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.Join(strings.Fields(s), " ")
-	s = strings.ToLower(s)
-	s = strings.TrimRight(s, ".?!")
-	return s
 }
 
 // MaxLocalOriginEventID returns the largest events.id row whose project_id

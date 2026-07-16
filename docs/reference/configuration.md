@@ -8,7 +8,7 @@ bindings, local per-machine overrides, and daemon config.
 | Variable | Meaning |
 | --- | --- |
 | `KATA_HOME` | Data directory. Defaults to `~/.kata`. |
-| `KATA_DSN` | Explicit database DSN. Production storage currently accepts a bare SQLite path or `sqlite://...`. Postgres URLs are recognized but rejected by normal store opening until backend domain methods land. |
+| `KATA_DSN` | Explicit database DSN. Accepts a bare SQLite path, `sqlite://...`, `postgres://...`, or `postgresql://...`. |
 | `KATA_DB` | Legacy explicit SQLite database path. Used when `KATA_DSN` is unset. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
@@ -34,10 +34,21 @@ kata resolves its database in this order:
 4. `<KATA_HOME>/kata.db`
 
 Bare paths and `sqlite://` DSNs select SQLite. `postgres://` and
-`postgresql://` DSNs are reserved for the incomplete Postgres backend and are
-not selectable by normal daemon/CLI store opening yet. `KATA_DB` stays ahead of
-`[storage].dsn` so existing shells and scripts keep using their explicit
-database path after the config-file key is introduced.
+`postgresql://` DSNs select Postgres. A standalone Postgres open owns the
+dedicated `kata` schema, installs or advances its versioned migrations under an
+advisory lock, and never uses `public` for kata tables. The database role must
+be able to create that schema and install the `unaccent` extension on first
+startup; deployments that apply migrations separately can use a restricted
+runtime role through the package-level validation profile. `KATA_DB` stays
+ahead of `[storage].dsn` so existing shells and scripts keep using their
+explicit database path after the config-file key is introduced.
+
+For example:
+
+```sh
+export KATA_DSN='postgres://kata:password@db.example/kata?sslmode=require'
+kata daemon start
+```
 
 `KATA_DSN` and `[storage].dsn` are shape-validated before use. Unknown schemes
 are rejected, and common Postgres-only query parameters on a bare path or
@@ -160,9 +171,10 @@ actor attribution. It requires a literal private-IP bind and cannot be combined
 with `token`, `require_token_identity`, or `--insecure-readonly`; token
 administration endpoints remain blocked.
 
-Postgres DSNs may carry credentials. Although they are not selectable yet,
-runtime redaction handles both URL and libpq keyword forms defensively; userinfo
-and query parameters are stripped before display or hashing.
+Postgres DSNs may carry credentials. Runtime redaction strips userinfo and
+query parameters before a DSN appears in daemon metadata, health output, import
+output, errors, or per-database namespace hashing. Use environment variables or
+secret-managed configuration rather than committing a credential-bearing DSN.
 
 ## Token identity mode
 

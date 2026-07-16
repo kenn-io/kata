@@ -2,7 +2,6 @@ package sqlitestore
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"go.kenn.io/kata/internal/db"
@@ -91,29 +90,5 @@ func priorityEqual(a, b *int64) bool {
 // priority transition from old to new. old==new is rejected as a programming
 // error because UpdatePriority short-circuits no-ops before reaching here.
 func priorityEventPayload(old, newPrio *int64, ts string) (string, string, error) {
-	type setPayload struct {
-		Priority    int64  `json:"priority"`
-		OldPriority *int64 `json:"old_priority,omitempty"`
-		UpdatedAt   string `json:"updated_at"`
-	}
-	type clearedPayload struct {
-		OldPriority int64  `json:"old_priority"`
-		UpdatedAt   string `json:"updated_at"`
-	}
-	if newPrio != nil {
-		bs, err := json.Marshal(setPayload{Priority: *newPrio, OldPriority: old, UpdatedAt: ts})
-		if err != nil {
-			return "", "", fmt.Errorf("marshal priority_set payload: %w", err)
-		}
-		return "issue.priority_set", string(bs), nil
-	}
-	// Clearing: old must be non-nil (priorityEqual short-circuits two nils).
-	if old == nil {
-		return "", "", fmt.Errorf("priorityEventPayload: cannot clear a nil priority")
-	}
-	bs, err := json.Marshal(clearedPayload{OldPriority: *old, UpdatedAt: ts})
-	if err != nil {
-		return "", "", fmt.Errorf("marshal priority_cleared payload: %w", err)
-	}
-	return "issue.priority_cleared", string(bs), nil
+	return db.PriorityEventPayload(old, newPrio, ts)
 }

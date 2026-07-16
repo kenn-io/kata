@@ -446,7 +446,8 @@ func TestSSE_GracePeriod_TimerVsConnectIsRaceFree(t *testing.T) {
 
 	// Track the last sseStatusMsg observed at any point and the count
 	// of frames so we know when enough cycles have completed.
-	var lastStatus *sseConnState
+	var lastStatus sseConnState
+	var sawStatus bool
 	deadline := time.After(20 * time.Second)
 	frames := 0
 	for frames < cycles {
@@ -458,8 +459,8 @@ func TestSSE_GracePeriod_TimerVsConnectIsRaceFree(t *testing.T) {
 			case eventReceivedMsg:
 				frames++
 			case sseStatusMsg:
-				s := m.state
-				lastStatus = &s
+				lastStatus = m.state
+				sawStatus = true
 			}
 		}
 	}
@@ -471,23 +472,23 @@ func TestSSE_GracePeriod_TimerVsConnectIsRaceFree(t *testing.T) {
 		select {
 		case msg := <-ch:
 			if st, ok := msg.(sseStatusMsg); ok {
-				s := st.state
-				lastStatus = &s
+				lastStatus = st.state
+				sawStatus = true
 			}
 		default:
 			goto done
 		}
 	}
 done:
-	if lastStatus == nil {
+	if !sawStatus {
 		t.Fatal("no sseStatusMsg observed; expected at least one transition")
 	}
 	// The terminal state observed for the run must be sseConnected:
 	// every reconnect completed before the run ended. A pre-lock build
 	// could leave the terminal state at sseReconnecting if the timer's
 	// send raced past publishConnected's send.
-	if *lastStatus != sseConnected {
-		t.Fatalf("terminal sseStatusMsg = %v, want sseConnected (race fix regression)", *lastStatus)
+	if lastStatus != sseConnected {
+		t.Fatalf("terminal sseStatusMsg = %v, want sseConnected (race fix regression)", lastStatus)
 	}
 }
 

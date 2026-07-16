@@ -2,11 +2,11 @@ package db
 
 // OpenConfig carries the mode flags shared across storage backends. New fields
 // must be safe to default: the zero value is "read-write, create-if-missing"
-// SQLite behavior.
+// behavior for both backends.
 type OpenConfig struct {
-	// ReadOnly opens an existing database without bootstrapping or PRAGMA
-	// writes. The cutover and preflight paths use this to inspect an old
-	// source DB before the destructive replace.
+	// ReadOnly opens an existing database without bootstrapping, migrations, or
+	// backend-specific setup writes. Cutover and export paths use it for
+	// non-mutating inspection.
 	ReadOnly bool
 }
 
@@ -15,8 +15,7 @@ type OpenConfig struct {
 // over time.
 type OpenOption func(*OpenConfig)
 
-// ReadOnly opens the database without bootstrap, schema-version writes, or
-// PRAGMA mutations. Equivalent to the prior OpenReadOnly entry point.
+// ReadOnly opens the database without bootstrap or schema-version writes.
 func ReadOnly() OpenOption {
 	return func(c *OpenConfig) { c.ReadOnly = true }
 }

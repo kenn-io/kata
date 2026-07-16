@@ -9,7 +9,7 @@
 //
 //	go generate ./internal/db/pgstore
 //
-// During Phase 4, the workflow for replacing a stub with a real query is:
+// When db.Storage grows, the workflow for replacing the generated guard is:
 //  1. Add the method name to alreadyImplemented below,
 //  2. Write the real implementation in a new pgstore .go file,
 //  3. Re-run go generate so the now-implemented method drops out of stubs_gen.go.
@@ -27,27 +27,230 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strings"
 )
 
 const (
 	interfaceName = "Storage"
 	receiverType  = "Store"
 	receiverVar   = "s"
-	sentinelName  = "ErrNotImplementedPhase3"
+	sentinelName  = "ErrNotImplemented"
 	qualifierPkg  = "db"
 )
 
 // alreadyImplemented lists Storage methods implemented on *pgstore.Store in
 // store.go and open.go, plus Close which is satisfied by the embedded
-// *sql.DB. Each Phase 4 method that lands a real query gets added here, and
+// *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
-	"Path":               true, // store.go
-	"InstanceUID":        true, // store.go
-	"RefreshInstanceUID": true, // store.go
-	"SchemaVersion":      true, // store.go
-	"RetryTransient":     true, // store.go (Phase 4 will swap in real retries)
-	"Close":              true, // inherited from embedded *sql.DB
+	"ActiveFederationQuarantine":           true, // federation_quarantine.go
+	"ActiveFederationQuarantinesByProject": true, // federation_quarantine.go
+	"AdoptProjectIntoFederation":           true, // federation_adoption.go
+	"AdvanceFederationPullCursor":          true, // federation_control.go
+	"AdvanceFederationPushCursor":          true, // federation_control.go
+	"AuthorizeFederationToken":             true, // federation_control.go
+	"ClearFederationSyncError":             true, // federation_control.go
+	"CountActiveFederationEnrollments":     true, // federation_control.go
+	"CreateFederationEnrollment":           true, // federation_control.go
+	"EnableFederationPush":                 true, // federation_control.go
+	"EnableProjectFederation":              true, // federation_projection.go
+	"ExportFederationBindings":             true, // export.go
+	"ExportFederationEnrollments":          true, // export.go
+	"ExportFederationQuarantine":           true, // export.go
+	"ExportFederationSyncStatus":           true, // export.go
+	"FederationBindingByProject":           true, // federation_control.go
+	"FederationSyncStatusByProject":        true, // federation_control.go
+	"ListFederationBindings":               true, // federation_control.go
+	"ListFederationEnrollments":            true, // federation_control.go
+	"LeaveFederationReplica":               true, // federation_projection.go
+	"MaterializeFederatedProject":          true, // federation_projection.go
+	"RecordFederationQuarantine":           true, // federation_quarantine.go
+	"RecordFederationSyncError":            true, // federation_control.go
+	"RecordFederationSyncPullStarted":      true, // federation_control.go
+	"RecordFederationSyncPullSuccess":      true, // federation_control.go
+	"RecordFederationSyncPushStarted":      true, // federation_control.go
+	"RecordFederationSyncPushSuccess":      true, // federation_control.go
+	"RecordFederationSyncReset":            true, // federation_control.go
+	"RefreshProjectFederationBaseline":     true, // federation_projection.go
+	"RetryFederationQuarantine":            true, // federation_quarantine.go
+	"RevokeFederationEnrollment":           true, // federation_control.go
+	"SkipFederationQuarantine":             true, // federation_quarantine.go
+	"UpsertFederationBinding":              true, // federation_control.go
+	"AliasByID":                            true, // aliases.go
+	"AliasByIdentity":                      true, // aliases.go
+	"AddLabel":                             true, // labels.go
+	"AddLabelAndEvent":                     true, // labels.go
+	"ActivelyBlockedIssueIDs":              true, // relationship_queries.go
+	"AcquireClaim":                         true, // claims_core.go
+	"ApplyClaimStatus":                     true, // claims_pending.go
+	"AttachAlias":                          true, // aliases.go
+	"BatchProjectStats":                    true, // project_lifecycle.go
+	"BlockNumbersByIssues":                 true, // relationship_queries.go
+	"BlockedByNumbersByIssues":             true, // relationship_queries.go
+	"ChildCountsByParents":                 true, // relationship_queries.go
+	"ChildrenOfIssue":                      true, // relationship_queries.go
+	"ClaimIssueSyncBinding":                true, // issue_sync.go
+	"ClaimOwner":                           true, // issue_lifecycle.go
+	"ClaimStatus":                          true, // claims_core.go
+	"ClaimStatusReadOnly":                  true, // claims_core.go
+	"ClaimStatusRefreshError":              true, // claims_pending.go
+	"CheckClaimGate":                       true, // claims_pending.go
+	"ClearClaimStatusRefreshError":         true, // claims_pending.go
+	"Close":                                true, // inherited from embedded *sql.DB
+	"CloseIssue":                           true, // issue_lifecycle.go
+	"CloseIssueWithEvents":                 true, // issue_lifecycle.go
+	"CommentBodyByID":                      true, // comments.go
+	"CommentsByIssue":                      true, // comments.go
+	"CountOpenIssues":                      true, // project_lifecycle.go
+	"CountLiveClaims":                      true, // claims_core.go
+	"CountPendingClaims":                   true, // claims_core.go
+	"CreateAPIToken":                       true, // tokens.go
+	"CreateComment":                        true, // comments.go
+	"CreateIssue":                          true, // issues.go
+	"CreateLink":                           true, // links.go
+	"CreateLinkAndEvent":                   true, // links.go
+	"CreateProject":                        true, // projects.go
+	"CreateProjectWithUID":                 true, // projects.go
+	"CreateRecurrence":                     true, // recurrences.go
+	"DetachProjectAlias":                   true, // project_lifecycle.go
+	"DeleteLinkAndEvent":                   true, // links.go
+	"DeleteLinkByID":                       true, // links.go
+	"DisableIssueSyncBinding":              true, // issue_sync.go
+	"EditComment":                          true, // comments.go
+	"EditIssue":                            true, // issue_lifecycle.go
+	"EditIssueAtomic":                      true, // atomic_edit.go
+	"EnsureSystemProject":                  true, // tokens.go
+	"EnqueuePendingClaim":                  true, // claims_pending.go
+	"EventsAfter":                          true, // events.go
+	"EventsByUIDs":                         true, // events.go
+	"EventsInWindow":                       true, // events.go
+	"ExpireTimedClaims":                    true, // claims_core.go
+	"ExpireTimedClaimsForProject":          true, // claims_core.go
+	"ExportComments":                       true, // export.go
+	"ExportEvents":                         true, // export.go
+	"ExportImportMappings":                 true, // export.go
+	"ExportIssueClaims":                    true, // export.go
+	"ExportIssueLabels":                    true, // export.go
+	"ExportIssueSyncBindings":              true, // export.go
+	"ExportIssueSyncStatus":                true, // export.go
+	"ExportIssues":                         true, // export.go
+	"ExportLinks":                          true, // export.go
+	"ExportMeta":                           true, // export.go
+	"ExportPendingClaimRequests":           true, // export.go
+	"ExportProjectPurgeLog":                true, // export.go
+	"ExportProjectAliases":                 true, // export.go
+	"ExportProjects":                       true, // export.go
+	"ExportPurgeLog":                       true, // export.go
+	"ExportRecurrences":                    true, // export.go
+	"ExportSequences":                      true, // export.go
+	"GetRecurrenceByID":                    true, // recurrences.go
+	"ForceReleaseClaim":                    true, // claims_core.go
+	"GetRecurrenceByUID":                   true, // recurrences.go
+	"HardDeleteProject":                    true, // aliases.go
+	"HasLabel":                             true, // labels.go
+	"ImportBatch":                          true, // imports.go
+	"ImportReplay":                         true, // import_replay.go
+	"InstanceUID":                          true, // store.go
+	"InsertCloseThrottledEvent":            true, // events.go
+	"IngestFederationEvents":               true, // federation_ingest.go
+	"InsertRemoteEvent":                    true, // federation_events.go
+	"IssueByID":                            true, // issues.go
+	"IssueByShortID":                       true, // issues.go
+	"IssueByUID":                           true, // issues.go
+	"IssueQualifiersByUIDs":                true, // discovery.go
+	"ImportMappingBySource":                true, // import_mappings.go
+	"ImportMappingsByProjectSource":        true, // import_mappings.go
+	"IssueSyncBindingByID":                 true, // issue_sync.go
+	"IssueSyncBindingByProject":            true, // issue_sync.go
+	"IssueSyncStatusByProject":             true, // issue_sync.go
+	"IssueUIDPrefixMatch":                  true, // issues.go
+	"LatestAliasForProject":                true, // aliases.go
+	"LabelByEndpoints":                     true, // labels.go
+	"LabelCounts":                          true, // labels.go
+	"LabelsByIssue":                        true, // labels.go
+	"LabelsByIssues":                       true, // labels.go
+	"LabelsForIssue":                       true, // labels.go
+	"ListAPITokens":                        true, // tokens.go
+	"ListAllIssues":                        true, // issues.go
+	"ListDueIssueSyncBindings":             true, // issue_sync.go
+	"ListIssueContent":                     true, // discovery.go
+	"ListIssues":                           true, // issues.go
+	"ListPendingClaimRequests":             true, // claims_pending.go
+	"ListPendingClaimRequestsForIssue":     true, // claims_pending.go
+	"ListProjects":                         true, // projects.go
+	"ListProjectsIncludingArchived":        true, // projects.go
+	"ListRecurrencesByProject":             true, // recurrences.go
+	"LinkByEndpoints":                      true, // links.go
+	"LinkByID":                             true, // links.go
+	"LinksByIssue":                         true, // links.go
+	"Path":                                 true, // store.go
+	"LookupIdempotency":                    true, // idempotency.go
+	"MaxEventID":                           true, // events.go
+	"MaxFederationBaselineEventID":         true, // events.go
+	"MaxLocalOriginEventID":                true, // events.go
+	"MarkClaimStatusRefreshError":          true, // claims_pending.go
+	"MarkPendingClaimAttempt":              true, // claims_pending.go
+	"MaterializeNext":                      true, // recurrences.go
+	"MergeProjects":                        true, // project_merge.go
+	"MoveIssueProject":                     true, // project_move.go
+	"OpenChildrenOf":                       true, // relationship_queries.go
+	"ParentNumbersByIssues":                true, // relationship_queries.go
+	"ParentOf":                             true, // links.go
+	"ParentShortIDsByIssues":               true, // relationship_queries.go
+	"PatchIssueMetadata":                   true, // metadata.go
+	"PatchProjectMetadata":                 true, // metadata.go
+	"PatchRecurrence":                      true, // recurrences.go
+	"PendingFederationPushEvents":          true, // federation_events.go
+	"PendingFederationPushStats":           true, // federation_events.go
+	"ProjectByID":                          true, // projects.go
+	"ProjectByName":                        true, // projects.go
+	"ProjectByNameIncludingArchived":       true, // projects.go
+	"ProjectByUID":                         true, // projects.go
+	"ProjectAliases":                       true, // aliases.go
+	"PurgeIssue":                           true, // purge.go
+	"PurgeProject":                         true, // project_lifecycle.go
+	"PurgeResetCheck":                      true, // purge.go
+	"ReadyIssues":                          true, // discovery.go
+	"ReadyIssuesGlobal":                    true, // discovery.go
+	"RecentSameMessageClose":               true, // events.go
+	"RecentSiblingCloses":                  true, // events.go
+	"ReconcileLocalFederationEcho":         true, // federation_events.go
+	"RecordIssueSyncError":                 true, // issue_sync.go
+	"RecordIssueSyncSuccess":               true, // issue_sync.go
+	"RefreshInstanceUID":                   true, // store.go
+	"RefreshIssueSyncBinding":              true, // issue_sync.go
+	"RejectPendingClaim":                   true, // claims_pending.go
+	"ReassignAlias":                        true, // aliases.go
+	"RemoveLabel":                          true, // labels.go
+	"RemoveLabelAndEvent":                  true, // labels.go
+	"RemoveProject":                        true, // project_lifecycle.go
+	"ReleaseClaim":                         true, // claims_core.go
+	"RenewClaim":                           true, // claims_core.go
+	"RenameProject":                        true, // projects.go
+	"RelatedNumbersByIssues":               true, // relationship_queries.go
+	"ReopenIssue":                          true, // issue_lifecycle.go
+	"ResolveAPIToken":                      true, // tokens.go
+	"ResolvePendingClaim":                  true, // claims_pending.go
+	"ResetFederatedProject":                true, // federation_reset.go
+	"ResetFederatedProjectIfNoPendingPush": true, // federation_reset.go
+	"RewriteAuthorIdentity":                true, // comments.go
+	"RestoreIssue":                         true, // issue_lifecycle.go
+	"RestoreProject":                       true, // project_lifecycle.go
+	"RetryTransient":                       true, // store.go
+	"RevokeAPIToken":                       true, // tokens.go
+	"SchemaVersion":                        true, // store.go
+	"SearchFTS":                            true, // search.go
+	"SearchFTSAny":                         true, // search.go
+	"SoftDeleteIssue":                      true, // issue_lifecycle.go
+	"SoftDeleteRecurrence":                 true, // recurrences.go
+	"SystemProject":                        true, // tokens.go
+	"UnresolvedClaimViolationsForIssue":    true, // claim_violations.go
+	"UnresolvedClaimViolationsForProject":  true, // claim_violations.go
+	"UpdateOwner":                          true, // issue_lifecycle.go
+	"UpdatePriority":                       true, // issue_lifecycle.go
+	"UpsertClaimCache":                     true, // claims_pending.go
+	"UpsertImportMapping":                  true, // import_mappings.go
+	"UpsertIssueSyncBinding":               true, // issue_sync.go
 }
 
 func main() {
@@ -100,11 +303,20 @@ func Generate(storagePath string) ([]byte, error) {
 		return nil, err
 	}
 
-	var buf bytes.Buffer
-	buf.WriteString(fileHeader)
+	var stubs bytes.Buffer
 	for _, m := range methods {
-		emitStub(&buf, fset, m)
+		emitStub(&stubs, fset, m)
 	}
+	var buf bytes.Buffer
+	buf.WriteString(fileHeaderPrefix)
+	for _, importPath := range []string{"context", "iter", "time"} {
+		if strings.Contains(stubs.String(), importPath+".") {
+			fmt.Fprintf(&buf, "\t%q\n", importPath)
+		}
+	}
+	buf.WriteString("\n\t\"go.kenn.io/kata/internal/db\"\n)\n\n")
+	buf.WriteString(fileHeaderSuffix)
+	buf.Write(stubs.Bytes())
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -136,6 +348,65 @@ func findStorageInterface(file *ast.File) *ast.InterfaceType {
 type stubMethod struct {
 	name string
 	ft   *ast.FuncType
+}
+
+// MethodStatus records whether pgstore has a real implementation or a
+// generated sentinel stub for one Storage method.
+type MethodStatus string
+
+const (
+	MethodImplemented MethodStatus = "implemented"
+	MethodStubbed     MethodStatus = "stubbed"
+)
+
+// StorageMethodInventory is one mechanically discovered Storage method and
+// its current pgstore implementation state.
+type StorageMethodInventory struct {
+	Name   string
+	Status MethodStatus
+}
+
+// CollectStorageMethodInventory parses Storage and classifies every method.
+// It rejects embedded interfaces and stale allow-list entries so a future
+// interface change cannot silently disappear from the parity accounting.
+func CollectStorageMethodInventory(storagePath string) ([]StorageMethodInventory, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, storagePath, nil, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", storagePath, err)
+	}
+
+	iface := findStorageInterface(file)
+	if iface == nil {
+		return nil, fmt.Errorf("interface %q not found in %s", interfaceName, storagePath)
+	}
+
+	seen := make(map[string]bool, len(iface.Methods.List))
+	methods := make([]StorageMethodInventory, 0, len(iface.Methods.List))
+	for _, field := range iface.Methods.List {
+		if len(field.Names) == 0 {
+			return nil, fmt.Errorf("embedded interfaces are not supported in %s", interfaceName)
+		}
+		if _, ok := field.Type.(*ast.FuncType); !ok {
+			return nil, fmt.Errorf("method %s: expected FuncType, got %T", field.Names[0].Name, field.Type)
+		}
+		for _, ident := range field.Names {
+			status := MethodStubbed
+			if alreadyImplemented[ident.Name] {
+				status = MethodImplemented
+			}
+			methods = append(methods, StorageMethodInventory{Name: ident.Name, Status: status})
+			seen[ident.Name] = true
+		}
+	}
+	for name := range alreadyImplemented {
+		if !seen[name] {
+			return nil, fmt.Errorf("implemented method %q is not declared by %s", name, interfaceName)
+		}
+	}
+
+	sort.Slice(methods, func(i, j int) bool { return methods[i].Name < methods[j].Name })
+	return methods, nil
 }
 
 func collectStubMethods(iface *ast.InterfaceType) ([]stubMethod, error) {
@@ -416,7 +687,7 @@ func iterSeq2Inner(results []ast.Expr) ast.Expr {
 	return ile.Indices[0]
 }
 
-const fileHeader = `// Code generated by ./stubgen; DO NOT EDIT.
+const fileHeaderPrefix = `// Code generated by ./stubgen; DO NOT EDIT.
 //
 // This file is regenerated from internal/db/storage.go's Storage interface
 // each time //go:generate runs. To regenerate after changing the interface
@@ -430,7 +701,8 @@ const fileHeader = `// Code generated by ./stubgen; DO NOT EDIT.
 //
 // Methods implemented in store.go, open.go, or inherited from the
 // embedded *sql.DB are skipped via stubgen/main.go's alreadyImplemented
-// allow-list. Phase 4 work moves a method by:
+// allow-list. The checked-in file has no stubs at full parity. When Storage
+// grows, complete the new backend method by:
 //
 //  1. Adding the method name to alreadyImplemented in stubgen/main.go,
 //  2. Writing the real implementation in a new pgstore .go file, and
@@ -439,17 +711,12 @@ const fileHeader = `// Code generated by ./stubgen; DO NOT EDIT.
 package pgstore
 
 import (
-	"context"
-	"iter"
-	"time"
+`
 
-	"go.kenn.io/kata/internal/db"
-)
-
-// Compile-time check that *Store satisfies db.Storage. Phase 4 replaces
-// stubs in this file with real query implementations elsewhere in the
-// package; the assertion stays here so a missing or mistyped method is
-// caught at build time.
+const fileHeaderSuffix = `
+// Compile-time check that *Store satisfies db.Storage. The assertion stays
+// here so a missing or mistyped method is caught at build time; the inventory
+// test separately requires every method to have shared conformance coverage.
 var _ db.Storage = (*Store)(nil)
 
 `

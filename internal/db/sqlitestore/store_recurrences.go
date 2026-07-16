@@ -16,88 +16,6 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// validateRecurrenceCore checks the (rrule, dtstart, timezone) triple by
-// computing the first occurrence and returns the cursor on success. Wraps
-// any parse failure in ErrInvalidRecurrence.
-func validateRecurrenceCore(rule, dtstart, tz string) (*string, error) {
-	first, err := recurrence.Next(rule, dtstart, tz)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", db.ErrInvalidRecurrence, err)
-	}
-	return first, nil
-}
-
-// validateRecurrenceTemplate enforces the invariants the recurrence
-// engine assumes when materializing instances: a non-empty title and a
-// metadata blob that is either absent or a JSON object. Body, owner,
-// priority, and labels are validated elsewhere.
-func validateRecurrenceTemplate(title string, metadata json.RawMessage) error {
-	if strings.TrimSpace(title) == "" {
-		return fmt.Errorf("%w: template_title must be non-empty", db.ErrInvalidRecurrence)
-	}
-	if len(metadata) > 0 {
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(metadata, &obj); err != nil {
-			return fmt.Errorf("%w: template_metadata must be a JSON object: %v",
-				db.ErrInvalidRecurrence, err)
-		}
-		// json.Unmarshal of the literal `null` into a map sets obj to nil
-		// without error, slipping past the object-only invariant. Reject
-		// it explicitly so MaterializeNext never sees a non-object blob.
-		if obj == nil {
-			return fmt.Errorf("%w: template_metadata must be a JSON object, got null",
-				db.ErrInvalidRecurrence)
-		}
-	}
-	return nil
-}
-
-// labelRe is the pattern from the schema CHECK: label must consist only of
-// a-z, 0-9, '.', '_', ':', '-' and be between 1 and 64 bytes long.
-// We validate this at write time so the DB constraint is never surprised.
-var labelAllowedChars = func() [256]bool {
-	var t [256]bool
-	const allowed = "abcdefghijklmnopqrstuvwxyz0123456789._:-"
-	for i := 0; i < len(allowed); i++ {
-		t[allowed[i]] = true
-	}
-	return t
-}()
-
-// dedupeNormalizeLabels trims, lowercases, and deduplicates labels. It returns
-// an error for any label that is empty after trimming, exceeds 64 bytes, or
-// contains characters outside [a-z0-9._:-] (matching the schema CHECK).
-// The returned slice is sorted for determinism.
-func dedupeNormalizeLabels(in []string) ([]string, error) {
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, raw := range in {
-		lbl := strings.TrimSpace(strings.ToLower(raw))
-		if len(lbl) == 0 {
-			return nil, fmt.Errorf("%w: label must be 1-64 characters", db.ErrLabelInvalid)
-		}
-		if len(lbl) > 64 {
-			return nil, fmt.Errorf("%w: label %q must be 1-64 characters", db.ErrLabelInvalid, lbl)
-		}
-		for i := 0; i < len(lbl); i++ {
-			if !labelAllowedChars[lbl[i]] {
-				return nil, fmt.Errorf("%w: label %q contains invalid characters", db.ErrLabelInvalid, lbl)
-			}
-		}
-		if _, dup := seen[lbl]; !dup {
-			seen[lbl] = struct{}{}
-			out = append(out, lbl)
-		}
-	}
-	// Sort for deterministic storage and diffing.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j] < out[j-1]; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
-	return out, nil
-}
-
 // CreateRecurrence inserts a new recurrence row, emits a recurrence.created
 // event, and returns the freshly-read row.
 func (d *Store) CreateRecurrence(ctx context.Context, in db.CreateRecurrenceIn) (db.Recurrence, error) {
@@ -137,7 +55,7 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 		return rec, fmt.Errorf("generate recurrence uid: %w", err)
 	}
 
-	normalizedLabels, err := dedupeNormalizeLabels(in.Template.Labels)
+	normalizedLabels, err := db.NormalizeRecurrenceLabels(in.Template.Labels)
 	if err != nil {
 		return rec, fmt.Errorf("validate template_labels: %w", err)
 	}
@@ -154,7 +72,7 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 		metaJSON = string(in.Template.Metadata)
 	}
 
-	if err := validateRecurrenceTemplate(in.Template.Title, in.Template.Metadata); err != nil {
+	if err := db.ValidateRecurrenceTemplate(in.Template.Title, in.Template.Metadata); err != nil {
 		return rec, err
 	}
 
@@ -164,7 +82,7 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 	// next_occurrence_key so a freshly-created recurrence does not read as
 	// exhausted (NULL == exhausted is the cursor invariant MaterializeNext
 	// relies on).
-	firstNext, err := validateRecurrenceCore(in.Rule, in.DTStart, in.Timezone)
+	firstNext, err := db.ValidateRecurrenceCore(in.Rule, in.DTStart, in.Timezone)
 	if err != nil {
 		return rec, err
 	}
@@ -281,7 +199,7 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		} else {
 			nextMeta = json.RawMessage(cur.TemplateMetadata)
 		}
-		if err := validateRecurrenceTemplate(nextTitle, nextMeta); err != nil {
+		if err := db.ValidateRecurrenceTemplate(nextTitle, nextMeta); err != nil {
 			return out, err
 		}
 	}
@@ -303,7 +221,7 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		if in.Update.Timezone != nil {
 			nextTZ = *in.Update.Timezone
 		}
-		if _, err := validateRecurrenceCore(nextRule, nextDTStart, nextTZ); err != nil {
+		if _, err := db.ValidateRecurrenceCore(nextRule, nextDTStart, nextTZ); err != nil {
 			return out, err
 		}
 	}
@@ -366,7 +284,7 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		}
 	}
 	if in.Update.TemplateLabels != nil {
-		normalized, nerr := dedupeNormalizeLabels(*in.Update.TemplateLabels)
+		normalized, nerr := db.NormalizeRecurrenceLabels(*in.Update.TemplateLabels)
 		if nerr != nil {
 			return out, fmt.Errorf("validate template_labels: %w", nerr)
 		}
@@ -741,7 +659,7 @@ func (d *Store) materializeNextTx(
 	// Defensive: stored template_labels may pre-date dedupe normalization
 	// (e.g. imported JSONL). Normalize before insertion to avoid hitting the
 	// (issue_id, label) PRIMARY KEY on the materialization tx.
-	labels, err = dedupeNormalizeLabels(labels)
+	labels, err = db.NormalizeRecurrenceLabels(labels)
 	if err != nil {
 		return out, fmt.Errorf("normalize stored labels: %w", err)
 	}

@@ -62,6 +62,9 @@ func (d *Store) CreateProjectWithUID(ctx context.Context, name, projectUID strin
 }
 
 func (d *Store) createProjectWithUID(ctx context.Context, name, projectUID string) (db.Project, error) {
+	if projectUID == db.SystemProjectUID {
+		return db.Project{}, fmt.Errorf("create project: reserved project uid %q", projectUID)
+	}
 	if !katauid.Valid(projectUID) {
 		return db.Project{}, fmt.Errorf("invalid project uid %q", projectUID)
 	}
@@ -333,6 +336,9 @@ func (d *Store) attachAlias(ctx context.Context, projectID int64, identity, kind
 		`INSERT INTO project_aliases(project_id, alias_identity, alias_kind)
 		 VALUES(?, ?, ?)`, projectID, identity, kind)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: project_aliases.alias_identity") {
+			return db.ProjectAlias{}, db.ErrAliasExists
+		}
 		return db.ProjectAlias{}, fmt.Errorf("insert alias: %w", err)
 	}
 	id, err := res.LastInsertId()
@@ -1418,12 +1424,21 @@ func (d *Store) closeIssueWithEvents(
 	if err != nil {
 		return db.Issue{}, nil, false, err
 	}
-	events = append(events, auditEvents...)
+	lastEventID := evt.ID
+	if len(auditEvents) > 0 {
+		events = append(events, auditEvents...)
+		lastEventID = auditEvents[len(auditEvents)-1].ID
+	}
 	if reason == "done" && issue.RecurrenceID != nil && issue.OccurrenceKey != nil {
 		if _, err := d.materializeNextTx(ctx, tx, *issue.RecurrenceID,
 			*issue.OccurrenceKey, actor); err != nil {
 			return db.Issue{}, nil, false, fmt.Errorf("materialize next recurrence: %w", err)
 		}
+		generated, err := eventsAfterTx(ctx, tx, lastEventID)
+		if err != nil {
+			return db.Issue{}, nil, false, fmt.Errorf("load recurrence materialization events: %w", err)
+		}
+		events = append(events, generated...)
 	}
 	updated, err := issueByIDTx(ctx, tx, issueID)
 	if err != nil {
@@ -1628,60 +1643,33 @@ func nowTimestamp() string {
 // issues.content_revision; owner, priority, status, comments, links, and
 // metadata deliberately do not bump it. See docs/design/semantic-search.md.
 func contentFieldsChanged(issue db.Issue, title, body *string) bool {
-	if title != nil && *title != issue.Title {
-		return true
-	}
-	if body != nil && *body != issue.Body {
-		return true
-	}
-	return false
+	plan, err := db.PlanIssueFieldEdit(issue, title, body, nil, "")
+	return err == nil && plan.ContentChanged()
 }
 
 func issueFieldUpdatePlan(issue db.Issue, title, body, owner *string, ts string) ([]string, []any, string, bool, error) {
+	plan, err := db.PlanIssueFieldEdit(issue, title, body, owner, ts)
+	if err != nil {
+		return nil, nil, "", false, err
+	}
 	sets := []string{}
 	args := []any{}
-	payload := map[string]any{}
-	if title != nil && *title != issue.Title {
+	if plan.TitleChanged {
 		sets = append(sets, `title = ?`)
 		args = append(args, *title)
-		payload["title"] = *title
-		payload["old_title"] = issue.Title
 	}
-	if body != nil && *body != issue.Body {
+	if plan.BodyChanged {
 		sets = append(sets, `body = ?`)
 		args = append(args, *body)
-		payload["body"] = *body
 	}
-	if owner != nil {
-		var newOwner *string
-		if *owner != "" {
-			v := *owner
-			newOwner = &v
-		}
-		if !ownerEqual(issue.Owner, newOwner) {
-			sets = append(sets, `owner = ?`)
-			args = append(args, newOwner)
-			if newOwner == nil {
-				payload["owner"] = nil
-			} else {
-				payload["owner"] = *newOwner
-			}
-			if issue.Owner == nil {
-				payload["old_owner"] = nil
-			} else {
-				payload["old_owner"] = *issue.Owner
-			}
-		}
+	if plan.OwnerChanged {
+		sets = append(sets, `owner = ?`)
+		args = append(args, plan.Owner)
 	}
-	if len(sets) == 0 {
+	if !plan.Changed() {
 		return nil, nil, "", false, nil
 	}
-	payload["updated_at"] = ts
-	bs, err := json.Marshal(payload)
-	if err != nil {
-		return nil, nil, "", false, fmt.Errorf("marshal issue.updated payload: %w", err)
-	}
-	return sets, args, string(bs), true, nil
+	return sets, args, plan.Payload, true, nil
 }
 
 func joinComma(parts []string) string {

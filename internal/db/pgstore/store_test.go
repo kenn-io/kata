@@ -2,7 +2,6 @@ package pgstore_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,21 +11,8 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// TestStubReturnsErrNotImplementedPhase3 proves a representative stub
-// surfaces the sentinel so callers that try to drive pgstore through a
-// non-Migrate path fail loudly with a clear error. The sentinel is the
-// signal Phase 4 work will switch off as queries land.
-func TestStubReturnsErrNotImplementedPhase3(t *testing.T) {
-	store := pgstore.NewStoreForTesting("postgres://h/db")
-	_, err := store.ListProjects(context.Background())
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, pgstore.ErrNotImplementedPhase3),
-		"want errors.Is(err, ErrNotImplementedPhase3), got %v", err)
-}
-
-// TestStoreSatisfiesStorageInterface is a runtime-side mirror of the
-// compile-time assertion in stubs.go. Kept so a future split of stubs
-// across files (Phase 4) cannot silently break the interface.
+// TestStoreSatisfiesStorageInterface mirrors the package's compile-time
+// assertion from an external consumer package.
 func TestStoreSatisfiesStorageInterface(_ *testing.T) {
 	var _ db.Storage = pgstore.NewStoreForTesting("postgres://h/db")
 }

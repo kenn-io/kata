@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,10 +37,8 @@ func (d *Store) ImportReplay(ctx context.Context, recs []db.ImportRecord, opts d
 }
 
 func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts db.ImportOptions) error {
-	for i, r := range recs {
-		if err := r.Validate(); err != nil {
-			return fmt.Errorf("import record %d: %w", i, err)
-		}
+	if err := db.ValidateImportRecords(recs); err != nil {
+		return err
 	}
 
 	tx, err := d.BeginTx(ctx, nil)
@@ -52,13 +49,13 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	if _, err := tx.ExecContext(ctx, `PRAGMA defer_foreign_keys=ON`); err != nil {
 		return fmt.Errorf("defer foreign keys: %w", err)
 	}
-	if err := removeAutoSystemProject(ctx, tx); err != nil {
+	if err := clearReplayTarget(ctx, tx, opts.RequireFreshTarget, d.instanceUID); err != nil {
 		return err
 	}
 
 	var skippedMissingPeer, skippedDup, skippedMappings int
 	skippedLinkIDs := make(map[int64]struct{})
-	for _, r := range recs {
+	for _, r := range db.OrderImportRecords(recs) {
 		skip, err := importRecord(ctx, tx, r, opts, skippedLinkIDs)
 		if err != nil {
 			return err
@@ -107,6 +104,114 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit import: %w", err)
+	}
+	return nil
+}
+
+// clearReplayTarget makes ImportReplay a whole-database replacement rather
+// than a merge. meta remains in place so NewInstance can retain the target's
+// instance UID; imported meta rows overwrite it in the default restore mode.
+func clearReplayTarget(
+	ctx context.Context,
+	tx *sql.Tx,
+	requireFresh bool,
+	expectedInstanceUID string,
+) error {
+	if requireFresh {
+		// Acquire SQLite's write lock before inspecting the precondition so no
+		// writer can appear between validation and replacement.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE meta SET value=value WHERE key='schema_version'`); err != nil {
+			return fmt.Errorf("lock fresh import target: %w", err)
+		}
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT name
+		FROM pragma_table_list
+		WHERE schema='main' AND type='table'
+		  AND name <> 'meta' AND name NOT LIKE 'sqlite_%'
+		ORDER BY name`)
+	if err != nil {
+		return fmt.Errorf("inspect import target tables: %w", err)
+	}
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan import target table: %w", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("inspect import target tables: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close import target table inventory: %w", err)
+	}
+	if requireFresh {
+		if err := validateFreshReplayTarget(ctx, tx, tables, expectedInstanceUID); err != nil {
+			return err
+		}
+	}
+	// Virtual and shadow FTS tables are excluded by pragma_table_list's type;
+	// deleting issues/comments maintains them through the schema triggers.
+	for _, table := range tables {
+		quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+quoted); err != nil { //nolint:gosec // catalog identifier is quoted above
+			return fmt.Errorf("clear import target table %s: %w", table, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sqlite_sequence`); err != nil {
+		return fmt.Errorf("clear import target sequences: %w", err)
+	}
+	return nil
+}
+
+func validateFreshReplayTarget(
+	ctx context.Context,
+	tx *sql.Tx,
+	tables []string,
+	expectedInstanceUID string,
+) error {
+	var instanceUID, schemaVersion string
+	var metaRows int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(MAX(CASE WHEN key='instance_uid' THEN value END), ''),
+		       COALESCE(MAX(CASE WHEN key='schema_version' THEN value END), '')
+		FROM meta`).Scan(&metaRows, &instanceUID, &schemaVersion); err != nil {
+		return fmt.Errorf("inspect fresh import metadata: %w", err)
+	}
+	if metaRows != 3 || instanceUID != expectedInstanceUID ||
+		schemaVersion != strconv.Itoa(db.CurrentSchemaVersion()) {
+		return fmt.Errorf("import requires a fresh target: metadata changed")
+	}
+	var projects, systemProjects int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(SUM(CASE WHEN uid=? AND name=? THEN 1 ELSE 0 END), 0)
+		FROM projects`, db.SystemProjectUID, db.SystemProjectName).
+		Scan(&projects, &systemProjects); err != nil {
+		return fmt.Errorf("inspect fresh import projects: %w", err)
+	}
+	if projects != 1 || systemProjects != 1 {
+		return fmt.Errorf("import requires a fresh target: project state exists")
+	}
+	for _, table := range tables {
+		if table == "projects" {
+			continue
+		}
+		quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+		var populated bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM `+quoted+` LIMIT 1)`).Scan(&populated); err != nil { //nolint:gosec // catalog identifier is quoted above
+			return fmt.Errorf("inspect fresh import table %s: %w", table, err)
+		}
+		if populated {
+			return fmt.Errorf("import requires a fresh target: table %s contains state", table)
+		}
 	}
 	return nil
 }
@@ -596,25 +701,8 @@ func importEvent(ctx context.Context, tx *sql.Tx, e *db.EventExport, opts db.Imp
 	if err != nil {
 		return err
 	}
-	// Validate v13 (current) replay fields; jsonl is responsible for filling
-	// pre-v13 sources before the record reaches ImportReplay.
-	if e.HLCPhysicalMS <= 0 {
-		return fmt.Errorf("event %d missing hlc_physical_ms", e.ID)
-	}
-	if e.HLCCounter < 0 {
-		return fmt.Errorf("event %d has negative hlc_counter", e.ID)
-	}
-	if !opts.RecomputeEventContentHash && !validContentHash(e.ContentHash) {
-		return fmt.Errorf("event %d invalid content_hash %q", e.ID, e.ContentHash)
-	}
-	recomputed, err := eventReplayContentHash(e, projectUID, projectName)
-	if err != nil {
-		return fmt.Errorf("event %d content_hash: %w", e.ID, err)
-	}
-	if opts.RecomputeEventContentHash {
-		e.ContentHash = recomputed
-	} else if recomputed != e.ContentHash {
-		return fmt.Errorf("event %d content_hash mismatch (supplied %s, recomputed %s)", e.ID, e.ContentHash, recomputed)
+	if err := db.PrepareReplayEvent(e, projectUID, projectName, opts.RecomputeEventContentHash); err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO events(id, uid, origin_instance_uid, project_id, project_name, issue_id, issue_uid, related_issue_id, related_issue_uid,
@@ -684,20 +772,6 @@ func importProjectPurgeLog(ctx context.Context, tx *sql.Tx, pl *db.ProjectPurgeL
 	return wrapImportErr(db.ImportKindProjectPurgeLog, err)
 }
 
-// removeAutoSystemProject deletes the system project row that db.Open inserts on
-// every fresh DB so an imported source's system project can take its place
-// without colliding on (uid, name). If no row was imported, ensureSystemProject
-// re-creates it after the loop.
-func removeAutoSystemProject(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx,
-		`DELETE FROM projects WHERE uid = ? AND name = ?`,
-		db.SystemProjectUID, db.SystemProjectName)
-	if err != nil {
-		return fmt.Errorf("remove auto system project before import: %w", err)
-	}
-	return nil
-}
-
 // ensureSystemProject inserts the system project if no project envelope brought
 // it in. Idempotent: if the imported source already shipped a system project
 // row, this is a no-op.
@@ -717,30 +791,6 @@ func ensureSystemProject(ctx context.Context, tx *sql.Tx) error {
 	`, db.SystemProjectUID, db.SystemProjectName)
 	if err != nil {
 		return fmt.Errorf("ensure system project after import: %w", err)
-	}
-	return nil
-}
-
-// tokenCreatedEventPayload and tokenRevokedEventPayload mirror the daemon-side
-// payload shapes so the import-time projector can validate them by structure
-// rather than going through json.RawMessage.
-type tokenCreatedEventPayload struct {
-	TokenID     int64   `json:"token_id"`
-	TokenHash   string  `json:"token_hash"`
-	TargetActor string  `json:"target_actor"`
-	Name        *string `json:"name,omitempty"`
-}
-
-type tokenRevokedEventPayload struct {
-	TokenID int64 `json:"token_id"`
-}
-
-func validateReplayTokenHash(hash string) error {
-	if len(hash) != 64 {
-		return fmt.Errorf("token_hash must be 64 hex characters")
-	}
-	if _, err := hex.DecodeString(hash); err != nil {
-		return fmt.Errorf("token_hash must be 64 hex characters: %w", err)
 	}
 	return nil
 }
@@ -776,18 +826,9 @@ func replayAPITokenProjection(ctx context.Context, tx *sql.Tx) error {
 		}
 		switch typ {
 		case "token.created":
-			var rec tokenCreatedEventPayload
-			if err := json.Unmarshal([]byte(payload), &rec); err != nil {
-				return fmt.Errorf("decode token.created payload: %w", err)
-			}
-			if rec.TokenID == 0 || rec.TokenHash == "" || rec.TargetActor == "" {
-				return fmt.Errorf("decode token.created payload: missing required field")
-			}
-			if err := validateReplayTokenHash(rec.TokenHash); err != nil {
-				return fmt.Errorf("decode token.created payload: %w", err)
-			}
-			if err := db.ValidateTokenActor(rec.TargetActor); err != nil {
-				return fmt.Errorf("decode token.created payload: %w", err)
+			rec, err := db.DecodeReplayTokenCreated([]byte(payload))
+			if err != nil {
+				return err
 			}
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO api_tokens(id, token_hash, actor, name, created_at)
@@ -796,12 +837,9 @@ func replayAPITokenProjection(ctx context.Context, tx *sql.Tx) error {
 				return fmt.Errorf("replay token.created %d: %w", rec.TokenID, err)
 			}
 		case "token.revoked":
-			var rec tokenRevokedEventPayload
-			if err := json.Unmarshal([]byte(payload), &rec); err != nil {
-				return fmt.Errorf("decode token.revoked payload: %w", err)
-			}
-			if rec.TokenID == 0 {
-				return fmt.Errorf("decode token.revoked payload: missing token_id")
+			rec, err := db.DecodeReplayTokenRevoked([]byte(payload))
+			if err != nil {
+				return err
 			}
 			res, err := tx.ExecContext(ctx,
 				`UPDATE api_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?`,
@@ -890,23 +928,6 @@ func importedEventProjectIdentity(ctx context.Context, tx *sql.Tx, rec *db.Event
 	return "", "", err
 }
 
-func eventReplayContentHash(rec *db.EventExport, projectUID, projectName string) (string, error) {
-	return db.EventContentHash(db.EventHashInput{
-		UID:               rec.UID,
-		OriginInstanceUID: rec.OriginInstanceUID,
-		ProjectUID:        projectUID,
-		ProjectName:       projectName,
-		IssueUID:          rec.IssueUID,
-		RelatedIssueUID:   rec.RelatedIssueUID,
-		Type:              rec.Type,
-		Actor:             rec.Actor,
-		HLCPhysicalMS:     rec.HLCPhysicalMS,
-		HLCCounter:        rec.HLCCounter,
-		CreatedAt:         rec.CreatedAt,
-		Payload:           rec.Payload,
-	})
-}
-
 func importedProjectName(ctx context.Context, tx *sql.Tx, projectID int64, projectName string) (string, error) {
 	var name string
 	err := tx.QueryRowContext(ctx, `SELECT name FROM projects WHERE id = ?`, projectID).Scan(&name)
@@ -917,18 +938,6 @@ func importedProjectName(ctx context.Context, tx *sql.Tx, projectID int64, proje
 		return projectName, nil
 	}
 	return "", fmt.Errorf("project %d not imported before project snapshot: %w", projectID, err)
-}
-
-func validContentHash(s string) bool {
-	if len(s) != 64 {
-		return false
-	}
-	for _, r := range s {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 func wrapImportErr(kind string, err error) error {

@@ -21,8 +21,8 @@ type retryConfig struct {
 // RetryTransient retries op while isTransient reports its error as a transient
 // condition that may clear on a whole-operation retry. op must be safe to re-run
 // in full; callers must not wrap a single statement inside an already-open
-// transaction. The backend supplies isTransient (SQLite busy/locked today;
-// Postgres serialization/deadlock later), so this loop stays backend-neutral.
+// transaction. The backend supplies isTransient (SQLite busy/locked or
+// Postgres serialization/deadlock), so this loop stays backend-neutral.
 func RetryTransient(ctx context.Context, isTransient func(error) bool, op func() error) error {
 	return retryTransient(ctx, retryConfig{
 		maxElapsed: defaultMaxRetryElapsed,

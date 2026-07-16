@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
@@ -433,180 +434,28 @@ func TestImportReplayRecomputesLegacyEventHashAfterResolvedIssueUID(t *testing.T
 	require.Equal(t, wantHash, gotHash)
 }
 
-// collectImportRecords drains the db export iterators into the current-shape
-// ImportRecord slice (no version fills needed — the source is current schema).
+// collectImportRecords drains every current-schema export through the shared
+// backend-neutral replay fixture collector.
 //
 //nolint:revive // test helper: t *testing.T conventionally precedes ctx.
 func collectImportRecords(t *testing.T, ctx context.Context, d *sqlitestore.Store) []db.ImportRecord {
 	t.Helper()
-	var recs []db.ImportRecord
-	for rec, err := range d.ExportMeta(ctx) {
-		require.NoError(t, err)
-		m := rec
-		recs = append(recs, db.ImportRecord{Kind: "meta", Meta: &m})
-	}
-	for rec, err := range d.ExportProjects(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "project", Project: &v})
-	}
-	for rec, err := range d.ExportProjectAliases(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "project_alias", Alias: &v})
-	}
-	for rec, err := range d.ExportIssueSyncBindings(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: db.ImportKindIssueSyncBinding, IssueSyncBinding: &v})
-	}
-	for rec, err := range d.ExportIssueSyncStatus(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: db.ImportKindIssueSyncStatus, IssueSyncStatus: &v})
-	}
-	for rec, err := range d.ExportRecurrences(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "recurrence", Recurrence: &v})
-	}
-	for rec, err := range d.ExportIssues(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "issue", Issue: &v})
-	}
-	for rec, err := range d.ExportComments(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "comment", Comment: &v})
-	}
-	for rec, err := range d.ExportIssueLabels(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "issue_label", Label: &v})
-	}
-	for rec, err := range d.ExportLinks(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "link", Link: &v})
-	}
-	for rec, err := range d.ExportImportMappings(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "import_mapping", ImportMapping: &v})
-	}
-	for rec, err := range d.ExportFederationBindings(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "federation_binding", FederationBinding: &v})
-	}
-	for rec, err := range d.ExportFederationSyncStatus(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "federation_sync_status", FederationSyncStatus: &v})
-	}
-	for rec, err := range d.ExportFederationQuarantine(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "federation_quarantine", FederationQuarantine: &v})
-	}
-	for rec, err := range d.ExportFederationEnrollments(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "federation_enrollment", FederationEnrollment: &v})
-	}
-	for rec, err := range d.ExportIssueClaims(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "issue_claim", IssueClaim: &v})
-	}
-	for rec, err := range d.ExportPendingClaimRequests(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "pending_claim_request", PendingClaimRequest: &v})
-	}
-	for rec, err := range d.ExportEvents(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "event", Event: &v})
-	}
-	for rec, err := range d.ExportPurgeLog(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "purge_log", PurgeLog: &v})
-	}
-	for rec, err := range d.ExportProjectPurgeLog(ctx, db.ExportFilter{IncludeDeleted: true}) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: db.ImportKindProjectPurgeLog, ProjectPurgeLog: &v})
-	}
-	for rec, err := range d.ExportSequences(ctx) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "sqlite_sequence", Sequence: &v})
-	}
-	return recs
+	records, err := dbtest.CollectImportRecords(ctx, d, db.ExportFilter{IncludeDeleted: true})
+	require.NoError(t, err)
+	return records
 }
 
-// collectImportRecordsForProject drains the project-scoped export iterators
-// into an ImportRecord slice, mirroring a project-filtered JSONL envelope. It
-// gathers the instance-level rows (meta, sequences) plus the project, its
-// issues, the links that touch it, its import mappings, and its events — enough
-// to replay the fixtures these cross-project tests build. ExportLinks includes
-// any edge touching the project, so the slice can carry a link whose peer issue
-// is omitted.
+// collectImportRecordsForProject builds the same project-scoped envelope used
+// by shared storage conformance.
 //
 //nolint:revive // test helper: t *testing.T conventionally precedes ctx.
 func collectImportRecordsForProject(t *testing.T, ctx context.Context, d *sqlitestore.Store, projectID int64) []db.ImportRecord {
 	t.Helper()
-	f := db.ExportFilter{ProjectID: &projectID, IncludeDeleted: true}
-	var recs []db.ImportRecord
-	for rec, err := range d.ExportMeta(ctx) {
-		require.NoError(t, err)
-		m := rec
-		recs = append(recs, db.ImportRecord{Kind: "meta", Meta: &m})
-	}
-	for rec, err := range d.ExportProjects(ctx, f) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "project", Project: &v})
-	}
-	for rec, err := range d.ExportIssueSyncBindings(ctx, f) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: db.ImportKindIssueSyncBinding, IssueSyncBinding: &v})
-	}
-	for rec, err := range d.ExportIssueSyncStatus(ctx, f) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: db.ImportKindIssueSyncStatus, IssueSyncStatus: &v})
-	}
-	for rec, err := range d.ExportIssues(ctx, f) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "issue", Issue: &v})
-	}
-	for rec, err := range d.ExportLinks(ctx, f) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "link", Link: &v})
-	}
-	for rec, err := range d.ExportImportMappings(ctx, f) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "import_mapping", ImportMapping: &v})
-	}
-	for rec, err := range d.ExportEvents(ctx, f) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "event", Event: &v})
-	}
-	for rec, err := range d.ExportSequences(ctx) {
-		require.NoError(t, err)
-		v := rec
-		recs = append(recs, db.ImportRecord{Kind: "sqlite_sequence", Sequence: &v})
-	}
-	return recs
+	records, err := dbtest.CollectImportRecords(ctx, d, db.ExportFilter{
+		ProjectID: &projectID, IncludeDeleted: true,
+	})
+	require.NoError(t, err)
+	return records
 }
 
 func makeFirstIssueEventHashStale(t *testing.T, recs []db.ImportRecord) (eventID int64, finalHash string, issueUID string) {

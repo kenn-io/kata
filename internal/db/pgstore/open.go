@@ -3,7 +3,6 @@ package pgstore
 import (
 	"context"
 	"database/sql"
-	_ "embed"
 	"errors"
 	"fmt"
 	"strconv"
@@ -16,9 +15,6 @@ import (
 	"go.kenn.io/kata/internal/db"
 	katauid "go.kenn.io/kata/internal/uid"
 )
-
-//go:embed schema.sql
-var schemaSQL string
 
 // Default connection pool sizing. Conservative for v1 single-daemon
 // deployments. Future phases may expose these through DSN params or
@@ -42,15 +38,29 @@ const (
 // newer DBs surface a credential-free error. Read-only handles skip both
 // bootstrap and ensureInstanceUID and just open the pool.
 func Open(ctx context.Context, dsn string, opts ...db.OpenOption) (*Store, error) {
-	cfg := db.ApplyOpenOptions(opts...)
-	return openInternal(ctx, dsn, cfg.ReadOnly)
+	return OpenWithConfig(ctx, dsn, DefaultConfig(), opts...)
 }
 
-// openInternal is the shared body shared between Open (option-driven) and
-// PeekSchemaVersion (always read-only). Splitting it keeps the option-handling
-// surface in one place and saves PeekSchemaVersion from a synthetic options
-// slice.
-func openInternal(ctx context.Context, dsn string, readOnly bool) (*Store, error) {
+// OpenWithConfig opens an exact schema using either standalone bootstrap or
+// validation-only startup. Validation occurs before DSN parsing so an invalid
+// schema never reaches a connection startup parameter.
+func OpenWithConfig(ctx context.Context, dsn string, pgConfig Config, opts ...db.OpenOption) (*Store, error) {
+	if err := pgConfig.Validate(); err != nil {
+		return nil, err
+	}
+	openConfig := db.ApplyOpenOptions(opts...)
+	return openInternal(ctx, dsn, pgConfig, openConfig.ReadOnly, false)
+}
+
+// openInternal is the shared body between option-driven opens and the
+// lifecycle-bypassing schema-version probe.
+func openInternal(
+	ctx context.Context,
+	dsn string,
+	pgConfig Config,
+	readOnly bool,
+	bypassLifecycle bool,
+) (*Store, error) {
 	connConfig, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		// pgx.ParseConfig errors can echo DSN fragments — a quoted bad
@@ -77,6 +87,7 @@ func openInternal(ctx context.Context, dsn string, readOnly bool) (*Store, error
 	connConfig.RuntimeParams["application_name"] = "kata"
 	connConfig.RuntimeParams["statement_timeout"] = "30s"
 	connConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "60s"
+	connConfig.RuntimeParams["search_path"] = quoteIdentifier(pgConfig.Schema)
 	if readOnly {
 		// Pool-wide read-only enforcement: any transaction opened from
 		// any pooled connection starts read-only. Without this on
@@ -94,15 +105,28 @@ func openInternal(ctx context.Context, dsn string, readOnly bool) (*Store, error
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping pgx: %w", err)
 	}
-	s := &Store{DB: sdb, dsn: dsn, readOnly: readOnly}
+	s := &Store{DB: sdb, dsn: dsn, schema: pgConfig.Schema, readOnly: readOnly}
+	if bypassLifecycle {
+		return s, nil
+	}
 	if readOnly {
+		// A read-only pool cannot bootstrap, but it must still reject missing
+		// or version-mismatched schemas before serving reads.
+		if err := s.validateSchema(ctx); err != nil {
+			_ = sdb.Close()
+			return nil, err
+		}
 		if err := s.cacheInstanceUIDIfPresent(ctx); err != nil {
+			_ = sdb.Close()
+			return nil, err
+		}
+		if err := s.validateSystemProject(ctx); err != nil {
 			_ = sdb.Close()
 			return nil, err
 		}
 		return s, nil
 	}
-	if err := s.bootstrap(ctx); err != nil {
+	if err := s.prepareSchema(ctx, pgConfig.SchemaMode); err != nil {
 		_ = sdb.Close()
 		return nil, err
 	}
@@ -110,52 +134,153 @@ func openInternal(ctx context.Context, dsn string, readOnly bool) (*Store, error
 		_ = sdb.Close()
 		return nil, err
 	}
-	// EnsureSystemProject is a Phase 4 stub; the Phase 3 schema is bootstrapped
-	// without seeding the system project so the meta-only acceptance suite can
-	// still drive Open against a fresh container.
+	if err := s.EnsureSystemProject(ctx); err != nil {
+		_ = sdb.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
-// bootstrap initializes a fresh database from schema.sql or refuses to open
-// a database whose schema_version disagrees with the binary's. Postgres has
-// no JSONL-cutover path; the operator must restore a current-schema backup
-// before reopening.
-func (s *Store) bootstrap(ctx context.Context) error {
-	current, err := s.currentVersion(ctx)
+func (s *Store) validateSystemProject(ctx context.Context) error {
+	project, err := s.SystemProject(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate system project: %w", err)
 	}
+	if project.UID != db.SystemProjectUID {
+		return fmt.Errorf("validate system project: %s has uid %q, want %q",
+			db.SystemProjectName, project.UID, db.SystemProjectUID)
+	}
+	return nil
+}
+
+func (s *Store) prepareSchema(ctx context.Context, mode SchemaMode) error {
+	if mode == SchemaModeValidate {
+		return s.validateSchema(ctx)
+	}
+	return s.bootstrap(ctx)
+}
+
+// bootstrap serializes schema installation with a transaction-scoped advisory
+// lock. Schema creation, every migration asset, and its version stamp commit
+// atomically, so another opener cannot observe a partial installation.
+func (s *Store) bootstrap(ctx context.Context) error {
 	currentBinary := db.CurrentSchemaVersion()
-	if current > currentBinary {
-		return fmt.Errorf("postgres schema_version %d is newer than binary schema %d",
-			current, currentBinary)
-	}
-	if current > 0 && current < currentBinary {
-		return fmt.Errorf("postgres schema_version %d is older than binary schema %d; restore from operator backup before reopening",
-			current, currentBinary)
-	}
-	if current == currentBinary {
-		return nil
-	}
 	tx, err := s.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin schema bootstrap: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("apply schema: %w", err)
+	defer func() { _ = tx.Rollback() }()
+
+	if err := acquireSchemaMigrationLock(ctx, tx); err != nil {
+		return fmt.Errorf("lock schema migrations: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO meta(key, value) VALUES ('schema_version', $1)
-		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-		strconv.Itoa(currentBinary)); err != nil {
-		_ = tx.Rollback()
-		return fmt.Errorf("record schema version %d: %w", currentBinary, err)
+
+	var schemaExists bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, s.schema).Scan(&schemaExists); err != nil {
+		return fmt.Errorf("inspect postgres schema %q: %w", s.schema, err)
+	}
+	if !schemaExists {
+		if _, err := tx.ExecContext(ctx, `CREATE SCHEMA `+quoteIdentifier(s.schema)); err != nil {
+			return fmt.Errorf("create postgres schema %q: %w", s.schema, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `SET LOCAL search_path TO `+quoteIdentifier(s.schema)); err != nil {
+		return fmt.Errorf("select postgres schema %q: %w", s.schema, err)
+	}
+
+	current, err := currentVersionTx(ctx, tx, s.schema)
+	if err != nil {
+		return err
+	}
+	if current == 0 && schemaExists {
+		var hasTables bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = $1)`, s.schema).
+			Scan(&hasTables); err != nil {
+			return fmt.Errorf("inspect postgres schema %q tables: %w", s.schema, err)
+		}
+		if hasTables {
+			return fmt.Errorf("postgres schema %q exists without migration metadata", s.schema)
+		}
+	}
+	if current > currentBinary {
+		return fmt.Errorf("postgres schema_version %d is newer than binary schema %d", current, currentBinary)
+	}
+
+	migrations, err := migrationPath(current, currentBinary)
+	if err != nil {
+		return err
+	}
+	for _, migration := range migrations {
+		if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
+			return fmt.Errorf("apply postgres migration %s: %w", migration.Name, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO meta(key, value) VALUES ('schema_version', $1)
+			 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+			strconv.Itoa(migration.ToVersion)); err != nil {
+			return fmt.Errorf("record postgres migration %s: %w", migration.Name, err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit schema bootstrap: %w", err)
 	}
 	return nil
+}
+
+func acquireSchemaMigrationLock(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('kata:pgstore:migrations', 0))`)
+	return err
+}
+
+func (s *Store) validateSchema(ctx context.Context) error {
+	var schemaExists bool
+	if err := s.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, s.schema).Scan(&schemaExists); err != nil {
+		return fmt.Errorf("inspect postgres schema %q: %w", s.schema, err)
+	}
+	if !schemaExists {
+		return fmt.Errorf("postgres schema %q is not installed", s.schema)
+	}
+	current, err := s.currentVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if current == 0 {
+		return fmt.Errorf("postgres schema %q has no migration metadata", s.schema)
+	}
+	currentBinary := db.CurrentSchemaVersion()
+	if current != currentBinary {
+		return fmt.Errorf("postgres schema_version %d does not match binary schema %d", current, currentBinary)
+	}
+	return nil
+}
+
+func currentVersionTx(ctx context.Context, tx *sql.Tx, schema string) (int, error) {
+	var metaExists bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM information_schema.tables
+		 WHERE table_schema = $1 AND table_name = 'meta')`, schema).Scan(&metaExists); err != nil {
+		return 0, fmt.Errorf("inspect postgres schema %q metadata: %w", schema, err)
+	}
+	if !metaExists {
+		return 0, nil
+	}
+	var value string
+	err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read schema_version: %w", err)
+	}
+	version, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse schema_version %q: %w", value, err)
+	}
+	return version, nil
 }
 
 // ensureInstanceUID is the single ownership rule for meta.instance_uid: if

@@ -159,10 +159,52 @@ should hold `db.Storage` after opening. Concrete store types are appropriate
 inside backend packages, SQLite-specific JSONL cutover code, and tests that
 assert SQL details.
 
-Both backends bootstrap fresh databases by applying their canonical
-`schema.sql` inside a transaction and stamping `meta.schema_version` to the
-binary's `db.CurrentSchemaVersion()`. Existing SQLite databases with older
-schema versions are upgraded through the JSONL cutover path described above.
-Postgres has no historical on-disk kata schema, so a Postgres database whose
-`schema_version` disagrees with the binary is refused; operators should restore
-from backup or run an explicit external migration before reopening.
+SQLite bootstraps a fresh database from its canonical `schema.sql` and upgrades
+older files through the JSONL cutover path described above. Postgres owns an
+ordered set of immutable migration assets under `internal/db/pgstore/migrations`.
+Each asset names its exact source and target schema versions, and the version
+stamp is written in the same transaction as its SQL.
+
+Postgres never uses the ambient `public` schema. A standalone open defaults to
+the dedicated `kata` schema; configured opens accept one restricted lowercase
+identifier and replace any DSN-provided `search_path` with that single quoted
+schema. Bootstrap mode creates an empty target schema and applies migrations
+under a transaction-scoped advisory lock. Schema creation, migration SQL, and
+the version stamp therefore become visible together, even when several
+processes start concurrently. A pre-existing non-empty schema without migration
+metadata is treated as a conflict rather than adopted.
+
+Validation mode performs no DDL and requires the exact binary schema version.
+It is the runtime-role path when a separate migration role or deployment
+orchestrator applied the exported assets. Older versions require a complete
+registered migration chain; newer versions fail closed until a matching binary
+is used. This keeps schema ownership with kata without requiring the serving
+credential to hold schema-creation privileges.
+
+Postgres mutation helpers retry the complete transaction only for serialization
+failure, deadlock, or explicit lock-unavailable SQLSTATEs. Connection failures
+are not retried because their commit outcome may be ambiguous. Serializable and
+repeatable-read helpers always roll back a failed attempt before retrying, and
+identity-sequence reservations discover Postgres's owned sequence rather than
+assuming a generated name. Constraint classification maps only query-owned
+constraint names to `db.Storage` sentinels; other server errors retain SQLSTATE
+and constraint diagnostics while omitting row values, hints, and query text.
+
+Backend parity is measured behaviorally rather than inferred from interface
+satisfaction or schema shape. `internal/db/dbtest` runs the same observable
+storage scenarios against fresh SQLite and Postgres stores. The Postgres
+expected-failure manifest is empty: all `db.Storage` methods are implemented
+and covered by shared conformance scenarios. The pgstore generator still parses
+every `Storage` method and classifies it as implemented or sentinel-backed, so
+future interface growth cannot silently bypass the inventory. Every method
+classified as implemented must also be named by a shared conformance scenario.
+New storage behavior belongs in the shared suite when it is backend-neutral;
+backend-package tests remain appropriate for SQL-specific details.
+
+JSONL replay is an atomic whole-database replacement on both backends, not a
+merge. SQLite imports into a temporary file set before swapping it into place;
+Postgres truncates every kata-owned table except `meta` inside the same
+locked replay transaction, restores the snapshot, rebuilds derived token state,
+and reconciles identity sequences before commit. This lets `kata import
+--target postgres://...` create a fresh `kata` schema or replace an initialized
+one with `--force` without exposing partial restored state.

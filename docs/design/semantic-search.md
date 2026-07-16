@@ -8,9 +8,8 @@ rationale; for current operator-facing behavior see the
 (`kata.vectors.db`) that replaced the single-table brute-force design this
 note originally described.
 
-kata's search is lexical: SQLite FTS5 with BM25 ranking over title, body, and
-comments (`internal/db/sqlitestore/queries_search.go`), with the PostgreSQL
-equivalent stubbed pending its tsvector implementation. Lexical search misses
+kata's search is lexical: SQLite FTS5 with BM25 ranking and PostgreSQL tsvector
+ranking over title, body, and comments. Lexical search misses
 issues that describe the same problem in different words — the exact case
 that matters for agents running search-before-create. This note describes the
 design for semantic search: embedding-based vector retrieval fused with the
@@ -352,9 +351,10 @@ down to fewer in-project hits than wanted (another project's higher-scoring
 chunks crowded the batch), the leg retries once at `knnDeepLimit` (1000)
 before giving up — one bounded retry, not a loop.
 
-### PostgreSQL: not supported
+### PostgreSQL semantic vectors: not supported
 
-Semantic search requires the SQLite backend today. A daemon started with
+Lexical search is fully supported by the Postgres backend. Embedding-based
+semantic search requires the SQLite backend today. A daemon started with
 `[search.embeddings]` configured against a non-SQLite DSN fails at startup
 with a clear configuration error (`internal/vector` needs a `kit/vector`
 store backend that does not exist for PostgreSQL yet) rather than silently
@@ -422,8 +422,9 @@ between a soft delete and the refresh that removes its stale vectors.
 
 `SearchResponse` gains `mode` (always present), `degraded` and
 `degraded_reason` (omitempty). `score` semantics are mode-scoped, documented
-at `SearchHit` (`internal/api/types.go`): lexical → negated BM25 exactly as
-today; hybrid → RRF score; semantic → cosine similarity.
+at `SearchHit` (`internal/api/types.go`): lexical → backend-native lexical
+relevance, normalized so higher is better (negated FTS5 BM25 on SQLite and
+`ts_rank_cd` on PostgreSQL); hybrid → RRF score; semantic → cosine similarity.
 
 This is explicit API evolution, not strict invisibility: `api_schema_version`
 takes a minor bump, the compatibility doc records that *ranking and score
@@ -501,8 +502,8 @@ version-mismatch handling.
   composition (each component independently changes it), L2 normalization.
 - RRF as a pure function: overlapping/disjoint/empty legs, similarity floor,
   determinism and tie-breaks.
-- Storage conformance suite shared by both backends (pgstore joins in
-  Phase 2): upsert round-trips including CHECK violations (dims, vector
+- Storage conformance suite shared by both backends: upsert round-trips
+  including CHECK violations (dims, vector
   length, fingerprint length); the three dirty predicates (missing,
   fingerprint mismatch, `content_revision` mismatch); that `content_revision`
   bumps via every title/body writer (`EditIssue`, `EditIssueAtomic`, import)
@@ -520,7 +521,7 @@ version-mismatch handling.
 - CLI/API compatibility test pinning the unconfigured-default search across
   surfaces: JSON envelope and agent status line carry `mode:"lexical"` /
   `mode=lexical`; human output is byte-identical to today; lexical score
-  semantics (negated BM25) unchanged. A companion human-rendering test pins
+  ordering and higher-is-better semantics unchanged. A companion human-rendering test pins
   that degraded `auto` (embedder down, effective `mode=lexical`,
   `degraded:true`) *does* print the `# mode=lexical degraded: <reason>` note
   — distinguishing baseline lexical from degraded lexical.
@@ -536,13 +537,12 @@ version-mismatch handling.
   interface methods with the sqlitestore implementation, reconciler, RRF
   merge and mode resolution, API/CLI surface, JSONL export/import, health
   reporting.
-- **Phase 2 — PostgreSQL parity**: implement `SearchFTS`/`SearchFTSAny`
-  over the existing tsvector machinery (currently stubbed in
-  `internal/db/pgstore/stubs_gen.go`), splitting or weighting the tsvector
-  so `matched_in` keeps parity with SQLite; semantic search stays
-  SQLite-only (hard startup error otherwise, see "Storage") until kit ships
-  a pgvector sibling backend for its vector store, at which point kata
-  adopts it as the PostgreSQL acceleration path.
+- **Phase 2 — PostgreSQL lexical parity (complete)**: `SearchFTS` and
+  `SearchFTSAny` use the Postgres tsvector projection with the same observable
+  filtering and `matched_in` contract as SQLite. Semantic search stays
+  SQLite-only (hard startup error otherwise, see "Storage") until kit ships a
+  pgvector sibling backend for its vector store, at which point kata adopts it
+  as the PostgreSQL acceleration path.
 
 ## Future work
 

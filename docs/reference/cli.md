@@ -475,13 +475,15 @@ daemon connection error.
 kata export [--project NAME] [--project-id N] [--output PATH]
 kata export --allow-running-daemon --output PATH
 
-kata import --input PATH --target PATH [--force]
+kata import --input PATH --target PATH_OR_POSTGRES_DSN [--force]
 kata import --source-format beads
 ```
 
-The kata-format `import` creates a fresh database at the target path; it is not a
-merge operation. The `--source-format beads` form is different: it drives the
-`bd` CLI and merges into the current project. See
+The kata-format `import` creates a fresh SQLite database at a target path or a
+fresh Postgres `kata` schema at a Postgres DSN; it is not a merge operation. An
+initialized target requires `--force`, which atomically replaces kata-owned
+state. The `--source-format beads` form is different: it drives the `bd` CLI
+and merges into the current project. See
 [Migrating from Beads](../guide/migrating-from-beads.md).
 
 ## Remote and identity tokens

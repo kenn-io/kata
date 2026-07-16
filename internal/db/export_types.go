@@ -266,7 +266,8 @@ type PendingClaimRequestExport struct {
 	ResolvedAt        *string `json:"resolved_at,omitempty"`
 }
 
-// SequenceExport is one sqlite_sequence row. SQLite-only; future backends yield nothing.
+// SequenceExport is one backend identity high-water mark using SQLite table
+// names as the portable wire vocabulary.
 type SequenceExport struct {
 	Name string `json:"name"`
 	Seq  int64  `json:"seq"`

@@ -2,9 +2,7 @@ package sqlitestore
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -19,7 +17,7 @@ func (d *Store) CreateFederationEnrollment(
 	p db.CreateFederationEnrollmentParams,
 ) (db.CreatedFederationEnrollment, error) {
 	if p.Token == "" {
-		token, err := generateFederationToken()
+		token, err := db.NewFederationToken()
 		if err != nil {
 			return db.CreatedFederationEnrollment{}, err
 		}
@@ -164,14 +162,6 @@ func (d *Store) AuthorizeFederationToken(
 		enrollment.AdoptionBaselineEndSourceEventID = 0
 	}
 	return enrollment, nil
-}
-
-func generateFederationToken() (string, error) {
-	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("generate federation token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
 func federationEnrollmentByIDTx(ctx context.Context, tx *sql.Tx, id int64) (db.FederationEnrollment, error) {

@@ -340,11 +340,10 @@ func TestImportCurrentVersionRejectsEventHashForPreNormalizedTimestamp(t *testin
 func TestImportLegacyEventSnapshotsUseFinalProjectName(t *testing.T) {
 	ctx := context.Background()
 	target := openImportTargetDB(t)
-	_, err := target.CreateProject(ctx, "kata")
-	require.NoError(t, err)
 
 	require.NoError(t, importJSONL(ctx, target,
 		validExportVersion,
+		`{"kind":"project","data":{"id":2,"identity":"github.com/example/first","name":"kata","created_at":"2026-05-02T00:00:00.000Z","next_issue_number":1}}`,
 		`{"kind":"project","data":{"id":3,"identity":"github.com/example/kata","name":"kata","created_at":"2026-05-03T00:00:00.000Z","next_issue_number":2}}`,
 		`{"kind":"issue","data":{"id":1,"project_id":3,"number":1,"title":"legacy issue","body":"","status":"open","closed_reason":null,"owner":null,"author":"tester","created_at":"2026-05-03T00:00:01.000Z","updated_at":"2026-05-03T00:00:01.000Z","closed_at":null,"deleted_at":null}}`,
 		`{"kind":"event","data":{"id":1,"project_id":3,"project_identity":"github.com/example/kata","issue_id":1,"issue_number":1,"related_issue_id":null,"type":"issue.created","actor":"tester","payload":{},"created_at":"2026-05-03T00:00:01.000Z"}}`,
@@ -398,6 +397,26 @@ func TestImportRejectsTooNewExportVersion(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported export_version")
 	assertTableEmpty(t, target, "projects")
+}
+
+func TestImportDurableReplayFieldsRejectMismatchedEventContentHash(t *testing.T) {
+	for _, version := range []string{"12", "24"} {
+		t.Run("v"+version, func(t *testing.T) {
+			ctx := context.Background()
+			target := openImportTargetDB(t)
+
+			err := importJSONL(ctx, target,
+				`{"kind":"meta","data":{"key":"export_version","value":"`+version+`"}}`,
+				`{"kind":"meta","data":{"key":"instance_uid","value":"01HZZZZZZZZZZZZZZZZZZZZZ10"}}`,
+				`{"kind":"project","data":{"id":1,"uid":"01HZZZZZZZZZZZZZZZZZZZZZ11","name":"hash-project","metadata":{},"revision":1,"created_at":"2026-05-23T00:00:00.000Z"}}`,
+				`{"kind":"event","data":{"id":1,"uid":"01HZZZZZZZZZZZZZZZZZZZZZ12","origin_instance_uid":"01HZZZZZZZZZZZZZZZZZZZZZ10","project_id":1,"project_uid":"01HZZZZZZZZZZZZZZZZZZZZZ11","project_name":"hash-project","type":"project.metadata_updated","actor":"worker","payload":{"project_uid":"01HZZZZZZZZZZZZZZZZZZZZZ11","metadata":{}},"hlc_physical_ms":1779494400000,"hlc_counter":0,"content_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","created_at":"2026-05-23T00:00:00.000Z"}}`,
+			)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "content_hash mismatch")
+			assertTableEmpty(t, target, "events")
+		})
+	}
 }
 
 func TestImportRejectsForeignKeyViolationBeforeCommit(t *testing.T) {

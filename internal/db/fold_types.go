@@ -3,7 +3,7 @@ package db
 import "encoding/json"
 
 // FoldEvent is the portable event shape consumed by the fold engine. It excludes
-// local SQLite row IDs by design.
+// backend-local row IDs by design.
 type FoldEvent struct {
 	UID               string
 	OriginInstanceUID string

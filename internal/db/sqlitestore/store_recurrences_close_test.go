@@ -48,6 +48,33 @@ func TestCloseDone_MaterializesNextRecurrence(t *testing.T) {
 		"next_occurrence_key should advance two steps past the closed instance")
 }
 
+func TestCloseDone_ClaimAuditEventsAreReturnedOnceBeforeMaterialization(t *testing.T) {
+	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
+		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
+		Template: db.RecurrenceTemplate{Title: "Claimed recurrence"},
+	})
+	issueID, _ := seedRecurrenceInstance(t, d, p.ID, rec.ID, "2026-05-11", "Claimed recurrence")
+	issue, err := d.IssueByID(ctx, issueID)
+	require.NoError(t, err)
+	upsertTestHubFederationBinding(ctx, t, d, p, true)
+	_, err = d.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: p.ID, IssueRef: issue.ShortID, Principal: claimPrincipal(t, "holder"), ClaimKind: "hard",
+	})
+	require.NoError(t, err)
+
+	_, events, changed, err := d.CloseIssueWithEvents(ctx, issueID, "done", "closer", "complete", nil)
+
+	require.NoError(t, err)
+	assert.True(t, changed)
+	types := make([]string, 0, len(events))
+	for _, event := range events {
+		types = append(types, event.Type)
+	}
+	assert.Equal(t, []string{
+		"issue.closed", "claim.violated", "claim.released", "issue.created", "recurrence.materialized",
+	}, types)
+}
+
 func TestCloseWontfix_DoesNotMaterialize(t *testing.T) {
 	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",

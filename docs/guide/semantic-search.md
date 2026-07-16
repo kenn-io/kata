@@ -182,7 +182,8 @@ reconciler rebuilds the vectors.
   lexically but a paraphrase that lives only in a comment will not vector-match.
 - Semantic search requires the SQLite backend. A daemon configured with a
   non-SQLite database and `[search.embeddings]` set fails to start with a
-  configuration error; PostgreSQL support is not yet implemented.
+  configuration error. PostgreSQL lexical search is supported; only its
+  embedding/vector path remains unavailable.
 
 For the design rationale and internals, see the
 [semantic search design note](../design/semantic-search.md).

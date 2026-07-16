@@ -1138,7 +1138,7 @@ type SearchRequest struct {
 }
 
 // SearchHit is one row in SearchResponse. Score is mode-scoped — negated raw
-// BM25 (lexical, higher = better match), the RRF fusion score (hybrid), or
+// backend-native lexical relevance (higher = better match), the RRF fusion score (hybrid), or
 // cosine similarity (semantic). MatchedIn lists the contributing sources: FTS
 // column names for the lexical leg plus "semantic" when the vector leg matched.
 type SearchHit struct {

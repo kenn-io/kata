@@ -386,7 +386,7 @@ type Event struct {
 }
 
 // RemoteEvent is the portable event shape accepted from a federation hub.
-// Local SQLite row IDs and display-only short IDs are intentionally excluded.
+// Backend-local row IDs and display-only short IDs are intentionally excluded.
 type RemoteEvent struct {
 	EventUID          string          `json:"event_uid"`
 	OriginInstanceUID string          `json:"origin_instance_uid"`
@@ -462,12 +462,13 @@ type ChildCounts struct {
 	Total int `json:"total"`
 }
 
-// SearchCandidate is one row from SearchFTS: an issue, a BM25 score (lower is
-// better in raw form; we negate so higher = better), and the columns where
-// the query matched. MatchedIn is the basis for the wire response's matched_in.
+// SearchCandidate is one row from SearchFTS: an issue, a backend-native
+// lexical relevance score normalized so higher is better, and the columns
+// where the query matched. MatchedIn is the basis for the wire response's
+// matched_in.
 type SearchCandidate struct {
 	Issue     Issue    `json:"issue"`
-	Score     float64  `json:"score"` // BM25, negated; higher = better match
+	Score     float64  `json:"score"` // Backend-native lexical relevance; higher is better.
 	MatchedIn []string `json:"matched_in"`
 }
 

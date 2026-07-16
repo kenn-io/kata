@@ -264,8 +264,8 @@ type PeerIdentity struct {
 // AtomicEditChanges describes which link mutations actually applied.
 // Each entry captures the peer's full identity (ShortID, UID, Project)
 // so the wire can render foreign peers qualified. The issue.links_changed
-// event payload keeps the legacy parallel-slice JSON shape; sqlitestore's
-// linksChangedWirePayload owns that projection.
+// event payload keeps the legacy parallel-slice JSON shape; the shared
+// linksChangedWirePayload helper owns that projection.
 type AtomicEditChanges struct {
 	ParentSet     *PeerIdentity
 	ParentRemoved *PeerIdentity
@@ -345,8 +345,8 @@ type EventsAfterParams struct {
 // digest aggregator can rely on chronological ordering for per-issue
 // "actions" sequencing.
 //
-// Both bounds are inclusive. SQLite stores created_at at millisecond
-// precision; an exclusive upper bound silently excludes events emitted in the
+// Both bounds are inclusive. The storage contract persists created_at at
+// millisecond precision; an exclusive upper bound silently excludes events emitted in the
 // same millisecond as Until, which happens often when Until defaults to
 // time.Now() right after a mutation. Inclusive matches what humans typing
 // "since 24h" expect anyway.

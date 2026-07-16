@@ -1,7 +1,7 @@
 // Package db hosts the neutral Storage contract — interface, parameter
 // structs, sentinel errors, and pure helpers — shared by every backend.
-// Concrete implementations live in sibling packages (sqlitestore today;
-// pgstore in Phase 3); production entry points pick a backend through the
+// Concrete implementations live in sibling packages (sqlitestore and
+// pgstore); production entry points pick a backend through the
 // storeopen DSN dispatcher and hold a db.Storage thereafter.
 package db
 
@@ -11,11 +11,10 @@ import (
 	"time"
 )
 
-// Storage is the backend-neutral domain API. The current implementation is
-// *sqlitestore.Store; a future Postgres backend will satisfy the same interface.
-// Transactions are an implementation detail and never appear here. Production
-// entry points hold a db.Storage; backend selection happens through the
-// storeopen DSN dispatcher.
+// Storage is the backend-neutral domain API implemented by both SQLite and
+// Postgres. Transactions are an implementation detail and never appear here.
+// Production entry points hold a db.Storage; backend selection happens
+// through the storeopen DSN dispatcher.
 type Storage interface {
 	// identity / lifecycle
 	InstanceUID() string

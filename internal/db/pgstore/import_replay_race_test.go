@@ -1,0 +1,140 @@
+package pgstore_test
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/testenv"
+)
+
+func TestImportReplayFreshTargetRejectsConcurrentWriter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	writer, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = writer.Close() })
+	writerTx, err := writer.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = writerTx.Rollback() })
+	const writerUID = "01KATA00000000000000000001"
+	_, err = writerTx.ExecContext(ctx, `
+		INSERT INTO kata.projects(uid, name)
+		VALUES($1, 'concurrent-project')`, writerUID)
+	require.NoError(t, err)
+
+	result := make(chan error, 1)
+	go func() {
+		result <- store.ImportReplay(ctx, []db.ImportRecord{{
+			Kind: db.ImportKindProject,
+			Project: &db.ProjectExport{
+				ID: 3, UID: "01KATA00000000000000000002", Name: "restored-project",
+				CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+			},
+		}}, db.ImportOptions{RequireFreshTarget: true})
+	}()
+
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := writer.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_catalog.pg_locks AS lock
+				JOIN pg_catalog.pg_class AS relation ON relation.oid = lock.relation
+				JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+				WHERE namespace.nspname = 'kata'
+				  AND relation.relname = 'projects'
+				  AND lock.mode = 'AccessExclusiveLock'
+				  AND NOT lock.granted
+			)`).Scan(&waiting)
+		return err == nil && waiting
+	}, 5*time.Second, 10*time.Millisecond, "replay never waited for the concurrent writer")
+
+	require.NoError(t, writerTx.Commit())
+	select {
+	case err := <-result:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fresh target")
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "replay remained blocked after the writer committed")
+	}
+
+	preserved, err := store.ProjectByUID(ctx, writerUID)
+	require.NoError(t, err)
+	assert.Equal(t, "concurrent-project", preserved.Name)
+}
+
+func TestImportReplayWaitsForConcurrentSchemaMigration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	migrator, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = migrator.Close() })
+	migrationTx, err := migrator.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = migrationTx.Rollback() })
+	_, err = migrationTx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('kata:pgstore:migrations', 0))`)
+	require.NoError(t, err)
+	_, err = migrationTx.ExecContext(ctx, `CREATE TABLE kata.late_state(value TEXT NOT NULL)`)
+	require.NoError(t, err)
+	_, err = migrationTx.ExecContext(ctx, `INSERT INTO kata.late_state(value) VALUES('must-be-cleared')`)
+	require.NoError(t, err)
+
+	result := make(chan error, 1)
+	go func() {
+		result <- store.ImportReplay(ctx, []db.ImportRecord{{
+			Kind: db.ImportKindProject,
+			Project: &db.ProjectExport{
+				ID: 2, UID: "01KATA00000000000000000003", Name: "restored-project",
+				CreatedAt: "2026-07-15T12:00:00.000Z", Metadata: json.RawMessage(`{}`), Revision: 1,
+			},
+		}}, db.ImportOptions{})
+	}()
+
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := migrator.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_catalog.pg_locks
+				WHERE locktype = 'advisory' AND NOT granted
+			)`).Scan(&waiting)
+		return err == nil && waiting
+	}, 5*time.Second, 10*time.Millisecond, "replay did not wait for the schema migration lock")
+
+	require.NoError(t, migrationTx.Commit())
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "replay remained blocked after the migration committed")
+	}
+
+	var retainedRows int
+	require.NoError(t, migrator.QueryRowContext(ctx, `SELECT COUNT(*) FROM kata.late_state`).Scan(&retainedRows))
+	assert.Zero(t, retainedRows, "replay must clear tables committed by a concurrent migration")
+}

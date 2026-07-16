@@ -906,7 +906,7 @@ func attachAlias(ctx context.Context, store db.Storage, projectID int64, info co
 		// beat us to the insert. Refetch the now-existing alias and apply the
 		// same existing-alias logic: idempotent if it points to this project,
 		// conflict or reassign otherwise.
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: project_aliases.alias_identity") {
+		if errors.Is(err, db.ErrAliasExists) {
 			raced, refetchErr := store.AliasByIdentity(ctx, info.Identity)
 			if refetchErr != nil {
 				return db.ProjectAlias{}, api.NewError(500, "internal",

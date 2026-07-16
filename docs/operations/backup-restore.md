@@ -33,7 +33,7 @@ kata export --allow-running-daemon --output backups/kata-$(date -u +%Y%m%d).json
 
 ## Restore
 
-Restore into a fresh database file:
+Restore into a fresh SQLite database file:
 
 ```sh
 kata import --input backups/kata-20260531.jsonl --target ~/.kata/restored.db
@@ -45,6 +45,18 @@ or move it into `KATA_HOME` as `kata.db`, then restart.
 
 `kata import` is not a merge operation. It creates a target database from the
 input snapshot.
+
+For Postgres, pass a DSN as the target:
+
+```sh
+kata import --input backups/kata-20260531.jsonl \
+  --target 'postgres://kata:password@db.example/kata?sslmode=require'
+```
+
+A missing `kata` schema is installed before the snapshot is replayed. An
+initialized target is refused unless `--force` is set; forced replay replaces
+all kata-owned state atomically and retains unrelated schemas in the database.
+Postgres credentials are redacted from command output and errors.
 
 ## Versioned backups
 

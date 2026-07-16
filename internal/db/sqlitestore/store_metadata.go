@@ -69,7 +69,7 @@ func (d *Store) patchIssueMetadata(ctx context.Context, in db.PatchIssueMetadata
 
 	// Apply the patch onto the current metadata to produce the new blob,
 	// then diff old vs new to detect no-ops and build the event payload.
-	newBlob, err := applyMetadataPatch(json.RawMessage(curMetadata), in.Patch)
+	newBlob, err := db.ApplyMetadataPatch(json.RawMessage(curMetadata), in.Patch)
 	if err != nil {
 		return out, fmt.Errorf("apply patch: %w", err)
 	}
@@ -207,7 +207,7 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 
 	// Apply the patch onto the current metadata to produce the new blob,
 	// then diff old vs new to detect no-ops and build the event payload.
-	newBlob, err := applyMetadataPatch(json.RawMessage(curMetadata), in.Patch)
+	newBlob, err := db.ApplyMetadataPatch(json.RawMessage(curMetadata), in.Patch)
 	if err != nil {
 		return out, fmt.Errorf("apply patch: %w", err)
 	}
@@ -282,32 +282,5 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 	out.Event = ev
 	out.Changed = true
 	out.NewRevision = newRev
-	return out, nil
-}
-
-// applyMetadataPatch merges patch keys into oldBlob, producing a new JSON
-// object. Null values in the patch delete the corresponding key from the result.
-// oldBlob may be empty or "null", treated as {}.
-func applyMetadataPatch(oldBlob json.RawMessage, patch map[string]json.RawMessage) (json.RawMessage, error) {
-	var m map[string]json.RawMessage
-	if len(oldBlob) > 0 && string(oldBlob) != "null" {
-		if err := json.Unmarshal(oldBlob, &m); err != nil {
-			return nil, fmt.Errorf("unmarshal current metadata: %w", err)
-		}
-	}
-	if m == nil {
-		m = make(map[string]json.RawMessage)
-	}
-	for k, v := range patch {
-		if string(v) == "null" {
-			delete(m, k)
-		} else {
-			m[k] = v
-		}
-	}
-	out, err := json.Marshal(m)
-	if err != nil {
-		return nil, fmt.Errorf("marshal new metadata: %w", err)
-	}
 	return out, nil
 }

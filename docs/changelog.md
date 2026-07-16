@@ -8,6 +8,21 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**New features**
+
+- Added production Postgres storage selected with `KATA_DSN`, `[storage].dsn`,
+  or a `postgres://` / `postgresql://` URL. Postgres now implements the complete
+  storage contract, including federation, claims, external import, JSONL
+  replay, lexical search, daemon startup, export, and atomic snapshot restore.
+
+**Improvements**
+
+- Runs the same behavioral storage conformance fixtures against SQLite and
+  Postgres, with no expected Postgres failures or generated method stubs.
+- Added Postgres JSONL restore targets. Fresh restores install the dedicated
+  `kata` schema; `--force` atomically replaces existing kata-owned state, and
+  failed first restores remove only an unchanged fresh schema.
+
 ## 0.10.0
 <small>2026-07-11</small>
 

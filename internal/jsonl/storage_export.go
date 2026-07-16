@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// exportSnapshotter is implemented by stores (today: *sqlitestore.Store) that
+// exportSnapshotter is implemented by both stores so they
 // can pin all iterator reads to a single read-only transaction. When present,
 // Export uses it so a concurrent writer that commits mid-export does not bleed
 // rows into the output.

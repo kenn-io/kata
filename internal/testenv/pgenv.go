@@ -14,7 +14,7 @@ import (
 // become ready, and returns the DSN string plus a cleanup function. Callers
 // must register the cleanup via t.Cleanup themselves so test ordering stays
 // predictable. The container lives for the test's lifetime; cleanup tears it
-// down. Used by pgstore tests; Phase 4+ conformance tests build on top.
+// down. Used by pgstore tests and the shared storage conformance suite.
 //
 // Skips with t.Skip when docker/podman is not reachable, so the suite runs
 // cleanly in environments without a container runtime. -short callers should

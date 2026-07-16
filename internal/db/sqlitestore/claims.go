@@ -14,11 +14,6 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-const (
-	minTimedClaimTTL = time.Minute
-	maxTimedClaimTTL = 24 * time.Hour
-)
-
 type claimStore interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -664,11 +659,7 @@ func (d *Store) ClearClaimStatusRefreshError(ctx context.Context, projectID int6
 }
 
 func claimStatusRefreshErrorKey(projectID int64, issueUID string) string {
-	issueUID = strings.TrimSpace(issueUID)
-	if projectID == 0 || issueUID == "" {
-		return ""
-	}
-	return fmt.Sprintf("claim_status_refresh_error:%d:%s", projectID, issueUID)
+	return db.ClaimStatusRefreshErrorKey(projectID, issueUID)
 }
 
 // UpsertClaimCache stores a live claim as the local cached authoritative status.
@@ -917,73 +908,15 @@ func (d *Store) applyClaimStatusTx(ctx context.Context, tx claimStore, projectID
 }
 
 func validatePendingClaimResolution(pending db.PendingClaimRequest, issue db.Issue, claim db.IssueClaim) error {
-	if claim.IssueUID != issue.UID {
-		return fmt.Errorf("%w: pending claim issue mismatch", db.ErrClaimValidation)
-	}
-	if claim.Holder != pending.Holder {
-		return fmt.Errorf("%w: pending claim holder mismatch", db.ErrClaimValidation)
-	}
-	if pending.HolderInstanceUID != "" && claim.HolderInstanceUID != pending.HolderInstanceUID {
-		return fmt.Errorf("%w: pending claim holder instance mismatch", db.ErrClaimValidation)
-	}
-	if claim.ClientKind != pending.ClientKind {
-		return fmt.Errorf("%w: pending claim client kind mismatch", db.ErrClaimValidation)
-	}
-	if claim.ClaimKind != pending.ClaimKind {
-		return fmt.Errorf("%w: pending claim kind mismatch", db.ErrClaimValidation)
-	}
-	if claim.ClaimKind == "timed" && claim.ExpiresAt == nil {
-		return fmt.Errorf("%w: timed pending claim requires expires_at", db.ErrClaimValidation)
-	}
-	return nil
+	return db.ValidatePendingClaimResolution(pending, issue, claim)
 }
 
 func validateStatusClaimIssueIdentity(issue db.Issue, claim db.IssueClaim) error {
-	if claim.IssueUID != "" && claim.IssueUID != issue.UID {
-		return fmt.Errorf("%w: status claim issue mismatch", db.ErrClaimValidation)
-	}
-	return nil
+	return db.ValidateStatusClaimIssueIdentity(issue, claim)
 }
 
 func normalizeCachedClaim(status db.ClaimStatus, issue db.Issue, now time.Time) (db.IssueClaim, error) {
-	claim := *status.Claim
-	claim.ProjectID = issue.ProjectID
-	claim.IssueID = issue.ID
-	claim.IssueUID = issue.UID
-	if claim.Holder == "" {
-		claim.Holder = status.Holder.Holder
-	}
-	if claim.HolderInstanceUID == "" {
-		claim.HolderInstanceUID = status.Holder.HolderInstanceUID
-	}
-	if claim.ClientKind == "" {
-		claim.ClientKind = status.Holder.ClientKind
-	}
-	if claim.AcquiredAt.IsZero() {
-		claim.AcquiredAt = now
-	}
-	if claim.UpdatedAt.IsZero() {
-		claim.UpdatedAt = now
-	}
-	if claim.Revision == 0 {
-		claim.Revision = 1
-	}
-	if !katauid.Valid(claim.ClaimUID) {
-		return db.IssueClaim{}, fmt.Errorf("%w: invalid claim uid", db.ErrClaimValidation)
-	}
-	if err := validateClaimPrincipal(principalForClaim(claim)); err != nil {
-		return db.IssueClaim{}, err
-	}
-	if claim.ClaimKind != "hard" && claim.ClaimKind != "timed" {
-		return db.IssueClaim{}, fmt.Errorf("%w: claim_kind must be hard or timed", db.ErrClaimValidation)
-	}
-	if claim.ClaimKind == "timed" && claim.ExpiresAt == nil {
-		return db.IssueClaim{}, fmt.Errorf("%w: timed claim requires expires_at", db.ErrClaimValidation)
-	}
-	if claim.ClaimKind == "hard" && claim.ExpiresAt != nil {
-		return db.IssueClaim{}, fmt.Errorf("%w: hard claim cannot expire", db.ErrClaimValidation)
-	}
-	return claim, nil
+	return db.NormalizeCachedClaim(status, issue, now)
 }
 
 func insertCachedClaimTx(ctx context.Context, tx claimStore, claim db.IssueClaim) error {
@@ -1044,10 +977,7 @@ func releaseCachedClaimTx(ctx context.Context, tx claimStore, id int64, reason s
 }
 
 func staleSameClaimRefresh(live, incoming db.IssueClaim) bool {
-	if incoming.UpdatedAt.Before(live.UpdatedAt) {
-		return true
-	}
-	return incoming.UpdatedAt.Equal(live.UpdatedAt) && incoming.Revision < live.Revision
+	return db.StaleSameClaimRefresh(live, incoming)
 }
 
 func assertSingleLiveClaimTx(ctx context.Context, tx claimStore, issueUID string) error {
@@ -1960,38 +1890,23 @@ func scanPendingClaimRequest(r rowScanner) (db.PendingClaimRequest, error) {
 }
 
 func validateClaimPrincipal(p db.ClaimPrincipal) error {
-	if !katauid.Valid(p.HolderInstanceUID) {
-		return fmt.Errorf("%w: invalid holder instance uid", db.ErrClaimValidation)
-	}
-	if strings.TrimSpace(p.Holder) == "" {
-		return fmt.Errorf("%w: holder is required", db.ErrClaimValidation)
-	}
-	return nil
+	return db.ValidateClaimPrincipal(p)
 }
 
 func validateTimedClaimTTL(ttl time.Duration) error {
-	if ttl < minTimedClaimTTL || ttl > maxTimedClaimTTL {
-		return fmt.Errorf("%w: timed claim ttl must be between 60s and 24h", db.ErrClaimValidation)
-	}
-	return nil
+	return db.ValidateTimedClaimTTL(ttl)
 }
 
 func claimNow(now time.Time) time.Time {
-	if now.IsZero() {
-		return time.Now().UTC()
-	}
-	return now.UTC()
+	return db.ClaimNow(now)
 }
 
 func sameClaimPrincipal(c db.IssueClaim, p db.ClaimPrincipal) bool {
-	return c.Holder == p.Holder &&
-		c.HolderInstanceUID == p.HolderInstanceUID &&
-		c.ClientKind == p.ClientKind
+	return db.SameClaimPrincipal(c, p)
 }
 
 func sameClaimGateHolder(c db.IssueClaim, p db.ClaimPrincipal) bool {
-	return c.Holder == p.Holder &&
-		c.HolderInstanceUID == p.HolderInstanceUID
+	return db.SameClaimGateHolder(c, p)
 }
 
 func claimExpiredThisPass(c db.IssueClaim, p db.ClaimPrincipal, now time.Time) bool {
@@ -2006,25 +1921,11 @@ func claimTimedExpiredThisPass(c db.IssueClaim, now time.Time) bool {
 }
 
 func principalForClaim(c db.IssueClaim) db.ClaimPrincipal {
-	return db.ClaimPrincipal{
-		HolderInstanceUID: c.HolderInstanceUID,
-		Holder:            c.Holder,
-		ClientKind:        c.ClientKind,
-	}
-}
-
-func resultForClaim(c db.IssueClaim, granted bool) db.LeaseResult {
-	return db.LeaseResult{
-		Granted: granted,
-		Holder:  principalForClaim(c),
-		Claim:   &c,
-	}
+	return db.PrincipalForClaim(c)
 }
 
 func resultForClaimWithEvents(c db.IssueClaim, granted bool, events []db.Event) db.LeaseResult {
-	out := resultForClaim(c, granted)
-	out.Events = events
-	return out
+	return db.LeaseResultFor(c, granted, events)
 }
 
 // CountLiveClaims returns the number of unreleased issue_claims rows for

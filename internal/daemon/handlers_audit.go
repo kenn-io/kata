@@ -74,8 +74,8 @@ func doAuditCloses(
 
 // parseAuditWindow parses the request's --since / --until pair. Empty
 // since defaults to the zero time; empty until defaults to now. The
-// daemon's events table stores created_at at millisecond precision via
-// a sqlite strftime format, so we format here in the same way.
+// storage contract keeps event timestamps at millisecond precision, so both
+// backends receive the same normalized bounds.
 const auditTimeFmt = "2006-01-02T15:04:05.000Z"
 
 func parseAuditWindow(sinceIn, untilIn string) (since, until string, err error) {

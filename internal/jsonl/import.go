@@ -12,8 +12,17 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
+// Event replay fields became durable wire data in schema v12. Later schema
+// changes must preserve and validate them instead of silently minting a new
+// content identity during cutover.
+const eventReplayFieldsSchemaVersion = 12
+
 // ImportOptions controls optional import behaviors.
 type ImportOptions struct {
+	// RequireFreshTarget rejects replay if domain state appeared after the CLI
+	// observed an uninitialized target.
+	RequireFreshTarget bool
+
 	// NewInstance preserves the target's meta.instance_uid (the value db.Open
 	// wrote on first open) instead of overwriting it with the source's. The
 	// imported events.origin_instance_uid and purge_log.origin_instance_uid
@@ -59,7 +68,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 	localInstanceUID := store.InstanceUID()
 
 	// Walk projects ahead of the main mapping pass to build the project_id ->
-	// project_uid map used by the pre-v13 event content-hash backfill. The
+	// project_uid map used by the pre-v12 event content-hash backfill. The
 	// data lives entirely in the same envelope stream, so this is a pure
 	// in-memory step.
 	projectUIDByID, err := collectProjectUIDs(envs)
@@ -76,9 +85,10 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		recs = append(recs, rec)
 	}
 	return store.ImportReplay(ctx, recs, db.ImportOptions{
+		RequireFreshTarget:              opts.RequireFreshTarget,
 		NewInstance:                     opts.NewInstance,
 		DedupeLegacyActivePendingClaims: exportVersion < 12,
-		RecomputeEventContentHash:       exportVersion < db.CurrentSchemaVersion(),
+		RecomputeEventContentHash:       exportVersion < eventReplayFieldsSchemaVersion,
 		PreserveIssueSyncBindingEnabled: opts.PreserveIssueSyncBindingEnabled,
 	})
 }
@@ -150,7 +160,7 @@ func collectProjectUIDs(envs []Envelope) (map[int64]string, error) {
 			return nil, err
 		}
 		// pre-v2 sources have no UID; the per-record fillProjectUID below
-		// derives one in toImportRecord, but for the pre-v13 content-hash
+		// derives one in toImportRecord, but for the pre-v12 content-hash
 		// backfill we need the (id, uid) pair before the event records run.
 		// Re-do the fill here so the map is complete.
 		if p.UID == "" {
@@ -558,12 +568,12 @@ func fillEventV3Identity(rec *db.EventExport, exportVersion int, localInstanceUI
 	return nil
 }
 
-// fillEventV11ReplayFields populates HLC + content_hash on pre-v13 sources,
-// and validates them on current-version sources. The content-hash backfill
+// fillEventV11ReplayFields populates HLC + content_hash on pre-v12 sources,
+// and validates them on v12-and-later sources. The content-hash backfill
 // uses the project_uid lookup map collected ahead of time from the project
 // envelopes (the project may not yet exist in the target DB at this point).
 func fillEventV11ReplayFields(rec *db.EventExport, exportVersion int, projectUIDByID map[int64]string) error {
-	if exportVersion >= db.CurrentSchemaVersion() {
+	if exportVersion >= eventReplayFieldsSchemaVersion {
 		if rec.HLCPhysicalMS <= 0 {
 			return fmt.Errorf("event %d missing hlc_physical_ms", rec.ID)
 		}

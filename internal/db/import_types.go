@@ -8,6 +8,12 @@ import (
 
 // ImportOptions controls optional ImportReplay behaviors.
 type ImportOptions struct {
+	// RequireFreshTarget rejects replay unless the target still contains only
+	// its bootstrap metadata and hidden system project. CLI restores use this
+	// after observing an uninitialized target so a concurrent writer cannot be
+	// cleared without --force.
+	RequireFreshTarget bool
+
 	// NewInstance keeps the target's existing meta.instance_uid (the value
 	// db.Open wrote on first open) instead of applying the source's. The
 	// imported events/purge_log origin_instance_uid columns are NOT rewritten:

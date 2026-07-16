@@ -86,6 +86,9 @@ var (
 
 // Project archive / alias / merge sentinels.
 var (
+	// ErrAliasExists is returned when an alias identity is already attached.
+	ErrAliasExists = errors.New("alias already attached")
+
 	// ErrProjectAlreadyArchived is returned when RemoveProject is called on a
 	// project whose deleted_at is already set.
 	ErrProjectAlreadyArchived = errors.New("project already archived")

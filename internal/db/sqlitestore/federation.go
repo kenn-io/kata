@@ -716,76 +716,11 @@ func (d *Store) reconcileLocalFederationEcho(ctx context.Context, projectID int6
 }
 
 func validateRemoteEventContentHash(ev db.RemoteEvent) (json.RawMessage, string, error) {
-	payload := ev.Payload
-	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	createdAt := ev.CreatedAt.UTC().Format(sqliteTimeFormat)
-	expectedHash, err := db.EventContentHash(db.EventHashInput{
-		UID:               ev.EventUID,
-		OriginInstanceUID: ev.OriginInstanceUID,
-		ProjectUID:        ev.ProjectUID,
-		ProjectName:       ev.ProjectName,
-		IssueUID:          ev.IssueUID,
-		RelatedIssueUID:   ev.RelatedIssueUID,
-		Type:              ev.Type,
-		Actor:             ev.Actor,
-		HLCPhysicalMS:     ev.HLCPhysicalMS,
-		HLCCounter:        ev.HLCCounter,
-		CreatedAt:         createdAt,
-		Payload:           payload,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("remote event content hash: %w", err)
-	}
-	if !strings.EqualFold(expectedHash, ev.ContentHash) {
-		return nil, "", fmt.Errorf("%w: event %s", db.ErrRemoteEventHashMismatch, ev.EventUID)
-	}
-	return payload, createdAt, nil
+	return db.ValidateRemoteEventContentHash(ev)
 }
 
 func localEchoMatchesCanonicalSnapshot(existing db.Event, ev db.RemoteEvent) (bool, error) {
-	if existing.Type != "issue.snapshot" || ev.Type != "issue.snapshot" {
-		return false, nil
-	}
-	if existing.UID != ev.EventUID ||
-		existing.OriginInstanceUID != ev.OriginInstanceUID ||
-		existing.ProjectUID != ev.ProjectUID ||
-		!stringPtrsEqual(existing.IssueUID, ev.IssueUID) ||
-		!stringPtrsEqual(existing.RelatedIssueUID, ev.RelatedIssueUID) ||
-		existing.Actor != ev.Actor ||
-		existing.HLCPhysicalMS != ev.HLCPhysicalMS ||
-		existing.HLCCounter != ev.HLCCounter ||
-		existing.CreatedAt.UTC().Format(sqliteTimeFormat) != ev.CreatedAt.UTC().Format(sqliteTimeFormat) {
-		return false, nil
-	}
-	local := db.RemoteEvent{
-		EventUID:          existing.UID,
-		OriginInstanceUID: existing.OriginInstanceUID,
-		ProjectUID:        existing.ProjectUID,
-		ProjectName:       existing.ProjectName,
-		IssueUID:          existing.IssueUID,
-		RelatedIssueUID:   existing.RelatedIssueUID,
-		Type:              existing.Type,
-		Actor:             existing.Actor,
-		HLCPhysicalMS:     existing.HLCPhysicalMS,
-		HLCCounter:        existing.HLCCounter,
-		ContentHash:       existing.ContentHash,
-		Payload:           json.RawMessage(existing.Payload),
-		CreatedAt:         existing.CreatedAt,
-	}
-	canonical, err := canonicalizeFederationSnapshotAuthors(local, ev.Actor)
-	if err != nil {
-		return false, err
-	}
-	return canonical.ContentHash == ev.ContentHash, nil
-}
-
-func stringPtrsEqual(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return *a == *b
+	return db.LocalEchoMatchesCanonicalSnapshot(existing, ev)
 }
 
 // EnableProjectFederation marks a local project as a pull hub and writes a
@@ -1299,19 +1234,7 @@ func scanFederationQuarantine(r rowScanner) (db.FederationQuarantine, error) {
 }
 
 func validateFederationQuarantine(p db.RecordFederationQuarantineParams) error {
-	if p.ProjectID <= 0 {
-		return fmt.Errorf("federation quarantine project id is required")
-	}
-	if p.Direction != db.FederationQuarantineDirectionPush && p.Direction != db.FederationQuarantineDirectionPull {
-		return fmt.Errorf("federation quarantine direction must be push or pull")
-	}
-	if p.FirstEventID < 0 || p.LastEventID < p.FirstEventID {
-		return fmt.Errorf("federation quarantine event id range is invalid")
-	}
-	if strings.TrimSpace(p.Error) == "" {
-		return fmt.Errorf("federation quarantine error is required")
-	}
-	return nil
+	return db.ValidateFederationQuarantine(p)
 }
 
 func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int64) ([]db.Issue, error) {
@@ -2519,7 +2442,7 @@ func (d *Store) adoptProjectIntoFederation(
 		emitMetadataBaseline = true
 	}
 	if emitMetadataBaseline {
-		payload, err := projectMetadataAdoptionPayload(project.Metadata)
+		payload, err := db.ProjectMetadataAdoptionPayload(project.Metadata)
 		if err != nil {
 			return db.AdoptProjectIntoFederationResult{}, err
 		}
@@ -2630,30 +2553,4 @@ func clearProjectClaimStateTx(ctx context.Context, tx *sql.Tx, projectID int64) 
 		}
 	}
 	return nil
-}
-
-func projectMetadataAdoptionPayload(metadata db.JSONBlob) (string, error) {
-	current := map[string]json.RawMessage{}
-	if len(metadata) > 0 {
-		if err := json.Unmarshal([]byte(metadata), &current); err != nil {
-			return "", fmt.Errorf("decode adopted project metadata: %w", err)
-		}
-	}
-	type diffEntry struct {
-		From any             `json:"from"`
-		To   json.RawMessage `json:"to"`
-	}
-	diff := make(map[string]diffEntry, len(current))
-	for key, value := range current {
-		diff[key] = diffEntry{From: nil, To: value}
-	}
-	payload, err := json.Marshal(struct {
-		Diff map[string]diffEntry `json:"diff"`
-	}{
-		Diff: diff,
-	})
-	if err != nil {
-		return "", fmt.Errorf("marshal adopted project metadata event: %w", err)
-	}
-	return string(payload), nil
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -172,6 +173,89 @@ func TestRuntimeRecordRedactsPostgresDSN(t *testing.T) {
 	assert.Contains(t, got, "db.example.com")
 	// Mutation guard: the raw DSN really does contain the secret.
 	assert.Contains(t, dsn, "SECRET")
+}
+
+func TestDaemonServesHealthFromPostgres(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_DSN", dsn)
+
+	orig := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = orig })
+
+	daemonCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		done <- runDaemonWithListen(daemonCtx, "127.0.0.1:0", false)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after context cancellation")
+		}
+	})
+
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	var runtimeRecord daemonRuntimeRecordJSON
+	require.Eventually(t, func() bool {
+		body, readErr := os.ReadFile(runtimePath) //nolint:gosec // test-owned runtime path
+		return readErr == nil && json.Unmarshal(body, &runtimeRecord) == nil
+	}, 5*time.Second, 20*time.Millisecond)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://" + runtimeRecord.Address + "/api/v1/health") //nolint:noctx // bounded test client
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	var health struct {
+		OK            bool   `json:"ok"`
+		DBPath        string `json:"db_path"`
+		SchemaVersion int    `json:"schema_version"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&health))
+	wantIdentity, err := config.CanonicalDSNIdentity(dsn)
+	require.NoError(t, err)
+	assert.True(t, health.OK)
+	assert.Equal(t, db.CurrentSchemaVersion(), health.SchemaVersion)
+	assert.Equal(t, wantIdentity, health.DBPath)
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"http://"+runtimeRecord.Address+"/api/v1/projects",
+		bytes.NewBufferString(`{"name":"postgres-daemon"}`))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	createdResponse, err := client.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = createdResponse.Body.Close() }()
+	assert.Equal(t, http.StatusOK, createdResponse.StatusCode)
+	var created struct {
+		Project struct {
+			Name string `json:"name"`
+		} `json:"project"`
+		Created bool `json:"created"`
+	}
+	require.NoError(t, json.NewDecoder(createdResponse.Body).Decode(&created))
+	assert.True(t, created.Created)
+	assert.Equal(t, "postgres-daemon", created.Project.Name)
 }
 
 func TestRuntimeRecordKeepsSQLitePath(t *testing.T) {
@@ -690,9 +774,9 @@ func TestDaemonRestart_ValidatesReplacementBeforeStopping(t *testing.T) {
 		{
 			name: "storage DSN",
 			setup: func(t *testing.T, _ string) {
-				t.Setenv("KATA_DSN", "postgres://db.example/kata")
+				t.Setenv("KATA_DSN", "mysql://db.example/kata")
 			},
-			wantErr: "postgres backend is not selectable",
+			wantErr: "unsupported dsn scheme",
 		},
 		{
 			name: "hooks config",

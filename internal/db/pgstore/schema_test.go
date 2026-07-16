@@ -11,7 +11,7 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// expectedTables enumerates the structural surface schema.sql must produce.
+// expectedTables enumerates the structural surface the baseline migration must produce.
 // Full constraint/index name parity with sqlitestore belongs in the later
 // conformance suite; this test pins the baseline acceptance subset.
 var expectedTables = []string{
@@ -103,6 +103,14 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 	for _, want := range expectedTables {
 		assert.Contains(t, got, want, "missing table %q", want)
 	}
+	bindingColumns := queryStrings(t, s, `
+		SELECT column_name
+		  FROM information_schema.columns
+		 WHERE table_schema = current_schema()
+		   AND table_name = 'federation_bindings'
+		 ORDER BY column_name`)
+	assert.Contains(t, bindingColumns, "bound_actor")
+	assert.Contains(t, bindingColumns, "allow_insecure")
 
 	// --- triggers ---
 	gotTriggers := queryStrings(t, s, `

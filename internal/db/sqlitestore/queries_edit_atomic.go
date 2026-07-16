@@ -3,7 +3,6 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -176,84 +175,11 @@ func (d *Store) editIssueAtomic(ctx context.Context, p db.EditIssueAtomicParams)
 	}, nil
 }
 
-// linksChangedWirePayload is the legacy JSON shape for issue.links_changed
-// event payloads. Field order matches the pre-PeerIdentity AtomicEditChanges
-// declaration order exactly so marshaled bytes remain identical to the old
-// embedded-struct emission (json.Marshal preserves struct field order).
-type linksChangedWirePayload struct {
-	ParentSet            *string  `json:"parent_set,omitempty"`
-	ParentSetUID         *string  `json:"parent_set_uid,omitempty"`
-	ParentRemoved        *string  `json:"parent_removed,omitempty"`
-	ParentRemovedUID     *string  `json:"parent_removed_uid,omitempty"`
-	BlocksAdded          []string `json:"blocks_added,omitempty"`
-	BlocksAddedUIDs      []string `json:"blocks_added_uids,omitempty"`
-	BlocksRemoved        []string `json:"blocks_removed,omitempty"`
-	BlocksRemovedUIDs    []string `json:"blocks_removed_uids,omitempty"`
-	BlockedByAdded       []string `json:"blocked_by_added,omitempty"`
-	BlockedByAddedUIDs   []string `json:"blocked_by_added_uids,omitempty"`
-	BlockedByRemoved     []string `json:"blocked_by_removed,omitempty"`
-	BlockedByRemovedUIDs []string `json:"blocked_by_removed_uids,omitempty"`
-	RelatedAdded         []string `json:"related_added,omitempty"`
-	RelatedAddedUIDs     []string `json:"related_added_uids,omitempty"`
-	RelatedRemoved       []string `json:"related_removed,omitempty"`
-	RelatedRemovedUIDs   []string `json:"related_removed_uids,omitempty"`
-	UpdatedAt            string   `json:"updated_at"`
-}
-
 // linksChangedPayload marshals c plus ts into the legacy wire bytes.
 // Short-IDs go into the plain-name fields; UIDs into the *_uid / *_uids fields.
 // Nil/empty inputs produce omitted keys, matching the old omitempty behavior.
 func linksChangedPayload(c db.AtomicEditChanges, ts string) ([]byte, error) {
-	p := linksChangedWirePayload{
-		BlocksAdded:          peerShortIDs(c.BlocksAdded),
-		BlocksAddedUIDs:      peerUIDs(c.BlocksAdded),
-		BlocksRemoved:        peerShortIDs(c.BlocksRemoved),
-		BlocksRemovedUIDs:    peerUIDs(c.BlocksRemoved),
-		BlockedByAdded:       peerShortIDs(c.BlockedByAdded),
-		BlockedByAddedUIDs:   peerUIDs(c.BlockedByAdded),
-		BlockedByRemoved:     peerShortIDs(c.BlockedByRemoved),
-		BlockedByRemovedUIDs: peerUIDs(c.BlockedByRemoved),
-		RelatedAdded:         peerShortIDs(c.RelatedAdded),
-		RelatedAddedUIDs:     peerUIDs(c.RelatedAdded),
-		RelatedRemoved:       peerShortIDs(c.RelatedRemoved),
-		RelatedRemovedUIDs:   peerUIDs(c.RelatedRemoved),
-		UpdatedAt:            ts,
-	}
-	if c.ParentSet != nil {
-		p.ParentSet = &c.ParentSet.ShortID
-		p.ParentSetUID = &c.ParentSet.UID
-	}
-	if c.ParentRemoved != nil {
-		p.ParentRemoved = &c.ParentRemoved.ShortID
-		p.ParentRemovedUID = &c.ParentRemoved.UID
-	}
-	return json.Marshal(p)
-}
-
-// peerShortIDs extracts the ShortID from each PeerIdentity. Returns nil when
-// the slice is empty so omitempty tags suppress the field.
-func peerShortIDs(ps []db.PeerIdentity) []string {
-	if len(ps) == 0 {
-		return nil
-	}
-	out := make([]string, len(ps))
-	for i, p := range ps {
-		out[i] = p.ShortID
-	}
-	return out
-}
-
-// peerUIDs extracts the UID from each PeerIdentity. Returns nil when the
-// slice is empty so omitempty tags suppress the field.
-func peerUIDs(ps []db.PeerIdentity) []string {
-	if len(ps) == 0 {
-		return nil
-	}
-	out := make([]string, len(ps))
-	for i, p := range ps {
-		out[i] = p.UID
-	}
-	return out
+	return db.LinksChangedPayload(c, ts)
 }
 
 // applyLinksDeltaTx is the per-TX worker that performs every link mutation.
