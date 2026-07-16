@@ -87,7 +87,8 @@ func Open(ctx context.Context, dsn string, opts ...db.OpenOption) (db.Storage, e
 			return nil, err
 		}
 		openConfig.Postgres = pgstore.ConfigFromValues(
-			storageConfig.Schema, storageConfig.Mode, storageConfig.AllowInsecure,
+			storageConfig.Schema, storageConfig.Mode, storageConfig.SchemaOwner,
+			storageConfig.AllowInsecure,
 		)
 	}
 	return OpenWithConfig(ctx, dsn, openConfig, opts...)
@@ -134,7 +135,8 @@ func PeekSchemaVersion(ctx context.Context, dsn string) (int, error) {
 			return 0, err
 		}
 		pgConfig := pgstore.ConfigFromValues(
-			storageConfig.Schema, storageConfig.Mode, storageConfig.AllowInsecure,
+			storageConfig.Schema, storageConfig.Mode, storageConfig.SchemaOwner,
+			storageConfig.AllowInsecure,
 		)
 		return pgstore.PeekSchemaVersionWithConfig(ctx, dsn, pgConfig)
 	}
@@ -162,7 +164,8 @@ func RemoveFreshPostgresTarget(ctx context.Context, dsn, instanceUID string) err
 		return err
 	}
 	pgConfig := pgstore.ConfigFromValues(
-		storageConfig.Schema, storageConfig.Mode, storageConfig.AllowInsecure,
+		storageConfig.Schema, storageConfig.Mode, storageConfig.SchemaOwner,
+		storageConfig.AllowInsecure,
 	)
 	return pgstore.RemoveFreshSchemaWithConfig(ctx, dsn, instanceUID, pgConfig)
 }

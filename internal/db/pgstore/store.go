@@ -32,6 +32,7 @@ type Store struct {
 	*sql.DB
 	dsn                  string
 	schema               string
+	schemaOwner          string
 	instanceUID          string
 	readOnly             bool
 	installedFreshSchema bool

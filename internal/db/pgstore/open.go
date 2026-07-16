@@ -67,6 +67,9 @@ func openInternal(
 	serving bool,
 	bypassLifecycle bool,
 ) (*Store, error) {
+	if !bypassLifecycle && pgConfig.SchemaMode == SchemaModeValidate && pgConfig.SchemaOwner == "" {
+		return nil, fmt.Errorf("postgres schema owner is required in validation mode")
+	}
 	connConfig, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		// pgx.ParseConfig errors can echo DSN fragments — a quoted bad
@@ -110,7 +113,25 @@ func openInternal(
 		_ = sdb.Close()
 		return nil, fmt.Errorf("ping pgx: %w", err)
 	}
-	s := &Store{DB: sdb, dsn: dsn, schema: pgConfig.Schema, readOnly: readOnly}
+	var currentUser string
+	if err := sdb.QueryRowContext(ctx, `SELECT current_user`).Scan(&currentUser); err != nil {
+		_ = sdb.Close()
+		return nil, fmt.Errorf("resolve authenticated postgres role: %w", err)
+	}
+	schemaOwner := pgConfig.SchemaOwner
+	if schemaOwner == "" {
+		schemaOwner = currentUser
+	}
+	if pgConfig.SchemaMode == SchemaModeBootstrap && schemaOwner != currentUser {
+		_ = sdb.Close()
+		return nil, fmt.Errorf(
+			"postgres bootstrap requires authenticated role %q to match configured schema owner %q",
+			currentUser, schemaOwner,
+		)
+	}
+	s := &Store{
+		DB: sdb, dsn: dsn, schema: pgConfig.Schema, schemaOwner: schemaOwner, readOnly: readOnly,
+	}
 	if bypassLifecycle {
 		return s, nil
 	}
@@ -355,13 +376,8 @@ func acquireSchemaMigrationLock(ctx context.Context, tx *sql.Tx) error {
 }
 
 func (s *Store) validateSchema(ctx context.Context) error {
-	var schemaExists bool
-	if err := s.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, s.schema).Scan(&schemaExists); err != nil {
-		return fmt.Errorf("inspect postgres schema %q: %w", s.schema, err)
-	}
-	if !schemaExists {
-		return fmt.Errorf("postgres schema %q is not installed", s.schema)
+	if err := s.validateSchemaOwnership(ctx); err != nil {
+		return err
 	}
 	current, err := s.currentVersion(ctx)
 	if err != nil {
@@ -373,6 +389,112 @@ func (s *Store) validateSchema(ctx context.Context) error {
 	currentBinary := db.CurrentSchemaVersion()
 	if current != currentBinary {
 		return fmt.Errorf("postgres schema_version %d does not match binary schema %d", current, currentBinary)
+	}
+	return nil
+}
+
+var canonicalTableNames = map[string]struct{}{
+	"api_tokens": {}, "comments": {}, "events": {}, "federation_bindings": {},
+	"federation_enrollments": {}, "federation_quarantine": {}, "federation_sync_status": {},
+	"import_mappings": {}, "issue_claims": {}, "issue_labels": {}, "issue_sync_bindings": {},
+	"issue_sync_status": {}, "issue_vector_chunks": {}, "issue_vector_generations": {},
+	"issue_vector_mirror": {}, "issue_vector_stamps": {}, "issues": {}, "issues_search": {},
+	"links": {}, "meta": {}, "pending_claim_requests": {}, "project_aliases": {},
+	"project_purge_log": {}, "projects": {}, "purge_log": {}, "recurrences": {},
+}
+
+func (s *Store) validateSchemaOwnership(ctx context.Context) error {
+	var actualOwner string
+	err := s.QueryRowContext(ctx, `
+		SELECT pg_catalog.pg_get_userbyid(n.nspowner)
+		  FROM pg_catalog.pg_namespace n
+		 WHERE n.nspname = $1`, s.schema).Scan(&actualOwner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("postgres schema %q is not installed", s.schema)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect postgres schema %q owner: %w", s.schema, err)
+	}
+	if actualOwner != s.schemaOwner {
+		return fmt.Errorf(
+			"postgres schema %q owner %q does not match trusted owner %q",
+			s.schema, actualOwner, s.schemaOwner,
+		)
+	}
+
+	rows, err := s.QueryContext(ctx, `
+		SELECT c.relname, c.relkind::text, pg_catalog.pg_get_userbyid(c.relowner),
+		       c.relrowsecurity, c.relforcerowsecurity
+		  FROM pg_catalog.pg_class c
+		  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = $1`, s.schema)
+	if err != nil {
+		return fmt.Errorf("inspect postgres schema %q relations: %w", s.schema, err)
+	}
+	defer func() { _ = rows.Close() }()
+	foundTables := make(map[string]struct{}, len(canonicalTableNames))
+	for rows.Next() {
+		var name, kind, owner string
+		var rowSecurity, forceRowSecurity bool
+		if err := rows.Scan(&name, &kind, &owner, &rowSecurity, &forceRowSecurity); err != nil {
+			return fmt.Errorf("scan postgres schema %q relation ownership: %w", s.schema, err)
+		}
+		if owner != s.schemaOwner {
+			return fmt.Errorf(
+				"postgres schema %q relation %q owner %q does not match trusted owner %q",
+				s.schema, name, owner, s.schemaOwner,
+			)
+		}
+		if _, expected := canonicalTableNames[name]; expected {
+			if kind != "r" && kind != "p" {
+				return fmt.Errorf("postgres schema %q relation %q has unexpected kind %q", s.schema, name, kind)
+			}
+			if rowSecurity || forceRowSecurity {
+				return fmt.Errorf("postgres schema %q relation %q has row security enabled", s.schema, name)
+			}
+			foundTables[name] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate postgres schema %q relations: %w", s.schema, err)
+	}
+	for name := range canonicalTableNames {
+		if _, ok := foundTables[name]; !ok {
+			return fmt.Errorf("postgres schema %q is missing canonical relation %q", s.schema, name)
+		}
+	}
+
+	var untrustedKind, untrustedName, untrustedOwner string
+	err = s.QueryRowContext(ctx, `
+		SELECT object_kind, object_name, object_owner
+		  FROM (
+			SELECT 'function'::text AS object_kind, p.proname::text AS object_name,
+			       pg_catalog.pg_get_userbyid(p.proowner)::text AS object_owner
+			  FROM pg_catalog.pg_proc p
+			  JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+			 WHERE n.nspname = $1
+			UNION ALL
+			SELECT 'type', t.typname, pg_catalog.pg_get_userbyid(t.typowner)
+			  FROM pg_catalog.pg_type t
+			  JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+			 WHERE n.nspname = $1
+			UNION ALL
+			SELECT 'text search configuration', c.cfgname,
+			       pg_catalog.pg_get_userbyid(c.cfgowner)
+			  FROM pg_catalog.pg_ts_config c
+			  JOIN pg_catalog.pg_namespace n ON n.oid = c.cfgnamespace
+			 WHERE n.nspname = $1
+		  ) owned_objects
+		 WHERE object_owner <> $2
+		 LIMIT 1`, s.schema, s.schemaOwner).Scan(&untrustedKind, &untrustedName, &untrustedOwner)
+	if err == nil {
+		return fmt.Errorf(
+			"postgres schema %q %s %q owner %q does not match trusted owner %q",
+			s.schema, untrustedKind, untrustedName, untrustedOwner, s.schemaOwner,
+		)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("inspect postgres schema %q object ownership: %w", s.schema, err)
 	}
 	return nil
 }

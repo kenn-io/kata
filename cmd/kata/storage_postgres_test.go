@@ -46,6 +46,9 @@ func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	var schemaOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
+	t.Setenv("KATA_POSTGRES_SCHEMA_OWNER", schemaOwner)
 	runtimeRole := fmt.Sprintf("operator_runtime_%d", os.Getpid())
 	_, err = admin.ExecContext(ctx, fmt.Sprintf(`
 		CREATE ROLE %s LOGIN PASSWORD 'runtime-password';
@@ -86,12 +89,14 @@ func TestDaemonPreflightCarriesPostgresValidationPolicy(t *testing.T) {
 [storage.postgres]
 schema = "runtime_store"
 mode = "validate"
+schema_owner = "runtime_schema_owner"
 `), 0o600))
 
 	startup, err := preflightDaemonStartup(context.Background(), "127.0.0.1:0", false)
 	require.NoError(t, err)
 	assert.Equal(t, "runtime_store", startup.StoreConfig.Postgres.Schema)
 	assert.Equal(t, "validate", string(startup.StoreConfig.Postgres.SchemaMode))
+	assert.Equal(t, "runtime_schema_owner", startup.StoreConfig.Postgres.SchemaOwner)
 }
 
 func postgresDSNForCLIUser(t *testing.T, dsn, username, password string) string {

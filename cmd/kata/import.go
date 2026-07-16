@@ -218,7 +218,8 @@ func postgresRestoreConfig(ctx context.Context) (pgstore.Config, error) {
 		return pgstore.Config{}, err
 	}
 	pgConfig := pgstore.ConfigFromValues(
-		storageConfig.Schema, storageConfig.Mode, storageConfig.AllowInsecure,
+		storageConfig.Schema, storageConfig.Mode, storageConfig.SchemaOwner,
+		storageConfig.AllowInsecure,
 	)
 	// Import is an explicit offline schema-owner operation. It must prepare a
 	// fresh target even when the long-running runtime is validation-only.

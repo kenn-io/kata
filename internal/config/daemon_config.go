@@ -120,6 +120,7 @@ type StorageConfig struct {
 type PostgresStorageConfig struct {
 	Schema        string `toml:"schema"`
 	Mode          string `toml:"mode"`
+	SchemaOwner   string `toml:"schema_owner"`
 	AllowInsecure bool   `toml:"allow_insecure"`
 }
 
@@ -511,6 +512,9 @@ func applyPostgresStorageEnv(cfg *PostgresStorageConfig) {
 	}
 	if v := strings.TrimSpace(os.Getenv("KATA_POSTGRES_SCHEMA_MODE")); v != "" {
 		cfg.Mode = v
+	}
+	if v := strings.TrimSpace(os.Getenv("KATA_POSTGRES_SCHEMA_OWNER")); v != "" {
+		cfg.SchemaOwner = v
 	}
 	if EnvTruthy("KATA_POSTGRES_ALLOW_INSECURE") {
 		cfg.AllowInsecure = true

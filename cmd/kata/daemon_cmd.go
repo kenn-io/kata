@@ -524,6 +524,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		storeConfig.Postgres = pgstore.ConfigFromValues(
 			dcfg.Storage.Postgres.Schema,
 			dcfg.Storage.Postgres.Mode,
+			dcfg.Storage.Postgres.SchemaOwner,
 			dcfg.Storage.Postgres.AllowInsecure,
 		)
 		if err := storeConfig.Postgres.Validate(); err != nil {

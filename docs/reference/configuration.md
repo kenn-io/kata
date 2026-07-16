@@ -12,6 +12,7 @@ bindings, local per-machine overrides, and daemon config.
 | `KATA_DB` | Legacy explicit SQLite database path. Used when `KATA_DSN` is unset. |
 | `KATA_POSTGRES_SCHEMA` | Dedicated Postgres schema. Defaults to `kata`. |
 | `KATA_POSTGRES_SCHEMA_MODE` | Postgres startup policy: `bootstrap` or `validate`. Defaults to `bootstrap`. |
+| `KATA_POSTGRES_SCHEMA_OWNER` | Trusted owner role for the selected schema. Required in `validate` mode. |
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |
@@ -60,14 +61,15 @@ dsn = "postgres://kata_runtime@db.example/kata?sslmode=verify-full&sslrootcert=s
 [storage.postgres]
 schema = "kata"
 mode = "validate"
+schema_owner = "kata_schema_owner"
 # Dangerous lab-only escape hatch for remote plaintext or unverified TLS:
 # allow_insecure = true
 ```
 
 `bootstrap` creates or advances the configured schema and therefore requires
-DDL authority. `validate` performs no DDL and requires the exact schema version
-for the running binary. Environment values override the two
-`[storage.postgres]` keys. See [PostgreSQL operations](../operations/postgres.md)
+DDL authority. `validate` performs no DDL and requires both `schema_owner` and
+the exact schema version for the running binary. Environment values override
+the `[storage.postgres]` keys. See [PostgreSQL operations](../operations/postgres.md)
 for the split-role installation and upgrade ceremony.
 
 Every non-loopback, non-Unix Postgres connection candidate must use TLS with

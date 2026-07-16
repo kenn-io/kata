@@ -84,10 +84,20 @@ func (s *Store) RemoveProject(ctx context.Context, params db.RemoveProjectParams
 
 // RestoreProject makes an archived project active again.
 func (s *Store) RestoreProject(ctx context.Context, projectID int64, actor string) (db.Project, *db.Event, bool, error) {
+	return s.restoreProject(ctx, projectID, actor, s.withSerializableTx)
+}
+
+func (s *Store) restoreProject(
+	ctx context.Context,
+	projectID int64,
+	actor string,
+	runTx func(context.Context, transactionFunc) error,
+) (db.Project, *db.Event, bool, error) {
 	var project db.Project
 	var event *db.Event
 	var changed bool
-	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	err := runTx(ctx, func(tx *sql.Tx) error {
+		project, event, changed = db.Project{}, nil, false
 		var err error
 		project, err = scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR UPDATE`, projectID))
 		if err != nil {

@@ -74,6 +74,14 @@ func (s *Store) EditComment(
 	ctx context.Context,
 	params db.EditCommentParams,
 ) (db.Comment, *db.Event, bool, error) {
+	return s.editComment(ctx, params, s.withSerializableTx)
+}
+
+func (s *Store) editComment(
+	ctx context.Context,
+	params db.EditCommentParams,
+	runTx func(context.Context, transactionFunc) error,
+) (db.Comment, *db.Event, bool, error) {
 	params.CommentUID = strings.TrimSpace(params.CommentUID)
 	if params.CommentUID == "" {
 		return db.Comment{}, nil, false, db.ErrNotFound
@@ -85,7 +93,8 @@ func (s *Store) EditComment(
 	var comment db.Comment
 	var event *db.Event
 	var changed bool
-	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+	err := runTx(ctx, func(tx *sql.Tx) error {
+		comment, event, changed = db.Comment{}, nil, false
 		issue, project, err := lockedIssueTx(ctx, tx, params.IssueID, false)
 		if err != nil {
 			return err
@@ -149,6 +158,7 @@ func (s *Store) RewriteAuthorIdentity(
 
 	var result db.RewriteAuthorIdentityResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		result = db.RewriteAuthorIdentityResult{}
 		project, err := scanProject(tx.QueryRowContext(ctx,
 			projectSelect+` WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, params.ProjectID))
 		if err != nil {

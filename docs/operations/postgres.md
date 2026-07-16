@@ -117,6 +117,7 @@ dsn = "postgres://kata_runtime@db.example/kata?sslmode=verify-full&sslrootcert=s
 [storage.postgres]
 schema = "kata"
 mode = "validate"
+schema_owner = "kata_schema_owner"
 ```
 
 The equivalent environment settings are:
@@ -125,11 +126,15 @@ The equivalent environment settings are:
 export KATA_DSN='postgres://kata_runtime@db.example/kata?sslmode=verify-full&sslrootcert=system'
 export KATA_POSTGRES_SCHEMA='kata'
 export KATA_POSTGRES_SCHEMA_MODE='validate'
+export KATA_POSTGRES_SCHEMA_OWNER='kata_schema_owner'
 ```
 
-In `validate` mode, every direct storage open—including daemon startup and
-offline export—requires the schema to exist at the binary's exact version and
-performs no DDL. Missing, older, newer, or unversioned schemas fail closed.
+In `validate` mode, `schema_owner` is required. Every direct storage
+open—including daemon startup and offline export—checks that the namespace,
+canonical relations, functions, types, and text-search configuration belong to
+that role before reading application tables. It also requires the schema to
+exist at the binary's exact version and performs no DDL. Missing, older, newer,
+unversioned, differently owned, or row-security-enabled schemas fail closed.
 
 Offline JSONL restore is also a schema-owner ceremony. Pass the schema-owner
 DSN directly to `kata import --target`; import deliberately uses bootstrap
@@ -214,6 +219,7 @@ kata storage postgres migrate
 
 export KATA_DSN='postgres://kata_runtime@db.example/kata?sslmode=verify-full&sslrootcert=system'
 export KATA_POSTGRES_SCHEMA_MODE=validate
+export KATA_POSTGRES_SCHEMA_OWNER=kata_schema_owner
 kata storage postgres status
 kata daemon start --foreground
 ```

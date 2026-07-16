@@ -49,6 +49,27 @@ func TestConfigValidateRejectsUnsafeSchemaNames(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+
+	for _, owner := range []string{"MixedCase", "role-with-dash", "two roles", "1owner"} {
+		t.Run("owner/"+owner, func(t *testing.T) {
+			t.Parallel()
+			err := (pgstore.Config{
+				Schema: "kata", SchemaMode: pgstore.SchemaModeValidate, SchemaOwner: owner,
+			}).Validate()
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.T) {
+	t.Parallel()
+
+	store, err := pgstore.OpenWithConfig(context.Background(), "not-a-postgres-dsn", pgstore.Config{
+		Schema: "kata", SchemaMode: pgstore.SchemaModeValidate,
+	})
+	assert.Nil(t, store)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "postgres schema owner is required in validation mode")
 }
 
 func TestFirstPostgresReleaseHasNoHistoricalMigrationAssets(t *testing.T) {
@@ -69,6 +90,8 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	var schemaOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
 	_, err = admin.ExecContext(ctx, `CREATE TABLE public.meta (key text PRIMARY KEY, value text NOT NULL)`)
 	require.NoError(t, err)
 	_, err = admin.ExecContext(ctx, `INSERT INTO public.meta(key, value) VALUES ('schema_version', '999')`)
@@ -104,8 +127,9 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 `, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
 	runtimeStore, err := pgstore.OpenWithConfig(ctx, postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"), pgstore.Config{
-		Schema:     "isolated_store",
-		SchemaMode: pgstore.SchemaModeValidate,
+		Schema:      "isolated_store",
+		SchemaMode:  pgstore.SchemaModeValidate,
+		SchemaOwner: schemaOwner,
 	})
 	require.NoError(t, err)
 	_, err = runtimeStore.ExecContext(ctx, `CREATE TABLE must_not_be_created (id integer)`)
@@ -117,7 +141,10 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 	readOnlyStore, err := pgstore.OpenWithConfig(
 		ctx,
 		postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"),
-		pgstore.Config{Schema: "isolated_store", SchemaMode: pgstore.SchemaModeValidate},
+		pgstore.Config{
+			Schema: "isolated_store", SchemaMode: pgstore.SchemaModeValidate,
+			SchemaOwner: schemaOwner,
+		},
 		db.ReadOnly(),
 	)
 	require.NoError(t, err)
@@ -127,14 +154,16 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 	require.NoError(t, readOnlyStore.Close())
 
 	_, err = pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
-		Schema:     "missing_store",
-		SchemaMode: pgstore.SchemaModeValidate,
+		Schema:      "missing_store",
+		SchemaMode:  pgstore.SchemaModeValidate,
+		SchemaOwner: schemaOwner,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `schema "missing_store" is not installed`)
 	_, err = pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
-		Schema:     "missing_store",
-		SchemaMode: pgstore.SchemaModeValidate,
+		Schema:      "missing_store",
+		SchemaMode:  pgstore.SchemaModeValidate,
+		SchemaOwner: schemaOwner,
 	}, db.ReadOnly())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `schema "missing_store" is not installed`)
@@ -143,18 +172,98 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'missing_store')`).Scan(&missingExists))
 	assert.False(t, missingExists, "validate-only open must not create the configured schema")
 
-	_, err = admin.ExecContext(ctx, `
-		CREATE SCHEMA stale_store;
-		CREATE TABLE stale_store.meta (key text PRIMARY KEY, value text NOT NULL);
-		INSERT INTO stale_store.meta(key, value) VALUES ('schema_version', '999');
-	`)
+	stale, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: "stale_store", SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	require.NoError(t, stale.Close())
+	_, err = admin.ExecContext(ctx,
+		`UPDATE stale_store.meta SET value='999' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	_, err = pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
-		Schema:     "stale_store",
-		SchemaMode: pgstore.SchemaModeValidate,
+		Schema:      "stale_store",
+		SchemaMode:  pgstore.SchemaModeValidate,
+		SchemaOwner: schemaOwner,
 	}, db.ReadOnly())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "schema_version 999 does not match")
+}
+
+func TestValidationRejectsUnexpectedSchemaAndObjectOwnership(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+
+	var trustedOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&trustedOwner))
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: "ownership_store", SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+
+	suffix := fmt.Sprintf("%d", os.Getpid())
+	attackerRole := "schema_attacker_" + suffix
+	runtimeRole := "schema_runtime_" + suffix
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`
+		CREATE ROLE %s;
+		CREATE ROLE %s LOGIN PASSWORD 'runtime-password';
+		REVOKE CREATE ON SCHEMA ownership_store FROM PUBLIC;
+		GRANT USAGE ON SCHEMA ownership_store TO %s;
+		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ownership_store TO %s;
+		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA ownership_store TO %s;
+	`, attackerRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(`
+			DROP OWNED BY %s, %s CASCADE;
+			DROP ROLE IF EXISTS %s, %s;
+		`, attackerRole, runtimeRole, attackerRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
+	})
+
+	assertRejected := func(t *testing.T, want string) {
+		t.Helper()
+		untrusted, openErr := pgstore.OpenWithConfig(ctx,
+			postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"),
+			pgstore.Config{
+				Schema: "ownership_store", SchemaMode: pgstore.SchemaModeValidate,
+				SchemaOwner: trustedOwner,
+			},
+		)
+		if untrusted != nil {
+			t.Cleanup(func() { _ = untrusted.Close() })
+		}
+		require.Error(t, openErr)
+		assert.Contains(t, openErr.Error(), want)
+	}
+
+	t.Run("namespace owner", func(t *testing.T) {
+		_, err := admin.ExecContext(ctx, `ALTER SCHEMA ownership_store OWNER TO `+attackerRole) // #nosec G202 -- role is a fixed prefix plus process ID.
+		require.NoError(t, err)
+		assertRejected(t, `schema "ownership_store" owner`)
+		_, err = admin.ExecContext(ctx, `ALTER SCHEMA ownership_store OWNER TO `+trustedOwner) // #nosec G202 -- owner came from PostgreSQL current_user.
+		require.NoError(t, err)
+	})
+
+	t.Run("metadata owner", func(t *testing.T) {
+		_, err := admin.ExecContext(ctx, `ALTER TABLE ownership_store.meta OWNER TO `+attackerRole) // #nosec G202 -- role is a fixed prefix plus process ID.
+		require.NoError(t, err)
+		assertRejected(t, `relation "meta"`)
+		_, err = admin.ExecContext(ctx, `ALTER TABLE ownership_store.meta OWNER TO `+trustedOwner) // #nosec G202 -- owner came from PostgreSQL current_user.
+		require.NoError(t, err)
+	})
+
+	t.Run("row security", func(t *testing.T) {
+		_, err := admin.ExecContext(ctx, `ALTER TABLE ownership_store.projects ENABLE ROW LEVEL SECURITY`)
+		require.NoError(t, err)
+		assertRejected(t, `relation "projects"`)
+	})
 }
 
 func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
@@ -173,6 +282,8 @@ func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
 		Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
 	})
 	require.NoError(t, err)
+	var schemaOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
 	project, err := owner.CreateProject(ctx, "existing-project")
 	require.NoError(t, err)
 	require.NoError(t, owner.Close())
@@ -190,7 +301,9 @@ func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
 
 	runtime, err := pgstore.OpenWithConfig(ctx,
 		postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"),
-		pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeValidate},
+		pgstore.Config{
+			Schema: schema, SchemaMode: pgstore.SchemaModeValidate, SchemaOwner: schemaOwner,
+		},
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = runtime.Close() })
@@ -335,12 +448,15 @@ func TestReadOnlyOpenRequiresSystemProject(t *testing.T) {
 		Schema: "missing_system_store", SchemaMode: pgstore.SchemaModeBootstrap,
 	})
 	require.NoError(t, err)
+	var schemaOwner string
+	require.NoError(t, store.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
 	_, err = store.ExecContext(ctx, `DELETE FROM projects WHERE name = $1`, db.SystemProjectName)
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 
 	_, err = pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
 		Schema: "missing_system_store", SchemaMode: pgstore.SchemaModeValidate,
+		SchemaOwner: schemaOwner,
 	}, db.ReadOnly())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "validate system project")
@@ -438,11 +554,14 @@ func TestValidatePreparedCanonicalSchema(t *testing.T) {
 		Schema: "external_store", SchemaMode: pgstore.SchemaModeBootstrap,
 	})
 	require.NoError(t, err)
+	var schemaOwner string
+	require.NoError(t, prepared.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
 	require.NoError(t, prepared.Close())
 
 	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
-		Schema:     "external_store",
-		SchemaMode: pgstore.SchemaModeValidate,
+		Schema:      "external_store",
+		SchemaMode:  pgstore.SchemaModeValidate,
+		SchemaOwner: schemaOwner,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })

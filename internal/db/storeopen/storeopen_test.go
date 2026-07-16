@@ -89,17 +89,22 @@ func TestOpenWithConfig_PostgresValidateModeDoesNotInstallSchema(t *testing.T) {
 	ctx := context.Background()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var schemaOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
 
 	store, err := storeopen.OpenWithConfig(ctx, dsn, storeopen.Config{
-		Postgres: pgstore.Config{Schema: "runtime_store", SchemaMode: pgstore.SchemaModeValidate},
+		Postgres: pgstore.Config{
+			Schema: "runtime_store", SchemaMode: pgstore.SchemaModeValidate,
+			SchemaOwner: schemaOwner,
+		},
 	})
 	assert.Nil(t, store)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `schema "runtime_store" is not installed`)
 
-	admin, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = admin.Close() })
 	var exists bool
 	require.NoError(t, admin.QueryRowContext(ctx,
 		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'runtime_store')`).Scan(&exists))
@@ -113,19 +118,22 @@ func TestOpen_PostgresHonorsResolvedValidationPolicy(t *testing.T) {
 	ctx := context.Background()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var schemaOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_POSTGRES_SCHEMA", "resolved_store")
 	t.Setenv("KATA_POSTGRES_SCHEMA_MODE", "validate")
+	t.Setenv("KATA_POSTGRES_SCHEMA_OWNER", schemaOwner)
 
 	store, err := storeopen.Open(ctx, dsn)
 	assert.Nil(t, store)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `schema "resolved_store" is not installed`)
 
-	admin, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = admin.Close() })
 	var exists bool
 	require.NoError(t, admin.QueryRowContext(ctx,
 		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'resolved_store')`).Scan(&exists))

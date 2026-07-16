@@ -81,3 +81,72 @@ func TestArchivedProjectRejectsIssueMutation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "original title", storedTitle)
 }
+
+func TestRestoreProjectRetryClearsRolledBackAttemptOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := OpenWithConfig(ctx, dsn, Config{
+		Schema: "project_restore_retry_store", SchemaMode: SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "project-restore-retry")
+	require.NoError(t, err)
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: project.ID, Actor: "tester", Force: true,
+	})
+	require.NoError(t, err)
+
+	restored, event, changed, err := store.restoreProject(
+		ctx, project.ID, "tester",
+		rollbackThenRetry(t, store, func() {
+			_, updateErr := store.ExecContext(ctx,
+				`UPDATE projects SET deleted_at=NULL WHERE id=$1`, project.ID)
+			require.NoError(t, updateErr)
+		}),
+	)
+	require.NoError(t, err)
+	assert.Nil(t, restored.DeletedAt)
+	assert.Nil(t, event)
+	assert.False(t, changed)
+}
+
+func TestEditCommentRetryClearsRolledBackAttemptOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := OpenWithConfig(ctx, dsn, Config{
+		Schema: "comment_retry_store", SchemaMode: SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "comment-retry")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "comment retry", Author: "tester",
+	})
+	require.NoError(t, err)
+	comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Body: "original body", Author: "tester",
+	})
+	require.NoError(t, err)
+
+	edited, event, changed, err := store.editComment(ctx, db.EditCommentParams{
+		IssueID: issue.ID, CommentUID: comment.UID, Body: "updated body", Actor: "tester",
+	}, rollbackThenRetry(t, store, func() {
+		_, updateErr := store.ExecContext(ctx,
+			`UPDATE comments SET body='updated body' WHERE id=$1`, comment.ID)
+		require.NoError(t, updateErr)
+	}))
+	require.NoError(t, err)
+	assert.Equal(t, "updated body", edited.Body)
+	assert.Nil(t, event)
+	assert.False(t, changed)
+}

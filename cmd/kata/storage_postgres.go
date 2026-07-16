@@ -130,7 +130,8 @@ func resolvePostgresCommandConfig(cmd *cobra.Command, dsn, schema string) (strin
 		return "", pgstore.Config{}, err
 	}
 	pgConfig := pgstore.ConfigFromValues(
-		storageConfig.Schema, storageConfig.Mode, storageConfig.AllowInsecure,
+		storageConfig.Schema, storageConfig.Mode, storageConfig.SchemaOwner,
+		storageConfig.AllowInsecure,
 	)
 	if schema = strings.TrimSpace(schema); schema != "" {
 		pgConfig.Schema = schema

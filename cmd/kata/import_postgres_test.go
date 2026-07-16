@@ -28,6 +28,8 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	var schemaOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
 	runtimeRole := fmt.Sprintf("import_runtime_%d", os.Getpid())
 	_, err = admin.ExecContext(ctx, fmt.Sprintf(
 		`CREATE ROLE %s LOGIN PASSWORD 'runtime-password'`, runtimeRole,
@@ -39,6 +41,7 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 	// schema-owner DSN explicitly and must bootstrap/replace independently of
 	// that ambient runtime policy.
 	t.Setenv("KATA_POSTGRES_SCHEMA_MODE", "validate")
+	t.Setenv("KATA_POSTGRES_SCHEMA_OWNER", schemaOwner)
 	wantTarget, err := config.CanonicalDSNIdentity(dsn)
 	require.NoError(t, err)
 

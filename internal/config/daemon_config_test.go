@@ -706,6 +706,7 @@ dsn = "postgres://db/kata"
 [storage.postgres]
 schema = "service_store"
 mode = "validate"
+schema_owner = "service_schema_owner"
 allow_insecure = true
 `), 0o600))
 
@@ -713,6 +714,7 @@ allow_insecure = true
 	require.NoError(t, err)
 	assert.Equal(t, "service_store", cfg.Storage.Postgres.Schema)
 	assert.Equal(t, "validate", cfg.Storage.Postgres.Mode)
+	assert.Equal(t, "service_schema_owner", cfg.Storage.Postgres.SchemaOwner)
 	assert.True(t, cfg.Storage.Postgres.AllowInsecure)
 }
 
@@ -721,6 +723,7 @@ func TestReadDaemonConfig_PostgresEnvironmentOverridesTOML(t *testing.T) {
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_POSTGRES_SCHEMA", "environment_store")
 	t.Setenv("KATA_POSTGRES_SCHEMA_MODE", "validate")
+	t.Setenv("KATA_POSTGRES_SCHEMA_OWNER", "environment_owner")
 	t.Setenv("KATA_POSTGRES_ALLOW_INSECURE", "1")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
 [storage.postgres]
@@ -732,6 +735,7 @@ mode = "bootstrap"
 	require.NoError(t, err)
 	assert.Equal(t, "environment_store", cfg.Storage.Postgres.Schema)
 	assert.Equal(t, "validate", cfg.Storage.Postgres.Mode)
+	assert.Equal(t, "environment_owner", cfg.Storage.Postgres.SchemaOwner)
 	assert.True(t, cfg.Storage.Postgres.AllowInsecure)
 }
 
