@@ -205,6 +205,11 @@ func TestStorageHashPostgresIncludesAmbientRouting(t *testing.T) {
 			env:  "PGHOST", first: "/var/run/postgresql-a", second: "/var/run/postgresql-b",
 		},
 		{
+			name: "host with explicit port",
+			dsn:  "postgres://:5433/kata?sslmode=disable",
+			env:  "PGHOST", first: "/var/run/postgresql-a", second: "/var/run/postgresql-b",
+		},
+		{
 			name: "port",
 			dsn:  "postgres://db.example.com/kata?sslmode=verify-full",
 			env:  "PGPORT", first: "5433", second: "5434",

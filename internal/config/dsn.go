@@ -110,11 +110,11 @@ func postgresTargetUsesAmbientRouting(dsn string) (bool, error) {
 		return false, errors.New("parse postgres target identity: invalid dsn")
 	}
 	query := u.Query()
-	hostExplicit := u.Host != "" || query.Has("host")
+	hostExplicit := u.Hostname() != "" || query.Has("host")
 	portExplicit := u.Port() != "" || query.Has("port")
 	databaseExplicit := strings.TrimLeft(u.Path, "/") != "" || query.Has("database") || query.Has("dbname")
 	if (os.Getenv("PGSERVICE") != "" || query.Has("service")) &&
-		!(hostExplicit && portExplicit && databaseExplicit) {
+		(!hostExplicit || !portExplicit || !databaseExplicit) {
 		return true, nil
 	}
 	return os.Getenv("PGHOST") != "" && !hostExplicit ||
