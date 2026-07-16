@@ -21,19 +21,22 @@
 CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 DO $$
+DECLARE
+  extension_name TEXT;
+  extension_schema TEXT;
 BEGIN
-  IF (SELECT extnamespace FROM pg_extension WHERE extname = 'unaccent')
-       <> (SELECT oid FROM pg_namespace WHERE nspname = 'public') THEN
-    ALTER EXTENSION unaccent SET SCHEMA public;
-  END IF;
-END
-$$;
-DO $$
-BEGIN
-  IF (SELECT extnamespace FROM pg_extension WHERE extname = 'vector')
-       <> (SELECT oid FROM pg_namespace WHERE nspname = 'public') THEN
-    ALTER EXTENSION vector SET SCHEMA public;
-  END IF;
+  FOREACH extension_name IN ARRAY ARRAY['unaccent', 'vector'] LOOP
+    SELECT n.nspname
+      INTO extension_schema
+      FROM pg_extension e
+      JOIN pg_namespace n ON n.oid = e.extnamespace
+     WHERE e.extname = extension_name;
+    IF extension_schema <> 'public' THEN
+      RAISE EXCEPTION
+        'postgres extension "%" is installed in schema "%"; move it to "public" before installing kata',
+        extension_name, extension_schema;
+    END IF;
+  END LOOP;
   IF to_regtype('public.halfvec') IS NULL THEN
     RAISE EXCEPTION 'pgvector 0.7 or later with public.halfvec is required';
   END IF;

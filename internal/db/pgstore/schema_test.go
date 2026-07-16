@@ -2,6 +2,8 @@ package pgstore_test
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"sort"
 	"testing"
 
@@ -10,6 +12,56 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestSchemaBootstrapRejectsExtensionsOutsidePublic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+
+	for _, extension := range []string{"unaccent", "vector"} {
+		t.Run(extension, func(t *testing.T) {
+			ctx := context.Background()
+			dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+			t.Cleanup(cleanup)
+
+			admin, err := sql.Open("pgx", dsn)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = admin.Close() })
+
+			_, err = admin.ExecContext(ctx, `CREATE SCHEMA extension_source`)
+			require.NoError(t, err)
+			_, err = admin.ExecContext(ctx,
+				`CREATE EXTENSION `+extension+` WITH SCHEMA extension_source`)
+			require.NoError(t, err)
+
+			store, err := pgstore.Open(ctx, dsn)
+			if store != nil {
+				t.Cleanup(func() { _ = store.Close() })
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), fmt.Sprintf(
+				`postgres extension %q is installed in schema "extension_source"; move it to "public" before installing kata`,
+				extension))
+
+			var installedSchema string
+			err = admin.QueryRowContext(ctx, `
+				SELECT n.nspname
+				  FROM pg_extension e
+				  JOIN pg_namespace n ON n.oid = e.extnamespace
+				 WHERE e.extname = $1`, extension).Scan(&installedSchema)
+			require.NoError(t, err)
+			assert.Equal(t, "extension_source", installedSchema)
+
+			var kataSchemaExists bool
+			err = admin.QueryRowContext(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM pg_namespace WHERE nspname = 'kata'
+				)`).Scan(&kataSchemaExists)
+			require.NoError(t, err)
+			assert.False(t, kataSchemaExists, "failed bootstrap must roll back the Kata schema")
+		})
+	}
+}
 
 // expectedTables enumerates the structural surface the baseline migration must produce.
 // Full constraint/index name parity with sqlitestore belongs in the later
