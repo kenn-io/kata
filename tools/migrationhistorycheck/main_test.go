@@ -67,6 +67,25 @@ func TestBlocksDuplicatePostgresMigrationVersion(t *testing.T) {
 	assert.Contains(t, stderr.String(), "000002_main_name")
 }
 
+func TestBlocksDuplicateVersionAcrossFeatureBranchCommits(t *testing.T) {
+	isolateGitEnvironment(t)
+	repo := initRepoWithMainMigration(t)
+	t.Chdir(repo)
+	t.Setenv("KATA_MIGRATION_BASE_REF", "main")
+
+	writeFile(t, repo, "internal/db/pgstore/migrations/000002_first_branch_name.up.sql", "first\n")
+	gitCommand(t, "add", "internal/db/pgstore/migrations/000002_first_branch_name.up.sql")
+	gitCommand(t, "commit", "-qm", "add first branch migration")
+	writeFile(t, repo, "internal/db/pgstore/migrations/000002_second_branch_name.up.sql", "second\n")
+	gitCommand(t, "add", "internal/db/pgstore/migrations/000002_second_branch_name.up.sql")
+
+	var stderr bytes.Buffer
+	assert.Equal(t, 1, run(t.Context(), &stderr))
+	assert.Contains(t, stderr.String(), "duplicate migration version")
+	assert.Contains(t, stderr.String(), "000002_first_branch_name")
+	assert.Contains(t, stderr.String(), "000002_second_branch_name")
+}
+
 func TestBlocksInvalidPostgresMigrationName(t *testing.T) {
 	isolateGitEnvironment(t)
 	repo := initRepoWithMainMigration(t)

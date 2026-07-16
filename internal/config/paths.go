@@ -39,8 +39,9 @@ func KataDB() (string, error) { return KataDSN(context.Background()) }
 
 // DBHash returns the first 12 lower-hex chars of sha256(absolute(dbPath)).
 // Used to namespace runtime files, sockets, and hook output per database.
-// A postgres:// DSN is hashed by its credential-free canonical identity so
-// runtime files never derive from a string that carries a password.
+// A postgres:// DSN is hashed by its credential-free effective connection
+// targets so runtime files never derive from a password or collide across
+// host, port, database, or fallback routing differences.
 //
 // A sqlite:// DSN is reduced to the same filesystem path that storeopen
 // opens before hashing, so /path/kata.db and sqlite:///path/kata.db share a
@@ -49,7 +50,7 @@ func KataDB() (string, error) { return KataDSN(context.Background()) }
 // could start a duplicate daemon against the same database.
 func DBHash(dbPath string) string {
 	if strings.HasPrefix(dbPath, "postgres://") || strings.HasPrefix(dbPath, "postgresql://") {
-		identity, err := CanonicalDSNIdentity(dbPath)
+		identity, err := postgresTargetIdentity(dbPath)
 		if err != nil {
 			// Never hash a raw postgres DSN — it may carry credentials. Fall
 			// back to the redacted form so a malformed DSN still produces a
@@ -81,7 +82,7 @@ func StorageHash(dsn, postgresSchema string) string {
 	if schema == "" {
 		schema = "kata"
 	}
-	identity, err := CanonicalDSNIdentity(dsn)
+	identity, err := postgresTargetIdentity(dsn)
 	if err != nil {
 		identity = RedactDSN(dsn)
 	}

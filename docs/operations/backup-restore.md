@@ -53,17 +53,23 @@ For Postgres, pass a DSN as the target:
 
 ```sh
 kata import --input backups/kata-20260531.jsonl \
-  --target 'postgres://kata:password@db.example/kata?sslmode=verify-full&sslrootcert=system'
+  --target 'postgres://kata_schema_owner@db.example/kata?sslmode=verify-full&sslrootcert=system'
 ```
 
 A missing `kata` schema is installed before the snapshot is replayed. An
 initialized target is refused unless `--force` is set; forced replay replaces
 all kata-owned state atomically and retains unrelated schemas in the database.
+In a split-role deployment, `--target` must use the schema-owner credential:
+fresh restore may create schema objects, and forced restore requires table
+replacement privileges that the serving role intentionally lacks. Import
+overrides an ambient `mode = "validate"` only for this explicit offline
+schema-owner operation; it does not expand the runtime role's grants. Restore
+the runtime DSN and validation mode before restarting service.
 Stop every daemon using that database and schema before restore. Each serving
 daemon holds a database advisory lease for its lifetime, and replay requires
 the exclusive counterpart, so a daemon on another host cannot retain a
-pre-restore identity while replacement is in progress. Postgres credentials
-are redacted from command output and errors.
+pre-restore identity while replacement is in progress. Postgres credentials are
+redacted from command output and errors.
 
 For a shared production database, also take a database-native snapshot before
 schema upgrades. JSONL is the portable logical backup; a managed snapshot or

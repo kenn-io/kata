@@ -108,9 +108,9 @@ func TestDBHashSQLitePathUnchanged(t *testing.T) {
 func TestDBHashPostgresUsesCredentialFreeCanonicalForm(t *testing.T) {
 	full := "postgres://user:SECRET@db.example.com:5432/kata?sslmode=require" //nolint:gosec // fixture proves the credential never reaches the hash
 	got := config.DBHash(full)
-	// Stable canonical identity, independent of credentials, query params, and
-	// the postgres default port (5432).
-	assert.Equal(t, "7d5d38a526ca", got)
+	// Stable effective-target identity, independent of credentials, incidental
+	// query params, and the postgres default port (5432).
+	assert.Equal(t, "1870f89ca57a", got)
 	assert.Equal(t, got, config.DBHash("postgres://other:pw2@db.example.com:5432/kata?application_name=x"))
 	// Explicit :5432 must hash the same as no-port (same logical DB).
 	assert.Equal(t, got, config.DBHash("postgres://db.example.com/kata"))
@@ -124,6 +124,30 @@ func TestStorageHashPostgresIncludesNormalizedSchema(t *testing.T) {
 	assert.NotEqual(t, defaultSchema, config.StorageHash(dsn, "archive"))
 	assert.Equal(t, config.StorageHash(dsn, "archive"),
 		config.StorageHash("postgres://other@db.example.com/kata?application_name=x", "archive"))
+}
+
+func TestStorageHashPostgresIncludesEffectiveRoutingTargets(t *testing.T) {
+	firstSocket := "postgres://user@/kata?host=/var/run/postgresql-a&sslmode=disable"
+	secondSocket := "postgres://user@/kata?host=/var/run/postgresql-b&sslmode=disable"
+
+	assert.NotEqual(t,
+		config.StorageHash(firstSocket, "kata"),
+		config.StorageHash(secondSocket, "kata"),
+		"different Unix-socket targets must never share a daemon namespace")
+	assert.Equal(t,
+		config.StorageHash(firstSocket, "kata"),
+		config.StorageHash("postgres://other:secret@/kata?host=/var/run/postgresql-a&application_name=worker&sslmode=disable", "kata"), //nolint:gosec // fixture proves credentials and incidental params do not alter target identity
+		"credentials and incidental connection settings must not split one storage target")
+}
+
+func TestStorageHashPostgresIncludesFallbackTargets(t *testing.T) {
+	firstFallback := "postgres://user@primary.example/kata?host=primary.example,standby-a.example&port=5432,5433&sslmode=verify-full"
+	secondFallback := "postgres://user@primary.example/kata?host=primary.example,standby-b.example&port=5432,5433&sslmode=verify-full"
+
+	assert.NotEqual(t,
+		config.StorageHash(firstFallback, "kata"),
+		config.StorageHash(secondFallback, "kata"),
+		"different fallback servers must never share a daemon namespace")
 }
 
 func TestRuntimeDir_NamespaceIsDBHashUnderHome(t *testing.T) {

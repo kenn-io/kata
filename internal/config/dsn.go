@@ -1,11 +1,14 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // CanonicalDSNIdentity returns a stable, credential-free identity for a database
@@ -48,6 +51,47 @@ func CanonicalDSNIdentity(dsn string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported dsn scheme %q", scheme)
 	}
+}
+
+type postgresConnectionTarget struct {
+	Host string `json:"host"`
+	Port uint16 `json:"port"`
+}
+
+type postgresConnectionTargetIdentity struct {
+	Database string                     `json:"database"`
+	Targets  []postgresConnectionTarget `json:"targets"`
+}
+
+// postgresTargetIdentity returns the effective credential-free PostgreSQL
+// connection targets selected by pgx. Unlike CanonicalDSNIdentity, which is a
+// display-safe database label, this identity retains routing overrides and HA
+// fallbacks so two different servers cannot share daemon runtime state.
+func postgresTargetIdentity(dsn string) (string, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		// pgx parse errors may echo credentials from the input.
+		return "", errors.New("parse postgres target identity: invalid dsn")
+	}
+	identity := postgresConnectionTargetIdentity{Database: cfg.Database}
+	seen := map[postgresConnectionTarget]struct{}{}
+	appendTarget := func(host string, port uint16) {
+		target := postgresConnectionTarget{Host: host, Port: port}
+		if _, exists := seen[target]; exists {
+			return
+		}
+		seen[target] = struct{}{}
+		identity.Targets = append(identity.Targets, target)
+	}
+	appendTarget(cfg.Host, cfg.Port)
+	for _, fallback := range cfg.Fallbacks {
+		appendTarget(fallback.Host, fallback.Port)
+	}
+	body, err := json.Marshal(identity)
+	if err != nil {
+		return "", errors.New("encode postgres target identity")
+	}
+	return string(body), nil
 }
 
 // RedactDSN returns dsn with any password removed, safe for errors and logs.

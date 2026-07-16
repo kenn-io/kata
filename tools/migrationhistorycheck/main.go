@@ -52,7 +52,7 @@ func run(ctx context.Context, stderr io.Writer) int {
 
 	changedViolations := changedMainBranchMigrations(ctx, baseRef, migrationDir, diff)
 	invalidNameViolations := invalidMigrationNameViolations(diff, migrationDir)
-	duplicateViolations, err := duplicateMigrationVersionViolations(ctx, baseRef, migrationDir, diff)
+	duplicateViolations, err := duplicateMigrationVersionViolations(ctx, baseRef, migrationDir)
 	if err != nil {
 		writef(stderr, "failed to verify PostgreSQL migration versions: %v\n", err)
 		return 1
@@ -164,34 +164,30 @@ func (v duplicateVersionViolation) Compare(other duplicateVersionViolation) int 
 	return strings.Compare(v.version, other.version)
 }
 
-func duplicateMigrationVersionViolations(ctx context.Context, baseRef, migrationDir, diff string) ([]duplicateVersionViolation, error) {
+func duplicateMigrationVersionViolations(ctx context.Context, baseRef, migrationDir string) ([]duplicateVersionViolation, error) {
+	indexByVersion, err := migrationNamesByVersionOnIndex(ctx, migrationDir)
+	if err != nil {
+		return nil, err
+	}
 	baseByVersion, err := migrationNamesByVersionOnRef(ctx, baseRef, migrationDir)
 	if err != nil {
 		return nil, err
 	}
-
-	stagedByVersion := map[string]map[string]struct{}{}
-	for _, path := range stagedMigrationPaths(diff, migrationDir) {
-		version, name, ok := migrationIdentityFromPath(path)
-		if !ok {
-			continue
+	for version, baseNames := range baseByVersion {
+		if _, exists := indexByVersion[version]; !exists {
+			indexByVersion[version] = map[string]struct{}{}
 		}
-		if _, exists := stagedByVersion[version]; !exists {
-			stagedByVersion[version] = map[string]struct{}{}
-		}
-		stagedByVersion[version][name] = struct{}{}
+		maps.Copy(indexByVersion[version], baseNames)
 	}
 
 	var violations []duplicateVersionViolation
-	for version, stagedNames := range stagedByVersion {
-		allNames := maps.Clone(stagedNames)
-		maps.Copy(allNames, baseByVersion[version])
-		if len(allNames) <= 1 {
+	for version, names := range indexByVersion {
+		if len(names) <= 1 {
 			continue
 		}
 		violations = append(violations, duplicateVersionViolation{
 			version: version,
-			names:   slices.Sorted(maps.Keys(allNames)),
+			names:   slices.Sorted(maps.Keys(names)),
 		})
 	}
 	slices.SortFunc(violations, duplicateVersionViolation.Compare)
@@ -203,7 +199,18 @@ func migrationNamesByVersionOnRef(ctx context.Context, ref, migrationDir string)
 	if err != nil {
 		return nil, err
 	}
+	return migrationNamesByVersion(output), nil
+}
 
+func migrationNamesByVersionOnIndex(ctx context.Context, migrationDir string) (map[string]map[string]struct{}, error) {
+	output, err := git(ctx, "ls-files", "--cached", "--", migrationDir)
+	if err != nil {
+		return nil, err
+	}
+	return migrationNamesByVersion(output), nil
+}
+
+func migrationNamesByVersion(output string) map[string]map[string]struct{} {
 	byVersion := map[string]map[string]struct{}{}
 	for line := range strings.SplitSeq(output, "\n") {
 		version, name, ok := migrationIdentityFromPath(line)
@@ -215,17 +222,7 @@ func migrationNamesByVersionOnRef(ctx context.Context, ref, migrationDir string)
 		}
 		byVersion[version][name] = struct{}{}
 	}
-	return byVersion, nil
-}
-
-func stagedMigrationPaths(diff, migrationDir string) []string {
-	var paths []string
-	for _, path := range stagedPaths(diff, migrationDir) {
-		if _, _, ok := migrationIdentityFromPath(path); ok {
-			paths = append(paths, path)
-		}
-	}
-	return paths
+	return byVersion
 }
 
 func stagedPaths(diff, migrationDir string) []string {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +25,20 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 	ctx := context.Background()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	runtimeRole := fmt.Sprintf("import_runtime_%d", os.Getpid())
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(
+		`CREATE ROLE %s LOGIN PASSWORD 'runtime-password'`, runtimeRole,
+	)) // #nosec G201 -- role is a fixed prefix plus process ID.
+	require.NoError(t, err)
+	runtimeDSN := postgresDSNForCLIUser(t, dsn, runtimeRole, "runtime-password")
+	t.Setenv("KATA_DSN", runtimeDSN)
+	// Production daemons use validation-only startup. Import receives the
+	// schema-owner DSN explicitly and must bootstrap/replace independently of
+	// that ambient runtime policy.
+	t.Setenv("KATA_POSTGRES_SCHEMA_MODE", "validate")
 	wantTarget, err := config.CanonicalDSNIdentity(dsn)
 	require.NoError(t, err)
 
@@ -32,8 +47,15 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 	assert.Contains(t, out, wantTarget)
 	assert.NotContains(t, out, "kata:kata@",
 		"success output must not expose Postgres userinfo")
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`
+		REVOKE CREATE ON SCHEMA kata FROM PUBLIC;
+		GRANT USAGE ON SCHEMA kata TO %s;
+		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA kata TO %s;
+		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA kata TO %s;
+	`, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
+	require.NoError(t, err)
 
-	store, err := storeopen.Open(ctx, dsn)
+	store, err := storeopen.Open(ctx, runtimeDSN)
 	require.NoError(t, err)
 	project, err := store.ProjectByName(ctx, "kata")
 	require.NoError(t, err)
@@ -51,7 +73,7 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 
 	_, err = runCmdOutput(t, nil, "import", "--force", "--input", input, "--target", dsn)
 	require.NoError(t, err)
-	restored, err := storeopen.OpenReadOnly(ctx, dsn)
+	restored, err := storeopen.OpenReadOnly(ctx, runtimeDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = restored.Close() })
 	_, err = restored.ProjectByUID(ctx, extra.UID)
@@ -126,7 +148,9 @@ func TestFreshPostgresCleanupSurvivesCanceledImportContext(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	require.NoError(t, removeFreshPostgresTargetAfterFailure(canceled, dsn, uid))
+	pgConfig, err := postgresRestoreConfig(ctx)
+	require.NoError(t, err)
+	require.NoError(t, removeFreshPostgresTargetAfterFailure(canceled, dsn, uid, pgConfig))
 
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)

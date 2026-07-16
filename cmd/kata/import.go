@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
 )
@@ -167,7 +168,11 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 	if err != nil {
 		return err
 	}
-	version, err := storeopen.PeekSchemaVersion(cmd.Context(), target)
+	pgConfig, err := postgresRestoreConfig(cmd.Context())
+	if err != nil {
+		return err
+	}
+	version, err := pgstore.PeekSchemaVersionWithConfig(cmd.Context(), target, pgConfig)
 	if err != nil {
 		return err
 	}
@@ -183,11 +188,11 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 		return fmt.Errorf("open import input: %w", err)
 	}
 	defer func() { _ = in.Close() }()
-	store, err := storeopen.Open(cmd.Context(), target)
+	store, err := pgstore.OpenWithConfig(cmd.Context(), target, pgConfig)
 	if err != nil {
 		return err
 	}
-	installedFreshSchema := storeopen.InstalledFreshPostgresSchema(store)
+	installedFreshSchema := store.InstalledFreshSchema()
 	instanceUID := store.InstanceUID()
 	if err := jsonl.ImportWithOptions(cmd.Context(), in, store, jsonl.ImportOptions{
 		RequireFreshTarget: version == 0,
@@ -195,7 +200,9 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 	}); err != nil {
 		_ = store.Close()
 		if installedFreshSchema {
-			return errors.Join(err, removeFreshPostgresTargetAfterFailure(cmd.Context(), target, instanceUID))
+			return errors.Join(err, removeFreshPostgresTargetAfterFailure(
+				cmd.Context(), target, instanceUID, pgConfig,
+			))
 		}
 		return err
 	}
@@ -205,10 +212,28 @@ func runPostgresJSONLImport(cmd *cobra.Command, input, target string, force, new
 	return writeImportSuccess(cmd, identity)
 }
 
-func removeFreshPostgresTargetAfterFailure(parent context.Context, target, instanceUID string) error {
+func postgresRestoreConfig(ctx context.Context) (pgstore.Config, error) {
+	storageConfig, err := config.KataPostgresStorageConfig(ctx)
+	if err != nil {
+		return pgstore.Config{}, err
+	}
+	pgConfig := pgstore.ConfigFromValues(
+		storageConfig.Schema, storageConfig.Mode, storageConfig.AllowInsecure,
+	)
+	// Import is an explicit offline schema-owner operation. It must prepare a
+	// fresh target even when the long-running runtime is validation-only.
+	pgConfig.SchemaMode = pgstore.SchemaModeBootstrap
+	return pgConfig, nil
+}
+
+func removeFreshPostgresTargetAfterFailure(
+	parent context.Context,
+	target, instanceUID string,
+	pgConfig pgstore.Config,
+) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 10*time.Second)
 	defer cancel()
-	return storeopen.RemoveFreshPostgresTarget(ctx, target, instanceUID)
+	return pgstore.RemoveFreshSchemaWithConfig(ctx, target, instanceUID, pgConfig)
 }
 
 func writeImportSuccess(cmd *cobra.Command, target string) error {

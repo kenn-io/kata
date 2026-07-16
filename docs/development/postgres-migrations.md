@@ -42,8 +42,10 @@ Correct a released migration with a new numbered forward migration. Each
 target version identifies exactly one migration name.
 
 The `migration-history` pre-commit hook compares staged migration SQL with
-`origin/main`. It rejects changes to migration SQL already present there,
-duplicate target versions, down migrations, and filenames outside the
+`origin/main` and validates target versions across the complete Git index, not
+only the current commit's additions. It therefore rejects duplicate versions
+accumulated across several feature-branch commits as well as changes to SQL
+already on main, down migrations, and filenames outside the
 `NNNNNN_description.up.sql` convention. Fetch `origin/main` before committing;
 the check fails closed when the comparison ref is unavailable.
 

@@ -17,7 +17,8 @@ production posture.
 - the `unaccent` extension and pgvector 0.7 or later installed in the `public`
   schema;
 - server-identity-verified TLS for every remote database endpoint;
-- one schema-owner credential for `kata storage postgres migrate`;
+- one schema-owner credential for `kata storage postgres migrate` and offline
+  `kata import` restore;
 - one runtime credential for the daemon.
 
 Kata tables never use the ambient `public` schema. The default schema name is
@@ -129,6 +130,14 @@ export KATA_POSTGRES_SCHEMA_MODE='validate'
 In `validate` mode, every direct storage open—including daemon startup and
 offline export—requires the schema to exist at the binary's exact version and
 performs no DDL. Missing, older, newer, or unversioned schemas fail closed.
+
+Offline JSONL restore is also a schema-owner ceremony. Pass the schema-owner
+DSN directly to `kata import --target`; import deliberately uses bootstrap
+policy for that target even when the ambient daemon configuration is
+`mode = "validate"`. A forced restore truncates and replaces Kata-owned tables,
+so the runtime role's DML grants are intentionally insufficient. Restore the
+runtime DSN and validation mode before restarting the daemon. See [Backup and
+restore](backup-restore.md) for the complete ordering.
 
 Budget up to 29 PostgreSQL connections per daemon process: the primary query
 pool allows 25 and a separate four-connection coordination pool serializes
