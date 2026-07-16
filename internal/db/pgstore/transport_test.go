@@ -11,7 +11,10 @@ import (
 )
 
 func TestValidatePostgresTransportRejectsUnverifiedRemoteCandidates(t *testing.T) {
-	t.Parallel()
+	t.Setenv("PGSERVICE", "")
+	t.Setenv("PGSERVICEFILE", "")
+	t.Setenv("PGSSLMODE", "")
+	t.Setenv("PGSSLROOTCERT", "")
 
 	for _, dsn := range []string{
 		"postgres://user:secret@db.example/kata",
