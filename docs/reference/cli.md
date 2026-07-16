@@ -469,6 +469,21 @@ The TUI appends local daemon transport diagnostics to
 and request paths. Use that file when an interactive fetch reports a local
 daemon connection error.
 
+### PostgreSQL schema operations
+
+```sh
+kata storage postgres migrate [--dsn POSTGRES_DSN] [--schema NAME]
+kata storage postgres status [--dsn POSTGRES_DSN] [--schema NAME]
+```
+
+`migrate` installs or advances the dedicated schema with a privileged
+credential. `status` performs a read-only exact-version readiness check and is
+safe for the restricted runtime credential. Both commands honor `KATA_DSN`,
+`KATA_POSTGRES_SCHEMA`, and `[storage.postgres]`; neither prints the DSN. Prefer
+environment or PostgreSQL password-file credentials over `--dsn` so secrets do
+not appear in process listings. See [PostgreSQL
+operations](../operations/postgres.md).
+
 ## Backup and import
 
 ```sh

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,10 +68,18 @@ func TestImportPostgresFailureRemovesFreshTargetSchema(t *testing.T) {
 	ctx := context.Background()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
+	t.Setenv("KATA_POSTGRES_SCHEMA", "restore_store")
 
 	_, err := runCmdOutput(t, nil, "import", "--input", input, "--target", dsn)
 	require.Error(t, err)
 	version, peekErr := storeopen.PeekSchemaVersion(ctx, dsn)
 	require.NoError(t, peekErr)
 	assert.Zero(t, version, "failed fresh import must remove the target schema")
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var exists bool
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'restore_store')`).Scan(&exists))
+	assert.False(t, exists, "cleanup must remove the configured target schema")
 }

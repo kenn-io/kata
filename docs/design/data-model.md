@@ -160,26 +160,38 @@ inside backend packages, SQLite-specific JSONL cutover code, and tests that
 assert SQL details.
 
 SQLite bootstraps a fresh database from its canonical `schema.sql` and upgrades
-older files through the JSONL cutover path described above. Postgres owns an
-ordered set of immutable migration assets under `internal/db/pgstore/migrations`.
-Each asset names its exact source and target schema versions, and the version
-stamp is written in the same transaction as its SQL.
+older files through the JSONL cutover path described above. Postgres also
+installs fresh databases from a canonical current `schema.sql`. Because no
+Postgres backend predates its first public release, development-only versions
+are not represented as compatibility migrations. The first released Postgres
+schema is the migration floor. Later releases add immutable forward migration
+assets from released versions; each asset names its exact source and target
+versions, and its version stamp is written in the same transaction as its SQL.
 
 Postgres never uses the ambient `public` schema. A standalone open defaults to
 the dedicated `kata` schema; configured opens accept one restricted lowercase
 identifier and replace any DSN-provided `search_path` with that single quoted
-schema. Bootstrap mode creates an empty target schema and applies migrations
-under a transaction-scoped advisory lock. Schema creation, migration SQL, and
-the version stamp therefore become visible together, even when several
-processes start concurrently. A pre-existing non-empty schema without migration
-metadata is treated as a conflict rather than adopted.
+schema. Bootstrap mode creates an empty target schema, installs the canonical
+schema or applies registered forward migrations, and holds a
+transaction-scoped advisory lock. Schema creation, schema SQL, and the version
+stamp therefore become visible together, even when several processes start
+concurrently. A pre-existing non-empty schema without migration metadata is
+treated as a conflict rather than adopted.
 
 Validation mode performs no DDL and requires the exact binary schema version.
-It is the runtime-role path when a separate migration role or deployment
-orchestrator applied the exported assets. Older versions require a complete
-registered migration chain; newer versions fail closed until a matching binary
-is used. This keeps schema ownership with kata without requiring the serving
-credential to hold schema-creation privileges.
+It is the runtime-role path after a separate migration role runs `kata storage
+postgres migrate`. Older versions require a complete registered migration
+chain; newer versions fail closed until a matching binary is used. This keeps
+schema ownership with kata without requiring the serving credential to hold
+schema-creation privileges. The production ceremony and grants are documented
+in [PostgreSQL operations](../operations/postgres.md).
+
+Postgres transport treats the database as a separate high-trust system, not as
+an extension of federation's explicitly enrolled peer trust. Every remote
+primary or fallback connection therefore requires TLS with server identity
+verification before dialing. Unix sockets and exact loopback hosts may use
+plaintext. A separate explicit insecure-storage opt-in exists for isolated
+labs; it is never inferred from a private address or federation setting.
 
 Postgres mutation helpers retry the complete transaction only for serialization
 failure, deadlock, or explicit lock-unavailable SQLSTATEs. Connection failures

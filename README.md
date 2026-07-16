@@ -9,6 +9,8 @@ same work in a terminal UI. By default, issue state lives in a local SQLite
 database, so your repo stays clean and no hosted tracker is required. When a team
 of humans and agents needs to share, you can opt into a remote daemon or
 federation; a shared daemon can use Postgres by setting `KATA_DSN`.
+Production Postgres deployments can use separate schema-owner and runtime roles;
+see the [operator ceremony](docs/operations/postgres.md).
 
 The documentation in [`docs/`](docs/) is the definitive guide, published with
 Zensical at <https://katatracker.com/>.

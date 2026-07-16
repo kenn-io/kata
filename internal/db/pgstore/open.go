@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -78,6 +80,9 @@ func openInternal(
 		}
 		return nil, fmt.Errorf("parse pgx config for %s", redacted)
 	}
+	if err := validatePostgresTransport(connConfig, pgConfig.AllowInsecure); err != nil {
+		return nil, err
+	}
 	if connConfig.RuntimeParams == nil {
 		connConfig.RuntimeParams = map[string]string{}
 	}
@@ -139,6 +144,46 @@ func openInternal(
 		return nil, err
 	}
 	return s, nil
+}
+
+func validatePostgresTransport(connConfig *pgx.ConnConfig, allowInsecure bool) error {
+	if allowInsecure {
+		return nil
+	}
+	type candidate struct {
+		host        string
+		verifiedTLS bool
+	}
+	candidates := make([]candidate, 0, 1+len(connConfig.Fallbacks))
+	candidates = append(candidates, candidate{
+		host: connConfig.Host,
+		verifiedTLS: connConfig.TLSConfig != nil &&
+			!connConfig.TLSConfig.InsecureSkipVerify,
+	})
+	for _, fallback := range connConfig.Fallbacks {
+		candidates = append(candidates, candidate{
+			host: fallback.Host,
+			verifiedTLS: fallback.TLSConfig != nil &&
+				!fallback.TLSConfig.InsecureSkipVerify,
+		})
+	}
+	for _, candidate := range candidates {
+		if isLocalPostgresHost(candidate.host) || candidate.verifiedTLS {
+			continue
+		}
+		return fmt.Errorf(
+			"remote postgres connections require verified TLS for every connection candidate; use sslmode=verify-full or explicitly allow insecure postgres transport",
+		)
+	}
+	return nil
+}
+
+func isLocalPostgresHost(host string) bool {
+	if strings.HasPrefix(host, "/") || strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Store) validateSystemProject(ctx context.Context) error {
@@ -208,23 +253,39 @@ func (s *Store) bootstrap(ctx context.Context) error {
 		return fmt.Errorf("postgres schema_version %d is newer than binary schema %d", current, currentBinary)
 	}
 
-	migrations, err := migrationPath(current, currentBinary)
-	if err != nil {
-		return err
-	}
-	for _, migration := range migrations {
-		if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
-			return fmt.Errorf("apply postgres migration %s: %w", migration.Name, err)
+	if current == 0 {
+		if _, err := tx.ExecContext(ctx, canonicalSchemaSQL); err != nil {
+			return fmt.Errorf("install canonical postgres schema: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO meta(key, value) VALUES ('schema_version', $1)
-			 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-			strconv.Itoa(migration.ToVersion)); err != nil {
-			return fmt.Errorf("record postgres migration %s: %w", migration.Name, err)
+		if err := recordSchemaVersion(ctx, tx, currentBinary, "canonical postgres schema"); err != nil {
+			return err
+		}
+	} else {
+		migrations, err := migrationPath(current, currentBinary)
+		if err != nil {
+			return err
+		}
+		for _, migration := range migrations {
+			if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
+				return fmt.Errorf("apply postgres migration %s: %w", migration.Name, err)
+			}
+			if err := recordSchemaVersion(ctx, tx, migration.ToVersion, migration.Name); err != nil {
+				return err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit schema bootstrap: %w", err)
+	}
+	return nil
+}
+
+func recordSchemaVersion(ctx context.Context, tx *sql.Tx, version int, source string) error {
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO meta(key, value) VALUES ('schema_version', $1)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		strconv.Itoa(version)); err != nil {
+		return fmt.Errorf("record postgres schema version for %s: %w", source, err)
 	}
 	return nil
 }

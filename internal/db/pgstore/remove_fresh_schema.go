@@ -15,7 +15,20 @@ import (
 // path for a failed first JSONL import; changed identity or any domain row
 // makes it fail closed.
 func RemoveFreshSchema(ctx context.Context, dsn, expectedInstanceUID string) error {
-	store, err := openInternal(ctx, dsn, DefaultConfig(), false, true)
+	return RemoveFreshSchemaWithConfig(ctx, dsn, expectedInstanceUID, DefaultConfig())
+}
+
+// RemoveFreshSchemaWithConfig removes the selected schema only when it remains
+// the exact empty installation identified by expectedInstanceUID.
+func RemoveFreshSchemaWithConfig(
+	ctx context.Context,
+	dsn, expectedInstanceUID string,
+	pgConfig Config,
+) error {
+	if err := pgConfig.Validate(); err != nil {
+		return err
+	}
+	store, err := openInternal(ctx, dsn, pgConfig, false, true)
 	if err != nil {
 		return err
 	}
@@ -48,7 +61,7 @@ func RemoveFreshSchema(ctx context.Context, dsn, expectedInstanceUID string) err
 	if err := validateFreshSchema(ctx, tx, tables, expectedInstanceUID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DROP SCHEMA `+quoteIdentifier(DefaultSchema)+` CASCADE`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DROP SCHEMA `+quoteIdentifier(pgConfig.Schema)+` CASCADE`); err != nil {
 		return fmt.Errorf("remove fresh postgres schema: %w", mapSQLError(err, nil))
 	}
 	if err := tx.Commit(); err != nil {

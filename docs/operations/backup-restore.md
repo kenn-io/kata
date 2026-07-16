@@ -50,13 +50,19 @@ For Postgres, pass a DSN as the target:
 
 ```sh
 kata import --input backups/kata-20260531.jsonl \
-  --target 'postgres://kata:password@db.example/kata?sslmode=require'
+  --target 'postgres://kata:password@db.example/kata?sslmode=verify-full&sslrootcert=system'
 ```
 
 A missing `kata` schema is installed before the snapshot is replayed. An
 initialized target is refused unless `--force` is set; forced replay replaces
 all kata-owned state atomically and retains unrelated schemas in the database.
 Postgres credentials are redacted from command output and errors.
+
+For a shared production database, also take a database-native snapshot before
+schema upgrades. JSONL is the portable logical backup; a managed snapshot or
+`pg_dump` archive is the exact-version rollback artifact. The split-role
+upgrade and restore ordering is documented in [PostgreSQL
+operations](postgres.md).
 
 ## Versioned backups
 

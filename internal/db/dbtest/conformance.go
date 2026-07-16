@@ -243,8 +243,9 @@ var storageScenarios = []scenario{
 	{
 		name: "claim lease lifecycle",
 		methods: []string{
-			"AcquireClaim", "ClaimStatus", "ClaimStatusReadOnly", "CountLiveClaims", "CountPendingClaims",
-			"CreateIssue", "CreateProject", "ExpireTimedClaims", "ExpireTimedClaimsForProject",
+			"AcquireClaim", "ClaimStatus", "ClaimStatusReadOnly", "CloseIssueWithEvents", "CountLiveClaims",
+			"CountPendingClaims", "CreateIssue", "CreateProject", "EnableProjectFederation",
+			"ExpireTimedClaims", "ExpireTimedClaimsForProject",
 			"ForceReleaseClaim", "ReleaseClaim", "RenewClaim", "SoftDeleteIssue",
 		},
 		run: checkClaimLeaseLifecycle,
@@ -289,11 +290,12 @@ var storageScenarios = []scenario{
 	{
 		name: "federation event transport",
 		methods: []string{
-			"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs",
-			"InsertRemoteEvent", "PendingFederationPushEvents", "PendingFederationPushStats",
+			"CommentsByIssue", "CreateComment", "CreateIssue", "CreateProject", "CreateProjectWithUID",
+			"EnableProjectFederation", "EventsByUIDs", "IngestFederationEvents", "InsertRemoteEvent",
+			"IssueByUID", "PendingFederationPushEvents", "PendingFederationPushStats",
 			"ReconcileLocalFederationEcho", "UpsertFederationBinding",
 		},
-		run: checkFederationEventTransport,
+		runWithBackend: checkFederationEventTransport,
 	},
 	{
 		name: "federation reset lifecycle",

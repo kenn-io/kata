@@ -38,8 +38,8 @@ type DaemonConfig struct {
 	Close CloseConfig `toml:"close"`
 	// Auth carries the daemon's bearer-auth token, if any.
 	Auth AuthConfig `toml:"auth"`
-	// Storage carries DB-selection settings. Today only `dsn` is honored;
-	// see config.KataDSN for the full precedence (env > file > default).
+	// Storage carries DB selection plus backend-specific startup policy; see
+	// config.KataDSN for DSN precedence (env > file > default).
 	Storage StorageConfig `toml:"storage"`
 	// Search carries opt-in semantic-search settings. An empty
 	// [search.embeddings] section leaves kata on lexical-only FTS.
@@ -110,7 +110,17 @@ func (e EmbeddingsConfig) ResolvedAPIKey() string {
 // DSN means "no override from the file" — env (KATA_DSN, KATA_DB) or the
 // default <KATA_HOME>/kata.db wins. See config.KataDSN.
 type StorageConfig struct {
-	DSN string `toml:"dsn"`
+	DSN      string                `toml:"dsn"`
+	Postgres PostgresStorageConfig `toml:"postgres"`
+}
+
+// PostgresStorageConfig controls the schema selected by Postgres connections
+// and whether a serving process may prepare it. Empty fields select pgstore's
+// standalone defaults: schema "kata" and mode "bootstrap".
+type PostgresStorageConfig struct {
+	Schema        string `toml:"schema"`
+	Mode          string `toml:"mode"`
+	AllowInsecure bool   `toml:"allow_insecure"`
 }
 
 // DefaultGitHubSyncTokenEnv is the environment variable name used for
@@ -276,6 +286,8 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
 		cfg.Storage.DSN = strings.TrimSpace(cfg.Storage.DSN)
+		cfg.Storage.Postgres.Schema = strings.TrimSpace(cfg.Storage.Postgres.Schema)
+		cfg.Storage.Postgres.Mode = strings.TrimSpace(cfg.Storage.Postgres.Mode)
 		cfg.Close.Throttle.Window = strings.TrimSpace(cfg.Close.Throttle.Window)
 		trimSearchEmbeddings(&cfg)
 		trimDaemonCatalog(&cfg)
@@ -489,6 +501,19 @@ func applyDaemonConfigEnv(cfg *DaemonConfig) {
 			}
 		}
 		cfg.Auth.Proxy.TrustedProxyListeners = out
+	}
+	applyPostgresStorageEnv(&cfg.Storage.Postgres)
+}
+
+func applyPostgresStorageEnv(cfg *PostgresStorageConfig) {
+	if v := strings.TrimSpace(os.Getenv("KATA_POSTGRES_SCHEMA")); v != "" {
+		cfg.Schema = v
+	}
+	if v := strings.TrimSpace(os.Getenv("KATA_POSTGRES_SCHEMA_MODE")); v != "" {
+		cfg.Mode = v
+	}
+	if EnvTruthy("KATA_POSTGRES_ALLOW_INSECURE") {
+		cfg.AllowInsecure = true
 	}
 }
 

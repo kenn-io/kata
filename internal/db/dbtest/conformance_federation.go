@@ -82,6 +82,10 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	}
 	assert.Equal(t, "sync-agent", spokeBinding.Actor)
 	assert.True(t, spokeBinding.AllowInsecure)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: spoke.ID, Title: "must not write while pull-only", Author: "member",
+	})
+	assert.ErrorIs(t, err, db.ErrFederatedReadOnly)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID: peer.ID, Role: db.FederationRoleSpoke,
 		HubURL: "https://hub.example/another-path", HubProjectID: hub.ID, HubProjectUID: hub.UID,
@@ -370,7 +374,7 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-func checkFederationEventTransport(t *testing.T, store db.Storage) error {
+func checkFederationEventTransport(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
 	ctx := context.Background()
 	project, err := store.CreateProject(ctx, "federation-event-transport")
@@ -468,13 +472,32 @@ func checkFederationEventTransport(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	_, boundEvent, err := store.CreateComment(ctx, db.CreateCommentParams{
-		IssueID: issue.ID, Author: "requesting-agent", Body: "bound event actor",
+	boundIssue, boundCreated, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "bound issue actor", Author: "requesting-agent",
 	})
 	if err != nil {
 		return err
 	}
+	assert.Equal(t, "bound-agent", boundIssue.Author)
+	assert.Equal(t, "bound-agent", boundCreated.Actor)
+	var createPayload struct {
+		Author string `json:"author"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(boundCreated.Payload), &createPayload))
+	assert.Equal(t, "bound-agent", createPayload.Author)
+	boundComment, boundEvent, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: boundIssue.ID, Author: "requesting-agent", Body: "bound event actor",
+	})
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "bound-agent", boundComment.Author)
 	assert.Equal(t, "bound-agent", boundEvent.Actor)
+	var commentPayload struct {
+		Author string `json:"author"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(boundEvent.Payload), &commentPayload))
+	assert.Equal(t, "bound-agent", commentPayload.Author)
 	if _, _, err := db.ValidateRemoteEventContentHash(remoteEventFromStored(boundEvent)); err != nil {
 		return fmt.Errorf("bound local event content hash: %w", err)
 	}
@@ -482,9 +505,42 @@ func checkFederationEventTransport(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	require.Len(t, pending, 1)
-	assert.Equal(t, boundEvent.ID, pending[0].ID)
+	require.Len(t, pending, 2)
+	assert.Equal(t, []int64{boundCreated.ID, boundEvent.ID}, []int64{pending[0].ID, pending[1].ID})
 	assert.Equal(t, "bound-agent", pending[0].Actor)
+	assert.Equal(t, "bound-agent", pending[1].Actor)
+
+	hubStore := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, hubStore.Close()) })
+	hubProject, err := hubStore.CreateProjectWithUID(ctx, project.Name, project.UID)
+	if err != nil {
+		return err
+	}
+	if _, err := hubStore.EnableProjectFederation(ctx, hubProject.ID, "operator"); err != nil {
+		return err
+	}
+	ingested, err := hubStore.IngestFederationEvents(ctx, db.FederationIngestParams{
+		ProjectID: hubProject.ID, SpokeInstanceUID: store.InstanceUID(), BoundActor: "bound-agent",
+		Events: []db.FederationIngestEvent{
+			{SourceEventID: boundCreated.ID, Event: remoteEventFromStored(boundCreated)},
+			{SourceEventID: boundEvent.ID, Event: remoteEventFromStored(boundEvent)},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("ingest bound create and comment: %w", err)
+	}
+	assert.Equal(t, 2, ingested.Accepted)
+	hubIssue, err := hubStore.IssueByUID(ctx, boundIssue.UID, db.IncludeDeletedNo)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "bound-agent", hubIssue.Author)
+	hubComments, err := hubStore.CommentsByIssue(ctx, hubIssue.ID)
+	if err != nil {
+		return err
+	}
+	require.Len(t, hubComments, 1)
+	assert.Equal(t, "bound-agent", hubComments[0].Author)
 
 	localEcho := remoteEventFromStored(created)
 	found, err := store.ReconcileLocalFederationEcho(ctx, project.ID, localEcho)

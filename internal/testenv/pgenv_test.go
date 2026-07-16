@@ -29,3 +29,24 @@ func TestNewPostgresContainerReturnsUsableDSN(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT 1").Scan(&one))
 	require.Equal(t, 1, one)
 }
+
+func TestExplicitPostgresServiceCreatesIsolatedDatabase(t *testing.T) {
+	if testing.Short() {
+		t.Skip("testcontainer requires docker; skip on -short")
+	}
+	ctx := context.Background()
+	baseDSN, baseCleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(baseCleanup)
+	t.Setenv("KATA_TEST_POSTGRES_DSN", baseDSN)
+
+	isolatedDSN, isolatedCleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(isolatedCleanup)
+	require.NotEqual(t, baseDSN, isolatedDSN)
+
+	db, err := sql.Open("pgx", isolatedDSN)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	var databaseName string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT current_database()`).Scan(&databaseName))
+	require.Contains(t, databaseName, "kata_ci_")
+}

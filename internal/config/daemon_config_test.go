@@ -696,6 +696,45 @@ func TestReadDaemonConfig_EmptyStorageDSNIsZero(t *testing.T) {
 	assert.Empty(t, cfg.Storage.DSN)
 }
 
+func TestReadDaemonConfig_ReadsPostgresRuntimePolicy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[storage]
+dsn = "postgres://db/kata"
+
+[storage.postgres]
+schema = "service_store"
+mode = "validate"
+allow_insecure = true
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "service_store", cfg.Storage.Postgres.Schema)
+	assert.Equal(t, "validate", cfg.Storage.Postgres.Mode)
+	assert.True(t, cfg.Storage.Postgres.AllowInsecure)
+}
+
+func TestReadDaemonConfig_PostgresEnvironmentOverridesTOML(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_POSTGRES_SCHEMA", "environment_store")
+	t.Setenv("KATA_POSTGRES_SCHEMA_MODE", "validate")
+	t.Setenv("KATA_POSTGRES_ALLOW_INSECURE", "1")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[storage.postgres]
+schema = "file_store"
+mode = "bootstrap"
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "environment_store", cfg.Storage.Postgres.Schema)
+	assert.Equal(t, "validate", cfg.Storage.Postgres.Mode)
+	assert.True(t, cfg.Storage.Postgres.AllowInsecure)
+}
+
 func TestReadDaemonConfig_StorageRejectsUnknownKey(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

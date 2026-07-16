@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strings"
+	"os"
 	"sync"
 	"testing"
 
@@ -51,71 +51,11 @@ func TestConfigValidateRejectsUnsafeSchemaNames(t *testing.T) {
 	}
 }
 
-func TestMigrationAssetsFormCurrentSchemaChain(t *testing.T) {
+func TestFirstPostgresReleaseHasNoHistoricalMigrationAssets(t *testing.T) {
 	t.Parallel()
 
-	migrations := pgstore.Migrations()
-	require.Len(t, migrations, 3)
-	assert.Equal(t, 0, migrations[0].FromVersion)
-	assert.Equal(t, 23, migrations[0].ToVersion)
-	assert.Equal(t, "0023_baseline.sql", migrations[0].Name)
-	assert.NotEmpty(t, migrations[0].SQL)
-	assert.Equal(t, 23, migrations[1].FromVersion)
-	assert.Equal(t, 24, migrations[1].ToVersion)
-	assert.Equal(t, "0024_postgres_runtime.sql", migrations[1].Name)
-	assert.NotEmpty(t, migrations[1].SQL)
-	assert.Equal(t, 24, migrations[2].FromVersion)
-	assert.Equal(t, db.CurrentSchemaVersion(), migrations[2].ToVersion)
-	assert.Equal(t, "0025_federation_binding_authority.sql", migrations[2].Name)
-	assert.NotEmpty(t, migrations[2].SQL)
-}
-
-func TestOpenUpgradesOriginalVersion24FederationBindings(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires postgres testcontainer")
-	}
-	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
-	t.Cleanup(cleanup)
-
-	admin, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = admin.Close() })
-	tx, err := admin.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback() }()
-	for _, statement := range []string{
-		`CREATE SCHEMA original_v24`,
-		`SET LOCAL search_path TO "original_v24"`,
-		pgstore.Migrations()[0].SQL,
-		pgstore.Migrations()[1].SQL,
-		`ALTER TABLE federation_bindings DROP COLUMN bound_actor, DROP COLUMN allow_insecure`,
-		`INSERT INTO projects(uid,name) VALUES ('01HZNQ7VFPK1XGD8R5MABCD4EF','legacy-project')`,
-		`INSERT INTO federation_bindings(project_id,role,hub_url,hub_project_id,hub_project_uid,push_enabled)
-		 SELECT id,'spoke','https://hub.example',42,uid,1 FROM projects WHERE name='legacy-project'`,
-		`INSERT INTO meta(key,value) VALUES ('schema_version','24')
-		 ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
-	} {
-		_, err = tx.ExecContext(ctx, statement)
-		require.NoError(t, err)
-	}
-	require.NoError(t, tx.Commit())
-
-	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
-		Schema: "original_v24", SchemaMode: pgstore.SchemaModeBootstrap,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	version, err := store.SchemaVersion(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, db.CurrentSchemaVersion(), version)
-	project, err := store.ProjectByName(ctx, "legacy-project")
-	require.NoError(t, err)
-	binding, err := store.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	assert.Empty(t, binding.Actor)
-	assert.False(t, binding.AllowInsecure)
-	assert.False(t, binding.PushEnabled)
+	assert.Empty(t, pgstore.Migrations(),
+		"Postgres has not shipped yet, so its first canonical schema is the migration floor")
 }
 
 func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
@@ -154,15 +94,16 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 		`SELECT value FROM public.meta WHERE key = 'schema_version'`).Scan(&publicVersion))
 	assert.Equal(t, "999", publicVersion)
 
-	_, err = admin.ExecContext(ctx, `
-		CREATE ROLE example_runtime LOGIN PASSWORD 'runtime-password';
+	runtimeRole := fmt.Sprintf("example_runtime_%d", os.Getpid())
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`
+		CREATE ROLE %s LOGIN PASSWORD 'runtime-password';
 		REVOKE CREATE ON SCHEMA isolated_store FROM PUBLIC;
-		GRANT USAGE ON SCHEMA isolated_store TO example_runtime;
-		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA isolated_store TO example_runtime;
-		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA isolated_store TO example_runtime;
-	`)
+		GRANT USAGE ON SCHEMA isolated_store TO %s;
+		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA isolated_store TO %s;
+		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA isolated_store TO %s;
+`, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
-	runtimeStore, err := pgstore.OpenWithConfig(ctx, postgresDSNWithUser(t, dsn, "example_runtime", "runtime-password"), pgstore.Config{
+	runtimeStore, err := pgstore.OpenWithConfig(ctx, postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"), pgstore.Config{
 		Schema:     "isolated_store",
 		SchemaMode: pgstore.SchemaModeValidate,
 	})
@@ -175,7 +116,7 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 	require.NoError(t, runtimeStore.Close())
 	readOnlyStore, err := pgstore.OpenWithConfig(
 		ctx,
-		postgresDSNWithUser(t, dsn, "example_runtime", "runtime-password"),
+		postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"),
 		pgstore.Config{Schema: "isolated_store", SchemaMode: pgstore.SchemaModeValidate},
 		db.ReadOnly(),
 	)
@@ -239,7 +180,7 @@ func TestBootstrapMultipleSchemasSharesUnaccent(t *testing.T) {
 	}
 }
 
-func TestBootstrapUpgradesLegacyVersion23Store(t *testing.T) {
+func TestBootstrapRejectsUnshippedOlderPostgresVersion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -250,89 +191,17 @@ func TestBootstrapUpgradesLegacyVersion23Store(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 
-	_, err = admin.ExecContext(ctx, `CREATE SCHEMA legacy_extensions;
-CREATE EXTENSION unaccent WITH SCHEMA legacy_extensions;
-CREATE SCHEMA legacy_store`)
+	_, err = admin.ExecContext(ctx, `CREATE SCHEMA legacy_store;
+CREATE TABLE legacy_store.meta (key text PRIMARY KEY, value text NOT NULL);
+INSERT INTO legacy_store.meta(key, value) VALUES ('schema_version', '23')`)
 	require.NoError(t, err)
-	tx, err := admin.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `SET LOCAL search_path TO legacy_store, legacy_extensions`)
-	require.NoError(t, err)
-	legacySQL := pgstore.Migrations()[0].SQL
-	legacySQL = strings.ReplaceAll(legacySQL, "CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public", "CREATE EXTENSION IF NOT EXISTS unaccent")
-	legacySQL = strings.ReplaceAll(legacySQL, `DO $$
-BEGIN
-  IF (SELECT extnamespace FROM pg_extension WHERE extname = 'unaccent')
-       <> (SELECT oid FROM pg_namespace WHERE nspname = 'public') THEN
-    ALTER EXTENSION unaccent SET SCHEMA public;
-  END IF;
-END
-$$;
-`, "")
-	legacySQL = strings.ReplaceAll(legacySQL, "WITH public.unaccent, pg_catalog.simple", "WITH unaccent, simple")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT links_unique_edge ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT links_type_check ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT links_not_self_check ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT links_from_uid_length_check ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT links_to_uid_length_check ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT links_author_check ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT links_related_order_check ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT issue_labels_label_length_check ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT issue_labels_label_charset_check ", "")
-	legacySQL = strings.ReplaceAll(legacySQL, "CONSTRAINT issue_labels_author_check ", "")
-	_, err = tx.ExecContext(ctx, legacySQL)
-	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES ('schema_version', '23')`)
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit())
 
 	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
 		Schema: "legacy_store", SchemaMode: pgstore.SchemaModeBootstrap,
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	version, err := store.SchemaVersion(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, db.CurrentSchemaVersion(), version)
-	var extensionSchema string
-	require.NoError(t, admin.QueryRowContext(ctx, `SELECT n.nspname
-FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
-WHERE e.extname = 'unaccent'`).Scan(&extensionSchema))
-	assert.Equal(t, "public", extensionSchema)
-	_, err = store.SystemProject(ctx)
-	require.NoError(t, err)
-
-	project, err := store.CreateProject(ctx, "legacy-project")
-	require.NoError(t, err)
-	parentA, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "parent a", Author: "tester"})
-	require.NoError(t, err)
-	parentB, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "parent b", Author: "tester"})
-	require.NoError(t, err)
-	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID, Title: "two parents", Author: "tester",
-		Links: []db.InitialLink{{Type: "parent", ToNumber: parentA.ID}, {Type: "parent", ToNumber: parentB.ID}},
-	})
-	assert.ErrorIs(t, err, db.ErrParentAlreadySet)
-	_, err = store.AddLabel(ctx, parentA.ID, "Bad Label", "tester")
-	assert.ErrorIs(t, err, db.ErrLabelInvalid)
-	link, err := store.CreateLink(ctx, db.CreateLinkParams{
-		FromIssueID: parentA.ID, ToIssueID: parentB.ID, Type: "related", Author: "tester",
-	})
-	require.NoError(t, err)
-	assert.NotZero(t, link.ID)
-	_, err = store.CreateLink(ctx, db.CreateLinkParams{
-		FromIssueID: parentA.ID, ToIssueID: parentB.ID, Type: "related", Author: "tester",
-	})
-	assert.ErrorIs(t, err, db.ErrLinkExists)
-	searchIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID, Title: "résumé search", Author: "tester",
-	})
-	require.NoError(t, err)
-	matches, err := store.SearchFTS(ctx, project.ID, "resume", 20, false)
-	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	assert.Equal(t, searchIssue.ID, matches[0].Issue.ID)
+	assert.Nil(t, store)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no postgres migration path from schema_version 23")
 }
 
 func TestReadOnlyOpenRequiresSystemProject(t *testing.T) {
@@ -437,7 +306,7 @@ func TestConcurrentBootstrapSerializesOneSchemaInstallation(t *testing.T) {
 	assert.Equal(t, 1, versionRows)
 }
 
-func TestValidateExternallyMigratedSchema(t *testing.T) {
+func TestValidatePreparedCanonicalSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
@@ -445,25 +314,11 @@ func TestValidateExternallyMigratedSchema(t *testing.T) {
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
-	admin, err := sql.Open("pgx", dsn)
+	prepared, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: "external_store", SchemaMode: pgstore.SchemaModeBootstrap,
+	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = admin.Close() })
-	tx, err := admin.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `CREATE SCHEMA external_store`)
-	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `SET LOCAL search_path TO "external_store"`)
-	require.NoError(t, err)
-	for _, migration := range pgstore.Migrations() {
-		_, err = tx.ExecContext(ctx, migration.SQL)
-		require.NoError(t, err)
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO meta(key, value) VALUES ('schema_version', $1)
-			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, fmt.Sprintf("%d", migration.ToVersion))
-		require.NoError(t, err)
-	}
-	require.NoError(t, tx.Commit())
+	require.NoError(t, prepared.Close())
 
 	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
 		Schema:     "external_store",

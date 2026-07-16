@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/testenv"
@@ -79,6 +80,56 @@ func TestOpen_PostgresDSNRoundTripsThroughReadOnlyOpen(t *testing.T) {
 	assert.Equal(t, created.UID, got.UID)
 	_, err = readOnly.CreateProject(ctx, "must-not-write")
 	assert.Error(t, err)
+}
+
+func TestOpenWithConfig_PostgresValidateModeDoesNotInstallSchema(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	store, err := storeopen.OpenWithConfig(ctx, dsn, storeopen.Config{
+		Postgres: pgstore.Config{Schema: "runtime_store", SchemaMode: pgstore.SchemaModeValidate},
+	})
+	assert.Nil(t, store)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `schema "runtime_store" is not installed`)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var exists bool
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'runtime_store')`).Scan(&exists))
+	assert.False(t, exists)
+}
+
+func TestOpen_PostgresHonorsResolvedValidationPolicy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_POSTGRES_SCHEMA", "resolved_store")
+	t.Setenv("KATA_POSTGRES_SCHEMA_MODE", "validate")
+
+	store, err := storeopen.Open(ctx, dsn)
+	assert.Nil(t, store)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `schema "resolved_store" is not installed`)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var exists bool
+	require.NoError(t, admin.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'resolved_store')`).Scan(&exists))
+	assert.False(t, exists)
 }
 
 // TestOpen_UnknownSchemeIsUnsupported refuses any non-sqlite/non-postgres

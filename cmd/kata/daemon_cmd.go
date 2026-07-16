@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/federation"
@@ -482,6 +483,7 @@ type daemonStartupPreflight struct {
 	Namespace      *daemon.Namespace
 	Endpoint       kitdaemon.Endpoint
 	DBPath         string
+	StoreConfig    storeopen.Config
 	KataHome       string
 	HookConfigPath string
 	HookConfig     hooks.LoadedConfig
@@ -513,6 +515,21 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err := storeopen.Validate(dbPath); err != nil {
 		return daemonStartupPreflight{}, err
 	}
+	storeConfig := storeopen.DefaultConfig()
+	backend, err := storeopen.BackendForDSN(dbPath)
+	if err != nil {
+		return daemonStartupPreflight{}, err
+	}
+	if backend == storeopen.BackendPostgres {
+		storeConfig.Postgres = pgstore.ConfigFromValues(
+			dcfg.Storage.Postgres.Schema,
+			dcfg.Storage.Postgres.Mode,
+			dcfg.Storage.Postgres.AllowInsecure,
+		)
+		if err := storeConfig.Postgres.Validate(); err != nil {
+			return daemonStartupPreflight{}, err
+		}
+	}
 	home, err := config.KataHome()
 	if err != nil {
 		return daemonStartupPreflight{}, err
@@ -535,6 +552,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		Namespace:      ns,
 		Endpoint:       endpoint,
 		DBPath:         dbPath,
+		StoreConfig:    storeConfig,
 		KataHome:       home,
 		HookConfigPath: hookCfgPath,
 		HookConfig:     loadedHooks,
@@ -691,7 +709,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	defer stopCleanup()
 
 	dbPath := startup.DBPath
-	store, err := storeopen.Open(ctx, dbPath)
+	store, err := storeopen.OpenWithConfig(ctx, dbPath, startup.StoreConfig)
 	if err != nil {
 		return err
 	}

@@ -51,6 +51,8 @@ func readStorageConfig() (StorageConfig, error) {
 		return StorageConfig{}, fmt.Errorf("parse %s [storage]: %w", path, err)
 	}
 	shadow.Storage.DSN = strings.TrimSpace(shadow.Storage.DSN)
+	shadow.Storage.Postgres.Schema = strings.TrimSpace(shadow.Storage.Postgres.Schema)
+	shadow.Storage.Postgres.Mode = strings.TrimSpace(shadow.Storage.Postgres.Mode)
 	return shadow.Storage, nil
 }
 

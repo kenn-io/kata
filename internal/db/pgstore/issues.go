@@ -91,6 +91,13 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 		if err != nil {
 			return err
 		}
+		if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
+		effectiveActor, err := effectiveLocalMutationActorTx(ctx, tx, project.ID, params.Author)
+		if err != nil {
+			return err
+		}
 		// Short IDs are allocated from a project-local namespace. Serialize
 		// allocation within that namespace so two distinct UIDs sharing a
 		// suffix observe one another and the later writer extends its suffix.
@@ -115,7 +122,7 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 		err = tx.QueryRowContext(ctx, `INSERT INTO issues(
           uid, project_id, short_id, title, body, author, owner, priority, metadata, created_at, updated_at
         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) RETURNING id`,
-			issueUID, params.ProjectID, shortIDValue, params.Title, params.Body, params.Author,
+			issueUID, params.ProjectID, shortIDValue, params.Title, params.Body, effectiveActor,
 			owner, params.Priority, string(metadataBlob), createdAt,
 		).Scan(&issueID)
 		if err != nil {
@@ -123,7 +130,7 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 		}
 		for _, label := range labels {
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO issue_labels(issue_id, label, author) VALUES($1,$2,$3)`, issueID, label, params.Author); err != nil {
+				`INSERT INTO issue_labels(issue_id, label, author) VALUES($1,$2,$3)`, issueID, label, effectiveActor); err != nil {
 				return mapSQLError(err, nil)
 			}
 		}
@@ -156,17 +163,17 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 			if _, err := tx.ExecContext(ctx, `INSERT INTO links(
               from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author
             ) VALUES($1,$2,$3,$4,$5,$6)`,
-				fromID, toID, fromUID, toUID, link.Type, params.Author); err != nil {
+				fromID, toID, fromUID, toUID, link.Type, effectiveActor); err != nil {
 				return mapSQLError(err, linkConstraintErrors)
 			}
 			linkPayloads = append(linkPayloads, createdLink{
 				Type: link.Type, ToShortID: targetShortID, ToIssueUID: targetUID,
-				Incoming: link.Incoming, Author: params.Author,
+				Incoming: link.Incoming, Author: effectiveActor,
 			})
 		}
 		payload, err := json.Marshal(issueCreatedPayload{
 			UID: issueUID, ShortID: shortIDValue, Title: params.Title, Body: params.Body,
-			Author: params.Author, Owner: owner, Priority: params.Priority, Status: "open",
+			Author: effectiveActor, Owner: owner, Priority: params.Priority, Status: "open",
 			Metadata: metadataBlob, Labels: labels, Links: linkPayloads, CreatedAt: createdAt,
 			IdempotencyKey: params.IdempotencyKey, IdempotencyFingerprint: params.IdempotencyFingerprint,
 		})
@@ -175,7 +182,7 @@ func (s *Store) CreateIssue(ctx context.Context, params db.CreateIssueParams) (d
 		}
 		event, err = s.insertEventTx(ctx, tx, eventInsert{
 			ProjectID: params.ProjectID, ProjectUID: project.UID, ProjectName: project.Name,
-			IssueID: &issueID, IssueUID: &issueUID, Type: "issue.created", Actor: params.Author,
+			IssueID: &issueID, IssueUID: &issueUID, Type: "issue.created", Actor: effectiveActor,
 			Payload: string(payload),
 		})
 		if err != nil {

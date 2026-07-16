@@ -337,6 +337,15 @@ func effectiveLocalEventActorTx(
 	projectID int64,
 	requestedActor string,
 ) (string, error) {
+	return effectiveLocalMutationActorTx(ctx, tx, projectID, requestedActor)
+}
+
+func effectiveLocalMutationActorTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	requestedActor string,
+) (string, error) {
 	var actor string
 	err := tx.QueryRowContext(ctx, `SELECT bound_actor FROM federation_bindings
 WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1`,

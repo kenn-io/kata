@@ -117,10 +117,17 @@ func (s *Store) RetryTransient(ctx context.Context, op func() error) error {
 // the meta table is absent), and closes the handle. Used by storeopen's
 // pre-Open schema-shape check.
 func PeekSchemaVersion(ctx context.Context, dsn string) (int, error) {
-	s, err := openInternal(ctx, dsn, Config{
-		Schema:     DefaultSchema,
-		SchemaMode: SchemaModeValidate,
-	}, true, true)
+	return PeekSchemaVersionWithConfig(ctx, dsn, DefaultConfig())
+}
+
+// PeekSchemaVersionWithConfig reads the version from the selected schema
+// without validating or mutating its lifecycle state.
+func PeekSchemaVersionWithConfig(ctx context.Context, dsn string, pgConfig Config) (int, error) {
+	pgConfig.SchemaMode = SchemaModeValidate
+	if err := pgConfig.Validate(); err != nil {
+		return 0, err
+	}
+	s, err := openInternal(ctx, dsn, pgConfig, true, true)
 	if err != nil {
 		return 0, err
 	}

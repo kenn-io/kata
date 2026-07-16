@@ -60,6 +60,20 @@ func KataDSN(ctx context.Context) (string, error) {
 	return filepath.Join(home, "kata.db"), nil
 }
 
+// KataPostgresStorageConfig returns the Postgres-specific [storage.postgres]
+// settings with environment overrides applied. It uses the same narrow
+// [storage]-only reader as KataDSN so unrelated daemon settings cannot block a
+// direct storage operation.
+func KataPostgresStorageConfig(ctx context.Context) (PostgresStorageConfig, error) {
+	_ = ctx
+	storage, err := readStorageConfig()
+	if err != nil {
+		return PostgresStorageConfig{}, err
+	}
+	applyPostgresStorageEnv(&storage.Postgres)
+	return storage.Postgres, nil
+}
+
 // validateDSN performs shape-only validation: it rejects unknown schemes,
 // scheme-less libpq keyword DSNs, and libpq query params on sqlite/bare DSNs,
 // and propagates the ambiguous-credentials probe from CanonicalDSNIdentity for

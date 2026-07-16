@@ -230,7 +230,6 @@ func (s *Store) CloseIssue(
 }
 
 // CloseIssueWithEvents returns the ordered event envelope for a close.
-// Claim-specific audit events join this envelope when claim storage lands.
 func (s *Store) CloseIssueWithEvents(
 	ctx context.Context,
 	issueID int64,
@@ -301,13 +300,25 @@ func (s *Store) CloseIssueWithEvents(
 			return err
 		}
 		events, changed = []db.Event{created}, true
+		auditEvents, err := s.annotateClaimWorkMutationTx(ctx, tx, claimWorkMutationInput{
+			Project: project, Issue: current, EventType: "issue.closed", Actor: actor,
+			HolderInstanceUID: s.InstanceUID(),
+		})
+		if err != nil {
+			return err
+		}
+		events = append(events, auditEvents...)
+		lastEventID := created.ID
+		if len(auditEvents) > 0 {
+			lastEventID = auditEvents[len(auditEvents)-1].ID
+		}
 		if reason == "done" && current.RecurrenceID != nil && current.OccurrenceKey != nil {
 			if _, err := s.materializeNextTx(
 				ctx, tx, *current.RecurrenceID, *current.OccurrenceKey, actor,
 			); err != nil {
 				return fmt.Errorf("materialize next recurrence: %w", err)
 			}
-			generated, err := eventsAfterTx(ctx, tx, created.ID)
+			generated, err := eventsAfterTx(ctx, tx, lastEventID)
 			if err != nil {
 				return fmt.Errorf("load recurrence materialization events: %w", err)
 			}

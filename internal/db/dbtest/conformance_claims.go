@@ -278,6 +278,44 @@ func checkClaimLeaseLifecycle(t *testing.T, store db.Storage) error {
 	assert.ErrorIs(t, err, db.ErrClaimExpired)
 	require.Len(t, expiredRelease.Events, 1)
 	assert.Equal(t, "system", expiredRelease.Events[0].Actor)
+
+	hubProject, err := store.CreateProject(ctx, "claim-close-hub-project")
+	if err != nil {
+		return err
+	}
+	if _, err := store.EnableProjectFederation(ctx, hubProject.ID, "operator"); err != nil {
+		return err
+	}
+	claimedIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: hubProject.ID, Title: "close releases claim", Author: "worker",
+	})
+	if err != nil {
+		return err
+	}
+	localPrincipal := db.ClaimPrincipal{
+		HolderInstanceUID: store.InstanceUID(), Holder: "worker", ClientKind: "agent",
+	}
+	if _, err := store.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: hubProject.ID, IssueRef: claimedIssue.UID, Principal: localPrincipal,
+		ClaimKind: "hard", Now: now.Add(21 * time.Hour),
+	}); err != nil {
+		return err
+	}
+	_, closeEvents, changed, err := store.CloseIssueWithEvents(
+		ctx, claimedIssue.ID, "done", "worker", "completed", nil,
+	)
+	if err != nil {
+		return err
+	}
+	assert.True(t, changed)
+	require.Len(t, closeEvents, 2)
+	assert.Equal(t, []string{"issue.closed", "claim.released"},
+		[]string{closeEvents[0].Type, closeEvents[1].Type})
+	claimStatus, err := store.ClaimStatusReadOnly(ctx, hubProject.ID, claimedIssue.UID, now.Add(22*time.Hour))
+	if err != nil {
+		return err
+	}
+	assert.False(t, claimStatus.Held)
 	return nil
 }
 

@@ -26,14 +26,29 @@ const (
 // deliberately a single restricted identifier rather than a raw search_path:
 // callers cannot add fallback schemas or inject startup SQL.
 type Config struct {
-	Schema     string
-	SchemaMode SchemaMode
+	Schema        string
+	SchemaMode    SchemaMode
+	AllowInsecure bool
 }
 
 // DefaultConfig is the standalone profile: a dedicated kata schema that is
 // installed on first open.
 func DefaultConfig() Config {
 	return Config{Schema: DefaultSchema, SchemaMode: SchemaModeBootstrap}
+}
+
+// ConfigFromValues converts operator-facing string settings into a complete
+// config. Empty values retain the standalone defaults.
+func ConfigFromValues(schema, mode string, allowInsecure bool) Config {
+	cfg := DefaultConfig()
+	if schema = strings.TrimSpace(schema); schema != "" {
+		cfg.Schema = schema
+	}
+	if mode = strings.TrimSpace(mode); mode != "" {
+		cfg.SchemaMode = SchemaMode(mode)
+	}
+	cfg.AllowInsecure = allowInsecure
+	return cfg
 }
 
 // Validate rejects ambiguous, ambient, and system schema names before a DSN

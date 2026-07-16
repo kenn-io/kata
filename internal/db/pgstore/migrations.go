@@ -5,16 +5,8 @@ import (
 	"fmt"
 )
 
-const baselineSchemaVersion = 23
-
-//go:embed migrations/0023_baseline.sql
-var baselineSchemaSQL string
-
-//go:embed migrations/0024_postgres_runtime.sql
-var postgresRuntimeSchemaSQL string
-
-//go:embed migrations/0025_federation_binding_authority.sql
-var federationBindingAuthoritySchemaSQL string
+//go:embed schema.sql
+var canonicalSchemaSQL string
 
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
@@ -26,29 +18,13 @@ type Migration struct {
 	SQL         string
 }
 
-var migrationAssets = []Migration{
-	{
-		FromVersion: 0,
-		ToVersion:   baselineSchemaVersion,
-		Name:        "0023_baseline.sql",
-		SQL:         baselineSchemaSQL,
-	},
-	{
-		FromVersion: baselineSchemaVersion,
-		ToVersion:   24,
-		Name:        "0024_postgres_runtime.sql",
-		SQL:         postgresRuntimeSchemaSQL,
-	},
-	{
-		FromVersion: 24,
-		ToVersion:   25,
-		Name:        "0025_federation_binding_authority.sql",
-		SQL:         federationBindingAuthoritySchemaSQL,
-	},
-}
+// migrationAssets begins at the first schema version released with Postgres
+// support. The first release installs canonicalSchemaSQL directly, so there
+// is no historical Postgres database to upgrade in this branch.
+var migrationAssets = []Migration{}
 
-// Migrations returns the ordered Postgres migration assets. The returned
-// slice is detached from the package registry.
+// Migrations returns forward migrations from previously released Postgres
+// schema versions. The returned slice is detached from the package registry.
 func Migrations() []Migration {
 	return append([]Migration(nil), migrationAssets...)
 }

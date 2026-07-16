@@ -14,6 +14,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   or a `postgres://` / `postgresql://` URL. Postgres now implements the complete
   storage contract, including federation, claims, external import, JSONL
   replay, lexical search, daemon startup, export, and atomic snapshot restore.
+- Added `kata storage postgres migrate` and `status`, plus validation-only
+  runtime configuration, so production deployments can separate schema-owner
+  and serving credentials.
 
 **Improvements**
 
@@ -22,6 +25,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added Postgres JSONL restore targets. Fresh restores install the dedicated
   `kata` schema; `--force` atomically replaces existing kata-owned state, and
   failed first restores remove only an unchanged fresh schema.
+- Established the first released Postgres schema as the migration floor rather
+  than retaining migrations for development-only versions that never shipped.
+- Required server-identity-verified TLS for every remote Postgres connection
+  candidate, with a separately configured lab-only insecure opt-in.
+- Added a dedicated PostgreSQL CI service job that cannot silently skip backend
+  conformance and operator-ceremony tests when Docker discovery is unavailable.
 
 ## 0.10.0
 <small>2026-07-11</small>

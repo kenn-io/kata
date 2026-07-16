@@ -23,6 +23,13 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		if err != nil {
 			return err
 		}
+		if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
+		effectiveActor, err := effectiveLocalMutationActorTx(ctx, tx, project.ID, params.Author)
+		if err != nil {
+			return err
+		}
 		commentUID, err := katauid.New()
 		if err != nil {
 			return fmt.Errorf("generate comment uid: %w", err)
@@ -32,7 +39,7 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			`INSERT INTO comments(uid, issue_id, author, body, created_at)
 			 VALUES($1,$2,$3,$4,$5)
 			 RETURNING id, uid, issue_id, author, body, created_at`,
-			commentUID, issue.ID, params.Author, params.Body, createdAt,
+			commentUID, issue.ID, effectiveActor, params.Body, createdAt,
 		))
 		if err != nil {
 			return err
@@ -56,7 +63,7 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			return fmt.Errorf("marshal comment payload: %w", err)
 		}
 		event, err = s.insertEventTx(ctx, tx,
-			issueEventInput(issue, project, "issue.commented", params.Author, string(payload)))
+			issueEventInput(issue, project, "issue.commented", effectiveActor, string(payload)))
 		return err
 	})
 	return comment, event, err
