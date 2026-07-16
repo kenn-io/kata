@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -60,8 +61,8 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 	reconciler := daemon.NewReconciler(store, index, embedder, daemon.ReconcilerConfig{
 		BatchSize:  64,
 		SweepEvery: time.Hour,
-		MinBackoff: 10 * time.Millisecond,
-		MaxBackoff: 50 * time.Millisecond,
+		MinBackoff: 50 * time.Millisecond,
+		MaxBackoff: 2 * time.Second,
 	})
 	done := make(chan error, 1)
 	go func() { done <- reconciler.Run(ctx) }()
@@ -75,45 +76,50 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 		}
 	})
 
-	var originalPID int
+	var currentPID int
 	require.Eventually(t, func() bool {
 		return store.QueryRowContext(ctx, `
 			SELECT pid FROM pg_catalog.pg_locks
 			WHERE locktype = 'advisory' AND granted
 			  AND classid = (hashtext(current_database())::bigint & 4294967295)
 			  AND objid = (hashtext('kata:vector:reconciler:' || current_schema())::bigint & 4294967295)
-			LIMIT 1`).Scan(&originalPID) == nil
+			LIMIT 1`).Scan(&currentPID) == nil
 	}, 5*time.Second, 10*time.Millisecond, "reconciler did not acquire its initial lease")
 	require.Eventually(t, func() bool {
 		var mirrored int
 		return store.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_mirror`).Scan(&mirrored) == nil && mirrored == 1
 	}, 5*time.Second, 10*time.Millisecond, "initial vector reconciliation did not complete")
 
-	var terminated bool
-	require.NoError(t, store.QueryRowContext(ctx,
-		`SELECT pg_terminate_backend($1)`, originalPID).Scan(&terminated))
-	require.True(t, terminated)
-	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID,
-		Title:     "second",
-		Body:      "second body",
-		Author:    "tester",
-	})
-	require.NoError(t, err)
-	reconciler.Wake()
+	for cycle := 1; cycle <= 5; cycle++ {
+		previousPID := currentPID
+		var terminated bool
+		require.NoError(t, store.QueryRowContext(ctx,
+			`SELECT pg_terminate_backend($1)`, previousPID).Scan(&terminated))
+		require.True(t, terminated)
+		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID,
+			Title:     fmt.Sprintf("cycle %d", cycle),
+			Body:      "recovery body",
+			Author:    "tester",
+		})
+		require.NoError(t, err)
+		reconciler.Wake()
 
-	require.Eventually(t, func() bool {
-		var currentPID int
-		err := store.QueryRowContext(ctx, `
-			SELECT pid FROM pg_catalog.pg_locks
-			WHERE locktype = 'advisory' AND granted
-			  AND classid = (hashtext(current_database())::bigint & 4294967295)
-			  AND objid = (hashtext('kata:vector:reconciler:' || current_schema())::bigint & 4294967295)
-			LIMIT 1`).Scan(&currentPID)
-		return err == nil && currentPID != originalPID
-	}, 5*time.Second, 10*time.Millisecond, "reconciler did not reacquire leadership on a new session")
-	require.Eventually(t, func() bool {
-		var mirrored int
-		return store.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_mirror`).Scan(&mirrored) == nil && mirrored == 2
-	}, 5*time.Second, 10*time.Millisecond, "reconciler did not process work after reacquiring leadership")
+		started := time.Now()
+		require.Eventually(t, func() bool {
+			err := store.QueryRowContext(ctx, `
+				SELECT pid FROM pg_catalog.pg_locks
+				WHERE locktype = 'advisory' AND granted
+				  AND classid = (hashtext(current_database())::bigint & 4294967295)
+				  AND objid = (hashtext('kata:vector:reconciler:' || current_schema())::bigint & 4294967295)
+				LIMIT 1`).Scan(&currentPID)
+			return err == nil && currentPID != previousPID
+		}, 5*time.Second, 10*time.Millisecond, "cycle %d did not reacquire leadership", cycle)
+		require.Eventually(t, func() bool {
+			var mirrored int
+			return store.QueryRowContext(ctx, `SELECT count(*) FROM issue_vector_mirror`).Scan(&mirrored) == nil && mirrored == cycle+1
+		}, 5*time.Second, 10*time.Millisecond, "cycle %d did not reconcile after reacquiring leadership", cycle)
+		require.Less(t, time.Since(started), 350*time.Millisecond,
+			"healthy leadership periods must reset retry backoff before the next lease loss")
+	}
 }

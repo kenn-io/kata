@@ -18,6 +18,9 @@ func ValidateImportBatch(params ImportBatchParams) error {
 		if strings.TrimSpace(item.ExternalID) == "" || strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.Author) == "" {
 			return fmt.Errorf("%w: external_id, title, and author are required", ErrImportValidation)
 		}
+		if strings.ContainsRune(item.Title, '\x00') {
+			return fmt.Errorf("%w: title must not contain NUL bytes", ErrImportValidation)
+		}
 		if item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() {
 			return fmt.Errorf("%w: created_at and updated_at are required", ErrImportValidation)
 		}

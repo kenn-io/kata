@@ -150,8 +150,7 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	firstStore, err := pgstore.Open(ctx, dsn)
@@ -178,6 +177,8 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 	secondServer := httptest.NewServer(secondDaemon.Handler())
 	t.Cleanup(secondServer.Close)
 
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	const requestCount = 16
 	start := make(chan struct{})
 	results := make(chan concurrentCreateResult, requestCount)
@@ -192,7 +193,7 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 			ready.Done()
 			<-start
 			key := fmt.Sprintf("distinct-request-%02d", i)
-			results <- postConcurrentCreateWithKey(ctx, baseURL, project.ID, key, key)
+			results <- postConcurrentCreateWithKey(requestCtx, baseURL, project.ID, key, key)
 		}()
 	}
 	ready.Wait()

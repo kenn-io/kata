@@ -137,6 +137,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	for {
 		release, err := r.idx.AcquireReconcilerLease(ctx)
 		if err == nil {
+			backoff = r.cfg.MinBackoff
 			err = r.runLeader(ctx)
 			err = errors.Join(err, release())
 		}

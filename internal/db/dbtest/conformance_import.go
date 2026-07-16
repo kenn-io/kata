@@ -532,6 +532,19 @@ func checkImportValidationAndWriteGate(ctx context.Context, t *testing.T, store 
 	assert.ErrorIs(t, err, db.ErrImportValidation)
 	_, _, err = store.ImportBatch(ctx, db.ImportBatchParams{
 		ProjectID: project.ID, Source: "tracker", Actor: "import-agent",
+		Items: []db.ImportItem{{
+			ExternalID: "invalid-title", Title: "before\x00after", Author: "alice",
+			Status: "open", CreatedAt: at, UpdatedAt: at,
+		}},
+	})
+	assert.ErrorIs(t, err, db.ErrImportValidation)
+	issues, listErr := store.ListIssues(ctx, db.ListIssuesParams{ProjectID: project.ID, Limit: 100})
+	if listErr != nil {
+		return listErr
+	}
+	assert.Empty(t, issues, "a rejected import must not persist its invalid issue")
+	_, _, err = store.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: project.ID, Source: "tracker", Actor: "import-agent",
 		Items: []db.ImportItem{
 			{ExternalID: "one", Title: "One", Author: "alice", Status: "open", CreatedAt: at, UpdatedAt: at,
 				Comments: []db.ImportComment{{ExternalID: "duplicate", Author: "alice", Body: "one", CreatedAt: at}}},
