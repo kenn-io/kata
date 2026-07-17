@@ -17,13 +17,22 @@ func (s *Store) ImportReplay(ctx context.Context, records []db.ImportRecord, opt
 	if err := db.ValidateImportRecords(records); err != nil {
 		return err
 	}
+	var finalInstanceUID string
 	err := s.withTx(ctx, sql.LevelReadCommitted, func(tx *sql.Tx) error {
-		return s.importReplayTx(ctx, tx, db.OrderImportRecords(records), opts)
+		if err := s.importReplayTx(ctx, tx, db.OrderImportRecords(records), opts); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx,
+			`SELECT value FROM meta WHERE key='instance_uid'`).Scan(&finalInstanceUID); err != nil {
+			return fmt.Errorf("read restored instance_uid: %w", mapSQLError(err, nil))
+		}
+		return nil
 	})
 	if err != nil {
 		return err
 	}
-	return s.RefreshInstanceUID(ctx)
+	s.instanceUID = finalInstanceUID
+	return nil
 }
 
 type replayLinkSkip int

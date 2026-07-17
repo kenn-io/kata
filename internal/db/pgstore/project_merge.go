@@ -86,7 +86,6 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 			{`UPDATE issues SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
 			{`UPDATE issue_claims SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
 			{`UPDATE pending_claim_requests SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
-			{`UPDATE events SET project_id = $1, project_name = $2 WHERE project_id = $3`, []any{target.ID, target.Name, source.ID}},
 			{`UPDATE purge_log SET project_id = $1, project_uid = $2, project_name = $3 WHERE project_id = $4`, []any{target.ID, target.UID, target.Name, source.ID}},
 			{`UPDATE import_mappings SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
 			{`UPDATE project_aliases SET project_id = $1 WHERE project_id = $2`, []any{target.ID, source.ID}},
@@ -95,6 +94,19 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 			if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
 				return mapSQLError(err, nil)
 			}
+		}
+		rows, err := tx.QueryContext(ctx,
+			`UPDATE events SET project_id = $1, project_name = $2 WHERE project_id = $3 RETURNING id`,
+			target.ID, target.Name, source.ID)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		movedEventIDs, err := collectEventIDs(rows)
+		if err != nil {
+			return err
+		}
+		if err := recomputeEventContentHashesTx(ctx, tx, movedEventIDs); err != nil {
+			return err
 		}
 		if params.TargetName != nil {
 			if _, err := tx.ExecContext(ctx, `UPDATE projects SET name = $1 WHERE id = $2`, *params.TargetName, target.ID); err != nil {

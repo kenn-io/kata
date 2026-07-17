@@ -328,6 +328,11 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("list events after project merge: %w", err)
 	}
 	assert.Len(t, events, 4)
+	for _, event := range events {
+		if _, _, err := db.ValidateRemoteEventContentHash(remoteEventFromStored(event)); err != nil {
+			return fmt.Errorf("validate merged event %s for federation: %w", event.UID, err)
+		}
+	}
 
 	collisionSource, err := store.CreateProject(ctx, "merge-collision-source")
 	if err != nil {
