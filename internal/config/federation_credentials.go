@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -37,6 +38,47 @@ type FederationCredentialMetadata struct {
 	AllowInsecure bool
 }
 
+// FederationCredentialStore isolates secret-bearing federation credentials
+// from the database and from other service instances in the same process.
+type FederationCredentialStore interface {
+	FederationCredential(context.Context, string) (FederationCredential, bool, error)
+	StoreFederationCredential(context.Context, string, FederationCredential) error
+	DeleteFederationCredential(context.Context, string) error
+}
+
+// homeFederationCredentialStore uses the standalone daemon's
+// <KATA_HOME>/credentials.toml file.
+type homeFederationCredentialStore struct{}
+
+func (homeFederationCredentialStore) FederationCredential(
+	_ context.Context, projectUID string,
+) (FederationCredential, bool, error) {
+	credentials, err := ReadFederationCredentials()
+	if err != nil {
+		return FederationCredential{}, false, err
+	}
+	credential, ok := credentials.Projects[projectUID]
+	return credential, ok, nil
+}
+
+func (homeFederationCredentialStore) StoreFederationCredential(
+	_ context.Context, projectUID string, credential FederationCredential,
+) error {
+	return WriteFederationCredential(projectUID, credential)
+}
+
+func (homeFederationCredentialStore) DeleteFederationCredential(
+	_ context.Context, projectUID string,
+) error {
+	return DeleteFederationCredential(projectUID)
+}
+
+// DefaultFederationCredentialStore returns the standalone daemon credential
+// store. Embedded services supply their own isolated store.
+func DefaultFederationCredentialStore() FederationCredentialStore {
+	return homeFederationCredentialStore{}
+}
+
 // ReadFederationCredentials reads <KATA_HOME>/credentials.toml. Missing files
 // return an empty credential set.
 func ReadFederationCredentials() (*FederationCredentials, error) {
@@ -64,11 +106,17 @@ func ReadFederationCredentials() (*FederationCredentials, error) {
 // FederationCredentialMetadataFor returns redacted federation credential
 // metadata for projectUID without exposing the stored token.
 func FederationCredentialMetadataFor(projectUID string) FederationCredentialMetadata {
-	creds, err := ReadFederationCredentials()
+	return FederationCredentialMetadataFromStore(context.Background(), DefaultFederationCredentialStore(), projectUID)
+}
+
+// FederationCredentialMetadataFromStore returns redacted metadata from store.
+func FederationCredentialMetadataFromStore(
+	ctx context.Context, store FederationCredentialStore, projectUID string,
+) FederationCredentialMetadata {
+	c, ok, err := store.FederationCredential(ctx, projectUID)
 	if err != nil {
 		return FederationCredentialMetadata{Status: "unreadable"}
 	}
-	c, ok := creds.Projects[projectUID]
 	if !ok {
 		return FederationCredentialMetadata{Status: "missing"}
 	}

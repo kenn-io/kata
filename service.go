@@ -84,8 +84,11 @@ type Config struct {
 	Postgres   PostgresConfig
 	Auth       AuthConfig
 	GitHubSync GitHubSyncConfig
-	StartedAt  time.Time
-	Logger     *slog.Logger
+	// FederationCredentials isolates secret material from other Service
+	// instances. Nil selects a service-owned in-memory store.
+	FederationCredentials FederationCredentialStore
+	StartedAt             time.Time
+	Logger                *slog.Logger
 }
 
 type serviceDeps struct {
@@ -95,17 +98,18 @@ type serviceDeps struct {
 
 // Service is a mountable Kata HTTP application and its owned lifecycle.
 type Service struct {
-	store             db.Storage
-	server            *daemon.Server
-	broadcaster       *daemon.EventBroadcaster
-	hookSink          hooks.Sink
-	federationWake    chan struct{}
-	gitHubSyncWake    chan struct{}
-	gitHubSyncFetcher githubsync.Fetcher
-	logger            *slog.Logger
-	lifetimeCtx       context.Context
-	lifetimeCancel    context.CancelFunc
-	handlerWG         sync.WaitGroup
+	store                 db.Storage
+	server                *daemon.Server
+	broadcaster           *daemon.EventBroadcaster
+	hookSink              hooks.Sink
+	federationWake        chan struct{}
+	gitHubSyncWake        chan struct{}
+	gitHubSyncFetcher     githubsync.Fetcher
+	federationCredentials config.FederationCredentialStore
+	logger                *slog.Logger
+	lifetimeCtx           context.Context
+	lifetimeCancel        context.CancelFunc
+	handlerWG             sync.WaitGroup
 
 	mu        sync.Mutex
 	running   bool
@@ -136,6 +140,11 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if err != nil {
 		return nil, fmt.Errorf("kata: GitHub sync config: %w", err)
 	}
+	publicFederationCredentials := cfg.FederationCredentials
+	if publicFederationCredentials == nil {
+		publicFederationCredentials = newMemoryFederationCredentialStore()
+	}
+	federationCredentials := serviceCredentialStoreAdapter{store: publicFederationCredentials}
 
 	openCfg := storeopen.DefaultConfig()
 	pgCfg := cfg.Postgres
@@ -188,30 +197,32 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		gitHubSyncFetcher = factory(gitHubSyncConfig)
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
-		DB:                store,
-		StartedAt:         startedAt,
-		Broadcaster:       broadcaster,
-		FederationWake:    wakeFederation,
-		GitHubSyncFetcher: gitHubSyncFetcher,
-		GitHubSyncConfig:  gitHubSyncConfig,
-		GitHubSyncWake:    wakeGitHubSync,
-		Hooks:             hookSink,
-		Auth:              config.AuthConfig{Token: cfg.Auth.Token},
-		Logger:            logger,
+		DB:                    store,
+		StartedAt:             startedAt,
+		Broadcaster:           broadcaster,
+		FederationWake:        wakeFederation,
+		FederationCredentials: federationCredentials,
+		GitHubSyncFetcher:     gitHubSyncFetcher,
+		GitHubSyncConfig:      gitHubSyncConfig,
+		GitHubSyncWake:        wakeGitHubSync,
+		Hooks:                 hookSink,
+		Auth:                  config.AuthConfig{Token: cfg.Auth.Token},
+		Logger:                logger,
 	})
 
 	return &Service{
-		store:             store,
-		server:            server,
-		broadcaster:       broadcaster,
-		hookSink:          hookSink,
-		federationWake:    federationWake,
-		gitHubSyncWake:    gitHubSyncWake,
-		gitHubSyncFetcher: gitHubSyncFetcher,
-		logger:            logger,
-		lifetimeCtx:       lifetimeCtx,
-		lifetimeCancel:    lifetimeCancel,
-		closeDone:         make(chan struct{}),
+		store:                 store,
+		server:                server,
+		broadcaster:           broadcaster,
+		hookSink:              hookSink,
+		federationWake:        federationWake,
+		gitHubSyncWake:        gitHubSyncWake,
+		gitHubSyncFetcher:     gitHubSyncFetcher,
+		federationCredentials: federationCredentials,
+		logger:                logger,
+		lifetimeCtx:           lifetimeCtx,
+		lifetimeCancel:        lifetimeCancel,
+		closeDone:             make(chan struct{}),
 	}, nil
 }
 
@@ -313,9 +324,10 @@ func (s *Service) Run(ctx context.Context) error {
 
 	workerErrs := make(chan error, 3)
 	runner := &federation.Runner{
-		DB:       s.store,
-		Interval: 30 * time.Second,
-		Wake:     s.federationWake,
+		DB:          s.store,
+		Credentials: s.federationCredentials,
+		Interval:    30 * time.Second,
+		Wake:        s.federationWake,
 		OnError: func(err error) {
 			s.logger.Error("kata federation worker", "err", err)
 		},

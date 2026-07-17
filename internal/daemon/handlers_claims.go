@@ -163,7 +163,7 @@ func handleClaimAcquire(
 		}
 		return claimResultBody(result), nil
 	}
-	remote, cred, err := claimForwardClient(ctx, cfg.DB, binding)
+	remote, cred, err := claimForwardClient(ctx, cfg, binding)
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
 	}
@@ -226,7 +226,7 @@ func handleClaimRenew(
 		emitClaimEvents(cfg, result.Events)
 		return claimResultBody(result), nil
 	}
-	remote, cred, err := claimForwardClient(ctx, cfg.DB, binding)
+	remote, cred, err := claimForwardClient(ctx, cfg, binding)
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
 	}
@@ -271,7 +271,7 @@ func handleClaimRelease(
 		emitClaimEvent(cfg, projectID, result.Event)
 		return claimResultBody(result), nil
 	}
-	remote, cred, err := claimForwardClient(ctx, cfg.DB, binding)
+	remote, cred, err := claimForwardClient(ctx, cfg, binding)
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
 	}
@@ -298,7 +298,7 @@ func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, r
 		emitClaimEvents(cfg, status.Events)
 		return claimStatusBody(status), nil
 	}
-	remote, cred, err := claimForwardClient(ctx, cfg.DB, binding)
+	remote, cred, err := claimForwardClient(ctx, cfg, binding)
 	if err != nil {
 		return api.ClaimStatusBody{}, err
 	}
@@ -354,18 +354,17 @@ func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPr
 
 func claimForwardClient(
 	ctx context.Context,
-	store db.Storage,
+	cfg ServerConfig,
 	binding db.FederationBinding,
 ) (*claimHubClient, config.FederationCredential, error) {
-	project, err := store.ProjectByID(ctx, binding.ProjectID)
+	project, err := cfg.DB.ProjectByID(ctx, binding.ProjectID)
 	if err != nil {
 		return nil, config.FederationCredential{}, claimAPIError(err)
 	}
-	creds, err := config.ReadFederationCredentials()
+	cred, _, err := cfg.federationCredentialStore().FederationCredential(ctx, project.UID)
 	if err != nil {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 	}
-	cred := creds.Projects[project.UID]
 	if strings.TrimSpace(cred.Token) == "" {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation claim credentials are unavailable", "", nil)
 	}
@@ -790,7 +789,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	} else if skip {
 		return nil, nil
 	}
-	remote, cred, err := claimForwardClient(ctx, cfg.DB, binding)
+	remote, cred, err := claimForwardClient(ctx, cfg, binding)
 	if err != nil {
 		if isOfflineClaimRefreshError(err) {
 			return nil, nil

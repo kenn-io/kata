@@ -89,7 +89,7 @@ func refreshSpokeClaimStatusForGate(
 	binding db.FederationBinding,
 	issue db.Issue,
 ) error {
-	remote, cred, err := claimForwardClient(ctx, cfg.DB, binding)
+	remote, cred, err := claimForwardClient(ctx, cfg, binding)
 	if err != nil {
 		if isOfflineClaimRefreshError(err) {
 			return nil

@@ -57,7 +57,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/federation/status",
 	}, func(ctx context.Context, in *api.FederationStatusRequest) (*api.FederationStatusResponse, error) {
-		body, err := federationStatusBody(ctx, cfg.DB, nil, includeContains(in.Include, "archived"))
+		body, err := federationStatusBody(ctx, cfg.DB, cfg.federationCredentialStore(), nil, includeContains(in.Include, "archived"))
 		if err != nil {
 			return nil, err
 		}
@@ -69,7 +69,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/federation/status",
 	}, func(ctx context.Context, in *api.ProjectFederationStatusRequest) (*api.FederationStatusResponse, error) {
-		body, err := federationStatusBody(ctx, cfg.DB, &in.ProjectID, false)
+		body, err := federationStatusBody(ctx, cfg.DB, cfg.federationCredentialStore(), &in.ProjectID, false)
 		if err != nil {
 			return nil, err
 		}
@@ -258,7 +258,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(400, "federation_capability_mismatch", "push-enabled federation replica credentials require push capability", "", nil)
 		}
 		if in.Body.Token != "" {
-			if err := config.WriteFederationCredential(project.UID, config.FederationCredential{
+			if err := cfg.federationCredentialStore().StoreFederationCredential(ctx, project.UID, config.FederationCredential{
 				HubURL:        in.Body.HubURL,
 				HubProjectID:  in.Body.HubProjectID,
 				Token:         in.Body.Token,
@@ -400,7 +400,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// response must not claim a detach happened.
 		body.Detached = res.Role == db.FederationRoleSpoke
 		if res.ProjectUID != "" {
-			if err := config.DeleteFederationCredential(res.ProjectUID); err != nil {
+			if err := cfg.federationCredentialStore().DeleteFederationCredential(ctx, res.ProjectUID); err != nil {
 				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 			}
 		}
@@ -867,14 +867,20 @@ func federationEnrollmentToOut(enrollment db.FederationEnrollment, token string)
 	}
 }
 
-func federationStatusBody(ctx context.Context, store db.Storage, projectID *int64, includeArchived bool) (api.FederationStatusBody, error) {
+func federationStatusBody(
+	ctx context.Context,
+	store db.Storage,
+	credentialStore config.FederationCredentialStore,
+	projectID *int64,
+	includeArchived bool,
+) (api.FederationStatusBody, error) {
 	bindings, err := federationStatusBindings(ctx, store, projectID)
 	if err != nil {
 		return api.FederationStatusBody{}, err
 	}
 	out := api.FederationStatusBody{Statuses: make([]api.FederationProjectStatus, 0, len(bindings))}
 	for _, binding := range bindings {
-		status, err := federationProjectStatus(ctx, store, binding, includeArchived)
+		status, err := federationProjectStatus(ctx, store, credentialStore, binding, includeArchived)
 		if err != nil {
 			if projectID == nil && isProjectNotFound(err) {
 				continue
@@ -915,7 +921,13 @@ func federationStatusBindings(ctx context.Context, store db.Storage, projectID *
 	return []db.FederationBinding{binding}, nil
 }
 
-func federationProjectStatus(ctx context.Context, store db.Storage, binding db.FederationBinding, includeArchived bool) (api.FederationProjectStatus, error) {
+func federationProjectStatus(
+	ctx context.Context,
+	store db.Storage,
+	credentialStore config.FederationCredentialStore,
+	binding db.FederationBinding,
+	includeArchived bool,
+) (api.FederationProjectStatus, error) {
 	project, err := activeProjectByID(ctx, store, binding.ProjectID)
 	if includeArchived && isProjectNotFound(err) {
 		// include=archived: an archived project's binding is still real —
@@ -962,7 +974,7 @@ func federationProjectStatus(ctx context.Context, store db.Storage, binding db.F
 	}
 	var credentialMetadata config.FederationCredentialMetadata
 	if binding.Role == db.FederationRoleSpoke {
-		credentialMetadata = config.FederationCredentialMetadataFor(project.UID)
+		credentialMetadata = config.FederationCredentialMetadataFromStore(ctx, credentialStore, project.UID)
 	}
 	// The credential's allow_insecure is only meaningful for the hub it was
 	// recorded for: a stale credential from an older enrollment (e.g. a

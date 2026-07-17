@@ -35,6 +35,7 @@ type ServerConfig struct {
 	Endpoint                 *kitdaemon.Endpoint
 	Broadcaster              *EventBroadcaster
 	FederationWake           func()
+	FederationCredentials    config.FederationCredentialStore
 	GitHubSyncFetcher        githubsync.Fetcher
 	GitHubSyncConfig         config.GitHubSyncConfig
 	GitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
@@ -87,6 +88,13 @@ func (c ServerConfig) authPolicy() authPolicy {
 	}
 }
 
+func (c ServerConfig) federationCredentialStore() config.FederationCredentialStore {
+	if c.FederationCredentials != nil {
+		return c.FederationCredentials
+	}
+	return config.DefaultFederationCredentialStore()
+}
+
 // CloseThrottlePolicy is the runtime form of [close.throttle] in
 // <KATA_HOME>/config.toml.
 type CloseThrottlePolicy struct {
@@ -137,6 +145,9 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	if cfg.Hooks == nil {
 		cfg.Hooks = hooks.NewNoop()
+	}
+	if cfg.FederationCredentials == nil {
+		cfg.FederationCredentials = config.DefaultFederationCredentialStore()
 	}
 
 	mux := http.NewServeMux()

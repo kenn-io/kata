@@ -718,6 +718,7 @@ func remoteEventFromEnvelope(ev api.EventEnvelope) db.RemoteEvent {
 // Runner quietly pulls every enabled spoke binding.
 type Runner struct {
 	DB             db.Storage
+	Credentials    config.FederationCredentialStore
 	Opts           clientpkg.Opts
 	Interval       time.Duration
 	Wake           <-chan struct{}
@@ -778,20 +779,9 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 	if len(spokes) == 0 {
 		return nil
 	}
-	creds, err := config.ReadFederationCredentials()
-	if err != nil {
-		var errs []error
-		errs = append(errs, err)
-		for _, spoke := range spokes {
-			if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
-				return leaseErr
-			}
-			binding := spoke.binding
-			if recordErr := r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()); recordErr != nil {
-				errs = append(errs, recordErr)
-			}
-		}
-		return errors.Join(errs...)
+	credentialStore := r.Credentials
+	if credentialStore == nil {
+		credentialStore = config.DefaultFederationCredentialStore()
 	}
 	var errs []error
 	for _, spoke := range spokes {
@@ -801,7 +791,14 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 		binding := spoke.binding
 		bindingErrs := len(errs)
 		project := spoke.project
-		cred := creds.Projects[project.UID]
+		cred, _, credentialErr := credentialStore.FederationCredential(ctx, project.UID)
+		if credentialErr != nil {
+			errs = append(errs, credentialErr)
+			if recordErr := r.DB.RecordFederationSyncError(ctx, binding.ProjectID, credentialErr, time.Now().UTC()); recordErr != nil {
+				errs = append(errs, recordErr)
+			}
+			continue
+		}
 		if cred.HubURL == "" {
 			cred.HubURL = binding.HubURL
 		}
