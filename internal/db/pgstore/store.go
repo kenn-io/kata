@@ -37,6 +37,7 @@ type Store struct {
 	readOnly             bool
 	installedFreshSchema bool
 	servingConn          *sql.Conn
+	federationLease      *federationRunnerLeaseState
 	idempotencyDB        *sql.DB
 	exportQ              exportQueryer
 }

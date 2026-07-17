@@ -689,6 +689,7 @@ type Runner struct {
 
 type runnerLeaseStore interface {
 	AcquireFederationRunnerLease(context.Context) (func() error, error)
+	ValidateFederationRunnerLease(context.Context) error
 }
 
 func (r *Runner) clientOpts() clientpkg.Opts {
@@ -932,19 +933,27 @@ func issueClaimFromAPI(claim *api.IssueClaimOut) db.IssueClaim {
 // runner per database/schema pair before any pull work begins; SQLite remains
 // process-local and needs no cross-daemon lease.
 func (r *Runner) Run(ctx context.Context) (runErr error) {
-	if store, ok := r.DB.(runnerLeaseStore); ok {
+	store, ok := r.DB.(runnerLeaseStore)
+	if !ok {
+		return r.run(ctx, nil)
+	}
+	for {
 		release, err := store.AcquireFederationRunnerLease(ctx)
 		if err != nil {
 			return err
 		}
-		defer func() {
-			runErr = errors.Join(runErr, release())
-		}()
+		runErr = r.run(ctx, store.ValidateFederationRunnerLease)
+		releaseErr := release()
+		if ctx.Err() != nil {
+			return errors.Join(ctx.Err(), releaseErr)
+		}
+		if leadershipErr := errors.Join(runErr, releaseErr); leadershipErr != nil && r.OnError != nil {
+			r.OnError(fmt.Errorf("federation runner leadership: %w", leadershipErr))
+		}
 	}
-	return r.run(ctx)
 }
 
-func (r *Runner) run(ctx context.Context) error {
+func (r *Runner) run(ctx context.Context, validateLease func(context.Context) error) error {
 	interval := r.Interval
 	if interval <= 0 {
 		interval = 30 * time.Second
@@ -956,6 +965,11 @@ func (r *Runner) run(ctx context.Context) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		if validateLease != nil {
+			if err := validateLease(ctx); err != nil {
+				return err
+			}
+		}
 		if err := r.RunOnce(ctx); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
