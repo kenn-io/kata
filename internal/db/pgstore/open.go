@@ -270,7 +270,14 @@ func (s *Store) prepareSchema(ctx context.Context, mode SchemaMode) (bool, error
 	if mode == SchemaModeValidate {
 		return false, s.validateSchema(ctx)
 	}
-	return s.bootstrap(ctx)
+	installedFresh, err := s.bootstrap(ctx)
+	if err != nil {
+		return false, err
+	}
+	if err := s.validateSchema(ctx); err != nil {
+		return installedFresh, err
+	}
+	return installedFresh, nil
 }
 
 // bootstrap serializes schema installation with a transaction-scoped advisory

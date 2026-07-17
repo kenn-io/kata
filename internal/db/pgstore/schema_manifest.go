@@ -14,6 +14,7 @@ const (
 	canonicalConstraintFingerprint = "3867e088c3ab4395d517d0788ffa658f589164b6b6bd68541fde3d648cd29363"
 	canonicalIndexFingerprint      = "3a9b60f05ac5c8064a0e61d867fed7ae3c9e0fa7b345bd3236e3300273801dac"
 	canonicalTriggerFingerprint    = "34f80f8e2b61c6cb1705bb8effb1548164e91f181fb58b68cf929ac90a190154"
+	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
 )
 
 var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
@@ -107,7 +108,10 @@ func (s *Store) validateSchemaManifest(ctx context.Context) error {
 	if err := s.validateCanonicalTriggers(ctx); err != nil {
 		return err
 	}
-	return s.validateCanonicalFunctions(ctx)
+	if err := s.validateCanonicalFunctions(ctx); err != nil {
+		return err
+	}
+	return s.validateCanonicalTextSearch(ctx)
 }
 
 func (s *Store) validateCanonicalColumns(ctx context.Context) error {
@@ -310,4 +314,40 @@ func (s *Store) validateCanonicalFunctions(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) validateCanonicalTextSearch(ctx context.Context) error {
+	rows, err := s.QueryContext(ctx, `
+		SELECT c.cfgname, parser_ns.nspname || '.' || parser.prsname,
+		       token.alias, mapping.mapseqno,
+		       dictionary_ns.nspname || '.' || dictionary.dictname
+		  FROM pg_catalog.pg_ts_config c
+		  JOIN pg_catalog.pg_namespace config_ns ON config_ns.oid = c.cfgnamespace
+		  JOIN pg_catalog.pg_ts_parser parser ON parser.oid = c.cfgparser
+		  JOIN pg_catalog.pg_namespace parser_ns ON parser_ns.oid = parser.prsnamespace
+		  JOIN pg_catalog.pg_ts_config_map mapping ON mapping.mapcfg = c.oid
+		  JOIN LATERAL pg_catalog.ts_token_type(c.cfgparser) token
+		    ON token.tokid = mapping.maptokentype
+		  JOIN pg_catalog.pg_ts_dict dictionary ON dictionary.oid = mapping.mapdict
+		  JOIN pg_catalog.pg_namespace dictionary_ns ON dictionary_ns.oid = dictionary.dictnamespace
+		 WHERE config_ns.nspname = $1 AND c.cfgname = 'kata_simple_unaccent'`, s.schema)
+	if err != nil {
+		return fmt.Errorf("inspect postgres schema %q text search definitions: %w", s.schema, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var records []string
+	for rows.Next() {
+		var config, parser, token, dictionary string
+		var sequence int
+		if err := rows.Scan(&config, &parser, &token, &sequence, &dictionary); err != nil {
+			return fmt.Errorf("scan postgres schema %q text search definition: %w", s.schema, err)
+		}
+		records = append(records, strings.Join([]string{
+			"TEXT_SEARCH", config, parser, token, strconv.Itoa(sequence), dictionary,
+		}, "\x00"))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate postgres schema %q text search definitions: %w", s.schema, err)
+	}
+	return validateCatalogFingerprint(s.schema, "text search", records, canonicalTextSearchFingerprint)
 }

@@ -138,12 +138,13 @@ canonical relations, functions, operators, types, and text-search configuration
 belong to that role before reading application tables, and rejects schema
 `CREATE` grants to non-owner roles. A canonical catalog fingerprint verifies
 column types and nullability, constraint expressions, index definitions and
-validity, and trigger definitions and enabled state; required function
-signatures are checked separately. PostgreSQL's version-specific catalog-only
-NOT NULL records are excluded from the application constraint fingerprint. The
-schema must exist at the binary's exact version and validation performs no DDL.
-Missing, older, newer, unversioned, differently owned, incomplete, or
-row-security-enabled schemas fail closed.
+validity, trigger definitions and enabled state, and the text-search parser and
+dictionary mappings; required function signatures are checked separately.
+PostgreSQL's version-specific catalog-only NOT NULL records are excluded from
+the application constraint fingerprint. The schema must exist at the binary's
+exact version and validation performs no DDL. Missing, older, newer,
+unversioned, differently owned, incomplete, or row-security-enabled schemas
+fail closed.
 
 Offline JSONL restore is also a schema-owner ceremony. Pass the schema-owner
 DSN directly to `kata import --target`; import deliberately uses bootstrap

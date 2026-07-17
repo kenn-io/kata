@@ -650,6 +650,8 @@ func TestValidationRejectsIncompleteCanonicalSchema(t *testing.T) {
 		{name: "trigger", mutation: `DROP TRIGGER issues_search_after_issue_update ON %s.issues`, want: `trigger "issues_search_after_issue_update"`},
 		{name: "trigger_definition", mutation: `ALTER TABLE %s.issues DISABLE TRIGGER issues_search_after_issue_update`, want: `trigger definitions do not match`},
 		{name: "function", mutation: `DROP FUNCTION %s.rebuild_issue_search(BIGINT) CASCADE`, want: `function "rebuild_issue_search(bigint)"`},
+		{name: "text_search", mutation: `DROP TEXT SEARCH CONFIGURATION %s.kata_simple_unaccent`, want: `text search definitions do not match`},
+		{name: "text_search_definition", mutation: `ALTER TEXT SEARCH CONFIGURATION %s.kata_simple_unaccent ALTER MAPPING FOR word WITH pg_catalog.simple`, want: `text search definitions do not match`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			schema := "manifest_" + test.name
@@ -672,4 +674,32 @@ func TestValidationRejectsIncompleteCanonicalSchema(t *testing.T) {
 			assert.Contains(t, err.Error(), test.want)
 		})
 	}
+}
+
+func TestBootstrapRejectsIncompleteCurrentSchema(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: "bootstrap_manifest", SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	_, err = admin.ExecContext(ctx, `DROP INDEX bootstrap_manifest.idx_events_idempotency`)
+	require.NoError(t, err)
+
+	reopened, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+		Schema: "bootstrap_manifest", SchemaMode: pgstore.SchemaModeBootstrap,
+	})
+	if reopened != nil {
+		t.Cleanup(func() { _ = reopened.Close() })
+	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `index "idx_events_idempotency"`)
 }
