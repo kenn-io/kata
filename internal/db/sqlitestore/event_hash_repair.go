@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -36,6 +37,7 @@ func recomputeEventContentHashesTx(ctx context.Context, tx *sql.Tx, ids []int64)
 		seen[id] = struct{}{}
 		var input db.EventHashInput
 		var payload string
+		var createdAt time.Time
 		err := tx.QueryRowContext(ctx, `
 SELECT e.uid, e.origin_instance_uid, p.uid, e.project_name,
        e.issue_uid, e.related_issue_uid, e.type, e.actor,
@@ -45,11 +47,12 @@ SELECT e.uid, e.origin_instance_uid, p.uid, e.project_name,
  WHERE e.id = ?`, id).Scan(
 			&input.UID, &input.OriginInstanceUID, &input.ProjectUID, &input.ProjectName,
 			&input.IssueUID, &input.RelatedIssueUID, &input.Type, &input.Actor,
-			&input.HLCPhysicalMS, &input.HLCCounter, &input.CreatedAt, &payload,
+			&input.HLCPhysicalMS, &input.HLCCounter, &createdAt, &payload,
 		)
 		if err != nil {
 			return fmt.Errorf("load retained event %d: %w", id, err)
 		}
+		input.CreatedAt = createdAt.UTC().Format(db.EventTimestampFormat)
 		input.Payload = json.RawMessage(payload)
 		hash, err := db.EventContentHash(input)
 		if err != nil {

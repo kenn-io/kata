@@ -80,7 +80,7 @@ func createProject(t *testing.T, baseURL, name string) projectResponse {
 	require.NoError(t, err)
 	resp, err := http.Post(baseURL+"/api/v1/projects", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var out projectResponse
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
@@ -97,7 +97,7 @@ func listProjects(t *testing.T, baseURL string) projectsResponse {
 	t.Helper()
 	resp, err := http.Get(baseURL + "/api/v1/projects")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var out projectsResponse
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))

@@ -34,7 +34,7 @@ type tokenRevokedPayload struct {
 func (s *Store) EnsureSystemProject(ctx context.Context) error {
 	return s.RetryTransient(ctx, func() error {
 		if _, err := s.ExecContext(ctx, `INSERT INTO projects(uid, name)
-VALUES($1, $2) ON CONFLICT(name) DO NOTHING`, db.SystemProjectUID, db.SystemProjectName); err != nil {
+VALUES($1, $2) ON CONFLICT DO NOTHING`, db.SystemProjectUID, db.SystemProjectName); err != nil {
 			return fmt.Errorf("ensure system project: %w", mapSQLError(err, nil))
 		}
 		project, err := s.SystemProject(ctx)
