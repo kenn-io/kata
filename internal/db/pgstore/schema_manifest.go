@@ -319,7 +319,7 @@ func (s *Store) validateCanonicalFunctions(ctx context.Context) error {
 			return fmt.Errorf("scan postgres schema %q function: %w", s.schema, err)
 		}
 		actual[name+"("+strings.ReplaceAll(identityArguments, " ", "")+")"] = struct{}{}
-		configuration = strings.ReplaceAll(configuration, s.schema, "<schema>")
+		configuration = normalizeFunctionConfiguration(configuration, s.schema)
 		records = append(records, strings.Join([]string{
 			"FUNCTION", name, identityArguments, arguments, result, language,
 			kind, volatility, strconv.FormatBool(strict), strconv.FormatBool(securityDefiner),
@@ -335,6 +335,24 @@ func (s *Store) validateCanonicalFunctions(ctx context.Context) error {
 		}
 	}
 	return validateCatalogFingerprint(s.schema, "function", records, canonicalFunctionFingerprint)
+}
+
+func normalizeFunctionConfiguration(configuration, schema string) string {
+	settings := strings.Split(configuration, "\x1f")
+	for i, setting := range settings {
+		name, value, ok := strings.Cut(setting, "=")
+		if !ok || name != "search_path" {
+			continue
+		}
+		entries := strings.Split(value, ",")
+		for j, entry := range entries {
+			if strings.TrimSpace(entry) == schema {
+				entries[j] = strings.Replace(entry, schema, "<schema>", 1)
+			}
+		}
+		settings[i] = name + "=" + strings.Join(entries, ",")
+	}
+	return strings.Join(settings, "\x1f")
 }
 
 func (s *Store) validateCanonicalTextSearch(ctx context.Context) error {

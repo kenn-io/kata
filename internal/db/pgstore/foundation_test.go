@@ -605,24 +605,28 @@ func TestValidatePreparedCanonicalSchema(t *testing.T) {
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
-	prepared, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
-		Schema: "external_store", SchemaMode: pgstore.SchemaModeBootstrap,
-	})
-	require.NoError(t, err)
-	var schemaOwner string
-	require.NoError(t, prepared.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
-	require.NoError(t, prepared.Close())
+	for _, schema := range []string{"external_store", "a"} {
+		t.Run(schema, func(t *testing.T) {
+			prepared, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+				Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+			})
+			require.NoError(t, err)
+			var schemaOwner string
+			require.NoError(t, prepared.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
+			require.NoError(t, prepared.Close())
 
-	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
-		Schema:      "external_store",
-		SchemaMode:  pgstore.SchemaModeValidate,
-		SchemaOwner: schemaOwner,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = store.Close() })
-	version, err := store.SchemaVersion(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, db.CurrentSchemaVersion(), version)
+			store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+				Schema:      schema,
+				SchemaMode:  pgstore.SchemaModeValidate,
+				SchemaOwner: schemaOwner,
+			})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = store.Close() })
+			version, err := store.SchemaVersion(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, db.CurrentSchemaVersion(), version)
+		})
+	}
 }
 
 func TestValidationRejectsIncompleteCanonicalSchema(t *testing.T) {
