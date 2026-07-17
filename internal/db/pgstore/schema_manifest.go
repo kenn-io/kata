@@ -14,6 +14,7 @@ const (
 	canonicalConstraintFingerprint = "3867e088c3ab4395d517d0788ffa658f589164b6b6bd68541fde3d648cd29363"
 	canonicalIndexFingerprint      = "3a9b60f05ac5c8064a0e61d867fed7ae3c9e0fa7b345bd3236e3300273801dac"
 	canonicalTriggerFingerprint    = "34f80f8e2b61c6cb1705bb8effb1548164e91f181fb58b68cf929ac90a190154"
+	canonicalFunctionFingerprint   = "f96c6a857ec7bc7c3e5c1cebdd3d7b795547f4399f8f65ea0aa9befa98681741"
 	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
 )
 
@@ -289,21 +290,41 @@ func (s *Store) validateCanonicalNamedObjects(
 
 func (s *Store) validateCanonicalFunctions(ctx context.Context) error {
 	rows, err := s.QueryContext(ctx, `
-		SELECT p.proname, pg_catalog.oidvectortypes(p.proargtypes)
+		SELECT p.proname, pg_catalog.oidvectortypes(p.proargtypes),
+		       pg_catalog.pg_get_function_arguments(p.oid),
+		       pg_catalog.pg_get_function_result(p.oid), l.lanname,
+		       p.prokind::text, p.provolatile::text, p.proisstrict,
+		       p.prosecdef, p.proleakproof, p.proparallel::text,
+		       COALESCE(pg_catalog.array_to_string(p.proconfig, E'\x1f'), ''),
+		       p.prosrc
 		  FROM pg_catalog.pg_proc p
 		  JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+		  JOIN pg_catalog.pg_language l ON l.oid = p.prolang
 		 WHERE n.nspname = $1`, s.schema)
 	if err != nil {
 		return fmt.Errorf("inspect postgres schema %q functions: %w", s.schema, err)
 	}
 	defer func() { _ = rows.Close() }()
 	actual := make(map[string]struct{}, len(canonicalFunctions))
+	var records []string
 	for rows.Next() {
-		var name, arguments string
-		if err := rows.Scan(&name, &arguments); err != nil {
+		var name, identityArguments, arguments, result, language string
+		var kind, volatility, parallel, configuration, source string
+		var strict, securityDefiner, leakproof bool
+		if err := rows.Scan(
+			&name, &identityArguments, &arguments, &result, &language,
+			&kind, &volatility, &strict, &securityDefiner, &leakproof,
+			&parallel, &configuration, &source,
+		); err != nil {
 			return fmt.Errorf("scan postgres schema %q function: %w", s.schema, err)
 		}
-		actual[name+"("+strings.ReplaceAll(arguments, " ", "")+")"] = struct{}{}
+		actual[name+"("+strings.ReplaceAll(identityArguments, " ", "")+")"] = struct{}{}
+		configuration = strings.ReplaceAll(configuration, s.schema, "<schema>")
+		records = append(records, strings.Join([]string{
+			"FUNCTION", name, identityArguments, arguments, result, language,
+			kind, volatility, strconv.FormatBool(strict), strconv.FormatBool(securityDefiner),
+			strconv.FormatBool(leakproof), parallel, configuration, source,
+		}, "\x00"))
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate postgres schema %q functions: %w", s.schema, err)
@@ -313,7 +334,7 @@ func (s *Store) validateCanonicalFunctions(ctx context.Context) error {
 			return fmt.Errorf("postgres schema %q is missing canonical function %q", s.schema, name)
 		}
 	}
-	return nil
+	return validateCatalogFingerprint(s.schema, "function", records, canonicalFunctionFingerprint)
 }
 
 func (s *Store) validateCanonicalTextSearch(ctx context.Context) error {

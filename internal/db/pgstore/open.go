@@ -401,6 +401,9 @@ func (s *Store) validateSchema(ctx context.Context) error {
 	if err := s.validateSchemaOwnership(ctx); err != nil {
 		return err
 	}
+	if err := s.validateRuntimePrivileges(ctx); err != nil {
+		return err
+	}
 	if err := s.validateSchemaManifest(ctx); err != nil {
 		return err
 	}

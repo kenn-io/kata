@@ -139,7 +139,8 @@ belong to that role before reading application tables, and rejects schema
 `CREATE` grants to non-owner roles. A canonical catalog fingerprint verifies
 column types and nullability, constraint expressions, index definitions and
 validity, trigger definitions and enabled state, and the text-search parser and
-dictionary mappings; required function signatures are checked separately.
+dictionary mappings. Function bodies, signatures, execution attributes, and
+captured settings are fingerprinted as part of the same readiness contract.
 PostgreSQL's version-specific catalog-only NOT NULL records are excluded from
 the application constraint fingerprint. The schema must exist at the binary's
 exact version and validation performs no DDL. Missing, older, newer,
@@ -175,8 +176,10 @@ kata storage postgres status
 kata daemon start --foreground
 ```
 
-`status` opens the database read-only, checks the exact schema version and
-reserved system project, and returns nonzero when the deployment is not ready.
+`status` opens the database read-only, checks the exact schema version,
+reserved system project, canonical catalog fingerprints, and the runtime
+role's required schema, table, sequence, and adoption-function privileges. It
+returns nonzero when the deployment is not ready.
 Machine-readable forms are available through the global `--json` and `--agent`
 flags.
 
@@ -266,6 +269,7 @@ restore](backup-restore.md) for the portable JSONL workflow.
 | `exists without migration metadata` | The chosen schema contains unknown tables. | Choose an empty schema or recover the intended database; do not adopt it by stamping a version. |
 | `no postgres migration path` | The database version is older than the supported released floor or the binary lacks a required migration. | Use the matching release and documented upgrade path, or restore a supported backup. |
 | `schema_version ... does not match` | Validation found an older or newer schema. | Run the correct new migrator for an older schema; use a matching newer binary for a newer schema. |
+| `runtime role lacks ... privilege` | The serving credential is missing a required schema, table, sequence, or adoption-function grant. | Re-run the runtime-role grants from [Prepare the schema](#prepare-the-schema), then retry `status`. |
 | `permission denied` during `migrate` | The schema-owner role lacks database, schema, extension, or object ownership. | Repair ownership/privileges as an administrator, then retry. |
 | `permission denied` during daemon startup or use | Runtime grants are incomplete. | Reapply the schema, table, sequence, and default grants. |
 

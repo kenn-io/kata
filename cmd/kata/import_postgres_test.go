@@ -55,7 +55,8 @@ func TestImportPostgresTargetCreatesThenAtomicallyReplacesSnapshot(t *testing.T)
 		GRANT USAGE ON SCHEMA kata TO %s;
 		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA kata TO %s;
 		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA kata TO %s;
-	`, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
+		GRANT EXECUTE ON FUNCTION kata.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
+	`, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
 
 	store, err := storeopen.Open(ctx, runtimeDSN)

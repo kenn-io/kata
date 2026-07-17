@@ -56,7 +56,8 @@ func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) {
 		GRANT USAGE ON SCHEMA operator_store TO %s;
 		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA operator_store TO %s;
 		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA operator_store TO %s;
-	`, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
+		GRANT EXECUTE ON FUNCTION operator_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
+	`, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
 
 	runtimeDSN := postgresDSNForCLIUser(t, dsn, runtimeRole, "runtime-password")
@@ -78,6 +79,63 @@ func TestStoragePostgresRejectsSQLiteTarget(t *testing.T) {
 	_, err := runCmdOutput(t, nil, "storage", "postgres", "status")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires a postgres DSN")
+}
+
+func TestStoragePostgresStatusRejectsIncompleteRuntimePrivileges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_DSN", dsn)
+	t.Setenv("KATA_DB", "")
+	t.Setenv("KATA_POSTGRES_SCHEMA", "privilege_store")
+	_ = executeRoot(t, newRootCmd(), "storage", "postgres", "migrate")
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var schemaOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
+	t.Setenv("KATA_POSTGRES_SCHEMA_OWNER", schemaOwner)
+
+	for index, test := range []struct {
+		name   string
+		revoke string
+		want   string
+	}{
+		{name: "schema usage", revoke: `REVOKE USAGE ON SCHEMA privilege_store FROM %s`, want: `USAGE privilege on schema "privilege_store"`},
+		{name: "table insert", revoke: `REVOKE INSERT ON privilege_store.projects FROM %s`, want: `INSERT privilege on table "privilege_store.projects"`},
+		{name: "sequence update", revoke: `REVOKE UPDATE ON SEQUENCE privilege_store.projects_id_seq FROM %s`, want: `UPDATE privilege on sequence "privilege_store.projects_id_seq"`},
+		{name: "adoption function execute", revoke: `REVOKE EXECUTE ON FUNCTION privilege_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) FROM %s`, want: `EXECUTE privilege on function "privilege_store.rewrite_project_uid_for_adoption(bigint,text)"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtimeRole := fmt.Sprintf("status_runtime_%d_%d", os.Getpid(), index)
+			_, err := admin.ExecContext(ctx, fmt.Sprintf(`
+				CREATE ROLE %s LOGIN PASSWORD 'runtime-password';
+				GRANT USAGE ON SCHEMA privilege_store TO %s;
+				GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA privilege_store TO %s;
+				GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA privilege_store TO %s;
+				GRANT EXECUTE ON FUNCTION privilege_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
+			`, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID and table index.
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(`
+					DROP OWNED BY %s;
+					DROP ROLE IF EXISTS %s;
+				`, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID and table index.
+			})
+			_, err = admin.ExecContext(ctx, fmt.Sprintf(test.revoke, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID and table index.
+			require.NoError(t, err)
+			t.Setenv("KATA_DSN", postgresDSNForCLIUser(t, dsn, runtimeRole, "runtime-password"))
+
+			_, err = runCmdOutput(t, nil, "storage", "postgres", "status")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.want)
+		})
+	}
 }
 
 func TestDaemonPreflightCarriesPostgresValidationPolicy(t *testing.T) {

@@ -134,7 +134,8 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 		GRANT USAGE ON SCHEMA isolated_store TO %s;
 		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA isolated_store TO %s;
 		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA isolated_store TO %s;
-`, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
+		GRANT EXECUTE ON FUNCTION isolated_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
+`, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
 	runtimeStore, err := pgstore.OpenWithConfig(ctx, postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"), pgstore.Config{
 		Schema:      "isolated_store",
@@ -228,7 +229,8 @@ func TestValidationRejectsUnexpectedSchemaAndObjectOwnership(t *testing.T) {
 		GRANT USAGE ON SCHEMA ownership_store TO %s;
 		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ownership_store TO %s;
 		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA ownership_store TO %s;
-	`, attackerRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
+		GRANT EXECUTE ON FUNCTION ownership_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
+	`, attackerRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(`
@@ -650,6 +652,8 @@ func TestValidationRejectsIncompleteCanonicalSchema(t *testing.T) {
 		{name: "trigger", mutation: `DROP TRIGGER issues_search_after_issue_update ON %s.issues`, want: `trigger "issues_search_after_issue_update"`},
 		{name: "trigger_definition", mutation: `ALTER TABLE %s.issues DISABLE TRIGGER issues_search_after_issue_update`, want: `trigger definitions do not match`},
 		{name: "function", mutation: `DROP FUNCTION %s.rebuild_issue_search(BIGINT) CASCADE`, want: `function "rebuild_issue_search(bigint)"`},
+		{name: "function_definition", mutation: `CREATE OR REPLACE FUNCTION %s.enforce_uid_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$`, want: `function definitions do not match`},
+		{name: "function_attribute", mutation: `ALTER FUNCTION %s.rewrite_project_uid_for_adoption(BIGINT, TEXT) SECURITY INVOKER`, want: `function definitions do not match`},
 		{name: "text_search", mutation: `DROP TEXT SEARCH CONFIGURATION %s.kata_simple_unaccent`, want: `text search definitions do not match`},
 		{name: "text_search_definition", mutation: `ALTER TEXT SEARCH CONFIGURATION %s.kata_simple_unaccent ALTER MAPPING FOR word WITH pg_catalog.simple`, want: `text search definitions do not match`},
 	} {
