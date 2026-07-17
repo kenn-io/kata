@@ -890,6 +890,9 @@ func recordFederationSyncError(ctx context.Context, store db.Storage, projectID 
 	if syncErr == nil {
 		return nil
 	}
+	if errors.Is(syncErr, context.Canceled) || errors.Is(syncErr, errFederationRunnerLeaseInvalid) {
+		return syncErr
+	}
 	if err := store.RecordFederationSyncError(ctx, projectID, syncErr, time.Now().UTC()); err != nil {
 		return errors.Join(syncErr, err)
 	}

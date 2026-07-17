@@ -49,6 +49,19 @@ func TestRunnerCancelsInFlightPassWhenLeaseIsLost(t *testing.T) {
 	assert.ErrorIs(t, <-done, context.Canceled)
 }
 
+func TestLeadershipLossDoesNotWriteFederationSyncError(t *testing.T) {
+	for _, syncErr := range []error{
+		errors.Join(errFederationRunnerLeaseInvalid, errTestFederationLeaseLost),
+		context.Canceled,
+	} {
+		store := &syncErrorRecordingStore{}
+		err := recordFederationSyncError(context.Background(), store, 42, syncErr)
+
+		assert.ErrorIs(t, err, syncErr)
+		assert.Zero(t, store.writes.Load(), "a former leader must not update shared sync status")
+	}
+}
+
 var errTestFederationLeaseLost = errors.New("test federation lease lost")
 
 type blockingLeaseStore struct {
@@ -58,6 +71,18 @@ type blockingLeaseStore struct {
 	releaseOnce sync.Once
 	passStarted chan struct{}
 	released    chan struct{}
+}
+
+type syncErrorRecordingStore struct {
+	db.Storage
+	writes atomic.Int64
+}
+
+func (s *syncErrorRecordingStore) RecordFederationSyncError(
+	context.Context, int64, error, time.Time,
+) error {
+	s.writes.Add(1)
+	return nil
 }
 
 func (s *blockingLeaseStore) AcquireFederationRunnerLease(ctx context.Context) (func() error, error) {
