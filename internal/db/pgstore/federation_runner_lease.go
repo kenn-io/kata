@@ -3,10 +3,14 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const federationRunnerLeasePollInterval = 100 * time.Millisecond
@@ -30,6 +34,12 @@ func (s *Store) AcquireFederationRunnerLease(ctx context.Context) (func() error,
 	for {
 		conn, err := s.Conn(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if !isFederationRunnerLeaseRetryable(err) {
+				return nil, fmt.Errorf("reserve postgres federation runner lease connection: %w", mapSQLError(err, nil))
+			}
 			if waitErr := waitForFederationRunnerLeaseRetry(ctx); waitErr != nil {
 				return nil, waitErr
 			}
@@ -41,7 +51,20 @@ func (s *Store) AcquireFederationRunnerLease(ctx context.Context) (func() error,
 			pg_catalog.hashtext(pg_catalog.current_database()),
 			pg_catalog.hashtext($1)
 		)`, lockName).Scan(&acquired)
-		if err != nil || !acquired {
+		if err != nil {
+			_ = conn.Close()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if !isFederationRunnerLeaseRetryable(err) {
+				return nil, fmt.Errorf("try postgres federation runner lease: %w", mapSQLError(err, nil))
+			}
+			if waitErr := waitForFederationRunnerLeaseRetry(ctx); waitErr != nil {
+				return nil, waitErr
+			}
+			continue
+		}
+		if !acquired {
 			_ = conn.Close()
 			if waitErr := waitForFederationRunnerLeaseRetry(ctx); waitErr != nil {
 				return nil, waitErr
@@ -79,6 +102,21 @@ func (s *Store) AcquireFederationRunnerLease(ctx context.Context) (func() error,
 			return releaseErr
 		}, nil
 	}
+}
+
+func isFederationRunnerLeaseRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, driver.ErrBadConn) || pgconn.SafeToRetry(err) || IsTransient(err) {
+		return true
+	}
+	var state interface{ SQLState() string }
+	if !errors.As(err, &state) {
+		return false
+	}
+	code := state.SQLState()
+	return strings.HasPrefix(code, "08") || code == "57P01" || code == "57P02" || code == "57P03"
 }
 
 // ValidateFederationRunnerLease verifies the exact session used to acquire
