@@ -3543,6 +3543,63 @@ func TestFederationClaimRetryCapabilityRules(t *testing.T) {
 	})
 }
 
+func TestPendingClaimRetryDoesNotPersistAfterLeaseLoss(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	project, issue, binding := createPendingClaimRetrySpoke(t, spoke.DB, "claim-lease-loss")
+	pending, err := spoke.DB.EnqueuePendingClaim(
+		ctx, pendingClaimParams(spoke.DB, project.ID, issue.ShortID, "lease-client"),
+	)
+	require.NoError(t, err)
+
+	requestStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/projects/42/issues/"+issue.UID+"/lease/actions/acquire", r.URL.Path)
+		close(requestStarted)
+		<-releaseResponse
+		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimActionResponseBody{Granted: false}))
+	}))
+	t.Cleanup(hub.Close)
+
+	leaseLost := make(chan struct{})
+	validateLease := func(context.Context) error {
+		select {
+		case <-leaseLost:
+			return errTestFederationLeaseLost
+		default:
+			return nil
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- retryPendingClaimsOnceWithFence(ctx, spoke.DB, binding, config.FederationCredential{
+			HubURL: hub.URL, HubProjectID: 42, Token: "token", Capabilities: "pull,claim",
+		}, clientOptsWithDefault(clientpkg.Opts{}), validateLease)
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "pending claim retry did not reach the hub")
+	}
+	close(leaseLost)
+	close(releaseResponse)
+
+	select {
+	case err = <-done:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "pending claim retry did not stop after lease loss")
+	}
+	assert.ErrorIs(t, err, errTestFederationLeaseLost)
+	var untouched int
+	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM pending_claim_requests
+		 WHERE request_uid = ?
+		   AND rejected_at IS NULL AND resolved_at IS NULL
+		   AND last_attempt_at IS NULL AND last_error IS NULL`, pending.RequestUID).Scan(&untouched))
+	assert.Equal(t, 1, untouched, "lease loss must leave the pending request for the elected successor")
+}
+
 func requireFederationSyncStatus(t *testing.T, store *sqlitestore.Store, projectID int64) db.FederationSyncStatus {
 	t.Helper()
 	got, err := store.FederationSyncStatusByProject(context.Background(), projectID)

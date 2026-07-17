@@ -78,8 +78,8 @@ func extractStorageSection(data []byte) []byte {
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		trimmed := bytes.TrimSpace(line)
-		if isSectionHeading(trimmed) {
-			inStorage = isStorageHeading(trimmed)
+		if heading, ok := sectionHeading(trimmed); ok {
+			inStorage = isStorageHeading(heading)
 		}
 		if inStorage {
 			out.Write(line)
@@ -89,11 +89,62 @@ func extractStorageSection(data []byte) []byte {
 	return out.Bytes()
 }
 
-// isSectionHeading reports whether the trimmed line is a TOML table heading
-// of the form "[name]" or "[name.sub]" or array-of-table "[[name]]". The
-// extractor doesn't need to distinguish the two — both reset section state.
-func isSectionHeading(trimmed []byte) bool {
-	return len(trimmed) >= 2 && trimmed[0] == '[' && trimmed[len(trimmed)-1] == ']'
+// sectionHeading returns a TOML table heading without its trailing comment.
+// It recognizes closing brackets only outside quoted key segments so valid
+// headings such as [storage."regional]db"] remain intact.
+func sectionHeading(trimmed []byte) ([]byte, bool) {
+	if len(trimmed) < 2 || trimmed[0] != '[' {
+		return nil, false
+	}
+	arrayTable := len(trimmed) > 1 && trimmed[1] == '['
+	start := 1
+	if arrayTable {
+		start = 2
+	}
+	var inBasic, inLiteral, escaped bool
+	for index := start; index < len(trimmed); index++ {
+		char := trimmed[index]
+		if inBasic {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if char == '\\' {
+				escaped = true
+				continue
+			}
+			if char == '"' {
+				inBasic = false
+			}
+			continue
+		}
+		if inLiteral {
+			if char == '\'' {
+				inLiteral = false
+			}
+			continue
+		}
+		switch char {
+		case '"':
+			inBasic = true
+		case '\'':
+			inLiteral = true
+		case ']':
+			end := index + 1
+			if arrayTable {
+				if end >= len(trimmed) || trimmed[end] != ']' {
+					continue
+				}
+				end++
+			}
+			remainder := bytes.TrimSpace(trimmed[end:])
+			if len(remainder) != 0 && remainder[0] != '#' {
+				return nil, false
+			}
+			return trimmed[:end], true
+		}
+	}
+	return nil, false
 }
 
 // isStorageHeading reports whether the heading is "[storage]" or

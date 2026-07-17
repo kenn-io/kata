@@ -622,3 +622,54 @@ func TestValidatePreparedCanonicalSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, db.CurrentSchemaVersion(), version)
 }
+
+func TestValidationRejectsIncompleteCanonicalSchema(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	var schemaOwner string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&schemaOwner))
+
+	for _, test := range []struct {
+		name     string
+		mutation string
+		want     string
+	}{
+		{name: "column", mutation: `ALTER TABLE %s.events DROP COLUMN content_hash CASCADE`, want: `column "events.content_hash"`},
+		{name: "column_definition", mutation: `ALTER TABLE %s.events ALTER COLUMN content_hash DROP NOT NULL`, want: `column definitions do not match`},
+		{name: "constraint", mutation: `ALTER TABLE %s.links DROP CONSTRAINT links_type_check`, want: `constraint definitions do not match`},
+		{name: "constraint_definition", mutation: `ALTER TABLE %s.links DROP CONSTRAINT links_type_check; ALTER TABLE %s.links ADD CONSTRAINT links_type_check CHECK (true)`, want: `constraint definitions do not match`},
+		{name: "index", mutation: `DROP INDEX %s.idx_events_idempotency`, want: `index "idx_events_idempotency"`},
+		{name: "index_definition", mutation: `DROP INDEX %s.idx_events_idempotency; CREATE INDEX idx_events_idempotency ON %s.events(actor)`, want: `index definitions do not match`},
+		{name: "trigger", mutation: `DROP TRIGGER issues_search_after_issue_update ON %s.issues`, want: `trigger "issues_search_after_issue_update"`},
+		{name: "trigger_definition", mutation: `ALTER TABLE %s.issues DISABLE TRIGGER issues_search_after_issue_update`, want: `trigger definitions do not match`},
+		{name: "function", mutation: `DROP FUNCTION %s.rebuild_issue_search(BIGINT) CASCADE`, want: `function "rebuild_issue_search(bigint)"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			schema := "manifest_" + test.name
+			store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+				Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap,
+			})
+			require.NoError(t, err)
+			require.NoError(t, store.Close())
+			mutation := strings.ReplaceAll(test.mutation, "%s", schema)
+			_, err = admin.ExecContext(ctx, mutation) // #nosec G201 -- schema is a fixed test identifier.
+			require.NoError(t, err)
+
+			validated, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+				Schema: schema, SchemaMode: pgstore.SchemaModeValidate, SchemaOwner: schemaOwner,
+			})
+			if validated != nil {
+				t.Cleanup(func() { _ = validated.Close() })
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.want)
+		})
+	}
+}

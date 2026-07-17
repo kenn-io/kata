@@ -311,6 +311,19 @@ func TestKataDSN_TolerantOfMalformedAuthSection(t *testing.T) {
 	assert.Equal(t, "postgres://h/db", got)
 }
 
+func TestKataDSN_ReadsCommentedStorageHeadingAndStopsAtCommentedPeer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_DSN", "")
+	t.Setenv("KATA_DB", "")
+	body := "[storage] # primary database\ndsn = \"postgres://h/db\"\n[auth] # unrelated\ntoken =\n"
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600))
+
+	got, err := config.KataDSN(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "postgres://h/db", got)
+}
+
 func TestKataDSN_RejectsUnknownStorageKeys(t *testing.T) {
 	for _, test := range []struct {
 		name    string

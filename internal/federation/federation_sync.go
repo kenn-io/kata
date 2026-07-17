@@ -783,6 +783,9 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 		var errs []error
 		errs = append(errs, err)
 		for _, spoke := range spokes {
+			if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
+				return leaseErr
+			}
 			binding := spoke.binding
 			if recordErr := r.DB.RecordFederationSyncError(ctx, binding.ProjectID, err, time.Now().UTC()); recordErr != nil {
 				errs = append(errs, recordErr)
@@ -806,19 +809,22 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 			cred.HubProjectID = binding.HubProjectID
 		}
 		opts := r.clientOpts()
-		if err := RetryPendingClaimsOnce(ctx, r.DB, binding, cred, opts); err != nil {
-			if errors.Is(err, context.Canceled) {
+		if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
 			}
 			errs = append(errs, err)
 		}
 		if err := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, r.OnPulledEvents, validateLease); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
 			}
 			errs = append(errs, err)
 		}
 		if len(errs) == bindingErrs {
+			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+				return err
+			}
 			if err := r.DB.ClearFederationSyncError(ctx, binding.ProjectID); err != nil {
 				errs = append(errs, err)
 			}
@@ -836,15 +842,35 @@ func RetryPendingClaimsOnce(
 	creds config.FederationCredential,
 	opts clientpkg.Opts,
 ) error {
+	return retryPendingClaimsOnceWithFence(ctx, store, binding, creds, opts, nil)
+}
+
+func retryPendingClaimsOnceWithFence(
+	ctx context.Context,
+	store db.Storage,
+	binding db.FederationBinding,
+	creds config.FederationCredential,
+	opts clientpkg.Opts,
+	validateLease func(context.Context) error,
+) error {
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return err
+	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke || strings.TrimSpace(creds.Token) == "" {
 		return nil
 	}
 	pending, err := store.ListPendingClaimRequests(ctx, binding.ProjectID, federationPollLimit)
+	if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
+		return leaseErr
+	}
 	if err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	if len(pending) == 0 {
 		return nil
+	}
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return err
 	}
 	if err := store.RecordFederationSyncPushStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 		return err
@@ -853,9 +879,15 @@ func RetryPendingClaimsOnce(
 	if hasKnownCapabilities && !federationCredentialHasCapability(creds.Capabilities, "claim") {
 		now := time.Now().UTC()
 		for _, req := range pending {
+			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+				return err
+			}
 			if err := store.RejectPendingClaim(ctx, req.RequestUID, "lease capability unavailable", now); err != nil {
 				return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 			}
+		}
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return err
 		}
 		return store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC())
 	}
@@ -868,20 +900,29 @@ func RetryPendingClaimsOnce(
 		hubProjectID = binding.HubProjectID
 	}
 	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsForCredential(opts, creds))
+	if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
+		return leaseErr
+	}
 	if err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	var errs []error
 	for _, req := range pending {
-		if err := retryPendingClaim(ctx, store, client, hubProjectID, req); err != nil {
-			if errors.Is(err, context.Canceled) {
+		if err := retryPendingClaim(ctx, store, client, hubProjectID, req, validateLease); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
 			}
 			errs = append(errs, err)
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
+		if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
+			return leaseErr
+		}
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
+	}
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return err
 	}
 	return store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC())
 }
@@ -913,6 +954,7 @@ func retryPendingClaim(
 	client *Client,
 	hubProjectID int64,
 	pending db.PendingClaimRequest,
+	validateLease func(context.Context) error,
 ) error {
 	req := ClaimRequest{
 		Holder:     pending.Holder,
@@ -923,7 +965,13 @@ func retryPendingClaim(
 	if pending.TTLSeconds != nil {
 		req.TTLSeconds = *pending.TTLSeconds
 	}
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return err
+	}
 	resp, err := client.AcquireClaim(ctx, hubProjectID, pending.IssueUID, req)
+	if leaseErr := validateFederationRunnerLease(ctx, validateLease); leaseErr != nil {
+		return leaseErr
+	}
 	now := time.Now().UTC()
 	if err != nil {
 		var statusErr *HubStatusError
