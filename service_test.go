@@ -18,7 +18,8 @@ import (
 func TestServiceMountRunAndClose(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "service.db")
 	service, err := kata.New(context.Background(), kata.Config{
-		DSN: dsn,
+		DSN:  dsn,
+		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
 	require.NoError(t, err)
 
@@ -48,7 +49,8 @@ func TestServiceMountRunAndClose(t *testing.T) {
 	require.NoError(t, service.Close())
 
 	reopened, err := kata.New(context.Background(), kata.Config{
-		DSN: dsn,
+		DSN:  dsn,
+		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, reopened.Close()) })
@@ -65,6 +67,55 @@ func TestNewRejectsMissingDSN(t *testing.T) {
 
 	assert.Nil(t, service)
 	assert.EqualError(t, err, "kata: storage DSN is required")
+}
+
+func TestNewRejectsMissingAuthenticationPolicy(t *testing.T) {
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"),
+	})
+
+	assert.Nil(t, service)
+	assert.EqualError(t, err, "kata: auth token is required unless caller authentication is explicitly trusted")
+}
+
+func TestNewRejectsAmbiguousAuthenticationPolicy(t *testing.T) {
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"),
+		Auth: kata.AuthConfig{
+			Token:                     "service-token",
+			TrustCallerAuthentication: true,
+		},
+	})
+
+	assert.Nil(t, service)
+	assert.EqualError(t, err, "kata: auth token and trusted caller authentication are mutually exclusive")
+}
+
+func TestServiceBearerAuthentication(t *testing.T) {
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: kata.AuthConfig{Token: "service-token"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+
+	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusUnauthorized, response.StatusCode)
+
+	authorized, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/projects", nil)
+	require.NoError(t, err)
+	authorized.Header.Set("Authorization", "Bearer service-token")
+	authorizedResponse, err := http.DefaultClient.Do(authorized)
+	require.NoError(t, err)
+	defer func() { _ = authorizedResponse.Body.Close() }()
+	assert.Equal(t, http.StatusOK, authorizedResponse.StatusCode)
 }
 
 type projectResponse struct {

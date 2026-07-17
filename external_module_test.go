@@ -58,7 +58,8 @@ import (
 
 func TestMountedServiceLifecycle(t *testing.T) {
 	service, err := kata.New(context.Background(), kata.Config{
-		DSN: filepath.Join(t.TempDir(), "kata.db"),
+		DSN:  filepath.Join(t.TempDir(), "kata.db"),
+		Auth: kata.AuthConfig{TrustCallerAuthentication: true},
 	})
 	if err != nil {
 		t.Fatal(err)

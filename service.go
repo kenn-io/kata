@@ -16,11 +16,13 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 )
 
@@ -45,22 +47,42 @@ type PostgresConfig struct {
 	AllowInsecureTransport bool
 }
 
+// AuthConfig defines the authentication boundary for a mounted Service.
+// Exactly one of Token or TrustCallerAuthentication must be selected.
+type AuthConfig struct {
+	// Token protects Kata's ordinary HTTP surface. Federation transport and
+	// claim actions retain their own scoped credential checks.
+	Token string
+	// TrustCallerAuthentication disables Kata's bearer check because the
+	// caller guarantees that Handler is mounted behind its own authentication
+	// boundary. Never mount that handler directly on an untrusted listener.
+	TrustCallerAuthentication bool
+}
+
 // Config contains the process-neutral inputs needed to construct a Service.
 type Config struct {
 	// DSN accepts a SQLite path, sqlite:// URL, or PostgreSQL URL.
 	DSN       string
 	Postgres  PostgresConfig
+	Auth      AuthConfig
 	StartedAt time.Time
 	Logger    *slog.Logger
 }
 
+type serviceDeps struct {
+	gitHubSyncFetcher githubsync.Fetcher
+}
+
 // Service is a mountable Kata HTTP application and its owned lifecycle.
 type Service struct {
-	store       db.Storage
-	server      *daemon.Server
-	broadcaster *daemon.EventBroadcaster
-	wake        chan struct{}
-	logger      *slog.Logger
+	store             db.Storage
+	server            *daemon.Server
+	broadcaster       *daemon.EventBroadcaster
+	hookSink          hooks.Sink
+	federationWake    chan struct{}
+	gitHubSyncWake    chan struct{}
+	gitHubSyncFetcher githubsync.Fetcher
+	logger            *slog.Logger
 
 	mu        sync.Mutex
 	running   bool
@@ -74,8 +96,18 @@ type Service struct {
 // New opens the configured backend and constructs a listener-free service.
 // The returned Service owns the backend handle and closes it from Close.
 func New(ctx context.Context, cfg Config) (*Service, error) {
+	return newService(ctx, cfg, serviceDeps{})
+}
+
+func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, error) {
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return nil, errors.New("kata: storage DSN is required")
+	}
+	if strings.TrimSpace(cfg.Auth.Token) == "" && !cfg.Auth.TrustCallerAuthentication {
+		return nil, errors.New("kata: auth token is required unless caller authentication is explicitly trusted")
+	}
+	if strings.TrimSpace(cfg.Auth.Token) != "" && cfg.Auth.TrustCallerAuthentication {
+		return nil, errors.New("kata: auth token and trusted caller authentication are mutually exclusive")
 	}
 
 	openCfg := storeopen.DefaultConfig()
@@ -100,38 +132,60 @@ func New(ctx context.Context, cfg Config) (*Service, error) {
 		logger = slog.Default()
 	}
 	broadcaster := daemon.NewEventBroadcaster()
-	wake := make(chan struct{}, 1)
-	wakeRunner := func() {
+	hookSink := hooks.NewNoop()
+	federationWake := make(chan struct{}, 1)
+	wakeFederation := func() {
 		select {
-		case wake <- struct{}{}:
+		case federationWake <- struct{}{}:
 		default:
 		}
 	}
+	gitHubSyncWake := make(chan struct{}, 1)
+	wakeGitHubSync := func() {
+		select {
+		case gitHubSyncWake <- struct{}{}:
+		default:
+		}
+	}
+	gitHubSyncConfig := config.GitHubSyncConfig{}
+	gitHubSyncFetcher := deps.gitHubSyncFetcher
+	if gitHubSyncFetcher == nil {
+		gitHubSyncFetcher = githubsync.NewHTTPFetcher(githubsync.HTTPFetcherConfig{
+			CredentialResolver: githubsync.NewCredentialResolver(gitHubSyncConfig, nil),
+		})
+	}
 	server := daemon.NewServer(daemon.ServerConfig{
-		DB:             store,
-		StartedAt:      startedAt,
-		Broadcaster:    broadcaster,
-		FederationWake: wakeRunner,
-		Hooks:          hooks.NewNoop(),
-		Logger:         logger,
+		DB:                store,
+		StartedAt:         startedAt,
+		Broadcaster:       broadcaster,
+		FederationWake:    wakeFederation,
+		GitHubSyncFetcher: gitHubSyncFetcher,
+		GitHubSyncConfig:  gitHubSyncConfig,
+		GitHubSyncWake:    wakeGitHubSync,
+		Hooks:             hookSink,
+		Auth:              config.AuthConfig{Token: cfg.Auth.Token},
+		Logger:            logger,
 	})
 
 	return &Service{
-		store:       store,
-		server:      server,
-		broadcaster: broadcaster,
-		wake:        wake,
-		logger:      logger,
-		closeDone:   make(chan struct{}),
+		store:             store,
+		server:            server,
+		broadcaster:       broadcaster,
+		hookSink:          hookSink,
+		federationWake:    federationWake,
+		gitHubSyncWake:    gitHubSyncWake,
+		gitHubSyncFetcher: gitHubSyncFetcher,
+		logger:            logger,
+		closeDone:         make(chan struct{}),
 	}, nil
 }
 
 // Handler returns the HTTP application for mounting in a caller-owned server.
 func (s *Service) Handler() http.Handler { return s.server.Handler() }
 
-// Run executes Kata's core federation and timed-claim workers until ctx is
-// canceled or Close is called. Run does not start a listener and may be called
-// only once at a time.
+// Run executes Kata's federation, GitHub synchronization, and timed-claim
+// workers until ctx is canceled or Close is called. Run does not start a
+// listener and may be called only once at a time.
 func (s *Service) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("kata: run context is required")
@@ -161,12 +215,11 @@ func (s *Service) Run(ctx context.Context) error {
 		s.mu.Unlock()
 	}()
 
-	workerErrs := make(chan error, 2)
-	sink := hooks.NewNoop()
+	workerErrs := make(chan error, 3)
 	runner := &federation.Runner{
 		DB:       s.store,
 		Interval: 30 * time.Second,
-		Wake:     s.wake,
+		Wake:     s.federationWake,
 		OnError: func(err error) {
 			s.logger.Error("kata federation worker", "err", err)
 		},
@@ -179,30 +232,48 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 		},
 	}
-	sweeper := daemon.NewTimedClaimSweeper(s.store, s.broadcaster, sink)
+	gitHubSyncRunner := githubsync.NewRunner(githubsync.RunnerConfig{
+		Store:    s.store,
+		Fetcher:  s.gitHubSyncFetcher,
+		Logger:   s.logger,
+		Interval: 5 * time.Minute,
+		Wake:     s.gitHubSyncWake,
+		EventSink: func(_ context.Context, projectID int64, events []db.Event) error {
+			for i := range events {
+				event := events[i]
+				s.broadcaster.Broadcast(daemon.StreamMsg{
+					Kind: "event", Event: &event, ProjectID: projectID,
+				})
+				s.hookSink.Enqueue(event)
+			}
+			return nil
+		},
+	})
+	sweeper := daemon.NewTimedClaimSweeper(s.store, s.broadcaster, s.hookSink)
 	sweeper.OnError = func(err error) {
 		s.logger.Error("kata timed-claim worker", "err", err)
 	}
 	go func() { workerErrs <- runner.Run(runCtx) }()
+	go func() { workerErrs <- gitHubSyncRunner.Run(runCtx) }()
 	go func() { workerErrs <- sweeper.Run(runCtx) }()
 
-	workerResults := make([]error, 0, 2)
+	workerResults := make([]error, 0, 3)
 	select {
 	case <-runCtx.Done():
 	case err := <-workerErrs:
 		workerResults = append(workerResults, err)
 	}
 	cancel()
-	for len(workerResults) < 2 {
+	for len(workerResults) < 3 {
 		workerResults = append(workerResults, <-workerErrs)
 	}
 	if runCtx.Err() != nil && (ctx.Err() != nil || s.isClosed()) {
 		return nil
 	}
-	return errors.Join(
-		normalizeWorkerError(workerResults[0]),
-		normalizeWorkerError(workerResults[1]),
-	)
+	for i := range workerResults {
+		workerResults[i] = normalizeWorkerError(workerResults[i])
+	}
+	return errors.Join(workerResults...)
 }
 
 func normalizeWorkerError(err error) error {
