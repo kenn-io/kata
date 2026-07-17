@@ -166,6 +166,17 @@ type GitHubAppConfig struct {
 	PrivateKeyPath string `toml:"private_key_path"`
 }
 
+// NormalizeGitHubSyncConfig applies the same defaults and validation used by
+// daemon configuration loading to a programmatically supplied configuration.
+func NormalizeGitHubSyncConfig(cfg GitHubSyncConfig) (GitHubSyncConfig, error) {
+	daemonCfg := DaemonConfig{GitHubSync: cfg}
+	trimGitHubSync(&daemonCfg)
+	if err := validateGitHubSync(daemonCfg.GitHubSync); err != nil {
+		return GitHubSyncConfig{}, err
+	}
+	return daemonCfg.GitHubSync, nil
+}
+
 // AuthConfig is the [auth] block of <KATA_HOME>/config.toml. An empty
 // Token disables bearer auth — appropriate for Unix-socket and loopback-TCP
 // deployments; non-loopback TCP requires either --insecure-readonly with no

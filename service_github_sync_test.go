@@ -1,16 +1,97 @@
 package kata
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	internalconfig "go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/githubsync"
 )
+
+func TestServiceGitHubSyncConfigDrivesHandlersAndRunner(t *testing.T) {
+	t.Setenv("KATA_GITHUB_SYNC_ALLOWED_HOSTS", "github.example")
+	fetcher := &serviceGitHubFetcher{
+		repositoryCalls: make(chan githubsync.Binding, 2),
+	}
+	var resolved internalconfig.GitHubSyncConfig
+	service, err := newService(context.Background(), Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: AuthConfig{TrustCallerAuthentication: true},
+		GitHubSync: GitHubSyncConfig{ //nolint:gosec // TokenEnv is an environment variable name, not a credential.
+			TokenEnv:  " EXAMPLE_GITHUB_TOKEN ",
+			TokenHost: " GitHub.Example ",
+			Apps: []GitHubAppConfig{{
+				Host: " GitHub.Example ", Owner: " example-owner ",
+				AppID: 123, InstallationID: 456, PrivateKeyPath: " /keys/example.pem ",
+			}},
+		},
+	}, serviceDeps{
+		gitHubSyncFetcherFactory: func(cfg internalconfig.GitHubSyncConfig) githubsync.Fetcher {
+			resolved = cfg
+			return fetcher
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	assert.Equal(t, internalconfig.GitHubSyncConfig{ //nolint:gosec // TokenEnv is an environment variable name, not a credential.
+		TokenEnv: "EXAMPLE_GITHUB_TOKEN", TokenHost: "github.example",
+		Apps: []internalconfig.GitHubAppConfig{{
+			Host: "github.example", Owner: "example-owner", AppID: 123,
+			InstallationID: 456, PrivateKeyPath: "/keys/example.pem",
+		}},
+	}, resolved)
+
+	project, err := service.store.CreateProject(context.Background(), "example-project")
+	require.NoError(t, err)
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+	body, err := json.Marshal(map[string]any{
+		"config": map[string]any{
+			"host": "github.example", "owner": "example-owner", "repo": "example-repo",
+		},
+	})
+	require.NoError(t, err)
+	response, err := http.Post(
+		server.URL+"/api/v1/projects/"+fmt.Sprint(project.ID)+"/issue-sync/github/enable",
+		"application/json", bytes.NewReader(body),
+	)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	select {
+	case call := <-fetcher.repositoryCalls:
+		assert.Equal(t, githubsync.Binding{
+			Host: "github.example", Owner: "example-owner", Repo: "example-repo",
+		}, call)
+	case <-time.After(2 * time.Second):
+		require.Fail(t, "configured GitHub fetcher was not used by the HTTP handler")
+	}
+
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- service.Run(runCtx) }()
+	select {
+	case call := <-fetcher.repositoryCalls:
+		assert.Equal(t, githubsync.Binding{
+			Host: "github.example", Owner: "example-owner", Repo: "example-repo",
+		}, call)
+	case <-time.After(2 * time.Second):
+		require.Fail(t, "configured GitHub fetcher was not used by the background runner")
+	}
+	cancelRun()
+	require.NoError(t, <-runDone)
+}
 
 func TestServiceRunProcessesEnabledGitHubSyncBinding(t *testing.T) {
 	fetcher := &serviceGitHubFetcher{

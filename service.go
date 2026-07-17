@@ -59,18 +59,38 @@ type AuthConfig struct {
 	TrustCallerAuthentication bool
 }
 
+// GitHubSyncConfig supplies credentials used by GitHub issue synchronization.
+// TokenEnv names an environment variable containing a token; token values are
+// never stored in Config. Empty fields use Kata's standalone defaults.
+type GitHubSyncConfig struct {
+	TokenEnv  string
+	TokenHost string
+	Apps      []GitHubAppConfig
+}
+
+// GitHubAppConfig identifies one GitHub App installation credential.
+type GitHubAppConfig struct {
+	Host           string
+	Owner          string
+	AppID          int64
+	InstallationID int64
+	PrivateKeyPath string
+}
+
 // Config contains the process-neutral inputs needed to construct a Service.
 type Config struct {
 	// DSN accepts a SQLite path, sqlite:// URL, or PostgreSQL URL.
-	DSN       string
-	Postgres  PostgresConfig
-	Auth      AuthConfig
-	StartedAt time.Time
-	Logger    *slog.Logger
+	DSN        string
+	Postgres   PostgresConfig
+	Auth       AuthConfig
+	GitHubSync GitHubSyncConfig
+	StartedAt  time.Time
+	Logger     *slog.Logger
 }
 
 type serviceDeps struct {
-	gitHubSyncFetcher githubsync.Fetcher
+	gitHubSyncFetcher        githubsync.Fetcher
+	gitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
 }
 
 // Service is a mountable Kata HTTP application and its owned lifecycle.
@@ -112,6 +132,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if strings.TrimSpace(cfg.Auth.Token) != "" && cfg.Auth.TrustCallerAuthentication {
 		return nil, errors.New("kata: auth token and trusted caller authentication are mutually exclusive")
 	}
+	gitHubSyncConfig, err := resolveGitHubSyncConfig(cfg.GitHubSync)
+	if err != nil {
+		return nil, fmt.Errorf("kata: GitHub sync config: %w", err)
+	}
 
 	openCfg := storeopen.DefaultConfig()
 	pgCfg := cfg.Postgres
@@ -151,12 +175,17 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		default:
 		}
 	}
-	gitHubSyncConfig := config.GitHubSyncConfig{}
 	gitHubSyncFetcher := deps.gitHubSyncFetcher
 	if gitHubSyncFetcher == nil {
-		gitHubSyncFetcher = githubsync.NewHTTPFetcher(githubsync.HTTPFetcherConfig{
-			CredentialResolver: githubsync.NewCredentialResolver(gitHubSyncConfig, nil),
-		})
+		factory := deps.gitHubSyncFetcherFactory
+		if factory == nil {
+			factory = func(cfg config.GitHubSyncConfig) githubsync.Fetcher {
+				return githubsync.NewHTTPFetcher(githubsync.HTTPFetcherConfig{
+					CredentialResolver: githubsync.NewCredentialResolver(cfg, nil),
+				})
+			}
+		}
+		gitHubSyncFetcher = factory(gitHubSyncConfig)
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
 		DB:                store,
@@ -184,6 +213,23 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		lifetimeCancel:    lifetimeCancel,
 		closeDone:         make(chan struct{}),
 	}, nil
+}
+
+func resolveGitHubSyncConfig(cfg GitHubSyncConfig) (config.GitHubSyncConfig, error) {
+	apps := make([]config.GitHubAppConfig, len(cfg.Apps))
+	for i := range cfg.Apps {
+		app := cfg.Apps[i]
+		apps[i] = config.GitHubAppConfig{
+			Host:           app.Host,
+			Owner:          app.Owner,
+			AppID:          app.AppID,
+			InstallationID: app.InstallationID,
+			PrivateKeyPath: app.PrivateKeyPath,
+		}
+	}
+	return config.NormalizeGitHubSyncConfig(config.GitHubSyncConfig{
+		TokenEnv: cfg.TokenEnv, TokenHost: cfg.TokenHost, Apps: apps,
+	})
 }
 
 // Handler returns the HTTP application for mounting in a caller-owned server.
@@ -240,6 +286,29 @@ func (s *Service) Run(ctx context.Context) error {
 		s.runCancel = nil
 		close(done)
 		s.mu.Unlock()
+	}()
+	federationSub := s.broadcaster.Subscribe(daemon.SubFilter{})
+	federationWakeDone := make(chan struct{})
+	go func() {
+		defer close(federationWakeDone)
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case msg, ok := <-federationSub.Ch:
+				if !ok {
+					return
+				}
+				if msg.Kind == "event" {
+					signalWake(s.federationWake)
+				}
+			}
+		}
+	}()
+	defer func() {
+		cancel()
+		<-federationWakeDone
+		federationSub.Unsub()
 	}()
 
 	workerErrs := make(chan error, 3)
@@ -301,6 +370,13 @@ func (s *Service) Run(ctx context.Context) error {
 		workerResults[i] = normalizeWorkerError(workerResults[i])
 	}
 	return errors.Join(workerResults...)
+}
+
+func signalWake(ch chan<- struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
 }
 
 func normalizeWorkerError(err error) error {
