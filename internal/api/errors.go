@@ -82,30 +82,82 @@ func (e *APIError) Schema(r huma.Registry) *huma.Schema {
 	return r.Schema(reflect.TypeOf(ErrorEnvelope{}), true, "ErrorEnvelope")
 }
 
-// InstallErrorFormatter wires Huma so non-API-typed errors (panics, validation
-// failures) also serialize to ErrorEnvelope. Call once at server startup.
-// Huma emits 422 for request-body validation failures; we normalize that to
-// 400 with code "validation" so the wire contract documented in spec §4.7
-// (no 422 in the status table) holds.
-//
-// Validation errors arrive with a generic message ("validation failed") plus
-// a slice of huma.ErrorDetail entries that carry the per-field details.
-// Without folding the details into the message, both human ("kata: validation
-// failed") and JSON envelope payloads tell the user nothing about what went
-// wrong (hammer-test finding #11). Fold up to ~3 details into the surfaced
-// message in "field: reason" form so close --reason banana, link 3 banana 4,
-// and list --status nonsense surface actionable feedback.
-func InstallErrorFormatter() {
-	huma.NewError = func(status int, message string, errs ...error) huma.StatusError {
-		if status == http.StatusUnprocessableEntity {
-			status = http.StatusBadRequest
-		}
+// WrapErrorAdapter keeps Huma's validation status normalization local to one
+// API. Huma writes a response status before running response transformers, so
+// the adapter context must translate 422 to Kata's documented 400 at the first
+// SetStatus call. This avoids mutating Huma's process-global error factories,
+// which would otherwise affect unrelated APIs in an embedding host.
+func WrapErrorAdapter(adapter huma.Adapter) huma.Adapter {
+	return &errorAdapter{Adapter: adapter}
+}
+
+type errorAdapter struct {
+	huma.Adapter
+}
+
+func (a *errorAdapter) Handle(operation *huma.Operation, handler func(huma.Context)) {
+	a.Adapter.Handle(operation, func(ctx huma.Context) {
+		handler(&errorContext{embeddedContext: ctx})
+	})
+}
+
+type embeddedContext = huma.Context
+
+type errorContext struct {
+	embeddedContext
+}
+
+func (c *errorContext) SetStatus(status int) {
+	c.embeddedContext.SetStatus(normalizeHumaStatus(status))
+}
+
+// TransformHumaError converts framework-generated errors to Kata's stable
+// envelope. Explicit APIError values pass through unchanged. Setting the
+// content type here also prevents Huma's default ErrorModel from leaving an
+// application/problem+json header behind after transformation.
+func TransformHumaError(ctx huma.Context, _ string, value any) (any, error) {
+	if _, ok := value.(*APIError); ok {
+		return value, nil
+	}
+
+	if model, ok := value.(*huma.ErrorModel); ok {
+		ctx.SetHeader("Content-Type", "application/json")
+		return apiErrorFromHuma(model), nil
+	}
+
+	if statusError, ok := value.(huma.StatusError); ok {
+		status := normalizeHumaStatus(statusError.GetStatus())
+		ctx.SetHeader("Content-Type", "application/json")
 		return &APIError{
 			Status:  status,
 			Code:    codeForStatus(status),
-			Message: foldDetailsIntoMessage(message, errs),
+			Message: statusError.Error(),
+		}, nil
+	}
+
+	return value, nil
+}
+
+func apiErrorFromHuma(model *huma.ErrorModel) *APIError {
+	status := normalizeHumaStatus(model.Status)
+	details := make([]error, 0, len(model.Errors))
+	for _, detail := range model.Errors {
+		if detail != nil {
+			details = append(details, detail)
 		}
 	}
+	return &APIError{
+		Status:  status,
+		Code:    codeForStatus(status),
+		Message: foldDetailsIntoMessage(model.Detail, details),
+	}
+}
+
+func normalizeHumaStatus(status int) int {
+	if status == http.StatusUnprocessableEntity {
+		return http.StatusBadRequest
+	}
+	return status
 }
 
 // foldDetailsIntoMessage appends per-error detail to the generic huma

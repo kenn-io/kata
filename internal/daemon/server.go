@@ -139,7 +139,6 @@ type Server struct {
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
-	api.InstallErrorFormatter()
 	if cfg.Broadcaster == nil {
 		cfg.Broadcaster = NewEventBroadcaster()
 	}
@@ -154,16 +153,18 @@ func NewServer(cfg ServerConfig) *Server {
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)
 	humaConfig.OpenAPIPath = "" // Plan 1: no /openapi.json served at runtime; see `kata openapi` + OpenAPIDocument
 	humaConfig.DocsPath = ""
+	humaConfig.Transformers = append(humaConfig.Transformers, api.TransformHumaError)
 	// Drop DefaultConfig's SchemaLinkTransformer: it rebuilds response structs
 	// via reflection (adding a $schema field), which silently bypasses any
 	// MarshalJSON. Our APIError relies on MarshalJSON to emit the wire-spec
 	// envelope shape, so we must disable the transform.
 	humaConfig.CreateHooks = nil
-	humaAPI := humago.New(mux, humaConfig)
+	humaAPI := huma.NewAPI(humaConfig, api.WrapErrorAdapter(humago.NewAdapter(mux, "")))
 
 	s := &Server{cfg: cfg, api: humaAPI}
 	registerRoutes(humaAPI, mux, cfg)
 	registerOpenAPIYAML(mux)
+	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
 	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 
 	s.handler = withGzip(withCSRFGuards(requireBearer(cfg.authPolicy(), cfg.DB)(withTrustedProxyActor(cfg)(mux))))

@@ -1,11 +1,11 @@
-// Internal test for the unexported foldDetailsIntoMessage helper
-// and the public InstallErrorFormatter contract.
+// Internal tests for Kata's Huma error conversion.
 //
 //nolint:revive // package-name lint flagged externally; internal test needs the package name
 package api
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -78,19 +78,14 @@ func TestFoldDetailsIntoMessage(t *testing.T) {
 	}
 }
 
-// TestInstallErrorFormatter_FoldsDetailsIntoApiError pins that
-// InstallErrorFormatter's huma.NewError replacement actually wires
-// up the fold for code paths that go through the framework's
-// validation pipeline.
-func TestInstallErrorFormatter_FoldsDetailsIntoApiError(t *testing.T) {
-	InstallErrorFormatter()
-	// huma.NewError is the package-level function we replaced.
-	se := huma.NewError(400, "validation failed",
-		&huma.ErrorDetail{Location: "body.reason", Message: "must be one of done, wontfix"})
-	apiErr, ok := se.(*APIError)
-	if !ok {
-		t.Fatalf("expected *APIError, got %T", se)
-	}
+func TestAPIErrorFromHuma_FoldsDetails(t *testing.T) {
+	apiErr := apiErrorFromHuma(&huma.ErrorModel{
+		Status: http.StatusUnprocessableEntity,
+		Detail: "validation failed",
+		Errors: []*huma.ErrorDetail{
+			{Location: "body.reason", Message: "must be one of done, wontfix"},
+		},
+	})
 	assert.Equal(t, 400, apiErr.Status)
 	assert.Equal(t, "validation", apiErr.Code)
 	assert.Contains(t, apiErr.Message, "reason: must be one of done, wontfix",

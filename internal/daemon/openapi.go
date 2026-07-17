@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
+
+	"go.kenn.io/kata/internal/api"
 )
 
 // APISchemaVersion is the version stamped into the daemon's OpenAPI document
@@ -182,6 +186,36 @@ func documentOperations(doc *huma.OpenAPI) []*huma.Operation {
 		}
 	}
 	return ops
+}
+
+// applyErrorEnvelopeResponses replaces Huma's process-global default error
+// model in this API's document only. Runtime framework errors are converted by
+// api.TransformHumaError; keeping the same transformation local here preserves
+// the published wire contract without changing other Huma APIs in the process.
+func applyErrorEnvelopeResponses(doc *huma.OpenAPI) {
+	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
+		return
+	}
+
+	registry := doc.Components.Schemas
+	errorSchema := registry.Schema(reflect.TypeOf(api.ErrorEnvelope{}), true, "ErrorEnvelope")
+	for _, operation := range documentOperations(doc) {
+		for code, response := range operation.Responses {
+			status, err := strconv.Atoi(code)
+			if code != "default" && (err != nil || status < 400) {
+				continue
+			}
+			response.Content = map[string]*huma.MediaType{
+				"application/json": {Schema: errorSchema},
+			}
+		}
+	}
+
+	// These framework schemas are no longer referenced after every error
+	// response is rewritten. Do not leak unrelated Huma error components into
+	// Kata's committed API artifact.
+	delete(registry.Map(), "ErrorDetail")
+	delete(registry.Map(), "ErrorModel")
 }
 
 // walkSchemaTree visits schema and every schema reachable from it, resolving
