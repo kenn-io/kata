@@ -296,6 +296,10 @@ func (s *Store) bootstrap(ctx context.Context) (bool, error) {
 		if _, err := tx.ExecContext(ctx, `CREATE SCHEMA `+quoteIdentifier(s.schema)); err != nil {
 			return false, fmt.Errorf("create postgres schema %q: %w", s.schema, err)
 		}
+		if _, err := tx.ExecContext(ctx,
+			`REVOKE CREATE ON SCHEMA `+quoteIdentifier(s.schema)+` FROM PUBLIC`); err != nil {
+			return false, fmt.Errorf("secure postgres schema %q: %w", s.schema, err)
+		}
 	}
 	// Inspect metadata with pg_catalog first. A pre-existing schema is not
 	// trusted until its Kata migration metadata has been validated below.
@@ -312,6 +316,16 @@ func (s *Store) bootstrap(ctx context.Context) (bool, error) {
 		if !trustedMetadata {
 			return false, fmt.Errorf("postgres schema %q exists without migration metadata", s.schema)
 		}
+	}
+	createGrantee, err := untrustedSchemaCreateGrantee(ctx, tx, s.schema)
+	if err != nil {
+		return false, err
+	}
+	if createGrantee != "" {
+		return false, fmt.Errorf(
+			"postgres schema %q grants CREATE privilege to non-owner %q",
+			s.schema, createGrantee,
+		)
 	}
 	current, err := currentVersionTx(ctx, tx, s.schema)
 	if err != nil {
@@ -421,6 +435,16 @@ func (s *Store) validateSchemaOwnership(ctx context.Context) error {
 			s.schema, actualOwner, s.schemaOwner,
 		)
 	}
+	createGrantee, err := untrustedSchemaCreateGrantee(ctx, s, s.schema)
+	if err != nil {
+		return err
+	}
+	if createGrantee != "" {
+		return fmt.Errorf(
+			"postgres schema %q grants CREATE privilege to non-owner %q",
+			s.schema, createGrantee,
+		)
+	}
 
 	rows, err := s.QueryContext(ctx, `
 		SELECT c.relname, c.relkind::text, pg_catalog.pg_get_userbyid(c.relowner),
@@ -484,6 +508,11 @@ func (s *Store) validateSchemaOwnership(ctx context.Context) error {
 			  FROM pg_catalog.pg_ts_config c
 			  JOIN pg_catalog.pg_namespace n ON n.oid = c.cfgnamespace
 			 WHERE n.nspname = $1
+			UNION ALL
+			SELECT 'operator', o.oprname, pg_catalog.pg_get_userbyid(o.oprowner)
+			  FROM pg_catalog.pg_operator o
+			  JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace
+			 WHERE n.nspname = $1
 		  ) owned_objects
 		 WHERE object_owner <> $2
 		 LIMIT 1`, s.schema, s.schemaOwner).Scan(&untrustedKind, &untrustedName, &untrustedOwner)
@@ -497,6 +526,32 @@ func (s *Store) validateSchemaOwnership(ctx context.Context) error {
 		return fmt.Errorf("inspect postgres schema %q object ownership: %w", s.schema, err)
 	}
 	return nil
+}
+
+type schemaRowQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func untrustedSchemaCreateGrantee(ctx context.Context, queryer schemaRowQueryer, schema string) (string, error) {
+	var createGrantee string
+	err := queryer.QueryRowContext(ctx, `
+		SELECT CASE WHEN acl.grantee = 0 THEN 'PUBLIC'
+		            ELSE pg_catalog.pg_get_userbyid(acl.grantee) END
+		  FROM pg_catalog.pg_namespace n
+		 CROSS JOIN LATERAL pg_catalog.aclexplode(
+		       COALESCE(n.nspacl, pg_catalog.acldefault('n', n.nspowner))
+		 ) acl
+		 WHERE n.nspname = $1
+		   AND acl.privilege_type = 'CREATE'
+		   AND acl.grantee <> n.nspowner
+		 LIMIT 1`, schema).Scan(&createGrantee)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("inspect postgres schema %q CREATE privileges: %w", schema, err)
+	}
+	return createGrantee, nil
 }
 
 func currentVersionTx(ctx context.Context, tx *sql.Tx, schema string) (int, error) {

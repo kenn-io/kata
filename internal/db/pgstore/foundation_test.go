@@ -273,6 +273,24 @@ func TestValidationRejectsUnexpectedSchemaAndObjectOwnership(t *testing.T) {
 		_, err := admin.ExecContext(ctx, `ALTER TABLE ownership_store.projects ENABLE ROW LEVEL SECURITY`)
 		require.NoError(t, err)
 		assertRejected(t, `relation "projects"`)
+		_, err = admin.ExecContext(ctx, `ALTER TABLE ownership_store.projects DISABLE ROW LEVEL SECURITY`)
+		require.NoError(t, err)
+	})
+
+	t.Run("schema create privilege", func(t *testing.T) {
+		_, err := admin.ExecContext(ctx, `GRANT CREATE ON SCHEMA ownership_store TO `+attackerRole) // #nosec G202 -- role is a fixed prefix plus process ID.
+		require.NoError(t, err)
+		assertRejected(t, `grants CREATE privilege to non-owner`)
+		ownerStore, openErr := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
+			Schema: "ownership_store", SchemaMode: pgstore.SchemaModeBootstrap,
+		})
+		if ownerStore != nil {
+			t.Cleanup(func() { _ = ownerStore.Close() })
+		}
+		require.Error(t, openErr)
+		assert.Contains(t, openErr.Error(), `grants CREATE privilege to non-owner`)
+		_, err = admin.ExecContext(ctx, `REVOKE CREATE ON SCHEMA ownership_store FROM `+attackerRole) // #nosec G202 -- role is a fixed prefix plus process ID.
+		require.NoError(t, err)
 	})
 }
 
@@ -299,15 +317,23 @@ func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
 	require.NoError(t, owner.Close())
 
 	runtimeRole := fmt.Sprintf("adoption_runtime_%d", os.Getpid())
+	attackerRole := fmt.Sprintf("adoption_attacker_%d", os.Getpid())
 	_, err = admin.ExecContext(ctx, fmt.Sprintf(`
 		CREATE ROLE %s LOGIN PASSWORD 'runtime-password';
+		CREATE ROLE %s;
 		REVOKE CREATE ON SCHEMA adoption_store FROM PUBLIC;
 		GRANT USAGE ON SCHEMA adoption_store TO %s;
 		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA adoption_store TO %s;
 		GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA adoption_store TO %s;
 		GRANT EXECUTE ON FUNCTION adoption_store.rewrite_project_uid_for_adoption(BIGINT, TEXT) TO %s;
-	`, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
+	`, runtimeRole, attackerRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(`
+			DROP OWNED BY %s, %s CASCADE;
+			DROP ROLE IF EXISTS %s, %s;
+		`, attackerRole, runtimeRole, attackerRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
+	})
 
 	runtime, err := pgstore.OpenWithConfig(ctx,
 		postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"),
@@ -317,6 +343,23 @@ func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = runtime.Close() })
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`
+		GRANT USAGE, CREATE ON SCHEMA adoption_store TO %s;
+		SET ROLE %s;
+		CREATE FUNCTION adoption_store.fail_bigint_eq(BIGINT, BIGINT)
+		RETURNS BOOLEAN LANGUAGE plpgsql AS $$
+		BEGIN
+			RAISE EXCEPTION 'operator shadow executed';
+		END $$;
+		CREATE OPERATOR adoption_store.= (
+			LEFTARG = BIGINT,
+			RIGHTARG = BIGINT,
+			FUNCTION = adoption_store.fail_bigint_eq
+		);
+		RESET ROLE;
+		REVOKE CREATE ON SCHEMA adoption_store FROM %s;
+	`, attackerRole, attackerRole, attackerRole)) // #nosec G201 -- role name is a fixed prefix plus process ID.
+	require.NoError(t, err)
 	hubProjectUID := "01KATA00000000000000000077"
 	conn, err := runtime.Conn(ctx)
 	require.NoError(t, err)

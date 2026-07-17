@@ -687,6 +687,10 @@ type Runner struct {
 	OnPulledEvents func(projectID int64, events []db.Event)
 }
 
+type runnerLeaseStore interface {
+	AcquireFederationRunnerLease(context.Context) (func() error, error)
+}
+
 func (r *Runner) clientOpts() clientpkg.Opts {
 	return clientOptsWithDefault(r.Opts)
 }
@@ -924,8 +928,23 @@ func issueClaimFromAPI(claim *api.IssueClaimOut) db.IssueClaim {
 	}
 }
 
-// Run executes pull passes until ctx is cancelled.
-func (r *Runner) Run(ctx context.Context) error {
+// Run executes pull passes until ctx is cancelled. PostgreSQL stores elect one
+// runner per database/schema pair before any pull work begins; SQLite remains
+// process-local and needs no cross-daemon lease.
+func (r *Runner) Run(ctx context.Context) (runErr error) {
+	if store, ok := r.DB.(runnerLeaseStore); ok {
+		release, err := store.AcquireFederationRunnerLease(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			runErr = errors.Join(runErr, release())
+		}()
+	}
+	return r.run(ctx)
+}
+
+func (r *Runner) run(ctx context.Context) error {
 	interval := r.Interval
 	if interval <= 0 {
 		interval = 30 * time.Second

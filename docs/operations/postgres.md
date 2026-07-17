@@ -102,8 +102,11 @@ Re-run the two `GRANT ... ON ALL ...` statements and the exact function grant
 after an upgrade when auditing an existing deployment. The function grant is
 deliberately narrow: existing-project federation adoption needs to replace one
 otherwise immutable project UID, but the runtime role never receives table DDL
-authority. The default privileges cover newly created tables and sequences only
-when migrations run as `kata_schema_owner`.
+authority. Do not grant `CREATE` on the Kata schema to the runtime role or any
+other non-owner role; validation-only startup rejects such grants because
+schema objects participate in PostgreSQL name resolution. The default
+privileges cover newly created tables and sequences only when migrations run as
+`kata_schema_owner`.
 
 ## Configure the runtime
 
@@ -131,8 +134,9 @@ export KATA_POSTGRES_SCHEMA_OWNER='kata_schema_owner'
 
 In `validate` mode, `schema_owner` is required. Every direct storage
 open—including daemon startup and offline export—checks that the namespace,
-canonical relations, functions, types, and text-search configuration belong to
-that role before reading application tables. It also requires the schema to
+canonical relations, functions, operators, types, and text-search configuration
+belong to that role before reading application tables, and rejects schema
+`CREATE` grants to non-owner roles. It also requires the schema to
 exist at the binary's exact version and performs no DDL. Missing, older, newer,
 unversioned, differently owned, or row-security-enabled schemas fail closed.
 

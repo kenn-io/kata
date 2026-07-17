@@ -245,6 +245,9 @@ CREATE TRIGGER trg_issues_uid_immutable
 -- a project UID. Keep the runtime role unable to alter tables directly while
 -- exposing only this schema-owner operation. SET search_path FROM CURRENT
 -- captures the trusted schema, pg_catalog, pg_temp order pinned by bootstrap.
+-- Qualify operators explicitly: PostgreSQL resolves operators through the
+-- search path independently of relation names, and this function executes as
+-- the schema owner.
 CREATE OR REPLACE FUNCTION rewrite_project_uid_for_adoption(
   p_project_id BIGINT,
   p_project_uid TEXT
@@ -254,18 +257,23 @@ SECURITY DEFINER
 SET search_path FROM CURRENT
 AS $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM federation_bindings WHERE project_id = p_project_id) THEN
+  IF EXISTS (
+    SELECT 1 FROM federation_bindings
+    WHERE project_id OPERATOR(pg_catalog.=) p_project_id
+  ) THEN
     RAISE EXCEPTION 'project already has a federation binding';
   END IF;
   IF NOT EXISTS (
-    SELECT 1 FROM projects WHERE id = p_project_id AND deleted_at IS NULL
+    SELECT 1 FROM projects
+    WHERE id OPERATOR(pg_catalog.=) p_project_id AND deleted_at IS NULL
   ) THEN
     RAISE EXCEPTION 'active project not found';
   END IF;
 
   ALTER TABLE projects DISABLE TRIGGER trg_projects_uid_immutable;
   BEGIN
-    UPDATE projects SET uid = p_project_uid WHERE id = p_project_id;
+    UPDATE projects SET uid = p_project_uid
+    WHERE id OPERATOR(pg_catalog.=) p_project_id;
     IF NOT FOUND THEN
       RAISE EXCEPTION 'project not found';
     END IF;
