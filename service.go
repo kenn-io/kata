@@ -83,6 +83,9 @@ type Service struct {
 	gitHubSyncWake    chan struct{}
 	gitHubSyncFetcher githubsync.Fetcher
 	logger            *slog.Logger
+	lifetimeCtx       context.Context
+	lifetimeCancel    context.CancelFunc
+	handlerWG         sync.WaitGroup
 
 	mu        sync.Mutex
 	running   bool
@@ -131,6 +134,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if logger == nil {
 		logger = slog.Default()
 	}
+	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	broadcaster := daemon.NewEventBroadcaster()
 	hookSink := hooks.NewNoop()
 	federationWake := make(chan struct{}, 1)
@@ -176,12 +180,35 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		gitHubSyncWake:    gitHubSyncWake,
 		gitHubSyncFetcher: gitHubSyncFetcher,
 		logger:            logger,
+		lifetimeCtx:       lifetimeCtx,
+		lifetimeCancel:    lifetimeCancel,
 		closeDone:         make(chan struct{}),
 	}, nil
 }
 
 // Handler returns the HTTP application for mounting in a caller-owned server.
-func (s *Service) Handler() http.Handler { return s.server.Handler() }
+func (s *Service) Handler() http.Handler { return http.HandlerFunc(s.serveHTTP) }
+
+func (s *Service) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		http.Error(w, "kata service is closed", http.StatusServiceUnavailable)
+		return
+	}
+	s.handlerWG.Add(1)
+	lifetimeCtx := s.lifetimeCtx
+	s.mu.Unlock()
+	defer s.handlerWG.Done()
+
+	requestCtx, cancel := context.WithCancel(r.Context())
+	stopLifetimeCancel := context.AfterFunc(lifetimeCtx, cancel)
+	defer func() {
+		stopLifetimeCancel()
+		cancel()
+	}()
+	s.server.Handler().ServeHTTP(w, r.WithContext(requestCtx))
+}
 
 // Run executes Kata's federation, GitHub synchronization, and timed-claim
 // workers until ctx is canceled or Close is called. Run does not start a
@@ -302,6 +329,7 @@ func (s *Service) Close() error {
 		return s.closeErr
 	}
 	s.closed = true
+	s.lifetimeCancel()
 	cancel := s.runCancel
 	runDone := s.runDone
 	s.mu.Unlock()
@@ -310,6 +338,7 @@ func (s *Service) Close() error {
 		cancel()
 		<-runDone
 	}
+	s.handlerWG.Wait()
 	err := errors.Join(s.server.Close(), s.store.Close())
 
 	s.mu.Lock()
