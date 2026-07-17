@@ -16,7 +16,10 @@ import (
 const federationRunnerLeasePollInterval = 100 * time.Millisecond
 
 type federationRunnerLeaseState struct {
-	mu   sync.RWMutex
+	// A lease connection is a single PostgreSQL session. Serialize every query
+	// and release operation so the runner and its monitor never drive pgx on
+	// that session concurrently.
+	mu   sync.Mutex
 	conn leaseQueryer
 }
 
@@ -86,10 +89,10 @@ func (s *Store) AcquireFederationRunnerLease(ctx context.Context) (func() error,
 		return func() error {
 			once.Do(func() {
 				s.federationLease.mu.Lock()
+				defer s.federationLease.mu.Unlock()
 				if s.federationLease.conn == conn {
 					s.federationLease.conn = nil
 				}
-				s.federationLease.mu.Unlock()
 				releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_, unlockErr := conn.ExecContext(releaseCtx, `
@@ -122,9 +125,9 @@ func isFederationRunnerLeaseRetryable(err error) bool {
 // ValidateFederationRunnerLease verifies the exact session used to acquire
 // leadership is still alive and owns the schema's advisory lock.
 func (s *Store) ValidateFederationRunnerLease(ctx context.Context) error {
-	s.federationLease.mu.RLock()
+	s.federationLease.mu.Lock()
+	defer s.federationLease.mu.Unlock()
 	conn := s.federationLease.conn
-	s.federationLease.mu.RUnlock()
 	if conn == nil {
 		return errors.New("postgres federation runner lease is not held")
 	}
