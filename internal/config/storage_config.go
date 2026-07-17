@@ -42,13 +42,21 @@ func readStorageConfig() (StorageConfig, error) {
 	if len(bytes.TrimSpace(subset)) == 0 {
 		return StorageConfig{}, nil
 	}
-	// Decode against a single-field shadow struct so a future [storage]
-	// addition we don't yet know about does not leak through meta.Undecoded.
+	// Decode against a single-field shadow struct. Since the pre-pass removed
+	// unrelated sections, every undecoded key here is an unsafe storage typo.
 	var shadow struct {
 		Storage StorageConfig `toml:"storage"`
 	}
-	if _, err := toml.Decode(string(subset), &shadow); err != nil {
+	metadata, err := toml.Decode(string(subset), &shadow)
+	if err != nil {
 		return StorageConfig{}, fmt.Errorf("parse %s [storage]: %w", path, err)
+	}
+	if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, 0, len(undecoded))
+		for _, key := range undecoded {
+			keys = append(keys, key.String())
+		}
+		return StorageConfig{}, fmt.Errorf("parse %s [storage]: unknown key(s): %s", path, strings.Join(keys, ", "))
 	}
 	shadow.Storage.DSN = strings.TrimSpace(shadow.Storage.DSN)
 	shadow.Storage.Postgres.Schema = strings.TrimSpace(shadow.Storage.Postgres.Schema)

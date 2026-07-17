@@ -55,9 +55,17 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
           WHERE issue_id = $1 OR (related_issue_id = $1 AND type <> 'issue.links_changed')`, issue.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL
-          WHERE related_issue_id = $1 AND type = 'issue.links_changed'`, issue.ID); err != nil {
+		rows, err := tx.QueryContext(ctx, `UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL
+		  WHERE related_issue_id = $1 AND type = 'issue.links_changed' RETURNING id`, issue.ID)
+		if err != nil {
 			return mapSQLError(err, nil)
+		}
+		detachedEventIDs, err := collectEventIDs(rows)
+		if err != nil {
+			return err
+		}
+		if err := recomputeEventContentHashesTx(ctx, tx, detachedEventIDs); err != nil {
+			return err
 		}
 		for _, statement := range []string{
 			`DELETE FROM comments WHERE issue_id = $1`,

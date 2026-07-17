@@ -49,6 +49,8 @@ var ErrFederationResetBlockedByQuarantine = db.ErrFederationResetBlockedByQuaran
 // the hub transport cap.
 var ErrFederationAdoptionBaselineTooLarge = errors.New("federation adoption snapshot baseline exceeds hub ingest body limit")
 
+var errFederationRunnerLeaseInvalid = errors.New("federation runner lease invalid")
+
 // SyncFederationOnce pulls one spoke binding from its configured hub.
 func SyncFederationOnce(
 	ctx context.Context,
@@ -71,6 +73,21 @@ func SyncFederationOnceWithPulledEvents(
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 ) error {
+	return syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil)
+}
+
+func syncFederationOnceWithFence(
+	ctx context.Context,
+	store db.Storage,
+	binding db.FederationBinding,
+	creds config.FederationCredential,
+	opts clientpkg.Opts,
+	onPulledEvents func(projectID int64, events []db.Event),
+	validateLease func(context.Context) error,
+) error {
+	if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+		return err
+	}
 	hubURL := creds.HubURL
 	if hubURL == "" {
 		hubURL = binding.HubURL
@@ -157,6 +174,9 @@ func SyncFederationOnceWithPulledEvents(
 				if err := federationFailpoint("before_spoke_push_cursor_advance"); err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
+				if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+					return err
+				}
 				if err := store.AdvanceFederationPushCursor(ctx, binding.ProjectID, ack.PushCursorEventID); err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
@@ -224,6 +244,9 @@ func SyncFederationOnceWithPulledEvents(
 	}
 	var pulledEvents []db.Event
 	if err := store.RetryTransient(ctx, func() error {
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return err
+		}
 		currentBinding, err := store.FederationBindingByProject(ctx, binding.ProjectID)
 		if err != nil {
 			return err
@@ -281,14 +304,30 @@ func SyncFederationOnceWithPulledEvents(
 			}
 			pulledEvents = events
 		}
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return err
+		}
 		return store.AdvanceFederationPullCursor(ctx, binding.ProjectID, body.NextAfterID)
 	}); err != nil {
 		return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 	}
 	if onPulledEvents != nil && len(pulledEvents) > 0 {
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return err
+		}
 		onPulledEvents(binding.ProjectID, pulledEvents)
 	}
 	return store.RecordFederationSyncPullSuccess(ctx, binding.ProjectID, time.Now().UTC())
+}
+
+func validateFederationRunnerLease(ctx context.Context, validate func(context.Context) error) error {
+	if validate == nil {
+		return nil
+	}
+	if err := validate(ctx); err != nil {
+		return errors.Join(errFederationRunnerLeaseInvalid, err)
+	}
+	return nil
 }
 
 func shouldDeliverDuplicatePulledEvent(
@@ -711,6 +750,10 @@ type activeSpokeBinding struct {
 // RunOnce executes one pull pass. With no spoke bindings it returns without
 // reading credentials or making network requests.
 func (r *Runner) RunOnce(ctx context.Context) error {
+	return r.runOnce(ctx, nil)
+}
+
+func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context) error) error {
 	bindings, err := r.DB.ListFederationBindings(ctx)
 	if err != nil {
 		return err
@@ -749,6 +792,9 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	}
 	var errs []error
 	for _, spoke := range spokes {
+		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+			return err
+		}
 		binding := spoke.binding
 		bindingErrs := len(errs)
 		project := spoke.project
@@ -766,7 +812,7 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 			}
 			errs = append(errs, err)
 		}
-		if err := SyncFederationOnceWithPulledEvents(ctx, r.DB, binding, cred, opts, r.OnPulledEvents); err != nil {
+		if err := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, r.OnPulledEvents, validateLease); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
@@ -942,13 +988,44 @@ func (r *Runner) Run(ctx context.Context) (runErr error) {
 		if err != nil {
 			return err
 		}
-		runErr = r.run(ctx, store.ValidateFederationRunnerLease)
+		runErr = r.runAsFederationLeader(ctx, store.ValidateFederationRunnerLease)
 		releaseErr := release()
 		if ctx.Err() != nil {
 			return errors.Join(ctx.Err(), releaseErr)
 		}
 		if leadershipErr := errors.Join(runErr, releaseErr); leadershipErr != nil && r.OnError != nil {
 			r.OnError(fmt.Errorf("federation runner leadership: %w", leadershipErr))
+		}
+	}
+}
+
+func (r *Runner) runAsFederationLeader(ctx context.Context, validateLease func(context.Context) error) error {
+	leaderCtx, cancelLeader := context.WithCancelCause(ctx)
+	monitorDone := make(chan error, 1)
+	go func() {
+		monitorDone <- monitorFederationRunnerLease(leaderCtx, cancelLeader, validateLease)
+	}()
+	runErr := r.run(leaderCtx, validateLease)
+	cancelLeader(context.Canceled)
+	return errors.Join(runErr, <-monitorDone)
+}
+
+func monitorFederationRunnerLease(
+	ctx context.Context,
+	cancel context.CancelCauseFunc,
+	validateLease func(context.Context) error,
+) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if err := validateLease(ctx); err != nil {
+				cancel(err)
+				return err
+			}
 		}
 	}
 }
@@ -970,8 +1047,8 @@ func (r *Runner) run(ctx context.Context, validateLease func(context.Context) er
 				return err
 			}
 		}
-		if err := r.RunOnce(ctx); err != nil {
-			if errors.Is(err, context.Canceled) {
+		if err := r.runOnce(ctx, validateLease); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
 				return err
 			}
 			if r.OnError != nil {

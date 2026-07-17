@@ -318,10 +318,28 @@ func countProjectPurgeTx(ctx context.Context, tx *sql.Tx, projectID int64) (proj
 }
 
 func deleteProjectScopedTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = $1`, projectID); err != nil {
+		return mapSQLError(err, nil)
+	}
+	var detachedEventIDs []int64
+	for _, statement := range []string{
+		`UPDATE events SET issue_id = NULL, issue_uid = NULL WHERE issue_id IN (SELECT id FROM issues WHERE project_id = $1) RETURNING id`,
+		`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id = $1) RETURNING id`,
+	} {
+		rows, err := tx.QueryContext(ctx, statement, projectID)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		ids, err := collectEventIDs(rows)
+		if err != nil {
+			return err
+		}
+		detachedEventIDs = append(detachedEventIDs, ids...)
+	}
+	if err := recomputeEventContentHashesTx(ctx, tx, detachedEventIDs); err != nil {
+		return err
+	}
 	statements := []string{
-		`DELETE FROM events WHERE project_id = $1`,
-		`UPDATE events SET issue_id = NULL, issue_uid = NULL WHERE issue_id IN (SELECT id FROM issues WHERE project_id = $1)`,
-		`UPDATE events SET related_issue_id = NULL, related_issue_uid = NULL WHERE related_issue_id IN (SELECT id FROM issues WHERE project_id = $1)`,
 		`DELETE FROM comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id = $1)`,
 		`DELETE FROM links WHERE from_issue_id IN (SELECT id FROM issues WHERE project_id = $1) OR to_issue_id IN (SELECT id FROM issues WHERE project_id = $1)`,
 		`DELETE FROM issue_labels WHERE issue_id IN (SELECT id FROM issues WHERE project_id = $1)`,
