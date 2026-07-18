@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -552,14 +551,17 @@ func requireSecureOrPrivate(u *url.URL, allowInsecure bool) error {
 	return nil
 }
 
-// probeRemote does a 1-second /api/v1/ping check against base. We keep
-// the budget tight: a misconfigured remote should fail fast, not stall
-// the user behind the 5-second auto-start deadline.
+// probeRemote checks an explicitly configured remote using the normal
+// non-streaming request budget. Connection refusal still fails immediately,
+// while a black-holed or misconfigured remote can wait for the full default or
+// operator-selected KATA_HTTP_TIMEOUT budget. Local runtime discovery keeps its
+// separate one-second probe so auto-start remains responsive.
 //
 // Indirected through a package-level var so tests that exercise
 // resolution paths past the probe (e.g. allow_insecure bypass) can
 // stub the network call without dialing TEST-NET addresses.
 var probeRemote = func(ctx context.Context, base string) bool {
-	client := &http.Client{Timeout: 1 * time.Second}
+	timeout, _ := ParseHTTPTimeout(os.Getenv(HTTPTimeoutEnvVar), DefaultHTTPTimeout)
+	client := &http.Client{Timeout: timeout}
 	return Ping(ctx, client, base)
 }

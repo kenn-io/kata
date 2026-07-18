@@ -33,6 +33,33 @@ func pingingServer(t *testing.T) *httptest.Server {
 	return s
 }
 
+func TestParseHTTPTimeout(t *testing.T) {
+	const fallback = 5 * time.Second
+	tests := []struct {
+		name    string
+		raw     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "empty returns fallback", raw: "", want: fallback},
+		{name: "valid duration", raw: "30s", want: 30 * time.Second},
+		{name: "invalid returns fallback", raw: "invalid", want: fallback, wantErr: true},
+		{name: "zero returns fallback", raw: "0s", want: fallback, wantErr: true},
+		{name: "negative returns fallback", raw: "-1s", want: fallback, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseHTTPTimeout(tt.raw, fallback)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestResolveRemote_NoEnvNoFile(t *testing.T) {
 	t.Setenv("KATA_SERVER", "")
 	dir := t.TempDir()
@@ -49,6 +76,30 @@ func TestResolveRemote_EnvWinsAndProbes(t *testing.T) {
 	t.Setenv("KATA_SERVER", srv.URL)
 
 	url, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, srv.URL, url)
+}
+
+func TestResolveRemote_HonorsHTTPTimeoutForSlowPing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ping" {
+			http.NotFound(w, r)
+			return
+		}
+		time.Sleep(1100 * time.Millisecond)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":      true,
+			"service": "kata",
+			"version": "test",
+		})
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("KATA_SERVER", srv.URL)
+	t.Setenv("KATA_HTTP_TIMEOUT", "1500ms")
+
+	url, ok, err := resolveRemote(context.Background(), "")
+
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url)

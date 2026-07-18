@@ -25,6 +25,33 @@ import (
 // requests through a unix-socket transport instead of TCP DNS.
 const UnixBase = "http://kata.invalid"
 
+const (
+	// HTTPTimeoutEnvVar configures non-streaming request and configured-remote
+	// probe budgets.
+	HTTPTimeoutEnvVar = "KATA_HTTP_TIMEOUT"
+
+	// DefaultHTTPTimeout is the normal non-streaming request and
+	// configured-remote probe budget.
+	DefaultHTTPTimeout = 5 * time.Second
+)
+
+// ParseHTTPTimeout parses a positive Go duration, returning fallback for an
+// empty or invalid value. Invalid non-empty values also return an error so
+// interactive callers can decide whether and where to warn.
+func ParseHTTPTimeout(raw string, fallback time.Duration) (time.Duration, error) {
+	if raw == "" {
+		return fallback, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback, fmt.Errorf("parse HTTP timeout %q: %w", raw, err)
+	}
+	if d <= 0 {
+		return fallback, fmt.Errorf("HTTP timeout must be positive, got %q", raw)
+	}
+	return d, nil
+}
+
 // PingInfo is the live daemon identity returned by /api/v1/ping.
 type PingInfo struct {
 	OK      bool   `json:"ok"`

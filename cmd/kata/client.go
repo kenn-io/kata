@@ -14,7 +14,7 @@ import (
 
 // defaultHTTPTimeout is the per-request budget for non-streaming CLI calls.
 // Override at runtime with KATA_HTTP_TIMEOUT (any time.ParseDuration string).
-const defaultHTTPTimeout = 5 * time.Second
+const defaultHTTPTimeout = client.DefaultHTTPTimeout
 
 // envHTTPTimeout reads KATA_HTTP_TIMEOUT, falling back to def on empty or
 // unparseable input. Bulk imports against an FTS-indexed DB can take longer
@@ -24,16 +24,12 @@ const defaultHTTPTimeout = 5 * time.Second
 // setting the env var ("KATA_HTTP_TIMEOUT=30" misses the unit and would
 // otherwise look like the bump took effect).
 func envHTTPTimeout(def time.Duration) time.Duration {
-	v := os.Getenv("KATA_HTTP_TIMEOUT")
-	if v == "" {
-		return def
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
+	v := os.Getenv(client.HTTPTimeoutEnvVar)
+	d, err := client.ParseHTTPTimeout(v, def)
+	if err != nil {
 		fmt.Fprintf(os.Stderr,
 			"kata: ignoring invalid KATA_HTTP_TIMEOUT=%q (expected a Go duration like 30s or 2m); using default %s\n",
 			v, def)
-		return def
 	}
 	return d
 }
