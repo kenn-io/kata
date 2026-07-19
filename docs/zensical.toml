@@ -54,6 +54,7 @@ nav = [
   ]},
   {"Development" = [
     {"Contributing" = "development/contributing.md"},
+    {"Embedding kata in Go" = "development/embedding.md"},
     {"PostgreSQL migrations" = "development/postgres-migrations.md"},
     {"Deploying docs" = "development/deploying-docs.md"},
   ]},

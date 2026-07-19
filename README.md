@@ -11,6 +11,8 @@ of humans and agents needs to share, you can opt into a remote daemon or
 federation; a shared daemon can use Postgres by setting `KATA_DSN`.
 Production Postgres deployments can use separate schema-owner and runtime roles;
 see the [operator ceremony](docs/operations/postgres.md).
+Go applications can instead mount kata's listener-free HTTP service in-process;
+see [Embedding kata in Go](docs/development/embedding.md).
 
 The documentation in [`docs/`](docs/) is the definitive guide, published with
 Zensical at <https://katatracker.com/>.
@@ -141,7 +143,10 @@ The [docs site](docs/) is the definitive reference:
   [Remote daemon](docs/operations/remote-daemon.md) ·
   [Federation](docs/operations/federation.md) ·
   [Hosted mode](docs/operations/hosted-mode.md) ·
+  [PostgreSQL](docs/operations/postgres.md) ·
   [Backup and restore](docs/operations/backup-restore.md)
+- Development: [Embedding kata in Go](docs/development/embedding.md) ·
+  [Contributing](docs/development/contributing.md)
 
 ## For coding agents
 

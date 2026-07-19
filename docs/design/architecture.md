@@ -42,13 +42,15 @@ no agentic worker pool and no daemon-driven code execution beyond the user's own
 configured hooks. Adopting a proven runtime shape kept the build simple; refusing
 roborev's execution surface kept kata a tracker rather than a workflow engine.
 
-## The daemon is the single access path
+## The HTTP service is the single access path
 
-All reads and writes go through the daemon's HTTP API. The CLI and TUI are
-clients of the same API; neither opens SQLite directly. One access path means
-every client sees identical resolution, validation, and event ordering, and it
-keeps the door open to remote and shared deployments where the database is not
-on the caller's machine (see [trust boundaries](#trust-boundaries) below).
+All reads and writes go through kata's HTTP API. The standalone daemon owns that
+service for CLI and TUI clients; a Go application can instead construct and
+[mount the service](../development/embedding.md) in its own process. No client
+opens SQLite or PostgreSQL directly. One access path means every client sees
+identical resolution, validation, and event ordering, and it supports remote,
+shared, and embedded deployments where the database is not on the caller's
+machine (see [trust boundaries](#trust-boundaries) below).
 
 A read-only direct-SQLite fast path was considered and deferred. It would create
 an immediate split between local behavior and any networked deployment, so kata
@@ -56,14 +58,20 @@ does not pay that complexity until a measured hot path justifies it.
 
 ### Transport and discovery
 
-The daemon listens on a Unix socket by default on Unix platforms (parent
-directory `0700`, socket `0600`) and loopback TCP by default on Windows; TCP
-binds are validated as loopback unless an operator opts into a
-remote listener. Runtime state is namespaced per database: a `<dbhash>` derived
-from the absolute database path keeps two databases from colliding on sockets,
+The standalone daemon listens on a Unix socket by default on Unix platforms
+(parent directory `0700`, socket `0600`) and loopback TCP by default on Windows;
+TCP binds are validated as loopback unless an operator opts into a remote
+listener. Runtime state is namespaced per database: a `<dbhash>` derived from
+the absolute database path keeps two databases from colliding on sockets,
 runtime files, or logs. Clients discover a running daemon by computing the
 `<dbhash>`, scanning its runtime files, probing `/api/v1/ping`, and auto-starting
 a daemon only if none is live.
+
+The embedded service is listener-free. Its host application owns the network
+listener, TLS, signal handling, and process shutdown, and must choose either a
+kata bearer token or an explicit trusted caller-authentication boundary. The
+service owns its configured storage handle and its federation, GitHub sync, and
+timed-claim background workers.
 
 ## Project binding over current directory
 

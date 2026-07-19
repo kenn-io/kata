@@ -8,43 +8,52 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+## 0.11.0
+<small>2026-07-18</small>
+
+kata 0.11.0 completes PostgreSQL support across kata's storage and sharing
+workflows and exposes the application as a listener-free Go service. It also
+strengthens machine-readable identity and semantic-search input validation.
+
 **New features**
 
-- Added production Postgres storage selected with `KATA_DSN`, `[storage].dsn`,
-  or a `postgres://` / `postgresql://` URL. Postgres now implements the complete
-  storage contract, including federation, claims, external import, JSONL
-  replay, lexical search, daemon startup, export, and atomic snapshot restore.
-- Added `kata storage postgres migrate` and `status`, plus validation-only
-  runtime configuration, so production deployments can separate schema-owner
-  and serving credentials.
-- Added PostgreSQL semantic search with pgvector `halfvec` storage and the same
-  generation/fill contract as SQLite, covered end to end against a real
-  pgvector service.
+- Added complete PostgreSQL support for the storage contract, daemon operation,
+  federation, claims, external and JSONL import, export and atomic snapshot
+  restore, lexical search, and pgvector-backed semantic search. Configure it
+  with `KATA_DSN`, `[storage].dsn`, or a `postgres://` / `postgresql://` URL.
+- Added `kata storage postgres migrate` and `status`, validation-only runtime
+  configuration, server-identity-verified TLS requirements, and separate
+  schema-owner and serving roles for production PostgreSQL deployments.
+- Exposed the module root at `go.kenn.io/kata` as a mountable Go service.
+  Applications construct a service with `kata.New`, mount its HTTP `Handler`,
+  run federation, GitHub sync, and timed-claim workers with `Run`, and release
+  owned storage and workers with `Close`; kata does not take over the listener,
+  signals, or host process lifecycle.
 
 **Improvements**
 
-- Runs the same behavioral storage conformance fixtures against SQLite and
-  Postgres, with no expected Postgres failures or generated method stubs.
-- Added Postgres JSONL restore targets. Fresh restores install the dedicated
-  `kata` schema; `--force` atomically replaces existing kata-owned state, and
-  failed first restores remove only an unchanged fresh schema.
-- Established the first released Postgres schema as the migration floor rather
-  than retaining migrations for development-only versions that never shipped.
-- Added an append-only numbered migration convention and pre-commit history
-  guard for PostgreSQL schema changes after that release floor.
-- Required server-identity-verified TLS for every remote Postgres connection
-  candidate, with a separately configured lab-only insecure opt-in.
-- Added a dedicated PostgreSQL CI service job that cannot silently skip backend
-  conformance and operator-ceremony tests when Docker discovery is unavailable.
-- Made generic CI lanes skip automatic PostgreSQL testcontainers immediately
-  while preserving local autostart and fail-hard coverage in the explicit
-  service job.
-- Added a real-daemon federation matrix proving bidirectional synchronization,
-  durable restart recovery, and lease-authorized edits across every SQLite and
-  PostgreSQL hub/spoke pairing.
-- Isolated daemon namespaces by PostgreSQL schema, fenced restore against
-  daemons on every host, and made failed fresh-import cleanup survive request
-  cancellation.
+- Added the stable canonical identity `"name": "kata"` to `kata version
+  --json`, alongside the existing version and build fields, so automation can
+  identify the binary without parsing human-readable output or contacting a
+  daemon.
+- Rejected embedding responses with null components or zero-norm vectors before
+  they can be persisted or used for a query. Background fills remain pending
+  and retry after an invalid provider response instead of marking unusable
+  vectors complete.
+
+**Bug fixes**
+
+- Honored `KATA_HTTP_TIMEOUT` for probes of explicitly configured remote
+  servers, while keeping the separate one-second local runtime-discovery probe.
+  Slow healthy WAN and reverse-proxied daemons now get the same request budget
+  as the command that follows the probe.
+
+**Acknowledgements**
+
+- Thanks to [Wes McKinney](https://github.com/wesm) for complete PostgreSQL
+  support, the mountable Go service, and configured-remote timeout handling.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for stable
+  JSON version identity and invalid embedding-vector rejection.
 
 ## 0.10.0
 <small>2026-07-11</small>

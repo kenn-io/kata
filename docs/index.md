@@ -122,6 +122,11 @@ bearer auth on trusted private HTTP or opt a single-user private IP into
 tokenless writes. See [Concepts](guide/concepts.md) and
 [Architecture](design/architecture.md) for the full model.
 
+Go applications can also run kata in-process through the listener-free
+`go.kenn.io/kata` service. The host application mounts the same HTTP API and
+owns the listener, authentication boundary, and process lifecycle; see
+[Embedding kata in Go](development/embedding.md).
+
 ## When to use kata
 
 Reach for kata when work should stay close to the machine doing it:
