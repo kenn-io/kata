@@ -8,6 +8,24 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+## 0.11.1
+<small>2026-07-19</small>
+
+kata 0.11.1 makes pgvector optional for PostgreSQL deployments that do not use
+semantic search.
+
+**Improvements**
+
+- Allowed core PostgreSQL task, federation, and lexical-search storage to start
+  without pgvector. Kata creates vector tables only when pgvector 0.7 or later
+  is already installed in `public`; configuring semantic search without it
+  reports the feature as unavailable without affecting core storage.
+
+**Acknowledgements**
+
+- Thanks to [Wes McKinney](https://github.com/wesm) for optional pgvector
+  support in PostgreSQL deployments.
+
 ## 0.11.0
 <small>2026-07-18</small>
 
