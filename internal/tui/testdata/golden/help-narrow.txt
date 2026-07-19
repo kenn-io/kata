@@ -51,7 +51,7 @@ j/k    move child cursor
 enter  open child
 
 Forms
-ctrl+s         save or apply
+ctrl+o         save or apply
 esc            cancel
 tab/shift+tab  change field
 ctrl+e         open editor

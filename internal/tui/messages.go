@@ -29,34 +29,39 @@ type refetchedMsg struct {
 // in Task 11. gen tags the detail-open generation that dispatched the
 // fetch — applyFetched discards messages whose gen no longer matches
 // dm.gen so a fetch in flight when the user pops/jumps cannot pollute
-// the new view with stale data.
+// the new view with stale data. requestSeq orders overlapping requests
+// within the same generation so an older response cannot replace a newer one.
 type detailFetchedMsg struct {
-	gen      int64
-	issue    *Issue
-	parent   *IssueRef
-	children []Issue
-	err      error
+	gen        int64
+	requestSeq uint64
+	issue      *Issue
+	parent     *IssueRef
+	children   []Issue
+	err        error
 }
 
 // commentsFetchedMsg, eventsFetchedMsg, and linksFetchedMsg carry the
 // per-tab fetch results dispatched in parallel by openDetailMsg. gen
 // is the detail-open generation; see detailFetchedMsg for the rationale.
 type commentsFetchedMsg struct {
-	gen      int64
-	comments []CommentEntry
-	err      error
+	gen        int64
+	requestSeq uint64
+	comments   []CommentEntry
+	err        error
 }
 
 type eventsFetchedMsg struct {
-	gen    int64
-	events []EventLogEntry
-	err    error
+	gen        int64
+	requestSeq uint64
+	events     []EventLogEntry
+	err        error
 }
 
 type linksFetchedMsg struct {
-	gen   int64
-	links []LinkEntry
-	err   error
+	gen        int64
+	requestSeq uint64
+	links      []LinkEntry
+	err        error
 }
 
 // openDetailMsg is emitted by the list view when Enter selects a row.

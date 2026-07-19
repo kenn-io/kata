@@ -8,6 +8,19 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**Improvements**
+
+- Made Ctrl-O the canonical TUI save/apply chord while retaining Ctrl-S as a
+  compatibility alias for existing users.
+- Allowed Up and Down to navigate live search results before committing the
+  filter, with reversible query/results focus and an explicit keep-filter exit.
+
+**Bug fixes**
+
+- Protected non-empty TUI comment drafts with discard confirmation when Esc is
+  pressed; canceling preserves the full in-memory form state, and the modal
+  footer advertises the active discard and keep-editing actions.
+
 ## 0.11.1
 <small>2026-07-19</small>
 

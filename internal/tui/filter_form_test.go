@@ -305,20 +305,20 @@ func TestFilterForm_EscRestoresPreFilter(t *testing.T) {
 	}
 }
 
-// TestFilterForm_CtrlSCommitsViaCommitInputBranch_NotCommitFormInput
-// (load-bearing): ctrl+s on the filter modal MUST go through the
+// TestFilterForm_CtrlOCommitsViaCommitInputBranch_NotCommitFormInput
+// (load-bearing): ctrl+o on the filter modal MUST go through the
 // dedicated commitFilterForm path, not commitFormInput. The latter
 // would set saving=true and wait for a mutationDoneMsg that never
-// arrives. The assertion is direct: after ctrl+s, the form is closed
+// arrives. The assertion is direct: after ctrl+o, the form is closed
 // (kind=inputNone) and saving is NOT true.
-func TestFilterForm_CtrlSCommitsViaCommitInputBranch_NotCommitFormInput(
+func TestFilterForm_CtrlOCommitsViaCommitInputBranch_NotCommitFormInput(
 	t *testing.T,
 ) {
 	m := openFilterForm(t, filterFormFixture())
-	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	nm, _ := stepModel(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	assertInputKind(t, nm, inputNone)
 	if nm.input.saving {
-		t.Fatal("saving=true after ctrl+s; filter form fell into commitFormInput")
+		t.Fatal("saving=true after ctrl+o; filter form fell into commitFormInput")
 	}
 }
 

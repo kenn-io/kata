@@ -191,11 +191,21 @@ func (m Model) handleLayoutFlip(prev layoutMode) (Model, tea.Cmd) {
 		} else {
 			m.focus = focusList
 		}
+		// Capture inherited detail before an active search takes ownership.
+		// Search must follow the filtered highlight even when a hidden detail
+		// is already populated; the ordinary nil-only bootstrap remains the
+		// right behavior for non-search layout transitions.
+		m = m.captureSearchSplitDetail()
+		if m.input.kind.isCommandBar() {
+			m, cmd := m.followSearchResultIfNeeded(nil)
+			return m.markSearchSplitDetailOwned(), cmd
+		}
 		// Bootstrap the detail pane on the first stacked→split flip so
 		// a launch that landed before the size msg, or a runtime
 		// widen/resize/toggle, populates the right pane without
 		// requiring a j/k nudge.
-		return m.maybeBootstrapSplitDetail()
+		m, cmd := m.maybeBootstrapSplitDetail()
+		return m.markSearchSplitDetailOwned(), cmd
 	}
 	return m, nil
 }

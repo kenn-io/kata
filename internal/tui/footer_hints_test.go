@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -84,40 +85,175 @@ func TestHelpRows_InputAndModalContexts(t *testing.T) {
 	tests := []struct {
 		name string
 		m    Model
-		want []helpItem
+		want [][]helpItem
 	}{
 		{
-			name: "search bar",
+			name: "search query focus",
 			m:    Model{input: inputState{kind: inputSearchBar}},
-			want: []helpItem{
-				{key: "enter", desc: "commit"},
+			want: [][]helpItem{{
+				{key: "↑↓/enter", desc: "results"},
 				{key: "esc", desc: "cancel"},
 				{key: "ctrl+u", desc: "clear"},
-			},
+			}},
+		},
+		{
+			name: "search results focus",
+			m: Model{input: inputState{
+				kind:        inputSearchBar,
+				searchFocus: searchFocusResults,
+			}},
+			want: [][]helpItem{{
+				{key: "↑↓", desc: "move"},
+				{key: "enter", desc: "apply"},
+				{key: "esc", desc: "query"},
+				{key: "/", desc: "query"},
+			}},
 		},
 		{
 			name: "filter form",
 			m:    Model{input: inputState{kind: inputFilterForm}},
-			want: []helpItem{
-				{key: "ctrl+s", desc: "apply"},
+			want: [][]helpItem{{
+				{key: "ctrl+o", desc: "apply"},
 				{key: "esc", desc: "cancel"},
 				{key: "ctrl+r", desc: "reset"},
-			},
+			}},
 		},
 		{
 			name: "quit modal",
 			m:    Model{modal: modalQuitConfirm},
-			want: []helpItem{
+			want: [][]helpItem{{
 				{key: "y", desc: "confirm"},
 				{key: "n/esc", desc: "cancel"},
+			}},
+		},
+		{
+			name: "discard modal in split layout",
+			m: Model{
+				layout: layoutSplit,
+				input:  inputState{kind: inputCommentForm},
+				modal:  modalDiscardComment,
 			},
+			want: [][]helpItem{{
+				{key: "y", desc: "discard"},
+				{key: "n/esc", desc: "keep editing"},
+			}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertHelpItemsPresent(t, tt.m.helpRows(), tt.want...)
+			if got := tt.m.helpRows(); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("help rows = %+v, want %+v", got, tt.want)
+			}
 		})
 	}
+}
+
+func TestViewChromeHelpRows_ModalPrecedesInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		modal modalKind
+		want  [][]helpItem
+	}{
+		{
+			name:  "discard comment",
+			modal: modalDiscardComment,
+			want: [][]helpItem{{
+				{key: "y", desc: "discard"},
+				{key: "n/esc", desc: "keep editing"},
+			}},
+		},
+		{
+			name:  "quit",
+			modal: modalQuitConfirm,
+			want: [][]helpItem{{
+				{key: "y", desc: "confirm"},
+				{key: "n/esc", desc: "cancel"},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := Model{
+				input: inputState{kind: inputCommentForm},
+				modal: tt.modal,
+			}
+			chrome := m.chrome()
+			if got := listHelpRows(listModel{}, chrome); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("list help rows = %+v, want %+v", got, tt.want)
+			}
+			if got := detailHelpRows(detailModel{}, chrome); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("detail help rows = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAuxiliaryViewFooters_ModalPrecedesActions(t *testing.T) {
+	projects := setupProjectsView()
+	daemons := setupDaemonView()
+	federation := setupFederationView()
+	federation.width, federation.height = 120, 24
+
+	tests := []struct {
+		name       string
+		model      Model
+		render     func(Model) string
+		normalWant string
+	}{
+		{
+			name:       "projects",
+			model:      projects,
+			render:     renderProjects,
+			normalWant: "q quit",
+		},
+		{
+			name:       "daemons",
+			model:      daemons,
+			render:     renderDaemons,
+			normalWant: "[q] quit",
+		},
+		{
+			name:       "federation",
+			model:      federation,
+			render:     renderFederation,
+			normalWant: "[?] help",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			normalFooter := lastRenderedLine(tt.render(tt.model))
+			if !strings.Contains(normalFooter, tt.normalWant) {
+				t.Fatalf("ordinary footer = %q, want %q action", normalFooter, tt.normalWant)
+			}
+
+			modalModel := tt.model
+			modalModel.modal = modalQuitConfirm
+			if got := lastRenderedLine(tt.render(modalModel)); got != "y confirm▕ n/esc cancel" {
+				t.Fatalf("quit modal footer = %q", got)
+			}
+		})
+	}
+}
+
+func TestFederationDetailEmpty_ModalFooterPrecedesEarlyReturn(t *testing.T) {
+	m := setupFederationView()
+	m.width, m.height = 120, 24
+	m.federationMode = federationModeDetail
+	m.federationStatuses = nil
+
+	if got := lastRenderedLine(renderFederation(m)); got != "no federation selected" {
+		t.Fatalf("ordinary empty-detail footer = %q", got)
+	}
+
+	m.modal = modalQuitConfirm
+	if got := lastRenderedLine(renderFederation(m)); got != "y confirm▕ n/esc cancel" {
+		t.Fatalf("quit modal empty-detail footer = %q", got)
+	}
+}
+
+func lastRenderedLine(rendered string) string {
+	lines := strings.Split(stripANSI(rendered), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // TestPersistentHelpRowsPreferArrowNotation guards the queue (list)

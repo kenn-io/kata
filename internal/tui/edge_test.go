@@ -110,11 +110,16 @@ func TestEdge_SSEDuringSearchPrompt(t *testing.T) {
 		t.Fatalf("bar value = %q after second keystroke, want %q", v, "ab")
 	}
 
-	// Enter commits — bar closes, filter stays. No refetch (Search is
-	// client-side; the bar already mirrored the value live).
+	// The first Enter focuses results; the second commits. The bar then
+	// closes and the filter stays. No refetch (Search is client-side;
+	// the bar already mirrored the value live).
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults {
+		t.Fatal("first Enter did not focus search results")
+	}
 	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.input.kind != inputNone {
-		t.Fatal("Enter did not close the bar")
+		t.Fatal("second Enter did not close the bar")
 	}
 	if m.list.filter.Search != "ab" {
 		t.Fatalf("filter.Search = %q, want %q", m.list.filter.Search, "ab")

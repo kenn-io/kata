@@ -40,7 +40,7 @@ func renderDaemons(m Model) string {
 		body = append(body, subtleStyle.Render(daemonFooter(rows[cursor], m.width)))
 	}
 	body = append(body, "")
-	body = append(body, subtleStyle.Render(
+	body = append(body, renderAuxiliaryFooter(m,
 		"[↑/↓ k/j] move  [enter] switch  [esc] back  [q] quit  [?] help"))
 	return strings.Join(body, "\n")
 }

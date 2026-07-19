@@ -1,12 +1,38 @@
 package tui
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+func TestFormCommitKeys_CtrlOCanonical_CtrlSCompatible(t *testing.T) {
+	for _, kind := range []inputKind{
+		inputBodyEditForm,
+		inputCommentForm,
+		inputNewIssueForm,
+		inputFilterForm,
+	} {
+		for _, key := range []rune{'o', 's'} {
+			t.Run(fmt.Sprintf("kind-%d/ctrl-%c", kind, key), func(t *testing.T) {
+				s := inputState{kind: kind}
+				_, action := s.Update(tea.KeyPressMsg{Code: key, Mod: tea.ModCtrl})
+				if action != actionCommit {
+					t.Fatalf("action = %v, want actionCommit", action)
+				}
+
+				s.saving = true
+				_, action = s.Update(tea.KeyPressMsg{Code: key, Mod: tea.ModCtrl})
+				if action != actionNone {
+					t.Fatalf("saving action = %v, want actionNone", action)
+				}
+			})
+		}
+	}
+}
 
 // captureCreateIssue stands up a test client whose handler records the
 // request path and replies with a minimal successful CreateIssue
@@ -202,14 +228,14 @@ func TestForm_OpenCommentForm_StartsEmpty(t *testing.T) {
 	}
 }
 
-// TestForm_CtrlS_OnEmptyComment_BlocksAndShowsError: ctrl+s on an
+// TestForm_CtrlO_OnEmptyComment_BlocksAndShowsError: ctrl+o on an
 // empty comment form must NOT dispatch AddComment; the form stays
 // open with an error message. Distinguishes from body edit, where
 // empty content is legitimate.
-func TestForm_CtrlS_OnEmptyComment_BlocksAndShowsError(t *testing.T) {
+func TestForm_CtrlO_OnEmptyComment_BlocksAndShowsError(t *testing.T) {
 	m := formFixture()
 	m = m.openCommentForm()
-	out, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	out, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	nm := out.(Model)
 	if cmd != nil {
 		t.Fatalf("empty comment dispatched cmd %T; want nil", cmd)
@@ -222,67 +248,151 @@ func TestForm_CtrlS_OnEmptyComment_BlocksAndShowsError(t *testing.T) {
 	}
 }
 
-// TestForm_CtrlS_OnEmptyBodyEdit_AllowedToCommit: clearing a body
-// is legitimate; ctrl+s on an empty body edit form must dispatch
+// TestForm_CtrlO_OnEmptyBodyEdit_AllowedToCommit: clearing a body
+// is legitimate; ctrl+o on an empty body edit form must dispatch
 // EditBody with body="" — no in-form error.
-func TestForm_CtrlS_OnEmptyBodyEdit_AllowedToCommit(t *testing.T) {
+func TestForm_CtrlO_OnEmptyBodyEdit_AllowedToCommit(t *testing.T) {
 	m := formFixture()
 	m = m.openBodyEditForm()
 	// Clear the textarea (it pre-filled with the existing body).
 	m.input.activeField().setValue("")
 	m.input.fields[m.input.active] = *m.input.activeField()
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("empty body edit must dispatch EditBody (clearing is legitimate)")
 	}
 }
 
-// TestForm_CtrlS_SetsSavingGate: the first ctrl+s flips saving=true
-// and a duplicate ctrl+s while saving is absorbed (no second cmd).
-// Regression for the "duplicate ctrl+s issues two mutations" race.
-func TestForm_CtrlS_SetsSavingGate(t *testing.T) {
+// TestForm_CtrlO_SetsSavingGate: the first ctrl+o flips saving=true
+// and a duplicate ctrl+o while saving is absorbed (no second cmd).
+// Regression for the "duplicate ctrl+o issues two mutations" race.
+func TestForm_CtrlO_SetsSavingGate(t *testing.T) {
 	m := formFixture()
 	m = m.openCommentForm()
 	m.input.activeField().setValue("hello")
 	m.input.fields[m.input.active] = *m.input.activeField()
-	out, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	out, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	nm := out.(Model)
 	if cmd == nil {
-		t.Fatal("first ctrl+s should dispatch AddComment")
+		t.Fatal("first ctrl+o should dispatch AddComment")
 	}
 	if !nm.input.saving {
-		t.Fatal("saving flag not set after first ctrl+s")
+		t.Fatal("saving flag not set after first ctrl+o")
 	}
-	// Duplicate ctrl+s while saving must be a no-op.
-	out2, cmd2 := nm.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	// Duplicate ctrl+o while saving must be a no-op.
+	out2, cmd2 := nm.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	nm2 := out2.(Model)
 	if cmd2 != nil {
-		t.Fatalf("duplicate ctrl+s dispatched cmd %T; want nil (saving gate)", cmd2)
+		t.Fatalf("duplicate ctrl+o dispatched cmd %T; want nil (saving gate)", cmd2)
 	}
 	if !nm2.input.saving {
-		t.Fatal("saving flag cleared by duplicate ctrl+s; should still be set")
+		t.Fatal("saving flag cleared by duplicate ctrl+o; should still be set")
 	}
 }
 
-// TestForm_Esc_CancelsAndClosesForm: esc on any form kind closes
-// the form without dispatching a mutation.
-func TestForm_Esc_CancelsAndClosesForm(t *testing.T) {
-	m := formFixture()
-	m = m.openCommentForm()
+func TestCommentForm_EscEmptyClosesImmediately(t *testing.T) {
+	m := formFixture().openCommentForm()
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	nm := out.(Model)
+	if nm.input.kind != inputNone || nm.modal != modalNone || cmd != nil {
+		t.Fatalf("empty cancel = input %v modal %v cmd %T", nm.input.kind, nm.modal, cmd)
+	}
+}
+
+func TestCommentForm_EscWhitespaceOnlyClosesImmediately(t *testing.T) {
+	m := formFixture().openCommentForm()
+	m.input.activeField().setValue(" \t\n")
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	nm := out.(Model)
+	if nm.input.kind != inputNone || nm.modal != modalNone || cmd != nil {
+		t.Fatalf("whitespace cancel = input %v modal %v cmd %T", nm.input.kind, nm.modal, cmd)
+	}
+}
+
+func TestCommentForm_EscDirtyRequiresConfirmation(t *testing.T) {
+	m := formFixture().openCommentForm()
 	m.input.activeField().setValue("draft comment")
 	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	nm := out.(Model)
-	if nm.input.kind != inputNone {
-		t.Fatalf("esc did not close form; kind = %v", nm.input.kind)
+	if cmd != nil || nm.modal != modalDiscardComment {
+		t.Fatalf("dirty cancel = modal %v cmd %T", nm.modal, cmd)
 	}
-	if cmd != nil {
-		// No mutation cmd; cancel cmd path is reserved for the post-create
-		// detail-open in commit 2.
-		if msg := cmd(); msg != nil {
-			if _, isMut := msg.(mutationDoneMsg); isMut {
-				t.Fatalf("esc dispatched mutation: %v", msg)
-			}
+	if got := nm.input.activeField().value(); got != "draft comment" {
+		t.Fatalf("draft = %q, want preserved", got)
+	}
+}
+
+func TestCommentForm_EscWhileSavingIsAbsorbed(t *testing.T) {
+	m := formFixture().openCommentForm()
+	m.input.activeField().setValue("draft comment")
+
+	out, saveCmd := m.Update(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	saving := out.(Model)
+	if saveCmd == nil || !saving.input.saving {
+		t.Fatalf("save dispatch = cmd %T saving %v", saveCmd, saving.input.saving)
+	}
+	before := saving.input
+
+	out, cancelCmd := saving.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	nm := out.(Model)
+	if cancelCmd != nil || nm.modal != modalNone || nm.input.kind != inputCommentForm {
+		t.Fatalf("saving cancel = input %v modal %v cmd %T", nm.input.kind, nm.modal, cancelCmd)
+	}
+	if !nm.input.saving || nm.input.activeField().value() != "draft comment" ||
+		nm.input.active != before.active || nm.input.target != before.target ||
+		nm.input.formGen != before.formGen {
+		t.Fatal("saving cancel changed the installed comment form state")
+	}
+}
+
+func TestCommentDiscardModal_CancelPreservesDraft(t *testing.T) {
+	for _, msg := range []tea.KeyPressMsg{
+		runeKey('n'),
+		{Code: tea.KeyEsc},
+	} {
+		m := formFixture().openCommentForm()
+		m.input.activeField().setValue("draft comment")
+		m.modal = modalDiscardComment
+		before := m.input
+		beforeArea := before.activeField().area
+		out, cmd := m.Update(msg)
+		nm := out.(Model)
+		if cmd != nil || nm.modal != modalNone || nm.input.kind != inputCommentForm {
+			t.Fatalf("cancel = input %v modal %v cmd %T", nm.input.kind, nm.modal, cmd)
 		}
+		afterArea := nm.input.activeField().area
+		if afterArea.Value() != beforeArea.Value() ||
+			afterArea.Line() != beforeArea.Line() ||
+			afterArea.Column() != beforeArea.Column() ||
+			afterArea.ScrollYOffset() != beforeArea.ScrollYOffset() ||
+			nm.input.active != before.active ||
+			nm.input.target != before.target ||
+			nm.input.formGen != before.formGen {
+			t.Fatal("cancel changed the installed comment form state")
+		}
+	}
+}
+
+func TestCommentDiscardModal_ConfirmClearsDraft(t *testing.T) {
+	m := formFixture().openCommentForm()
+	m.input.activeField().setValue("draft comment")
+	m.modal = modalDiscardComment
+	out, cmd := m.Update(runeKey('y'))
+	nm := out.(Model)
+	if cmd != nil || nm.modal != modalNone || nm.input.kind != inputNone {
+		t.Fatalf("confirm = input %v modal %v cmd %T", nm.input.kind, nm.modal, cmd)
+	}
+}
+
+func TestCommentDiscardModal_AbsorbsOtherKeys(t *testing.T) {
+	m := formFixture().openCommentForm()
+	m.input.activeField().setValue("draft comment")
+	m.modal = modalDiscardComment
+	out, cmd := m.Update(runeKey('j'))
+	nm := out.(Model)
+	if cmd != nil || nm.modal != modalDiscardComment ||
+		nm.input.activeField().value() != "draft comment" {
+		t.Fatal("unrelated key escaped discard modal")
 	}
 }
 

@@ -40,7 +40,7 @@ func helpSections(km keymap) []helpSection {
 			{key: "enter", desc: "open child"},
 		}},
 		{"Forms", []helpItem{
-			{key: "ctrl+s", desc: "save or apply"},
+			{key: "ctrl+o", desc: "save or apply"},
 			{key: "esc", desc: "cancel"},
 			{key: "tab/shift+tab", desc: "change field"},
 			{key: "ctrl+e", desc: "open editor"},

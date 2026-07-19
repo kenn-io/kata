@@ -19,5 +19,5 @@
 │                                                                                    │
 │ Parent                                                                             │
 │ 42aa                                                                               │
-│ ctrl+s save · esc cancel · tab next · ctrl+e (body only)                           │
+│ ctrl+o save · esc cancel · tab next · ctrl+e (body only)                           │
 ╰────────────────────────────────────────────────────────────────────────────────────╯

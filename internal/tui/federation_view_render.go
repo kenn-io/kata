@@ -75,7 +75,7 @@ func renderFederation(m Model) string {
 		body = append(body, subtleStyle.Render(federationFooter(rows[cursor], m.width)))
 	}
 	body = append(body, "")
-	body = append(body, subtleStyle.Render(
+	body = append(body, renderAuxiliaryFooter(m,
 		"[↑/↓ k/j] move  [enter] detail  [esc] back  [r] refresh  [n] enroll  [x] leave  [b] browse hubs  [?] help"))
 	return strings.Join(body, "\n")
 }
@@ -92,7 +92,7 @@ func renderFederationSelectLocalProject(m Model) string {
 		body = append(body, renderFederationChoice(label, i == cursor))
 	}
 	body = appendFederationEnrollErr(body, m)
-	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [enter] select  [esc] back"))
+	body = append(body, "", renderAuxiliaryFooter(m, "[↑/↓ k/j] move  [enter] select  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -119,7 +119,7 @@ func renderFederationSelectHub(m Model) string {
 		body = append(body, renderFederationChoice(label, i == cursor))
 	}
 	body = appendFederationEnrollErr(body, m)
-	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [enter] select  [esc] back"))
+	body = append(body, "", renderAuxiliaryFooter(m, "[↑/↓ k/j] move  [enter] select  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -145,7 +145,7 @@ func renderFederationSelectHubProject(m Model) string {
 		}
 	}
 	body = appendFederationEnrollErr(body, m)
-	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [enter] preview  [esc] back"))
+	body = append(body, "", renderAuxiliaryFooter(m, "[↑/↓ k/j] move  [enter] preview  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -173,7 +173,7 @@ func renderFederationBrowseHubs(m Model) string {
 			body = append(body, renderFederationChoice(federationBrowseHubProjectLabel(project), i == cursor))
 		}
 	}
-	body = append(body, "", subtleStyle.Render("[↑/↓ k/j] move  [esc] back"))
+	body = append(body, "", renderAuxiliaryFooter(m, "[↑/↓ k/j] move  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -219,7 +219,7 @@ func renderFederationPreview(m Model) string {
 		body = append(body, "", errorStyle.Render("Blocked: "+sanitizeForLine(draft.BlockedReason)))
 	}
 	body = appendFederationEnrollErr(body, m)
-	body = append(body, "", subtleStyle.Render("[enter] confirm  [esc] back"))
+	body = append(body, "", renderAuxiliaryFooter(m, "[enter] confirm  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -241,7 +241,7 @@ func renderFederationAdoptConfirm(m Model) string {
 			sanitizeForLine(m.federationAdoptConfirmInput)),
 	)
 	body = appendFederationEnrollErr(body, m)
-	body = append(body, "", subtleStyle.Render("[enter] confirm  [esc] back"))
+	body = append(body, "", renderAuxiliaryFooter(m, "[enter] confirm  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -275,7 +275,7 @@ func renderFederationLeavePreview(m Model) string {
 	}
 	body = appendFederationEnrollErr(body, m)
 	body = append(body, "",
-		subtleStyle.Render("[enter] confirm  [d] keep / archive  [l] local-only  [esc] back"))
+		renderAuxiliaryFooter(m, "[enter] confirm  [d] keep / archive  [l] local-only  [esc] back"))
 	return strings.Join(body, "\n")
 }
 
@@ -311,7 +311,7 @@ func renderFederationResult(m Model) string {
 		fmt.Sprintf("hub project ID: %d", result.Metadata.ProjectID),
 		"hub project UID: "+sanitizeForLine(emptyDash(result.Metadata.ProjectUID)),
 		"",
-		subtleStyle.Render("[enter] list  [esc] list"),
+		renderAuxiliaryFooter(m, "[enter] list  [esc] list"),
 	)
 	return strings.Join(body, "\n")
 }
@@ -340,7 +340,7 @@ func renderFederationLeaveResult(m Model) string {
 	}
 	body = append(body,
 		"",
-		subtleStyle.Render("[enter] list  [esc] list"),
+		renderAuxiliaryFooter(m, "[enter] list  [esc] list"),
 	)
 	return strings.Join(body, "\n")
 }
@@ -375,7 +375,7 @@ func renderFederationRecovery(m Model) string {
 	}
 	body = append(body,
 		"",
-		subtleStyle.Render("[R] reveal recovery command  [esc] back"),
+		renderAuxiliaryFooter(m, "[R] reveal recovery command  [esc] back"),
 	)
 	if recovery.Reveal {
 		body = append(body,
@@ -736,6 +736,9 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 	}
 	if cursor < 0 || cursor >= len(rows) {
 		body = append(body, subtleStyle.Render("no federation selected"))
+		if m.modal != modalNone {
+			body = append(body, "", renderAuxiliaryFooter(m, ""))
+		}
 		return strings.Join(fitFederationLines(body, m.height), "\n")
 	}
 	row := rows[cursor]
@@ -777,7 +780,7 @@ func renderFederationDetail(m Model, rows []FederationProjectStatus, cursor int)
 		"last sync success: "+formatOptionalTime(row.LastSuccessfulSyncAt),
 		"last error: "+formatOptionalError(row),
 		"",
-		subtleStyle.Render("[esc] back  [r] refresh  [q] quit  [?] help"),
+		renderAuxiliaryFooter(m, "[esc] back  [r] refresh  [q] quit  [?] help"),
 	)
 	return strings.Join(fitFederationLines(body, m.height), "\n")
 }

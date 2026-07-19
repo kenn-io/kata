@@ -266,9 +266,30 @@ func TestSnapshot_QuitConfirmModal(t *testing.T) {
 	defer snapshotInit(t)()
 	lm := snapListModel(snapListFixture())
 	lm.cursor = 1
-	bg := lm.View(120, 30, snapViewChrome())
+	chrome := snapViewChrome()
+	chrome.modal = modalQuitConfirm
+	bg := lm.View(120, 30, chrome)
 	got := overlayModal(bg, renderQuitConfirmModal(), 120, 30)
 	assertGolden(t, "quit-confirm-modal", got)
+}
+
+func TestSnapshot_CommentDiscardConfirmModal(t *testing.T) {
+	defer snapshotInit(t)()
+	m := formFixture()
+	m.width, m.height = 120, 30
+	m.view = viewDetail
+	m = m.openCommentForm()
+	m.input.activeField().setValue("draft comment")
+	m.modal = modalDiscardComment
+	got := m.viewContent()
+	lines := strings.Split(stripANSI(got), "\n")
+	footer := lines[len(lines)-1]
+	if !strings.Contains(footer, "y discard") ||
+		!strings.Contains(footer, "n/esc keep editing") ||
+		strings.Contains(footer, "ctrl+o save") {
+		t.Fatalf("discard modal footer = %q", footer)
+	}
+	assertGolden(t, "comment-discard-confirm-modal", got)
 }
 
 // TestSnapshot_List_SearchBarActive covers the inline command bar
@@ -281,6 +302,16 @@ func TestSnapshot_List_SearchBarActive(t *testing.T) {
 	chrome.input = newSearchBar(ListFilter{Search: "login"})
 	got := lm.View(120, 30, chrome)
 	assertGolden(t, "list-search-bar-active", got)
+}
+
+func TestSnapshot_List_SearchResultsFocused(t *testing.T) {
+	defer snapshotInit(t)()
+	lm := snapListModel(snapListFixture())
+	chrome := snapViewChrome()
+	chrome.input = newSearchBar(ListFilter{Search: "login"})
+	chrome.input.searchFocus = searchFocusResults
+	got := lm.View(120, 30, chrome)
+	assertGolden(t, "list-search-results-focused", got)
 }
 
 // TestSnapshot_List_ScrollIndicator covers the scroll-indicator slot

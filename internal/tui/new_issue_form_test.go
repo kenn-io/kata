@@ -210,13 +210,13 @@ func TestNewIssueForm_EnterInBodyInsertsNewline(t *testing.T) {
 	}
 }
 
-// TestNewIssueForm_CtrlSEmptyTitleSetsErrNoDispatch: ctrl+s with a
+// TestNewIssueForm_CtrlOEmptyTitleSetsErrNoDispatch: ctrl+o with a
 // blank Title sets the in-form err and does NOT dispatch.
-func TestNewIssueForm_CtrlSEmptyTitleSetsErrNoDispatch(t *testing.T) {
+func TestNewIssueForm_CtrlOEmptyTitleSetsErrNoDispatch(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
-	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 	if cmd != nil {
-		t.Fatalf("empty-title ctrl+s dispatched cmd %T; want nil", cmd)
+		t.Fatalf("empty-title ctrl+o dispatched cmd %T; want nil", cmd)
 	}
 	assertInputKind(t, nm, inputNewIssueForm)
 	if nm.input.err == "" {

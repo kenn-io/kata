@@ -2,10 +2,16 @@ package tui
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
+
+// nextDetailFetchRequestSeq orders detail requests independently of the
+// detail-open generation. A generation identifies the issue lifetime, while
+// this sequence distinguishes overlapping refetches within that lifetime.
+var nextDetailFetchRequestSeq atomic.Uint64
 
 // fetchIssue wraps Client.GetIssueDetail for the Enter-jump path. The 5s
 // ceiling matches fetchInitial so the detail view honors the same
@@ -14,6 +20,7 @@ import (
 // before the request finished. ref is a short_id, qualified short_id,
 // or 26-char ULID; the daemon's path resolver handles all three.
 func fetchIssue(api detailAPI, projectID int64, ref string, gen int64) tea.Cmd {
+	requestSeq := nextDetailFetchRequestSeq.Add(1)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -26,7 +33,10 @@ func fetchIssue(api detailAPI, projectID int64, ref string, gen int64) tea.Cmd {
 			parent = detail.Parent
 			children = detail.Children
 		}
-		return detailFetchedMsg{gen: gen, issue: issue, parent: parent, children: children, err: err}
+		return detailFetchedMsg{
+			gen: gen, requestSeq: requestSeq,
+			issue: issue, parent: parent, children: children, err: err,
+		}
 	}
 }
 
@@ -34,11 +44,12 @@ func fetchIssue(api detailAPI, projectID int64, ref string, gen int64) tea.Cmd {
 // ceiling matches fetchInitial so the detail view honors the same
 // budget as the list-fetch path. See fetchIssue for the gen rationale.
 func fetchComments(api detailAPI, projectID int64, ref string, gen int64) tea.Cmd {
+	requestSeq := nextDetailFetchRequestSeq.Add(1)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		comments, err := api.ListComments(ctx, projectID, ref)
-		return commentsFetchedMsg{gen: gen, comments: comments, err: err}
+		return commentsFetchedMsg{gen: gen, requestSeq: requestSeq, comments: comments, err: err}
 	}
 }
 
@@ -46,20 +57,22 @@ func fetchComments(api detailAPI, projectID int64, ref string, gen int64) tea.Cm
 // issue short_id; the client filters the project-wide poll response by
 // the issue_short_id embedded in each event row.
 func fetchEvents(api detailAPI, projectID int64, ref string, gen int64) tea.Cmd {
+	requestSeq := nextDetailFetchRequestSeq.Add(1)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		events, err := api.ListEvents(ctx, projectID, ref)
-		return eventsFetchedMsg{gen: gen, events: events, err: err}
+		return eventsFetchedMsg{gen: gen, requestSeq: requestSeq, events: events, err: err}
 	}
 }
 
 // fetchLinks wraps Client.ListLinks for use as a tea.Cmd.
 func fetchLinks(api detailAPI, projectID int64, ref string, gen int64) tea.Cmd {
+	requestSeq := nextDetailFetchRequestSeq.Add(1)
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		links, err := api.ListLinks(ctx, projectID, ref)
-		return linksFetchedMsg{gen: gen, links: links, err: err}
+		return linksFetchedMsg{gen: gen, requestSeq: requestSeq, links: links, err: err}
 	}
 }

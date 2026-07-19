@@ -1,7 +1,7 @@
 kata — keybindings
 
 Global                             Detail                                     Forms
-?         help                     tab            next tab                    ctrl+s         save or apply
+?         help                     tab            next tab                    ctrl+o         save or apply
 q/ctrl+c  quit                     shift+tab      prev tab                    esc            cancel
 P         projects                 enter          jump to referenced issue    tab/shift+tab  change field
 D         daemons                  esc/backspace  back                        ctrl+e         open editor

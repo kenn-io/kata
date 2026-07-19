@@ -1,0 +1,30 @@
+ Project: kata                                                                                          kata カタ · dev
+
+  #42aa  fix bug                                                                            [open]
+  owner: none   p╭────────────────────────────────────────────────────────────────────────────────────╮
+  priority: none │ comment on #42aa                                                                   │
+                 │ draft comment                                                                      │
+  Body           │                                                                                    │
+  current body   │                                                                                    │
+                 │                                                                                    │
+                 │                                                                                    │
+                 │                      ╭──────────────────────────────────────╮                      │
+                 │                      │                                      │                      │
+                 │                      │  Discard comment draft?              │                      │
+                 │                      │                                      │                      │
+                 │                      │  Your unsaved comment will be lost.  │                      │
+                 │                      │                                      │                      │
+                 │                      │  [Y] Discard    [N] Keep editing     │                      │
+                 │                      │                                      │                      │
+                 │                      ╰──────────────────────────────────────╯                      │
+                 │                                                                                    │
+                 │                                                                                    │
+                 │                                                                                    │
+                 │                                                                                    │
+                 │                                                                                    │
+                 │ ctrl+o save · esc cancel · ctrl+e $EDITOR                                          │
+                 ╰────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+ y discard▕ n/esc keep editing

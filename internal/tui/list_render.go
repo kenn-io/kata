@@ -18,9 +18,10 @@ import (
 // footer help row. Plumbed from Model so the sub-views don't have to
 // reach back into parent state. Zero-value renders a "minimal chrome"
 // view (used by snapshot tests that exercise just the body) — no
-// version, no SSE indicator text, no toast, no input.
+// version, no SSE indicator text, no toast, no input, no modal.
 //
-// input is the active inline command bar / panel-local prompt /
+// modal is the active centered confirmation and owns footer help while
+// installed. input is the active inline command bar / panel-local prompt /
 // centered form. When input.kind is a command bar, the chrome
 // renders the bar on the info line just above the footer (msgvault
 // pattern) and swaps the help row to the bar's keys.
@@ -40,6 +41,7 @@ type viewChrome struct {
 	narrow       bool             // M6 split mode list pane: drop owner column
 	projectsByID map[int64]string // for all-projects mode: pid → display name (empty otherwise)
 	daemon       string           // active daemon display label
+	modal        modalKind        // active confirmation; takes footer precedence
 }
 
 // View renders the list under the M3.5 chrome layer:

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -100,6 +101,7 @@ type detailModel struct {
 	loading         bool
 	err             error
 	gen             int64
+	fetchSeq        detailFetchSequences
 	activeTab       detailTab
 	scroll          int // unified viewport offset in document lines
 	tabCursor       int // active-tab row cursor
@@ -145,8 +147,133 @@ type detailModel struct {
 	// Model.input owns inline label/owner/link prompts now.
 }
 
+type detailFetchSequences struct {
+	issue    uint64
+	comments uint64
+	events   uint64
+	links    uint64
+}
+
 // newDetailModel returns a zeroed detailModel.
 func newDetailModel() detailModel { return detailModel{} }
+
+// cloneDetailModel returns a snapshot that shares no mutable issue, slice, or
+// event-payload state with dm. Error values are retained by interface because
+// detail errors are immutable once installed.
+func cloneDetailModel(dm detailModel) detailModel {
+	cloned := dm
+	cloned.issue = cloneIssue(dm.issue)
+	if dm.parent != nil {
+		parent := *dm.parent
+		cloned.parent = &parent
+	}
+	cloned.children = cloneIssues(dm.children)
+	cloned.comments = append([]CommentEntry(nil), dm.comments...)
+	cloned.events = cloneEventLogEntries(dm.events)
+	cloned.links = append([]LinkEntry(nil), dm.links...)
+	if dm.navStack != nil {
+		cloned.navStack = make([]detailModel, len(dm.navStack))
+		for i := range dm.navStack {
+			cloned.navStack[i] = cloneDetailModel(dm.navStack[i])
+		}
+	}
+	return cloned
+}
+
+func cloneIssue(issue *Issue) *Issue {
+	if issue == nil {
+		return nil
+	}
+	cloned := *issue
+	cloned.ClosedReason = cloneString(issue.ClosedReason)
+	cloned.Owner = cloneString(issue.Owner)
+	cloned.ClosedAt = cloneTime(issue.ClosedAt)
+	cloned.DeletedAt = cloneTime(issue.DeletedAt)
+	cloned.Labels = append([]string(nil), issue.Labels...)
+	if issue.Parent != nil {
+		parent := *issue.Parent
+		cloned.Parent = &parent
+	}
+	if issue.ChildCounts != nil {
+		counts := *issue.ChildCounts
+		cloned.ChildCounts = &counts
+	}
+	cloned.Blocks = append([]LinkPeer(nil), issue.Blocks...)
+	cloned.BlockedBy = append([]LinkPeer(nil), issue.BlockedBy...)
+	cloned.Related = append([]LinkPeer(nil), issue.Related...)
+	if issue.Priority != nil {
+		priority := *issue.Priority
+		cloned.Priority = &priority
+	}
+	return &cloned
+}
+
+func cloneIssues(issues []Issue) []Issue {
+	if issues == nil {
+		return nil
+	}
+	cloned := make([]Issue, len(issues))
+	for i := range issues {
+		cloned[i] = *cloneIssue(&issues[i])
+	}
+	return cloned
+}
+
+func cloneEventLogEntries(events []EventLogEntry) []EventLogEntry {
+	if events == nil {
+		return nil
+	}
+	cloned := make([]EventLogEntry, len(events))
+	for i, event := range events {
+		cloned[i] = event
+		cloned[i].IssueShortID = cloneString(event.IssueShortID)
+		cloned[i].RelatedIssueShortID = cloneString(event.RelatedIssueShortID)
+		cloned[i].Payload = cloneEventPayload(event.Payload)
+	}
+	return cloned
+}
+
+func cloneEventPayload(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(payload))
+	for key, value := range payload {
+		cloned[key] = cloneEventPayloadValue(value)
+	}
+	return cloned
+}
+
+func cloneEventPayloadValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		return cloneEventPayload(value)
+	case []any:
+		cloned := make([]any, len(value))
+		for i := range value {
+			cloned[i] = cloneEventPayloadValue(value[i])
+		}
+		return cloned
+	default:
+		return value
+	}
+}
+
+func cloneString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
 
 // Update routes detail-view messages: keys and the four fetch results.
 // After M3b the dm.modal in-place input was retired; the panel-local
@@ -178,11 +305,22 @@ func (dm detailModel) Update(msg tea.Msg, km keymap, api detailAPI) (detailModel
 // initial-load Comments(0) → Events(N) jump from pulling focus away
 // once the user has cycled tabs themselves.
 func (dm detailModel) applyFetched(msg tea.Msg) detailModel {
+	dm, _ = dm.applyFetchedIfFresh(msg)
+	return dm
+}
+
+// applyFetchedIfFresh applies a generation-matched result only when no newer
+// request for the same component has already completed. requestSeq is assigned
+// when a real fetch command is created; zero remains accepted for synthetic
+// internal messages and focused model tests that do not represent overlapping
+// requests.
+func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 	switch m := msg.(type) {
 	case detailFetchedMsg:
-		if m.gen != dm.gen {
-			return dm
+		if m.gen != dm.gen || detailFetchResultIsOlder(m.requestSeq, dm.fetchSeq.issue) {
+			return dm, false
 		}
+		dm.fetchSeq.issue = newestDetailFetchSeq(dm.fetchSeq.issue, m.requestSeq)
 		dm.loading = false
 		if m.issue != nil {
 			dm.issue = m.issue
@@ -192,31 +330,47 @@ func (dm detailModel) applyFetched(msg tea.Msg) detailModel {
 		dm = dm.clampChildFocus()
 		dm.err = mergeErr(dm.err, m.err)
 	case commentsFetchedMsg:
-		if m.gen != dm.gen {
-			return dm
+		if m.gen != dm.gen || detailFetchResultIsOlder(m.requestSeq, dm.fetchSeq.comments) {
+			return dm, false
 		}
+		dm.fetchSeq.comments = newestDetailFetchSeq(dm.fetchSeq.comments, m.requestSeq)
 		dm.commentsLoading = false
 		dm.comments = m.comments
 		dm.commentsErr = m.err
 		dm = dm.autoSelectActivityTab()
 	case eventsFetchedMsg:
-		if m.gen != dm.gen {
-			return dm
+		if m.gen != dm.gen || detailFetchResultIsOlder(m.requestSeq, dm.fetchSeq.events) {
+			return dm, false
 		}
+		dm.fetchSeq.events = newestDetailFetchSeq(dm.fetchSeq.events, m.requestSeq)
 		dm.eventsLoading = false
 		dm.events = m.events
 		dm.eventsErr = m.err
 		dm = dm.autoSelectActivityTab()
 	case linksFetchedMsg:
-		if m.gen != dm.gen {
-			return dm
+		if m.gen != dm.gen || detailFetchResultIsOlder(m.requestSeq, dm.fetchSeq.links) {
+			return dm, false
 		}
+		dm.fetchSeq.links = newestDetailFetchSeq(dm.fetchSeq.links, m.requestSeq)
 		dm.linksLoading = false
 		dm.links = m.links
 		dm.linksErr = m.err
 		dm = dm.autoSelectActivityTab()
+	default:
+		return dm, false
 	}
-	return dm
+	return dm, true
+}
+
+func detailFetchResultIsOlder(requestSeq, appliedSeq uint64) bool {
+	return requestSeq != 0 && requestSeq < appliedSeq
+}
+
+func newestDetailFetchSeq(appliedSeq, requestSeq uint64) uint64 {
+	if requestSeq > appliedSeq {
+		return requestSeq
+	}
+	return appliedSeq
 }
 
 // autoSelectActivityTab picks the first non-empty activity tab the

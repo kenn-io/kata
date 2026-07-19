@@ -178,7 +178,7 @@ func renderFilterFormFooter(s inputState) string {
 	if s.saving {
 		return statusStyle.Render("saving…")
 	}
-	hint := "ctrl+s apply · esc cancel · tab next · ctrl+r reset"
+	hint := "ctrl+o apply · esc cancel · tab next · ctrl+r reset"
 	return subtleStyle.Render(hint)
 }
 
@@ -289,12 +289,12 @@ func renderFormFooter(s inputState, innerW int, allowEditor bool) string {
 	if s.saving {
 		return statusStyle.Render("saving…")
 	}
-	hint := "ctrl+s save · esc cancel · ctrl+e $EDITOR"
+	hint := "ctrl+o save · esc cancel · ctrl+e $EDITOR"
 	if !allowEditor {
-		hint = "ctrl+s save · esc cancel · tab next · ctrl+e (body only)"
+		hint = "ctrl+o save · esc cancel · tab next · ctrl+e (body only)"
 	}
 	if len(hint) > innerW {
-		hint = "ctrl+s save · esc cancel"
+		hint = "ctrl+o save · esc cancel"
 	}
 	return subtleStyle.Render(hint)
 }

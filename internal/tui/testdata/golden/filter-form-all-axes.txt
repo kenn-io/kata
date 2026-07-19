@@ -8,5 +8,5 @@
 │ login                                                                              │
 │ Labels                                                                             │
 │                                                                                    │
-│ ctrl+s apply · esc cancel · tab next · ctrl+r reset                                │
+│ ctrl+o apply · esc cancel · tab next · ctrl+r reset                                │
 ╰────────────────────────────────────────────────────────────────────────────────────╯

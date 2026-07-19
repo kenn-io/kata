@@ -88,8 +88,8 @@ type Model struct {
 	// route normally. While an input is open, all non-Quit keys go to
 	// the input's bubbles model; canQuit() gates global keys.
 	input inputState
-	// modal is the active centered confirm/info overlay (M3.5b: the
-	// quit-confirm modal; future plans add delete-confirm etc.).
+	// modal is the active centered confirm/info overlay (quit confirm or
+	// dirty-comment discard confirm; future plans may add others).
 	// modalNone is the quiescent state. While a modal is open it
 	// owns key dispatch — `y`/`n`/`esc` route through it instead of
 	// reaching list/detail handlers.
@@ -387,6 +387,7 @@ func initialFilter(_ Options) ListFilter {
 // comments tab — but the list sub-model is untouched on pop, preserving
 // the user's cursor and filter state across the round trip.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m = m.syncSearchDetailSnapshot(msg)
 	if next, cmd, ok := m.routeTopLevel(msg); ok {
 		return next, cmd
 	}
@@ -411,8 +412,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.staleConnMsg(mut.connGen) {
 			return m, nil
 		}
+		snapshotCmd := m.searchSnapshotMutationRefetch(mut)
 		next, cmd := m.routeMutation(mut)
-		return next, cmd
+		return next, combineCmds(cmd, snapshotCmd)
 	}
 	// Editor returns from a centered form's ctrl+e handoff land here
 	// before dispatchToView so the writeback can hit m.input. formGen=0
@@ -710,6 +712,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		// type. Forward to the active input's bubbles model so a paste
 		// lands atomically (newlines included) instead of as
 		// keystrokes; without an open input the paste has no target.
+		if m.input.kind == inputSearchBar && m.input.searchFocus == searchFocusResults {
+			return m, nil, true
+		}
 		if m.modal == modalNone && m.input.kind != inputNone {
 			m.input, _ = m.input.delegateToField(msg)
 			if m.input.kind.isCommandBar() {
@@ -867,8 +872,9 @@ func (m Model) cacheDetailViewport(dm detailModel) detailModel {
 // AND the formTarget rides on inputState.target so the autocomplete
 // dispatch (label suggestions) can scope to the right project. For
 // the centered new-issue form (Plan 8 commit 4), the form has no
-// issue context — ctrl+s dispatches CreateIssue with the four-field
-// payload. For other centered forms (edit-body, comment), openInput
+// issue context — ctrl+o dispatches CreateIssue with the four-field
+// payload (ctrl+s remains compatible). For other centered forms
+// (edit-body, comment), openInput
 // delegates to openBodyEditForm / openCommentForm — they need extra
 // context (current body, issue target) so they're called directly
 // from the detail key handler instead of via openInputMsg.
@@ -887,7 +893,10 @@ func (m Model) openInputFromMsg(msg openInputMsg) (Model, tea.Cmd) {
 	kind := msg.kind
 	switch {
 	case kind == inputSearchBar:
-		m.input = newSearchBar(m.list.filter)
+		s := newSearchBar(m.list.filter)
+		s.preListSelection = snapshotListSelection(m.list)
+		m.input = s
+		m = m.captureSearchSplitDetail()
 	case kind == inputNewIssueForm:
 		m.nextFormGen++
 		s := newNewIssueForm()
@@ -999,6 +1008,11 @@ func (m Model) openCommentForm() Model {
 // highlighted suggestion's label (suggestion source is computed at
 // the Model level — see suggestionsForPrompt).
 func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	if m.input.kind == inputSearchBar {
+		if next, cmd, handled := m.routeSearchInputKey(msg); handled {
+			return next, cmd
+		}
+	}
 	prevKind := m.input.kind
 	next, action := m.input.Update(msg)
 	m.input = next
@@ -1006,7 +1020,7 @@ func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case actionCommit:
 		return m.commitInput()
 	case actionCancel:
-		return m.cancelInput()
+		return m.requestInputCancel()
 	case actionEditorHandoff:
 		return m.handoffToEditor()
 	}
@@ -1017,6 +1031,225 @@ func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m = m.applyLabelPromptKey(msg)
 	}
 	return m, nil
+}
+
+func (m Model) routeSearchInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	if m.input.searchFocus == searchFocusQuery {
+		switch msg.String() {
+		case "enter":
+			m.list = m.list.syncSelection(m.list.visibleRows())
+			m.input.searchFocus = searchFocusResults
+			next, cmd := m.followSearchResultIfNeeded(nil)
+			return next, cmd, true
+		case "up", "down":
+			m.input.searchFocus = searchFocusResults
+			next, cmd := m.dispatchListKey(msg)
+			next, cmd = next.followSearchResultIfNeeded(cmd)
+			return next, cmd, true
+		}
+		return m, nil, false
+	}
+
+	switch msg.String() {
+	case "up", "down":
+		next, cmd := m.dispatchListKey(msg)
+		return next, cmd, true
+	case "esc", "/":
+		m.input.searchFocus = searchFocusQuery
+		return m, nil, true
+	case "enter":
+		next, cmd := m.commitInput()
+		return next, cmd, true
+	default:
+		return m, nil, true
+	}
+}
+
+func (m Model) followSearchResultIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
+	if m.layout != layoutSplit {
+		return m, prior
+	}
+	return m.followHighlightedIssueIfNeeded(prior)
+}
+
+// restoreSearchDetailIfNeeded bypasses the ordinary split-only search-result
+// gate after an active search has owned a split detail pane, so a later stacked
+// resize cannot leave that hidden pane pinned to the canceled result.
+func (m Model) restoreSearchDetailIfNeeded(
+	snapshot *detailModel, snapshotAhead bool, prior tea.Cmd,
+) (Model, tea.Cmd) {
+	if iss, ok := pickHighlightedIssue(m.list); ok {
+		pid := detailProjectID(iss, m.scope)
+		if snapshotAhead && detailModelMatches(snapshot, iss.UID, pid) {
+			liveMatches := detailModelMatches(&m.detail, iss.UID, pid)
+			if liveMatches && m.detail.gen > snapshot.gen {
+				// The search returned to the inherited issue after the saved
+				// generation advanced while hidden. Keep that newer live shell so
+				// its outstanding responses still match and can complete it.
+				return m, prior
+			}
+			if !liveMatches {
+				// Installing the snapshot replaces a search-owned live target.
+				// Invalidate its pending debounce tick without scheduling a fetch.
+				m.nextDetailFollowGen++
+			}
+			m.detail = m.applyDetailViewportCache(cloneDetailModel(*snapshot))
+			return m, prior
+		}
+		return m.followHighlightedIssueIfNeeded(prior)
+	}
+	// No restored row can drive scheduleDetailFollow. Invalidate the search's
+	// pending tick directly, then reinstate its inherited detail model or clear
+	// a pane that the search itself created.
+	m.nextDetailFollowGen++
+	if snapshot == nil {
+		m.detail = m.applyDetailViewportCache(newDetailModel())
+		return m, prior
+	}
+	m.detail = m.applyDetailViewportCache(cloneDetailModel(*snapshot))
+	return m, prior
+}
+
+// captureSearchSplitDetail snapshots the first populated split detail model an
+// active search inherits. It runs before split bootstrap so a detail created
+// from the live query is never mistaken for pre-search state.
+func (m Model) captureSearchSplitDetail() Model {
+	if !m.input.kind.isCommandBar() || m.layout != layoutSplit {
+		return m
+	}
+	if m.input.preSplitDetailCaptured {
+		return m
+	}
+	m.input.preSplitDetailCaptured = true
+	if m.detail.issue != nil {
+		snapshot := cloneDetailModel(m.detail)
+		m.input.preSplitDetail = &snapshot
+		m.input.restoreSplitDetail = true
+	}
+	return m
+}
+
+// syncSearchDetailSnapshot mirrors every generation-matched async detail
+// result into the saved pre-search model. Fetch results flow through
+// detailModel.applyFetched, while mutation completions share the state-only
+// portion of detailModel.applyMutation. This keeps fetched content plus
+// mutation status/errors converged without dispatching a duplicate refetch,
+// while preserving the snapshot's tab, cursor, scroll, and navigation state.
+func (m Model) syncSearchDetailSnapshot(msg tea.Msg) Model {
+	if !m.input.kind.isCommandBar() || m.input.preSplitDetail == nil {
+		return m
+	}
+	if mut, ok := msg.(mutationDoneMsg); ok {
+		if m.staleConnMsg(mut.connGen) {
+			return m
+		}
+		updated, applied := m.input.preSplitDetail.applyMutationState(mut)
+		if !applied {
+			return m
+		}
+		if mut.gen != m.detail.gen {
+			m.input.preSplitDetailAhead = true
+		}
+		snapshot := cloneDetailModel(updated)
+		m.input.preSplitDetail = &snapshot
+		return m
+	}
+	if !isDetailFetchMsg(msg) {
+		return m
+	}
+	updated, applied := m.input.preSplitDetail.applyFetchedIfFresh(msg)
+	if !applied {
+		return m
+	}
+	if gen, ok := detailFetchGeneration(msg); ok &&
+		gen == m.input.preSplitDetail.gen && !m.detailFetchReachesLive(gen) {
+		m.input.preSplitDetailAhead = true
+	}
+	snapshot := cloneDetailModel(updated)
+	m.input.preSplitDetail = &snapshot
+	return m
+}
+
+// searchSnapshotMutationRefetch returns the normal post-mutation detail
+// refresh when a successful completion belongs to the saved pre-search detail
+// but can no longer reach the retargeted live pane. syncSearchDetailSnapshot
+// has already applied the mutation status to that saved model; this preserves
+// the issue and activity refresh that detailModel.applyMutation would have
+// dispatched if its generation still matched live detail.
+func (m Model) searchSnapshotMutationRefetch(mut mutationDoneMsg) tea.Cmd {
+	if m.api == nil || mut.err != nil || mut.origin != "detail" ||
+		m.input.preSplitDetail == nil || mut.gen != m.input.preSplitDetail.gen ||
+		mut.gen == m.detail.gen {
+		return nil
+	}
+	return m.input.preSplitDetail.refetchAfterMutation(m.api)
+}
+
+func combineCmds(first, second tea.Cmd) tea.Cmd {
+	switch {
+	case first == nil:
+		return second
+	case second == nil:
+		return first
+	default:
+		return tea.Batch(first, second)
+	}
+}
+
+func detailModelMatches(detail *detailModel, uid string, pid int64) bool {
+	return detail != nil && detail.issue != nil &&
+		detail.issue.UID == uid && detail.scopePID == pid
+}
+
+func detailFetchGeneration(msg tea.Msg) (int64, bool) {
+	switch msg := msg.(type) {
+	case detailFetchedMsg:
+		return msg.gen, true
+	case commentsFetchedMsg:
+		return msg.gen, true
+	case eventsFetchedMsg:
+		return msg.gen, true
+	case linksFetchedMsg:
+		return msg.gen, true
+	}
+	return 0, false
+}
+
+func (m Model) detailFetchReachesLive(gen int64) bool {
+	if m.detail.gen != gen {
+		return false
+	}
+	return m.layout == layoutSplit || m.view == viewDetail
+}
+
+// markSearchSplitDetailOwned records that the active search has controlled a
+// visible split detail pane. The marker is monotonic for the search lifetime:
+// once set, cancel must restore that pane even after a later stacked resize.
+// It is state-only so layout changes never introduce another follow command.
+func (m Model) markSearchSplitDetailOwned() Model {
+	if m.input.kind.isCommandBar() && m.layout == layoutSplit && m.detail.issue != nil {
+		m.input.restoreSplitDetail = true
+	}
+	return m
+}
+
+func (m Model) followHighlightedIssueIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
+	iss, ok := pickHighlightedIssue(m.list)
+	if !ok {
+		return m, prior
+	}
+	pid := detailProjectID(iss, m.scope)
+	if m.detail.issue != nil && m.detail.issue.UID == iss.UID && m.detail.scopePID == pid {
+		return m, prior
+	}
+	m, follow := m.scheduleDetailFollow()
+	if prior == nil {
+		return m, follow
+	}
+	if follow == nil {
+		return m, prior
+	}
+	return m, tea.Batch(prior, follow)
 }
 
 // applyLabelPromptKey post-processes a key into a label prompt:
@@ -1353,7 +1586,8 @@ func (m Model) applyLiveBarFilter() Model {
 //
 // For centered forms, commitInput keeps the form open with
 // saving=true while the mutation is in flight (so a duplicate
-// ctrl+s is absorbed by the form's updateForm gate). The form is
+// canonical ctrl+o or compatible ctrl+s is absorbed by the form's
+// updateForm gate). The form is
 // closed by routeFormMutation when the response arrives. Per-form
 // gates: comments require non-empty content; body edits allow empty
 // (clearing a body is legitimate); the new-issue form requires a
@@ -1363,9 +1597,9 @@ func (m Model) applyLiveBarFilter() Model {
 // isCenteredForm() check. The filter form IS in isCenteredForm() for
 // rendering (overlayModal needs to know to draw it), but its commit
 // is filter-apply-and-refetch, not mutation-dispatch. Without the
-// explicit early branch, ctrl+s on the filter modal would fall into
-// commitFormInput, set saving=true, and wait forever for a
-// mutationDoneMsg that never arrives (no daemon round-trip is in
+// explicit early branch, canonical ctrl+o (or compatible ctrl+s) on
+// the filter modal would fall into commitFormInput, set saving=true,
+// and wait forever for a mutationDoneMsg that never arrives (no daemon round-trip is in
 // flight). Order matters here.
 func (m Model) commitInput() (Model, tea.Cmd) {
 	kind := m.input.kind
@@ -1423,9 +1657,10 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// commitFormInput handles ctrl+s on a centered form. The form stays
-// open with saving=true while the daemon round-trip runs; the
-// arriving mutationDoneMsg closes it (success: clear and update
+// commitFormInput handles canonical ctrl+o and compatible ctrl+s on a
+// centered form. The form stays open with saving=true while the daemon
+// round-trip runs; the arriving mutationDoneMsg closes it (success:
+// clear and update
 // detail / list; error: surface on the form's status line and leave
 // open). Render-side sanitization elsewhere handles display safety;
 // mutation payloads go to the wire untouched so the user's content
@@ -1636,12 +1871,51 @@ func dispatchFormEditBody(
 // with the bar path so any future "live preview" mode plugs in
 // without changing this code.
 func (m Model) cancelInput() (Model, tea.Cmd) {
-	if m.input.kind.isCommandBar() || m.input.kind == inputFilterForm {
+	searchCanceled := m.input.kind.isCommandBar()
+	restoreSplitDetail := searchCanceled && m.input.restoreSplitDetail
+	preSplitDetail := m.input.preSplitDetail
+	preSplitDetailAhead := m.input.preSplitDetailAhead
+	if searchCanceled {
+		m.list.filter = m.input.preFilter
+		snapshot := m.input.preListSelection
+		m.list.cursor = snapshot.cursor
+		m.list.windowStart = snapshot.windowStart
+		m.list.selectedUID = snapshot.selectedUID
+		m.list.selectedProjectID = snapshot.selectedProjectID
+		m.list = m.list.restoreCursorToSelection()
+	} else if m.input.kind == inputFilterForm {
 		m.list.filter = m.input.preFilter
 		m.list = m.list.clampCursorToFilter()
 	}
 	m.input = inputState{}
+	if restoreSplitDetail {
+		return m.restoreSearchDetailIfNeeded(preSplitDetail, preSplitDetailAhead, nil)
+	}
+	if searchCanceled {
+		return m.followSearchResultIfNeeded(nil)
+	}
 	return m, nil
+}
+
+func snapshotListSelection(lm listModel) listSelectionSnapshot {
+	lm = lm.syncSelection(lm.visibleRows())
+	return listSelectionSnapshot{
+		cursor:            lm.cursor,
+		windowStart:       lm.windowStart,
+		selectedUID:       lm.selectedUID,
+		selectedProjectID: lm.selectedProjectID,
+	}
+}
+
+func (m Model) requestInputCancel() (Model, tea.Cmd) {
+	if m.input.kind == inputCommentForm && m.input.saving {
+		return m, nil
+	}
+	if m.input.hasCommentDraft() {
+		m.modal = modalDiscardComment
+		return m, nil
+	}
+	return m.cancelInput()
 }
 
 // routeGlobalKey handles the global key family (quit, help, scope
@@ -2241,7 +2515,7 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 
 // canQuit reports whether a global keystroke (q, ?, R) should be
 // honored. False while an input shell (M3a/M3b/M3.5c bars/prompts
-// /forms) or a confirm modal (M3.5b quit confirm) is open. Both
+// /forms) or a confirm modal (quit or comment discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
 	if m.modal != modalNone {
@@ -2253,10 +2527,11 @@ func (m Model) canQuit() bool {
 	return true
 }
 
-// routeModalKey delivers a key to the active centered modal. M3.5b
-// only handles modalQuitConfirm: y/Y commits → tea.Quit; n/N/esc
-// cancels → close the modal. Other keys are absorbed (the modal owns
-// dispatch; nothing reaches the underlying view).
+// routeModalKey delivers a key to the active centered modal. Quit
+// confirmation maps y/Y to tea.Quit and n/N/esc to close; comment
+// discard maps y/Y to cancelInput and n/N/esc to resume editing.
+// Other keys are absorbed (the modal owns dispatch; nothing reaches
+// the underlying view).
 //
 // ctrl+c always fast-quits regardless of which modal is open — the
 // power-user escape hatch must not be trapped behind a confirmation
@@ -2270,6 +2545,15 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		switch msg.String() {
 		case "y", "Y":
 			return m, tea.Quit
+		case "n", "N", "esc":
+			m.modal = modalNone
+			return m, nil
+		}
+	case modalDiscardComment:
+		switch msg.String() {
+		case "y", "Y":
+			m.modal = modalNone
+			return m.cancelInput()
 		case "n", "N", "esc":
 			m.modal = modalNone
 			return m, nil
@@ -2602,6 +2886,7 @@ func (m Model) scheduleDetailFollow() (Model, tea.Cmd) {
 	m.detail.eventsLoading = true
 	m.detail.linksLoading = true
 	m.detail = m.applyDetailViewportCache(m.detail)
+	m = m.markSearchSplitDetailOwned()
 	m.nextDetailFollowGen++
 	tickGen := m.nextDetailFollowGen
 	return m, tea.Tick(detailFollowDebounce, func(time.Time) tea.Msg {
@@ -2696,25 +2981,12 @@ func (m Model) viewContent() string {
 			body = renderTooNarrow(m.width, m.height)
 		}
 		body = m.appendNonListDetailExtras(body)
-		if m.modal == modalQuitConfirm {
-			return overlayModal(body, renderQuitConfirmModal(), m.width, m.height)
-		}
-		if m.input.kind.isCenteredForm() {
-			form := renderCenteredForm(m.input, m.width, m.height)
-			return overlayModal(body, form, m.width, m.height)
-		}
-		return body
+		return m.overlayInputAndModal(body)
 	}
 	body := m.viewBody()
 	body = m.appendNonListDetailExtras(body)
-	// M3.5b: a centered modal overlays the rendered view when active.
-	if m.modal == modalQuitConfirm {
-		return overlayModal(body, renderQuitConfirmModal(), m.width, m.height)
-	}
-	// M4: centered form overlays the rendered view when active.
-	if m.input.kind.isCenteredForm() {
-		form := renderCenteredForm(m.input, m.width, m.height)
-		return overlayModal(body, form, m.width, m.height)
+	if m.input.kind.isCenteredForm() || m.modal != modalNone {
+		return m.overlayInputAndModal(body)
 	}
 	// Plan-8: label-prompt autocomplete menu overlays the detail view
 	// above the info line. The detail layout reserves the menu's
@@ -2724,6 +2996,17 @@ func (m Model) viewContent() string {
 	// user is on focusDetail regardless of m.view.
 	if m.detailIsActive() && isLabelPromptKind(m.input.kind) {
 		body = m.overlaySuggestMenu(body)
+	}
+	return body
+}
+
+func (m Model) overlayInputAndModal(body string) string {
+	if m.input.kind.isCenteredForm() {
+		form := renderCenteredForm(m.input, m.width, m.height)
+		body = overlayModal(body, form, m.width, m.height)
+	}
+	if m.modal != modalNone {
+		body = overlayModal(body, renderConfirmModal(m.modal), m.width, m.height)
 	}
 	return body
 }
@@ -2842,7 +3125,7 @@ func (m Model) viewBody() string {
 // chrome assembles the cross-cutting render inputs both the list view
 // and the detail view need from Model state: scope, SSE status,
 // pending invalidation flag, the active toast (if any), the
-// build-time version string, and the active input shell. Centralising
+// build-time version string, active input shell, and active modal. Centralising
 // this keeps the sub-views free of Model coupling.
 func (m Model) chrome() viewChrome {
 	return viewChrome{
@@ -2854,6 +3137,7 @@ func (m Model) chrome() viewChrome {
 		input:        m.input,
 		projectsByID: m.projectsByID,
 		daemon:       activeDaemonDisplay(m.activeDaemon),
+		modal:        m.modal,
 	}
 }
 

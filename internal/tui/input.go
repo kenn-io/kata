@@ -35,6 +35,13 @@ const (
 	inputFilterForm        // list `f` — multi-axis filter modal: Status/Owner/Search
 )
 
+type searchFocus int
+
+const (
+	searchFocusQuery searchFocus = iota
+	searchFocusResults
+)
+
 // isPanelPrompt reports whether a kind is one of the M3b panel-local
 // prompt kinds (anchored to the bottom of the detail pane).
 func (k inputKind) isPanelPrompt() bool {
@@ -55,7 +62,8 @@ func (k inputKind) isCommandBar() bool {
 }
 
 // isCenteredForm reports whether a kind is one of the centered form
-// kinds (multi-line textarea, ctrl+s commit, esc cancel, ctrl+e
+// kinds (multi-line textarea, ctrl+o commit with ctrl+s compatibility,
+// esc cancel, ctrl+e
 // $EDITOR escape hatch). M4 introduced edit-body and comment;
 // Plan 8 commit 4 added the multi-field new-issue form; Plan 8
 // commit 5a added the filter modal. The filter modal renders via
@@ -205,9 +213,18 @@ func (f *inputField) blur() {
 // reads field values and dispatches the mutation; on actionCancel it
 // discards and restores any pre-open snapshot.
 //
-// preFilter is the listFilter snapshot captured when an inline
-// command bar opened, so a cancel can revert any live-applied changes.
-// Empty filter for non-bar inputs.
+// preFilter snapshots the filter when a command bar or filter form
+// opens. preListSelection additionally snapshots the highlighted row
+// for a search bar, so cancel can revert every live-applied search
+// change without leaving cursor and stable identity out of sync.
+// restoreSplitDetail records whether that search has owned a populated split
+// detail pane, whose hidden state must follow the restored selection even if
+// the terminal becomes stacked before cancel. preSplitDetail is a deep copy
+// of the detail model the search first inherited, when one existed.
+// preSplitDetailCaptured distinguishes an intentionally captured nil detail
+// from a search that has not entered split layout yet. preSplitDetailAhead is
+// set when a matching async result updated the snapshot without reaching live
+// detail.
 //
 // target / err / saving / formGen are populated for centered-form and
 // panel-prompt kinds. target carries the issue context so a stale
@@ -222,17 +239,30 @@ func (f *inputField) blur() {
 // visible row in the menu when the entry list overflows the menu's
 // height. Both are zero on every non-suggesting input kind.
 type inputState struct {
-	kind             inputKind
-	title            string
-	fields           []inputField
-	active           int
-	err              string
-	saving           bool
-	preFilter        ListFilter
-	target           formTarget
-	formGen          int64
-	suggestHighlight int
-	suggestScroll    int
+	kind                   inputKind
+	searchFocus            searchFocus
+	title                  string
+	fields                 []inputField
+	active                 int
+	err                    string
+	saving                 bool
+	preFilter              ListFilter
+	preListSelection       listSelectionSnapshot
+	restoreSplitDetail     bool
+	preSplitDetail         *detailModel
+	preSplitDetailCaptured bool
+	preSplitDetailAhead    bool
+	target                 formTarget
+	formGen                int64
+	suggestHighlight       int
+	suggestScroll          int
+}
+
+type listSelectionSnapshot struct {
+	cursor            int
+	windowStart       int
+	selectedUID       string
+	selectedProjectID int64
 }
 
 // formTarget carries the issue identity a centered form is acting
@@ -277,11 +307,20 @@ func (s *inputState) activeField() *inputField {
 	return &s.fields[idx]
 }
 
+func (s *inputState) hasCommentDraft() bool {
+	if s == nil || s.kind != inputCommentForm {
+		return false
+	}
+	f := s.activeField()
+	return f != nil && strings.TrimSpace(f.value()) != ""
+}
+
 // Update routes a key into the active field and reports the action
 // the caller should take. Centered forms route differently from bars
-// and prompts: ctrl+s commits (Enter inserts a newline into the
-// textarea); ctrl+e requests the $EDITOR escape hatch; saving=true
-// blocks duplicate commits while a mutation is in flight.
+// and prompts: ctrl+o is the canonical commit key, with ctrl+s retained
+// for compatibility (Enter inserts a newline into the textarea);
+// ctrl+e requests the $EDITOR escape hatch; saving=true blocks duplicate
+// commits while a mutation is in flight.
 //
 // Label-prompt kinds (`+` / `-`) intercept ↑/↓/⇥ BEFORE delegating to
 // the textinput so the autocomplete menu's highlight cursor moves
@@ -353,13 +392,14 @@ func (s inputState) handleSuggestKey(msg tea.KeyPressMsg) (inputState, bool) {
 	return s, false
 }
 
-// updateForm is the Update path for centered forms. ctrl+s commits
-// (Model-level handler validates kind-specific empty rules); esc
-// cancels; ctrl+e hands off to $EDITOR (gated to the body field on
-// multi-field forms so the user does not get $EDITOR for a one-line
-// owner string); tab/shift+tab cycle fields with wrap on multi-field
+// updateForm is the Update path for centered forms. ctrl+o is the canonical
+// commit key, with ctrl+s retained for compatibility (Model-level handler
+// validates kind-specific empty rules); esc cancels; ctrl+e hands off
+// to $EDITOR (gated to the body field on multi-field forms so the user
+// does not get $EDITOR for a one-line owner string); tab/shift+tab cycle
+// fields with wrap on multi-field
 // forms; enter on a single-line field advances to the next field
-// rather than committing (commit is ctrl+s only).
+// rather than committing (commit is ctrl+o, with ctrl+s compatibility).
 //
 // On single-field forms (edit-body, comment) tab and shift+tab fall
 // through to the textarea so the user can still indent. The Body
@@ -367,7 +407,7 @@ func (s inputState) handleSuggestKey(msg tea.KeyPressMsg) (inputState, bool) {
 // can use tab natively. The cycling only triggers for the single-line
 // fields on a multi-field form.
 //
-// While saving=true, ctrl+s is absorbed (no duplicate dispatches).
+// While saving=true, ctrl+o and ctrl+s are absorbed (no duplicate dispatches).
 //
 // The filter form (Plan 8 commit 5a) honors ctrl+r as a reset gesture
 // (zeros every field; preFilter intact for esc) and routes ←/→/space
@@ -389,14 +429,15 @@ func (s inputState) updateForm(msg tea.KeyPressMsg) (inputState, inputAction) {
 }
 
 // handleFormControlKey handles the action-emitting key family
-// (ctrl+s, esc, ctrl+e, ctrl+r). handled=true means the key was
+// (canonical ctrl+o, compatible ctrl+s, esc, ctrl+e, ctrl+r).
+// handled=true means the key was
 // consumed (the action may still be actionNone for absorbed gestures
-// like ctrl+r and the saving=true ctrl+s gate).
+// like ctrl+r and the saving=true commit gate).
 func (s inputState) handleFormControlKey(
 	msg tea.KeyPressMsg,
 ) (inputState, inputAction, bool) {
 	switch msg.String() {
-	case "ctrl+s":
+	case "ctrl+o", "ctrl+s":
 		if s.saving {
 			return s, actionNone, true
 		}
@@ -519,8 +560,8 @@ func (s inputState) shouldCycleFields() bool {
 // line field should advance to the next field. The body field on the
 // new-issue form stays as a newline-insert (textarea native
 // behavior); other fields treat enter as "next field." Commit is
-// reserved for ctrl+s. The filter form has no multi-line field, so
-// every field advances on enter.
+// reserved for canonical ctrl+o, with ctrl+s compatibility. The filter
+// form has no multi-line field, so every field advances on enter.
 func (s inputState) shouldAdvanceOnEnter() bool {
 	if len(s.fields) <= 1 {
 		return false
@@ -648,7 +689,8 @@ const (
 // newBodyEditForm constructs the centered multi-line editor opened by
 // `e` on the detail view. current pre-fills the textarea with the
 // existing body so the user starts on top of what's there. esc
-// closes the form (returns to detail); ctrl+s dispatches EditBody;
+// closes the form (returns to detail); ctrl+o dispatches EditBody
+// (ctrl+s remains compatible);
 // ctrl+e suspends to $EDITOR.
 func newBodyEditForm(target formTarget, current string) inputState {
 	return inputState{
@@ -661,9 +703,9 @@ func newBodyEditForm(target formTarget, current string) inputState {
 
 // newCommentForm is the centered multi-line comment editor opened
 // by `c` on the detail view. esc cancels (no comment posted);
-// ctrl+s dispatches AddComment; empty content blocks commit per the
-// kind-specific gate (comments must have content; clearing a body is
-// legitimate but posting an empty comment is not).
+// ctrl+o dispatches AddComment (ctrl+s remains compatible); empty content
+// blocks commit per the kind-specific gate (comments must have content;
+// clearing a body is legitimate but posting an empty comment is not).
 func newCommentForm(target formTarget) inputState {
 	return inputState{
 		kind:   inputCommentForm,
@@ -773,7 +815,8 @@ func joinLabelsForFilterForm(labels []string) string {
 // only multi-line field (so ctrl+e for $EDITOR escape only fires when
 // it owns focus); Labels accepts a comma-separated string normalized
 // at commit time; Owner is a single-line textinput, nil-on-wire when
-// blank. tab cycles fields with wrap; ctrl+s commits; esc cancels.
+// blank. tab cycles fields with wrap; ctrl+o commits (ctrl+s remains
+// compatible); esc cancels.
 func newNewIssueForm() inputState {
 	return newNewIssueFormBase("new issue")
 }

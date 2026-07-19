@@ -259,7 +259,8 @@ func TestList_StatusOpenShowsNestedMatchingGrandchildContext(t *testing.T) {
 // TestList_Search_AccumulatesAndCommits drives /, then "abc", then
 // Enter through Model.Update so the M3a inline command bar handles
 // the keys. The buffer mirrors live into filter.Search on every
-// keystroke; Enter closes the bar leaving the filter applied.
+// keystroke; the first Enter focuses results and the second closes
+// the bar leaving the filter applied.
 //
 // The filter changes are *client-side* (filteredIssues), so no API
 // refetch fires for Search/Owner — only Status filter changes
@@ -279,8 +280,13 @@ func TestList_Search_AccumulatesAndCommits(t *testing.T) {
 		t.Fatalf("filter.Search = %q, want abc (live mirror)", m.list.filter.Search)
 	}
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults {
+		t.Fatalf("search state = kind %v focus %v, want focused results",
+			m.input.kind, m.input.searchFocus)
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.input.kind != inputNone {
-		t.Fatalf("input.kind = %v, want inputNone after Enter", m.input.kind)
+		t.Fatalf("input.kind = %v, want inputNone after second Enter", m.input.kind)
 	}
 	if m.list.filter.Search != "abc" {
 		t.Fatalf("filter.Search = %q, want abc (preserved on commit)", m.list.filter.Search)
@@ -350,6 +356,219 @@ func openBarFromCmd(t *testing.T, m Model, key rune) Model {
 	msg := cmd()
 	out, _ = m.Update(msg)
 	return out.(Model)
+}
+
+func searchNavigationFixture(t *testing.T) Model {
+	t.Helper()
+	m := mFixtureForBar()
+	m.list.issues = []Issue{
+		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "fix alpha", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "fix beta", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-ccc3", ShortID: "ccc3", Title: "other", Status: "open"},
+	}
+	return openBarFromCmd(t, m, '/')
+}
+
+func TestSearch_DownMovesIntoResultsAndAdvancesCursor(t *testing.T) {
+	m := searchNavigationFixture(t)
+	for _, r := range "fix" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults {
+		t.Fatalf("search state = kind %v focus %v", m.input.kind, m.input.searchFocus)
+	}
+	if m.list.cursor != 1 || m.input.activeField().value() != "fix" {
+		t.Fatalf("cursor/query = %d/%q", m.list.cursor, m.input.activeField().value())
+	}
+}
+
+func TestSearch_UpMovesIntoResultsRelativeToCursor(t *testing.T) {
+	m := searchNavigationFixture(t)
+	m.list.cursor = 1
+	for _, r := range "fix" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if m.input.searchFocus != searchFocusResults || m.list.cursor != 0 {
+		t.Fatalf("up state = focus %v cursor %d", m.input.searchFocus, m.list.cursor)
+	}
+}
+
+func TestSearch_EnterMovesToResultsThenCommitsFilter(t *testing.T) {
+	m := searchNavigationFixture(t)
+	for _, r := range "fix" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults {
+		t.Fatal("first enter did not focus results")
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	wantCursor := m.list.cursor
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.input.kind != inputNone || m.list.filter.Search != "fix" ||
+		m.list.cursor != wantCursor {
+		t.Fatal("commit lost filter or selection")
+	}
+}
+
+func TestSearch_EnterSynchronizesSelectionAcrossRefetch(t *testing.T) {
+	m := mFixtureForBar()
+	m.list.issues = []Issue{
+		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "fix beta", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-ccc3", ShortID: "ccc3", Title: "fix gamma", Status: "open"},
+	}
+	m.list.cursor = 1
+	m.list.selectedUID = "01TEST-bbb2"
+	m.list.selectedProjectID = 7
+	m = openBarFromCmd(t, m, '/')
+	for _, r := range "fix" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	if highlighted, ok := pickHighlightedIssue(m.list); !ok || highlighted.UID != "01TEST-ccc3" {
+		t.Fatalf("highlighted issue = (%+v, %v), want ccc3", highlighted, ok)
+	}
+	assertSelection(t, m, 1, "01TEST-bbb2")
+
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m, _ = stepModel(m, refetchedMsg{
+		dispatchKey: m.currentCacheKey(),
+		issues: []Issue{
+			{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other", Status: "open"},
+			{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "fix beta", Status: "open"},
+			{ProjectID: 7, UID: "01TEST-ccc3", ShortID: "ccc3", Title: "fix gamma", Status: "open"},
+		},
+	})
+	assertSelection(t, m, 1, "01TEST-ccc3")
+	if m.list.selectedProjectID != 7 {
+		t.Fatalf("selectedProjectID = %d, want 7", m.list.selectedProjectID)
+	}
+}
+
+func TestSearch_EscReturnsToQueryThenCancels(t *testing.T) {
+	m := mFixtureForBar()
+	m.list.filter.Search = "previous"
+	m = openBarFromCmd(t, m, '/')
+	for _, r := range "fix" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	m.input.searchFocus = searchFocusResults
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusQuery {
+		t.Fatal("first esc did not restore query focus")
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.input.kind != inputNone || m.list.filter.Search != "previous" {
+		t.Fatal("second esc did not restore pre-search filter")
+	}
+}
+
+func TestSearch_CancelRestoresSelectionAcrossRefetch(t *testing.T) {
+	m := mFixtureForBar()
+	m.list.issues = []Issue{
+		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other alpha", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "fix beta", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-ccc3", ShortID: "ccc3", Title: "fix gamma", Status: "open"},
+	}
+	m.list.selectedUID = "01TEST-aaa1"
+	m.list.selectedProjectID = 7
+	m = openBarFromCmd(t, m, '/')
+	for _, r := range "fix" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	assertSelection(t, m, 0, "01TEST-bbb2")
+
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.input.kind != inputNone || m.list.filter.Search != "" {
+		t.Fatalf("cancel state = input %v filter %q", m.input.kind, m.list.filter.Search)
+	}
+	assertSelection(t, m, 0, "01TEST-aaa1")
+	if m.list.selectedProjectID != 7 {
+		t.Fatalf("selectedProjectID = %d, want 7", m.list.selectedProjectID)
+	}
+	if highlighted, ok := pickHighlightedIssue(m.list); !ok || highlighted.UID != "01TEST-aaa1" {
+		t.Fatalf("highlighted issue = (%+v, %v), want aaa1", highlighted, ok)
+	}
+
+	m, _ = stepModel(m, refetchedMsg{
+		dispatchKey: m.currentCacheKey(),
+		issues: []Issue{
+			{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other alpha", Status: "open"},
+			{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "fix beta", Status: "open"},
+			{ProjectID: 7, UID: "01TEST-ccc3", ShortID: "ccc3", Title: "fix gamma", Status: "open"},
+		},
+	})
+	assertSelection(t, m, 0, "01TEST-aaa1")
+	if m.list.selectedProjectID != 7 {
+		t.Fatalf("selectedProjectID after refetch = %d, want 7", m.list.selectedProjectID)
+	}
+}
+
+func TestSearch_ResultsAbsorbUnrelatedKeys(t *testing.T) {
+	m := searchNavigationFixture(t)
+	m.input.activeField().setValue("fix")
+	m = m.applyLiveBarFilter()
+	m.input.searchFocus = searchFocusResults
+	out, cmd := m.Update(runeKey('q'))
+	nm := out.(Model)
+	if cmd != nil || nm.input.activeField().value() != "fix" ||
+		nm.input.searchFocus != searchFocusResults {
+		t.Fatal("unrelated key escaped results focus")
+	}
+}
+
+func TestSearch_ResultsAbsorbPaste(t *testing.T) {
+	m := searchNavigationFixture(t)
+	for _, r := range "fix" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	wantQuery := m.input.activeField().value()
+	wantFilter := m.list.filter
+	wantFocus := m.input.searchFocus
+	wantCursor := m.list.cursor
+	wantUID := m.list.selectedUID
+	wantPID := m.list.selectedProjectID
+
+	out, cmd := m.Update(tea.PasteMsg{Content: "other"})
+	nm := out.(Model)
+	if cmd != nil {
+		t.Fatalf("paste returned cmd %T, want nil", cmd)
+	}
+	if got := nm.input.activeField().value(); got != wantQuery {
+		t.Fatalf("query = %q, want %q", got, wantQuery)
+	}
+	require.Equal(t, wantFilter, nm.list.filter)
+	if nm.input.searchFocus != wantFocus || nm.list.cursor != wantCursor ||
+		nm.list.selectedUID != wantUID || nm.list.selectedProjectID != wantPID {
+		t.Fatalf("focus/cursor/selection = %v/%d/%q/%d, want %v/%d/%q/%d",
+			nm.input.searchFocus, nm.list.cursor, nm.list.selectedUID, nm.list.selectedProjectID,
+			wantFocus, wantCursor, wantUID, wantPID)
+	}
+}
+
+func TestSearch_SlashReturnsFromResultsToQuery(t *testing.T) {
+	m := searchNavigationFixture(t)
+	m.input.searchFocus = searchFocusResults
+	m, _ = stepModel(m, runeKey('/'))
+	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusQuery {
+		t.Fatal("slash did not restore query focus")
+	}
+}
+
+func TestSearch_ZeroResultsNavigationIsSafe(t *testing.T) {
+	m := searchNavigationFixture(t)
+	m.input.activeField().setValue("no-match")
+	m = m.applyLiveBarFilter()
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.input.searchFocus != searchFocusResults || m.list.cursor != 0 {
+		t.Fatalf("zero-result state = focus %v cursor %d", m.input.searchFocus, m.list.cursor)
+	}
 }
 
 // TestList_ClearFilters_ZeroesEveryField: `c` zeroes every filter slot

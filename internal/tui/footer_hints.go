@@ -16,7 +16,7 @@ func (m Model) helpRows() [][]helpItem {
 		return modalHelpRows(m.modal)
 	}
 	if m.input.kind != inputNone {
-		return inputHelpRows(m.input.kind)
+		return inputHelpRows(m.input)
 	}
 	if m.layout == layoutSplit {
 		return m.splitHelpRows()
@@ -35,7 +35,7 @@ func (m Model) queueHelpRows() [][]helpItem {
 		return modalHelpRows(m.modal)
 	}
 	if m.input.kind != inputNone {
-		return inputHelpRows(m.input.kind)
+		return inputHelpRows(m.input)
 	}
 	return m.list.queueHelpRows()
 }
@@ -45,7 +45,7 @@ func (m Model) detailHelpRows() [][]helpItem {
 		return modalHelpRows(m.modal)
 	}
 	if m.input.kind != inputNone {
-		return inputHelpRows(m.input.kind)
+		return inputHelpRows(m.input)
 	}
 	return m.detail.detailHelpRows()
 }
@@ -55,7 +55,7 @@ func (m Model) splitHelpRows() [][]helpItem {
 		return modalHelpRows(m.modal)
 	}
 	if m.input.kind != inputNone {
-		return inputHelpRows(m.input.kind)
+		return inputHelpRows(m.input)
 	}
 	if m.focus == focusDetail {
 		return m.detail.detailHelpRows()
@@ -64,27 +64,43 @@ func (m Model) splitHelpRows() [][]helpItem {
 }
 
 func listHelpRows(lm listModel, chrome viewChrome) [][]helpItem {
+	if chrome.modal != modalNone {
+		return modalHelpRows(chrome.modal)
+	}
 	if chrome.input.kind != inputNone {
-		return inputHelpRows(chrome.input.kind)
+		return inputHelpRows(chrome.input)
 	}
 	return lm.queueHelpRows()
 }
 
 func detailHelpRows(dm detailModel, chrome viewChrome) [][]helpItem {
+	if chrome.modal != modalNone {
+		return modalHelpRows(chrome.modal)
+	}
 	if chrome.input.kind != inputNone {
-		return inputHelpRows(chrome.input.kind)
+		return inputHelpRows(chrome.input)
 	}
 	return dm.detailHelpRows()
 }
 
-func inputHelpRows(kind inputKind) [][]helpItem {
-	switch {
-	case kind.isCommandBar():
+func inputHelpRows(input inputState) [][]helpItem {
+	if input.kind == inputSearchBar && input.searchFocus == searchFocusResults {
 		return [][]helpItem{{
-			{key: "enter", desc: "commit"},
+			{key: "↑↓", desc: "move"},
+			{key: "enter", desc: "apply"},
+			{key: "esc", desc: "query"},
+			{key: "/", desc: "query"},
+		}}
+	}
+	if input.kind == inputSearchBar {
+		return [][]helpItem{{
+			{key: "↑↓/enter", desc: "results"},
 			{key: "esc", desc: "cancel"},
 			{key: "ctrl+u", desc: "clear"},
 		}}
+	}
+	kind := input.kind
+	switch {
 	case kind.isPanelPrompt():
 		return [][]helpItem{{
 			{key: "enter", desc: "commit"},
@@ -92,20 +108,20 @@ func inputHelpRows(kind inputKind) [][]helpItem {
 		}}
 	case kind == inputFilterForm:
 		return [][]helpItem{{
-			{key: "ctrl+s", desc: "apply"},
+			{key: "ctrl+o", desc: "apply"},
 			{key: "esc", desc: "cancel"},
 			{key: "ctrl+r", desc: "reset"},
 		}}
 	case kind == inputNewIssueForm:
 		return [][]helpItem{{
-			{key: "ctrl+s", desc: "create"},
+			{key: "ctrl+o", desc: "create"},
 			{key: "esc", desc: "cancel"},
 			{key: "tab", desc: "field"},
 			{key: "ctrl+e", desc: "editor"},
 		}}
 	case kind.isCenteredForm():
 		return [][]helpItem{{
-			{key: "ctrl+s", desc: "save"},
+			{key: "ctrl+o", desc: "save"},
 			{key: "esc", desc: "cancel"},
 			{key: "ctrl+e", desc: "editor"},
 		}}
@@ -208,8 +224,27 @@ func modalHelpRows(kind modalKind) [][]helpItem {
 			{key: "y", desc: "confirm"},
 			{key: "n/esc", desc: "cancel"},
 		}}
+	case modalDiscardComment:
+		return [][]helpItem{{
+			{key: "y", desc: "discard"},
+			{key: "n/esc", desc: "keep editing"},
+		}}
 	}
 	return nil
+}
+
+func modalFirstHelpRows(kind modalKind, fallback [][]helpItem) [][]helpItem {
+	if kind != modalNone {
+		return modalHelpRows(kind)
+	}
+	return fallback
+}
+
+func renderAuxiliaryFooter(m Model, ordinary string) string {
+	if rows := modalFirstHelpRows(m.modal, nil); rows != nil {
+		return renderFooterHelpTable(rows, m.width)
+	}
+	return subtleStyle.Render(ordinary)
 }
 
 func globalHelpRows() [][]helpItem {

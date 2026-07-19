@@ -19,5 +19,5 @@
 │ alice                                                                              │
 │ Parent                                                                             │
 │                                                                                    │
-│ ctrl+s save · esc cancel · ctrl+e $EDITOR                                          │
+│ ctrl+o save · esc cancel · ctrl+e $EDITOR                                          │
 ╰────────────────────────────────────────────────────────────────────────────────────╯

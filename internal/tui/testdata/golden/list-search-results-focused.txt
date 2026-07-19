@@ -27,4 +27,4 @@
 
 
  /login
- ↑↓/enter results▕ esc cancel▕ ctrl+u clear
+ ↑↓ move▕ enter apply▕ esc query▕ / query

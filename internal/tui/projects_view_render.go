@@ -25,7 +25,7 @@ func renderProjects(m Model) string {
 	if cursor < 0 {
 		cursor = 0
 	}
-	helpRows := projectsHelpRows()
+	helpRows := modalFirstHelpRows(m.modal, projectsHelpRows())
 	footerLines := helpLines(helpRows, m.width)
 
 	rowBudget := len(rows)
