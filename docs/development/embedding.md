@@ -53,39 +53,53 @@ func main() {
 		log.Fatal(err)
 	}
 
-	runDone := make(chan error, 1)
-	go func() { runDone <- service.Run(ctx) }()
-
 	server := &http.Server{
-		Addr:              ":8080",
+		Addr:              "127.0.0.1:8080",
 		Handler:           service.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-	}()
+	runDone := make(chan error, 1)
+	serveDone := make(chan error, 1)
+	go func() { runDone <- service.Run(ctx) }()
+	go func() { serveDone <- server.ListenAndServe() }()
 
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Print(err)
-		stop()
+	var runErr, serveErr error
+	var runFinished, serveFinished bool
+	select {
+	case runErr = <-runDone:
+		runFinished = true
+	case serveErr = <-serveDone:
+		serveFinished = true
+	case <-ctx.Done():
 	}
-	if err := <-runDone; err != nil {
-		log.Print(err)
+	stop()
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownErr := server.Shutdown(shutdownCtx)
+	cancelShutdown()
+	if !runFinished {
+		runErr = <-runDone
 	}
-	if err := service.Close(); err != nil {
-		log.Print(err)
+	if !serveFinished {
+		serveErr = <-serveDone
+	}
+	if errors.Is(serveErr, http.ErrServerClosed) {
+		serveErr = nil
+	}
+	if err := errors.Join(runErr, serveErr, shutdownErr, service.Close()); err != nil {
+		log.Fatal(err)
 	}
 }
 ```
 
 `Run` does not open a listener. It blocks while federation, scheduled GitHub
 sync, and timed-claim workers are active, then returns when its context is
-canceled or `Close` begins. Only one `Run` call may be active for a service.
-`Close` cancels active work and requests, waits for them to stop, and closes the
-owned storage handle. It is safe to call more than once.
+canceled or `Close` begins, and it may return an error from any background
+worker. Treat any `Run` return as service termination: stop accepting HTTP
+traffic, cancel the shared context, and inspect the error after both the workers
+and server stop. Only one `Run` call may be active for a service. `Close` cancels
+active work and requests, waits for them to stop, and closes the owned storage
+handle. It is safe to call more than once.
 
 ## Authentication is explicit
 
@@ -100,6 +114,11 @@ owned storage handle. It is safe to call more than once.
 Construction fails when neither policy is selected or when both are set. The
 explicit choice prevents an embedded service from accidentally inheriting the
 standalone daemon's local-user trust boundary.
+
+The lifecycle example deliberately binds to loopback. To accept remote clients,
+use `server.ListenAndServeTLS(certFile, keyFile)` with a valid certificate or
+mount the handler behind a TLS-terminating reverse proxy. Never send the bearer
+token over plaintext non-loopback HTTP.
 
 ## Storage and PostgreSQL policy
 
