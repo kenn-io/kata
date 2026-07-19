@@ -107,3 +107,48 @@ func TestPostgresBootstrapDoesNotRequirePgvector(t *testing.T) {
 	require.Len(t, issues, 1)
 	assert.Equal(t, created.UID, issues[0].Issue.UID)
 }
+
+func TestPostgresBootstrapDoesNotRequireHalfvec(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires pgvector testcontainer")
+	}
+	ctx := context.Background()
+	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
+	t.Cleanup(cleanup)
+
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	_, err = admin.ExecContext(ctx, `
+		ALTER EXTENSION vector DROP TYPE public.halfvec;
+		DROP TYPE public.halfvec CASCADE;
+	`)
+	require.NoError(t, err)
+
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	project, err := store.CreateProject(ctx, "older-vector-project")
+	require.NoError(t, err)
+	created, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "core storage without halfvec",
+		Author:    "operator",
+	})
+	require.NoError(t, err)
+	issues, err := store.SearchFTS(ctx, project.ID, "without halfvec", 10, false)
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, created.UID, issues[0].Issue.UID)
+
+	var vectorTables int
+	require.NoError(t, admin.QueryRowContext(ctx, `
+		SELECT count(*)
+		  FROM pg_catalog.pg_class relation
+		  JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
+		 WHERE namespace.nspname='kata'
+		   AND relation.relname IN ('vector_generations', 'issue_vector_mirror', 'vector_chunks')
+	`).Scan(&vectorTables))
+	assert.Zero(t, vectorTables, "bootstrap must leave semantic storage unavailable without halfvec")
+}

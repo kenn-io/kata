@@ -40,7 +40,7 @@ func TestPostgresReconcilerReacquiresLeaseAfterSessionLoss(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)

@@ -402,6 +402,15 @@ func prepareOptionalVectorSchema(ctx context.Context, tx *sql.Tx, schema string)
 	if !extensionSchema.Valid {
 		return nil
 	}
+	var halfvecAvailable bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT pg_catalog.to_regtype('public.halfvec') IS NOT NULL`,
+	).Scan(&halfvecAvailable); err != nil {
+		return fmt.Errorf("inspect pgvector halfvec support: %w", err)
+	}
+	if !halfvecAvailable {
+		return nil
+	}
 
 	var relationCount int
 	if err := tx.QueryRowContext(ctx, `
