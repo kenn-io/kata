@@ -5,7 +5,7 @@ rationale; for current operator-facing behavior see the
 [semantic search guide](../guide/semantic-search.md) and
 [Configuration](../reference/configuration.md#semantic-search). The
 "Storage" section reflects the backend-native indexes: a kit-based SQLite
-sidecar and canonical pgvector tables for PostgreSQL.
+sidecar and optional pgvector tables for PostgreSQL.
 
 kata's search is lexical: SQLite FTS5 with BM25 ranking and PostgreSQL tsvector
 ranking over title, body, and comments. Lexical search misses
@@ -22,8 +22,8 @@ Goals:
 - `kata search` finds paraphrased and conceptually-related issues, not just
   token matches, when an embedding endpoint is configured.
 - No embedding endpoint or network calls for deployments that do not opt in,
-  and no behavior change to ranking or scores. PostgreSQL installations carry
-  pgvector as part of their canonical schema even when semantic search is off.
+  and no behavior change to ranking or scores. PostgreSQL core storage does
+  not require pgvector when semantic search is off.
 - Index freshness is owned by the daemon, never by user discipline. Stale or
   missing embeddings degrade recall gracefully; they never break search.
 - Both storage backends reach the same observable contract, by different
@@ -294,10 +294,10 @@ issue UIDs; kata never writes chunk rows directly — `kitvec.Fill` chunks
 content (`vector.Split`, 2000 runes with 200-rune overlap) and writes chunks,
 stamps, and vec0 rows together.
 
-PostgreSQL keeps the corresponding mirror, generation, stamp, and chunk rows
-in its selected Kata schema. The canonical schema owns those tables and the
-schema-owner ceremony installs pgvector 0.7 or later in `public`; the daemon's
-runtime role needs DML only. Chunk embeddings use unbounded `public.halfvec`
+When pgvector 0.7 or later is available in `public`, PostgreSQL keeps the
+corresponding mirror, generation, stamp, and chunk rows in its selected Kata
+schema. The schema-owner ceremony creates these optional derived tables; the
+daemon's runtime role needs DML only. Chunk embeddings use unbounded `public.halfvec`
 so model dimensions can change without runtime DDL. Both forms are derived
 state and portable JSONL restore deliberately rebuilds them from issue content.
 
@@ -498,7 +498,7 @@ The CLI has three output surfaces, each handled to a precise shape:
 | Definitive 4xx in reconciler | Max backoff immediately + health error; no hot loop |
 | Rows not yet embedded (reconciler backlog) | Invisible to vector leg (not yet stamped in the active generation), carried by FTS leg; not degradation |
 | Model swap in progress (active generation fingerprint ≠ configured embedder) | Vector leg unavailable until cutover: `auto` → lexical + `degraded:true`; explicit `hybrid`/`semantic` → 503 |
-| PostgreSQL missing pgvector or canonical vector tables | Schema preparation/startup fails closed |
+| PostgreSQL missing pgvector or optional vector tables | Core storage starts normally; configuring semantic search reports the feature unavailable |
 | Missing or version-mismatched vector storage at query time | Treated as vector-leg failure (degraded / 503) |
 | Mirror/fill lag (edited issue before next reconcile) | Ranking-only effect; visibility always resolved against live `issues` |
 

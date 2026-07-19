@@ -13,7 +13,9 @@ projects_id_seq project_aliases_id_seq recurrences_id_seq issues_id_seq
 comments_id_seq links_id_seq events_id_seq api_tokens_id_seq purge_log_id_seq
 project_purge_log_id_seq issue_sync_bindings_id_seq federation_quarantine_id_seq
 federation_enrollments_id_seq issue_claims_id_seq pending_claim_requests_id_seq
-import_mappings_id_seq issue_vector_generations_ordinal_seq`)
+import_mappings_id_seq`)
+
+const optionalVectorSequenceName = "issue_vector_generations_ordinal_seq"
 
 func (s *Store) validateRuntimePrivileges(ctx context.Context) error {
 	var allowed bool
@@ -56,7 +58,7 @@ func (s *Store) validateRuntimeTablePrivileges(ctx context.Context) error {
 		if err := rows.Scan(&table, &selectAllowed, &insertAllowed, &updateAllowed, &deleteAllowed); err != nil {
 			return fmt.Errorf("scan postgres schema %q runtime table privileges: %w", s.schema, err)
 		}
-		if _, canonical := canonicalTableNames[table]; !canonical {
+		if !knownTableName(table) {
 			continue
 		}
 		for _, check := range []struct {
@@ -135,6 +137,9 @@ func (s *Store) validateRuntimeSequencePrivileges(ctx context.Context) error {
 }
 
 func isCanonicalSequence(name string) bool {
+	if name == optionalVectorSequenceName {
+		return true
+	}
 	for _, canonical := range canonicalSequenceNames {
 		if name == canonical {
 			return true

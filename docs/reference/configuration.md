@@ -318,9 +318,11 @@ everything past a fixed length cutoff.
 
 With SQLite, embeddings live in a sidecar database the daemon creates next to
 the main database (`kata.vectors.db` for the default `kata.db`). With
-PostgreSQL, they live in pgvector `halfvec` tables in the selected Kata schema;
-see [PostgreSQL operations](../operations/postgres.md) for extension and role
-requirements. Both forms are derived state and are rebuilt by re-embedding;
+PostgreSQL, they live in `halfvec` tables in the selected Kata schema when the
+optional pgvector extension is installed. See
+[PostgreSQL operations](../operations/postgres.md) for extension and role
+requirements. Core PostgreSQL storage works without pgvector. Both forms are
+derived state and are rebuilt by re-embedding;
 portable JSONL exports do not include vectors.
 
 Upgrading to a kata version that changes embedding storage re-embeds every

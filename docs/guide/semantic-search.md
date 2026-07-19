@@ -170,7 +170,8 @@ API key is only ever sent to the configured `base_url` origin.
 Embeddings are local derived state and **do not federate**: each daemon embeds
 only what it stores, and no vectors are sent to or pulled from federated hubs.
 SQLite keeps them in a sidecar database; PostgreSQL keeps them in pgvector
-tables in its selected Kata schema. They are not included in JSONL
+tables in its selected Kata schema when that optional extension is installed.
+They are not included in JSONL
 [backup/export](../operations/backup-restore.md) — a restore or a storage-format
 upgrade re-embeds from scratch rather than carrying vectors forward. Archives
 exported by older kata versions that still contain
@@ -181,9 +182,10 @@ reconciler rebuilds the vectors.
 
 - Only issue **title and body** are embedded today; comments are searchable
   lexically but a paraphrase that lives only in a comment will not vector-match.
-- PostgreSQL semantic search requires pgvector 0.7 or later. Its first
-  implementation uses bounded exact cosine scans; SQLite uses sqlite-vec KNN.
-  See [PostgreSQL operations](../operations/postgres.md) for setup.
+- PostgreSQL semantic search requires pgvector 0.7 or later, but core task and
+  lexical-search storage does not. Its first implementation uses bounded exact
+  cosine scans; SQLite uses sqlite-vec KNN. See
+  [PostgreSQL operations](../operations/postgres.md) for setup.
 
 For the design rationale and internals, see the
 [semantic search design note](../design/semantic-search.md).

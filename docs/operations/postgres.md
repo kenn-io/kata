@@ -14,8 +14,9 @@ production posture.
 - PostgreSQL 17 or later;
 - one database reserved for the service, or a database in which the dedicated
   kata schema can be isolated;
-- the `unaccent` extension and pgvector 0.7 or later installed in the `public`
-  schema;
+- the `unaccent` extension installed in the `public` schema;
+- optionally, pgvector 0.7 or later in `public` when PostgreSQL semantic
+  search is wanted;
 - server-identity-verified TLS for every remote database endpoint;
 - one schema-owner credential for `kata storage postgres migrate` and offline
   `kata import` restore;
@@ -38,18 +39,21 @@ GRANT CREATE ON DATABASE kata TO kata_schema_owner;
 ```
 
 The schema owner needs `CREATE` on the database because the first preparation
-creates the dedicated schema and installs `unaccent` and pgvector. Managed
-PostgreSQL services may require an administrator to install the extensions
-first:
+creates the dedicated schema and installs `unaccent`. When pgvector is
+available, preparation installs it and adds the derived semantic-search
+tables. Managed PostgreSQL services may require an administrator to install
+extensions first:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public;
+-- Optional: omit this when semantic search is not needed.
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 ```
 
-If either extension already exists in another schema, move it to `public` as
-its owner before preparing Kata. The serving role does not need database-level
-`CREATE`.
+If either installed extension lives in another schema, move it to `public` as
+its owner before preparing Kata. A server without pgvector still supports all
+core task, federation, and lexical-search behavior. The serving role does not
+need database-level `CREATE`.
 
 Use the same schema-owner role for later upgrades. PostgreSQL default
 privileges are attached to the object-creating role, so silently changing the
@@ -162,8 +166,10 @@ burst of distinct idempotency keys from reserving every query connection while
 their mutations wait for the same pool. Multiply this budget by the maximum
 number of daemon replicas that can reach one database.
 
-When `[search.embeddings]` is configured, vectors are stored in canonical
-pgvector `halfvec` tables in the selected Kata schema. The runtime still needs
+When pgvector is installed and `[search.embeddings]` is configured, vectors
+are stored in `halfvec` tables in the selected Kata schema. Configuring
+embeddings without pgvector fails with a feature-unavailable error; it does not
+make core storage or lexical search unavailable. The runtime still needs
 only the table and sequence grants above. The first implementation performs a
 bounded exact cosine scan rather than creating model-dimension-specific ANN
 indexes, so model changes require no runtime DDL. pgvector's `halfvec` supports

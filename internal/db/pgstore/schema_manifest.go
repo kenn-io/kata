@@ -10,41 +10,47 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "789e6ae6066ad24cfdc8f918275b90a26725c7fd6d1e942a0f76dc89ec15d1b9"
-	canonicalConstraintFingerprint = "3867e088c3ab4395d517d0788ffa658f589164b6b6bd68541fde3d648cd29363"
-	canonicalIndexFingerprint      = "3a9b60f05ac5c8064a0e61d867fed7ae3c9e0fa7b345bd3236e3300273801dac"
+	canonicalColumnFingerprint     = "a4f8495a566414a64a548b74a392f01f61afa9ff672484bde860fbba8f6e252b"
+	canonicalConstraintFingerprint = "53c7c7e43564e661f8b4c7fdda2a38c4588c0dbfc0371794ce5c800270dcf3ab"
+	canonicalIndexFingerprint      = "24c22eafa4d407a9567a592de7b437525d4f42a6efaf995581f551451f487ab8"
+	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
+	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
+	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
 	canonicalTriggerFingerprint    = "34f80f8e2b61c6cb1705bb8effb1548164e91f181fb58b68cf929ac90a190154"
 	canonicalFunctionFingerprint   = "f96c6a857ec7bc7c3e5c1cebdd3d7b795547f4399f8f65ea0aa9befa98681741"
 	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
 )
 
 var canonicalTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
-	"api_tokens":               "id,token_hash,actor,name,created_at,last_used_at,revoked_at",
-	"comments":                 "id,uid,issue_id,author,body,created_at",
-	"events":                   "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
-	"federation_bindings":      "project_id,role,hub_url,hub_project_id,hub_project_uid,replay_horizon_event_id,pull_cursor_event_id,push_enabled,push_cursor_event_id,bound_actor,allow_insecure,enabled,created_at,updated_at,last_sync_at",
-	"federation_enrollments":   "id,token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,allow_adoption_snapshot_authors,adoption_baseline_open,adoption_baseline_next_source_event_id,adoption_baseline_end_source_event_id,created_at,updated_at,revoked_at",
-	"federation_quarantine":    "id,project_id,direction,first_event_id,last_event_id,event_uids,error,created_at,skipped_at,skipped_by,skip_reason",
-	"federation_sync_status":   "project_id,last_pull_started_at,last_pull_success_at,last_push_started_at,last_push_success_at,last_error_at,last_error,last_reset_at",
-	"import_mappings":          "id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at",
-	"issue_claims":             "id,claim_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,purpose,claim_kind,acquired_at,expires_at,released_at,release_reason,revision,updated_at",
-	"issue_labels":             "issue_id,label,author,created_at",
-	"issue_sync_bindings":      "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at",
-	"issue_sync_status":        "binding_id,project_id,sync_started_at,last_attempt_at,last_success_at,last_error_at,last_error,last_created,last_updated,last_unchanged,last_comments",
+	"api_tokens":             "id,token_hash,actor,name,created_at,last_used_at,revoked_at",
+	"comments":               "id,uid,issue_id,author,body,created_at",
+	"events":                 "id,uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,related_issue_id,related_issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at",
+	"federation_bindings":    "project_id,role,hub_url,hub_project_id,hub_project_uid,replay_horizon_event_id,pull_cursor_event_id,push_enabled,push_cursor_event_id,bound_actor,allow_insecure,enabled,created_at,updated_at,last_sync_at",
+	"federation_enrollments": "id,token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,allow_adoption_snapshot_authors,adoption_baseline_open,adoption_baseline_next_source_event_id,adoption_baseline_end_source_event_id,created_at,updated_at,revoked_at",
+	"federation_quarantine":  "id,project_id,direction,first_event_id,last_event_id,event_uids,error,created_at,skipped_at,skipped_by,skip_reason",
+	"federation_sync_status": "project_id,last_pull_started_at,last_pull_success_at,last_push_started_at,last_push_success_at,last_error_at,last_error,last_reset_at",
+	"import_mappings":        "id,source,external_id,object_type,project_id,issue_id,comment_id,link_id,label,source_updated_at,imported_at",
+	"issue_claims":           "id,claim_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,purpose,claim_kind,acquired_at,expires_at,released_at,release_reason,revision,updated_at",
+	"issue_labels":           "issue_id,label,author,created_at",
+	"issue_sync_bindings":    "id,project_id,provider,source_key,remote_id,display_name,config_json,enabled,interval_seconds,last_cursor_at,created_at,updated_at",
+	"issue_sync_status":      "binding_id,project_id,sync_started_at,last_attempt_at,last_success_at,last_error_at,last_error,last_created,last_updated,last_unchanged,last_comments",
+	"issues":                 "id,uid,project_id,short_id,title,body,status,closed_reason,owner,priority,author,created_at,updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key",
+	"issues_search":          "issue_id,tsv",
+	"links":                  "id,from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at",
+	"meta":                   "key,value",
+	"pending_claim_requests": "id,request_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,claim_kind,ttl_seconds,purpose,requested_at,last_attempt_at,last_error,rejected_at,resolved_at",
+	"project_aliases":        "id,project_id,alias_identity,alias_kind,created_at",
+	"project_purge_log":      "id,uid,origin_instance_uid,project_id,project_uid,project_name,issue_count,event_count,alias_count,comment_count,link_count,label_count,claim_count,pending_claim_request_count,events_deleted_min_id,events_deleted_max_id,purge_reset_after_event_id,actor,reason,purged_at",
+	"projects":               "id,uid,name,created_at,deleted_at,metadata,revision",
+	"purge_log":              "id,uid,origin_instance_uid,project_id,purged_issue_id,issue_uid,project_uid,project_name,issue_title,issue_author,comment_count,link_count,label_count,event_count,events_deleted_min_id,events_deleted_max_id,purge_reset_after_event_id,short_id,actor,reason,purged_at",
+	"recurrences":            "id,uid,project_id,rrule,dtstart,timezone,template_title,template_body,template_owner,template_priority,template_labels,template_metadata,next_occurrence_key,last_materialized_uid,author,revision,created_at,updated_at,deleted_at",
+}
+
+var optionalVectorTableColumns = map[string]string{ //nolint:gosec // Catalog column names, not credential values.
 	"issue_vector_chunks":      "gen_key,issue_uid,chunk_index,embedding",
 	"issue_vector_generations": "ordinal,gen_key,model,dimensions,state",
 	"issue_vector_mirror":      "issue_uid,project_uid,content,content_revision,embed_gen",
 	"issue_vector_stamps":      "gen_key,issue_uid,revision",
-	"issues":                   "id,uid,project_id,short_id,title,body,status,closed_reason,owner,priority,author,created_at,updated_at,closed_at,deleted_at,metadata,revision,content_revision,recurrence_id,occurrence_key",
-	"issues_search":            "issue_id,tsv",
-	"links":                    "id,from_issue_id,to_issue_id,from_issue_uid,to_issue_uid,type,author,created_at",
-	"meta":                     "key,value",
-	"pending_claim_requests":   "id,request_uid,project_id,issue_id,issue_uid,holder,holder_instance_uid,client_kind,claim_kind,ttl_seconds,purpose,requested_at,last_attempt_at,last_error,rejected_at,resolved_at",
-	"project_aliases":          "id,project_id,alias_identity,alias_kind,created_at",
-	"project_purge_log":        "id,uid,origin_instance_uid,project_id,project_uid,project_name,issue_count,event_count,alias_count,comment_count,link_count,label_count,claim_count,pending_claim_request_count,events_deleted_min_id,events_deleted_max_id,purge_reset_after_event_id,actor,reason,purged_at",
-	"projects":                 "id,uid,name,created_at,deleted_at,metadata,revision",
-	"purge_log":                "id,uid,origin_instance_uid,project_id,purged_issue_id,issue_uid,project_uid,project_name,issue_title,issue_author,comment_count,link_count,label_count,event_count,events_deleted_min_id,events_deleted_max_id,purge_reset_after_event_id,short_id,actor,reason,purged_at",
-	"recurrences":              "id,uid,project_id,rrule,dtstart,timezone,template_title,template_body,template_owner,template_priority,template_labels,template_metadata,next_occurrence_key,last_materialized_uid,author,revision,created_at,updated_at,deleted_at",
 }
 
 var canonicalIndexes = strings.Fields(`
@@ -62,7 +68,9 @@ idx_issue_sync_bindings_due idx_issue_sync_status_project idx_issue_sync_status_
 uniq_federation_quarantine_active idx_federation_enrollments_scope idx_federation_enrollments_spoke
 uniq_issue_claims_live_issue idx_issue_claims_project_issue idx_issue_claims_timed_expiry
 uniq_pending_claim_active idx_issues_search_tsv idx_import_mappings_issue
-idx_import_mappings_comment idx_import_mappings_link idx_issue_vector_chunks_generation`)
+idx_import_mappings_comment idx_import_mappings_link`)
+
+var optionalVectorIndexes = []string{"idx_issue_vector_chunks_generation"}
 
 var canonicalTriggers = strings.Fields(`
 trg_links_uid_consistency_insert trg_links_uid_consistency_update
@@ -82,10 +90,14 @@ issues_search_trigger_on_comment_update()
 issues_search_trigger_on_comment_delete()`)
 
 func (s *Store) validateSchemaManifest(ctx context.Context) error {
-	if err := s.validateCanonicalColumns(ctx); err != nil {
+	vectorsInstalled, err := s.vectorRelationsInstalled(ctx)
+	if err != nil {
 		return err
 	}
-	if err := s.validateCanonicalConstraints(ctx); err != nil {
+	if err := s.validateCanonicalColumns(ctx, vectorsInstalled); err != nil {
+		return err
+	}
+	if err := s.validateCanonicalConstraints(ctx, vectorsInstalled); err != nil {
 		return err
 	}
 	if err := s.validateCanonicalNamedObjects(ctx, "index", canonicalIndexes, `
@@ -95,7 +107,16 @@ func (s *Store) validateSchemaManifest(ctx context.Context) error {
 		 WHERE n.nspname = $1 AND c.relkind = 'i'`); err != nil {
 		return err
 	}
-	if err := s.validateCanonicalIndexes(ctx); err != nil {
+	if vectorsInstalled {
+		if err := s.validateCanonicalNamedObjects(ctx, "index", optionalVectorIndexes, `
+			SELECT c.relname
+			  FROM pg_catalog.pg_class c
+			  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+			 WHERE n.nspname = $1 AND c.relkind = 'i'`); err != nil {
+			return err
+		}
+	}
+	if err := s.validateCanonicalIndexes(ctx, vectorsInstalled); err != nil {
 		return err
 	}
 	if err := s.validateCanonicalNamedObjects(ctx, "trigger", canonicalTriggers, `
@@ -115,7 +136,32 @@ func (s *Store) validateSchemaManifest(ctx context.Context) error {
 	return s.validateCanonicalTextSearch(ctx)
 }
 
-func (s *Store) validateCanonicalColumns(ctx context.Context) error {
+func (s *Store) vectorRelationsInstalled(ctx context.Context) (bool, error) {
+	var count int
+	if err := s.QueryRowContext(ctx, `
+		SELECT count(*)
+		  FROM pg_catalog.pg_class c
+		  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = $1 AND c.relkind IN ('r', 'p')
+		   AND c.relname = ANY($2)`, s.schema, mapKeys(optionalVectorTableNames)).Scan(&count); err != nil {
+		return false, fmt.Errorf("inspect postgres schema %q optional vector relations: %w", s.schema, err)
+	}
+	if count != 0 && count != len(optionalVectorTableNames) {
+		return false, fmt.Errorf("postgres schema %q has a partial optional vector schema", s.schema)
+	}
+	return count == len(optionalVectorTableNames), nil
+}
+
+func mapKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (s *Store) validateCanonicalColumns(ctx context.Context, vectorsInstalled bool) error {
 	rows, err := s.QueryContext(ctx, `
 		SELECT table_name, column_name, udt_schema || '.' || udt_name, is_nullable
 		  FROM information_schema.columns
@@ -124,26 +170,41 @@ func (s *Store) validateCanonicalColumns(ctx context.Context) error {
 		return fmt.Errorf("inspect postgres schema %q columns: %w", s.schema, err)
 	}
 	defer func() { _ = rows.Close() }()
-	actual := make(map[string]map[string]struct{}, len(canonicalTableColumns))
-	var records []string
+	expectedTables := canonicalTableColumns
+	if vectorsInstalled {
+		expectedTables = make(map[string]string, len(canonicalTableColumns)+len(optionalVectorTableColumns))
+		for table, columns := range canonicalTableColumns {
+			expectedTables[table] = columns
+		}
+		for table, columns := range optionalVectorTableColumns {
+			expectedTables[table] = columns
+		}
+	}
+	actual := make(map[string]map[string]struct{}, len(expectedTables))
+	var coreRecords, vectorRecords []string
 	for rows.Next() {
 		var table, column, dataType, nullable string
 		if err := rows.Scan(&table, &column, &dataType, &nullable); err != nil {
 			return fmt.Errorf("scan postgres schema %q columns: %w", s.schema, err)
 		}
-		if _, canonical := canonicalTableColumns[table]; !canonical {
+		if _, canonical := expectedTables[table]; !canonical {
 			continue
 		}
 		if actual[table] == nil {
 			actual[table] = make(map[string]struct{})
 		}
 		actual[table][column] = struct{}{}
-		records = append(records, strings.Join([]string{"COLUMN", table, column, dataType, nullable}, "\x00"))
+		record := strings.Join([]string{"COLUMN", table, column, dataType, nullable}, "\x00")
+		if _, vector := optionalVectorTableColumns[table]; vector {
+			vectorRecords = append(vectorRecords, record)
+		} else {
+			coreRecords = append(coreRecords, record)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate postgres schema %q columns: %w", s.schema, err)
 	}
-	for table, columns := range canonicalTableColumns {
+	for table, columns := range expectedTables {
 		expected := strings.Split(columns, ",")
 		if len(actual[table]) != len(expected) {
 			for _, column := range expected {
@@ -159,10 +220,16 @@ func (s *Store) validateCanonicalColumns(ctx context.Context) error {
 			}
 		}
 	}
-	return validateCatalogFingerprint(s.schema, "column", records, canonicalColumnFingerprint)
+	if err := validateCatalogFingerprint(s.schema, "column", coreRecords, canonicalColumnFingerprint); err != nil {
+		return err
+	}
+	if vectorsInstalled {
+		return validateCatalogFingerprint(s.schema, "vector column", vectorRecords, vectorColumnFingerprint)
+	}
+	return nil
 }
 
-func (s *Store) validateCanonicalConstraints(ctx context.Context) error {
+func (s *Store) validateCanonicalConstraints(ctx context.Context, vectorsInstalled bool) error {
 	rows, err := s.QueryContext(ctx, `
 		SELECT c.relname, con.conname, con.contype::text,
 		       pg_catalog.pg_get_constraintdef(con.oid, true)
@@ -174,21 +241,32 @@ func (s *Store) validateCanonicalConstraints(ctx context.Context) error {
 		return fmt.Errorf("inspect postgres schema %q constraints: %w", s.schema, err)
 	}
 	defer func() { _ = rows.Close() }()
-	var records []string
+	var coreRecords, vectorRecords []string
 	for rows.Next() {
 		var table, name, constraintType, definition string
 		if err := rows.Scan(&table, &name, &constraintType, &definition); err != nil {
 			return fmt.Errorf("scan postgres schema %q constraints: %w", s.schema, err)
 		}
-		records = append(records, strings.Join([]string{"CONSTRAINT", table, name, constraintType, definition}, "\x00"))
+		record := strings.Join([]string{"CONSTRAINT", table, name, constraintType, definition}, "\x00")
+		if _, vector := optionalVectorTableColumns[table]; vector {
+			vectorRecords = append(vectorRecords, record)
+		} else {
+			coreRecords = append(coreRecords, record)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate postgres schema %q constraints: %w", s.schema, err)
 	}
-	return validateCatalogFingerprint(s.schema, "constraint", records, canonicalConstraintFingerprint)
+	if err := validateCatalogFingerprint(s.schema, "constraint", coreRecords, canonicalConstraintFingerprint); err != nil {
+		return err
+	}
+	if vectorsInstalled {
+		return validateCatalogFingerprint(s.schema, "vector constraint", vectorRecords, vectorConstraintFingerprint)
+	}
+	return nil
 }
 
-func (s *Store) validateCanonicalIndexes(ctx context.Context) error {
+func (s *Store) validateCanonicalIndexes(ctx context.Context, vectorsInstalled bool) error {
 	rows, err := s.QueryContext(ctx, `
 		SELECT idx.relname, tbl.relname, i.indisvalid, i.indisready,
 		       pg_catalog.pg_get_indexdef(i.indexrelid)
@@ -201,7 +279,7 @@ func (s *Store) validateCanonicalIndexes(ctx context.Context) error {
 		return fmt.Errorf("inspect postgres schema %q index definitions: %w", s.schema, err)
 	}
 	defer func() { _ = rows.Close() }()
-	var records []string
+	var coreRecords, vectorRecords []string
 	for rows.Next() {
 		var name, table, definition string
 		var valid, ready bool
@@ -209,14 +287,25 @@ func (s *Store) validateCanonicalIndexes(ctx context.Context) error {
 			return fmt.Errorf("scan postgres schema %q index definition: %w", s.schema, err)
 		}
 		definition = strings.ReplaceAll(definition, s.schema+".", "")
-		records = append(records, strings.Join([]string{
+		record := strings.Join([]string{
 			"INDEX", name, table, strconv.FormatBool(valid), strconv.FormatBool(ready), definition,
-		}, "\x00"))
+		}, "\x00")
+		if _, vector := optionalVectorTableColumns[table]; vector {
+			vectorRecords = append(vectorRecords, record)
+		} else {
+			coreRecords = append(coreRecords, record)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate postgres schema %q index definitions: %w", s.schema, err)
 	}
-	return validateCatalogFingerprint(s.schema, "index", records, canonicalIndexFingerprint)
+	if err := validateCatalogFingerprint(s.schema, "index", coreRecords, canonicalIndexFingerprint); err != nil {
+		return err
+	}
+	if vectorsInstalled {
+		return validateCatalogFingerprint(s.schema, "vector index", vectorRecords, vectorIndexFingerprint)
+	}
+	return nil
 }
 
 func (s *Store) validateCanonicalTriggers(ctx context.Context) error {

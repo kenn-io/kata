@@ -375,10 +375,65 @@ func (s *Store) bootstrap(ctx context.Context) (bool, error) {
 			}
 		}
 	}
+	if err := prepareOptionalVectorSchema(ctx, tx, s.schema); err != nil {
+		return false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit schema bootstrap: %w", err)
 	}
 	return !schemaExists, nil
+}
+
+func prepareOptionalVectorSchema(ctx context.Context, tx *sql.Tx, schema string) error {
+	var extensionSchema sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT n.nspname
+		  FROM pg_catalog.pg_extension e
+		  JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace
+		 WHERE e.extname = 'vector'`).Scan(&extensionSchema); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("inspect pgvector extension: %w", err)
+	}
+	if extensionSchema.Valid && extensionSchema.String != "public" {
+		return fmt.Errorf(
+			"postgres extension %q is installed in schema %q; move it to %q before installing kata",
+			"vector", extensionSchema.String, "public",
+		)
+	}
+	if !extensionSchema.Valid {
+		var available bool
+		if err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_catalog.pg_available_extensions WHERE name = 'vector'
+			)`).Scan(&available); err != nil {
+			return fmt.Errorf("inspect pgvector availability: %w", err)
+		}
+		if !available {
+			return nil
+		}
+		if _, err := tx.ExecContext(ctx, `CREATE EXTENSION vector WITH SCHEMA public`); err != nil {
+			return fmt.Errorf("install optional pgvector extension: %w", err)
+		}
+	}
+
+	var relationCount int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT count(*)
+		  FROM pg_catalog.pg_class c
+		  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = $1 AND c.relkind IN ('r', 'p')
+		   AND c.relname = ANY($2)`, schema, mapKeys(optionalVectorTableNames)).Scan(&relationCount); err != nil {
+		return fmt.Errorf("inspect optional vector schema: %w", err)
+	}
+	if relationCount == len(optionalVectorTableNames) {
+		return nil
+	}
+	if relationCount != 0 {
+		return fmt.Errorf("postgres schema %q has a partial optional vector schema", schema)
+	}
+	if _, err := tx.ExecContext(ctx, vectorSchemaSQL); err != nil {
+		return fmt.Errorf("install optional vector schema: %w", err)
+	}
+	return nil
 }
 
 func recordSchemaVersion(ctx context.Context, tx *sql.Tx, version int, source string) error {
@@ -425,10 +480,20 @@ var canonicalTableNames = map[string]struct{}{
 	"api_tokens": {}, "comments": {}, "events": {}, "federation_bindings": {},
 	"federation_enrollments": {}, "federation_quarantine": {}, "federation_sync_status": {},
 	"import_mappings": {}, "issue_claims": {}, "issue_labels": {}, "issue_sync_bindings": {},
-	"issue_sync_status": {}, "issue_vector_chunks": {}, "issue_vector_generations": {},
-	"issue_vector_mirror": {}, "issue_vector_stamps": {}, "issues": {}, "issues_search": {},
+	"issue_sync_status": {}, "issues": {}, "issues_search": {},
 	"links": {}, "meta": {}, "pending_claim_requests": {}, "project_aliases": {},
 	"project_purge_log": {}, "projects": {}, "purge_log": {}, "recurrences": {},
+}
+
+var optionalVectorTableNames = map[string]struct{}{
+	"issue_vector_chunks": {}, "issue_vector_generations": {},
+	"issue_vector_mirror": {}, "issue_vector_stamps": {},
+}
+
+func knownTableName(name string) bool {
+	_, core := canonicalTableNames[name]
+	_, vector := optionalVectorTableNames[name]
+	return core || vector
 }
 
 func (s *Store) validateSchemaOwnership(ctx context.Context) error {

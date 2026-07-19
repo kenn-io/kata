@@ -8,6 +8,9 @@ import (
 //go:embed schema.sql
 var canonicalSchemaSQL string
 
+//go:embed vector_schema.sql
+var vectorSchemaSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.

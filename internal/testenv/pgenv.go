@@ -20,6 +20,7 @@ import (
 var postgresDatabaseCounter atomic.Uint64
 
 const postgresAutoContainerEnv = "KATA_TEST_POSTGRES_AUTO_CONTAINER"
+const plainPostgresDSNEnv = "KATA_TEST_PLAIN_POSTGRES_DSN"
 
 // NewPostgresContainer starts a pgvector-enabled PostgreSQL 17 container, waits for it to
 // become ready, and returns the DSN string plus a cleanup function. Callers
@@ -37,8 +38,27 @@ const postgresAutoContainerEnv = "KATA_TEST_POSTGRES_AUTO_CONTAINER"
 //
 //nolint:revive // t is the canonical first arg for testing helpers
 func NewPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
+	return newPostgresContainer(
+		ctx, t, "pgvector/pgvector:pg17", os.Getenv("KATA_TEST_POSTGRES_DSN"),
+	)
+}
+
+// NewPlainPostgresContainer starts PostgreSQL 17 without third-party
+// extensions. It is used to prove that core storage does not depend on
+// optional database features.
+//
+//nolint:revive // t is the canonical first arg for testing helpers
+func NewPlainPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
+	return newPostgresContainer(ctx, t, "postgres:17", os.Getenv(plainPostgresDSNEnv))
+}
+
+func newPostgresContainer(
+	ctx context.Context,
+	t *testing.T,
+	image string,
+	baseDSN string,
+) (string, func()) {
 	t.Helper()
-	baseDSN := os.Getenv("KATA_TEST_POSTGRES_DSN")
 	if baseDSN != "" {
 		return newIsolatedPostgresDatabase(ctx, t, baseDSN)
 	}
@@ -46,7 +66,7 @@ func NewPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
 		t.Skip("automatic PostgreSQL testcontainers are disabled; use KATA_TEST_POSTGRES_DSN to run PostgreSQL tests")
 	}
 	container, err := postgres.Run(ctx,
-		"pgvector/pgvector:pg17",
+		image,
 		postgres.WithDatabase("kata_test"),
 		postgres.WithUsername("kata"),
 		postgres.WithPassword("kata"),

@@ -54,7 +54,7 @@ func (p *postgresIndex) validate(ctx context.Context) error {
 		return fmt.Errorf("vector: validate pgvector: %w", err)
 	}
 	if !halfvecAvailable {
-		return errors.New("vector: pgvector 0.7 or later in the public schema is required")
+		return errors.New("vector: pgvector is not installed; semantic search is unavailable")
 	}
 	var tablesReady bool
 	if err := p.db.QueryRowContext(ctx, `SELECT
