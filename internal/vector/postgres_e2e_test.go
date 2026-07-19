@@ -26,7 +26,7 @@ func TestPostgresPgvectorIndexesAndRanksSemanticIssue(t *testing.T) {
 		t.Skip("requires pgvector testcontainer")
 	}
 	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestPostgresPgvectorRejectsDimensionsAboveHalfvecLimit(t *testing.T) {
 		t.Skip("requires pgvector testcontainer")
 	}
 	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)
@@ -118,7 +118,7 @@ func TestPostgresReconcilersElectOneLeaderPerSchema(t *testing.T) {
 		t.Skip("requires pgvector testcontainer")
 	}
 	ctx := context.Background()
-	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)

@@ -400,19 +400,7 @@ func prepareOptionalVectorSchema(ctx context.Context, tx *sql.Tx, schema string)
 		)
 	}
 	if !extensionSchema.Valid {
-		var available bool
-		if err := tx.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM pg_catalog.pg_available_extensions WHERE name = 'vector'
-			)`).Scan(&available); err != nil {
-			return fmt.Errorf("inspect pgvector availability: %w", err)
-		}
-		if !available {
-			return nil
-		}
-		if _, err := tx.ExecContext(ctx, `CREATE EXTENSION vector WITH SCHEMA public`); err != nil {
-			return fmt.Errorf("install optional pgvector extension: %w", err)
-		}
+		return nil
 	}
 
 	var relationCount int

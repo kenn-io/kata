@@ -39,10 +39,9 @@ GRANT CREATE ON DATABASE kata TO kata_schema_owner;
 ```
 
 The schema owner needs `CREATE` on the database because the first preparation
-creates the dedicated schema and installs `unaccent`. When pgvector is
-available, preparation installs it and adds the derived semantic-search
-tables. Managed PostgreSQL services may require an administrator to install
-extensions first:
+creates the dedicated schema and installs `unaccent`. Kata never installs
+pgvector automatically. When semantic search is wanted, a database
+administrator must install pgvector before preparing Kata:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public;
@@ -51,9 +50,10 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 ```
 
 If either installed extension lives in another schema, move it to `public` as
-its owner before preparing Kata. A server without pgvector still supports all
-core task, federation, and lexical-search behavior. The serving role does not
-need database-level `CREATE`.
+its owner before preparing Kata. A server that offers pgvector but has not
+installed it behaves exactly like a server without pgvector: all core task,
+federation, and lexical-search behavior remains available. The serving role
+does not need database-level `CREATE`.
 
 Use the same schema-owner role for later upgrades. PostgreSQL default
 privileges are attached to the object-creating role, so silently changing the

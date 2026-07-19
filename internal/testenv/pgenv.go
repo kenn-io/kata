@@ -43,6 +43,21 @@ func NewPostgresContainer(t *testing.T, ctx context.Context) (string, func()) {
 	)
 }
 
+// NewPostgresWithPgvectorContainer starts PostgreSQL 17 and installs pgvector
+// explicitly for tests of semantic storage.
+//
+//nolint:revive // t is the canonical first arg for testing helpers
+func NewPostgresWithPgvectorContainer(t *testing.T, ctx context.Context) (string, func()) {
+	dsn, cleanup := newPostgresContainer(
+		ctx, t, "pgvector/pgvector:pg17", os.Getenv("KATA_TEST_POSTGRES_DSN"),
+	)
+	if err := installTestPgvector(ctx, dsn); err != nil {
+		cleanup()
+		t.Fatalf("install PostgreSQL test extension pgvector: %v", err)
+	}
+	return dsn, cleanup
+}
+
 // NewPlainPostgresContainer starts PostgreSQL 17 without third-party
 // extensions. It is used to prove that core storage does not depend on
 // optional database features.
@@ -88,6 +103,18 @@ func newPostgresContainer(
 		_ = container.Terminate(context.Background())
 	}
 	return dsn, cleanup
+}
+
+func installTestPgvector(ctx context.Context, dsn string) error {
+	database, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return fmt.Errorf("open PostgreSQL test database: %w", err)
+	}
+	defer func() { _ = database.Close() }()
+	if _, err := database.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS vector`); err != nil {
+		return err
+	}
+	return nil
 }
 
 func skipAutomaticPostgresContainer(goos, explicitDSN, autostart string) bool {
