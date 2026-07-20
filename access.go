@@ -10,8 +10,9 @@ import (
 var ErrAccessDenied = errors.New("kata: access denied")
 
 // Principal is the authenticated identity supplied by an embedding host.
-// Subject is a stable opaque identifier. Actor is the display snapshot Kata
-// records on mutations instead of accepting an actor from request data.
+// Subject is a stable opaque identifier and also anchors lease ownership.
+// Actor is the display snapshot Kata records on mutations instead of accepting
+// an actor from request data.
 type Principal struct {
 	Subject string
 	Actor   string

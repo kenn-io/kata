@@ -252,9 +252,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.Body.PushEnabled && !federationCapabilitiesContain(capabilities, "push") {
 			return nil, api.NewError(400, "federation_capability_mismatch", "push-enabled federation replica requires push capability", "", nil)
 		}
-		if err := db.ValidateTokenActor(in.Body.Actor); err != nil {
+		actor := actorFor(ctx, in.Body.Actor)
+		if err := db.ValidateTokenActor(actor); err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
+		in.Body.Actor = strings.TrimSpace(actor)
 		if in.Body.AdoptExisting {
 			if !in.Body.PushEnabled {
 				return nil, api.NewError(400, "federation_capability_mismatch", "adopting an existing project requires push to be enabled", "", nil)

@@ -447,7 +447,7 @@ func TestServiceAccessControllerAuthorizesMoveDestination(t *testing.T) {
 	assert.Equal(t, []string{target.Project.UID}, request.Operation.ProjectUIDs)
 }
 
-func TestServiceAccessControllerAuthorizesEffectiveEventStreamScope(t *testing.T) {
+func TestServiceAccessControllerRequiresCompleteEventStreamScope(t *testing.T) {
 	controller := &recordingAccessController{lease: &revocableAccessLease{}}
 	controller.authorize = func(request kata.AccessRequest) error {
 		if request.Operation.ID == "streamEvents" {
@@ -486,8 +486,8 @@ func TestServiceAccessControllerAuthorizesEffectiveEventStreamScope(t *testing.T
 	require.GreaterOrEqual(t, len(requests), 3)
 	projectStream := requests[len(requests)-2].Operation
 	globalStream := requests[len(requests)-1].Operation
-	assert.Equal(t, []int64{project.Project.ID}, projectStream.ProjectIDs)
-	assert.False(t, projectStream.AllProjects)
+	assert.Empty(t, projectStream.ProjectIDs)
+	assert.True(t, projectStream.AllProjects)
 	assert.Empty(t, globalStream.ProjectIDs)
 	assert.True(t, globalStream.AllProjects)
 }

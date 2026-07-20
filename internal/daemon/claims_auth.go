@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
@@ -28,7 +30,7 @@ func resolveClaimPrincipal(
 ) (claimPrincipal, error) {
 	if cfg.HostAccess != nil {
 		if requestPrincipal, ok := PrincipalFromContext(ctx); ok && requestPrincipal.Kind == PrincipalHost {
-			return localClaimPrincipal(cfg, body), nil
+			return hostClaimPrincipal(cfg, body, requestPrincipal.Subject), nil
 		}
 		if allowEnrollment && hasBearerHeader(authz) {
 			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body)
@@ -60,6 +62,12 @@ func resolveClaimPrincipal(
 		return claimPrincipal{}, localAuthError(cfg, authz)
 	}
 	return localClaimPrincipal(cfg, body), nil
+}
+
+func hostClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody, subject string) claimPrincipal {
+	digest := sha256.Sum256([]byte("kata:host-claim-holder:v1\x00" + strings.TrimSpace(subject)))
+	return localClaimPrincipalWithHolder(cfg, body,
+		"host:"+base64.RawURLEncoding.EncodeToString(digest[:]))
 }
 
 func resolveEnrollmentClaimPrincipal(

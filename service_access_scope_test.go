@@ -153,6 +153,9 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 		{http.MethodGet, "/api/v1/projects/" + projectID + "/ready"},
 		{http.MethodGet, "/api/v1/issues/" + first.Issue.UID[:8]},
 		{http.MethodGet, "/api/v1/issues/01ABCDEFG"},
+		{http.MethodPost, "/api/v1/projects/" + projectID + "/imports"},
+		{http.MethodGet, "/api/v1/projects/" + projectID + "/events"},
+		{http.MethodGet, "/api/v1/events/stream?project_id=" + projectID},
 	}
 	for _, tc := range requests {
 		request, err := http.NewRequest(tc.method, server.URL+tc.path, bytes.NewBufferString(`{}`))
@@ -174,7 +177,8 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 
 	requireAll := map[string]bool{
 		"purgeIssue": true, "purgeProject": true, "closeIssue": true,
-		"readyIssues": true, "showIssueByUID": true,
+		"readyIssues": true, "showIssueByUID": true, "importIssues": true,
+		"pollProjectEvents": true, "streamEvents": true,
 	}
 	seen := map[string]int{}
 	for _, request := range controller.snapshot() {
@@ -186,8 +190,92 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 	}
 	assert.Equal(t, map[string]int{
 		"purgeIssue": 1, "purgeProject": 1, "closeIssue": 1,
-		"readyIssues": 1, "showIssueByUID": 2,
+		"readyIssues": 1, "showIssueByUID": 2, "importIssues": 1,
+		"pollProjectEvents": 1, "streamEvents": 1,
 	}, seen)
+}
+
+func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		subject := r.Header.Get("X-Test-Subject")
+		if subject == "" {
+			subject = "user-one"
+		}
+		principal := kata.Principal{Subject: subject, Actor: "Example User"}
+		service.Handler().ServeHTTP(w, r.WithContext(kata.WithPrincipal(r.Context(), principal)))
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+	issue := createAccessIssue(t, server, project.Project.ID, "leased issue")
+	projectID := strconv.FormatInt(project.Project.ID, 10)
+	postJSON(t, server.Client(), server.URL+"/api/v1/projects/"+projectID+"/federation/enable",
+		`{"actor":"ignored"}`, nil)
+	leasePath := server.URL + "/api/v1/projects/" + projectID + "/issues/" +
+		issue.Issue.ShortID + "/lease/actions/"
+
+	var acquired struct {
+		Holder struct {
+			Holder string `json:"holder"`
+		} `json:"holder"`
+	}
+	postJSON(t, server.Client(), leasePath+"acquire",
+		`{"holder":"caller-selected","client_kind":"cli","claim_kind":"hard"}`, &acquired)
+	assert.NotEmpty(t, acquired.Holder.Holder)
+	assert.NotEqual(t, "caller-selected", acquired.Holder.Holder)
+
+	impersonation, err := http.NewRequest(http.MethodPost, leasePath+"release",
+		bytes.NewBufferString(`{"holder":"`+acquired.Holder.Holder+`","client_kind":"cli"}`))
+	require.NoError(t, err)
+	impersonation.Header.Set("Content-Type", "application/json")
+	impersonation.Header.Set("X-Test-Subject", "user-two")
+	impersonationResponse, err := server.Client().Do(impersonation)
+	require.NoError(t, err)
+	_ = impersonationResponse.Body.Close()
+	assert.Equal(t, http.StatusConflict, impersonationResponse.StatusCode)
+
+	ownerRelease, err := http.NewRequest(http.MethodPost, leasePath+"release",
+		bytes.NewBufferString(`{"holder":"another-caller-value","client_kind":"cli"}`))
+	require.NoError(t, err)
+	ownerRelease.Header.Set("Content-Type", "application/json")
+	ownerRelease.Header.Set("X-Test-Subject", "user-one")
+	ownerResponse, err := server.Client().Do(ownerRelease)
+	require.NoError(t, err)
+	defer func() { _ = ownerResponse.Body.Close() }()
+	assert.Equal(t, http.StatusOK, ownerResponse.StatusCode)
+}
+
+func TestServiceAccessControllerSuppliesFederationReplicaActor(t *testing.T) {
+	controller := &recordingAccessController{}
+	_, server := newAccessTestServer(t, controller)
+	body := bytes.NewBufferString(`{
+		"hub_url":"https://hub.example",
+		"hub_project_id":42,
+		"hub_project_uid":"01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":"replica-project",
+		"replay_horizon_event_id":1,
+		"actor":"forged actor"
+	}`)
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/federation/replicas", body)
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var created struct {
+		Binding struct {
+			Actor string `json:"actor"`
+		} `json:"binding"`
+	}
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&created))
+	assert.Equal(t, "Example User", created.Binding.Actor)
 }
 
 func TestServiceAccessControllerAuthorizesProjectsContributingChildCounts(t *testing.T) {

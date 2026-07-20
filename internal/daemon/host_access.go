@@ -167,7 +167,6 @@ func hostAccessResolvedByHandler(operationID string) bool {
 	switch operationID {
 	case "mergeProject",
 		"moveIssue",
-		"streamEvents",
 		"listAllIssues",
 		"auditCloses",
 		"createFederationEnrollment":
@@ -183,7 +182,8 @@ func hostAccessResolvedByHandler(operationID string) bool {
 // project-existence or relationship-state oracles.
 func hostAccessRequiresAllProjects(operationID string) bool {
 	switch operationID {
-	case "purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID":
+	case "purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID",
+		"importIssues", "pollProjectEvents", "streamEvents":
 		return true
 	default:
 		return false
