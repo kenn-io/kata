@@ -74,6 +74,9 @@ host-owned access-controller contract. The access contract supplies identity in
 process, authorizes the matched operation, and revalidates long-lived responses
 without defining the host's role model. The service owns its configured storage
 handle and its federation, GitHub sync, and timed-claim background workers.
+Hosts with an external catalog can idempotently ensure and archive projects by
+stable UID through in-process application methods; they never need to write
+Kata tables or loop back through the mounted HTTP handler.
 
 ## Project binding over current directory
 

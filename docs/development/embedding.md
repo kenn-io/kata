@@ -174,6 +174,31 @@ audit attribution tied to the authenticated principal rather than caller input.
 middleware mode; use `Config.Access` when projects or operations need distinct
 authorization decisions.
 
+## Host-managed projects
+
+Applications that keep their own project catalog can establish one stable Kata
+project without calling the HTTP API internally:
+
+```go
+result, err := service.EnsureProject(ctx, kata.ProjectSpec{
+	UID:  "01HZNQ7VFPK1XGD8R5MABCD4EX",
+	Name: "example-host-project",
+})
+```
+
+`EnsureProject` is idempotent across processes. An exact UID-and-name match
+returns the existing numeric identity and history; a reused UID or name that
+points at a different project returns `kata.ErrProjectConflict`. The caller can
+therefore retry after an interrupted catalog update without creating a second
+project. Archived projects are returned as `kata.ProjectArchived` and are not
+silently reactivated.
+
+`ArchiveProject` retains that same UID, numeric identity, tasks, and events
+while removing the project from ordinary active reads. It is idempotent and
+requires an actor for the retained event history. These methods are in-process
+application methods: they do not authenticate a network caller and should be
+invoked only after the host has authorized its own catalog lifecycle change.
+
 ## Storage and PostgreSQL policy
 
 `Config.DSN` is required and accepts a bare SQLite path, a `sqlite://` URL, or a
