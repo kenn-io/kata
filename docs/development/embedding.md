@@ -142,15 +142,18 @@ request rather than treating a call as a one-time notification. Global
 operations set `AllProjects` explicitly. Operations such as purge, close,
 imports, ready selection, UID-prefix lookup, event feeds, close audits, and
 project digests also require `AllProjects` because their results or side effects
-can depend on relationships outside the project named in the URL. The request
-deliberately contains no application roles or tenant model.
+can depend on relationships outside the project named in the URL. Parent-link
+changes and deletion by a global link ID use the same conservative scope. The
+request deliberately contains no application roles or tenant model.
 
 For lease operations, Kata derives an opaque holder key from the stable
 `Principal.Subject`; a request-provided `holder` cannot select or impersonate
 another mounted caller. Subject bytes are compared exactly after rejecting
 empty or whitespace-only values, so the embedding host must provide one
 canonical subject representation. Subject ownership remains distinct when a
-spoke forwards a lease through its shared federation identity.
+spoke forwards a lease through its shared federation identity. Existing
+non-host lease clients keep their established holder and client-kind behavior;
+mounting a service does not rewrite their persisted ownership tuples.
 `Principal.Actor` remains the human-readable audit snapshot for replica setup
 and other mutations.
 

@@ -132,6 +132,10 @@ func (w *graphWalk) issue(ctx context.Context, issueID int64) (db.Issue, bool, e
 	if err != nil {
 		return db.Issue{}, false, err
 	}
+	ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+	if err != nil {
+		return db.Issue{}, false, err
+	}
 	if issue.DeletedAt != nil {
 		w.hidden[issueID] = struct{}{}
 		return db.Issue{}, false, nil

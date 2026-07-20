@@ -19,6 +19,8 @@ type claimPrincipal struct {
 	IdentityToken bool
 }
 
+const hostClaimClientKind = "host:v1"
+
 func resolveClaimPrincipal(
 	ctx context.Context,
 	cfg ServerConfig,
@@ -29,7 +31,11 @@ func resolveClaimPrincipal(
 	requireMutationLocal bool,
 ) (claimPrincipal, error) {
 	if cfg.HostAccess != nil {
-		if requestPrincipal, ok := PrincipalFromContext(ctx); ok && requestPrincipal.Kind == PrincipalHost {
+		if requestPrincipal, ok := PrincipalFromContext(ctx); ok {
+			if !validHostPrincipal(requestPrincipal) {
+				return claimPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
+					"valid host principal required", "", nil)
+			}
 			return hostClaimPrincipal(cfg, body, requestPrincipal.Subject), nil
 		}
 		if allowEnrollment && hasBearerHeader(authz) {
@@ -65,7 +71,9 @@ func resolveClaimPrincipal(
 }
 
 func hostClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody, subject string) claimPrincipal {
-	return localClaimPrincipalWithHolder(cfg, body, hostClaimHolder(subject))
+	principal := localClaimPrincipalWithHolder(cfg, body, hostClaimHolder(subject))
+	principal.ClientKind = hostClaimClientKind
+	return principal
 }
 
 func hostClaimHolder(subject string) string {
@@ -98,8 +106,12 @@ func authorizeClaimStatusRead(
 	authz string,
 ) error {
 	if cfg.HostAccess != nil {
-		if requestPrincipal, ok := PrincipalFromContext(ctx); ok && requestPrincipal.Kind == PrincipalHost {
-			return nil
+		if requestPrincipal, ok := PrincipalFromContext(ctx); ok {
+			if validHostPrincipal(requestPrincipal) {
+				return nil
+			}
+			return api.NewError(http.StatusUnauthorized, "auth_required",
+				"valid host principal required", "", nil)
 		}
 		if hasBearerHeader(authz) {
 			_, err := authorizeFederationRequest(ctx, cfg.DB, authz, projectID, "claim")

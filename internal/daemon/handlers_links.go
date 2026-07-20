@@ -74,6 +74,12 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err != nil {
 			return nil, err
 		}
+		if in.Body.Type == "parent" {
+			ctx, err = authorizeHostProjectScope(ctx, nil, nil, true)
+			if err != nil {
+				return nil, err
+			}
+		}
 		to, err := resolveLinkTargetRef(ctx, cfg.DB, in.ProjectID, in.Body.ToRef, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err

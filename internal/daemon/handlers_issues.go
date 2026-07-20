@@ -418,6 +418,12 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			if err := validateLinksDelta(in.Body.LinksDelta); err != nil {
 				return nil, err
 			}
+			if in.Body.LinksDelta.SetParent != nil || in.Body.LinksDelta.RemoveParent != nil {
+				ctx, err = authorizeHostProjectScope(ctx, nil, nil, true)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 
 		params := db.EditIssueAtomicParams{

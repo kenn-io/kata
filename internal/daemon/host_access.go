@@ -91,8 +91,12 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 			return
 		}
 		principal, ok := PrincipalFromContext(ctx.Context())
-		if !ok || principal.Kind != PrincipalHost || strings.TrimSpace(principal.Subject) == "" ||
-			strings.TrimSpace(principal.Actor) == "" {
+		if ok && !validHostPrincipal(principal) {
+			writeHostAccessError(ctx, http.StatusUnauthorized,
+				"authentication_required", "authentication required")
+			return
+		}
+		if !ok {
 			if hostSelfAuthenticatedOperation(operation.OperationID) &&
 				hasBearerHeader(ctx.Header(authHeader)) {
 				next(ctx)
@@ -182,7 +186,8 @@ func hostAccessResolvedByHandler(operationID string) bool {
 func hostAccessRequiresAllProjects(operationID string) bool {
 	switch operationID {
 	case "purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID",
-		"importIssues", "pollProjectEvents", "streamEvents", "auditCloses", "digestProject":
+		"importIssues", "pollProjectEvents", "streamEvents", "auditCloses", "digestProject",
+		"deleteLink":
 		return true
 	default:
 		return false
@@ -292,8 +297,7 @@ func authorizeHostHTTP(
 		return true
 	}
 	principal, ok := PrincipalFromContext(r.Context())
-	if !ok || principal.Kind != PrincipalHost || strings.TrimSpace(principal.Subject) == "" ||
-		strings.TrimSpace(principal.Actor) == "" {
+	if !ok || !validHostPrincipal(principal) {
 		api.WriteEnvelope(w, http.StatusUnauthorized,
 			"authentication_required", "authentication required")
 		return false

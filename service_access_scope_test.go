@@ -158,6 +158,7 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 		{http.MethodGet, "/api/v1/projects/" + projectID + "/events"},
 		{http.MethodGet, "/api/v1/events/stream?project_id=" + projectID},
 		{http.MethodGet, "/api/v1/projects/" + projectID + "/digest?since=2026-01-01T00:00:00Z"},
+		{http.MethodDelete, "/api/v1/projects/" + projectID + "/issues/" + first.Issue.ShortID + "/links/999?actor=ignored"},
 	}
 	for _, tc := range requests {
 		request, err := http.NewRequest(tc.method, server.URL+tc.path, bytes.NewBufferString(`{}`))
@@ -181,6 +182,7 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 		"purgeIssue": true, "purgeProject": true, "closeIssue": true,
 		"readyIssues": true, "showIssueByUID": true, "importIssues": true,
 		"pollProjectEvents": true, "streamEvents": true, "digestProject": true,
+		"deleteLink": true,
 	}
 	seen := map[string]int{}
 	for _, request := range controller.snapshot() {
@@ -194,6 +196,7 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 		"purgeIssue": 1, "purgeProject": 1, "closeIssue": 1,
 		"readyIssues": 1, "showIssueByUID": 2, "importIssues": 1,
 		"pollProjectEvents": 1, "streamEvents": 1, "digestProject": 1,
+		"deleteLink": 1,
 	}, seen)
 }
 
@@ -234,6 +237,29 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 		`{"holder":"caller-selected","client_kind":"cli","claim_kind":"hard"}`, &acquired)
 	assert.NotEmpty(t, acquired.Holder.Holder)
 	assert.NotEqual(t, "caller-selected", acquired.Holder.Holder)
+	issuePath := server.URL + "/api/v1/projects/" + projectID + "/issues/" + issue.Issue.ShortID
+	ownerEdit, err := http.NewRequest(http.MethodPatch, issuePath,
+		bytes.NewBufferString(`{"actor":"ignored","title":"owner edit"}`))
+	require.NoError(t, err)
+	ownerEdit.Header.Set("Content-Type", "application/json")
+	ownerEdit.Header.Set("If-Match", `"rev-1"`)
+	ownerEditResponse, err := server.Client().Do(ownerEdit)
+	require.NoError(t, err)
+	var edited accessIssue
+	require.NoError(t, json.NewDecoder(ownerEditResponse.Body).Decode(&edited))
+	_ = ownerEditResponse.Body.Close()
+	assert.Equal(t, http.StatusOK, ownerEditResponse.StatusCode)
+
+	otherEdit, err := http.NewRequest(http.MethodPatch, issuePath,
+		bytes.NewBufferString(`{"actor":"ignored","title":"other edit"}`))
+	require.NoError(t, err)
+	otherEdit.Header.Set("Content-Type", "application/json")
+	otherEdit.Header.Set("If-Match", `"rev-`+strconv.FormatInt(edited.Issue.Revision, 10)+`"`)
+	otherEdit.Header.Set("X-Test-Subject", "padded")
+	otherEditResponse, err := server.Client().Do(otherEdit)
+	require.NoError(t, err)
+	_ = otherEditResponse.Body.Close()
+	assert.Equal(t, http.StatusConflict, otherEditResponse.StatusCode)
 
 	impersonation, err := http.NewRequest(http.MethodPost, leasePath+"release",
 		bytes.NewBufferString(`{"holder":"`+acquired.Holder.Holder+`","client_kind":"cli"}`))
@@ -254,6 +280,52 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ownerResponse.Body.Close() }()
 	assert.Equal(t, http.StatusOK, ownerResponse.StatusCode)
+}
+
+func TestServiceAccessControllerRejectsMalformedHostPrincipalBeforeBearerFallback(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal := kata.Principal{Subject: "user-one", Actor: "Example User"}
+		if r.Header.Get("X-Test-Malformed") != "" {
+			principal = kata.Principal{Subject: " ", Actor: " "}
+		}
+		service.Handler().ServeHTTP(w, r.WithContext(kata.WithPrincipal(r.Context(), principal)))
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+	issue := createAccessIssue(t, server, project.Project.ID, "leased issue")
+	projectID := strconv.FormatInt(project.Project.ID, 10)
+	postJSON(t, server.Client(), server.URL+"/api/v1/projects/"+projectID+"/federation/enable",
+		`{"actor":"ignored"}`, nil)
+	basePath := server.URL + "/api/v1/projects/" + projectID + "/issues/" + issue.Issue.ShortID + "/lease"
+
+	requests := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, basePath + "/actions/acquire", `{"holder":"forged","client_kind":"cli","claim_kind":"hard"}`},
+		{http.MethodGet, basePath, ""},
+	}
+	before := len(controller.snapshot())
+	for _, tc := range requests {
+		request, err := http.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer invalid-token")
+		request.Header.Set("X-Test-Malformed", "1")
+		response, err := server.Client().Do(request)
+		require.NoError(t, err)
+		_ = response.Body.Close()
+		assert.Equal(t, http.StatusUnauthorized, response.StatusCode)
+	}
+	assert.Len(t, controller.snapshot(), before)
 }
 
 func TestServiceAccessControllerConcealsUnauthorizedLinkTargetState(t *testing.T) {
@@ -300,6 +372,114 @@ func TestServiceAccessControllerConcealsUnauthorizedLinkTargetState(t *testing.T
 			"error": map[string]any{
 				"code": "not_found", "message": "resource not found",
 			},
+		}, body)
+	}
+}
+
+func TestServiceAccessControllerRequiresAllProjectsForParentMutations(t *testing.T) {
+	controller := &recordingAccessController{}
+	_, server := newAccessTestServer(t, controller)
+	project := createProject(t, server.URL, "example-project")
+	child := createAccessIssue(t, server, project.Project.ID, "child issue")
+	parent := createAccessIssue(t, server, project.Project.ID, "parent issue")
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.AllProjects {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+	basePath := server.URL + "/api/v1/projects/" + strconv.FormatInt(project.Project.ID, 10) +
+		"/issues/" + child.Issue.ShortID
+
+	createRequest, err := http.NewRequest(http.MethodPost, basePath+"/links",
+		bytes.NewBufferString(`{"actor":"ignored","type":"parent","to_ref":"`+parent.Issue.UID+`"}`))
+	require.NoError(t, err)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse, err := server.Client().Do(createRequest)
+	require.NoError(t, err)
+	_ = createResponse.Body.Close()
+	assert.Equal(t, http.StatusNotFound, createResponse.StatusCode)
+
+	editRequest, err := http.NewRequest(http.MethodPatch, basePath,
+		bytes.NewBufferString(`{"actor":"ignored","links_delta":{"set_parent":"`+parent.Issue.UID+`"}}`))
+	require.NoError(t, err)
+	editRequest.Header.Set("Content-Type", "application/json")
+	editRequest.Header.Set("If-Match", `"rev-1"`)
+	editResponse, err := server.Client().Do(editRequest)
+	require.NoError(t, err)
+	_ = editResponse.Body.Close()
+	assert.Equal(t, http.StatusNotFound, editResponse.StatusCode)
+}
+
+func TestServiceAccessControllerAuthorizesDeletedGraphPeerBeforeHidingIt(t *testing.T) {
+	controller := &recordingAccessController{}
+	_, server := newAccessTestServer(t, controller)
+	sourceProject := createProject(t, server.URL, "source-project")
+	targetProject := createProject(t, server.URL, "target-project")
+	source := createAccessIssue(t, server, sourceProject.Project.ID, "source issue")
+	target := createAccessIssue(t, server, targetProject.Project.ID, "target issue")
+	postJSON(t, server.Client(), server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(sourceProject.Project.ID, 10)+"/issues/"+source.Issue.ShortID+"/links",
+		`{"actor":"ignored","type":"related","to_ref":"`+target.Issue.UID+`"}`, nil)
+	deleteRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(targetProject.Project.ID, 10)+"/issues/"+target.Issue.ShortID+"/actions/delete",
+		bytes.NewBufferString(`{"actor":"ignored"}`))
+	require.NoError(t, err)
+	deleteRequest.Header.Set("Content-Type", "application/json")
+	deleteRequest.Header.Set("X-Kata-Confirm", "DELETE target-project#"+target.Issue.ShortID)
+	deleteResponse, err := server.Client().Do(deleteRequest)
+	require.NoError(t, err)
+	_ = deleteResponse.Body.Close()
+	require.Equal(t, http.StatusOK, deleteResponse.StatusCode)
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.ID == "reachableIssueGraph" &&
+			containsInt64(request.Operation.ProjectIDs, targetProject.Project.ID) {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+
+	response, err := server.Client().Get(server.URL + "/api/v1/projects/" +
+		strconv.FormatInt(sourceProject.Project.ID, 10) + "/issues/" + source.Issue.ShortID + "/graph")
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusNotFound, response.StatusCode)
+}
+
+func TestServiceAccessControllerConcealsForeignRecurrenceIdentity(t *testing.T) {
+	controller := &recordingAccessController{}
+	_, server := newAccessTestServer(t, controller)
+	sourceProject := createProject(t, server.URL, "source-project")
+	targetProject := createProject(t, server.URL, "target-project")
+	var created struct {
+		Recurrence struct {
+			UID string `json:"uid"`
+		} `json:"recurrence"`
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(targetProject.Project.ID, 10)+"/recurrences",
+		bytes.NewBufferString(`{"actor":"ignored","rrule":"FREQ=WEEKLY","dtstart":"2026-05-15","timezone":"UTC","template":{"title":"weekly review"}}`))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&created))
+	_ = response.Body.Close()
+	require.Equal(t, http.StatusCreated, response.StatusCode)
+	require.NotEmpty(t, created.Recurrence.UID)
+
+	basePath := server.URL + "/api/v1/projects/" + strconv.FormatInt(sourceProject.Project.ID, 10) +
+		"/recurrences/"
+	for _, uid := range []string{created.Recurrence.UID, "01HZNQ7VFPK1XGD8R5MABCD4EA"} {
+		response, err := server.Client().Get(basePath + uid)
+		require.NoError(t, err)
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&body))
+		_ = response.Body.Close()
+		assert.Equal(t, http.StatusNotFound, response.StatusCode)
+		assert.Equal(t, map[string]any{
+			"status": float64(http.StatusNotFound),
+			"error":  map[string]any{"code": "not_found", "message": "resource not found"},
 		}, body)
 	}
 }

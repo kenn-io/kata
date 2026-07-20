@@ -33,17 +33,19 @@ func requireFederatedIssueClaim(
 		return federationReadOnlyError(db.ErrFederatedReadOnly)
 	}
 
-	holder := strings.TrimSpace(actor)
-	if binding.Role == db.FederationRoleSpoke && binding.PushEnabled {
-		if bound := strings.TrimSpace(binding.Actor); bound != "" {
-			holder = bound
-		}
-	}
 	principal := db.ClaimPrincipal{
 		HolderInstanceUID: cfg.DB.InstanceUID(),
-		Holder:            holder,
-		ClientKind:        "",
+		Holder:            strings.TrimSpace(actor),
 	}
+	if cfg.HostAccess != nil {
+		requestPrincipal, ok := PrincipalFromContext(ctx)
+		if !ok || !validHostPrincipal(requestPrincipal) {
+			return api.NewError(http.StatusUnauthorized, "auth_required",
+				"valid host principal required", "", nil)
+		}
+		principal = hostClaimPrincipal(cfg, api.ClaimActionBody{}, requestPrincipal.Subject).ClaimPrincipal
+	}
+	principal = boundSpokeClaimPrincipal(binding, principal)
 
 	if binding.Role == db.FederationRoleSpoke {
 		if err := refreshSpokeClaimStatusForGate(ctx, cfg, binding, issue); err != nil {

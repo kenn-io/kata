@@ -32,6 +32,16 @@ func TestBoundSpokeClaimPrincipalPreservesLocalOwnerIdentity(t *testing.T) {
 	assert.NotEqual(t, first.ClientKind, second.ClientKind)
 }
 
+func TestBoundSpokeClaimPrincipalKeepsLegacyClientIdentity(t *testing.T) {
+	binding := db.FederationBinding{Role: db.FederationRoleSpoke, Actor: "spoke-actor"}
+	legacy := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
+		Holder: "local-worker", ClientKind: "cli",
+	})
+
+	assert.Equal(t, "spoke-actor", legacy.Holder)
+	assert.Equal(t, "cli", legacy.ClientKind)
+}
+
 func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 

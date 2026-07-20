@@ -75,16 +75,24 @@ func parseIfMatchRevision(raw string) (int64, error) {
 func activeRecurrenceByUID(
 	ctx context.Context, d db.Storage, projectID int64, recUID string,
 ) (db.Recurrence, error) {
+	notFound := func() error {
+		if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); mounted {
+			return api.NewError(404, "not_found", "resource not found", "", nil)
+		}
+		return api.NewError(404, "not_found",
+			fmt.Sprintf("recurrence %q not found", recUID), "", nil)
+	}
 	rec, err := d.GetRecurrenceByUID(ctx, recUID)
 	if err != nil {
-		return db.Recurrence{}, api.NewError(404, "not_found",
-			fmt.Sprintf("recurrence %q not found", recUID), "", nil)
+		return db.Recurrence{}, notFound()
 	}
 	if rec.DeletedAt != nil {
-		return db.Recurrence{}, api.NewError(404, "not_found",
-			fmt.Sprintf("recurrence %q not found", recUID), "", nil)
+		return db.Recurrence{}, notFound()
 	}
 	if rec.ProjectID != projectID {
+		if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); mounted {
+			return db.Recurrence{}, notFound()
+		}
 		return db.Recurrence{}, api.NewError(404, "not_found",
 			fmt.Sprintf("recurrence %q not in project %d", recUID, projectID), "", nil)
 	}

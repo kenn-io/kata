@@ -350,13 +350,13 @@ func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPr
 	if actor == "" {
 		return principal
 	}
-	// Enrollment authentication binds the remote holder to the spoke actor.
-	// Preserve the local owner tuple in client_kind before replacing Holder so
-	// two mounted subjects (or two ordinary local holders) cannot control one
-	// another's remote lease through the shared spoke credential.
-	ownerDigest := sha256.Sum256([]byte("kata:spoke-claim-owner:v1\x00" +
-		principal.Holder + "\x00" + principal.ClientKind))
-	principal.ClientKind = "spoke:" + base64.RawURLEncoding.EncodeToString(ownerDigest[:])
+	// Existing clients keep their established actor/client-kind identity.
+	// Mounted callers carry an opaque subject-bound identity through the shared
+	// spoke credential so one subject cannot control another subject's lease.
+	if strings.HasPrefix(principal.Holder, "host:") {
+		ownerDigest := sha256.Sum256([]byte("kata:spoke-host-claim-owner:v1\x00" + principal.Holder))
+		principal.ClientKind = "spoke-host:v1:" + base64.RawURLEncoding.EncodeToString(ownerDigest[:])
+	}
 	principal.Holder = actor
 	return principal
 }
