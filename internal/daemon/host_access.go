@@ -46,52 +46,37 @@ type HostAccessController interface {
 	Authorize(context.Context, HostAccessRequest) (HostAccessDecision, error)
 }
 
-type hostAccessDecisionContextKey struct{}
-type pendingHostAccessContextKey struct{}
+type hostAccessStateContextKey struct{}
 
-type pendingHostAccess struct {
+type hostAccessState struct {
 	controller HostAccessController
 	request    HostAccessRequest
-	decision   *HostAccessDecision
+	decision   HostAccessDecision
+	authorized bool
 }
 
 func requireHostAccessLease(ctx context.Context) error {
-	if pending, ok := ctx.Value(pendingHostAccessContextKey{}).(pendingHostAccess); ok {
-		if pending.decision == nil || pending.decision.Revalidate == nil {
+	if state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); ok {
+		if !state.authorized || state.decision.Revalidate == nil {
 			return api.NewError(http.StatusServiceUnavailable, "access_lease_required",
 				"long-lived access lease required", "", nil)
 		}
-		if err := pending.decision.Revalidate(ctx); err != nil {
+		if err := state.decision.Revalidate(ctx); err != nil {
 			return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 		}
 		return nil
-	}
-	decision, ok := ctx.Value(hostAccessDecisionContextKey{}).(HostAccessDecision)
-	if !ok {
-		return nil
-	}
-	if decision.Revalidate == nil {
-		return api.NewError(http.StatusServiceUnavailable, "access_lease_required",
-			"long-lived access lease required", "", nil)
-	}
-	if err := decision.Revalidate(ctx); err != nil {
-		return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 	}
 	return nil
 }
 
 func revalidateHostAccess(ctx context.Context) error {
-	if pending, ok := ctx.Value(pendingHostAccessContextKey{}).(pendingHostAccess); ok {
-		if pending.decision == nil || pending.decision.Revalidate == nil {
+	if state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); ok {
+		if !state.authorized || state.decision.Revalidate == nil {
 			return nil
 		}
-		return pending.decision.Revalidate(ctx)
+		return state.decision.Revalidate(ctx)
 	}
-	decision, ok := ctx.Value(hostAccessDecisionContextKey{}).(HostAccessDecision)
-	if !ok || decision.Revalidate == nil {
-		return nil
-	}
-	return decision.Revalidate(ctx)
+	return nil
 }
 
 func withHostAccess(humaAPI huma.API, controller HostAccessController) {
@@ -135,14 +120,14 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 		if projectID, ok := positiveProjectID(pathParams["project_id"]); ok {
 			request.Operation.ProjectIDs = []int64{projectID}
 		}
+		state := &hostAccessState{controller: controller, request: request}
 		if hostAccessResolvedByHandler(operation.OperationID) {
-			decision := &HostAccessDecision{}
-			next(huma.WithValue(ctx, pendingHostAccessContextKey{}, pendingHostAccess{
-				controller: controller,
-				request:    request,
-				decision:   decision,
-			}))
+			next(huma.WithValue(ctx, hostAccessStateContextKey{}, state))
 			return
+		}
+		if len(request.Operation.ProjectIDs) == 0 && !hostAccessOperationWithoutProjectData(operation.OperationID) {
+			request.Operation.AllProjects = true
+			state.request.Operation.AllProjects = true
 		}
 		decision, err := controller.Authorize(ctx.Context(), request)
 		if errors.Is(err, ErrHostAccessDenied) {
@@ -154,7 +139,9 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 				"access_unavailable", "access decision unavailable")
 			return
 		}
-		next(huma.WithValue(ctx, hostAccessDecisionContextKey{}, decision))
+		state.decision = decision
+		state.authorized = true
+		next(huma.WithValue(ctx, hostAccessStateContextKey{}, state))
 	})
 }
 
@@ -175,7 +162,22 @@ func hostSelfAuthenticatedOperation(operationID string) bool {
 
 func hostAccessResolvedByHandler(operationID string) bool {
 	switch operationID {
-	case "mergeProject", "moveIssue", "streamEvents":
+	case "mergeProject",
+		"moveIssue",
+		"streamEvents",
+		"listAllIssues",
+		"auditCloses",
+		"showIssueByUID",
+		"createFederationEnrollment":
+		return true
+	default:
+		return false
+	}
+}
+
+func hostAccessOperationWithoutProjectData(operationID string) bool {
+	switch operationID {
+	case "ping", "health", "instance":
 		return true
 	default:
 		return false
@@ -193,16 +195,28 @@ func authorizeHostProjectScope(
 	projectUIDs []string,
 	allProjects bool,
 ) (context.Context, error) {
-	pending, ok := ctx.Value(pendingHostAccessContextKey{}).(pendingHostAccess)
+	state, ok := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState)
 	if !ok {
 		return ctx, nil
 	}
-	pending.request.Operation.ProjectIDs = appendUniqueInt64(
-		pending.request.Operation.ProjectIDs, projectIDs...)
-	pending.request.Operation.ProjectUIDs = appendUniqueString(
-		pending.request.Operation.ProjectUIDs, projectUIDs...)
-	pending.request.Operation.AllProjects = allProjects
-	decision, err := pending.controller.Authorize(ctx, pending.request)
+	if state.authorized && state.request.Operation.AllProjects {
+		return ctx, nil
+	}
+	previousProjectIDs := len(state.request.Operation.ProjectIDs)
+	previousProjectUIDs := len(state.request.Operation.ProjectUIDs)
+	previousAllProjects := state.request.Operation.AllProjects
+	state.request.Operation.ProjectIDs = appendUniqueInt64(
+		state.request.Operation.ProjectIDs, projectIDs...)
+	state.request.Operation.ProjectUIDs = appendUniqueString(
+		state.request.Operation.ProjectUIDs, projectUIDs...)
+	state.request.Operation.AllProjects = state.request.Operation.AllProjects || allProjects
+	scopeChanged := previousProjectIDs != len(state.request.Operation.ProjectIDs) ||
+		previousProjectUIDs != len(state.request.Operation.ProjectUIDs) ||
+		previousAllProjects != state.request.Operation.AllProjects
+	if state.authorized && !scopeChanged {
+		return ctx, nil
+	}
+	decision, err := state.controller.Authorize(ctx, state.request)
 	if errors.Is(err, ErrHostAccessDenied) {
 		return ctx, api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
 	}
@@ -210,9 +224,8 @@ func authorizeHostProjectScope(
 		return ctx, api.NewError(http.StatusServiceUnavailable,
 			"access_unavailable", "access decision unavailable", "", nil)
 	}
-	if pending.decision != nil {
-		*pending.decision = decision
-	}
+	state.decision = decision
+	state.authorized = true
 	return ctx, nil
 }
 
@@ -294,4 +307,12 @@ func writeHostAccessError(ctx huma.Context, status int, code, message string) {
 	ctx.SetHeader("Content-Type", "application/json")
 	ctx.SetStatus(status)
 	_, _ = ctx.BodyWriter().Write(body)
+}
+
+func internalAPIError(err error) error {
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr
+	}
+	return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 }

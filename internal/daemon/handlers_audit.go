@@ -40,6 +40,11 @@ func doAuditCloses(
 		return nil, api.NewError(400, "validation",
 			"project_id must be a positive integer", "", nil)
 	}
+	var err error
+	ctx, err = authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, false)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 		return nil, err
 	}
@@ -306,6 +311,9 @@ func resolveAuditParentFilter(
 	}
 	issue, rerr := resolveLinkTargetRef(ctx, cfg.DB, projectID, parentRef, db.IncludeDeletedYes)
 	if rerr == nil {
+		if _, err := authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false); err != nil {
+			return auditParentFilter{}, err
+		}
 		f.resolvedUID = issue.UID
 		if issue.ProjectID == projectID {
 			f.resolvedShortID = issue.ShortID

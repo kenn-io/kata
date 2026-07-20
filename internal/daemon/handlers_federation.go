@@ -166,6 +166,19 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusBadRequest, "validation",
 				"allow_adoption_snapshot_authors requires project_id", "", nil)
 		}
+		var projectIDs []int64
+		if in.Body.ProjectID != nil {
+			if *in.Body.ProjectID <= 0 {
+				return nil, api.NewError(http.StatusBadRequest, "validation",
+					"project_id must be a positive integer", "", nil)
+			}
+			projectIDs = []int64{*in.Body.ProjectID}
+		}
+		var err error
+		ctx, err = authorizeHostProjectScope(ctx, projectIDs, nil, in.Body.ProjectID == nil)
+		if err != nil {
+			return nil, err
+		}
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err

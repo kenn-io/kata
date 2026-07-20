@@ -54,8 +54,11 @@ type AccessDecision struct {
 }
 
 // AccessController makes host-owned authorization decisions for a mounted
-// service. Returning ErrAccessDenied produces a generic not-found response;
-// other errors make only the mounted service temporarily unavailable.
+// service. A request may be repeated with a larger, cumulative project scope
+// when resolving a UID, link, or graph discovers another project, so
+// implementations must make retry-safe decisions. Returning ErrAccessDenied
+// produces a generic not-found response; other errors make only the mounted
+// service temporarily unavailable.
 type AccessController interface {
 	Authorize(context.Context, AccessRequest) (AccessDecision, error)
 }

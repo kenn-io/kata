@@ -127,15 +127,20 @@ token over plaintext non-loopback HTTP.
 ## Host-owned access
 
 `AccessController` is the fine-grained embedding seam. Kata calls it after a
-route matches and before the operation reads or changes Kata data. The request
+route matches and before protected data is returned or changed. The request
 contains the opaque authenticated subject, the actor snapshot used for new
 event and projection rows, and the matched operation ID, method, path template,
 and path parameters. `Operation.ProjectIDs`, `ProjectUIDs`, and `AllProjects`
 carry the validated effective project scope. Cross-project operations include
 both projects; omitting the project filter from the event stream sets
 `AllProjects` instead of silently broadening an empty scope. Body- and
-query-selected projects are decoded and validated before this decision. The
-request deliberately contains no application roles or tenant model.
+query-selected projects are decoded and validated before this decision. When
+an operation discovers another project while resolving a link, UID, or graph,
+Kata asks again with the expanded scope before returning or changing protected
+data. Controllers should therefore make retry-safe decisions from the complete
+request rather than treating a call as a one-time notification. Global
+operations set `AllProjects` explicitly. The request deliberately contains no
+application roles or tenant model.
 
 An embedding host typically mounts the service behind its ordinary session or
 credential middleware:

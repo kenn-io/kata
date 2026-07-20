@@ -74,7 +74,7 @@ func buildReachableIssueGraph(
 
 	dist, err := w.traverse(ctx, depth)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 
 	nodes := make([]api.ReachableGraphNode, 0, len(dist))
@@ -82,7 +82,7 @@ func buildReachableIssueGraph(
 		issue := w.issueByID[id]
 		project, err := w.project(ctx, issue.ProjectID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		nodes = append(nodes, api.ReachableGraphNode{
 			Issue:       issue,
@@ -93,7 +93,7 @@ func buildReachableIssueGraph(
 
 	links, err := w.linksForReached(ctx, dist)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	edges, unresolved := w.edgesAndUnresolved(links, dist, depth)
 	markTransitiveBlockLayout(edges)
@@ -154,6 +154,10 @@ func (w *graphWalk) issue(ctx context.Context, issueID int64) (db.Issue, bool, e
 func (w *graphWalk) project(ctx context.Context, projectID int64) (db.Project, error) {
 	if project, ok := w.projectByID[projectID]; ok {
 		return project, nil
+	}
+	ctx, err := authorizeHostProjectScope(ctx, []int64{projectID}, nil, false)
+	if err != nil {
+		return db.Project{}, err
 	}
 	project, err := w.store.ProjectByID(ctx, projectID)
 	if err != nil {

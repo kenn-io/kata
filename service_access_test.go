@@ -554,6 +554,18 @@ func TestServiceAccessControllerPreservesScopedFederationAuthentication(t *testi
 	defer func() { _ = metadataResponse.Body.Close() }()
 	assert.Equal(t, http.StatusOK, metadataResponse.StatusCode)
 
+	invalidClaimRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/issues/"+issue.Issue.ShortID+
+		"/lease/actions/acquire", bytes.NewBufferString(
+		`{"holder":"unauthorized-worker","client_kind":"cli","claim_kind":"hard"}`))
+	require.NoError(t, err)
+	invalidClaimRequest.Header.Set("Content-Type", "application/json")
+	invalidClaimRequest.Header.Set("Authorization", "Bearer invalid-token")
+	invalidClaimResponse, err := server.Client().Do(invalidClaimRequest)
+	require.NoError(t, err)
+	defer func() { _ = invalidClaimResponse.Body.Close() }()
+	assert.Equal(t, http.StatusForbidden, invalidClaimResponse.StatusCode)
+
 	claimRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
 		strconv.FormatInt(project.Project.ID, 10)+"/issues/"+issue.Issue.ShortID+
 		"/lease/actions/acquire", bytes.NewBufferString(

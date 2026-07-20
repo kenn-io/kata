@@ -26,6 +26,16 @@ func resolveClaimPrincipal(
 	allowEnrollment bool,
 	requireMutationLocal bool,
 ) (claimPrincipal, error) {
+	if cfg.HostAccess != nil {
+		if requestPrincipal, ok := PrincipalFromContext(ctx); ok && requestPrincipal.Kind == PrincipalHost {
+			return localClaimPrincipal(cfg, body), nil
+		}
+		if allowEnrollment && hasBearerHeader(authz) {
+			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body)
+		}
+		return claimPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
+			"host principal or scoped federation bearer required", "", nil)
+	}
 	if cfg.Auth.Token != "" {
 		if principal, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, body, false); ok || err != nil {
 			return principal, err
@@ -76,11 +86,18 @@ func authorizeClaimStatusRead(
 	projectID int64,
 	authz string,
 ) error {
-	if cfg.Auth.Token == "" {
-		if cfg.HostAccess != nil && hasBearerHeader(authz) {
+	if cfg.HostAccess != nil {
+		if requestPrincipal, ok := PrincipalFromContext(ctx); ok && requestPrincipal.Kind == PrincipalHost {
+			return nil
+		}
+		if hasBearerHeader(authz) {
 			_, err := authorizeFederationRequest(ctx, cfg.DB, authz, projectID, "claim")
 			return err
 		}
+		return api.NewError(http.StatusUnauthorized, "auth_required",
+			"host principal or scoped federation bearer required", "", nil)
+	}
+	if cfg.Auth.Token == "" {
 		if cfg.InsecureReadonly {
 			if !hasBearerHeader(authz) {
 				return localAuthError(cfg, authz)

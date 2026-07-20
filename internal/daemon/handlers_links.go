@@ -45,6 +45,9 @@ func registerLinksHandlers(humaAPI huma.API, cfg ServerConfig) {
 // peers are skipped (their link rows are still removable, but the issue can't
 // hold a live claim). Duplicates are evaluated once.
 func requireFederatedLinkClaims(ctx context.Context, cfg ServerConfig, actor string, issues ...db.Issue) error {
+	if _, err := authorizeHostProjectScope(ctx, issueProjectIDs(issues), nil, false); err != nil {
+		return err
+	}
 	seen := make(map[int64]struct{}, len(issues))
 	for _, issue := range issues {
 		if _, ok := seen[issue.ID]; ok {
@@ -102,11 +105,11 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		names := &projectNames{store: cfg.DB}
 		canonicalFromPeer, err := linkPeerFor(ctx, names, from)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		canonicalToPeer, err := linkPeerFor(ctx, names, to)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if in.Body.Type == "related" && storageFromID > storageToID {
 			storageFromID, storageToID = storageToID, storageFromID
