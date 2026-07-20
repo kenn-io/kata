@@ -1036,6 +1036,9 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 	if err != nil {
 		return nil, err
 	}
+	if err := authorizeHostChildProjects(ctx, store, issues, childCounts); err != nil {
+		return nil, err
+	}
 	blocks, err := store.BlockNumbersByIssues(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -1084,6 +1087,32 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 		out[i] = row
 	}
 	return out, nil
+}
+
+// authorizeHostChildProjects expands the request scope to every project that
+// contributes to the child-count projection. Child links can cross project
+// boundaries even though the list itself is project-scoped.
+func authorizeHostChildProjects(
+	ctx context.Context,
+	store db.Storage,
+	issues []db.Issue,
+	counts map[int64]db.ChildCounts,
+) error {
+	projectIDs := make([]int64, 0)
+	for _, issue := range issues {
+		if counts[issue.ID].Total == 0 {
+			continue
+		}
+		children, err := store.ChildrenOfIssue(ctx, issue.ID)
+		if err != nil {
+			return err
+		}
+		for _, child := range children {
+			projectIDs = appendUniqueInt64(projectIDs, child.ProjectID)
+		}
+	}
+	_, err := authorizeHostProjectScope(ctx, projectIDs, nil, false)
+	return err
 }
 
 // peerSlice projects a slice of peer issue ids onto LinkPeer entries using

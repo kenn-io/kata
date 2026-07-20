@@ -26,8 +26,9 @@ type Operation struct {
 	PathParams map[string]string
 
 	// ProjectIDs and ProjectUIDs identify every project whose data the
-	// operation may read or change. AllProjects is true when an omitted filter
-	// selects the global project set. Values are parsed and validated before
+	// operation may read or change. AllProjects is true when a global selector
+	// is used or when an operation can depend on projects that cannot be safely
+	// bounded before dispatch. Values are parsed and validated before
 	// authorization; cross-project operations include both sides.
 	ProjectIDs  []int64
 	ProjectUIDs []string

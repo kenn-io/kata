@@ -120,6 +120,9 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 		if projectID, ok := positiveProjectID(pathParams["project_id"]); ok {
 			request.Operation.ProjectIDs = []int64{projectID}
 		}
+		if hostAccessRequiresAllProjects(operation.OperationID) {
+			request.Operation.AllProjects = true
+		}
 		state := &hostAccessState{controller: controller, request: request}
 		if hostAccessResolvedByHandler(operation.OperationID) {
 			next(huma.WithValue(ctx, hostAccessStateContextKey{}, state))
@@ -167,8 +170,20 @@ func hostAccessResolvedByHandler(operationID string) bool {
 		"streamEvents",
 		"listAllIssues",
 		"auditCloses",
-		"showIssueByUID",
 		"createFederationEnrollment":
+		return true
+	default:
+		return false
+	}
+}
+
+// hostAccessRequiresAllProjects identifies operations whose result or side
+// effects can depend on relationships outside the project named in the URL.
+// Requiring complete authority before dispatch keeps denials from becoming
+// project-existence or relationship-state oracles.
+func hostAccessRequiresAllProjects(operationID string) bool {
+	switch operationID {
+	case "purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID":
 		return true
 	default:
 		return false

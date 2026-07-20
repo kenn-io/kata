@@ -139,8 +139,11 @@ an operation discovers another project while resolving a link, UID, or graph,
 Kata asks again with the expanded scope before returning or changing protected
 data. Controllers should therefore make retry-safe decisions from the complete
 request rather than treating a call as a one-time notification. Global
-operations set `AllProjects` explicitly. The request deliberately contains no
-application roles or tenant model.
+operations set `AllProjects` explicitly. Operations such as purge, close,
+ready selection, and UID-prefix lookup also require `AllProjects` because
+their results or side effects can depend on relationships outside the project
+named in the URL. The request deliberately contains no application roles or
+tenant model.
 
 An embedding host typically mounts the service behind its ordinary session or
 credential middleware:
