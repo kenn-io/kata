@@ -1095,6 +1095,11 @@ func (m Model) followSearchResultIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
 	if m.layout != layoutSplit {
 		return m, prior
 	}
+	if _, ok := pickHighlightedIssue(m.list); !ok {
+		m.nextDetailFollowGen++
+		m.detail = m.applyDetailViewportCache(newDetailModel())
+		return m, prior
+	}
 	return m.followHighlightedIssueIfNeeded(prior)
 }
 
@@ -1109,10 +1114,15 @@ func (m Model) restoreSearchDetailIfNeeded(
 		if detailModelMatches(snapshot, iss.UID, pid) {
 			liveMatches := detailModelMatches(&m.detail, iss.UID, pid)
 			if liveMatches {
-				// The live pane already represents the restored issue. Detail
-				// responses now reach it in every layout, and a newer generation
-				// must retain its outstanding-response eligibility.
-				return m, prior
+				// Preserve the newer live generation so its outstanding responses
+				// remain eligible, but retain a mutation outcome that advanced only
+				// on the saved generation. A fresh live-generation refetch converges
+				// component data without allowing older snapshot requests to win.
+				if snapshot.status != "" {
+					m.detail.status = snapshot.status
+					m.detail.err = snapshot.err
+				}
+				return m, combineCmds(prior, m.refetchRestoredDetail())
 			}
 			// Installing the snapshot replaces a search-owned live target.
 			// Invalidate its pending debounce tick without scheduling a fetch.

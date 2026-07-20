@@ -123,6 +123,51 @@ func TestSplit_SearchEnterRetargetsDetailToFilteredResult(t *testing.T) {
 	}
 }
 
+func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m.list.issues = []Issue{
+		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other row", Status: "open"},
+	}
+	m.list.cursor = 0
+	m.list.selectedUID = "01TEST-aaa1"
+	m.list.selectedProjectID = 7
+	seed := m.list.issues[0]
+	m.detail = detailModel{issue: &seed, scopePID: 7, gen: 41}
+	m.nextGen = m.detail.gen
+
+	m = openBarFromCmd(t, m, '/')
+	for _, r := range "missing" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	if rows := m.list.visibleRows(); len(rows) != 0 {
+		t.Fatalf("query rows = %d, want zero", len(rows))
+	}
+	if m.input.preSplitDetail == nil || m.input.preSplitDetail.issue == nil ||
+		m.input.preSplitDetail.issue.UID != "01TEST-aaa1" {
+		t.Fatalf("saved detail = %+v, want aaa1", m.input.preSplitDetail)
+	}
+	startFollowGen := m.nextDetailFollowGen
+
+	m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("empty results transition returned unexpected command %T", cmd)
+	}
+	if m.input.searchFocus != searchFocusResults {
+		t.Fatalf("searchFocus = %v, want results", m.input.searchFocus)
+	}
+	if m.detail.issue != nil {
+		t.Fatalf("empty results detail = %+v, want nil", m.detail.issue)
+	}
+	if delta := m.nextDetailFollowGen - startFollowGen; delta != 1 {
+		t.Fatalf("empty results follow generation advanced by %d, want 1 invalidation", delta)
+	}
+	if m.input.preSplitDetail == nil || m.input.preSplitDetail.issue == nil ||
+		m.input.preSplitDetail.issue.UID != "01TEST-aaa1" {
+		t.Fatalf("empty results lost saved detail: %+v", m.input.preSplitDetail)
+	}
+}
+
 func TestSplit_SearchResultsRefetchRetargetsChangedHighlight(t *testing.T) {
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
@@ -576,8 +621,8 @@ func TestSplit_SearchCancelPrefersCompletedSnapshotOverStaleMatchingDetail(t *te
 	}
 
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if cancelCmd != nil {
-		t.Fatalf("matching-snapshot cancel returned unexpected command %T", cancelCmd)
+	if cancelCmd == nil {
+		t.Fatal("matching-snapshot cancel returned no freshness refetch")
 	}
 	assertSelection(t, m, 0, "01TEST-aaa1")
 	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" {
@@ -721,8 +766,8 @@ func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if cancelCmd != nil {
-		t.Fatalf("matching-live cancel returned unexpected command %T", cancelCmd)
+	if cancelCmd == nil {
+		t.Fatal("matching-live cancel returned no freshness refetch")
 	}
 	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.gen != newerGen {
 		t.Fatalf("detail after cancel = %+v gen %d, want newer live aaa1 gen %d", m.detail.issue, m.detail.gen, newerGen)
@@ -736,6 +781,89 @@ func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 	m, _ = stepModel(m, detailFetchedMsg{gen: newerGen, issue: &newest})
 	if m.detail.issue == nil || m.detail.issue.Title != "newest live detail" || m.detail.loading {
 		t.Fatalf("newer response result = detail %+v loading %v, want newest/non-loading", m.detail.issue, m.detail.loading)
+	}
+}
+
+func TestSplit_SearchCancelMergesSnapshotMutationIntoNewerMatchingLiveDetail(t *testing.T) {
+	mutationErr := errors.New("mutation rejected")
+	tests := []struct {
+		name       string
+		mutation   mutationDoneMsg
+		wantStatus string
+		wantErr    error
+	}{
+		{
+			name: "failure",
+			mutation: mutationDoneMsg{
+				origin: "detail", gen: 41, kind: "close", err: mutationErr,
+			},
+			wantStatus: "close failed",
+			wantErr:    mutationErr,
+		},
+		{
+			name: "success",
+			mutation: mutationDoneMsg{
+				origin: "detail", gen: 41, kind: "close",
+				resp: &MutationResp{Issue: &Issue{
+					ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Status: "closed",
+				}},
+			},
+			wantStatus: "closed #aaa1",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, cleanup := splitSearchTransitionFixture(t)
+			defer cleanup()
+			m.detail.gen = 41
+			m.nextGen = 41
+			m.input.preSplitDetail.gen = 41
+
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			if m.detail.issue == nil || m.detail.issue.UID != "01TEST-bbb2" {
+				t.Fatalf("target detail = %+v, want bbb2", m.detail.issue)
+			}
+			m, _ = stepModel(m, tc.mutation)
+			if m.input.preSplitDetail == nil ||
+				!strings.Contains(stripANSI(m.input.preSplitDetail.status), tc.wantStatus) {
+				t.Fatalf("saved mutation status = %q, want %q",
+					stripANSI(m.input.preSplitDetail.status), tc.wantStatus)
+			}
+
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+			for _, r := range "other" {
+				m, _ = stepModel(m, runeKey(r))
+			}
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" {
+				t.Fatalf("retargeted detail = %+v, want aaa1", m.detail.issue)
+			}
+			newerGen := m.detail.gen
+			if newerGen <= 41 {
+				t.Fatalf("retargeted detail generation = %d, want newer than 41", newerGen)
+			}
+
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+			m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+			if cancelCmd == nil {
+				t.Fatal("matching-live cancel returned no freshness refetch")
+			}
+			batch, ok := cancelCmd().(tea.BatchMsg)
+			if !ok || len(batch) != 4 {
+				t.Fatalf("matching-live refetch = %T len %d, want four-command batch", batch, len(batch))
+			}
+			if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.gen != newerGen {
+				t.Fatalf("cancel detail = %+v gen %d, want aaa1/live gen %d", m.detail.issue, m.detail.gen, newerGen)
+			}
+			if got := stripANSI(m.detail.status); !strings.Contains(got, tc.wantStatus) {
+				t.Fatalf("cancel mutation status = %q, want %q", got, tc.wantStatus)
+			}
+			if !errors.Is(m.detail.err, tc.wantErr) {
+				t.Fatalf("cancel mutation err = %v, want %v", m.detail.err, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -851,8 +979,8 @@ func TestSplit_SearchCancelConvergesSnapshotWithSameGenerationMutation(t *testin
 			}
 
 			m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-			if cancelCmd != nil {
-				t.Fatalf("matching-snapshot cancel returned unexpected command %T", cancelCmd)
+			if cancelCmd == nil {
+				t.Fatal("matching-snapshot cancel returned no freshness refetch")
 			}
 			if m.detail.issue == nil || m.detail.issue.Title != "completed snapshot" || m.detail.issue.Body != "fresh fetched body" {
 				t.Fatalf("restored fetched detail = %+v, want completed snapshot/fresh body", m.detail.issue)
@@ -969,8 +1097,8 @@ func TestSplit_SearchCancelRejectsOlderSameGenerationFetchResults(t *testing.T) 
 	}
 
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if cancelCmd != nil {
-		t.Fatalf("matching-snapshot cancel returned unexpected command %T", cancelCmd)
+	if cancelCmd == nil {
+		t.Fatal("matching-snapshot cancel returned no freshness refetch")
 	}
 	if m.detail.issue == nil || m.detail.issue.Title != "newer issue response" {
 		t.Errorf("restored issue = %+v, want newer response", m.detail.issue)
