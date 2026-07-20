@@ -394,7 +394,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if next, cmd, ok := m.routeSSE(msg); ok {
 		return next, cmd
 	}
-	var bootstrapCmd tea.Cmd
+	var postFetchCmd tea.Cmd
 	switch msg.(type) {
 	case initialFetchMsg, refetchedMsg:
 		if m.staleConnResult(msg) {
@@ -403,9 +403,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.isStaleListFetch(msg) {
 			return m, nil
 		}
+		prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 		m = m.populateCache(msg)
 		if _, isInitial := msg.(initialFetchMsg); isInitial {
-			m, bootstrapCmd = m.maybeBootstrapSplitDetail()
+			m, postFetchCmd = m.maybeBootstrapSplitDetail()
+		} else {
+			m, postFetchCmd = m.reconcileSearchDetailAfterRefetch(prevPID, prevUID, prevHas)
 		}
 	}
 	if mut, ok := msg.(mutationDoneMsg); ok {
@@ -516,13 +519,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	next, cmd := m.dispatchToView(msg)
-	if bootstrapCmd == nil {
+	if postFetchCmd == nil {
 		return next, cmd
 	}
 	if cmd == nil {
-		return next, bootstrapCmd
+		return next, postFetchCmd
 	}
-	return next, tea.Batch(cmd, bootstrapCmd)
+	return next, tea.Batch(cmd, postFetchCmd)
+}
+
+// reconcileSearchDetailAfterRefetch applies the same detail-follows-selection
+// invariant as keyboard navigation when an accepted list response moves the
+// highlighted search result. Empty results clear the search-owned pane and
+// invalidate any debounce tick for the departed issue.
+func (m Model) reconcileSearchDetailAfterRefetch(
+	prevPID int64, prevUID string, prevHas bool,
+) (Model, tea.Cmd) {
+	if m.input.kind != inputSearchBar || m.input.searchFocus != searchFocusResults ||
+		m.layout != layoutSplit {
+		return m, nil
+	}
+	newPID, newUID, newHas := highlightedIdentity(m.list)
+	if prevHas == newHas && prevPID == newPID && prevUID == newUID {
+		return m, nil
+	}
+	if !newHas {
+		m.nextDetailFollowGen++
+		m.detail = m.applyDetailViewportCache(newDetailModel())
+		return m, nil
+	}
+	return m.scheduleDetailFollow()
 }
 
 // maybeBootstrapSplitDetail auto-loads the highlighted list row into the
@@ -1076,25 +1102,23 @@ func (m Model) followSearchResultIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
 // gate after an active search has owned a split detail pane, so a later stacked
 // resize cannot leave that hidden pane pinned to the canceled result.
 func (m Model) restoreSearchDetailIfNeeded(
-	snapshot *detailModel, snapshotAhead bool, prior tea.Cmd,
+	snapshot *detailModel, prior tea.Cmd,
 ) (Model, tea.Cmd) {
 	if iss, ok := pickHighlightedIssue(m.list); ok {
 		pid := detailProjectID(iss, m.scope)
-		if snapshotAhead && detailModelMatches(snapshot, iss.UID, pid) {
+		if detailModelMatches(snapshot, iss.UID, pid) {
 			liveMatches := detailModelMatches(&m.detail, iss.UID, pid)
-			if liveMatches && m.detail.gen > snapshot.gen {
-				// The search returned to the inherited issue after the saved
-				// generation advanced while hidden. Keep that newer live shell so
-				// its outstanding responses still match and can complete it.
+			if liveMatches {
+				// The live pane already represents the restored issue. Detail
+				// responses now reach it in every layout, and a newer generation
+				// must retain its outstanding-response eligibility.
 				return m, prior
 			}
-			if !liveMatches {
-				// Installing the snapshot replaces a search-owned live target.
-				// Invalidate its pending debounce tick without scheduling a fetch.
-				m.nextDetailFollowGen++
-			}
+			// Installing the snapshot replaces a search-owned live target.
+			// Invalidate its pending debounce tick without scheduling a fetch.
+			m.nextDetailFollowGen++
 			m.detail = m.applyDetailViewportCache(cloneDetailModel(*snapshot))
-			return m, prior
+			return m, combineCmds(prior, m.refetchRestoredDetail())
 		}
 		return m.followHighlightedIssueIfNeeded(prior)
 	}
@@ -1107,7 +1131,14 @@ func (m Model) restoreSearchDetailIfNeeded(
 		return m, prior
 	}
 	m.detail = m.applyDetailViewportCache(cloneDetailModel(*snapshot))
-	return m, prior
+	return m, combineCmds(prior, m.refetchRestoredDetail())
+}
+
+func (m Model) refetchRestoredDetail() tea.Cmd {
+	if m.api == nil {
+		return nil
+	}
+	return m.detail.refetch(m.api)
 }
 
 // captureSearchSplitDetail snapshots the first populated split detail model an
@@ -1147,9 +1178,6 @@ func (m Model) syncSearchDetailSnapshot(msg tea.Msg) Model {
 		if !applied {
 			return m
 		}
-		if mut.gen != m.detail.gen {
-			m.input.preSplitDetailAhead = true
-		}
 		snapshot := cloneDetailModel(updated)
 		m.input.preSplitDetail = &snapshot
 		return m
@@ -1160,10 +1188,6 @@ func (m Model) syncSearchDetailSnapshot(msg tea.Msg) Model {
 	updated, applied := m.input.preSplitDetail.applyFetchedIfFresh(msg)
 	if !applied {
 		return m
-	}
-	if gen, ok := detailFetchGeneration(msg); ok &&
-		gen == m.input.preSplitDetail.gen && !m.detailFetchReachesLive(gen) {
-		m.input.preSplitDetailAhead = true
 	}
 	snapshot := cloneDetailModel(updated)
 	m.input.preSplitDetail = &snapshot
@@ -1182,7 +1206,7 @@ func (m Model) searchSnapshotMutationRefetch(mut mutationDoneMsg) tea.Cmd {
 		mut.gen == m.detail.gen {
 		return nil
 	}
-	return m.input.preSplitDetail.refetchAfterMutation(m.api)
+	return m.input.preSplitDetail.refetch(m.api)
 }
 
 func combineCmds(first, second tea.Cmd) tea.Cmd {
@@ -1213,13 +1237,6 @@ func detailFetchGeneration(msg tea.Msg) (int64, bool) {
 		return msg.gen, true
 	}
 	return 0, false
-}
-
-func (m Model) detailFetchReachesLive(gen int64) bool {
-	if m.detail.gen != gen {
-		return false
-	}
-	return m.layout == layoutSplit || m.view == viewDetail
 }
 
 // markSearchSplitDetailOwned records that the active search has controlled a
@@ -1874,7 +1891,6 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 	searchCanceled := m.input.kind.isCommandBar()
 	restoreSplitDetail := searchCanceled && m.input.restoreSplitDetail
 	preSplitDetail := m.input.preSplitDetail
-	preSplitDetailAhead := m.input.preSplitDetailAhead
 	if searchCanceled {
 		m.list.filter = m.input.preFilter
 		snapshot := m.input.preListSelection
@@ -1889,7 +1905,7 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 	}
 	m.input = inputState{}
 	if restoreSplitDetail {
-		return m.restoreSearchDetailIfNeeded(preSplitDetail, preSplitDetailAhead, nil)
+		return m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
 	}
 	if searchCanceled {
 		return m.followSearchResultIfNeeded(nil)
@@ -2740,6 +2756,14 @@ func (m Model) projectIDForName(name string) (int64, bool) {
 //
 // In stacked layout the original m.view path is preserved.
 func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Detail responses remain relevant when stacked list view temporarily hides
+	// a retained pane. Generation checks inside detailModel reject obsolete
+	// responses, so route them independently of the active layout/view.
+	if isDetailFetchMsg(msg) {
+		var cmd tea.Cmd
+		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
+		return m, withConnGen(cmd, m.connGen)
+	}
 	if m.layout == layoutSplit {
 		return m.dispatchToSplitPane(msg)
 	}

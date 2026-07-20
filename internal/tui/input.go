@@ -222,9 +222,7 @@ func (f *inputField) blur() {
 // the terminal becomes stacked before cancel. preSplitDetail is a deep copy
 // of the detail model the search first inherited, when one existed.
 // preSplitDetailCaptured distinguishes an intentionally captured nil detail
-// from a search that has not entered split layout yet. preSplitDetailAhead is
-// set when a matching async result updated the snapshot without reaching live
-// detail.
+// from a search that has not entered split layout yet.
 //
 // target / err / saving / formGen are populated for centered-form and
 // panel-prompt kinds. target carries the issue context so a stale
@@ -251,7 +249,6 @@ type inputState struct {
 	restoreSplitDetail     bool
 	preSplitDetail         *detailModel
 	preSplitDetailCaptured bool
-	preSplitDetailAhead    bool
 	target                 formTarget
 	formGen                int64
 	suggestHighlight       int

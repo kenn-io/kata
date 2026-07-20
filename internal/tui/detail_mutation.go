@@ -130,7 +130,7 @@ func (dm detailModel) applyMutation(
 	if !applied || m.err != nil {
 		return dm, nil
 	}
-	return dm, dm.refetchAfterMutation(api)
+	return dm, dm.refetch(api)
 }
 
 // applyMutationState applies the generation-guarded, user-visible portion of
@@ -191,13 +191,10 @@ func mutationSuccessText(m mutationDoneMsg, iss *Issue) string {
 	return ""
 }
 
-// refetchAfterMutation re-fetches the issue and the three tabs so the
-// rendered detail reflects the new state without waiting for the SSE
-// consumer (Task 11) to invalidate. The four fetches run in parallel
-// via tea.Batch — the order they land doesn't matter because each
-// fetch updates a distinct slice on dm. dm.gen rides every fetch so a
-// later jump/pop discards stale results.
-func (dm detailModel) refetchAfterMutation(api detailAPI) tea.Cmd {
+// refetch re-fetches the issue and the three tabs so a retained detail model
+// can converge with daemon state after either a mutation or snapshot restore.
+// The four fetches run in parallel; dm.gen lets a later open/jump reject them.
+func (dm detailModel) refetch(api detailAPI) tea.Cmd {
 	if dm.issue == nil {
 		return nil
 	}

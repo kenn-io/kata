@@ -123,6 +123,77 @@ func TestSplit_SearchEnterRetargetsDetailToFilteredResult(t *testing.T) {
 	}
 }
 
+func TestSplit_SearchResultsRefetchRetargetsChangedHighlight(t *testing.T) {
+	m, cleanup := splitSearchTransitionFixture(t)
+	defer cleanup()
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-bbb2" {
+		t.Fatalf("results detail = %+v, want bbb2", m.detail.issue)
+	}
+
+	m, refetchCmd := stepModel(m, refetchedMsg{
+		dispatchKey: m.currentCacheKey(),
+		issues: []Issue{
+			{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other row", Status: "open"},
+			{ProjectID: 7, UID: "01TEST-ccc3", ShortID: "ccc3", Title: "target replacement", Status: "open"},
+		},
+	})
+	if refetchCmd == nil {
+		t.Fatal("changed search highlight returned no detail-follow command")
+	}
+	if m.list.selectedUID != "01TEST-ccc3" || m.detail.issue == nil || m.detail.issue.UID != "01TEST-ccc3" {
+		t.Fatalf("refetched selection/detail = %q/%+v, want ccc3/c3 detail", m.list.selectedUID, m.detail.issue)
+	}
+}
+
+func TestSplit_SearchResultsRefetchClearsDetailWhenResultsDisappear(t *testing.T) {
+	m, cleanup := splitSearchTransitionFixture(t)
+	defer cleanup()
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	startFollowGen := m.nextDetailFollowGen
+
+	m, refetchCmd := stepModel(m, refetchedMsg{
+		dispatchKey: m.currentCacheKey(),
+		issues: []Issue{
+			{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other row", Status: "open"},
+		},
+	})
+	if refetchCmd != nil {
+		t.Fatalf("empty search results returned unexpected command %T", refetchCmd)
+	}
+	if m.list.selectedUID != "" || m.detail.issue != nil {
+		t.Fatalf("empty-results selection/detail = %q/%+v, want empty/nil", m.list.selectedUID, m.detail.issue)
+	}
+	if delta := m.nextDetailFollowGen - startFollowGen; delta != 1 {
+		t.Fatalf("empty-results follow generation advanced by %d, want 1 invalidation", delta)
+	}
+}
+
+func TestSplit_SearchResultsRefetchKeepsMatchingDetailWithoutFollow(t *testing.T) {
+	m, cleanup := splitSearchTransitionFixture(t)
+	defer cleanup()
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	startDetailGen := m.detail.gen
+	startFollowGen := m.nextDetailFollowGen
+
+	m, refetchCmd := stepModel(m, refetchedMsg{
+		dispatchKey: m.currentCacheKey(),
+		issues: []Issue{
+			{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "target row refreshed", Status: "open"},
+			{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "other row", Status: "open"},
+		},
+	})
+	if refetchCmd != nil {
+		t.Fatalf("unchanged search highlight returned unexpected command %T", refetchCmd)
+	}
+	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-bbb2" || m.detail.gen != startDetailGen {
+		t.Fatalf("matching detail = %+v gen %d, want bbb2/gen %d", m.detail.issue, m.detail.gen, startDetailGen)
+	}
+	if delta := m.nextDetailFollowGen - startFollowGen; delta != 0 {
+		t.Fatalf("unchanged-results follow generation advanced by %d, want 0", delta)
+	}
+}
+
 func TestSplit_SearchCancelRetargetsDetailToRestoredSelection(t *testing.T) {
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
@@ -287,8 +358,8 @@ func TestSplit_SearchCancelRestoresDetailWhenPreFilterHasNoRows(t *testing.T) {
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if cancelCmd != nil {
-		t.Fatalf("empty-list cancel returned unexpected follow command %T", cancelCmd)
+	if cancelCmd == nil {
+		t.Fatal("empty-list snapshot restore returned no freshness refetch")
 	}
 	if m.input.kind != inputNone || m.list.filter.Search != "no-match-anywhere" {
 		t.Fatalf("cancel state = input %v search %q, want none/no-match-anywhere", m.input.kind, m.list.filter.Search)
@@ -500,8 +571,8 @@ func TestSplit_SearchCancelPrefersCompletedSnapshotOverStaleMatchingDetail(t *te
 	m, _ = stepModel(m, detailFetchedMsg{gen: 41, issue: &completed})
 	commentsErr := errors.New("comments temporarily unavailable")
 	m, _ = stepModel(m, commentsFetchedMsg{gen: 41, err: commentsErr})
-	if m.detail.issue == nil || m.detail.issue.Title != "loading detail" || !m.detail.loading || !m.detail.commentsLoading {
-		t.Fatalf("hidden live detail unexpectedly converged: %+v loading %v/%v", m.detail.issue, m.detail.loading, m.detail.commentsLoading)
+	if m.detail.issue == nil || m.detail.issue.Title != "completed detail" || m.detail.loading || m.detail.commentsLoading {
+		t.Fatalf("hidden live detail did not converge: %+v loading %v/%v", m.detail.issue, m.detail.loading, m.detail.commentsLoading)
 	}
 
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -537,6 +608,77 @@ func TestSplit_SearchCancelPrefersCompletedSnapshotOverStaleMatchingDetail(t *te
 	}
 }
 
+func TestStacked_SearchCancelRefetchesAndCompletesRestoredSnapshot(t *testing.T) {
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m.list.issues = []Issue{
+		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "loading detail", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "target row", Status: "open"},
+	}
+	m.list.cursor = 0
+	m.list.selectedUID = "01TEST-aaa1"
+	m.list.selectedProjectID = 7
+	seed := m.list.issues[0]
+	m.detail = detailModel{
+		issue:           &seed,
+		scopePID:        7,
+		gen:             41,
+		loading:         true,
+		commentsLoading: true,
+		eventsLoading:   true,
+		linksLoading:    true,
+	}
+	m.nextGen = m.detail.gen
+
+	m = openBarFromCmd(t, m, '/')
+	for _, r := range "target" {
+		m, _ = stepModel(m, runeKey(r))
+	}
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-bbb2" {
+		t.Fatalf("results detail = %+v, want bbb2", m.detail.issue)
+	}
+	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
+
+	completed := seed
+	completed.Title = "fresh issue"
+	m, _ = stepModel(m, detailFetchedMsg{gen: 41, issue: &completed})
+	if m.input.preSplitDetail == nil || m.input.preSplitDetail.issue == nil ||
+		m.input.preSplitDetail.issue.Title != "fresh issue" {
+		t.Fatalf("partial off-screen response did not update snapshot: %+v", m.input.preSplitDetail)
+	}
+
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if cancelCmd == nil {
+		t.Fatal("partial snapshot restore returned no freshness refetch")
+	}
+	batch, ok := cancelCmd().(tea.BatchMsg)
+	if !ok || len(batch) != 4 {
+		t.Fatalf("snapshot restore refetch = %T len %d, want four-command batch", batch, len(batch))
+	}
+	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.issue.Title != "fresh issue" {
+		t.Fatalf("restored detail = %+v, want fresh aaa1 snapshot", m.detail.issue)
+	}
+	if !m.detail.commentsLoading || !m.detail.eventsLoading || !m.detail.linksLoading {
+		t.Fatalf("partial snapshot loading flags = %v/%v/%v, want all true",
+			m.detail.commentsLoading, m.detail.eventsLoading, m.detail.linksLoading)
+	}
+
+	m, _ = stepModel(m, commentsFetchedMsg{gen: 41, comments: []CommentEntry{{ID: 1, Body: "fresh comment"}}})
+	m, _ = stepModel(m, eventsFetchedMsg{gen: 41, events: []EventLogEntry{{ID: 2}}})
+	m, _ = stepModel(m, linksFetchedMsg{gen: 41, links: []LinkEntry{{Type: "related"}}})
+	if m.detail.commentsLoading || m.detail.eventsLoading || m.detail.linksLoading {
+		t.Fatalf("late restored responses left loading flags = %v/%v/%v, want all false",
+			m.detail.commentsLoading, m.detail.eventsLoading, m.detail.linksLoading)
+	}
+	if len(m.detail.comments) != 1 || m.detail.comments[0].Body != "fresh comment" ||
+		len(m.detail.events) != 1 || len(m.detail.links) != 1 {
+		t.Fatalf("restored activity = comments %+v events %+v links %+v, want fresh payloads",
+			m.detail.comments, m.detail.events, m.detail.links)
+	}
+}
+
 func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
@@ -560,9 +702,6 @@ func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 	completed := m.list.issues[0]
 	completed.Title = "older completed snapshot"
 	m, _ = stepModel(m, detailFetchedMsg{gen: 41, issue: &completed})
-	if !m.input.preSplitDetailAhead {
-		t.Fatal("stacked fetch did not mark saved detail ahead")
-	}
 
 	m, toTargetCmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	if toTargetCmd == nil || m.detail.issue == nil || m.detail.issue.UID != "01TEST-bbb2" {
@@ -633,8 +772,8 @@ func TestSplit_SearchCancelSnapshotInvalidatesDifferentLiveFollow(t *testing.T) 
 
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if cancelCmd != nil {
-		t.Fatalf("snapshot cancel returned unexpected command %T", cancelCmd)
+	if cancelCmd == nil {
+		t.Fatal("snapshot cancel returned no freshness refetch")
 	}
 	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.issue.Title != "completed snapshot" || m.detail.loading {
 		t.Fatalf("restored snapshot = detail %+v loading %v, want completed aaa1", m.detail.issue, m.detail.loading)
@@ -699,9 +838,6 @@ func TestSplit_SearchCancelConvergesSnapshotWithSameGenerationMutation(t *testin
 			completed.Title = "completed snapshot"
 			completed.Body = "fresh fetched body"
 			m, _ = stepModel(m, detailFetchedMsg{gen: 41, issue: &completed})
-			if !m.input.preSplitDetailAhead {
-				t.Fatal("stacked fetch did not mark saved detail ahead")
-			}
 
 			m, mutationCmd := stepModel(m, tc.mutation)
 			if !strings.Contains(stripANSI(m.detail.status), tc.wantStatus) {
@@ -774,8 +910,8 @@ func TestSplit_SearchRetargetMutationRefetchesSavedDetail(t *testing.T) {
 	m, _ = stepModel(m, detailFetchedMsg{gen: 41, issue: &closed})
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if cancelCmd != nil {
-		t.Fatalf("cancel returned unexpected command %T", cancelCmd)
+	if cancelCmd == nil {
+		t.Fatal("snapshot cancel returned no freshness refetch")
 	}
 	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.issue.Status != "closed" {
 		t.Fatalf("restored detail = %+v, want refreshed closed aaa1", m.detail.issue)
@@ -882,16 +1018,17 @@ func TestSplit_SearchSnapshotRejectsOlderFetchAfterLiveRetarget(t *testing.T) {
 	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
 	m, _ = stepModel(m, newIssueCmd())
 	m, _ = stepModel(m, newCommentsCmd())
-	if !m.input.preSplitDetailAhead {
-		t.Fatal("newer snapshot-only responses did not mark saved detail ahead")
+	if m.input.preSplitDetail == nil || m.input.preSplitDetail.issue == nil ||
+		m.input.preSplitDetail.issue.Title != "newer issue response" {
+		t.Fatalf("newer snapshot-only responses did not update saved detail: %+v", m.input.preSplitDetail)
 	}
 	m, _ = stepModel(m, oldIssueCmd())
 	m, _ = stepModel(m, oldCommentsCmd())
 
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if cancelCmd != nil {
-		t.Fatalf("snapshot cancel returned unexpected command %T", cancelCmd)
+	if cancelCmd == nil {
+		t.Fatal("snapshot cancel returned no freshness refetch")
 	}
 	if m.detail.issue == nil || m.detail.issue.Title != "newer issue response" {
 		t.Errorf("restored issue = %+v, want newer response", m.detail.issue)
