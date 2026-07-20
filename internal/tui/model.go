@@ -1225,20 +1225,6 @@ func detailModelMatches(detail *detailModel, uid string, pid int64) bool {
 		detail.issue.UID == uid && detail.scopePID == pid
 }
 
-func detailFetchGeneration(msg tea.Msg) (int64, bool) {
-	switch msg := msg.(type) {
-	case detailFetchedMsg:
-		return msg.gen, true
-	case commentsFetchedMsg:
-		return msg.gen, true
-	case eventsFetchedMsg:
-		return msg.gen, true
-	case linksFetchedMsg:
-		return msg.gen, true
-	}
-	return 0, false
-}
-
 // markSearchSplitDetailOwned records that the active search has controlled a
 // visible split detail pane. The marker is monotonic for the search lifetime:
 // once set, cancel must restore that pane even after a later stacked resize.
