@@ -1021,11 +1021,14 @@ func TestSplit_SearchRetargetMutationRefetchesSavedDetail(t *testing.T) {
 	}
 	m, mutationCmd := stepModel(m, mutation)
 	if mutationCmd == nil {
-		t.Fatal("snapshot-only mutation returned no detail refetch command")
+		t.Fatal("snapshot-only mutation returned no refresh commands")
 	}
 	batch, ok := mutationCmd().(tea.BatchMsg)
-	if !ok || len(batch) != 4 {
-		t.Fatalf("snapshot refetch = %T len %d, want four-command batch", batch, len(batch))
+	if !ok || len(batch) != 2 {
+		t.Fatalf("mutation refresh = %T len %d, want list debounce plus detail batch", batch, len(batch))
+	}
+	if !m.pendingRefetch {
+		t.Fatal("snapshot-only mutation did not schedule list refetch")
 	}
 
 	closed := Issue{
@@ -1046,6 +1049,20 @@ func TestSplit_SearchRetargetMutationRefetchesSavedDetail(t *testing.T) {
 	}
 	if got := stripANSI(m.detail.status); !strings.Contains(got, "closed #aaa1") {
 		t.Fatalf("restored mutation status = %q, want close confirmation", got)
+	}
+	if m.list.issues[0].Status != "open" || !m.pendingRefetch {
+		t.Fatalf("pre-refetch list status/pending = %q/%v, want open/true", m.list.issues[0].Status, m.pendingRefetch)
+	}
+
+	m, _ = stepModel(m, refetchedMsg{
+		dispatchKey: m.currentCacheKey(),
+		issues: []Issue{
+			closed,
+			{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "target row", Status: "open"},
+		},
+	})
+	if m.list.issues[0].Status != "closed" || m.detail.issue == nil || m.detail.issue.Status != "closed" {
+		t.Fatalf("refetched list/detail = %q/%+v, want closed/closed", m.list.issues[0].Status, m.detail.issue)
 	}
 }
 

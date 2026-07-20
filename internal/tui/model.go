@@ -585,17 +585,15 @@ func (m Model) isStaleListFetch(msg tea.Msg) bool {
 //  1. origin=list, view!=viewList → apply directly to listModel so
 //     the list status/refetch fires even though the user is in
 //     detail view now.
-//  2. origin=detail, view!=viewDetail → apply directly to dm; its
-//     gen is unchanged (no new open since pop) so applyMutation
-//     accepts the message.
-//  3. origin=detail, view==viewDetail, mut.gen != m.detail.gen →
-//     the user opened a *different* detail issue between dispatch
-//     and arrival. dm.applyMutation would silently drop the message
-//     on the gen mismatch and leave the list cache stale. Mark the
-//     cache stale here so the next list refetch (or SSE invalidation)
-//     repopulates the rows the original mutation touched.
+//  2. origin=detail, mut.gen != m.detail.gen → the user opened or
+//     followed a *different* detail generation between dispatch and
+//     arrival. dm.applyMutation would silently drop the message and
+//     leave the list cache stale. Mark the cache stale regardless of
+//     which pane now owns focus.
+//  3. origin=detail, inactive pane, matching gen → apply directly
+//     to dm so its status and component refetch still land.
 //
-// Without case (3), a "close issue A in detail → jump to issue B
+// Without case (2), a "close issue A in detail → jump to issue B
 // before the close completes" sequence would update neither A's UI
 // (it's gone) nor any cache, and the list rows would stay stale
 // until an unrelated SSE event happened to refresh them.
@@ -614,11 +612,6 @@ func (m Model) routeMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		return m, withConnGen(cmd, m.connGen)
 	}
 	if mut.origin == "detail" {
-		if !m.detailIsActive() {
-			var cmd tea.Cmd
-			m.detail, cmd = m.detail.applyMutation(mut, m.api)
-			return m, withConnGen(cmd, m.connGen)
-		}
 		if mut.gen != m.detail.gen {
 			// Stale-to-current-detail: the original UI is gone but
 			// the underlying data still changed. Mark the list cache
@@ -633,6 +626,11 @@ func (m Model) routeMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 				return m, debouncedRefetch(refetchDebounce)
 			}
 			return m, nil
+		}
+		if !m.detailIsActive() {
+			var cmd tea.Cmd
+			m.detail, cmd = m.detail.applyMutation(mut, m.api)
+			return m, withConnGen(cmd, m.connGen)
 		}
 	}
 	next, cmd := m.routeMutationToActivePane(mut)
