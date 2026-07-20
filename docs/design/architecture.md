@@ -68,10 +68,12 @@ runtime files, or logs. Clients discover a running daemon by computing the
 a daemon only if none is live.
 
 The embedded service is listener-free. Its host application owns the network
-listener, TLS, signal handling, and process shutdown, and must choose either a
-kata bearer token or an explicit trusted caller-authentication boundary. The
-service owns its configured storage handle and its federation, GitHub sync, and
-timed-claim background workers.
+listener, TLS, signal handling, and process shutdown, and must choose a kata
+bearer token, an explicit trusted caller-authentication boundary, or the
+host-owned access-controller contract. The access contract supplies identity in
+process, authorizes the matched operation, and revalidates long-lived responses
+without defining the host's role model. The service owns its configured storage
+handle and its federation, GitHub sync, and timed-claim background workers.
 
 ## Project binding over current directory
 

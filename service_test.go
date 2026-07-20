@@ -88,7 +88,8 @@ func TestNewRejectsAmbiguousAuthenticationPolicy(t *testing.T) {
 	})
 
 	assert.Nil(t, service)
-	assert.EqualError(t, err, "kata: auth token and trusted caller authentication are mutually exclusive")
+	assert.EqualError(t, err,
+		"kata: auth token, trusted caller authentication, and host access are mutually exclusive")
 }
 
 func TestServiceBearerAuthentication(t *testing.T) {
@@ -120,6 +121,7 @@ func TestServiceBearerAuthentication(t *testing.T) {
 
 type projectResponse struct {
 	Project struct {
+		ID   int64  `json:"id"`
 		Name string `json:"name"`
 	} `json:"project"`
 	Created bool `json:"created"`

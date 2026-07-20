@@ -47,8 +47,8 @@ type PostgresConfig struct {
 	AllowInsecureTransport bool
 }
 
-// AuthConfig defines the authentication boundary for a mounted Service.
-// Exactly one of Token or TrustCallerAuthentication must be selected.
+// AuthConfig defines Kata-owned authentication for a mounted Service. Select
+// exactly one of Token, TrustCallerAuthentication, or Config.Access.
 type AuthConfig struct {
 	// Token protects Kata's ordinary HTTP surface. Federation transport and
 	// claim actions retain their own scoped credential checks.
@@ -84,6 +84,9 @@ type Config struct {
 	Postgres   PostgresConfig
 	Auth       AuthConfig
 	GitHubSync GitHubSyncConfig
+	// Access selects host-supplied in-process authentication and authorization.
+	// It is mutually exclusive with Auth.
+	Access AccessController
 	// FederationCredentials isolates secret material from other Service
 	// instances. Nil selects a service-owned in-memory store.
 	FederationCredentials FederationCredentialStore
@@ -107,6 +110,7 @@ type Service struct {
 	gitHubSyncFetcher     githubsync.Fetcher
 	federationCredentials config.FederationCredentialStore
 	logger                *slog.Logger
+	hostAccessEnabled     bool
 	lifetimeCtx           context.Context
 	lifetimeCancel        context.CancelFunc
 	handlerWG             sync.WaitGroup
@@ -130,11 +134,14 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return nil, errors.New("kata: storage DSN is required")
 	}
-	if strings.TrimSpace(cfg.Auth.Token) == "" && !cfg.Auth.TrustCallerAuthentication {
+	usesAccess := cfg.Access != nil
+	usesToken := strings.TrimSpace(cfg.Auth.Token) != ""
+	usesTrustedCaller := cfg.Auth.TrustCallerAuthentication
+	if !usesAccess && !usesToken && !usesTrustedCaller {
 		return nil, errors.New("kata: auth token is required unless caller authentication is explicitly trusted")
 	}
-	if strings.TrimSpace(cfg.Auth.Token) != "" && cfg.Auth.TrustCallerAuthentication {
-		return nil, errors.New("kata: auth token and trusted caller authentication are mutually exclusive")
+	if boolCount(usesAccess, usesToken, usesTrustedCaller) != 1 {
+		return nil, errors.New("kata: auth token, trusted caller authentication, and host access are mutually exclusive")
 	}
 	gitHubSyncConfig, err := resolveGitHubSyncConfig(cfg.GitHubSync)
 	if err != nil {
@@ -196,6 +203,10 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		}
 		gitHubSyncFetcher = factory(gitHubSyncConfig)
 	}
+	var hostAccess daemon.HostAccessController
+	if cfg.Access != nil {
+		hostAccess = hostAccessControllerAdapter{controller: cfg.Access}
+	}
 	server := daemon.NewServer(daemon.ServerConfig{
 		DB:                    store,
 		StartedAt:             startedAt,
@@ -207,6 +218,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		GitHubSyncWake:        wakeGitHubSync,
 		Hooks:                 hookSink,
 		Auth:                  config.AuthConfig{Token: cfg.Auth.Token},
+		HostAccess:            hostAccess,
 		Logger:                logger,
 	})
 
@@ -220,6 +232,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		gitHubSyncFetcher:     gitHubSyncFetcher,
 		federationCredentials: federationCredentials,
 		logger:                logger,
+		hostAccessEnabled:     cfg.Access != nil,
 		lifetimeCtx:           lifetimeCtx,
 		lifetimeCancel:        lifetimeCancel,
 		closeDone:             make(chan struct{}),
@@ -264,7 +277,53 @@ func (s *Service) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		stopLifetimeCancel()
 		cancel()
 	}()
+	if principal, ok := principalFromContext(requestCtx); s.hostAccessEnabled && ok {
+		requestCtx = daemon.WithPrincipal(requestCtx, daemon.Principal{
+			Kind: daemon.PrincipalHost, Subject: principal.Subject, Actor: principal.Actor,
+		})
+	}
 	s.server.Handler().ServeHTTP(w, r.WithContext(requestCtx))
+}
+
+func boolCount(values ...bool) int {
+	count := 0
+	for _, value := range values {
+		if value {
+			count++
+		}
+	}
+	return count
+}
+
+type hostAccessControllerAdapter struct {
+	controller AccessController
+}
+
+func (a hostAccessControllerAdapter) Authorize(
+	ctx context.Context,
+	request daemon.HostAccessRequest,
+) (daemon.HostAccessDecision, error) {
+	if a.controller == nil {
+		return daemon.HostAccessDecision{}, nil
+	}
+	decision, err := a.controller.Authorize(ctx, AccessRequest{
+		Principal: Principal{Subject: request.Subject, Actor: request.Actor},
+		Operation: Operation{
+			ID: request.Operation.ID, Method: request.Operation.Method, Path: request.Operation.Path,
+			PathParams: request.Operation.PathParams,
+		},
+	})
+	if errors.Is(err, ErrAccessDenied) {
+		return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+	}
+	if err != nil {
+		return daemon.HostAccessDecision{}, err
+	}
+	var revalidate func(context.Context) error
+	if decision.Lease != nil {
+		revalidate = decision.Lease.Revalidate
+	}
+	return daemon.HostAccessDecision{Revalidate: revalidate}, nil
 }
 
 // Run executes Kata's federation, GitHub synchronization, and timed-claim

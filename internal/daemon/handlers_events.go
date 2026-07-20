@@ -244,6 +244,9 @@ func registerEventsStream(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := requireHostAccessLease(ctx); err != nil {
+			return nil, err
+		}
 
 		return &huma.StreamResponse{
 			Body: func(ctx huma.Context) {
@@ -304,6 +307,9 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 		return
 	}
 	if resetTo > 0 {
+		if revalidateHostAccess(ctx) != nil {
+			return
+		}
 		writeResetFrame(w, resetTo)
 		flusher.Flush()
 		return
@@ -317,6 +323,9 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 	}
 
 	if len(rows) == sseDrainCap+1 {
+		if revalidateHostAccess(ctx) != nil {
+			return
+		}
 		writeResetFrame(w, hwm)
 		flusher.Flush()
 		return
@@ -324,6 +333,9 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 
 	lastSent := cursor
 	for _, ev := range rows {
+		if revalidateHostAccess(ctx) != nil {
+			return
+		}
 		writeEventFrame(w, ev)
 		flusher.Flush()
 		lastSent = ev.ID
@@ -423,6 +435,9 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if revalidateHostAccess(ctx) != nil {
+				return
+			}
 			if _, err := io.WriteString(deps.w, ": keepalive\n\n"); err != nil {
 				return
 			}
@@ -433,6 +448,9 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 			}
 			switch msg.Kind {
 			case "reset":
+				if revalidateHostAccess(ctx) != nil {
+					return
+				}
 				writeResetFrame(deps.w, msg.ResetID)
 				deps.flusher.Flush()
 				return
@@ -452,6 +470,9 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 					return
 				}
 				if resetTo > 0 {
+					if revalidateHostAccess(ctx) != nil {
+						return
+					}
 					writeResetFrame(deps.w, resetTo)
 					deps.flusher.Flush()
 					return
@@ -472,6 +493,9 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 						return
 					}
 					for _, ev := range rows {
+						if revalidateHostAccess(ctx) != nil {
+							return
+						}
 						writeEventFrame(deps.w, ev)
 						deps.flusher.Flush()
 						lastSent = ev.ID

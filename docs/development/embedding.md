@@ -110,8 +110,12 @@ handle. It is safe to call more than once.
 - Set `Auth.TrustCallerAuthentication` to `true` only when trusted middleware
   already authenticates every request before it reaches `service.Handler()`.
   Never expose that handler directly on an untrusted listener.
+- Set `Config.Access` when the host owns both identity and per-operation
+  authorization. The host middleware attaches an authenticated
+  `kata.Principal` in process with `kata.WithPrincipal`; Kata never accepts
+  that principal from a network header.
 
-Construction fails when neither policy is selected or when both are set. The
+Construction fails when no policy is selected or when policies are combined. The
 explicit choice prevents an embedded service from accidentally inheriting the
 standalone daemon's local-user trust boundary.
 
@@ -119,6 +123,56 @@ The lifecycle example deliberately binds to loopback. To accept remote clients,
 use `server.ListenAndServeTLS(certFile, keyFile)` with a valid certificate or
 mount the handler behind a TLS-terminating reverse proxy. Never send the bearer
 token over plaintext non-loopback HTTP.
+
+## Host-owned access
+
+`AccessController` is the fine-grained embedding seam. Kata calls it after a
+route matches and before request decoding or handler work. The request contains
+the opaque authenticated subject, the actor snapshot used for new event and
+projection rows, and the matched operation ID, method, path template, and path
+parameters. It deliberately contains no application roles or tenant model.
+
+An embedding host typically mounts the service behind its ordinary session or
+credential middleware:
+
+```go
+service, err := kata.New(ctx, kata.Config{
+	DSN:    "/var/lib/example-app/kata.db",
+	Access: applicationAccessController,
+})
+if err != nil {
+	return err
+}
+
+handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	principal, err := authenticateApplicationRequest(r)
+	if err != nil {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	ctx := kata.WithPrincipal(r.Context(), kata.Principal{
+		Subject: principal.StableID,
+		Actor:   principal.DisplayName,
+	})
+	service.Handler().ServeHTTP(w, r.WithContext(ctx))
+})
+```
+
+The controller returns `kata.ErrAccessDenied` for a rejected operation. Kata
+answers with a generic not-found envelope so the response does not confirm that
+a protected resource exists. Other controller failures return a bounded
+service-unavailable envelope without exposing the underlying error.
+
+Long-lived operations require an `AccessLease` in the successful decision.
+Kata revalidates that lease before each event or heartbeat; a failed
+revalidation closes the stream before more protected data is written. Bounded
+requests may return a decision with no lease.
+
+The host-supplied actor always replaces an actor in request JSON. This keeps
+audit attribution tied to the authenticated principal rather than caller input.
+`Auth.TrustCallerAuthentication` preserves the older all-or-nothing trusted
+middleware mode; use `Config.Access` when projects or operations need distinct
+authorization decisions.
 
 ## Storage and PostgreSQL policy
 

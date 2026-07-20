@@ -28,12 +28,16 @@ const (
 	// header (or its value is empty). Writes against this principal are
 	// rejected; reads pass through.
 	PrincipalTrustedProxyAbsent PrincipalKind = "trusted_proxy_absent"
+	// PrincipalHost is supplied in process by a mounted service's host access
+	// adapter. It never comes from a network header.
+	PrincipalHost PrincipalKind = "host"
 )
 
 // Principal is the request-local identity derived by auth middleware.
 type Principal struct {
 	Kind    PrincipalKind
 	Actor   string
+	Subject string
 	TokenID int64
 	Name    *string
 }

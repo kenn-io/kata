@@ -73,6 +73,10 @@ type ServerConfig struct {
 	// state for /health. Nil means semantic search is disabled, in which case
 	// the health response omits the embeddings block entirely.
 	ReconcilerHealth func() ReconcilerHealth
+
+	// HostAccess enables in-process authentication and authorization supplied
+	// by a mounting application. It is nil for the standalone daemon.
+	HostAccess HostAccessController
 }
 
 // authPolicy returns the resolved bearer-auth policy in the form the
@@ -160,10 +164,11 @@ func NewServer(cfg ServerConfig) *Server {
 	// envelope shape, so we must disable the transform.
 	humaConfig.CreateHooks = nil
 	humaAPI := huma.NewAPI(humaConfig, api.WrapErrorAdapter(humago.NewAdapter(mux, "")))
+	withHostAccess(humaAPI, cfg.HostAccess)
 
 	s := &Server{cfg: cfg, api: humaAPI}
 	registerRoutes(humaAPI, mux, cfg)
-	registerOpenAPIYAML(mux)
+	registerOpenAPIYAML(mux, cfg.HostAccess)
 	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
 	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 
@@ -201,8 +206,14 @@ func (s *Server) API() huma.API { return s.api }
 // owned by the caller.
 func (s *Server) Close() error { return nil }
 
-func registerOpenAPIYAML(mux *http.ServeMux) {
-	mux.HandleFunc(http.MethodGet+" /openapi.yaml", func(w http.ResponseWriter, _ *http.Request) {
+func registerOpenAPIYAML(mux *http.ServeMux, hostAccess HostAccessController) {
+	mux.HandleFunc(http.MethodGet+" /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+		if !authorizeHostHTTP(w, r, hostAccess, HostOperation{
+			ID: "openAPI", Method: http.MethodGet, Path: "/openapi.yaml",
+			PathParams: map[string]string{},
+		}) {
+			return
+		}
 		out, err := OpenAPIYAML()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
