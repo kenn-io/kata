@@ -140,15 +140,19 @@ Kata asks again with the expanded scope before returning or changing protected
 data. Controllers should therefore make retry-safe decisions from the complete
 request rather than treating a call as a one-time notification. Global
 operations set `AllProjects` explicitly. Operations such as purge, close,
-imports, ready selection, UID-prefix lookup, and event feeds also require
-`AllProjects` because their results or side effects can depend on relationships
-outside the project named in the URL. The request deliberately contains no
-application roles or tenant model.
+imports, ready selection, UID-prefix lookup, event feeds, close audits, and
+project digests also require `AllProjects` because their results or side effects
+can depend on relationships outside the project named in the URL. The request
+deliberately contains no application roles or tenant model.
 
 For lease operations, Kata derives an opaque holder key from the stable
 `Principal.Subject`; a request-provided `holder` cannot select or impersonate
-another mounted caller. `Principal.Actor` remains the human-readable audit
-snapshot for replica setup and other mutations.
+another mounted caller. Subject bytes are compared exactly after rejecting
+empty or whitespace-only values, so the embedding host must provide one
+canonical subject representation. Subject ownership remains distinct when a
+spoke forwards a lease through its shared federation identity.
+`Principal.Actor` remains the human-readable audit snapshot for replica setup
+and other mutations.
 
 An embedding host typically mounts the service behind its ordinary session or
 credential middleware:

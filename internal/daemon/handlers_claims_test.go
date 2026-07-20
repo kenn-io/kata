@@ -964,9 +964,9 @@ func TestPendingClaimOfflineAcquireDuplicateReturnsExistingRequest(t *testing.T)
 	var n int
 	require.NoError(t, spoke.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM pending_claim_requests
-		 WHERE issue_uid = ? AND holder = ? AND holder_instance_uid = ? AND client_kind = ?
+		 WHERE issue_uid = ? AND holder = ? AND holder_instance_uid = ?
 		   AND rejected_at IS NULL AND resolved_at IS NULL`,
-		issue.UID, "tester", spoke.DB.InstanceUID(), "cli").Scan(&n))
+		issue.UID, "tester", spoke.DB.InstanceUID()).Scan(&n))
 	assert.Equal(t, 1, n)
 }
 

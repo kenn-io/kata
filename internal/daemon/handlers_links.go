@@ -78,6 +78,10 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if err != nil {
 			return nil, err
 		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{to.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
 		if err := requireLinkTargetAddable(ctx, cfg.DB, in.ProjectID, to); err != nil {
 			return nil, err
 		}

@@ -88,10 +88,13 @@ func qualifiedID(projectName, shortID string) string {
 // as an anti-fishing guard), link targets may live in any project: a bare
 // short_id resolves in the subject issue's project, a qualified
 // "project#short_id" in the named project, and a 26-char ULID globally. A
-// miss is a plain issue_not_found — it means "not found anywhere", and
-// single-token auth makes that no leak.
+// Standalone misses use issue_not_found. Mounted misses use the same generic
+// not_found response as an access denial so target state is not an oracle.
 func resolveLinkTargetRef(ctx context.Context, store db.Storage, subjectProjectID int64, ref string, include db.IncludeDeleted) (db.Issue, error) {
 	notFound := api.NewError(404, "issue_not_found", "issue not found", "", nil)
+	if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); mounted {
+		notFound = api.NewError(404, "not_found", "resource not found", "", nil)
+	}
 	parsed, err := shortid.Parse(ref)
 	if err != nil {
 		return db.Issue{}, notFound

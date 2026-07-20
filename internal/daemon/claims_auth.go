@@ -65,9 +65,12 @@ func resolveClaimPrincipal(
 }
 
 func hostClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody, subject string) claimPrincipal {
-	digest := sha256.Sum256([]byte("kata:host-claim-holder:v1\x00" + strings.TrimSpace(subject)))
-	return localClaimPrincipalWithHolder(cfg, body,
-		"host:"+base64.RawURLEncoding.EncodeToString(digest[:]))
+	return localClaimPrincipalWithHolder(cfg, body, hostClaimHolder(subject))
+}
+
+func hostClaimHolder(subject string) string {
+	digest := sha256.Sum256([]byte("kata:host-claim-holder:v1\x00" + subject))
+	return "host:" + base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
 func resolveEnrollmentClaimPrincipal(

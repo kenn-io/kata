@@ -14,8 +14,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+func TestBoundSpokeClaimPrincipalPreservesLocalOwnerIdentity(t *testing.T) {
+	binding := db.FederationBinding{Role: db.FederationRoleSpoke, Actor: "spoke-actor"}
+	first := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
+		Holder: hostClaimHolder("user-one"), ClientKind: "cli",
+	})
+	second := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
+		Holder: hostClaimHolder("user-two"), ClientKind: "cli",
+	})
+
+	assert.Equal(t, "spoke-actor", first.Holder)
+	assert.Equal(t, "spoke-actor", second.Holder)
+	assert.NotEqual(t, first.ClientKind, second.ClientKind)
+}
 
 func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")

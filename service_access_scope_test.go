@@ -57,7 +57,8 @@ func TestServiceAccessControllerScopesGlobalAndFilteredReads(t *testing.T) {
 	assert.False(t, filtered.Operation.AllProjects)
 	assert.Empty(t, global.Operation.ProjectIDs)
 	assert.True(t, global.Operation.AllProjects)
-	assert.Equal(t, []int64{project.Project.ID}, audit.Operation.ProjectIDs)
+	assert.Empty(t, audit.Operation.ProjectIDs)
+	assert.True(t, audit.Operation.AllProjects)
 }
 
 func TestServiceAccessControllerScopesFederationEnrollmentBody(t *testing.T) {
@@ -156,6 +157,7 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 		{http.MethodPost, "/api/v1/projects/" + projectID + "/imports"},
 		{http.MethodGet, "/api/v1/projects/" + projectID + "/events"},
 		{http.MethodGet, "/api/v1/events/stream?project_id=" + projectID},
+		{http.MethodGet, "/api/v1/projects/" + projectID + "/digest?since=2026-01-01T00:00:00Z"},
 	}
 	for _, tc := range requests {
 		request, err := http.NewRequest(tc.method, server.URL+tc.path, bytes.NewBufferString(`{}`))
@@ -178,7 +180,7 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 	requireAll := map[string]bool{
 		"purgeIssue": true, "purgeProject": true, "closeIssue": true,
 		"readyIssues": true, "showIssueByUID": true, "importIssues": true,
-		"pollProjectEvents": true, "streamEvents": true,
+		"pollProjectEvents": true, "streamEvents": true, "digestProject": true,
 	}
 	seen := map[string]int{}
 	for _, request := range controller.snapshot() {
@@ -191,7 +193,7 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 	assert.Equal(t, map[string]int{
 		"purgeIssue": 1, "purgeProject": 1, "closeIssue": 1,
 		"readyIssues": 1, "showIssueByUID": 2, "importIssues": 1,
-		"pollProjectEvents": 1, "streamEvents": 1,
+		"pollProjectEvents": 1, "streamEvents": 1, "digestProject": 1,
 	}, seen)
 }
 
@@ -204,8 +206,11 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		subject := r.Header.Get("X-Test-Subject")
-		if subject == "" {
+		switch subject {
+		case "":
 			subject = "user-one"
+		case "padded":
+			subject = " user-one "
 		}
 		principal := kata.Principal{Subject: subject, Actor: "Example User"}
 		service.Handler().ServeHTTP(w, r.WithContext(kata.WithPrincipal(r.Context(), principal)))
@@ -234,7 +239,7 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 		bytes.NewBufferString(`{"holder":"`+acquired.Holder.Holder+`","client_kind":"cli"}`))
 	require.NoError(t, err)
 	impersonation.Header.Set("Content-Type", "application/json")
-	impersonation.Header.Set("X-Test-Subject", "user-two")
+	impersonation.Header.Set("X-Test-Subject", "padded")
 	impersonationResponse, err := server.Client().Do(impersonation)
 	require.NoError(t, err)
 	_ = impersonationResponse.Body.Close()
@@ -249,6 +254,54 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ownerResponse.Body.Close() }()
 	assert.Equal(t, http.StatusOK, ownerResponse.StatusCode)
+}
+
+func TestServiceAccessControllerConcealsUnauthorizedLinkTargetState(t *testing.T) {
+	controller := &recordingAccessController{}
+	_, server := newAccessTestServer(t, controller)
+	sourceProject := createProject(t, server.URL, "source-project")
+	activeProject := createProject(t, server.URL, "active-project")
+	archivedProject := createProject(t, server.URL, "archived-project")
+	source := createAccessIssue(t, server, sourceProject.Project.ID, "source issue")
+	active := createAccessIssue(t, server, activeProject.Project.ID, "active target")
+	archived := createAccessIssue(t, server, archivedProject.Project.ID, "archived target")
+
+	archiveRequest, err := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(archivedProject.Project.ID, 10)+"?actor=ignored&force=true", nil)
+	require.NoError(t, err)
+	archiveResponse, err := server.Client().Do(archiveRequest)
+	require.NoError(t, err)
+	_ = archiveResponse.Body.Close()
+	require.Equal(t, http.StatusOK, archiveResponse.StatusCode)
+
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.ID == "createLink" &&
+			(containsInt64(request.Operation.ProjectIDs, activeProject.Project.ID) ||
+				containsInt64(request.Operation.ProjectIDs, archivedProject.Project.ID)) {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+	linkPath := server.URL + "/api/v1/projects/" +
+		strconv.FormatInt(sourceProject.Project.ID, 10) + "/issues/" + source.Issue.ShortID + "/links"
+	for _, target := range []string{active.Issue.UID, archived.Issue.UID, "01HZNQ7VFPK1XGD8R5MABCD4EZ"} {
+		request, err := http.NewRequest(http.MethodPost, linkPath, bytes.NewBufferString(
+			`{"actor":"ignored","type":"related","to_ref":"`+target+`"}`))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := server.Client().Do(request)
+		require.NoError(t, err)
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&body))
+		_ = response.Body.Close()
+		assert.Equal(t, http.StatusNotFound, response.StatusCode)
+		assert.Equal(t, map[string]any{
+			"status": float64(http.StatusNotFound),
+			"error": map[string]any{
+				"code": "not_found", "message": "resource not found",
+			},
+		}, body)
+	}
 }
 
 func TestServiceAccessControllerSuppliesFederationReplicaActor(t *testing.T) {

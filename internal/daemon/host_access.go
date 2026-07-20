@@ -168,7 +168,6 @@ func hostAccessResolvedByHandler(operationID string) bool {
 	case "mergeProject",
 		"moveIssue",
 		"listAllIssues",
-		"auditCloses",
 		"createFederationEnrollment":
 		return true
 	default:
@@ -183,7 +182,7 @@ func hostAccessResolvedByHandler(operationID string) bool {
 func hostAccessRequiresAllProjects(operationID string) bool {
 	switch operationID {
 	case "purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID",
-		"importIssues", "pollProjectEvents", "streamEvents":
+		"importIssues", "pollProjectEvents", "streamEvents", "auditCloses", "digestProject":
 		return true
 	default:
 		return false
