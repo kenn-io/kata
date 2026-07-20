@@ -77,6 +77,10 @@ func authorizeClaimStatusRead(
 	authz string,
 ) error {
 	if cfg.Auth.Token == "" {
+		if cfg.HostAccess != nil && hasBearerHeader(authz) {
+			_, err := authorizeFederationRequest(ctx, cfg.DB, authz, projectID, "claim")
+			return err
+		}
 		if cfg.InsecureReadonly {
 			if !hasBearerHeader(authz) {
 				return localAuthError(cfg, authz)

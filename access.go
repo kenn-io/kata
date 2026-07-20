@@ -24,6 +24,14 @@ type Operation struct {
 	Method     string
 	Path       string
 	PathParams map[string]string
+
+	// ProjectIDs and ProjectUIDs identify every project whose data the
+	// operation may read or change. AllProjects is true when an omitted filter
+	// selects the global project set. Values are parsed and validated before
+	// authorization; cross-project operations include both sides.
+	ProjectIDs  []int64
+	ProjectUIDs []string
+	AllProjects bool
 }
 
 // AccessRequest is the complete input to one host authorization decision.

@@ -122,6 +122,7 @@ func TestServiceBearerAuthentication(t *testing.T) {
 type projectResponse struct {
 	Project struct {
 		ID   int64  `json:"id"`
+		UID  string `json:"uid"`
 		Name string `json:"name"`
 	} `json:"project"`
 	Created bool `json:"created"`

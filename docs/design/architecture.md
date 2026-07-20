@@ -71,9 +71,12 @@ The embedded service is listener-free. Its host application owns the network
 listener, TLS, signal handling, and process shutdown, and must choose a kata
 bearer token, an explicit trusted caller-authentication boundary, or the
 host-owned access-controller contract. The access contract supplies identity in
-process, authorizes the matched operation, and revalidates long-lived responses
-without defining the host's role model. The service owns its configured storage
-handle and its federation, GitHub sync, and timed-claim background workers.
+process, authorizes the matched operation and its complete validated project
+scope, and revalidates long-lived responses without defining the host's role
+model. Kata-managed project-scoped federation credentials continue to
+authenticate their own transport and lease routes. The service owns its
+configured storage handle and its federation, GitHub sync, and timed-claim
+background workers.
 Hosts with an external catalog can idempotently ensure and archive projects by
 stable UID through in-process application methods; they never need to write
 Kata tables or loop back through the mounted HTTP handler.

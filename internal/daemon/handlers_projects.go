@@ -180,6 +180,11 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.Body.SourceProjectID == 0 {
 			return nil, api.NewError(400, "validation", "source_project_id required", "", nil)
 		}
+		var err error
+		ctx, err = authorizeHostProjectScope(ctx, []int64{in.Body.SourceProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
 		targetName := strings.TrimSpace(in.Body.TargetName)
 		var namePtr *string
 		if targetName != "" {

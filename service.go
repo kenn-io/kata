@@ -310,7 +310,10 @@ func (a hostAccessControllerAdapter) Authorize(
 		Principal: Principal{Subject: request.Subject, Actor: request.Actor},
 		Operation: Operation{
 			ID: request.Operation.ID, Method: request.Operation.Method, Path: request.Operation.Path,
-			PathParams: request.Operation.PathParams,
+			PathParams:  request.Operation.PathParams,
+			ProjectIDs:  append([]int64(nil), request.Operation.ProjectIDs...),
+			ProjectUIDs: append([]string(nil), request.Operation.ProjectUIDs...),
+			AllProjects: request.Operation.AllProjects,
 		},
 	})
 	if errors.Is(err, ErrAccessDenied) {

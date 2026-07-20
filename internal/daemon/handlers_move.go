@@ -46,6 +46,10 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 		if in.Body.ToProjectUID == "" {
 			return nil, api.NewError(400, "validation", "to_project_uid must be non-empty", "", nil)
 		}
+		ctx, err = authorizeHostProjectScope(ctx, nil, []string{in.Body.ToProjectUID}, false)
+		if err != nil {
+			return nil, err
+		}
 		rev, err := parseIfMatchRevision(in.IfMatch)
 		if err != nil {
 			return nil, err

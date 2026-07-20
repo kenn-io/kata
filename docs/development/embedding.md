@@ -127,10 +127,15 @@ token over plaintext non-loopback HTTP.
 ## Host-owned access
 
 `AccessController` is the fine-grained embedding seam. Kata calls it after a
-route matches and before request decoding or handler work. The request contains
-the opaque authenticated subject, the actor snapshot used for new event and
-projection rows, and the matched operation ID, method, path template, and path
-parameters. It deliberately contains no application roles or tenant model.
+route matches and before the operation reads or changes Kata data. The request
+contains the opaque authenticated subject, the actor snapshot used for new
+event and projection rows, and the matched operation ID, method, path template,
+and path parameters. `Operation.ProjectIDs`, `ProjectUIDs`, and `AllProjects`
+carry the validated effective project scope. Cross-project operations include
+both projects; omitting the project filter from the event stream sets
+`AllProjects` instead of silently broadening an empty scope. Body- and
+query-selected projects are decoded and validated before this decision. The
+request deliberately contains no application roles or tenant model.
 
 An embedding host typically mounts the service behind its ordinary session or
 credential middleware:
@@ -173,6 +178,13 @@ audit attribution tied to the authenticated principal rather than caller input.
 `Auth.TrustCallerAuthentication` preserves the older all-or-nothing trusted
 middleware mode; use `Config.Access` when projects or operations need distinct
 authorization decisions.
+
+Federation transport and lease routes may authenticate with Kata-managed,
+project-scoped bearer credentials. When such a request has no in-process host
+principal, Kata validates the scoped credential in the route and does not call
+the host controller. The outer server must preserve the `Authorization` header
+on those routes. A request without either an in-process principal or a scoped
+bearer credential remains unauthenticated.
 
 ## Host-managed projects
 

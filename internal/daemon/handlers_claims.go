@@ -82,7 +82,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err := requireHubClaimBinding(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		actor := strings.TrimSpace(in.Body.Actor)
+		actor := actorFor(ctx, strings.TrimSpace(in.Body.Actor))
 		if principal.IdentityToken {
 			actor = principal.Holder
 		}

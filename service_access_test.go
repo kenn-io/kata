@@ -21,10 +21,11 @@ import (
 )
 
 type recordingAccessController struct {
-	mu       sync.Mutex
-	requests []kata.AccessRequest
-	err      error
-	lease    kata.AccessLease
+	mu        sync.Mutex
+	requests  []kata.AccessRequest
+	err       error
+	lease     kata.AccessLease
+	authorize func(kata.AccessRequest) error
 }
 
 func (c *recordingAccessController) Authorize(
@@ -37,6 +38,9 @@ func (c *recordingAccessController) Authorize(
 	decision := kata.AccessDecision{}
 	if request.Operation.ID == "streamEvents" {
 		decision.Lease = c.lease
+	}
+	if c.authorize != nil {
+		return decision, c.authorize(request)
 	}
 	return decision, c.err
 }
@@ -103,6 +107,7 @@ func TestServiceAccessControllerDeniesWithoutDisclosingProjectData(t *testing.T)
 		Method:     http.MethodGet,
 		Path:       "/api/v1/projects/{project_id}",
 		PathParams: map[string]string{"project_id": "42"},
+		ProjectIDs: []int64{42},
 	}, controller.snapshot()[0].Operation)
 }
 
@@ -342,4 +347,315 @@ func TestServiceAccessControllerProtectsTheOpenAPIDocument(t *testing.T) {
 		ID: "openAPI", Method: http.MethodGet, Path: "/openapi.yaml",
 		PathParams: map[string]string{},
 	}, requests[0].Operation)
+}
+
+func TestServiceAccessControllerAuthorizesBothProjectsBeforeMerge(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		service.Handler().ServeHTTP(w, r.WithContext(kata.WithPrincipal(r.Context(), principal)))
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	target := createProject(t, server.URL, "target-project")
+	source := createProject(t, server.URL, "source-project")
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.ID == "mergeProject" &&
+			containsInt64(request.Operation.ProjectIDs, source.Project.ID) {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+
+	body := bytes.NewBufferString(`{"source_project_id":` +
+		strconv.FormatInt(source.Project.ID, 10) + `}`)
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(target.Project.ID, 10)+"/merge", body)
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusNotFound, response.StatusCode)
+
+	requests := controller.snapshot()
+	mergeRequest := requests[len(requests)-1]
+	assert.Equal(t, "mergeProject", mergeRequest.Operation.ID)
+	assert.ElementsMatch(t, []int64{target.Project.ID, source.Project.ID}, mergeRequest.Operation.ProjectIDs)
+}
+
+func TestServiceAccessControllerAuthorizesMoveDestination(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		service.Handler().ServeHTTP(w, r.WithContext(kata.WithPrincipal(r.Context(), principal)))
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	source := createProject(t, server.URL, "source-project")
+	target := createProject(t, server.URL, "target-project")
+	issueBody := bytes.NewBufferString(`{"actor":"ignored","title":"stays in source"}`)
+	issueResponse, err := http.Post(server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(source.Project.ID, 10)+"/issues", "application/json", issueBody)
+	require.NoError(t, err)
+	defer func() { _ = issueResponse.Body.Close() }()
+	require.Equal(t, http.StatusOK, issueResponse.StatusCode)
+	var created struct {
+		Issue struct {
+			ShortID  string `json:"short_id"`
+			Revision int64  `json:"revision"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.NewDecoder(issueResponse.Body).Decode(&created))
+
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.ID == "moveIssue" &&
+			containsString(request.Operation.ProjectUIDs, target.Project.UID) {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+	moveBody := bytes.NewBufferString(`{"actor":"ignored","to_project_uid":"` + target.Project.UID + `"}`)
+	moveRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(source.Project.ID, 10)+"/issues/"+created.Issue.ShortID+"/actions/move", moveBody)
+	require.NoError(t, err)
+	moveRequest.Header.Set("Content-Type", "application/json")
+	moveRequest.Header.Set("If-Match", `"rev-`+strconv.FormatInt(created.Issue.Revision, 10)+`"`)
+	moveResponse, err := server.Client().Do(moveRequest)
+	require.NoError(t, err)
+	defer func() { _ = moveResponse.Body.Close() }()
+	assert.Equal(t, http.StatusNotFound, moveResponse.StatusCode)
+
+	requests := controller.snapshot()
+	request := requests[len(requests)-1]
+	assert.Equal(t, "moveIssue", request.Operation.ID)
+	assert.Equal(t, []int64{source.Project.ID}, request.Operation.ProjectIDs)
+	assert.Equal(t, []string{target.Project.UID}, request.Operation.ProjectUIDs)
+}
+
+func TestServiceAccessControllerAuthorizesEffectiveEventStreamScope(t *testing.T) {
+	controller := &recordingAccessController{lease: &revocableAccessLease{}}
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.ID == "streamEvents" {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		service.Handler().ServeHTTP(w, r.WithContext(kata.WithPrincipal(r.Context(), principal)))
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	project := createProject(t, server.URL, "example-project")
+
+	for _, path := range []string{
+		"/api/v1/events/stream?project_id=" + strconv.FormatInt(project.Project.ID, 10),
+		"/api/v1/events/stream",
+	} {
+		request, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+		require.NoError(t, err)
+		request.Header.Set("Accept", "text/event-stream")
+		response, err := server.Client().Do(request)
+		require.NoError(t, err)
+		_ = response.Body.Close()
+		assert.Equal(t, http.StatusNotFound, response.StatusCode)
+	}
+
+	requests := controller.snapshot()
+	require.GreaterOrEqual(t, len(requests), 3)
+	projectStream := requests[len(requests)-2].Operation
+	globalStream := requests[len(requests)-1].Operation
+	assert.Equal(t, []int64{project.Project.ID}, projectStream.ProjectIDs)
+	assert.False(t, projectStream.AllProjects)
+	assert.Empty(t, globalStream.ProjectIDs)
+	assert.True(t, globalStream.AllProjects)
+}
+
+func TestServiceAccessControllerPreservesScopedFederationAuthentication(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			r = r.WithContext(kata.WithPrincipal(r.Context(), principal))
+		}
+		service.Handler().ServeHTTP(w, r)
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	project := createProject(t, server.URL, "federated-project")
+	issueBody := bytes.NewBufferString(`{"actor":"ignored","title":"claimable issue"}`)
+	issueResponse, err := http.Post(server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/issues", "application/json", issueBody)
+	require.NoError(t, err)
+	defer func() { _ = issueResponse.Body.Close() }()
+	require.Equal(t, http.StatusOK, issueResponse.StatusCode)
+	var issue struct {
+		Issue struct {
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.NewDecoder(issueResponse.Body).Decode(&issue))
+
+	postJSON(t, server.Client(), server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/federation/enable",
+		`{"actor":"ignored"}`, nil)
+	var enrollment struct {
+		Token string `json:"token"`
+	}
+	postJSON(t, server.Client(), server.URL+"/api/v1/federation/enrollments",
+		`{"spoke_instance_uid":"01HZNQ7VFPK1XGD8R5MABCD4EA","project_id":`+
+			strconv.FormatInt(project.Project.ID, 10)+
+			`,"capabilities":"pull,claim","actor":"ignored"}`, &enrollment)
+	require.NotEmpty(t, enrollment.Token)
+
+	invalidMetadataRequest, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/federation/metadata", nil)
+	require.NoError(t, err)
+	invalidMetadataRequest.Header.Set("Authorization", "Bearer invalid-token")
+	invalidMetadataResponse, err := server.Client().Do(invalidMetadataRequest)
+	require.NoError(t, err)
+	defer func() { _ = invalidMetadataResponse.Body.Close() }()
+	assert.Equal(t, http.StatusForbidden, invalidMetadataResponse.StatusCode)
+
+	metadataRequest, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/federation/metadata", nil)
+	require.NoError(t, err)
+	metadataRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
+	metadataResponse, err := server.Client().Do(metadataRequest)
+	require.NoError(t, err)
+	defer func() { _ = metadataResponse.Body.Close() }()
+	assert.Equal(t, http.StatusOK, metadataResponse.StatusCode)
+
+	claimRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/issues/"+issue.Issue.ShortID+
+		"/lease/actions/acquire", bytes.NewBufferString(
+		`{"holder":"spoke-worker","client_kind":"cli","claim_kind":"hard"}`))
+	require.NoError(t, err)
+	claimRequest.Header.Set("Content-Type", "application/json")
+	claimRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
+	claimResponse, err := server.Client().Do(claimRequest)
+	require.NoError(t, err)
+	defer func() { _ = claimResponse.Body.Close() }()
+	assert.Equal(t, http.StatusOK, claimResponse.StatusCode)
+
+	statusRequest, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/issues/"+issue.Issue.ShortID+"/lease", nil)
+	require.NoError(t, err)
+	statusRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
+	statusResponse, err := server.Client().Do(statusRequest)
+	require.NoError(t, err)
+	defer func() { _ = statusResponse.Body.Close() }()
+	assert.Equal(t, http.StatusOK, statusResponse.StatusCode)
+
+	for _, request := range controller.snapshot() {
+		assert.NotEqual(t, "getFederationProjectMetadata", request.Operation.ID)
+		assert.NotEqual(t, "acquireIssueLease", request.Operation.ID)
+		assert.NotEqual(t, "getIssueLeaseStatus", request.Operation.ID)
+	}
+}
+
+func TestServiceAccessControllerSuppliesForceReleaseActor(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		service.Handler().ServeHTTP(w, r.WithContext(kata.WithPrincipal(r.Context(), principal)))
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	project := createProject(t, server.URL, "claim-project")
+	issueBody := bytes.NewBufferString(`{"actor":"ignored","title":"claimed issue"}`)
+	issueResponse, err := http.Post(server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/issues", "application/json", issueBody)
+	require.NoError(t, err)
+	defer func() { _ = issueResponse.Body.Close() }()
+	require.Equal(t, http.StatusOK, issueResponse.StatusCode)
+	var issue struct {
+		Issue struct {
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.NewDecoder(issueResponse.Body).Decode(&issue))
+	postJSON(t, server.Client(), server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/federation/enable",
+		`{"actor":"forged enable actor"}`, nil)
+
+	claimPath := server.URL + "/api/v1/projects/" + strconv.FormatInt(project.Project.ID, 10) +
+		"/issues/" + issue.Issue.ShortID + "/lease/actions/"
+	postJSON(t, server.Client(), claimPath+"acquire",
+		`{"holder":"local-worker","client_kind":"cli","claim_kind":"hard"}`, nil)
+	var released struct {
+		Event struct {
+			Actor string `json:"actor"`
+		} `json:"event"`
+	}
+	postJSON(t, server.Client(), claimPath+"force_release",
+		`{"actor":"forged audit actor","reason":"operator override"}`, &released)
+	assert.Equal(t, "Example User", released.Event.Actor)
+}
+
+func postJSON(t *testing.T, client *http.Client, url, body string, out any) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, url, bytes.NewBufferString(body))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	if out != nil {
+		require.NoError(t, json.NewDecoder(response.Body).Decode(out))
+	}
+}
+
+func containsInt64(values []int64, want int64) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
