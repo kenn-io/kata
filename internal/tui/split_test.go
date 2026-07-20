@@ -168,6 +168,47 @@ func TestSplit_SearchEnterWithNoResultsClearsDetail(t *testing.T) {
 	}
 }
 
+func TestStacked_SearchArrowNavigationDoesNotRetargetHiddenDetail(t *testing.T) {
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 40})
+	m.list.issues = []Issue{
+		{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "first row", Status: "open"},
+		{ProjectID: 7, UID: "01TEST-bbb2", ShortID: "bbb2", Title: "second row", Status: "open"},
+	}
+	m.list.cursor = 0
+	m.list.selectedUID = "01TEST-aaa1"
+	m.list.selectedProjectID = 7
+	seed := m.list.issues[0]
+	m.detail = detailModel{issue: &seed, scopePID: 7, gen: 41}
+	m.nextGen = m.detail.gen
+
+	m = openBarFromCmd(t, m, '/')
+	if m.input.preSplitDetailCaptured || m.input.preSplitDetail != nil {
+		t.Fatalf("stacked search captured split detail: %+v", m.input.preSplitDetail)
+	}
+	m, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if cmd != nil {
+		t.Fatalf("stacked search arrow returned unexpected detail command %T", cmd)
+	}
+	if m.input.searchFocus != searchFocusResults || m.list.selectedUID != "01TEST-bbb2" {
+		t.Fatalf("stacked results focus/selection = %v/%q, want results/bbb2",
+			m.input.searchFocus, m.list.selectedUID)
+	}
+	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.gen != 41 {
+		t.Fatalf("stacked hidden detail = %+v gen %d, want unchanged aaa1/gen 41", m.detail.issue, m.detail.gen)
+	}
+
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.input.kind != inputNone || m.list.selectedUID != "01TEST-aaa1" {
+		t.Fatalf("stacked cancel input/selection = %v/%q, want none/aaa1", m.input.kind, m.list.selectedUID)
+	}
+	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.gen != 41 {
+		t.Fatalf("stacked canceled detail = %+v gen %d, want unchanged aaa1/gen 41", m.detail.issue, m.detail.gen)
+	}
+}
+
 func TestSplit_SearchResultsRefetchRetargetsChangedHighlight(t *testing.T) {
 	m, cleanup := splitSearchTransitionFixture(t)
 	defer cleanup()
@@ -735,7 +776,25 @@ func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 	m.list.selectedUID = "01TEST-aaa1"
 	m.list.selectedProjectID = 7
 	seed := m.list.issues[0]
-	m.detail = detailModel{issue: &seed, scopePID: 7, gen: 41, loading: true}
+	childOne := Issue{ProjectID: 7, UID: "01TEST-ccc3", ShortID: "ccc3", Title: "child one", Status: "open"}
+	childTwo := Issue{ProjectID: 7, UID: "01TEST-ddd4", ShortID: "ddd4", Title: "child two", Status: "open"}
+	navIssue := Issue{ProjectID: 7, UID: "01TEST-nnn5", ShortID: "nnn5", Title: "prior nav", Status: "open"}
+	m.detail = detailModel{
+		issue:       &seed,
+		children:    []Issue{childOne, childTwo},
+		detailFocus: focusChildren,
+		loading:     true,
+		gen:         41,
+		activeTab:   tabLinks,
+		scroll:      7,
+		tabCursor:   2,
+		childCursor: 1,
+		navStack: []detailModel{{
+			issue: &navIssue, scopePID: 7, gen: 40,
+		}},
+		scopePID:    7,
+		tabExplicit: true,
+	}
 	m.nextGen = m.detail.gen
 
 	m = openBarFromCmd(t, m, '/')
@@ -746,7 +805,9 @@ func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 
 	completed := m.list.issues[0]
 	completed.Title = "older completed snapshot"
-	m, _ = stepModel(m, detailFetchedMsg{gen: 41, issue: &completed})
+	m, _ = stepModel(m, detailFetchedMsg{
+		gen: 41, issue: &completed, children: []Issue{childOne, childTwo},
+	})
 
 	m, toTargetCmd := updateModel(m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	if toTargetCmd == nil || m.detail.issue == nil || m.detail.issue.UID != "01TEST-bbb2" {
@@ -763,6 +824,14 @@ func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 	if newerGen <= 41 {
 		t.Fatalf("new live detail generation = %d, want newer than snapshot generation 41", newerGen)
 	}
+	newest := m.list.issues[0]
+	newest.Title = "newest live detail"
+	m, _ = stepModel(m, detailFetchedMsg{
+		gen: newerGen, issue: &newest, children: []Issue{childOne, childTwo},
+	})
+	m, _ = stepModel(m, commentsFetchedMsg{
+		gen: newerGen, comments: []CommentEntry{{ID: 9, Body: "newest live comment"}},
+	})
 
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m, cancelCmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
@@ -772,15 +841,19 @@ func TestSplit_SearchCancelPreservesNewerMatchingLiveDetail(t *testing.T) {
 	if m.detail.issue == nil || m.detail.issue.UID != "01TEST-aaa1" || m.detail.gen != newerGen {
 		t.Fatalf("detail after cancel = %+v gen %d, want newer live aaa1 gen %d", m.detail.issue, m.detail.gen, newerGen)
 	}
-	if m.detail.issue.Title != "loading detail" {
-		t.Fatalf("detail title after cancel = %q, want newer live shell", m.detail.issue.Title)
+	if m.detail.issue.Title != "newest live detail" || len(m.detail.comments) != 1 ||
+		m.detail.comments[0].Body != "newest live comment" {
+		t.Fatalf("detail content after cancel = %+v comments %+v, want newest live data", m.detail.issue, m.detail.comments)
 	}
-
-	newest := m.list.issues[0]
-	newest.Title = "newest live detail"
-	m, _ = stepModel(m, detailFetchedMsg{gen: newerGen, issue: &newest})
-	if m.detail.issue == nil || m.detail.issue.Title != "newest live detail" || m.detail.loading {
-		t.Fatalf("newer response result = detail %+v loading %v, want newest/non-loading", m.detail.issue, m.detail.loading)
+	if m.detail.detailFocus != focusChildren || m.detail.activeTab != tabLinks ||
+		m.detail.scroll != 7 || m.detail.tabCursor != 2 || m.detail.childCursor != 1 || !m.detail.tabExplicit {
+		t.Fatalf("restored presentation = focus %v tab %v scroll %d cursors %d/%d explicit %v",
+			m.detail.detailFocus, m.detail.activeTab, m.detail.scroll,
+			m.detail.tabCursor, m.detail.childCursor, m.detail.tabExplicit)
+	}
+	if len(m.detail.navStack) != 1 || m.detail.navStack[0].issue == nil ||
+		m.detail.navStack[0].issue.UID != "01TEST-nnn5" {
+		t.Fatalf("restored navigation stack = %+v, want prior nav issue", m.detail.navStack)
 	}
 }
 

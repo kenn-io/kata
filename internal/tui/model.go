@@ -1113,9 +1113,18 @@ func (m Model) restoreSearchDetailIfNeeded(
 			liveMatches := detailModelMatches(&m.detail, iss.UID, pid)
 			if liveMatches {
 				// Preserve the newer live generation so its outstanding responses
-				// remain eligible, but retain a mutation outcome that advanced only
-				// on the saved generation. A fresh live-generation refetch converges
-				// component data without allowing older snapshot requests to win.
+				// and fetched content remain eligible, while restoring the pre-search
+				// presentation/navigation state and any mutation outcome that advanced
+				// only on the saved generation. A fresh live-generation refetch
+				// converges component data without allowing older requests to win.
+				saved := cloneDetailModel(*snapshot)
+				m.detail.detailFocus = saved.detailFocus
+				m.detail.activeTab = saved.activeTab
+				m.detail.scroll = saved.scroll
+				m.detail.tabCursor = saved.tabCursor
+				m.detail.childCursor = saved.childCursor
+				m.detail.navStack = saved.navStack
+				m.detail.tabExplicit = saved.tabExplicit
 				if snapshot.status != "" {
 					m.detail.status = snapshot.status
 					m.detail.err = snapshot.err
@@ -2827,6 +2836,9 @@ func (m Model) dispatchListKey(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m = m.applyListViewportCache()
 	m.list, cmd = m.list.Update(msg, m.keymap, m.api, m.scope)
+	if m.layout != layoutSplit {
+		return m, withConnGen(cmd, m.connGen)
+	}
 	newPID, newUID, newHas := highlightedIdentity(m.list)
 	if prevHas == newHas && prevPID == newPID && prevUID == newUID {
 		return m, withConnGen(cmd, m.connGen)
