@@ -1013,6 +1013,64 @@ url = "`+srv.URL+`"
 	assert.Empty(t, url)
 }
 
+// TestResolveRemote_SymlinkedWorkspaceGitFailureRefused closes the symlink
+// bypass of the fail-closed path: the workspace is anchored through a symlink
+// whose lexical parents contain no .git, while the physical target is a nested
+// workspace inside a git repo with a committed override. When the tracked-
+// status query fails, worktree detection must resolve symlinks and still
+// recognize the repo — otherwise the committed override lands in the
+// "no repo → honor" branch and the bearer token is misrouted.
+func TestResolveRemote_SymlinkedWorkspaceGitFailureRefused(t *testing.T) {
+	srv := pingingServer(t)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "victim-global-token")
+	repo := testfix.InitGitRepo(t)
+	nested := filepath.Join(repo, "ws")
+	require.NoError(t, os.Mkdir(nested, 0o755)) //nolint:gosec // test fixture under TempDir
+	writeWorkspaceMarker(t, nested)
+	require.NoError(t, os.WriteFile(filepath.Join(nested, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+srv.URL+`"
+`), 0o600))
+	testfix.RunGit(t, repo, "add", "-f", "ws/.kata.local.toml")
+	testfix.RunGit(t, repo, "commit", "--quiet", "-m", "plant nested override")
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(nested, link))
+	stubGitRunner(t, failingGitRunner{err: errors.New("git unavailable")})
+
+	url, ok, err := resolveRemote(context.Background(), link)
+	require.Error(t, err,
+		"a symlinked workspace physically inside a git repo must not dodge the fail-closed path")
+	assert.Contains(t, err.Error(), ".kata.local.toml")
+	assert.False(t, ok)
+	assert.Empty(t, url)
+}
+
+// TestResolveRemote_SymlinkedNonRepoWorkspaceGitFailureHonored guards the
+// legitimate side of the symlink fix: a workspace reached through a symlink
+// whose physical target is genuinely outside any git repo has no notion of
+// tracking, so its local config must still be honored when git is unavailable.
+func TestResolveRemote_SymlinkedNonRepoWorkspaceGitFailureHonored(t *testing.T) {
+	srv := pingingServer(t)
+	t.Setenv("KATA_SERVER", "")
+	dir := t.TempDir()
+	writeWorkspaceMarker(t, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+srv.URL+`"
+`), 0o600))
+	link := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(dir, link))
+	stubGitRunner(t, failingGitRunner{err: errors.New("not a git repository")})
+
+	url, ok, err := resolveRemote(context.Background(), link)
+	require.NoError(t, err)
+	assert.True(t, ok, "a symlinked non-repo workspace must still honor its local config")
+	assert.Equal(t, srv.URL, url)
+}
+
 // TestResolveRemote_GitQueryFailureNonRepoHonored guards the legitimate
 // non-git workspace: a bare directory anchored only by .kata.toml (no .git
 // anywhere up the tree) has no notion of tracking, so an untracked

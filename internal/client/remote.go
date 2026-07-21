@@ -587,7 +587,25 @@ var localConfigGitRunner gitOutputRunner = gitcmd.New()
 // binary is missing, broken, or slow — exactly the conditions under which the
 // provenance query itself cannot determine tracked status.
 //
+// Both the lexical path and its symlink-resolved physical path are walked: a
+// workspace anchored through a symlink (e.g. --workspace /elsewhere/link →
+// /repo/nested/ws) has lexical parents with no .git even though the physical
+// location is inside a repo, and missing that would let a committed override
+// through the "no repo → honor" branch when the git query fails. If the
+// physical path cannot be resolved at all, repository membership cannot be
+// ruled out, so the check fails closed and reports a worktree.
 func gitWorktreePresent(dir string) bool {
+	if dotGitInAncestors(dir) {
+		return true
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return true
+	}
+	return resolved != dir && dotGitInAncestors(resolved)
+}
+
+func dotGitInAncestors(dir string) bool {
 	for {
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 			return true
