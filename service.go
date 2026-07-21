@@ -101,6 +101,10 @@ type Config struct {
 	// Access selects host-supplied in-process authentication and authorization.
 	// It is mutually exclusive with Auth.
 	Access AccessController
+	// WorkerTransactionFence revalidates host authority from inside every
+	// background-worker writable storage transaction. It is required when
+	// Access is set.
+	WorkerTransactionFence TransactionFence
 	// Profile optionally removes native administration routes that an embedding
 	// host owns. The zero value keeps the complete standalone-compatible API.
 	Profile EmbeddingProfile
@@ -118,19 +122,20 @@ type serviceDeps struct {
 
 // Service is a mountable Kata HTTP application and its owned lifecycle.
 type Service struct {
-	store                 db.Storage
-	server                *daemon.Server
-	broadcaster           *daemon.EventBroadcaster
-	hookSink              hooks.Sink
-	federationWake        chan struct{}
-	gitHubSyncWake        chan struct{}
-	gitHubSyncFetcher     githubsync.Fetcher
-	federationCredentials config.FederationCredentialStore
-	logger                *slog.Logger
-	hostAccessEnabled     bool
-	lifetimeCtx           context.Context
-	lifetimeCancel        context.CancelFunc
-	handlerWG             sync.WaitGroup
+	store                  db.Storage
+	server                 *daemon.Server
+	broadcaster            *daemon.EventBroadcaster
+	hookSink               hooks.Sink
+	federationWake         chan struct{}
+	gitHubSyncWake         chan struct{}
+	gitHubSyncFetcher      githubsync.Fetcher
+	federationCredentials  config.FederationCredentialStore
+	logger                 *slog.Logger
+	hostAccessEnabled      bool
+	workerTransactionFence TransactionFence
+	lifetimeCtx            context.Context
+	lifetimeCancel         context.CancelFunc
+	handlerWG              sync.WaitGroup
 
 	mu        sync.Mutex
 	running   bool
@@ -244,19 +249,20 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	})
 
 	return &Service{
-		store:                 store,
-		server:                server,
-		broadcaster:           broadcaster,
-		hookSink:              hookSink,
-		federationWake:        federationWake,
-		gitHubSyncWake:        gitHubSyncWake,
-		gitHubSyncFetcher:     gitHubSyncFetcher,
-		federationCredentials: federationCredentials,
-		logger:                logger,
-		hostAccessEnabled:     cfg.Access != nil,
-		lifetimeCtx:           lifetimeCtx,
-		lifetimeCancel:        lifetimeCancel,
-		closeDone:             make(chan struct{}),
+		store:                  store,
+		server:                 server,
+		broadcaster:            broadcaster,
+		hookSink:               hookSink,
+		federationWake:         federationWake,
+		gitHubSyncWake:         gitHubSyncWake,
+		gitHubSyncFetcher:      gitHubSyncFetcher,
+		federationCredentials:  federationCredentials,
+		logger:                 logger,
+		hostAccessEnabled:      cfg.Access != nil,
+		workerTransactionFence: cfg.WorkerTransactionFence,
+		lifetimeCtx:            lifetimeCtx,
+		lifetimeCancel:         lifetimeCancel,
+		closeDone:              make(chan struct{}),
 	}, nil
 }
 
@@ -375,6 +381,9 @@ func (s *Service) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("kata: run context is required")
 	}
+	if s.hostAccessEnabled && s.workerTransactionFence == nil {
+		return errors.New("kata: worker transaction fence is required with host access")
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -385,6 +394,23 @@ func (s *Service) Run(ctx context.Context) error {
 		return errors.New("kata: service is already running")
 	}
 	runCtx, cancel := context.WithCancel(ctx)
+	workerFenceFailures := make(chan error, 1)
+	var reportWorkerFenceFailure sync.Once
+	if s.workerTransactionFence != nil {
+		runCtx = db.WithTransactionFence(runCtx, func(
+			fenceCtx context.Context,
+			transaction db.Transaction,
+		) error {
+			err := s.workerTransactionFence(fenceCtx, transaction)
+			if err != nil {
+				reportWorkerFenceFailure.Do(func() {
+					workerFenceFailures <- err
+					cancel()
+				})
+			}
+			return err
+		})
+	}
 	done := make(chan struct{})
 	s.running = true
 	s.runCancel = cancel
@@ -467,14 +493,25 @@ func (s *Service) Run(ctx context.Context) error {
 	go func() { workerErrs <- sweeper.Run(runCtx) }()
 
 	workerResults := make([]error, 0, 3)
+	var workerFenceFailure error
 	select {
 	case <-runCtx.Done():
+	case workerFenceFailure = <-workerFenceFailures:
 	case err := <-workerErrs:
 		workerResults = append(workerResults, err)
 	}
 	cancel()
 	for len(workerResults) < 3 {
 		workerResults = append(workerResults, <-workerErrs)
+	}
+	if workerFenceFailure == nil {
+		select {
+		case workerFenceFailure = <-workerFenceFailures:
+		default:
+		}
+	}
+	if workerFenceFailure != nil {
+		return fmt.Errorf("kata: worker transaction fence: %w", workerFenceFailure)
 	}
 	if runCtx.Err() != nil && (ctx.Err() != nil || s.isClosed()) {
 		return nil

@@ -15,6 +15,9 @@ func (d *Store) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, erro
 	if err != nil {
 		return nil, err
 	}
+	if opts != nil && opts.ReadOnly {
+		return tx, nil
+	}
 	if err := db.ApplyTransactionFence(ctx, tx); err != nil {
 		_ = tx.Rollback()
 		return nil, err

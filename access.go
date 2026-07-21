@@ -110,9 +110,9 @@ type TransactionFence func(context.Context, Transaction) error
 type AccessDecision struct {
 	Lease AccessLease
 	// TransactionFence should be present on every successful decision. Kata
-	// invokes it when handling the operation begins a storage transaction,
-	// before the transaction's first domain write, and retains its database
-	// locks through commit or rollback.
+	// invokes it when handling the operation begins a writable storage
+	// transaction, before the transaction's first domain write, and retains its
+	// database locks through commit or rollback.
 	TransactionFence TransactionFence
 }
 

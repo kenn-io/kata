@@ -2,13 +2,29 @@ package sqlitestore_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
+
+func TestTransactionFenceSkipsExplicitReadOnlyTransactions(t *testing.T) {
+	d, ctx, _, _ := setupSoftDeletedIssue(t)
+	var calls atomic.Int64
+	fenced := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error {
+		calls.Add(1)
+		return errors.New("must not run for a read-only transaction")
+	})
+
+	tx, err := d.BeginTx(fenced, &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
+	assert.Zero(t, calls.Load())
+}
 
 func TestTransactionFenceRollsBackAutocommitAndImmediateMutations(t *testing.T) {
 	d, ctx, _, issue := setupSoftDeletedIssue(t)
