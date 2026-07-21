@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,27 +38,7 @@ func TestServiceWorkerTransactionFenceRollsBackAndStopsWorkers(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
-	project, err := service.store.CreateProject(ctx, "worker-project")
-	require.NoError(t, err)
-	_, err = service.store.EnableProjectFederation(ctx, project.ID, "worker")
-	require.NoError(t, err)
-	issue, _, err := service.store.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID, Title: "expired claim", Author: "worker",
-	})
-	require.NoError(t, err)
-	_, err = service.store.AcquireClaim(ctx, db.AcquireClaimParams{
-		ProjectID: project.ID,
-		IssueRef:  issue.ShortID,
-		Principal: db.ClaimPrincipal{
-			HolderInstanceUID: service.store.InstanceUID(),
-			Holder:            "worker",
-			ClientKind:        "test",
-		},
-		ClaimKind: "timed",
-		TTL:       time.Minute,
-		Now:       time.Now().UTC().Add(-2 * time.Minute),
-	})
-	require.NoError(t, err)
+	issue := seedExpiredWorkerClaim(ctx, t, service)
 
 	inspection, err := sql.Open("sqlite", databasePath)
 	require.NoError(t, err)
@@ -82,6 +63,106 @@ func TestServiceWorkerTransactionFenceRollsBackAndStopsWorkers(t *testing.T) {
 		`SELECT released_at IS NOT NULL FROM issue_claims WHERE issue_uid = ?`, issue.UID).Scan(&released))
 	assert.Zero(t, markerCount)
 	assert.Zero(t, released)
+}
+
+func TestServiceRunTreatsCanceledInFlightWorkerFenceAsCleanShutdown(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		close bool
+	}{
+		{name: "caller cancellation"},
+		{name: "service close", close: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			fenceStarted := make(chan struct{})
+			var startOnce sync.Once
+			service, err := New(ctx, Config{
+				DSN:    filepath.Join(t.TempDir(), "service.db"),
+				Access: allowWorkerFenceAccess{},
+				WorkerTransactionFence: func(ctx context.Context, _ Transaction) error {
+					startOnce.Do(func() { close(fenceStarted) })
+					<-ctx.Done()
+					return ctx.Err()
+				},
+			})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+			seedExpiredWorkerClaim(ctx, t, service)
+
+			runCtx, cancelRun := context.WithCancel(ctx)
+			defer cancelRun()
+			runDone := make(chan error, 1)
+			go func() { runDone <- service.Run(runCtx) }()
+			select {
+			case <-fenceStarted:
+			case <-time.After(5 * time.Second):
+				require.FailNow(t, "worker did not enter transaction fence")
+			}
+
+			closeDone := make(chan error, 1)
+			if testCase.close {
+				go func() { closeDone <- service.Close() }()
+			} else {
+				cancelRun()
+			}
+			select {
+			case runErr := <-runDone:
+				require.NoError(t, runErr)
+			case <-time.After(5 * time.Second):
+				require.FailNow(t, "Run did not stop after cancellation")
+			}
+			if testCase.close {
+				require.NoError(t, <-closeDone)
+			}
+		})
+	}
+}
+
+func TestServiceRunReportsWorkerInitiatedContextCancellation(t *testing.T) {
+	ctx := context.Background()
+	service, err := New(ctx, Config{
+		DSN:    filepath.Join(t.TempDir(), "service.db"),
+		Access: allowWorkerFenceAccess{},
+		WorkerTransactionFence: func(context.Context, Transaction) error {
+			return context.Canceled
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	seedExpiredWorkerClaim(ctx, t, service)
+
+	runErr := service.Run(ctx)
+
+	require.ErrorIs(t, runErr, context.Canceled)
+	assert.ErrorContains(t, runErr, "worker transaction fence")
+}
+
+func seedExpiredWorkerClaim(ctx context.Context, t *testing.T, service *Service) db.Issue {
+	t.Helper()
+	project, err := service.store.CreateProject(ctx, "worker-project")
+	require.NoError(t, err)
+	_, err = service.store.EnableProjectFederation(ctx, project.ID, "worker")
+	require.NoError(t, err)
+	issue, _, err := service.store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "expired claim", Author: "worker",
+	})
+	require.NoError(t, err)
+	_, err = service.store.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: project.ID,
+		IssueRef:  issue.ShortID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: service.store.InstanceUID(),
+			Holder:            "worker",
+			ClientKind:        "test",
+		},
+		ClaimKind: "timed",
+		TTL:       time.Minute,
+		Now:       time.Now().UTC().Add(-2 * time.Minute),
+	})
+	require.NoError(t, err)
+	return issue
 }
 
 func TestServiceRunRequiresWorkerFenceWithHostAccess(t *testing.T) {

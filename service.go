@@ -510,10 +510,14 @@ func (s *Service) Run(ctx context.Context) error {
 		default:
 		}
 	}
+	shuttingDown := ctx.Err() != nil || s.isClosed()
+	if shuttingDown && errors.Is(workerFenceFailure, context.Canceled) {
+		return nil
+	}
 	if workerFenceFailure != nil {
 		return fmt.Errorf("kata: worker transaction fence: %w", workerFenceFailure)
 	}
-	if runCtx.Err() != nil && (ctx.Err() != nil || s.isClosed()) {
+	if runCtx.Err() != nil && shuttingDown {
 		return nil
 	}
 	for i := range workerResults {
