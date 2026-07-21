@@ -616,12 +616,20 @@ func localConfigTrackState(root string) (tracked, determined bool) {
 		if entry == "" {
 			continue
 		}
-		// The pathspec is anchored to root, so a match is a root-level
-		// .kata.local.toml (any case); skip any unexpected nested path.
-		if strings.ContainsRune(entry, '/') {
-			continue
+		// The :(icase) pathspec matches only the root-level file (a nested
+		// same-named file is never returned), but git may print it either
+		// cwd-relative (".kata.local.toml") or repo-relative
+		// ("workspaces/app/.kata.local.toml") depending on version/config.
+		// Compare the basename (git always separates with "/") so a
+		// committed override is recognized regardless of the printed form;
+		// rejecting slashed entries would miss it and honor the redirect.
+		name := entry
+		if i := strings.LastIndex(entry, "/"); i >= 0 {
+			name = entry[i+1:]
 		}
-		return true, true
+		if strings.EqualFold(name, config.LocalConfigFilename) {
+			return true, true
+		}
 	}
 	return false, true
 }

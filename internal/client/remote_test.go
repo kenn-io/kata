@@ -953,6 +953,31 @@ func stubGitRunner(t *testing.T, r gitOutputRunner) {
 	t.Cleanup(func() { localConfigGitRunner = saved })
 }
 
+// fixedGitRunner returns canned NUL-delimited ls-files output, letting a test
+// pin how the tracked-status parser reacts to a specific git output shape.
+type fixedGitRunner struct{ out string }
+
+func (f fixedGitRunner) Output(_ context.Context, _ string, _ ...string) ([]byte, error) {
+	return []byte(f.out), nil
+}
+
+// TestLocalConfigTrackState_RepoRelativeMatchTracked pins the tracked verdict
+// against git output that reports the matched file as a repo-relative path
+// (e.g. "workspaces/app/.kata.local.toml") rather than cwd-relative. The
+// :(icase) pathspec only ever matches the root-level file — never a nested
+// same-named file — so any returned entry is that file regardless of how git
+// prints the path. Comparing the basename (not rejecting any entry containing
+// a slash) keeps a committed override in a nested workspace recognized as
+// tracked; the slash-rejecting form silently treated it as untracked and
+// honored the redirect.
+func TestLocalConfigTrackState_RepoRelativeMatchTracked(t *testing.T) {
+	stubGitRunner(t, fixedGitRunner{out: "workspaces/app/.kata.local.toml\x00"})
+	tracked, determined := localConfigTrackState("/repo/workspaces/app")
+	assert.True(t, determined, "a successful git query is determined")
+	assert.True(t, tracked,
+		"a matched root-level override must be tracked even when git prints a repo-relative path")
+}
+
 // TestResolveRemote_GitQueryFailureInWorktreeFailsClosed covers the fail-open
 // escalation: a hostile repo commits an evil override and then induces the
 // tracked-status git query to fail (huge index blows the timeout, or a
