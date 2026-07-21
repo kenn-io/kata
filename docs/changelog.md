@@ -8,18 +8,37 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+## 0.12.0
+<small>2026-07-20</small>
+
+kata 0.12.0 gives embedded integrations host-controlled access policies and
+project lifecycle APIs, and makes TUI input safer and easier to navigate.
+
+**New features**
+
+- Added host-controlled authentication and per-operation authorization for
+  mounted Go services through `Config.Access`. Embedding hosts supply the
+  authenticated principal; kata exposes the matched operation and project
+  scope to their controller, records the host-supplied actor, hides denied
+  resources, and revalidates access during long-lived event streams.
+- Added retry-safe `Service.EnsureProject` and `Service.ArchiveProject` methods
+  so embedding hosts can provision exact project UID/name bindings and archive
+  projects without deleting their stable identity, task history, or events.
+
 **Improvements**
 
 - Made Ctrl-O the canonical TUI save/apply chord while retaining Ctrl-S as a
   compatibility alias for existing users.
 - Allowed Up and Down to navigate live search results before committing the
   filter, with reversible query/results focus and an explicit keep-filter exit.
-
-**Bug fixes**
-
 - Protected non-empty TUI comment drafts with discard confirmation when Esc is
   pressed; canceling preserves the full in-memory form state, and the modal
   footer advertises the active discard and keep-editing actions.
+
+**Acknowledgements**
+
+- Thanks to [Wes McKinney](https://github.com/wesm) for host-controlled
+  embedded access, project lifecycle APIs, and safer TUI input and navigation.
 
 ## 0.11.1
 <small>2026-07-19</small>
