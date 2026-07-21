@@ -487,7 +487,9 @@ func findLocalConfig(start string) (root, path string, ok bool) {
 		}
 		if isWorkspaceBoundary(dir) {
 			if foundLocal {
-				if localConfigTracked(localRoot) {
+				tracked, determined := localConfigTrackState(localRoot)
+				switch {
+				case determined && tracked:
 					// A .kata.local.toml that is committed into the repo has
 					// attacker-controlled provenance: a hostile contributor
 					// can `git add -f` it past the gitignore and point
@@ -499,8 +501,22 @@ func findLocalConfig(start string) (root, path string, ok bool) {
 					// through to active_daemon/local resolution.
 					fmt.Fprintf(os.Stderr, "kata: warning: ignoring %s: it is tracked by git; a committed .kata.local.toml is not honored as a server override (keep it untracked/gitignored)\n", localPath)
 					return "", "", false
+				case !determined && gitWorktreePresent(localRoot):
+					// Tracked status could not be established (git missing,
+					// broken, dubious-ownership, or the query timed out) but we
+					// ARE inside a git worktree, where the file could be a
+					// committed redirect. Fail closed: an attacker who can make
+					// the git query fail must not thereby get an unverifiable
+					// override honored.
+					fmt.Fprintf(os.Stderr, "kata: warning: cannot verify git-tracked status of %s inside a git repository; refusing it as a server override — ensure git is available and the checkout is trusted\n", localPath)
+					return "", "", false
+				default:
+					// Either determined-untracked (legitimate gitignored
+					// developer override) or unknown with no .git present at
+					// all (a genuine non-repo workspace anchored only by
+					// .kata.toml, where there is no notion of tracking). Honor.
+					return localRoot, localPath, true
 				}
-				return localRoot, localPath, true
 			}
 			return "", "", false
 		}
@@ -531,20 +547,52 @@ func isWorkspaceBoundary(dir string) bool {
 	return false
 }
 
+// gitOutputRunner is the subset of gitcmd.Runner the provenance check needs.
+// Declaring it as an interface lets tests inject a failing/slow runner to
+// exercise the fail-closed path without a real git repo or a real timeout.
+type gitOutputRunner interface {
+	Output(ctx context.Context, dir string, args ...string) ([]byte, error)
+}
+
 // localConfigGitRunner runs git with a sanitized environment (no inherited
 // GIT_* vars, no global/system config) so provenance checks cannot be steered
 // by ambient config while still honoring the user's safe.directory trust.
-var localConfigGitRunner = gitcmd.New()
+var localConfigGitRunner gitOutputRunner = gitcmd.New()
 
-// localConfigTracked reports whether the .kata.local.toml in root is tracked
-// by git in root's containing repository. A tracked file is one that was
+// gitWorktreePresent reports whether dir sits inside a git worktree, decided
+// purely by walking the filesystem upward for a `.git` directory or file
+// (the file form covers submodules and linked worktrees). It intentionally
+// does not shell out to git, so it still answers correctly when the git
+// binary is missing, broken, or slow — exactly the conditions under which the
+// provenance query itself cannot determine tracked status.
+func gitWorktreePresent(dir string) bool {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+// localConfigTrackState reports whether the .kata.local.toml in root is tracked
+// by git, as a tri-state: (tracked, determined). A tracked file is one that was
 // committed into the repo (including a force-add past the gitignore), which
 // gives its contents attacker-controlled provenance; callers must refuse to
 // honor its [server].url / allow_insecure overrides.
 //
-// Untracked and gitignored files — the legitimate per-developer remote
-// workflow — return false, as does a directory that is not a git repository
-// or any case where git cannot be run.
+//   - determined && tracked   → committed; refuse.
+//   - determined && !tracked  → untracked/gitignored; honor (the legitimate
+//     per-developer remote workflow).
+//   - !determined             → git failed or timed out; tracked status is
+//     UNKNOWN and the caller must fail closed inside a worktree (see
+//     findLocalConfig). Failing open here is attacker-influenceable: a hostile
+//     repo can commit an evil override and then induce the git query to fail
+//     (a huge index blowing the timeout, a dubious-ownership checkout git
+//     refuses) to get the committed URL honored.
 //
 // The match is case-insensitive on the basename and must not depend on git's
 // core.ignorecase: on a case-insensitive filesystem (macOS/APFS) findLocalConfig
@@ -552,14 +600,14 @@ var localConfigGitRunner = gitcmd.New()
 // searched only for the exact lowercase pathspec could miss the uppercase
 // tracked entry and honor the redirect. We instead enumerate the git index
 // entries located directly in root (NUL-delimited, no path separator) and
-// refuse if any basename case-insensitively equals config.LocalConfigFilename.
-// Erring toward refuse is the correct bias for a security control.
-func localConfigTracked(root string) bool {
+// treat the file as tracked if any basename case-insensitively equals
+// config.LocalConfigFilename.
+func localConfigTrackState(root string) (tracked, determined bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	out, err := localConfigGitRunner.Output(ctx, root, "ls-files", "-z", "--", ".")
 	if err != nil {
-		return false
+		return false, false
 	}
 	for _, entry := range strings.Split(string(out), "\x00") {
 		if entry == "" {
@@ -572,10 +620,10 @@ func localConfigTracked(root string) bool {
 			continue
 		}
 		if strings.EqualFold(entry, config.LocalConfigFilename) {
-			return true
+			return true, true
 		}
 	}
-	return false
+	return false, true
 }
 
 // normalizeRemoteURL parses a value as an http(s) URL and returns the

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -771,11 +772,15 @@ url = "`+srv.URL+`"
 // a freshly cloned repo has .git but not yet .kata.toml; a developer
 // can still drop a .kata.local.toml beside .git to point at a remote
 // daemon for the upcoming `kata init`.
+//
+// Uses a real repo (not a fake empty .git dir): the provenance guard now
+// consults git inside a worktree, and a freshly cloned repo has a valid .git
+// where `git ls-files` succeeds and reports the untracked local config as
+// untracked — so it is honored, mirroring the real pre-init flow.
 func TestResolveRemote_GitMarkerCountsAsWorkspace(t *testing.T) {
 	srv := pingingServer(t)
 	t.Setenv("KATA_SERVER", "")
-	dir := t.TempDir()
-	require.NoError(t, os.Mkdir(filepath.Join(dir, ".git"), 0o755)) //nolint:gosec // test fixture under TempDir
+	dir := testfix.InitGitRepo(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
 		[]byte(`version = 1
 [server]
@@ -870,7 +875,7 @@ allow_insecure = true
 // core.ignorecase, so the repo pins it false and commits the uppercase name:
 // a lowercase-pathspec lookup would miss it, but the guard must still refuse.
 //
-// This exercises localConfigTracked directly because the end-to-end
+// This exercises localConfigTrackState directly because the end-to-end
 // resolveRemote manifestation only reproduces on a case-insensitive FS (the
 // lowercase os.Stat in findLocalConfig cannot open the uppercase file on the
 // case-sensitive Linux CI host); the guard function is the seam where the
@@ -886,7 +891,9 @@ url = "http://198.51.100.1:7777"
 	testfix.RunGit(t, dir, "add", "-f", ".KATA.LOCAL.TOML")
 	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "plant case-variant config")
 
-	assert.True(t, localConfigTracked(dir),
+	tracked, determined := localConfigTrackState(dir)
+	assert.True(t, determined, "a working git query must yield a determined result")
+	assert.True(t, tracked,
 		"a committed case-variant .kata.local.toml must be treated as tracked")
 }
 
@@ -901,8 +908,80 @@ func TestLocalConfigTracked_UntrackedNotRefused(t *testing.T) {
 url = "http://198.51.100.1:7777"
 `), 0o600))
 
-	assert.False(t, localConfigTracked(dir),
+	tracked, determined := localConfigTrackState(dir)
+	assert.True(t, determined, "a working git query must yield a determined result")
+	assert.False(t, tracked,
 		"an untracked .kata.local.toml must not be treated as tracked")
+}
+
+// failingGitRunner stands in for a git binary that is missing, broken, or
+// hangs past the timeout. It never inspects args; the point is the error.
+type failingGitRunner struct{ err error }
+
+func (f failingGitRunner) Output(_ context.Context, _ string, _ ...string) ([]byte, error) {
+	return nil, f.err
+}
+
+// stubGitRunner swaps the package git runner for the duration of the test so
+// the fail-closed path is exercised without a real 5s timeout or a broken git.
+func stubGitRunner(t *testing.T, r gitOutputRunner) {
+	t.Helper()
+	saved := localConfigGitRunner
+	localConfigGitRunner = r
+	t.Cleanup(func() { localConfigGitRunner = saved })
+}
+
+// TestResolveRemote_GitQueryFailureInWorktreeFailsClosed covers the fail-open
+// escalation: a hostile repo commits an evil override and then induces the
+// tracked-status git query to fail (huge index blows the timeout, or a
+// dubious-ownership checkout git refuses). Because we are demonstrably inside a
+// git worktree, the unverifiable file must be refused, not honored — otherwise
+// the victim's global bearer token is routed to the committed URL. The server
+// is reachable so a pass could only come from honoring the file.
+func TestResolveRemote_GitQueryFailureInWorktreeFailsClosed(t *testing.T) {
+	srv := pingingServer(t)
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "victim-global-token")
+	dir := testfix.InitGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+srv.URL+`"
+`), 0o600))
+	testfix.RunGit(t, dir, "add", "-f", ".kata.local.toml")
+	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "plant evil override")
+	t.Chdir(dir)
+	stubGitRunner(t, failingGitRunner{err: errors.New("git unavailable")})
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	assert.False(t, ok, "unverifiable tracked status inside a git worktree must fail closed")
+	assert.Empty(t, url)
+	assert.NotEqual(t, srv.URL, url)
+}
+
+// TestResolveRemote_GitQueryFailureNonRepoHonored guards the legitimate
+// non-git workspace: a bare directory anchored only by .kata.toml (no .git
+// anywhere up the tree) has no notion of tracking, so an untracked
+// .kata.local.toml must still be honored even though the git query yields no
+// determined answer. This keeps kata usable without git in a non-repo project.
+func TestResolveRemote_GitQueryFailureNonRepoHonored(t *testing.T) {
+	srv := pingingServer(t)
+	t.Setenv("KATA_SERVER", "")
+	dir := t.TempDir()
+	writeWorkspaceMarker(t, dir) // .kata.toml boundary, no .git
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+srv.URL+`"
+`), 0o600))
+	t.Chdir(dir)
+	stubGitRunner(t, failingGitRunner{err: errors.New("not a git repository")})
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	assert.True(t, ok, "a non-repo workspace with no .git must honor its untracked local config")
+	assert.Equal(t, srv.URL, url)
 }
 
 // TestNormalizeRemoteURL_SchemeGuard covers the plain-http guard.
