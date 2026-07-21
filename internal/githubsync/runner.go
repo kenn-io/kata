@@ -221,7 +221,7 @@ func (r *Runner) runClaimed(ctx context.Context, binding db.IssueSyncBinding, sy
 	if err != nil {
 		return r.recordError(ctx, binding, syncStartedAt, err, importResult)
 	}
-	cleanupCtx, cleanupCancel := r.cleanupContext()
+	cleanupCtx, cleanupCancel := r.cleanupContext(ctx)
 	defer cleanupCancel()
 	if parentLinkBackfill {
 		backfilledConfig := ghConfig.WithParentLinksBackfilled()
@@ -478,8 +478,8 @@ func (r *Runner) emitEvents(ctx context.Context, projectID int64, events []db.Ev
 	}
 }
 
-func (r *Runner) recordError(_ context.Context, binding db.IssueSyncBinding, startedAt time.Time, cause error, importResult db.ImportBatchResult) (RunResult, error) {
-	cleanupCtx, cleanupCancel := r.cleanupContext()
+func (r *Runner) recordError(ctx context.Context, binding db.IssueSyncBinding, startedAt time.Time, cause error, importResult db.ImportBatchResult) (RunResult, error) {
+	cleanupCtx, cleanupCancel := r.cleanupContext(ctx)
 	defer cleanupCancel()
 	status, recordErr := r.config.Store.RecordIssueSyncError(cleanupCtx, db.IssueSyncErrorParams{
 		BindingID: binding.ID,
@@ -493,8 +493,8 @@ func (r *Runner) recordError(_ context.Context, binding db.IssueSyncBinding, sta
 	return RunResult{Binding: binding, Status: status, Import: importResult}, cause
 }
 
-func (r *Runner) cleanupContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), runnerCleanupTimeout)
+func (r *Runner) cleanupContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), runnerCleanupTimeout)
 }
 
 func (r *Runner) now() time.Time {

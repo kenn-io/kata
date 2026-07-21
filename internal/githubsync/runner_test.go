@@ -478,6 +478,65 @@ func TestRunnerSuccessCleanupIgnoresCallerCancellation(t *testing.T) {
 	assertCursorAt(h.ctx, t, h.db, h.binding.ID, h.now)
 }
 
+func TestRunnerSuccessCleanupRetainsTransactionFenceAfterCancellation(t *testing.T) {
+	h := newRunnerHarness(t)
+	rejectCleanup := false
+	fenceErr := errors.New("host authority changed before success cleanup")
+	fenced := db.WithTransactionFence(h.ctx, func(context.Context, db.Transaction) error {
+		if rejectCleanup {
+			return fenceErr
+		}
+		return nil
+	})
+	ctx, cancel := context.WithCancel(fenced)
+	h.runner.config.EventSink = func(context.Context, int64, []db.Event) error {
+		rejectCleanup = true
+		cancel()
+		return nil
+	}
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+
+	_, err := h.runner.RunOnce(ctx, h.binding.ID)
+
+	require.ErrorIs(t, err, fenceErr)
+	assertCursorNil(h.ctx, t, h.db, h.binding.ID)
+	status, err := h.db.IssueSyncStatusByProject(h.ctx, h.project.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, status.SyncStartedAt)
+	assert.Nil(t, status.LastSuccessAt)
+}
+
+func TestRunnerBackfillRefreshRetainsTransactionFenceAfterCancellation(t *testing.T) {
+	h := newRunnerHarness(t)
+	rejectCleanup := false
+	fenceErr := errors.New("host authority changed before binding refresh")
+	fenced := db.WithTransactionFence(h.ctx, func(context.Context, db.Transaction) error {
+		if rejectCleanup {
+			return fenceErr
+		}
+		return nil
+	})
+	ctx, cancel := context.WithCancel(fenced)
+	h.runner.config.EventSink = func(context.Context, int64, []db.Event) error {
+		rejectCleanup = true
+		cancel()
+		return nil
+	}
+	h.fetcher.parentData = ParentData{Authoritative: true}
+	h.fetcher.parentDataSet = true
+	h.fetcher.issues = []Issue{testIssue(101, 1, "first issue", h.now.Add(-time.Hour))}
+
+	_, err := h.runner.RunOnce(ctx, h.binding.ID)
+
+	require.ErrorIs(t, err, fenceErr)
+	stored, err := h.db.IssueSyncBindingByID(h.ctx, h.binding.ID)
+	require.NoError(t, err)
+	storedConfig, err := DecodeConfig(stored.Config)
+	require.NoError(t, err)
+	assert.True(t, storedConfig.NeedsParentLinkBackfill())
+	assertCursorNil(h.ctx, t, h.db, h.binding.ID)
+}
+
 func TestRunnerIncrementalUsesCursorMinusOverlap(t *testing.T) {
 	h := newRunnerHarness(t)
 	lastCursor := h.now.Add(-10 * time.Minute)
@@ -651,6 +710,34 @@ func TestRunnerErrorCleanupIgnoresCallerCancellation(t *testing.T) {
 	assert.Nil(t, status.SyncStartedAt)
 	require.NotNil(t, status.LastErrorAt)
 	assert.Contains(t, status.LastError, "github unavailable")
+}
+
+func TestRunnerErrorCleanupRetainsTransactionFenceAfterCancellation(t *testing.T) {
+	h := newRunnerHarness(t)
+	rejectCleanup := false
+	fenceErr := errors.New("host authority changed before error cleanup")
+	fenced := db.WithTransactionFence(h.ctx, func(context.Context, db.Transaction) error {
+		if rejectCleanup {
+			return fenceErr
+		}
+		return nil
+	})
+	ctx, cancel := context.WithCancel(fenced)
+	h.fetcher.beforeIssuesReturn = func() {
+		rejectCleanup = true
+		cancel()
+	}
+	h.fetcher.issuesErr = errors.New("github unavailable")
+
+	_, err := h.runner.RunOnce(ctx, h.binding.ID)
+
+	require.ErrorIs(t, err, fenceErr)
+	assertCursorNil(h.ctx, t, h.db, h.binding.ID)
+	status, err := h.db.IssueSyncStatusByProject(h.ctx, h.project.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, status.SyncStartedAt)
+	assert.Nil(t, status.LastErrorAt)
+	assert.Empty(t, status.LastError)
 }
 
 func TestRunnerImportFailureClearsInFlightAndLeavesCursorUnchanged(t *testing.T) {
