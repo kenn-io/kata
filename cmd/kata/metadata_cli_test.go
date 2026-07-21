@@ -62,6 +62,18 @@ func TestList_MetaFilterPresence(t *testing.T) {
 	assert.NotContains(t, out, "unbranched")
 }
 
+func TestList_RepeatedMetaFiltersRequireEveryMatch(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+	_ = runCLI(t, env, dir, "--quiet", "create", "matching metadata",
+		"--meta", "team=core", "--meta", "tier=one")
+	_ = runCLI(t, env, dir, "--quiet", "create", "partial metadata",
+		"--meta", "team=core")
+
+	out := runCLI(t, env, dir, "list", "--meta", "team=core", "--meta", "tier=one")
+	assert.Contains(t, out, "matching metadata")
+	assert.NotContains(t, out, "partial metadata")
+}
+
 // TestShow_HumanRendersMetadataSection pins the human-mode metadata section.
 func TestShow_HumanRendersMetadataSection(t *testing.T) {
 	env, dir, _ := setupCLIWorkspace(t)

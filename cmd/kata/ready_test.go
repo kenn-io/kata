@@ -43,6 +43,33 @@ func TestReady_FiltersBlocked(t *testing.T) {
 		"blocked is hidden while blocker is open")
 }
 
+func TestReady_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	alphaOnly := createIssue(t, env, pid, "alpha only")
+	alphaBeta := createIssue(t, env, pid, "alpha beta")
+	runCLI(t, env, dir, "label", "add", alphaOnly, "alpha")
+	runCLI(t, env, dir, "label", "add", alphaBeta, "alpha")
+	runCLI(t, env, dir, "label", "add", alphaBeta, "beta")
+
+	out := runCLI(t, env, dir, "ready", "--label", "alpha", "--label", "beta")
+	assert.Contains(t, out, "alpha beta")
+	assert.NotContains(t, out, "alpha only")
+}
+
+func TestReady_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	alpha := createIssue(t, env, pid, "alpha candidate")
+	beta := createIssue(t, env, pid, "beta candidate")
+	createIssue(t, env, pid, "plain candidate")
+	runCLI(t, env, dir, "label", "add", alpha, "alpha")
+	runCLI(t, env, dir, "label", "add", beta, "beta")
+
+	out := runCLI(t, env, dir, "ready", "--no-label", "alpha", "--no-label", "beta")
+	assert.Contains(t, out, "plain candidate")
+	assert.NotContains(t, out, "alpha candidate")
+	assert.NotContains(t, out, "beta candidate")
+}
+
 func TestReady_AgentOutputRowsOmitAbsentOwner(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	createIssue(t, env, pid, "ready unowned")

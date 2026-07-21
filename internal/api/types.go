@@ -394,13 +394,13 @@ type ListIssuesRequest struct {
 	Limit         int      `query:"limit,omitempty"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
-	Labels        []string `query:"label,omitempty"`
-	ExcludeLabels []string `query:"exclude_label,omitempty"`
+	Labels        []string `query:"label,explode"`
+	ExcludeLabels []string `query:"exclude_label,explode"`
 	// Meta is a repeatable metadata filter. Each entry is "key" (key present
 	// in top-level metadata) or "key=value" (the key's JSON string value
 	// equals value); split on the FIRST "=". Multiple entries AND together.
 	// An empty key is a validation error.
-	Meta []string `query:"meta,omitempty"`
+	Meta []string `query:"meta,explode"`
 }
 
 // ListAllIssuesRequest is GET /api/v1/issues — the cross-project list. The
@@ -968,8 +968,8 @@ type ReadyRequest struct {
 	Limit         int      `query:"limit,omitempty"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
-	Labels        []string `query:"label,omitempty"`
-	ExcludeLabels []string `query:"exclude_label,omitempty"`
+	Labels        []string `query:"label,explode"`
+	ExcludeLabels []string `query:"exclude_label,explode"`
 }
 
 // ReadyResponse is the ready-issue list. Rows are hydrated IssueOuts so
@@ -1052,7 +1052,7 @@ type PurgeResponse struct {
 type DigestRequest struct {
 	Since  string   `query:"since" required:"true"`
 	Until  string   `query:"until,omitempty"`
-	Actors []string `query:"actor,omitempty"`
+	Actors []string `query:"actor,explode"`
 }
 
 // DigestProjectRequest is the per-project variant. Only the path param differs.
@@ -1060,7 +1060,7 @@ type DigestProjectRequest struct {
 	ProjectID int64    `path:"project_id" required:"true"`
 	Since     string   `query:"since" required:"true"`
 	Until     string   `query:"until,omitempty"`
-	Actors    []string `query:"actor,omitempty"`
+	Actors    []string `query:"actor,explode"`
 }
 
 // DigestTotals is the per-actor and grand-total breakdown of mutations the

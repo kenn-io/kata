@@ -175,6 +175,25 @@ func TestDigest_ActorFilter(t *testing.T) {
 	assert.Equal(t, "alice", body.Actors[0].Actor)
 }
 
+func TestDigest_RepeatedActorFiltersIncludeEveryActor(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	createIssueAs(t, env, pid, "alice", "alice issue")
+	createIssueAs(t, env, pid, "bob", "bob issue")
+	createIssueAs(t, env, pid, "carol", "carol issue")
+
+	q := url.Values{}
+	q.Set("since", rfc3339Offset(-time.Hour))
+	q.Add("actor", "alice")
+	q.Add("actor", "bob")
+	var body digestBody
+	envGetJSON(t, env, projectPath(pid)+"/digest?"+q.Encode(), &body)
+
+	require.Len(t, body.Actors, 2)
+	assert.Equal(t, "alice", body.Actors[0].Actor)
+	assert.Equal(t, "bob", body.Actors[1].Actor)
+}
+
 // TestDigest_CountsCreateTimeLabelsOwnerLinks ensures that initial labels,
 // owner, and links supplied at issue creation are folded into digest totals
 // and per-issue actions. CreateIssue does not emit separate

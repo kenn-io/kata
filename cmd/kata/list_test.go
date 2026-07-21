@@ -44,6 +44,33 @@ func TestList_DefaultsToOpenIssuesInProject(t *testing.T) {
 	assert.Contains(t, out, "beta")
 }
 
+func TestList_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	alphaOnly := createIssue(t, env, pid, "alpha only")
+	alphaBeta := createIssue(t, env, pid, "alpha beta")
+	runCLI(t, env, dir, "label", "add", alphaOnly, "alpha")
+	runCLI(t, env, dir, "label", "add", alphaBeta, "alpha")
+	runCLI(t, env, dir, "label", "add", alphaBeta, "beta")
+
+	out := runCLI(t, env, dir, "list", "--label", "alpha", "--label", "beta")
+	assert.Contains(t, out, "alpha beta")
+	assert.NotContains(t, out, "alpha only")
+}
+
+func TestList_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	alpha := createIssue(t, env, pid, "alpha candidate")
+	beta := createIssue(t, env, pid, "beta candidate")
+	createIssue(t, env, pid, "plain candidate")
+	runCLI(t, env, dir, "label", "add", alpha, "alpha")
+	runCLI(t, env, dir, "label", "add", beta, "beta")
+
+	out := runCLI(t, env, dir, "list", "--no-label", "alpha", "--no-label", "beta")
+	assert.Contains(t, out, "plain candidate")
+	assert.NotContains(t, out, "alpha candidate")
+	assert.NotContains(t, out, "beta candidate")
+}
+
 // TestList_HumanRowUsesGlyphLayout pins the new row renderer's layout: an
 // open issue renders the open glyph "○ " ahead of its title, replacing the
 // old "%-8s  %-8s" column format.
