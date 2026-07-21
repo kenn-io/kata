@@ -187,7 +187,7 @@ func hostAccessRequiresAllProjects(operationID string) bool {
 	switch operationID {
 	case "purgeIssue", "purgeProject", "closeIssue", "readyIssues", "showIssueByUID",
 		"importIssues", "pollProjectEvents", "streamEvents", "auditCloses", "digestProject",
-		"deleteLink":
+		"deleteLink", "rewriteAuthorIdentity":
 		return true
 	default:
 		return false

@@ -212,6 +212,10 @@ type ClaimPrincipal struct {
 	HolderInstanceUID string
 	Holder            string
 	ClientKind        string
+	// AuthenticatedHost is request provenance set only by mounted host
+	// authentication. It is deliberately not persisted or accepted from wire
+	// input; daemon binding and storage gates use it only during this request.
+	AuthenticatedHost bool
 }
 
 // AcquireClaimParams requests a hard or timed claim on a project-scoped issue

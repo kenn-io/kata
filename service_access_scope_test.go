@@ -147,21 +147,27 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 	requests := []struct {
 		method string
 		path   string
+		body   string
 	}{
-		{http.MethodPost, "/api/v1/projects/" + projectID + "/issues/" + first.Issue.ShortID + "/actions/purge"},
-		{http.MethodPost, "/api/v1/projects/" + projectID + "/actions/purge"},
-		{http.MethodPost, "/api/v1/projects/" + projectID + "/issues/" + first.Issue.ShortID + "/actions/close"},
-		{http.MethodGet, "/api/v1/projects/" + projectID + "/ready"},
-		{http.MethodGet, "/api/v1/issues/" + first.Issue.UID[:8]},
-		{http.MethodGet, "/api/v1/issues/01ABCDEFG"},
-		{http.MethodPost, "/api/v1/projects/" + projectID + "/imports"},
-		{http.MethodGet, "/api/v1/projects/" + projectID + "/events"},
-		{http.MethodGet, "/api/v1/events/stream?project_id=" + projectID},
-		{http.MethodGet, "/api/v1/projects/" + projectID + "/digest?since=2026-01-01T00:00:00Z"},
-		{http.MethodDelete, "/api/v1/projects/" + projectID + "/issues/" + first.Issue.ShortID + "/links/999?actor=ignored"},
+		{http.MethodPost, "/api/v1/projects/" + projectID + "/issues/" + first.Issue.ShortID + "/actions/purge", ""},
+		{http.MethodPost, "/api/v1/projects/" + projectID + "/actions/purge", ""},
+		{http.MethodPost, "/api/v1/projects/" + projectID + "/issues/" + first.Issue.ShortID + "/actions/close", ""},
+		{http.MethodGet, "/api/v1/projects/" + projectID + "/ready", ""},
+		{http.MethodGet, "/api/v1/issues/" + first.Issue.UID[:8], ""},
+		{http.MethodGet, "/api/v1/issues/01ABCDEFG", ""},
+		{http.MethodPost, "/api/v1/projects/" + projectID + "/imports", ""},
+		{http.MethodGet, "/api/v1/projects/" + projectID + "/events", ""},
+		{http.MethodGet, "/api/v1/events/stream?project_id=" + projectID, ""},
+		{http.MethodGet, "/api/v1/projects/" + projectID + "/digest?since=2026-01-01T00:00:00Z", ""},
+		{http.MethodDelete, "/api/v1/projects/" + projectID + "/issues/" + first.Issue.ShortID + "/links/999?actor=ignored", ""},
+		{http.MethodPost, "/api/v1/projects/" + projectID + "/actions/rewrite-author", `{"from":"old","to":"new"}`},
 	}
 	for _, tc := range requests {
-		request, err := http.NewRequest(tc.method, server.URL+tc.path, bytes.NewBufferString(`{}`))
+		requestBody := tc.body
+		if requestBody == "" {
+			requestBody = `{}`
+		}
+		request, err := http.NewRequest(tc.method, server.URL+tc.path, bytes.NewBufferString(requestBody))
 		require.NoError(t, err)
 		request.Header.Set("Content-Type", "application/json")
 		response, err := server.Client().Do(request)
@@ -182,7 +188,7 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 		"purgeIssue": true, "purgeProject": true, "closeIssue": true,
 		"readyIssues": true, "showIssueByUID": true, "importIssues": true,
 		"pollProjectEvents": true, "streamEvents": true, "digestProject": true,
-		"deleteLink": true,
+		"deleteLink": true, "rewriteAuthorIdentity": true,
 	}
 	seen := map[string]int{}
 	for _, request := range controller.snapshot() {
@@ -196,8 +202,51 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 		"purgeIssue": 1, "purgeProject": 1, "closeIssue": 1,
 		"readyIssues": 1, "showIssueByUID": 2, "importIssues": 1,
 		"pollProjectEvents": 1, "streamEvents": 1, "digestProject": 1,
-		"deleteLink": 1,
+		"deleteLink":            1,
+		"rewriteAuthorIdentity": 1,
 	}, seen)
+}
+
+func TestServiceAccessControllerDeniesCrossProjectAuthorRewriteBeforeMutation(t *testing.T) {
+	controller := &recordingAccessController{}
+	_, server := newAccessTestServer(t, controller)
+	sourceProject := createProject(t, server.URL, "source-project")
+	targetProject := createProject(t, server.URL, "target-project")
+	source := createAccessIssue(t, server, sourceProject.Project.ID, "source issue")
+	target := createAccessIssue(t, server, targetProject.Project.ID, "target issue")
+	postJSON(t, server.Client(), server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(sourceProject.Project.ID, 10)+"/issues/"+source.Issue.ShortID+"/links",
+		`{"actor":"ignored","type":"related","to_ref":"`+target.Issue.UID+`"}`, nil)
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.ID == "rewriteAuthorIdentity" && request.Operation.AllProjects {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+
+	rewriteRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(sourceProject.Project.ID, 10)+"/actions/rewrite-author",
+		bytes.NewBufferString(`{"from":"Example User","to":"Replacement User"}`))
+	require.NoError(t, err)
+	rewriteRequest.Header.Set("Content-Type", "application/json")
+	rewriteResponse, err := server.Client().Do(rewriteRequest)
+	require.NoError(t, err)
+	_ = rewriteResponse.Body.Close()
+	require.Equal(t, http.StatusNotFound, rewriteResponse.StatusCode)
+
+	controller.authorize = nil
+	showResponse, err := server.Client().Get(server.URL + "/api/v1/projects/" +
+		strconv.FormatInt(sourceProject.Project.ID, 10) + "/issues/" + source.Issue.ShortID)
+	require.NoError(t, err)
+	defer func() { _ = showResponse.Body.Close() }()
+	var shown struct {
+		Links []struct {
+			Author string `json:"author"`
+		} `json:"links"`
+	}
+	require.NoError(t, json.NewDecoder(showResponse.Body).Decode(&shown))
+	require.Len(t, shown.Links, 1)
+	assert.Equal(t, "Example User", shown.Links[0].Author)
 }
 
 func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {

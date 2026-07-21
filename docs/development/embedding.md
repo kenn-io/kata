@@ -155,7 +155,10 @@ empty or whitespace-only values, so the embedding host must provide one
 canonical subject representation. Subject ownership remains distinct when a
 spoke forwards a lease through its shared federation identity. Existing
 non-host lease clients keep their established holder and client-kind behavior;
-mounting a service does not rewrite their persisted ownership tuples.
+mounting a service does not rewrite their persisted ownership tuples. Host
+provenance is carried separately from those caller-visible strings, so
+reserved-looking holder or client-kind text cannot opt an ordinary client into
+mounted identity handling.
 `Principal.Actor` remains the human-readable audit snapshot for replica setup
 and other mutations.
 

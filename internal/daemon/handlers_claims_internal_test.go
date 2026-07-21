@@ -21,10 +21,10 @@ import (
 func TestBoundSpokeClaimPrincipalPreservesLocalOwnerIdentity(t *testing.T) {
 	binding := db.FederationBinding{Role: db.FederationRoleSpoke, Actor: "spoke-actor"}
 	first := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
-		Holder: hostClaimHolder("user-one"), ClientKind: "cli",
+		Holder: hostClaimHolder("user-one"), ClientKind: "cli", AuthenticatedHost: true,
 	})
 	second := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
-		Holder: hostClaimHolder("user-two"), ClientKind: "cli",
+		Holder: hostClaimHolder("user-two"), ClientKind: "cli", AuthenticatedHost: true,
 	})
 
 	assert.Equal(t, "spoke-actor", first.Holder)
@@ -34,12 +34,14 @@ func TestBoundSpokeClaimPrincipalPreservesLocalOwnerIdentity(t *testing.T) {
 
 func TestBoundSpokeClaimPrincipalKeepsLegacyClientIdentity(t *testing.T) {
 	binding := db.FederationBinding{Role: db.FederationRoleSpoke, Actor: "spoke-actor"}
-	legacy := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
-		Holder: "local-worker", ClientKind: "cli",
-	})
+	for _, holder := range []string{"local-worker", "host:worker"} {
+		legacy := boundSpokeClaimPrincipal(binding, db.ClaimPrincipal{
+			Holder: holder, ClientKind: "cli",
+		})
 
-	assert.Equal(t, "spoke-actor", legacy.Holder)
-	assert.Equal(t, "cli", legacy.ClientKind)
+		assert.Equal(t, "spoke-actor", legacy.Holder)
+		assert.Equal(t, "cli", legacy.ClientKind)
+	}
 }
 
 func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {

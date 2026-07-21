@@ -353,7 +353,7 @@ func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPr
 	// Existing clients keep their established actor/client-kind identity.
 	// Mounted callers carry an opaque subject-bound identity through the shared
 	// spoke credential so one subject cannot control another subject's lease.
-	if strings.HasPrefix(principal.Holder, "host:") {
+	if principal.AuthenticatedHost {
 		ownerDigest := sha256.Sum256([]byte("kata:spoke-host-claim-owner:v1\x00" + principal.Holder))
 		principal.ClientKind = "spoke-host:v1:" + base64.RawURLEncoding.EncodeToString(ownerDigest[:])
 	}

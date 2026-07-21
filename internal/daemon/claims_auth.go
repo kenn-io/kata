@@ -73,6 +73,7 @@ func resolveClaimPrincipal(
 func hostClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody, subject string) claimPrincipal {
 	principal := localClaimPrincipalWithHolder(cfg, body, hostClaimHolder(subject))
 	principal.ClientKind = hostClaimClientKind
+	principal.AuthenticatedHost = true
 	return principal
 }
 

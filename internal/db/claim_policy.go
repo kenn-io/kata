@@ -70,17 +70,14 @@ func LeaseResultFor(claim IssueClaim, granted bool, events []Event) LeaseResult 
 
 // SameClaimGateHolder reports whether a mutation principal owns the cached
 // claim. Existing claim clients retain their holder-and-instance gate identity.
-// Mounted host claims also include their versioned client kind because it
-// carries the authenticated subject through spoke federation.
+// Authenticated mounted host principals also include their exact client kind
+// because it carries the subject through spoke federation. Caller-provided
+// holder or client-kind strings never opt into that comparison.
 func SameClaimGateHolder(claim IssueClaim, principal ClaimPrincipal) bool {
-	if subjectBoundClaimKind(claim.ClientKind) || subjectBoundClaimKind(principal.ClientKind) {
+	if principal.AuthenticatedHost {
 		return SameClaimPrincipal(claim, principal)
 	}
 	return claim.Holder == principal.Holder && claim.HolderInstanceUID == principal.HolderInstanceUID
-}
-
-func subjectBoundClaimKind(kind string) bool {
-	return kind == "host:v1" || strings.HasPrefix(kind, "spoke-host:v1:")
 }
 
 // ClaimStatusRefreshErrorKey returns the stable metadata key for one issue's
