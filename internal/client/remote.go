@@ -544,16 +544,38 @@ var localConfigGitRunner = gitcmd.New()
 //
 // Untracked and gitignored files — the legitimate per-developer remote
 // workflow — return false, as does a directory that is not a git repository
-// or any case where git cannot be run. `git ls-files --error-unmatch` exits
-// zero only when the pathspec matches a tracked file; any other outcome
-// (untracked, ignored, not a repo, git missing) surfaces as an error and is
-// treated as "not tracked, honor it".
+// or any case where git cannot be run.
+//
+// The match is case-insensitive on the basename and must not depend on git's
+// core.ignorecase: on a case-insensitive filesystem (macOS/APFS) findLocalConfig
+// opens a committed `.KATA.LOCAL.TOML` via its lowercase stat, so a guard that
+// searched only for the exact lowercase pathspec could miss the uppercase
+// tracked entry and honor the redirect. We instead enumerate the git index
+// entries located directly in root (NUL-delimited, no path separator) and
+// refuse if any basename case-insensitively equals config.LocalConfigFilename.
+// Erring toward refuse is the correct bias for a security control.
 func localConfigTracked(root string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, err := localConfigGitRunner.Output(ctx, root,
-		"ls-files", "--error-unmatch", "--", config.LocalConfigFilename)
-	return err == nil
+	out, err := localConfigGitRunner.Output(ctx, root, "ls-files", "-z", "--", ".")
+	if err != nil {
+		return false
+	}
+	for _, entry := range strings.Split(string(out), "\x00") {
+		if entry == "" {
+			continue
+		}
+		// Entries in subdirectories carry a path separator (git always
+		// reports forward slashes); only files directly in root are the
+		// workspace-boundary .kata.local.toml candidate.
+		if strings.ContainsRune(entry, '/') {
+			continue
+		}
+		if strings.EqualFold(entry, config.LocalConfigFilename) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeRemoteURL parses a value as an http(s) URL and returns the

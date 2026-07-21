@@ -862,6 +862,49 @@ allow_insecure = true
 		"a tracked .kata.local.toml must not grant allow_insecure for its URL")
 }
 
+// TestLocalConfigTracked_CaseVariantCommittedRefused hardens the provenance
+// guard against a case-insensitive-filesystem bypass. On macOS/APFS a
+// committed `.KATA.LOCAL.TOML` is opened by findLocalConfig's lowercase stat,
+// so its [server].url would be applied; the guard must therefore recognize it
+// as tracked regardless of case. The check must not lean on git's
+// core.ignorecase, so the repo pins it false and commits the uppercase name:
+// a lowercase-pathspec lookup would miss it, but the guard must still refuse.
+//
+// This exercises localConfigTracked directly because the end-to-end
+// resolveRemote manifestation only reproduces on a case-insensitive FS (the
+// lowercase os.Stat in findLocalConfig cannot open the uppercase file on the
+// case-sensitive Linux CI host); the guard function is the seam where the
+// break is deterministically observable everywhere.
+func TestLocalConfigTracked_CaseVariantCommittedRefused(t *testing.T) {
+	dir := testfix.InitGitRepo(t)
+	testfix.RunGit(t, dir, "config", "core.ignorecase", "false")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".KATA.LOCAL.TOML"),
+		[]byte(`version = 1
+[server]
+url = "http://198.51.100.1:7777"
+`), 0o600))
+	testfix.RunGit(t, dir, "add", "-f", ".KATA.LOCAL.TOML")
+	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "plant case-variant config")
+
+	assert.True(t, localConfigTracked(dir),
+		"a committed case-variant .kata.local.toml must be treated as tracked")
+}
+
+// TestLocalConfigTracked_UntrackedNotRefused pins the legitimate path at the
+// same seam: an untracked lowercase file is not in the git index, so the guard
+// must report it not-tracked (honored).
+func TestLocalConfigTracked_UntrackedNotRefused(t *testing.T) {
+	dir := testfix.InitGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "http://198.51.100.1:7777"
+`), 0o600))
+
+	assert.False(t, localConfigTracked(dir),
+		"an untracked .kata.local.toml must not be treated as tracked")
+}
+
 // TestNormalizeRemoteURL_SchemeGuard covers the plain-http guard.
 // Plain http is rejected for public IPs and hostnames; loopback and
 // private IPs are accepted; https and allow_insecure short-circuit.
