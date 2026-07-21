@@ -246,7 +246,14 @@ func fillLinksDeltaParams(ctx context.Context, store db.Storage, projectID int64
 		return nil
 	}
 	resolve := func(ref string, include db.IncludeDeleted) (db.Issue, error) {
-		return resolveLinkTargetRef(ctx, store, projectID, ref, include)
+		issue, err := resolveLinkTargetRef(ctx, store, projectID, ref, include)
+		if err != nil {
+			return db.Issue{}, err
+		}
+		if _, err := authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false); err != nil {
+			return db.Issue{}, err
+		}
+		return issue, nil
 	}
 	// resolveAdd is the add-side variant: resolve then gate the target so a
 	// peer in an archived project is rejected before any mutation runs.

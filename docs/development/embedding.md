@@ -144,7 +144,9 @@ imports, ready selection, UID-prefix lookup, event feeds, close audits, and
 project digests also require `AllProjects` because their results or side effects
 can depend on relationships outside the project named in the URL. Parent-link
 changes and deletion by a global link ID use the same conservative scope. The
-request deliberately contains no application roles or tenant model.
+same applies to tolerant relationship removals, whose missing-target no-op
+must not reveal whether a target belongs to a denied project. The request
+deliberately contains no application roles or tenant model.
 
 For lease operations, Kata derives an opaque holder key from the stable
 `Principal.Subject`; a request-provided `holder` cannot select or impersonate

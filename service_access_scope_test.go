@@ -411,6 +411,60 @@ func TestServiceAccessControllerRequiresAllProjectsForParentMutations(t *testing
 	assert.Equal(t, http.StatusNotFound, editResponse.StatusCode)
 }
 
+func TestServiceAccessControllerConcealsLinkDeltaTargetsBeforeValidation(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, server := newAccessTestServer(t, controller)
+	sourceProject := createProject(t, server.URL, "source-project")
+	activeProject := createProject(t, server.URL, "active-project")
+	archivedProject := createProject(t, server.URL, "archived-project")
+	source := createAccessIssue(t, server, sourceProject.Project.ID, "source issue")
+	active := createAccessIssue(t, server, activeProject.Project.ID, "active target")
+	archived := createAccessIssue(t, server, archivedProject.Project.ID, "archived target")
+	_, err := service.ArchiveProject(t.Context(), archivedProject.Project.UID, "Example User")
+	require.NoError(t, err)
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.AllProjects ||
+			containsInt64(request.Operation.ProjectIDs, activeProject.Project.ID) ||
+			containsInt64(request.Operation.ProjectIDs, archivedProject.Project.ID) {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+
+	requests := []struct {
+		name  string
+		delta string
+	}{
+		{"active add", `{"add_related":["` + active.Issue.UID + `"]}`},
+		{"archived add", `{"add_related":["` + archived.Issue.UID + `"]}`},
+		{"missing add", `{"add_related":["01HZNQ7VFPK1XGD8R5MABCD4EA"]}`},
+		{"resolved conflict", `{"add_blocks":["` + active.Issue.UID + `"],"remove_blocks":["active-project#` + active.Issue.ShortID + `"]}`},
+		{"active tolerant removal", `{"remove_related":["` + active.Issue.UID + `"]}`},
+		{"missing tolerant removal", `{"remove_related":["01HZNQ7VFPK1XGD8R5MABCD4EA"]}`},
+	}
+	issuePath := server.URL + "/api/v1/projects/" + strconv.FormatInt(sourceProject.Project.ID, 10) +
+		"/issues/" + source.Issue.ShortID
+	for _, tc := range requests {
+		t.Run(tc.name, func(t *testing.T) {
+			request, err := http.NewRequest(http.MethodPatch, issuePath,
+				bytes.NewBufferString(`{"actor":"ignored","links_delta":`+tc.delta+`}`))
+			require.NoError(t, err)
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("If-Match", `"rev-1"`)
+			response, err := server.Client().Do(request)
+			require.NoError(t, err)
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&body))
+			_ = response.Body.Close()
+			assert.Equal(t, http.StatusNotFound, response.StatusCode)
+			assert.Equal(t, map[string]any{
+				"status": float64(http.StatusNotFound),
+				"error":  map[string]any{"code": "not_found", "message": "resource not found"},
+			}, body)
+		})
+	}
+}
+
 func TestServiceAccessControllerAuthorizesDeletedGraphPeerBeforeHidingIt(t *testing.T) {
 	controller := &recordingAccessController{}
 	_, server := newAccessTestServer(t, controller)

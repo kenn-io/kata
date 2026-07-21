@@ -418,7 +418,7 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 			if err := validateLinksDelta(in.Body.LinksDelta); err != nil {
 				return nil, err
 			}
-			if in.Body.LinksDelta.SetParent != nil || in.Body.LinksDelta.RemoveParent != nil {
+			if linksDeltaRequiresAllProjectsBeforeResolution(in.Body.LinksDelta) {
 				ctx, err = authorizeHostProjectScope(ctx, nil, nil, true)
 				if err != nil {
 					return nil, err
@@ -492,6 +492,20 @@ func editIssueHandler(cfg ServerConfig) func(context.Context, *api.EditIssueRequ
 		}
 		return out, nil
 	}
+}
+
+// linksDeltaRequiresAllProjectsBeforeResolution identifies relationship
+// changes whose target cannot be scoped safely after a lookup. Parent changes
+// inspect ancestry beyond the named target. Tolerant removals must treat a
+// missing target as a successful no-op, so mounted callers need complete
+// project authority before resolution to keep missing and denied targets
+// indistinguishable.
+func linksDeltaRequiresAllProjectsBeforeResolution(d *api.LinksDelta) bool {
+	if d == nil {
+		return false
+	}
+	return d.SetParent != nil || d.RemoveParent != nil ||
+		len(d.RemoveBlocks) > 0 || len(d.RemoveBlockedBy) > 0 || len(d.RemoveRelated) > 0
 }
 
 // linksDeltaRequestsAnyOp reports whether the delta carries at least one
