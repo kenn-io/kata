@@ -978,14 +978,19 @@ func TestLocalConfigTrackState_RepoRelativeMatchTracked(t *testing.T) {
 		"a matched root-level override must be tracked even when git prints a repo-relative path")
 }
 
-// TestResolveRemote_GitQueryFailureInWorktreeFailsClosed covers the fail-open
+// TestResolveRemote_GitQueryFailureInWorktreeErrors covers the fail-open
 // escalation: a hostile repo commits an evil override and then induces the
 // tracked-status git query to fail (huge index blows the timeout, or a
 // dubious-ownership checkout git refuses). Because we are demonstrably inside a
 // git worktree, the unverifiable file must be refused, not honored — otherwise
 // the victim's global bearer token is routed to the committed URL. The server
 // is reachable so a pass could only come from honoring the file.
-func TestResolveRemote_GitQueryFailureInWorktreeFailsClosed(t *testing.T) {
+//
+// Refusal must surface as an error, not a silent fall-through: the file may
+// equally be a developer's legitimate override, and treating a transient git
+// failure as "no override" would silently reroute a state-changing command to
+// an active or auto-started local daemon.
+func TestResolveRemote_GitQueryFailureInWorktreeErrors(t *testing.T) {
 	srv := pingingServer(t)
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_AUTH_TOKEN", "victim-global-token")
@@ -1001,10 +1006,11 @@ url = "`+srv.URL+`"
 	stubGitRunner(t, failingGitRunner{err: errors.New("git unavailable")})
 
 	url, ok, err := resolveRemote(context.Background(), "")
-	require.NoError(t, err)
-	assert.False(t, ok, "unverifiable tracked status inside a git worktree must fail closed")
+	require.Error(t, err,
+		"unverifiable tracked status inside a git worktree must error, not fall through to another daemon")
+	assert.Contains(t, err.Error(), ".kata.local.toml")
+	assert.False(t, ok)
 	assert.Empty(t, url)
-	assert.NotEqual(t, srv.URL, url)
 }
 
 // TestResolveRemote_GitQueryFailureNonRepoHonored guards the legitimate

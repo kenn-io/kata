@@ -126,7 +126,10 @@ func resolveRemote(ctx context.Context, workspaceStart string) (string, bool, er
 		}
 		return u, true, nil
 	}
-	root, path, ok := findLocalConfig(workspaceStart)
+	root, path, ok, err := findLocalConfig(workspaceStart)
+	if err != nil {
+		return "", false, err
+	}
 	if !ok {
 		return resolveActiveRemote(ctx)
 	}
@@ -378,8 +381,11 @@ func higherPriorityRemoteSourceMatchesBaseURL(baseURL, workspaceStart string) bo
 		u, err := normalizeRemoteURL(v, envAllowInsecure())
 		return err == nil && u == baseURL
 	}
-	root, _, ok := findLocalConfig(workspaceStart)
-	if !ok {
+	// An unverifiable local config (findErr != nil) aborts resolution in
+	// resolveRemote, so no client reaches this point through it; report
+	// no match rather than guessing at its contents.
+	root, _, ok, findErr := findLocalConfig(workspaceStart)
+	if findErr != nil || !ok {
 		return false
 	}
 	cfg, err := config.ReadLocalConfig(root)
@@ -417,7 +423,11 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 		u, err := normalizeRemoteURL(v, allow)
 		return err == nil && u == baseURL && allow
 	}
-	root, _, ok := findLocalConfig(workspaceStart)
+	root, _, ok, findErr := findLocalConfig(workspaceStart)
+	if findErr != nil {
+		// Unverifiable provenance never grants a plaintext downgrade.
+		return false
+	}
 	if !ok {
 		return activeRemoteAllowInsecureForBaseURL(baseURL)
 	}
@@ -458,13 +468,21 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 // gitignored, so a committed one has unverifiable provenance and
 // could redirect [server].url to route a victim's bearer token to an
 // attacker-controlled host.
-func findLocalConfig(start string) (root, path string, ok bool) {
+//
+// A non-nil error means a .kata.local.toml was found but its tracked
+// status could not be verified inside a git worktree. That case must
+// abort resolution rather than fall through: the file may be a
+// developer's legitimate override, and silently ignoring it on a
+// transient git failure would reroute a state-changing command to an
+// active or auto-started local daemon. (A determined-tracked file, by
+// contrast, is definitively illegitimate, so treating it as absent
+// restores exactly the pre-attack behavior.)
+func findLocalConfig(start string) (root, path string, ok bool, err error) {
 	dir := start
 	if dir == "" {
-		var err error
 		dir, err = os.Getwd()
 		if err != nil {
-			return "", "", false
+			return "", "", false, nil
 		}
 	}
 
@@ -500,25 +518,28 @@ func findLocalConfig(start string) (root, path string, ok bool) {
 					// honored as a server/URL override. Drop it and fall
 					// through to active_daemon/local resolution.
 					fmt.Fprintf(os.Stderr, "kata: warning: ignoring %s: it is tracked by git; a committed .kata.local.toml is not honored as a server override (keep it untracked/gitignored)\n", localPath)
-					return "", "", false
+					return "", "", false, nil
 				case !determined && gitWorktreePresent(localRoot):
 					// Tracked status could not be established (git missing,
 					// broken, dubious-ownership, or the query timed out) but we
 					// ARE inside a git worktree, where the file could be a
-					// committed redirect. Fail closed: an attacker who can make
-					// the git query fail must not thereby get an unverifiable
-					// override honored.
-					fmt.Fprintf(os.Stderr, "kata: warning: cannot verify git-tracked status of %s inside a git repository; refusing it as a server override — ensure git is available and the checkout is trusted\n", localPath)
-					return "", "", false
+					// committed redirect. Fail closed with a hard error: an
+					// attacker who can make the git query fail must not get an
+					// unverifiable override honored, and a legitimate override
+					// must not be silently dropped in favor of another daemon.
+					return "", "", false, fmt.Errorf(
+						"cannot verify the git-tracked status of %s inside a git repository; "+
+							"refusing it as a server override — ensure git is available and the "+
+							"checkout is trusted, or remove the file", localPath)
 				default:
 					// Either determined-untracked (legitimate gitignored
 					// developer override) or unknown with no .git present at
 					// all (a genuine non-repo workspace anchored only by
 					// .kata.toml, where there is no notion of tracking). Honor.
-					return localRoot, localPath, true
+					return localRoot, localPath, true, nil
 				}
 			}
-			return "", "", false
+			return "", "", false, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -526,7 +547,7 @@ func findLocalConfig(start string) (root, path string, ok bool) {
 			// workspace boundary. A .kata.local.toml found in a
 			// shared ancestor without a workspace anchor is
 			// unverifiable provenance — drop it.
-			return "", "", false
+			return "", "", false, nil
 		}
 		dir = parent
 	}
@@ -565,6 +586,7 @@ var localConfigGitRunner gitOutputRunner = gitcmd.New()
 // does not shell out to git, so it still answers correctly when the git
 // binary is missing, broken, or slow — exactly the conditions under which the
 // provenance query itself cannot determine tracked status.
+//
 func gitWorktreePresent(dir string) bool {
 	for {
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
@@ -588,8 +610,8 @@ func gitWorktreePresent(dir string) bool {
 //   - determined && !tracked  → untracked/gitignored; honor (the legitimate
 //     per-developer remote workflow).
 //   - !determined             → git failed or timed out; tracked status is
-//     UNKNOWN and the caller must fail closed inside a worktree (see
-//     findLocalConfig). Failing open here is attacker-influenceable: a hostile
+//     UNKNOWN and the caller must fail closed with an error inside a worktree
+//     (see findLocalConfig). Failing open here is attacker-influenceable: a hostile
 //     repo can commit an evil override and then induce the git query to fail
 //     (a huge index blowing the timeout, a dubious-ownership checkout git
 //     refuses) to get the committed URL honored.
