@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 func pingingServer(t *testing.T) *httptest.Server {
@@ -786,6 +787,79 @@ url = "`+srv.URL+`"
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, srv.URL, url)
+}
+
+// TestResolveRemote_TrackedFileNotHonored covers the credential-misrouting
+// fix: a .kata.local.toml that a hostile contributor force-committed past
+// the gitignore has attacker-controlled provenance, so its [server].url
+// override must NOT be honored even though the URL is reachable. Without the
+// provenance guard, resolution would return the committed URL and the CLI
+// would attach the victim's global bearer token to it.
+func TestResolveRemote_TrackedFileNotHonored(t *testing.T) {
+	srv := pingingServer(t) // reachable: proves refusal is provenance-based, not a probe failure
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "victim-global-token")
+	dir := testfix.InitGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+srv.URL+`"
+`), 0o600))
+	// Force-commit past the gitignore, mirroring `git add -f`.
+	testfix.RunGit(t, dir, "add", "-f", ".kata.local.toml")
+	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "plant local config")
+	t.Chdir(dir)
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	assert.False(t, ok, "a git-tracked .kata.local.toml must not be honored as a server override")
+	assert.Empty(t, url)
+	assert.NotEqual(t, srv.URL, url)
+}
+
+// TestResolveRemote_UntrackedFileHonoredInGitRepo guards the legitimate
+// developer workflow: a gitignored (untracked) .kata.local.toml inside a real
+// git repo pointing at the developer's own remote daemon must still resolve.
+// The provenance guard only refuses tracked files.
+func TestResolveRemote_UntrackedFileHonoredInGitRepo(t *testing.T) {
+	srv := pingingServer(t)
+	t.Setenv("KATA_SERVER", "")
+	dir := testfix.InitGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"),
+		[]byte(".kata.local.toml\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+srv.URL+`"
+`), 0o600))
+	t.Chdir(dir)
+
+	url, ok, err := resolveRemote(context.Background(), "")
+	require.NoError(t, err)
+	assert.True(t, ok, "an untracked/gitignored .kata.local.toml must remain honored")
+	assert.Equal(t, srv.URL, url)
+}
+
+// TestRemoteAllowInsecureForBaseURL_TrackedFileDenied covers the plaintext
+// vector: a tracked .kata.local.toml cannot grant allow_insecure for its URL,
+// so the CLI will not downgrade the bearer-token transport to cleartext toward
+// an attacker-chosen host.
+func TestRemoteAllowInsecureForBaseURL_TrackedFileDenied(t *testing.T) {
+	t.Setenv("KATA_SERVER", "")
+	dir := testfix.InitGitRepo(t)
+	const baseURL = "http://198.51.100.1:7777" // TEST-NET-3, never dialed
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte(`version = 1
+[server]
+url = "`+baseURL+`"
+allow_insecure = true
+`), 0o600))
+	testfix.RunGit(t, dir, "add", "-f", ".kata.local.toml")
+	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "plant local config")
+	t.Chdir(dir)
+
+	assert.False(t, remoteAllowInsecureForBaseURL(baseURL, ""),
+		"a tracked .kata.local.toml must not grant allow_insecure for its URL")
 }
 
 // TestNormalizeRemoteURL_SchemeGuard covers the plain-http guard.

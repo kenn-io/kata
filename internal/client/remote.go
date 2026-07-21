@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	gitcmd "go.kenn.io/kit/git/cmd"
 )
 
 // remoteServerEnvVar is the environment variable that names a kata
@@ -449,6 +451,13 @@ func remoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {
 // specific workspace via --workspace pass that path so the walk
 // honors the targeted workspace rather than wherever the user
 // happens to be.
+//
+// A .kata.local.toml discovered at the boundary is additionally
+// refused when it is git-tracked in its containing repo (see
+// localConfigTracked): the file is meant to be per-developer and
+// gitignored, so a committed one has unverifiable provenance and
+// could redirect [server].url to route a victim's bearer token to an
+// attacker-controlled host.
 func findLocalConfig(start string) (root, path string, ok bool) {
 	dir := start
 	if dir == "" {
@@ -478,6 +487,19 @@ func findLocalConfig(start string) (root, path string, ok bool) {
 		}
 		if isWorkspaceBoundary(dir) {
 			if foundLocal {
+				if localConfigTracked(localRoot) {
+					// A .kata.local.toml that is committed into the repo has
+					// attacker-controlled provenance: a hostile contributor
+					// can `git add -f` it past the gitignore and point
+					// [server].url at a host they control, so a victim who
+					// runs kata in the checkout (with a global bearer token
+					// configured) misroutes that token. The file is meant to
+					// be per-developer and gitignored; a tracked one is never
+					// honored as a server/URL override. Drop it and fall
+					// through to active_daemon/local resolution.
+					fmt.Fprintf(os.Stderr, "kata: warning: ignoring %s: it is tracked by git; a committed .kata.local.toml is not honored as a server override (keep it untracked/gitignored)\n", localPath)
+					return "", "", false
+				}
 				return localRoot, localPath, true
 			}
 			return "", "", false
@@ -507,6 +529,31 @@ func isWorkspaceBoundary(dir string) bool {
 		return true
 	}
 	return false
+}
+
+// localConfigGitRunner runs git with a sanitized environment (no inherited
+// GIT_* vars, no global/system config) so provenance checks cannot be steered
+// by ambient config while still honoring the user's safe.directory trust.
+var localConfigGitRunner = gitcmd.New()
+
+// localConfigTracked reports whether the .kata.local.toml in root is tracked
+// by git in root's containing repository. A tracked file is one that was
+// committed into the repo (including a force-add past the gitignore), which
+// gives its contents attacker-controlled provenance; callers must refuse to
+// honor its [server].url / allow_insecure overrides.
+//
+// Untracked and gitignored files — the legitimate per-developer remote
+// workflow — return false, as does a directory that is not a git repository
+// or any case where git cannot be run. `git ls-files --error-unmatch` exits
+// zero only when the pathspec matches a tracked file; any other outcome
+// (untracked, ignored, not a repo, git missing) surfaces as an error and is
+// treated as "not tracked, honor it".
+func localConfigTracked(root string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := localConfigGitRunner.Output(ctx, root,
+		"ls-files", "--error-unmatch", "--", config.LocalConfigFilename)
+	return err == nil
 }
 
 // normalizeRemoteURL parses a value as an http(s) URL and returns the
