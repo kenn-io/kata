@@ -594,18 +594,21 @@ func gitWorktreePresent(dir string) bool {
 //     (a huge index blowing the timeout, a dubious-ownership checkout git
 //     refuses) to get the committed URL honored.
 //
-// The match is case-insensitive on the basename and must not depend on git's
-// core.ignorecase: on a case-insensitive filesystem (macOS/APFS) findLocalConfig
-// opens a committed `.KATA.LOCAL.TOML` via its lowercase stat, so a guard that
-// searched only for the exact lowercase pathspec could miss the uppercase
-// tracked entry and honor the redirect. We instead enumerate the git index
-// entries located directly in root (NUL-delimited, no path separator) and
-// treat the file as tracked if any basename case-insensitively equals
-// config.LocalConfigFilename.
+// The match is case-insensitive and must not depend on git's core.ignorecase:
+// on a case-insensitive filesystem (macOS/APFS) findLocalConfig opens a
+// committed `.KATA.LOCAL.TOML` via its lowercase stat, so a plain lowercase
+// pathspec could miss the uppercase tracked entry and honor the redirect. The
+// `:(icase)` pathspec magic performs the case-insensitive match explicitly and
+// is anchored to root (no wildcard, so it never matches a same-named file in a
+// subdirectory). Scoping the query to the single filename also avoids
+// enumerating every tracked file under root, which on a large repo could blow
+// the 5s timeout and — because we now fail closed inside a worktree — wrongly
+// lock a developer out of a legitimate override.
 func localConfigTrackState(root string) (tracked, determined bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := localConfigGitRunner.Output(ctx, root, "ls-files", "-z", "--", ".")
+	out, err := localConfigGitRunner.Output(ctx, root,
+		"ls-files", "-z", "--", ":(icase)"+config.LocalConfigFilename)
 	if err != nil {
 		return false, false
 	}
@@ -613,15 +616,12 @@ func localConfigTrackState(root string) (tracked, determined bool) {
 		if entry == "" {
 			continue
 		}
-		// Entries in subdirectories carry a path separator (git always
-		// reports forward slashes); only files directly in root are the
-		// workspace-boundary .kata.local.toml candidate.
+		// The pathspec is anchored to root, so a match is a root-level
+		// .kata.local.toml (any case); skip any unexpected nested path.
 		if strings.ContainsRune(entry, '/') {
 			continue
 		}
-		if strings.EqualFold(entry, config.LocalConfigFilename) {
-			return true, true
-		}
+		return true, true
 	}
 	return false, true
 }

@@ -914,6 +914,28 @@ url = "http://198.51.100.1:7777"
 		"an untracked .kata.local.toml must not be treated as tracked")
 }
 
+// TestLocalConfigTracked_SubdirSameNameNotRoot pins the scoping contract of the
+// `:(icase)` pathspec query: a tracked .kata.local.toml committed in a
+// subdirectory must not make the workspace root look tracked. Root here has
+// only an untracked file, so the guard must report determined + untracked
+// (honored) — not tracked because of the nested committed file.
+func TestLocalConfigTracked_SubdirSameNameNotRoot(t *testing.T) {
+	dir := testfix.InitGitRepo(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub"), 0o755)) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", ".kata.local.toml"),
+		[]byte("version = 1\n"), 0o600))
+	testfix.RunGit(t, dir, "add", "-f", "sub/.kata.local.toml")
+	testfix.RunGit(t, dir, "commit", "--quiet", "-m", "nested config")
+	// Untracked file at root — the candidate findLocalConfig would honor.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kata.local.toml"),
+		[]byte("version = 1\n"), 0o600))
+
+	tracked, determined := localConfigTrackState(dir)
+	assert.True(t, determined)
+	assert.False(t, tracked,
+		"a committed config in a subdirectory must not mark the root as tracked")
+}
+
 // failingGitRunner stands in for a git binary that is missing, broken, or
 // hangs past the timeout. It never inspects args; the point is the error.
 type failingGitRunner struct{ err error }
