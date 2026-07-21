@@ -130,7 +130,15 @@ token over plaintext non-loopback HTTP.
 route matches and before protected data is returned or changed. The request
 contains the opaque authenticated subject, the actor snapshot used for new
 event and projection rows, and the matched operation ID, method, path template,
-and path parameters. `Operation.ProjectIDs`, `ProjectUIDs`, and `AllProjects`
+path parameters, and Kata's operation policy. The policy contains a stable
+domain kind, the required product-neutral `read`, `write`, `manage`, or
+`federate` capability, and explicit mutation and long-lived-response flags.
+Hosts map those capability classes to their own roles; they do not need to
+infer policy from operation names or HTTP verbs. Kata's registration test fails
+if a new route has no policy, and host-access mode fails closed if metadata is
+unavailable.
+
+`Operation.ProjectIDs`, `ProjectUIDs`, and `AllProjects`
 carry the validated effective project scope. Cross-project operations include
 both projects; omitting the project filter from the event stream sets
 `AllProjects` instead of silently broadening an empty scope. Body- and
@@ -210,6 +218,32 @@ principal, Kata validates the scoped credential in the route and does not call
 the host controller. The outer server must preserve the `Authorization` header
 on those routes. A request without either an in-process principal or a scoped
 bearer credential remains unauthenticated.
+
+## Restricted embedding profile
+
+Use `EmbeddingProfileRestricted` when the mounting application owns project
+lifecycle, API-token administration, federation setup, and external issue-sync
+configuration:
+
+```go
+service, err := kata.New(ctx, kata.Config{
+	DSN:     "/var/lib/example-app/kata.db",
+	Access:  applicationAccessController,
+	Profile: kata.EmbeddingProfileRestricted,
+})
+```
+
+Restricted mode returns a generic not-found response for native project
+mutations, token administration, federation administration, and issue-sync
+administration. Rejection happens before host authorization or request-body
+processing. Project and task reads, ordinary task changes, event streams, and
+Kata-authenticated federation transport remain available under their normal
+access checks. The zero-value profile preserves the full standalone-compatible
+HTTP API.
+
+Use the in-process project lifecycle methods below instead of enabling native
+project administration in restricted mode. Later profile revisions may add
+more host-owned application methods without changing standalone defaults.
 
 ## Host-managed projects
 

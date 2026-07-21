@@ -77,6 +77,11 @@ type ServerConfig struct {
 	// HostAccess enables in-process authentication and authorization supplied
 	// by a mounting application. It is nil for the standalone daemon.
 	HostAccess HostAccessController
+
+	// EmbeddingProfile removes native administrative routes when their
+	// lifecycle is owned by a mounting application. The standalone daemon uses
+	// the zero value and retains every route.
+	EmbeddingProfile EmbeddingProfile
 }
 
 // authPolicy returns the resolved bearer-auth policy in the form the
@@ -164,6 +169,7 @@ func NewServer(cfg ServerConfig) *Server {
 	// envelope shape, so we must disable the transform.
 	humaConfig.CreateHooks = nil
 	humaAPI := huma.NewAPI(humaConfig, api.WrapErrorAdapter(humago.NewAdapter(mux, "")))
+	withEmbeddingProfile(humaAPI, cfg.EmbeddingProfile)
 	withHostAccess(humaAPI, cfg.HostAccess)
 
 	s := &Server{cfg: cfg, api: humaAPI}

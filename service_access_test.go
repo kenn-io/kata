@@ -107,8 +107,115 @@ func TestServiceAccessControllerDeniesWithoutDisclosingProjectData(t *testing.T)
 		Method:     http.MethodGet,
 		Path:       "/api/v1/projects/{project_id}",
 		PathParams: map[string]string{"project_id": "42"},
+		Policy: kata.OperationPolicy{
+			Kind: kata.OperationProjectRead, Capability: kata.CapabilityRead,
+		},
 		ProjectIDs: []int64{42},
 	}, controller.snapshot()[0].Operation)
+}
+
+func TestServiceAccessControllerReceivesOperationPolicy(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN:    filepath.Join(t.TempDir(), "service.db"),
+		Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	project, err := service.EnsureProject(context.Background(), kata.ProjectSpec{
+		UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Name: "example-project",
+	})
+	require.NoError(t, err)
+
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	serve := func(method, target string, body []byte) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, target, bytes.NewReader(body))
+		if len(body) > 0 {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		request = request.WithContext(kata.WithPrincipal(request.Context(), principal))
+		response := httptest.NewRecorder()
+		service.Handler().ServeHTTP(response, request)
+		return response
+	}
+
+	response := serve(http.MethodGet,
+		"/api/v1/projects/"+strconv.FormatInt(project.Project.ID, 10)+"/issues", nil)
+	require.Equal(t, http.StatusOK, response.Code)
+	response = serve(http.MethodPost,
+		"/api/v1/projects/"+strconv.FormatInt(project.Project.ID, 10)+"/issues",
+		[]byte(`{"actor":"ignored","title":"Classified task mutation"}`))
+	require.Equal(t, http.StatusOK, response.Code)
+	response = serve(http.MethodGet, "/api/v1/tokens", nil)
+	require.Equal(t, http.StatusForbidden, response.Code)
+
+	requests := controller.snapshot()
+	require.Len(t, requests, 3)
+	assert.Equal(t, kata.OperationPolicy{
+		Kind: kata.OperationTaskRead, Capability: kata.CapabilityRead,
+	}, requests[0].Operation.Policy)
+	assert.Equal(t, kata.OperationPolicy{
+		Kind: kata.OperationTaskMutation, Capability: kata.CapabilityWrite, Mutation: true,
+	}, requests[1].Operation.Policy)
+	assert.Equal(t, kata.OperationPolicy{
+		Kind: kata.OperationTokenAdministration, Capability: kata.CapabilityManage,
+	}, requests[2].Operation.Policy)
+}
+
+func TestRestrictedEmbeddingProfileDeniesNativeAdministration(t *testing.T) {
+	controller := &recordingAccessController{}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+		Profile: kata.EmbeddingProfileRestricted,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	project, err := service.EnsureProject(context.Background(), kata.ProjectSpec{
+		UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Name: "example-project",
+	})
+	require.NoError(t, err)
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	serve := func(method, target string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, target, nil)
+		request = request.WithContext(kata.WithPrincipal(request.Context(), principal))
+		response := httptest.NewRecorder()
+		service.Handler().ServeHTTP(response, request)
+		return response
+	}
+
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/projects"},
+		{http.MethodGet, "/api/v1/tokens"},
+		{http.MethodPost, "/api/v1/federation/enrollments"},
+		{http.MethodPost, "/api/v1/projects/" + strconv.FormatInt(project.Project.ID, 10) +
+			"/issue-sync/github/enable"},
+	} {
+		response := serve(request.method, request.path)
+		assert.Equal(t, http.StatusNotFound, response.Code, "%s %s", request.method, request.path)
+		assert.JSONEq(t, `{"status":404,"error":{"code":"not_found","message":"resource not found"}}`,
+			response.Body.String())
+	}
+
+	response := serve(http.MethodGet,
+		"/api/v1/projects/"+strconv.FormatInt(project.Project.ID, 10)+"/issues")
+	assert.Equal(t, http.StatusOK, response.Code)
+	requests := controller.snapshot()
+	require.Len(t, requests, 1, "restricted operations must fail before host authorization")
+	assert.Equal(t, "listIssues", requests[0].Operation.ID)
+}
+
+func TestNewRejectsUnknownEmbeddingProfile(t *testing.T) {
+	_, err := kata.New(context.Background(), kata.Config{
+		DSN:     filepath.Join(t.TempDir(), "service.db"),
+		Auth:    kata.AuthConfig{TrustCallerAuthentication: true},
+		Profile: kata.EmbeddingProfile("unknown"),
+	})
+	require.EqualError(t, err, `kata: unknown embedding profile "unknown"`)
 }
 
 func TestServiceAccessControllerSuppliesTheMutationActor(t *testing.T) {
@@ -346,6 +453,9 @@ func TestServiceAccessControllerProtectsTheOpenAPIDocument(t *testing.T) {
 	assert.Equal(t, kata.Operation{
 		ID: "openAPI", Method: http.MethodGet, Path: "/openapi.yaml",
 		PathParams: map[string]string{},
+		Policy: kata.OperationPolicy{
+			Kind: kata.OperationServiceRead, Capability: kata.CapabilityRead,
+		},
 	}, requests[0].Operation)
 }
 

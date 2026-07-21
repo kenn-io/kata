@@ -20,6 +20,47 @@ type Principal struct {
 	Actor   string
 }
 
+// Capability is the product-neutral authority class an operation requires.
+// Embedding hosts map these classes to their own roles and grants.
+type Capability string
+
+// Capability values form the stable authority vocabulary exposed to hosts.
+const (
+	CapabilityRead     Capability = "read"
+	CapabilityWrite    Capability = "write"
+	CapabilityManage   Capability = "manage"
+	CapabilityFederate Capability = "federate"
+)
+
+// OperationKind describes the domain boundary of a matched route. The values
+// are owned by Kata so embedding hosts do not have to duplicate route policy.
+type OperationKind string
+
+// Operation kinds group routes by their data and administration boundary.
+const (
+	OperationServiceRead               OperationKind = "service_read"
+	OperationProjectRead               OperationKind = "project_read"
+	OperationTaskRead                  OperationKind = "task_read"
+	OperationTaskMutation              OperationKind = "task_mutation"
+	OperationTaskAdministration        OperationKind = "task_administration"
+	OperationProjectAdministration     OperationKind = "project_administration"
+	OperationTokenAdministration       OperationKind = "token_administration"
+	OperationFederationRead            OperationKind = "federation_read"
+	OperationFederationAdministration  OperationKind = "federation_administration"
+	OperationFederationTransport       OperationKind = "federation_transport"
+	OperationIntegrationAdministration OperationKind = "integration_administration"
+)
+
+// OperationPolicy is Kata's deny-by-default classification of one route.
+// Mutation and LongLived let a host apply browser and resource controls without
+// inferring behavior from an HTTP verb or operation name.
+type OperationPolicy struct {
+	Kind       OperationKind
+	Capability Capability
+	Mutation   bool
+	LongLived  bool
+}
+
 // Operation identifies the matched Kata HTTP operation without assigning any
 // host-specific meaning to it.
 type Operation struct {
@@ -27,6 +68,7 @@ type Operation struct {
 	Method     string
 	Path       string
 	PathParams map[string]string
+	Policy     OperationPolicy
 
 	// ProjectIDs and ProjectUIDs identify every project whose data the
 	// operation may read or change. AllProjects is true when a global selector

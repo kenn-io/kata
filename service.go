@@ -38,6 +38,20 @@ const (
 	PostgresSchemaValidate PostgresSchemaMode = "validate"
 )
 
+// EmbeddingProfile selects which HTTP administration surfaces a mounted
+// service exposes. The zero value preserves the standalone-compatible API.
+type EmbeddingProfile string
+
+// Embedding profiles supported by Config.Profile.
+const (
+	EmbeddingProfileStandalone EmbeddingProfile = ""
+	// EmbeddingProfileRestricted is for applications that own project,
+	// credential, federation, and external-integration administration. It keeps
+	// task and federation transport behavior while failing closed on native
+	// administration routes.
+	EmbeddingProfileRestricted EmbeddingProfile = "restricted"
+)
+
 // PostgresConfig selects an isolated PostgreSQL schema and startup policy.
 // Empty fields use Kata's standalone defaults.
 type PostgresConfig struct {
@@ -87,6 +101,9 @@ type Config struct {
 	// Access selects host-supplied in-process authentication and authorization.
 	// It is mutually exclusive with Auth.
 	Access AccessController
+	// Profile optionally removes native administration routes that an embedding
+	// host owns. The zero value keeps the complete standalone-compatible API.
+	Profile EmbeddingProfile
 	// FederationCredentials isolates secret material from other Service
 	// instances. Nil selects a service-owned in-memory store.
 	FederationCredentials FederationCredentialStore
@@ -133,6 +150,9 @@ func New(ctx context.Context, cfg Config) (*Service, error) {
 func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, error) {
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return nil, errors.New("kata: storage DSN is required")
+	}
+	if cfg.Profile != EmbeddingProfileStandalone && cfg.Profile != EmbeddingProfileRestricted {
+		return nil, fmt.Errorf("kata: unknown embedding profile %q", cfg.Profile)
 	}
 	usesAccess := cfg.Access != nil
 	usesToken := strings.TrimSpace(cfg.Auth.Token) != ""
@@ -219,6 +239,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		Hooks:                 hookSink,
 		Auth:                  config.AuthConfig{Token: cfg.Auth.Token},
 		HostAccess:            hostAccess,
+		EmbeddingProfile:      daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                logger,
 	})
 
@@ -310,7 +331,13 @@ func (a hostAccessControllerAdapter) Authorize(
 		Principal: Principal{Subject: request.Subject, Actor: request.Actor},
 		Operation: Operation{
 			ID: request.Operation.ID, Method: request.Operation.Method, Path: request.Operation.Path,
-			PathParams:  request.Operation.PathParams,
+			PathParams: request.Operation.PathParams,
+			Policy: OperationPolicy{
+				Kind:       OperationKind(request.Operation.Policy.Kind),
+				Capability: Capability(request.Operation.Policy.Capability),
+				Mutation:   request.Operation.Policy.Mutation,
+				LongLived:  request.Operation.Policy.LongLived,
+			},
 			ProjectIDs:  append([]int64(nil), request.Operation.ProjectIDs...),
 			ProjectUIDs: append([]string(nil), request.Operation.ProjectUIDs...),
 			AllProjects: request.Operation.AllProjects,

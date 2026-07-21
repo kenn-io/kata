@@ -4,10 +4,52 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/hooks"
 )
+
+func TestEveryRegisteredOperationHasHostPolicy(t *testing.T) {
+	srv := NewServer(ServerConfig{})
+	t.Cleanup(func() { _ = srv.Close() })
+
+	registered := make(map[string]struct{})
+	for _, pathItem := range srv.API().OpenAPI().Paths {
+		operations := []*huma.Operation{
+			pathItem.Get, pathItem.Put, pathItem.Post, pathItem.Delete,
+			pathItem.Options, pathItem.Head, pathItem.Patch, pathItem.Trace,
+		}
+		for _, operation := range operations {
+			if operation == nil {
+				continue
+			}
+			policy, ok := hostOperationPolicy(operation.OperationID)
+			if !ok {
+				t.Errorf("operation %q has no host policy", operation.OperationID)
+				continue
+			}
+			if policy.Kind == "" || policy.Capability == "" {
+				t.Errorf("operation %q has incomplete host policy: %+v", operation.OperationID, policy)
+			}
+			registered[operation.OperationID] = struct{}{}
+		}
+	}
+	registered["openAPI"] = struct{}{}
+
+	var stale []string
+	for operationID := range hostOperationPolicies {
+		if _, ok := registered[operationID]; !ok {
+			stale = append(stale, operationID)
+		}
+	}
+	sort.Strings(stale)
+	if len(stale) > 0 {
+		t.Errorf("host policies reference unregistered operations: %v", stale)
+	}
+}
 
 // TestServerConfig_NilHooks_FillsNoop verifies NewServer substitutes a
 // hooks.NewNoop() Sink when ServerConfig.Hooks is nil so handler tests

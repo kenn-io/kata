@@ -27,6 +27,7 @@ type HostOperation struct {
 	ProjectIDs  []int64
 	ProjectUIDs []string
 	AllProjects bool
+	Policy      HostOperationPolicy
 }
 
 // HostAccessRequest contains only generic request identity and route facts.
@@ -121,6 +122,13 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 				PathParams: pathParams,
 			},
 		}
+		policy, ok := hostOperationPolicy(operation.OperationID)
+		if !ok {
+			writeHostAccessError(ctx, http.StatusServiceUnavailable,
+				"access_unavailable", "access decision unavailable")
+			return
+		}
+		request.Operation.Policy = policy
 		if projectID, ok := positiveProjectID(pathParams["project_id"]); ok {
 			request.Operation.ProjectIDs = []int64{projectID}
 		}
@@ -302,6 +310,13 @@ func authorizeHostHTTP(
 			"authentication_required", "authentication required")
 		return false
 	}
+	policy, ok := hostOperationPolicy(operation.ID)
+	if !ok {
+		api.WriteEnvelope(w, http.StatusServiceUnavailable,
+			"access_unavailable", "access decision unavailable")
+		return false
+	}
+	operation.Policy = policy
 	_, err := controller.Authorize(r.Context(), HostAccessRequest{
 		Subject: principal.Subject, Actor: principal.Actor, Operation: operation,
 	})
