@@ -26,7 +26,7 @@ func activeProjectByID(ctx context.Context, store db.Storage, id int64) (db.Proj
 		if errors.Is(err, db.ErrNotFound) {
 			return db.Project{}, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}
-		return db.Project{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Project{}, internalAPIError(err)
 	}
 	if p.DeletedAt != nil {
 		return db.Project{}, api.NewError(404, "project_not_found", "project not found", "", nil)
@@ -119,7 +119,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			ps, err = cfg.DB.ListProjects(ctx)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		outs := make([]api.ProjectOut, len(ps))
 		for i, p := range ps {
@@ -128,7 +128,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if includeContains(in.Include, "stats") {
 			stats, err := cfg.DB.BatchProjectStats(ctx)
 			if err != nil {
-				return nil, api.NewError(500, "internal", err.Error(), "", nil)
+				return nil, internalAPIError(err)
 			}
 			for i, p := range ps {
 				if s, ok := stats[p.ID]; ok {
@@ -161,7 +161,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		aliases, err := cfg.DB.ProjectAliases(ctx, p.ID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.ShowProjectResponse{}
 		out.Body.Project = dbProjectToOut(p)
@@ -226,7 +226,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		extensions := make([]api.MergeShortIDExtension, 0, len(merged.ShortIDExtensions))
 		for _, ext := range merged.ShortIDExtensions {
@@ -274,7 +274,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				map[string]any{"open_issues": openErr.OpenIssues})
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
 		cfg.Hooks.Enqueue(*evt)
@@ -300,7 +300,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if err := validateExactConfirm(in.Confirm, "PURGE "+project.Name); err != nil {
 			return nil, err
@@ -331,7 +331,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				fedErr.Error(), hint, map[string]any{"role": string(fedErr.Role)})
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if pl.PurgeResetAfterEventID != nil {
 			cfg.Broadcaster.Broadcast(StreamMsg{
@@ -359,7 +359,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
@@ -397,7 +397,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"detach with force=true to drop it anyway, or attach a replacement first", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: alias.ProjectID})
 		cfg.Hooks.Enqueue(*evt)
@@ -427,11 +427,11 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		aliases, err := cfg.DB.ProjectAliases(ctx, p.ID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.ShowProjectResponse{}
 		out.Body.Project = dbProjectToOut(p)
@@ -506,7 +506,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 	case err == nil:
 		project, err := store.ProjectByID(ctx, alias.ProjectID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if project.DeletedAt != nil {
 			return nil, api.NewError(404, "project_not_initialized",
@@ -518,7 +518,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 			Alias:   alias,
 		}, nil
 	case !errors.Is(err, db.ErrNotFound):
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 
 	// Alias unknown. Fall back to name lookup if supplied so a fresh
@@ -540,7 +540,7 @@ func resolveByAliasInput(ctx context.Context, store db.Storage, in *api.AliasInp
 			`run "kata init" in this workspace`, nil)
 	}
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	// First-seen attach: bind the supplied alias to the matched project
 	// so subsequent resolves hit the alias path. Reassign=false matches
@@ -571,7 +571,7 @@ func resolveByName(ctx context.Context, store db.Storage, name string) (*api.Pro
 			`run "kata init" in this workspace`, nil)
 	}
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	return &api.ProjectResolveBody{Project: dbProjectToOut(project)}, nil
 }
@@ -598,7 +598,7 @@ func resolveByKataToml(ctx context.Context, store db.Storage, disc config.Discov
 		}
 		if cfgFile.Project.Name != "" && body.Project.Name != cfgFile.Project.Name {
 			if err := config.WriteProjectConfig(disc.WorkspaceRoot, body.Project.Name); err != nil {
-				return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
+				return nil, false, internalAPIError(err)
 			}
 		}
 		return body, true, nil
@@ -610,7 +610,7 @@ func resolveByKataToml(ctx context.Context, store db.Storage, disc config.Discov
 			`run "kata init" in this workspace`, nil)
 	}
 	if err != nil {
-		return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, false, internalAPIError(err)
 	}
 	alias, err := upsertAliasFor(ctx, store, project.ID, disc, false)
 	if err != nil {
@@ -636,11 +636,11 @@ func resolveByAliasIfAvailable(ctx context.Context, store db.Storage, disc confi
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, false, internalAPIError(err)
 	}
 	project, err := store.ProjectByID(ctx, alias.ProjectID)
 	if err != nil {
-		return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, false, internalAPIError(err)
 	}
 	return &api.ProjectResolveBody{
 		Project:       dbProjectToOut(project),
@@ -663,11 +663,11 @@ func resolveByAlias(ctx context.Context, store db.Storage, disc config.Discovere
 			`run "kata init" in this workspace`, nil)
 	}
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	project, err := store.ProjectByID(ctx, alias.ProjectID)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	return &api.ProjectResolveBody{
 		Project:       dbProjectToOut(project),
@@ -730,7 +730,7 @@ func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequ
 			}
 		}
 	} else if !errors.Is(err, db.ErrNotFound) {
-		return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, false, internalAPIError(err)
 	}
 	// Preflight alias conflict before mutating anything: without this, a fresh
 	// project row would be created and then orphaned when alias attach fails.
@@ -759,7 +759,7 @@ func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequ
 	dest := config.WriteDestination(disc, abs)
 	if tomlCfg == nil || tomlCfg.Project.Name != project.Name {
 		if err := config.WriteProjectConfig(dest, project.Name); err != nil {
-			return nil, false, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, false, internalAPIError(err)
 		}
 	}
 
@@ -867,7 +867,7 @@ func upsertProject(ctx context.Context, store db.Storage, name string) (db.Proje
 		return got, false, nil
 	}
 	if !errors.Is(err, db.ErrNotFound) {
-		return db.Project{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Project{}, false, internalAPIError(err)
 	}
 	if archived, archErr := store.ProjectByNameIncludingArchived(ctx, name); archErr == nil && archived.DeletedAt != nil {
 		return db.Project{}, false, api.NewError(409, "project_archived",
@@ -877,7 +877,7 @@ func upsertProject(ctx context.Context, store db.Storage, name string) (db.Proje
 	}
 	created, err := store.CreateProject(ctx, name)
 	if err != nil {
-		return db.Project{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Project{}, false, internalAPIError(err)
 	}
 	return created, true, nil
 }
@@ -903,7 +903,7 @@ func attachAlias(ctx context.Context, store db.Storage, projectID int64, info co
 		return applyExistingAlias(ctx, store, projectID, info, existing, reassign)
 	}
 	if !errors.Is(err, db.ErrNotFound) {
-		return db.ProjectAlias{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.ProjectAlias{}, internalAPIError(err)
 	}
 	a, err := store.AttachAlias(ctx, projectID, info.Identity, info.Kind)
 	if err != nil {
@@ -919,7 +919,7 @@ func attachAlias(ctx context.Context, store db.Storage, projectID int64, info co
 			}
 			return applyExistingAlias(ctx, store, projectID, info, raced, reassign)
 		}
-		return db.ProjectAlias{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.ProjectAlias{}, internalAPIError(err)
 	}
 	return a, nil
 }
@@ -941,7 +941,7 @@ func applyExistingAlias(ctx context.Context, store db.Storage, projectID int64, 
 			})
 	}
 	if execErr := store.ReassignAlias(ctx, existing.ID, projectID); execErr != nil {
-		return db.ProjectAlias{}, api.NewError(500, "internal", execErr.Error(), "", nil)
+		return db.ProjectAlias{}, internalAPIError(execErr)
 	}
 	refreshed, _ := store.AliasByIdentity(ctx, info.Identity)
 	return refreshed, nil
@@ -960,11 +960,11 @@ func preflightAliasConflict(ctx context.Context, store db.Storage, info config.A
 		return nil
 	}
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	existingProject, err := store.ProjectByID(ctx, existing.ProjectID)
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	if existingProject.Name == targetName {
 		return nil
@@ -974,7 +974,7 @@ func preflightAliasConflict(ctx context.Context, store db.Storage, info config.A
 		return nil
 	}
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	return api.NewError(http.StatusConflict, "project_alias_conflict",
 		"alias already attached to a different project",

@@ -359,7 +359,7 @@ func issueSyncStorageError(err error) error {
 	if errors.Is(err, db.ErrIssueSyncProjectAlreadyBound) || errors.Is(err, db.ErrImportValidation) {
 		return api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
 	}
-	return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+	return internalAPIError(err)
 }
 
 func issueSyncRunError(err error) error {
@@ -372,7 +372,7 @@ func issueSyncRunError(err error) error {
 	if errors.Is(err, db.ErrImportValidation) {
 		return api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
 	}
-	return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+	return internalAPIError(err)
 }
 
 func issueSyncBody(binding *db.IssueSyncBinding, status db.IssueSyncStatus) (api.IssueSyncBody, error) {

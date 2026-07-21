@@ -97,7 +97,7 @@ func doPollEvents(
 
 	resetTo, err := cfg.DB.PurgeResetCheck(ctx, afterID, projectID)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	if resetTo > 0 {
 		out := &api.PollEventsResponse{}
@@ -114,7 +114,7 @@ func doPollEvents(
 		Limit:     limit,
 	})
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 
 	out := &api.PollEventsResponse{}

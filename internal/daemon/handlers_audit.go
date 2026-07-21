@@ -66,7 +66,7 @@ func doAuditCloses(
 	}
 	events, err := cfg.DB.EventsInWindow(ctx, params)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	rows, err := buildAuditRows(ctx, cfg, in, events)
 	if err != nil {
@@ -342,7 +342,7 @@ func resolveAuditParentFilter(
 	if perr == nil && parsed.Project != "" {
 		project, projErr := cfg.DB.ProjectByID(ctx, projectID)
 		if projErr != nil {
-			return auditParentFilter{}, api.NewError(500, "internal", projErr.Error(), "", nil)
+			return auditParentFilter{}, internalAPIError(projErr)
 		}
 		if parsed.Project != project.Name {
 			// Clear every parsed identifier, not just parsedShortID, so a
@@ -422,7 +422,7 @@ func loadLegacyParentsForCloseEvents(
 	}
 	parents, err := cfg.DB.ParentShortIDsByIssues(ctx, ids)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	return parents, nil
 }
@@ -454,7 +454,7 @@ func resolveParentQualifiers(
 	}
 	out, err := cfg.DB.IssueQualifiersByUIDs(ctx, uids)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	return out, nil
 }

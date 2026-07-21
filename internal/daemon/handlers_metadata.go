@@ -79,7 +79,7 @@ func patchIssueMetadataHandler(cfg ServerConfig) func(context.Context, *api.Patc
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 
 		out := &api.PatchIssueMetadataResponse{}
@@ -131,7 +131,7 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.PatchProjectMetadataResponse{}
 		out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)

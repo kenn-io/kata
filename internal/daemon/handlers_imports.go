@@ -82,7 +82,7 @@ func registerImportsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrNotFound):
 			return nil, api.NewError(404, "issue_not_found", err.Error(), "", nil)
 		case err != nil:
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 
 		for i := range events {
@@ -110,7 +110,7 @@ func requireFederatedImportClaims(
 		return nil
 	}
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	if !binding.Enabled {
 		return nil
@@ -166,7 +166,7 @@ func importItemFederatedClaimState(
 		return importClaimItemState{}, nil
 	}
 	if err != nil {
-		return importClaimItemState{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return importClaimItemState{}, internalAPIError(err)
 	}
 	if mapping.IssueID == nil {
 		return importClaimItemState{}, api.NewError(404, "issue_not_found", "import issue mapping is missing issue id", "", nil)
@@ -176,7 +176,7 @@ func importItemFederatedClaimState(
 		return importClaimItemState{}, api.NewError(404, "issue_not_found", err.Error(), "", nil)
 	}
 	if err != nil {
-		return importClaimItemState{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return importClaimItemState{}, internalAPIError(err)
 	}
 	if issue.DeletedAt != nil {
 		return importClaimItemState{}, api.NewError(404, "issue_not_found", "mapped import issue is deleted", "", nil)
@@ -237,7 +237,7 @@ func importItemLinkAddClaimPeers(
 			if _, err := store.LinkByEndpoints(ctx, fromID, toID, importLink.Type); err == nil {
 				continue
 			} else if !errors.Is(err, db.ErrNotFound) {
-				return nil, api.NewError(500, "internal", err.Error(), "", nil)
+				return nil, internalAPIError(err)
 			}
 		}
 		out = append(out, target)
@@ -262,7 +262,7 @@ func importItemLinkRemovalClaimPeers(
 	}
 	mappings, err := store.ImportMappingsByProjectSource(ctx, projectID, source)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	var out []db.Issue
 	for _, mapping := range mappings {
@@ -280,7 +280,7 @@ func importItemLinkRemovalClaimPeers(
 			continue
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		peerID := link.ToIssueID
 		if peerID == state.issue.ID {
@@ -288,7 +288,7 @@ func importItemLinkRemovalClaimPeers(
 		}
 		peer, err := store.IssueByID(ctx, peerID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out = append(out, peer)
 	}
@@ -311,7 +311,7 @@ func importLinkClaimTarget(
 		return db.Issue{}, false, api.NewError(404, "issue_not_found", fmt.Sprintf("import link target %q not found", externalID), "", nil)
 	}
 	if err != nil {
-		return db.Issue{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Issue{}, false, internalAPIError(err)
 	}
 	if mapping.IssueID == nil {
 		return db.Issue{}, false, api.NewError(404, "issue_not_found", fmt.Sprintf("import link target %q is missing issue id", externalID), "", nil)
@@ -321,7 +321,7 @@ func importLinkClaimTarget(
 		return db.Issue{}, false, api.NewError(404, "issue_not_found", fmt.Sprintf("import link target %q not found", externalID), "", nil)
 	}
 	if err != nil {
-		return db.Issue{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Issue{}, false, internalAPIError(err)
 	}
 	if issue.DeletedAt != nil {
 		return db.Issue{}, false, api.NewError(404, "issue_not_found", fmt.Sprintf("import link target %q is deleted", externalID), "", nil)

@@ -32,7 +32,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		project, perr := cfg.DB.ProjectByID(ctx, issue.ProjectID)
 		if perr != nil {
-			return nil, api.NewError(500, "internal", perr.Error(), "", nil)
+			return nil, internalAPIError(perr)
 		}
 		if err := validateConfirm(in.Confirm, "DELETE", project.Name, issue.ShortID); err != nil {
 			return nil, err
@@ -48,7 +48,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
@@ -86,7 +86,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
@@ -116,7 +116,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		project, perr := cfg.DB.ProjectByID(ctx, issue.ProjectID)
 		if perr != nil {
-			return nil, api.NewError(500, "internal", perr.Error(), "", nil)
+			return nil, internalAPIError(perr)
 		}
 		if err := validateConfirm(in.Confirm, "PURGE", project.Name, issue.ShortID); err != nil {
 			return nil, err
@@ -140,11 +140,11 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if pl.PurgeResetAfterEventID != nil {
 			if err := refreshFederationBaselineAfterPurge(ctx, cfg, in.ProjectID, actor); err != nil {
-				return nil, api.NewError(500, "internal", err.Error(), "", nil)
+				return nil, internalAPIError(err)
 			}
 			cfg.Broadcaster.Broadcast(StreamMsg{
 				Kind:      "reset",

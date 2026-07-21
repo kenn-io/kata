@@ -42,7 +42,7 @@ func registerAuthorRewriteHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusConflict, "project_federated", err.Error(), "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if result.Event != nil {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: result.Event, ProjectID: in.ProjectID})

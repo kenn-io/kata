@@ -54,7 +54,7 @@ func registerSearchHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 				return nil, api.NewError(me.Status(), kind, me.Error(), "", nil)
 			}
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.SearchResponse{}
 		out.Body.Query = in.Query

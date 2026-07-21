@@ -36,7 +36,7 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, _ *struct{}) (*api.HealthResponse, error) {
 		schema, err := cfg.DB.SchemaVersion(ctx)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.HealthResponse{}
 		out.Body.OK = true

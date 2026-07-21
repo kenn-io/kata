@@ -2,6 +2,7 @@ package kata
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 )
 
@@ -93,10 +94,26 @@ type AccessLease interface {
 	Revalidate(context.Context) error
 }
 
+// Transaction is the narrow database/sql surface supplied to a transaction
+// fence. Both SQLite and PostgreSQL transactions implement it.
+type Transaction interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// TransactionFence revalidates authority from inside the active storage
+// transaction. Returning an error aborts and rolls back the domain mutation.
+type TransactionFence func(context.Context, Transaction) error
+
 // AccessDecision carries state needed after a request is admitted. Lease may
 // be nil for bounded responses; long-lived operations require one.
 type AccessDecision struct {
 	Lease AccessLease
+	// TransactionFence should be present on every successful decision. Kata
+	// invokes it when handling the operation begins a storage transaction,
+	// before the transaction's first domain write, and retains its database
+	// locks through commit or rollback.
+	TransactionFence TransactionFence
 }
 
 // AccessController makes host-owned authorization decisions for a mounted

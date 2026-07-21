@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -21,11 +22,13 @@ import (
 )
 
 type recordingAccessController struct {
-	mu        sync.Mutex
-	requests  []kata.AccessRequest
-	err       error
-	lease     kata.AccessLease
-	authorize func(kata.AccessRequest) error
+	mu                   sync.Mutex
+	requests             []kata.AccessRequest
+	err                  error
+	lease                kata.AccessLease
+	transactionFence     kata.TransactionFence
+	omitTransactionFence bool
+	authorize            func(kata.AccessRequest) error
 }
 
 func (c *recordingAccessController) Authorize(
@@ -36,6 +39,10 @@ func (c *recordingAccessController) Authorize(
 	defer c.mu.Unlock()
 	c.requests = append(c.requests, request)
 	decision := kata.AccessDecision{}
+	decision.TransactionFence = c.transactionFence
+	if decision.TransactionFence == nil && !c.omitTransactionFence {
+		decision.TransactionFence = func(context.Context, kata.Transaction) error { return nil }
+	}
 	if request.Operation.ID == "streamEvents" {
 		decision.Lease = c.lease
 	}
@@ -43,6 +50,132 @@ func (c *recordingAccessController) Authorize(
 		return decision, c.authorize(request)
 	}
 	return decision, c.err
+}
+
+func TestServiceMutationFailsClosedWithoutTransactionFence(t *testing.T) {
+	controller := &recordingAccessController{omitTransactionFence: true}
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	project, err := service.EnsureProject(context.Background(), kata.ProjectSpec{
+		UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Name: "example-project",
+	})
+	require.NoError(t, err)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/issues",
+		bytes.NewBufferString(`{"actor":"ignored","title":"must not be stored"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(kata.WithPrincipal(request.Context(), kata.Principal{
+		Subject: "user-123", Actor: "Example User",
+	}))
+	response := httptest.NewRecorder()
+	service.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+	assert.JSONEq(t,
+		`{"status":503,"error":{"code":"access_unavailable","message":"transaction access decision unavailable"}}`,
+		response.Body.String())
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+		strconv.FormatInt(project.Project.ID, 10)+"/issues", nil)
+	listRequest = listRequest.WithContext(kata.WithPrincipal(listRequest.Context(), kata.Principal{
+		Subject: "user-123", Actor: "Example User",
+	}))
+	listed := httptest.NewRecorder()
+	service.Handler().ServeHTTP(listed, listRequest)
+	require.Equal(t, http.StatusOK, listed.Code)
+	assert.NotContains(t, listed.Body.String(), "must not be stored")
+}
+
+func TestServiceTransactionFenceSharesMutationCommitAndRollback(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "service.db")
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var attempts atomic.Int64
+	controller := &recordingAccessController{}
+	controller.transactionFence = func(ctx context.Context, tx kata.Transaction) error {
+		attempt := attempts.Add(1)
+		_, err := tx.ExecContext(ctx, `INSERT INTO fence_markers(attempt) VALUES(?)`, attempt)
+		if err != nil {
+			return err
+		}
+		if attempt == 1 {
+			entered <- struct{}{}
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return kata.ErrAccessDenied
+	}
+	service, err := kata.New(context.Background(), kata.Config{DSN: databasePath, Access: controller})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	project, err := service.EnsureProject(context.Background(), kata.ProjectSpec{
+		UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Name: "example-project",
+	})
+	require.NoError(t, err)
+
+	inspection, err := sql.Open("sqlite", databasePath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, inspection.Close()) })
+	_, err = inspection.Exec(`CREATE TABLE fence_markers (attempt INTEGER NOT NULL)`)
+	require.NoError(t, err)
+
+	principal := kata.Principal{Subject: "user-123", Actor: "Example User"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		service.Handler().ServeHTTP(w, r.WithContext(kata.WithPrincipal(r.Context(), principal)))
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	create := func(title string) (*http.Response, error) {
+		body := bytes.NewBufferString(`{"actor":"ignored","title":` + strconv.Quote(title) + `}`)
+		return http.Post(server.URL+"/api/v1/projects/"+
+			strconv.FormatInt(project.Project.ID, 10)+"/issues", "application/json", body)
+	}
+
+	firstResponse := make(chan *http.Response, 1)
+	firstError := make(chan error, 1)
+	go func() {
+		response, requestErr := create("committed after fence")
+		firstResponse <- response
+		firstError <- requestErr
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "transaction fence was not reached")
+	}
+	var issuesBeforeRelease int
+	require.NoError(t, inspection.QueryRow(
+		`SELECT count(*) FROM issues WHERE title = ?`, "committed after fence").Scan(&issuesBeforeRelease))
+	assert.Zero(t, issuesBeforeRelease, "domain write must not run before the transaction fence")
+	close(release)
+	require.NoError(t, <-firstError)
+	committed := <-firstResponse
+	require.NotNil(t, committed)
+	defer func() { _ = committed.Body.Close() }()
+	require.Equal(t, http.StatusOK, committed.StatusCode)
+
+	rejected, err := create("rolled back with fence")
+	require.NoError(t, err)
+	defer func() { _ = rejected.Body.Close() }()
+	assert.Equal(t, http.StatusNotFound, rejected.StatusCode)
+
+	var markerCount, committedIssues, rejectedIssues int
+	require.NoError(t, inspection.QueryRow(`SELECT count(*) FROM fence_markers`).Scan(&markerCount))
+	require.NoError(t, inspection.QueryRow(
+		`SELECT count(*) FROM issues WHERE title = ?`, "committed after fence").Scan(&committedIssues))
+	require.NoError(t, inspection.QueryRow(
+		`SELECT count(*) FROM issues WHERE title = ?`, "rolled back with fence").Scan(&rejectedIssues))
+	assert.Equal(t, 1, markerCount, "rejected fence work must roll back with the domain transaction")
+	assert.Equal(t, 1, committedIssues)
+	assert.Zero(t, rejectedIssues)
 }
 
 type revocableAccessLease struct {

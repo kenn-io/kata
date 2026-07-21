@@ -74,7 +74,7 @@ func doDigest(
 		Actors:    actors,
 	})
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 
 	out := &api.DigestResponse{}

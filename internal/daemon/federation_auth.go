@@ -42,7 +42,7 @@ func authorizeFederationRequest(
 			return federationPrincipal{}, api.NewError(http.StatusForbidden, "auth_invalid",
 				"federation token is invalid for this project or capability", "", nil)
 		}
-		return federationPrincipal{}, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return federationPrincipal{}, internalAPIError(err)
 	}
 	return federationPrincipal{
 		EnrollmentID:                 enrollment.ID,

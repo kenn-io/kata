@@ -1001,7 +1001,7 @@ func (d *Store) withImmediateClaimTx(ctx context.Context, fn func(*sql.Conn) err
 		}
 		defer func() { _ = conn.Close() }()
 
-		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE TRANSACTION"); err != nil {
+		if err := d.beginImmediateTransaction(ctx, conn); err != nil {
 			return fmt.Errorf("begin immediate: %w", err)
 		}
 		committed := false

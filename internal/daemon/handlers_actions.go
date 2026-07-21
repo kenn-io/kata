@@ -96,7 +96,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 							Parent: parentRef,
 							Cohort: cohort,
 						}); err != nil {
-						return nil, api.NewError(500, "internal", err.Error(), "", nil)
+						return nil, internalAPIError(err)
 					}
 				}
 				return nil, api.NewError(429, "sibling_throttle", refusal.Error(), "", nil)
@@ -111,7 +111,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 							Parent: parentRef,
 							Prior:  &priorRef,
 						}); err != nil {
-						return nil, api.NewError(500, "internal", err.Error(), "", nil)
+						return nil, internalAPIError(err)
 					}
 				}
 				return nil, api.NewError(429, "duplicate_message", refusal.Error(), "", nil)
@@ -159,7 +159,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if errors.Is(err, db.ErrFederatedReadOnly) {
 				return nil, federationReadOnlyError(err)
 			}
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if changed {
 			for i := range events {
@@ -208,7 +208,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})

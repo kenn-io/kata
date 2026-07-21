@@ -331,7 +331,7 @@ func claimBinding(ctx context.Context, store db.Storage, projectID int64) (db.Fe
 		return db.FederationBinding{}, api.NewError(http.StatusNotFound, "federation_not_found", "project is not federated", "", nil)
 	}
 	if err != nil {
-		return db.FederationBinding{}, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return db.FederationBinding{}, internalAPIError(err)
 	}
 	if !binding.Enabled {
 		return db.FederationBinding{}, api.NewError(http.StatusConflict, "federated_read_only", "federation binding is disabled", "", nil)
@@ -372,7 +372,7 @@ func claimForwardClient(
 	}
 	cred, _, err := cfg.federationCredentialStore().FederationCredential(ctx, project.UID)
 	if err != nil {
-		return nil, config.FederationCredential{}, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return nil, config.FederationCredential{}, internalAPIError(err)
 	}
 	if strings.TrimSpace(cred.Token) == "" {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation claim credentials are unavailable", "", nil)
@@ -692,7 +692,7 @@ func requireHubClaimBinding(ctx context.Context, store db.Storage, projectID int
 		return api.NewError(http.StatusNotFound, "federation_not_found", "project is not a federation hub", "", nil)
 	}
 	if err != nil {
-		return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleHub {
 		return api.NewError(http.StatusConflict, "federated_read_only", "claim actions must be resolved by the hub project", "", nil)
@@ -730,7 +730,7 @@ func claimAPIError(err error) error {
 	case errors.Is(err, db.ErrNotFound):
 		return api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
 	default:
-		return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 }
 
@@ -775,7 +775,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 		return nil, nil
 	}
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
 		if binding.Enabled && binding.Role == db.FederationRoleHub {
@@ -794,7 +794,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	now := time.Now().UTC()
 	if skip, err := skipRecentShowClaimStatusError(ctx, cfg.DB, issue, now); err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	} else if skip {
 		return nil, nil
 	}
@@ -871,15 +871,15 @@ func markShowClaimStatusRefreshFailure(
 	now time.Time,
 ) error {
 	if err := store.MarkClaimStatusRefreshError(ctx, issue.ProjectID, issue.UID, statusCode, msg, now); err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	pending, err := store.ListPendingClaimRequestsForIssue(ctx, issue.ProjectID, issue.UID, 0)
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	for _, req := range pending {
 		if err := store.MarkPendingClaimAttempt(ctx, req.RequestUID, msg, now); err != nil {
-			return api.NewError(500, "internal", err.Error(), "", nil)
+			return internalAPIError(err)
 		}
 	}
 	return nil
@@ -889,11 +889,11 @@ func hydrateClaimOutForIssue(ctx context.Context, cfg ServerConfig, issue db.Iss
 	now := time.Now().UTC()
 	status, err := cfg.DB.ClaimStatusReadOnly(ctx, issue.ProjectID, issue.UID, now)
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	pending, err := cfg.DB.ListPendingClaimRequestsForIssue(ctx, issue.ProjectID, issue.UID, 0)
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	out.Body.Claim = issueClaimOut(status.Claim)
 	out.Body.Lease = out.Body.Claim

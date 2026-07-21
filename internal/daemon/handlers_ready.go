@@ -31,7 +31,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		issues, err := cfg.DB.ReadyIssues(ctx, in.ProjectID, in.Limit, filter)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, in.ProjectID, issues)
 		if err != nil {
@@ -49,7 +49,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.ReadyGlobalRequest) (*api.ReadyGlobalResponse, error) {
 		issues, err := cfg.DB.ReadyIssuesGlobal(ctx, in.Limit)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		bare := make([]db.Issue, len(issues))
 		for i, iss := range issues {

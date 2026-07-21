@@ -133,7 +133,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.CreateRecurrenceResponse{}
 		out.Body.Recurrence = rec
@@ -148,7 +148,7 @@ func listRecurrencesHandler(cfg ServerConfig) func(context.Context, *api.ListRec
 		}
 		list, err := cfg.DB.ListRecurrencesByProject(ctx, in.ProjectID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if list == nil {
 			list = []db.Recurrence{}
@@ -216,7 +216,7 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.PatchRecurrenceResponse{}
 		out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)
@@ -240,7 +240,7 @@ func deleteRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Delete
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		return &api.DeleteRecurrenceResponse{}, nil
 	}

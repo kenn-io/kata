@@ -28,7 +28,7 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		plaintext, err := newPlaintextToken()
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		var name *string
 		if trimmed := strings.TrimSpace(in.Body.Name); trimmed != "" {
@@ -41,7 +41,7 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 			AdminActor:     tokenAdminAuditActor(ctx, db.BootstrapActor),
 		})
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.CreateTokenResponse{}
 		out.Body.Token = tokenOut(tok)
@@ -59,7 +59,7 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		toks, err := cfg.DB.ListAPITokens(ctx)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.ListTokensResponse{}
 		out.Body.Tokens = make([]api.TokenOut, 0, len(toks))
@@ -82,7 +82,7 @@ func registerTokenHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(404, "token_not_found", "token not found", "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.RevokeTokenResponse{}
 		out.Body.Token = tokenOut(tok)

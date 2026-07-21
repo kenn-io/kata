@@ -24,7 +24,7 @@ func requireFederatedIssueClaim(
 		return nil
 	}
 	if err != nil {
-		return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	if !binding.Enabled {
 		return nil
@@ -77,7 +77,7 @@ func requireFederatedHubIssueClaim(
 		return nil
 	}
 	if err != nil {
-		return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	if !binding.Enabled || binding.Role != db.FederationRoleHub {
 		return nil
@@ -137,7 +137,7 @@ func isPendingSpokePushClaimStatusMiss(
 	}
 	pending, err := pendingPushMayMaterializeIssue(ctx, cfg.DB, binding, issue.UID)
 	if err != nil {
-		return false, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return false, internalAPIError(err)
 	}
 	return pending, nil
 }
@@ -213,6 +213,6 @@ func claimGateAPIError(err error) error {
 	case errors.Is(err, db.ErrNotFound):
 		return api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
 	default:
-		return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 }

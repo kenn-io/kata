@@ -26,7 +26,7 @@ func (d *Store) purgeProject(ctx context.Context, p db.PurgeProjectParams) (db.P
 	}
 	defer func() { _ = conn.Close() }()
 
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE TRANSACTION"); err != nil {
+	if err := d.beginImmediateTransaction(ctx, conn); err != nil {
 		return db.ProjectPurgeLog{}, fmt.Errorf("begin immediate: %w", err)
 	}
 	committed := false

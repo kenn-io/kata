@@ -29,7 +29,7 @@ func activeProjectByUID(ctx context.Context, store db.Storage, uid string) (db.P
 		if errors.Is(err, db.ErrNotFound) {
 			return db.Project{}, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}
-		return db.Project{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Project{}, internalAPIError(err)
 	}
 	if p.DeletedAt != nil {
 		return db.Project{}, api.NewError(404, "project_not_found", "project not found", "", nil)
@@ -89,7 +89,7 @@ func moveIssueHandler(cfg ServerConfig) func(context.Context, *api.MoveIssueRequ
 			return nil, apiErr
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 
 		out := &api.MoveIssueResponse{}

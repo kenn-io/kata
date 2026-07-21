@@ -128,7 +128,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		if existing, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type); lookupErr == nil {
 			return mutationLinkResponse(from, existing, canonicalFromPeer, canonicalToPeer, nil, false), nil
 		} else if !errors.Is(lookupErr, db.ErrNotFound) {
-			return nil, api.NewError(500, "internal", lookupErr.Error(), "", nil)
+			return nil, internalAPIError(lookupErr)
 		}
 		if err := requireFederatedIssueClaim(ctx, cfg, to.ProjectID, to, actor); err != nil {
 			return nil, err
@@ -146,7 +146,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			// race backstop; this closes the practical gap.
 			cycle, cerr := parentReplaceWouldCycle(ctx, cfg.DB, from.ID, to.ID)
 			if cerr != nil {
-				return nil, api.NewError(500, "internal", cerr.Error(), "", nil)
+				return nil, internalAPIError(cerr)
 			}
 			if cycle {
 				// Byte-identical to the insert path's db.ErrParentCycle mapping.
@@ -163,7 +163,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 				// payload records the parent we're actually removing.
 				oldParentIssue, err := cfg.DB.IssueByID(ctx, existing.ToIssueID)
 				if err != nil {
-					return nil, api.NewError(500, "internal", err.Error(), "", nil)
+					return nil, internalAPIError(err)
 				}
 				if err := requireFederatedLinkClaims(ctx, cfg, actor, oldParentIssue); err != nil {
 					return nil, err
@@ -182,12 +182,12 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 					if apiErr := federationReadOnlyError(err); apiErr != nil {
 						return nil, apiErr
 					}
-					return nil, api.NewError(500, "internal", err.Error(), "", nil)
+					return nil, internalAPIError(err)
 				}
 				cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &unlinkEvt, ProjectID: in.ProjectID})
 				cfg.Hooks.Enqueue(unlinkEvt)
 			} else if !errors.Is(perr, db.ErrNotFound) {
-				return nil, api.NewError(500, "internal", perr.Error(), "", nil)
+				return nil, internalAPIError(perr)
 			}
 		}
 
@@ -213,7 +213,7 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 			// Duplicate (from, to, type) → no-op. Re-fetch and return existing.
 			existing, lookupErr := cfg.DB.LinkByEndpoints(ctx, storageFromID, storageToID, in.Body.Type)
 			if lookupErr != nil {
-				return nil, api.NewError(500, "internal", lookupErr.Error(), "", nil)
+				return nil, internalAPIError(lookupErr)
 			}
 			return mutationLinkResponse(from, existing, canonicalFromPeer, canonicalToPeer, nil, false), nil
 		case errors.Is(err, db.ErrParentAlreadySet):
@@ -231,12 +231,12 @@ func createLinkHandler(cfg ServerConfig) func(context.Context, *api.CreateLinkRe
 		case errors.Is(err, db.ErrFederatedReadOnly):
 			return nil, federationReadOnlyError(err)
 		case err != nil:
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 
 		updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
 		cfg.Hooks.Enqueue(evt)
@@ -294,7 +294,7 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 			return out, nil
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		// The URL says we're operating on issue {ref}'s links. Reject if
 		// the link's two endpoints don't include this issue — defends against
@@ -317,11 +317,11 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 		// the stored row holds.
 		linkFrom, err := cfg.DB.IssueByID(ctx, link.FromIssueID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		linkTo, err := cfg.DB.IssueByID(ctx, link.ToIssueID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if link.FromIssueID != from.ID {
 			linkFrom, linkTo = linkTo, linkFrom
@@ -351,11 +351,11 @@ func deleteLinkHandler(cfg ServerConfig) func(context.Context, *api.DeleteLinkRe
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		updatedIssue, err := cfg.DB.IssueByID(ctx, from.ID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
 		cfg.Hooks.Enqueue(evt)

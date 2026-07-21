@@ -206,6 +206,22 @@ Kata revalidates that lease before each event or heartbeat; a failed
 revalidation closes the stream before more protected data is written. Bounded
 requests may return a decision with no lease.
 
+Return a `TransactionFence` with every successful decision. Kata invokes it
+only when handling the operation begins a SQLite or PostgreSQL transaction,
+before the first domain write. This also covers read operations that perform
+transactional maintenance. SQL locks acquired by the callback are therefore
+held through the domain commit or rollback; the callback must not commit or
+roll back the supplied transaction itself. Returning `ErrAccessDenied` rolls
+the mutation back and produces the same generic not-found response as an
+initial authorization denial. Other failures roll back and make only the
+mounted service temporarily unavailable. A missing fence fails closed before
+writing.
+
+Serializable transactions may retry, so a fence must be safe to invoke once
+per transaction attempt. The transaction exposes only `ExecContext` and
+`QueryRowContext`, which is enough to call a fixed host-owned validation
+function without exposing Kata's internal storage packages.
+
 The host-supplied actor always replaces an actor in request JSON. This keeps
 audit attribution tied to the authenticated principal rather than caller input.
 `Auth.TrustCallerAuthentication` preserves the older all-or-nothing trusted

@@ -59,7 +59,7 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 			// No-op: re-fetch existing row to populate the response.
 			existing, lerr := cfg.DB.LabelByEndpoints(ctx, issue.ID, in.Body.Label)
 			if lerr != nil {
-				return nil, api.NewError(500, "internal", lerr.Error(), "", nil)
+				return nil, internalAPIError(lerr)
 			}
 			out := &api.AddLabelResponse{}
 			out.Body.Issue = issue
@@ -73,14 +73,14 @@ func addLabelHandler(cfg ServerConfig) func(context.Context, *api.AddLabelReques
 		case errors.Is(err, db.ErrFederatedReadOnly):
 			return nil, federationReadOnlyError(err)
 		case err != nil:
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 
 		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
 		cfg.Hooks.Enqueue(evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.AddLabelResponse{}
 		out.Body.Issue = updatedIssue
@@ -123,14 +123,14 @@ func removeLabelHandler(cfg ServerConfig) func(context.Context, *api.RemoveLabel
 			return nil, federationReadOnlyError(err)
 		}
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 
 		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
 		cfg.Hooks.Enqueue(evt)
 		updatedIssue, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.MutationResponse{}
 		out.Body.Issue = updatedIssue
@@ -147,7 +147,7 @@ func listLabelsHandler(cfg ServerConfig) func(context.Context, *api.LabelsListRe
 		}
 		counts, err := cfg.DB.LabelCounts(ctx, in.ProjectID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.LabelsListResponse{}
 		out.Body.Labels = counts

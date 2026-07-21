@@ -36,7 +36,7 @@ func resolveIssueRef(ctx context.Context, store db.Storage, projectID int64, ref
 			return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}
 		if err != nil {
-			return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+			return db.Issue{}, internalAPIError(err)
 		}
 		if issue.ProjectID != projectID {
 			return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
@@ -49,7 +49,7 @@ func resolveIssueRef(ctx context.Context, store db.Storage, projectID int64, ref
 			if errors.Is(err, db.ErrNotFound) {
 				return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 			}
-			return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+			return db.Issue{}, internalAPIError(err)
 		}
 		if parsed.Project != project.Name {
 			return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
@@ -60,7 +60,7 @@ func resolveIssueRef(ctx context.Context, store db.Storage, projectID int64, ref
 		return db.Issue{}, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 	}
 	if err != nil {
-		return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Issue{}, internalAPIError(err)
 	}
 	return issue, nil
 }
@@ -105,7 +105,7 @@ func resolveLinkTargetRef(ctx context.Context, store db.Storage, subjectProjectI
 			return db.Issue{}, notFound
 		}
 		if err != nil {
-			return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+			return db.Issue{}, internalAPIError(err)
 		}
 		return issue, nil
 	}
@@ -118,7 +118,7 @@ func resolveLinkTargetRef(ctx context.Context, store db.Storage, subjectProjectI
 			return db.Issue{}, notFound
 		}
 		if err != nil {
-			return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+			return db.Issue{}, internalAPIError(err)
 		}
 		projectID = project.ID
 	}
@@ -127,7 +127,7 @@ func resolveLinkTargetRef(ctx context.Context, store db.Storage, subjectProjectI
 		return db.Issue{}, notFound
 	}
 	if err != nil {
-		return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Issue{}, internalAPIError(err)
 	}
 	return issue, nil
 }
@@ -145,7 +145,7 @@ func requireLinkTargetAddable(ctx context.Context, store db.Storage, subjectProj
 	}
 	project, err := store.ProjectByID(ctx, target.ProjectID)
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	if project.DeletedAt != nil {
 		return api.NewError(409, "link_target_archived",

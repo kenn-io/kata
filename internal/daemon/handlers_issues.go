@@ -117,7 +117,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// daemon processes can serve the same schema.
 		releaseIdempotency, err := cfg.DB.AcquireIdempotencyLock(ctx, in.ProjectID, in.IdempotencyKey)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		defer func() { _ = releaseIdempotency() }()
 
@@ -191,7 +191,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrNotFound):
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		case err != nil:
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
 		cfg.Hooks.Enqueue(evt)
@@ -240,7 +240,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Meta:          metaFilters,
 		})
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, in.ProjectID, issues)
 		out := &api.ListIssuesResponse{}
@@ -297,7 +297,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Limit:       in.Limit,
 		})
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		issueOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, issues)
 		if err != nil {
@@ -557,7 +557,7 @@ func mapAtomicEditError(err error, issueShortID string, delta *api.LinksDelta) e
 	case errors.Is(err, db.ErrFederatedReadOnly):
 		return federationReadOnlyError(err)
 	default:
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 }
 
@@ -648,7 +648,7 @@ func requireFederatedLinksDeltaClaims(
 			}
 		case errors.Is(err, db.ErrNotFound):
 		default:
-			return api.NewError(500, "internal", err.Error(), "", nil)
+			return internalAPIError(err)
 		}
 	}
 	if p.RemoveParent != nil {
@@ -668,7 +668,7 @@ func requireFederatedLinksDeltaClaims(
 	for id := range ids {
 		issue, err := cfg.DB.IssueByID(ctx, id)
 		if err != nil {
-			return api.NewError(500, "internal", err.Error(), "", nil)
+			return internalAPIError(err)
 		}
 		issues = append(issues, issue)
 	}
@@ -744,7 +744,7 @@ func resolveIssueByUIDOrPrefix(ctx context.Context, store db.Storage, ref string
 				fmt.Sprintf("no issue matches uid %s", normalized), "", nil)
 		}
 		if err != nil {
-			return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+			return db.Issue{}, internalAPIError(err)
 		}
 		return issue, nil
 	}
@@ -760,7 +760,7 @@ func resolveIssueByUIDOrPrefix(ctx context.Context, store db.Storage, ref string
 	}
 	matches, err := store.IssueUIDPrefixMatch(ctx, normalized, 20, include)
 	if err != nil {
-		return db.Issue{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Issue{}, internalAPIError(err)
 	}
 	switch len(matches) {
 	case 0:
@@ -789,7 +789,7 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	comments, err := listComments(ctx, cfg.DB, issue.ID)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	links, err := loadLinkOuts(ctx, cfg.DB, issue.ID)
 	if err != nil {
@@ -797,7 +797,7 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	labels, err := cfg.DB.LabelsByIssue(ctx, issue.ID)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	parent, err := loadParentRef(ctx, cfg.DB, issue)
 	if err != nil {
@@ -805,7 +805,7 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	children, err := cfg.DB.ChildrenOfIssue(ctx, issue.ID)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	// ChildrenOfIssue returns children from any project (links span projects,
 	// storage v16), so hydrate each child against its OWN project rather than
@@ -824,7 +824,7 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	out.Body.Children = childOuts
 	claimRelevant, err := showIssueClaimRelevant(ctx, cfg.DB, issue.ProjectID)
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	if !claimRelevant {
 		return out, nil
@@ -840,7 +840,7 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 		return nil, err
 	}
 	if err := hydrateClaimViolationsForIssue(ctx, cfg.DB, issue, out); err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	if err := hydrateClaimOutForIssue(ctx, cfg, issue, out); err != nil {
 		return nil, err
@@ -1242,7 +1242,7 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 	since := time.Now().Add(-idempotencyWindow)
 	match, err := cfg.DB.LookupIdempotency(ctx, in.ProjectID, in.IdempotencyKey, since)
 	if err != nil {
-		return "", nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return "", nil, internalAPIError(err)
 	}
 	if match == nil {
 		return fp, nil, nil
@@ -1252,11 +1252,11 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 		// short_id + qualified_id rather than the dropped numeric ref.
 		prior, err := cfg.DB.IssueByID(ctx, match.IssueID)
 		if err != nil {
-			return "", nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return "", nil, internalAPIError(err)
 		}
 		priorProject, err := cfg.DB.ProjectByID(ctx, prior.ProjectID)
 		if err != nil {
-			return "", nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return "", nil, internalAPIError(err)
 		}
 		return "", nil, api.NewError(409, "idempotency_mismatch",
 			"idempotency key matched a prior issue with a different fingerprint",
@@ -1269,12 +1269,12 @@ func tryIdempotencyMatch(ctx context.Context, cfg ServerConfig, in *api.CreateIs
 	}
 	existing, err := cfg.DB.IssueByID(ctx, match.IssueID)
 	if err != nil {
-		return "", nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return "", nil, internalAPIError(err)
 	}
 	if existing.DeletedAt != nil {
 		existingProject, err := cfg.DB.ProjectByID(ctx, existing.ProjectID)
 		if err != nil {
-			return "", nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return "", nil, internalAPIError(err)
 		}
 		return "", nil, api.NewError(409, "idempotency_deleted",
 			"idempotency key matched a soft-deleted issue",
@@ -1307,7 +1307,7 @@ func runLookalikeCheck(ctx context.Context, cfg ServerConfig, in *api.CreateIssu
 	q := strings.TrimSpace(in.Body.Title + " " + in.Body.Body)
 	candidates, err := cfg.DB.SearchFTSAny(ctx, in.ProjectID, q, 20, false)
 	if err != nil {
-		return api.NewError(500, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 	matched := []map[string]any{}
 	for _, c := range candidates {

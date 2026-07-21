@@ -44,10 +44,10 @@ func (s *Store) CreateProjectWithUID(ctx context.Context, name, projectUID strin
 	var project db.Project
 	err := s.RetryTransient(ctx, func() error {
 		var err error
-		project, err = scanProject(s.QueryRowContext(ctx,
+		project, err = fencedQueryRow(ctx, s, scanProject,
 			`INSERT INTO projects(uid, name) VALUES($1, $2) `+
 				`RETURNING id, uid, name, metadata, revision, created_at, deleted_at`,
-			projectUID, name))
+			projectUID, name)
 		return mapSQLError(err, nil)
 	})
 	return project, err
@@ -82,10 +82,10 @@ func (s *Store) RenameProject(ctx context.Context, id int64, name string) (db.Pr
 	var project db.Project
 	err := s.RetryTransient(ctx, func() error {
 		var err error
-		project, err = scanProject(s.QueryRowContext(ctx,
+		project, err = fencedQueryRow(ctx, s, scanProject,
 			`UPDATE projects SET name = $1 WHERE id = $2 AND name <> $3 AND uid <> $4 `+
 				`RETURNING id, uid, name, metadata, revision, created_at, deleted_at`,
-			name, id, db.SystemProjectName, db.SystemProjectUID))
+			name, id, db.SystemProjectName, db.SystemProjectUID)
 		return mapSQLError(err, nil)
 	})
 	return visibleProject(project, err)

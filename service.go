@@ -353,7 +353,19 @@ func (a hostAccessControllerAdapter) Authorize(
 	if decision.Lease != nil {
 		revalidate = decision.Lease.Revalidate
 	}
-	return daemon.HostAccessDecision{Revalidate: revalidate}, nil
+	var transactionFence db.TransactionFence
+	if decision.TransactionFence != nil {
+		transactionFence = func(ctx context.Context, transaction db.Transaction) error {
+			err := decision.TransactionFence(ctx, transaction)
+			if errors.Is(err, ErrAccessDenied) {
+				return daemon.ErrHostAccessDenied
+			}
+			return err
+		}
+	}
+	return daemon.HostAccessDecision{
+		Revalidate: revalidate, TransactionFence: transactionFence,
+	}, nil
 }
 
 // Run executes Kata's federation, GitHub synchronization, and timed-claim

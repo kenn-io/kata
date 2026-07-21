@@ -37,13 +37,13 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
 		cfg.Hooks.Enqueue(evt)
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated
@@ -85,7 +85,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: in.ProjectID})
@@ -93,7 +93,7 @@ func registerCommentsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		updated, err := cfg.DB.IssueByID(ctx, issue.ID)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := &api.CommentResponse{}
 		out.Body.Issue = updated

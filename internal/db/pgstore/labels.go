@@ -25,9 +25,9 @@ func (s *Store) AddLabel(ctx context.Context, issueID int64, label, author strin
 	var issueLabel db.IssueLabel
 	err := s.RetryTransient(ctx, func() error {
 		var err error
-		issueLabel, err = scanLabel(s.QueryRowContext(ctx,
+		issueLabel, err = fencedQueryRow(ctx, s, scanLabel,
 			`INSERT INTO issue_labels(issue_id, label, author) VALUES($1,$2,$3)
-			 RETURNING issue_id, label, author, created_at`, issueID, label, author))
+			 RETURNING issue_id, label, author, created_at`, issueID, label, author)
 		return mapSQLError(err, labelConstraintErrors)
 	})
 	return issueLabel, err

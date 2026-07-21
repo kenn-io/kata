@@ -15,10 +15,10 @@ func (s *Store) AttachAlias(ctx context.Context, projectID int64, identity, kind
 	var alias db.ProjectAlias
 	err := s.RetryTransient(ctx, func() error {
 		var err error
-		alias, err = scanAlias(s.QueryRowContext(ctx,
+		alias, err = fencedQueryRow(ctx, s, scanAlias,
 			`INSERT INTO project_aliases(project_id, alias_identity, alias_kind) VALUES($1, $2, $3) `+
 				`RETURNING id, project_id, alias_identity, alias_kind, created_at`,
-			projectID, identity, kind))
+			projectID, identity, kind)
 		return mapSQLError(err, map[string]error{
 			"project_aliases_alias_identity_key": db.ErrAliasExists,
 		})

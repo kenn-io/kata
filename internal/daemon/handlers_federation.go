@@ -99,7 +99,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusNotFound, "federation_quarantine_not_found", "federation quarantine not found", "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		return &api.SkipFederationQuarantineResponse{Body: federationQuarantineSummary(q)}, nil
 	})
@@ -131,7 +131,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"federation quarantine retry only supports push quarantines", "", nil)
 		}
 		if err != nil {
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		return &api.RetryFederationQuarantineResponse{Body: federationQuarantineSummary(q)}, nil
 	})
@@ -192,7 +192,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			AllowAdoptionSnapshotAuthors: in.Body.AllowAdoptionSnapshotAuthors,
 		})
 		if err != nil {
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		return &api.CreateFederationEnrollmentResponse{
 			Body: federationEnrollmentToOut(created.Enrollment, created.Token),
@@ -206,7 +206,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, _ *api.ListFederationEnrollmentsRequest) (*api.ListFederationEnrollmentsResponse, error) {
 		enrollments, err := cfg.DB.ListFederationEnrollments(ctx)
 		if err != nil {
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		out := make([]api.FederationEnrollmentOut, 0, len(enrollments))
 		for _, enrollment := range enrollments {
@@ -226,7 +226,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if errors.Is(err, db.ErrNotFound) {
 				return nil, api.NewError(http.StatusNotFound, "federation_enrollment_not_found", "federation enrollment not found", "", nil)
 			}
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		return &api.RevokeFederationEnrollmentResponse{
 			Body: api.RevokeFederationEnrollmentBody{ID: in.EnrollmentID, Revoked: true},
@@ -281,7 +281,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				Actor:         strings.TrimSpace(in.Body.Actor),
 				AllowInsecure: in.Body.AllowInsecure,
 			}); err != nil {
-				return nil, api.NewError(500, "internal", err.Error(), "", nil)
+				return nil, internalAPIError(err)
 			}
 		}
 		if in.Body.PushEnabled && !binding.PushEnabled {
@@ -329,7 +329,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, api.NewError(http.StatusConflict, "not_a_spoke", "federation binding is not a spoke", "", nil)
 			}
 		} else if !errors.Is(bErr, db.ErrNotFound) {
-			return nil, api.NewError(http.StatusInternalServerError, "internal", bErr.Error(), "", nil)
+			return nil, internalAPIError(bErr)
 		}
 
 		if in.Body.Preflight {
@@ -344,14 +344,14 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			case errors.Is(err, db.ErrNotFound):
 				return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
 			case err != nil:
-				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+				return nil, internalAPIError(err)
 			}
 			// Mirror RemoveProject's refusal for a live archive target; an
 			// already-archived project passes (the real call resumes).
 			if disposition == "archive" && project.DeletedAt == nil && !in.Body.Force {
 				openIssues, err := cfg.DB.CountOpenIssues(ctx, in.ProjectID)
 				if err != nil {
-					return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+					return nil, internalAPIError(err)
 				}
 				if openIssues > 0 {
 					return nil, api.NewError(http.StatusConflict, "project_has_open_issues", "project has open issues",
@@ -392,7 +392,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				// the project fill below uses ProjectByID, which includes
 				// archived rows.
 			case err != nil:
-				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+				return nil, internalAPIError(err)
 			default:
 				cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: evt, ProjectID: project.ID})
 				cfg.Hooks.Enqueue(*evt)
@@ -408,7 +408,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		case errors.Is(err, db.ErrFederationNotSpoke):
 			return nil, api.NewError(http.StatusConflict, "not_a_spoke", "federation binding is not a spoke", "", nil)
 		case err != nil:
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		// Zero role means there was no binding: this is the idempotent resume
 		// (only the credential delete below may still have work to do), so the
@@ -416,13 +416,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		body.Detached = res.Role == db.FederationRoleSpoke
 		if res.ProjectUID != "" {
 			if err := cfg.federationCredentialStore().DeleteFederationCredential(ctx, res.ProjectUID); err != nil {
-				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+				return nil, internalAPIError(err)
 			}
 		}
 		if !body.Archived {
 			project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
 			if err != nil {
-				return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+				return nil, internalAPIError(err)
 			}
 			body.Project = dbProjectToOut(project)
 		}
@@ -489,7 +489,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		inserted, err := cfg.DB.EventsByUIDs(ctx, in.ProjectID, result.InsertedEventUIDs)
 		if err != nil {
-			return nil, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		for _, evt := range inserted {
 			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &evt, ProjectID: in.ProjectID})
@@ -570,7 +570,7 @@ func federationIngestError(err error) error {
 	case errors.Is(err, db.ErrNotFound):
 		return api.NewError(http.StatusNotFound, "federation_not_found", err.Error(), "", nil)
 	default:
-		return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+		return internalAPIError(err)
 	}
 }
 
@@ -651,11 +651,11 @@ func adoptExistingReplica(
 					if errors.Is(err, db.ErrIssueSyncFederationBinding) {
 						return db.AdoptProjectIntoFederationResult{}, false, issueSyncFederationConflict()
 					}
-					return db.AdoptProjectIntoFederationResult{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+					return db.AdoptProjectIntoFederationResult{}, false, internalAPIError(err)
 				}
 				return result, true, nil
 			}
-			return db.AdoptProjectIntoFederationResult{}, false, api.NewError(500, "internal", bindErr.Error(), "", nil)
+			return db.AdoptProjectIntoFederationResult{}, false, internalAPIError(bindErr)
 		}
 		if details := replicaBindingConflictDetails(binding, in); len(details) > 0 {
 			return db.AdoptProjectIntoFederationResult{}, false,
@@ -669,7 +669,7 @@ func adoptExistingReplica(
 		}
 		return db.AdoptProjectIntoFederationResult{}, false, nil
 	} else if !errors.Is(err, db.ErrNotFound) {
-		return db.AdoptProjectIntoFederationResult{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.AdoptProjectIntoFederationResult{}, false, internalAPIError(err)
 	}
 	existing, err := store.ProjectByNameIncludingArchived(ctx, projectName)
 	if errors.Is(err, db.ErrNotFound) {
@@ -677,7 +677,7 @@ func adoptExistingReplica(
 			api.NewError(404, "federation_project_not_found", "adoption requested but no local project exists with this name", "", nil)
 	}
 	if err != nil {
-		return db.AdoptProjectIntoFederationResult{}, false, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.AdoptProjectIntoFederationResult{}, false, internalAPIError(err)
 	}
 	if existing.UID == in.Body.HubProjectUID {
 		return db.AdoptProjectIntoFederationResult{}, false,
@@ -692,7 +692,7 @@ func adoptExistingReplica(
 			api.NewError(409, "federation_binding_conflict",
 				fmt.Sprintf("project already has %q federation binding", binding.Role), "", nil)
 	} else if !errors.Is(err, db.ErrNotFound) {
-		return db.AdoptProjectIntoFederationResult{}, true, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.AdoptProjectIntoFederationResult{}, true, internalAPIError(err)
 	}
 	result, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
 		ProjectID:            existing.ID,
@@ -707,7 +707,7 @@ func adoptExistingReplica(
 		if errors.Is(err, db.ErrIssueSyncFederationBinding) {
 			return db.AdoptProjectIntoFederationResult{}, true, issueSyncFederationConflict()
 		}
-		return db.AdoptProjectIntoFederationResult{}, true, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.AdoptProjectIntoFederationResult{}, true, internalAPIError(err)
 	}
 	return result, true, nil
 }
@@ -729,15 +729,15 @@ func ensureReplicaBinding(
 				return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision", "a project with this name already has a different UID; rerun with --adopt-existing --push to adopt it into federation", "", nil)
 			}
 		} else if !errors.Is(lookupErr, db.ErrNotFound) {
-			return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", lookupErr.Error(), "", nil)
+			return db.Project{}, db.FederationBinding{}, internalAPIError(lookupErr)
 		}
 		project, err = store.CreateProjectWithUID(ctx, projectName, in.Body.HubProjectUID)
 		if err != nil {
-			return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
+			return db.Project{}, db.FederationBinding{}, internalAPIError(err)
 		}
 		createdProject = true
 	} else if err != nil {
-		return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Project{}, db.FederationBinding{}, internalAPIError(err)
 	} else if project.DeletedAt != nil {
 		return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision",
 			fmt.Sprintf("an archived local project %q already has the hub project UID; restore it with `kata projects restore` first", project.Name), "", nil)
@@ -761,7 +761,7 @@ func ensureReplicaBinding(
 		pushEnabled = existing.PushEnabled
 		pushCursor = existing.PushCursorEventID
 	} else if !errors.Is(err, db.ErrNotFound) {
-		return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Project{}, db.FederationBinding{}, internalAPIError(err)
 	} else if !createdProject {
 		// An unbound local project holding the hub project UID is the normal
 		// post-leave state: leave removes the binding but the project keeps the
@@ -805,7 +805,7 @@ func ensureReplicaBinding(
 		if errors.Is(err, db.ErrIssueSyncFederationBinding) {
 			return db.Project{}, db.FederationBinding{}, issueSyncFederationConflict()
 		}
-		return db.Project{}, db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.Project{}, db.FederationBinding{}, internalAPIError(err)
 	}
 	return project, binding, nil
 }
@@ -813,11 +813,11 @@ func ensureReplicaBinding(
 func enableReplicaPush(ctx context.Context, store db.Storage, projectID int64) (db.FederationBinding, error) {
 	localCursor, err := maxLocalOriginEventID(ctx, store, projectID)
 	if err != nil {
-		return db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.FederationBinding{}, internalAPIError(err)
 	}
 	binding, err := store.EnableFederationPush(ctx, projectID, localCursor)
 	if err != nil {
-		return db.FederationBinding{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return db.FederationBinding{}, internalAPIError(err)
 	}
 	return binding, nil
 }
@@ -919,7 +919,7 @@ func federationStatusBindings(ctx context.Context, store db.Storage, projectID *
 	if projectID == nil {
 		bindings, err := store.ListFederationBindings(ctx)
 		if err != nil {
-			return nil, api.NewError(500, "internal", err.Error(), "", nil)
+			return nil, internalAPIError(err)
 		}
 		return bindings, nil
 	}
@@ -931,7 +931,7 @@ func federationStatusBindings(ctx context.Context, store db.Storage, projectID *
 		return []db.FederationBinding{}, nil
 	}
 	if err != nil {
-		return nil, api.NewError(500, "internal", err.Error(), "", nil)
+		return nil, internalAPIError(err)
 	}
 	return []db.FederationBinding{binding}, nil
 }
@@ -952,7 +952,7 @@ func federationProjectStatus(
 		if errors.Is(err, db.ErrNotFound) {
 			return api.FederationProjectStatus{}, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
 		} else if err != nil {
-			return api.FederationProjectStatus{}, api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
+			return api.FederationProjectStatus{}, internalAPIError(err)
 		}
 	} else if err != nil {
 		return api.FederationProjectStatus{}, err
@@ -961,31 +961,31 @@ func federationProjectStatus(
 	if errors.Is(err, db.ErrNotFound) {
 		syncStatus = db.FederationSyncStatus{}
 	} else if err != nil {
-		return api.FederationProjectStatus{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
 	pendingPush, pendingHighWater, err := federationPendingPushStats(ctx, store, binding)
 	if err != nil {
-		return api.FederationProjectStatus{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
 	enrollments, err := federationEnrollmentCount(ctx, store, binding)
 	if err != nil {
-		return api.FederationProjectStatus{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
 	liveClaims, err := federationLiveClaimCount(ctx, store, binding.ProjectID)
 	if err != nil {
-		return api.FederationProjectStatus{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
 	pendingClaims, err := federationPendingClaimCount(ctx, store, binding.ProjectID)
 	if err != nil {
-		return api.FederationProjectStatus{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
 	activeQuarantines, err := store.ActiveFederationQuarantinesByProject(ctx, binding.ProjectID)
 	if err != nil {
-		return api.FederationProjectStatus{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
 	recentViolations, unresolvedViolationCount, err := store.UnresolvedClaimViolationsForProject(ctx, binding.ProjectID, 5)
 	if err != nil {
-		return api.FederationProjectStatus{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return api.FederationProjectStatus{}, internalAPIError(err)
 	}
 	var credentialMetadata config.FederationCredentialMetadata
 	if binding.Role == db.FederationRoleSpoke {
@@ -1138,19 +1138,19 @@ func projectFederationBody(ctx context.Context, store db.Storage, projectID int6
 	if binding.Role == db.FederationRoleHub && binding.Enabled {
 		resetTo, err := store.PurgeResetCheck(ctx, binding.ReplayHorizonEventID, projectID)
 		if err != nil {
-			return api.ProjectFederationBody{}, api.NewError(500, "internal", err.Error(), "", nil)
+			return api.ProjectFederationBody{}, internalAPIError(err)
 		}
 		if resetTo > 0 {
 			binding, _, err = store.RefreshProjectFederationBaseline(ctx, projectID, "federation")
 			if err != nil {
-				return api.ProjectFederationBody{}, api.NewError(500, "internal", err.Error(), "", nil)
+				return api.ProjectFederationBody{}, internalAPIError(err)
 			}
 		}
 	}
 	through := binding.ReplayHorizonEventID
 	maxSnapshot, err := store.MaxFederationBaselineEventID(ctx, projectID, binding.ReplayHorizonEventID)
 	if err != nil {
-		return api.ProjectFederationBody{}, api.NewError(500, "internal", err.Error(), "", nil)
+		return api.ProjectFederationBody{}, internalAPIError(err)
 	}
 	if maxSnapshot > 0 {
 		through = maxSnapshot
@@ -1171,7 +1171,7 @@ func federationError(err error) error {
 	if errors.Is(err, db.ErrIssueSyncFederationBinding) {
 		return issueSyncFederationConflict()
 	}
-	return api.NewError(500, "internal", err.Error(), "", nil)
+	return internalAPIError(err)
 }
 
 // issueSyncFederationConflict reports a 409 for the lifecycle rule that an
