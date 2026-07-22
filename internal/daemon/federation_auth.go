@@ -70,7 +70,7 @@ func authorizeFederationRequest(
 			return ctx, federationPrincipal{}, api.NewError(http.StatusServiceUnavailable,
 				"access_unavailable", "federation transaction access decision unavailable", "", nil)
 		}
-		ctx = db.WithTransactionFence(ctx, decision.TransactionFence)
+		ctx = db.WithTransactionFence(ctx, sanitizeFederationTransactionFence(decision.TransactionFence))
 	}
 	return ctx, federationPrincipal{
 		EnrollmentID:                 enrollment.ID,
@@ -80,6 +80,23 @@ func authorizeFederationRequest(
 		AllowAdoptionSnapshotAuthors: enrollment.AllowAdoptionSnapshotAuthors,
 		AllowAdoptionBaseline:        enrollment.AllowAdoptionSnapshotAuthors || enrollment.AdoptionBaselineOpen,
 	}, nil
+}
+
+func sanitizeFederationTransactionFence(fence db.TransactionFence) db.TransactionFence {
+	if fence == nil {
+		return nil
+	}
+	return func(ctx context.Context, transaction db.Transaction) error {
+		err := fence(ctx, transaction)
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, ErrHostAccessDenied):
+			return ErrHostAccessDenied
+		default:
+			return errHostFederationAccessUnavailable
+		}
+	}
 }
 
 func federationCredentialDenied() error {

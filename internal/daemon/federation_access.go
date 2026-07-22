@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"context"
+	"errors"
 
 	"go.kenn.io/kata/internal/db"
 )
+
+var errHostFederationAccessUnavailable = errors.New("host federation access unavailable")
 
 // HostFederationOperation identifies one authenticated transport operation.
 type HostFederationOperation struct {

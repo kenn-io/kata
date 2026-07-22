@@ -121,20 +121,20 @@ func authorizeClaimStatusRead(
 		}
 		if hasBearerHeader(authz) {
 			authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
-				HostFederationOperation{ID: "getIssueLeaseStatus"})
+				HostFederationOperation{ID: "getIssueLeaseStatus", Mutation: true})
 			return authorizedCtx, err
 		}
 		return ctx, api.NewError(http.StatusUnauthorized, "auth_required",
 			"host principal or scoped federation bearer required", "", nil)
 	}
 	if cfg.Auth.Token == "" {
-		if cfg.InsecureReadonly {
-			if !hasBearerHeader(authz) {
-				return ctx, localAuthError(cfg, authz)
-			}
+		if hasBearerHeader(authz) {
 			authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
-				HostFederationOperation{ID: "getIssueLeaseStatus"})
+				HostFederationOperation{ID: "getIssueLeaseStatus", Mutation: true})
 			return authorizedCtx, err
+		}
+		if cfg.InsecureReadonly {
+			return ctx, localAuthError(cfg, authz)
 		}
 		return ctx, nil
 	}
@@ -142,7 +142,7 @@ func authorizeClaimStatusRead(
 		return ctx, err
 	}
 	authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
-		HostFederationOperation{ID: "getIssueLeaseStatus"})
+		HostFederationOperation{ID: "getIssueLeaseStatus", Mutation: true})
 	return authorizedCtx, err
 }
 

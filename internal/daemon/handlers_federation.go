@@ -143,7 +143,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.FederationProjectMetadataRequest) (*api.ProjectFederationResponse, error) {
 		var err error
 		ctx, _, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
-			HostFederationOperation{ID: "getFederationProjectMetadata"})
+			HostFederationOperation{ID: "getFederationProjectMetadata", Mutation: true})
 		if err != nil {
 			return nil, err
 		}

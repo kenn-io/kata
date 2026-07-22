@@ -371,5 +371,12 @@ func internalAPIError(err error) error {
 	if errors.As(err, &apiErr) {
 		return apiErr
 	}
+	if errors.Is(err, ErrHostAccessDenied) {
+		return federationCredentialDenied()
+	}
+	if errors.Is(err, errHostFederationAccessUnavailable) {
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable",
+			"federation credential authorization is unavailable", "", nil)
+	}
 	return api.NewError(http.StatusInternalServerError, "internal", err.Error(), "", nil)
 }

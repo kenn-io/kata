@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -42,7 +43,7 @@ func (c *recordingFederationAccessController) snapshot() []kata.FederationAccess
 }
 
 func TestServiceFederationAccessReceivesAuthenticatedEnrollment(t *testing.T) {
-	controller := &recordingFederationAccessController{}
+	controller := &recordingFederationAccessController{decide: allowFederationMutation}
 	service, project, enrollment := newFederationAccessService(t, controller)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
@@ -58,7 +59,7 @@ func TestServiceFederationAccessReceivesAuthenticatedEnrollment(t *testing.T) {
 		Project:    project,
 		Capability: kata.FederationCapabilityPull,
 		Operation: kata.FederationOperation{
-			ID: "getFederationProjectMetadata", Mutation: false,
+			ID: "getFederationProjectMetadata", Mutation: true,
 		},
 	}, controller.snapshot()[0])
 }
@@ -95,6 +96,78 @@ func TestServiceFederationAccessRejectsInvalidCredentialBeforeHostDecision(t *te
 
 	assert.Equal(t, http.StatusForbidden, response.Code)
 	assert.Empty(t, controller.snapshot())
+}
+
+func TestServiceFederationAccessChecksBearerOnLeaseStatus(t *testing.T) {
+	controller := &recordingFederationAccessController{
+		decide: func(kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
+			return kata.FederationAccessDecision{}, kata.ErrAccessDenied
+		},
+	}
+	service, project, enrollment := newFederationAccessService(t, controller)
+	issue := createFederationAccessIssue(t, service, project.ID)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+		strconv.FormatInt(project.ID, 10)+"/issues/"+issue+"/lease", nil)
+	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
+	response := httptest.NewRecorder()
+	service.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	require.Len(t, controller.snapshot(), 1)
+	assert.Equal(t, kata.FederationOperation{
+		ID: "getIssueLeaseStatus", Mutation: true,
+	}, controller.snapshot()[0].Operation)
+}
+
+func TestServiceFederationAccessRejectsInvalidLeaseStatusCredentialBeforeHostDecision(t *testing.T) {
+	controller := &recordingFederationAccessController{}
+	service, project, _ := newFederationAccessService(t, controller)
+	issue := createFederationAccessIssue(t, service, project.ID)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+		strconv.FormatInt(project.ID, 10)+"/issues/"+issue+"/lease", nil)
+	request.Header.Set("Authorization", "Bearer invalid-credential")
+	response := httptest.NewRecorder()
+	service.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	assert.Empty(t, controller.snapshot())
+}
+
+func TestServiceFederationAccessKeepsTokenlessTrustedLeaseStatus(t *testing.T) {
+	controller := &recordingFederationAccessController{
+		decide: func(kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
+			return kata.FederationAccessDecision{}, kata.ErrAccessDenied
+		},
+	}
+	service, project, _ := newFederationAccessService(t, controller)
+	issue := createFederationAccessIssue(t, service, project.ID)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+		strconv.FormatInt(project.ID, 10)+"/issues/"+issue+"/lease", nil)
+	response := httptest.NewRecorder()
+	service.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Empty(t, controller.snapshot())
+}
+
+func TestServiceFederationAccessMetadataRequiresTransactionFence(t *testing.T) {
+	controller := &recordingFederationAccessController{}
+	service, project, enrollment := newFederationAccessService(t, controller)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+		strconv.FormatInt(project.ID, 10)+"/federation/metadata", nil)
+	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
+	response := httptest.NewRecorder()
+	service.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	require.Len(t, controller.snapshot(), 1)
+	assert.Equal(t, kata.FederationOperation{
+		ID: "getFederationProjectMetadata", Mutation: true,
+	}, controller.snapshot()[0].Operation)
 }
 
 func TestServiceFederationAccessMutationRequiresTransactionFence(t *testing.T) {
@@ -134,7 +207,7 @@ func TestServiceFederationAccessFenceRollsBackClaimMutation(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 
-	controller.decide = nil
+	controller.decide = allowFederationMutation
 	statusRequest := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
 		strconv.FormatInt(project.ID, 10)+"/issues/"+issue+"/lease", nil)
 	statusRequest.Header.Set("Authorization", "Bearer "+enrollment.Token)
@@ -146,6 +219,38 @@ func TestServiceFederationAccessFenceRollsBackClaimMutation(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(statusResponse.Body.Bytes(), &status))
 	assert.False(t, status.Held)
+}
+
+func allowFederationMutation(request kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
+	decision := kata.FederationAccessDecision{}
+	if request.Operation.Mutation {
+		decision.TransactionFence = func(context.Context, kata.Transaction) error { return nil }
+	}
+	return decision, nil
+}
+
+func TestServiceFederationAccessSanitizesFenceFailure(t *testing.T) {
+	controller := &recordingFederationAccessController{
+		decide: func(request kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
+			decision := kata.FederationAccessDecision{}
+			if request.Operation.Mutation {
+				decision.TransactionFence = func(context.Context, kata.Transaction) error {
+					return errors.New("private controller detail")
+				}
+			}
+			return decision, nil
+		},
+	}
+	service, project, enrollment := newFederationAccessService(t, controller)
+	issue := createFederationAccessIssue(t, service, project.ID)
+
+	response := acquireFederationAccessClaim(t, service, project.ID, issue, enrollment.Token)
+
+	assert.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+	assert.JSONEq(t,
+		`{"status":503,"error":{"code":"access_unavailable","message":"federation credential authorization is unavailable"}}`,
+		response.Body.String())
+	assert.NotContains(t, response.Body.String(), "private controller detail")
 }
 
 func acquireFederationAccessClaim(

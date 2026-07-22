@@ -16,7 +16,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added an optional federation-access controller for mounting applications that
   need to revalidate Kata-authenticated project credentials against outside
   lifecycle state. Federation mutations share the controller's transaction
-  fence with event or lease writes.
+  fence with event or lease writes. Conditionally mutating metadata and lease
+  status reads use the same fence, and controller failures return only bounded,
+  generic authorization errors.
 
 ## 0.12.0
 <small>2026-07-20</small>
