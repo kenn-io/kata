@@ -27,6 +27,11 @@ func authorizeFederationRequest(
 	capability string,
 	operation HostFederationOperation,
 ) (context.Context, federationPrincipal, error) {
+	if principal, ok := federationPreauthorizationFromContext(
+		ctx, authHeader, projectID, capability, operation,
+	); ok {
+		return ctx, principal, nil
+	}
 	if !strings.HasPrefix(authHeader, authBearerPrefix) {
 		return ctx, federationPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
 			"Authorization bearer required", "", nil)

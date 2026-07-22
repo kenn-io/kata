@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -1719,6 +1720,61 @@ func TestFederationAuthValidEnrollmentTokenReachesTransportHandlers(t *testing.T
 	assert.Equal(t, int64(0), out.Duplicates)
 	assert.Equal(t, int64(0), out.PushCursorEventID)
 	assert.NotContains(t, string(raw), "spoke_instance_uid")
+}
+
+func TestFederationIngestRejectsInvalidCredentialBeforeReadingBody(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(t.Context(), "hub")
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: d.db, StartedAt: d.now})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	body := &failingReadBody{}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		projectPath(project.ID)+"/federation/events:ingest",
+		body,
+	)
+	request.Header.Set("Authorization", "Bearer invalid-credential")
+	request.Header.Set("Content-Type", "application/json")
+	request.ContentLength = 64 << 20
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	assert.Contains(t, response.Body.String(), "auth_invalid")
+	assert.Zero(t, body.reads, "credential rejection must precede request-body decoding")
+}
+
+func TestFederationIngestRejectsInvalidProjectBeforeReadingBody(t *testing.T) {
+	d := openTestDB(t)
+	server := daemon.NewServer(daemon.ServerConfig{DB: d.db, StartedAt: d.now})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	body := &failingReadBody{}
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/projects/not-a-number/federation/events:ingest",
+		body,
+	)
+	request.Header.Set("Authorization", "Bearer invalid-credential")
+	request.Header.Set("Content-Type", "application/json")
+	request.ContentLength = 64 << 20
+	response := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.Contains(t, response.Body.String(), "validation")
+	assert.Zero(t, body.reads, "path rejection must precede request-body decoding")
+}
+
+type failingReadBody struct {
+	reads int
+}
+
+func (b *failingReadBody) Read([]byte) (int, error) {
+	b.reads++
+	return 0, errors.New("body must not be read before authentication")
 }
 
 func TestFederationIngestRejectsSnapshotHistoricalAuthorWithoutAdoptionIntent(t *testing.T) {

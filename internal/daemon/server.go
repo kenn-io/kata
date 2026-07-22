@@ -182,7 +182,9 @@ func NewServer(cfg ServerConfig) *Server {
 	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
 	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 
-	s.handler = withGzip(withCSRFGuards(requireBearer(cfg.authPolicy(), cfg.DB)(withTrustedProxyActor(cfg)(mux))))
+	s.handler = withGzip(withCSRFGuards(requireBearer(cfg.authPolicy(), cfg.DB)(
+		withTrustedProxyActor(cfg)(withFederationIngestPreauthorization(cfg, mux)),
+	)))
 	return s
 }
 
