@@ -437,6 +437,24 @@ func TestNextBackoffClassifiesErrors(t *testing.T) {
 	}
 }
 
+func TestLeaseRetryBackoffResetsAfterLeadership(t *testing.T) {
+	reconciler := &Reconciler{cfg: ReconcilerConfig{
+		MinBackoff: 50 * time.Millisecond,
+		MaxBackoff: 2 * time.Second,
+	}}
+	retry := newLeaseRetryBackoff(reconciler)
+	transient := errors.New("lease unavailable")
+
+	require.Equal(t, 50*time.Millisecond, retry.afterAttempt(false, transient))
+	require.Equal(t, 100*time.Millisecond, retry.afterAttempt(false, transient))
+	require.Equal(t, 200*time.Millisecond, retry.afterAttempt(false, transient))
+
+	// A healthy leadership period must discard the accumulated delay. The
+	// following loss waits only the configured minimum, not 400ms.
+	require.Equal(t, 50*time.Millisecond, retry.afterAttempt(true, transient))
+	require.Equal(t, 100*time.Millisecond, retry.afterAttempt(false, transient))
+}
+
 // flakyEmbedder fails its first failUntil EncodeFunc calls with err, then
 // succeeds. It records the total number of successfully encoded texts. All
 // access is guarded so Run's goroutine and the test goroutine can read/write

@@ -133,11 +133,11 @@ func (r *Reconciler) Health() ReconcilerHealth {
 // Run drains dirty work until ctx is cancelled, waking on Wake(), a periodic
 // safety sweep, and after backoff on failure.
 func (r *Reconciler) Run(ctx context.Context) error {
-	backoff := r.cfg.MinBackoff
+	retry := newLeaseRetryBackoff(r)
 	for {
 		release, err := r.idx.AcquireReconcilerLease(ctx)
-		if err == nil {
-			backoff = r.cfg.MinBackoff
+		leadershipAcquired := err == nil
+		if leadershipAcquired {
 			err = r.runLeader(ctx)
 			err = errors.Join(err, release())
 		}
@@ -145,15 +145,35 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			return ctx.Err()
 		}
 		r.markError(err)
-		timer := time.NewTimer(backoff)
+		timer := time.NewTimer(retry.afterAttempt(leadershipAcquired, err))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
 		}
-		backoff = r.nextBackoff(backoff, err)
 	}
+}
+
+type leaseRetryBackoff struct {
+	reconciler *Reconciler
+	current    time.Duration
+}
+
+func newLeaseRetryBackoff(reconciler *Reconciler) *leaseRetryBackoff {
+	return &leaseRetryBackoff{reconciler: reconciler, current: reconciler.cfg.MinBackoff}
+}
+
+// afterAttempt returns the delay before the next lease attempt and advances
+// the retry schedule. Reaching leadership resets accumulated acquisition
+// failures before the next loss is scheduled.
+func (b *leaseRetryBackoff) afterAttempt(leadershipAcquired bool, err error) time.Duration {
+	if leadershipAcquired {
+		b.current = b.reconciler.cfg.MinBackoff
+	}
+	delay := b.current
+	b.current = b.reconciler.nextBackoff(b.current, err)
+	return delay
 }
 
 func (r *Reconciler) runLeader(ctx context.Context) error {
