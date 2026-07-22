@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 )
 
 const federationIngestPathSuffix = "/federation/events:ingest"
@@ -15,11 +16,12 @@ const federationIngestPathSuffix = "/federation/events:ingest"
 type federationPreauthorizationKey struct{}
 
 type federationPreauthorization struct {
-	authorization string
-	projectID     int64
-	capability    string
-	operation     HostFederationOperation
-	principal     federationPrincipal
+	authorization    string
+	projectID        int64
+	capability       string
+	operation        HostFederationOperation
+	principal        federationPrincipal
+	transactionFence db.TransactionFence
 }
 
 // withFederationIngestPreauthorization authenticates the large body-bearing
@@ -36,19 +38,20 @@ func withFederationIngestPreauthorization(cfg ServerConfig, next http.Handler) h
 			return
 		}
 		operation := HostFederationOperation{ID: "ingestFederationProjectEvents", Mutation: true}
-		ctx, principal, err := authorizeFederationRequest(
+		authorization, err := evaluateFederationRequest(
 			r.Context(), cfg, r.Header.Get("Authorization"), projectID, "push", operation,
 		)
 		if err != nil {
 			writeFederationPreauthorizationError(w, err)
 			return
 		}
-		ctx = context.WithValue(ctx, federationPreauthorizationKey{}, federationPreauthorization{
-			authorization: r.Header.Get("Authorization"),
-			projectID:     projectID,
-			capability:    "push",
-			operation:     operation,
-			principal:     principal,
+		ctx := context.WithValue(r.Context(), federationPreauthorizationKey{}, federationPreauthorization{
+			authorization:    r.Header.Get("Authorization"),
+			projectID:        projectID,
+			capability:       "push",
+			operation:        operation,
+			principal:        authorization.principal,
+			transactionFence: authorization.transactionFence,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -88,11 +91,14 @@ func federationPreauthorizationFromContext(
 	projectID int64,
 	capability string,
 	operation HostFederationOperation,
-) (federationPrincipal, bool) {
+) (federationAuthorization, bool) {
 	preauthorized, ok := ctx.Value(federationPreauthorizationKey{}).(federationPreauthorization)
 	if !ok || preauthorized.authorization != authorization || preauthorized.projectID != projectID ||
 		preauthorized.capability != capability || preauthorized.operation != operation {
-		return federationPrincipal{}, false
+		return federationAuthorization{}, false
 	}
-	return preauthorized.principal, true
+	return federationAuthorization{
+		principal:        preauthorized.principal,
+		transactionFence: preauthorized.transactionFence,
+	}, true
 }
