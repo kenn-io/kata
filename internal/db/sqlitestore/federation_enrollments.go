@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -196,6 +197,42 @@ func (d *Store) AuthorizeFederationToken(
 		enrollment.AdoptionBaselineEndSourceEventID = 0
 	}
 	return enrollment, nil
+}
+
+// FederationEnrollmentTransactionFence rechecks native credential authority
+// in the same transaction as the protected mutation.
+func (d *Store) FederationEnrollmentTransactionFence(
+	admitted db.FederationEnrollment,
+	projectID int64,
+	capability string,
+) db.TransactionFence {
+	return func(ctx context.Context, transaction db.Transaction) error {
+		current, err := scanFederationEnrollment(transaction.QueryRowContext(ctx,
+			federationEnrollmentSelect+` WHERE id = ?`, admitted.ID))
+		if err != nil {
+			return err
+		}
+		if !db.FederationEnrollmentAuthorizationMatches(current, admitted, projectID, capability) {
+			return db.ErrNotFound
+		}
+		var active int
+		err = transaction.QueryRowContext(ctx, `
+			SELECT binding.enabled
+			FROM federation_bindings AS binding
+			JOIN projects AS project ON project.id = binding.project_id
+			WHERE binding.project_id = ? AND binding.role = 'hub'
+			  AND binding.enabled = 1 AND project.deleted_at IS NULL`, projectID).Scan(&active)
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if active != 1 {
+			return db.ErrNotFound
+		}
+		return nil
+	}
 }
 
 func federationEnrollmentByIDTx(ctx context.Context, tx *sql.Tx, id int64) (db.FederationEnrollment, error) {

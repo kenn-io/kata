@@ -87,6 +87,15 @@ func withHostAccess(humaAPI huma.API, controller HostAccessController) {
 		return
 	}
 	humaAPI.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
+		if state, ok := ctx.Context().Value(hostAccessStateContextKey{}).(*hostAccessState); ok {
+			if !state.authorized {
+				writeHostAccessError(ctx, http.StatusServiceUnavailable,
+					"access_unavailable", "access decision unavailable")
+				return
+			}
+			next(withHostAccessState(ctx, state))
+			return
+		}
 		operation := ctx.Operation()
 		if operation == nil || strings.TrimSpace(operation.OperationID) == "" {
 			writeHostAccessError(ctx, http.StatusServiceUnavailable,

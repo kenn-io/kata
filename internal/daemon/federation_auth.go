@@ -32,12 +32,6 @@ func authorizeFederationRequest(
 	capability string,
 	operation HostFederationOperation,
 ) (context.Context, federationPrincipal, error) {
-	if authorization, ok := federationPreauthorizationFromContext(
-		ctx, authHeader, projectID, capability, operation,
-	); ok {
-		return db.WithAdditionalTransactionFence(ctx, authorization.transactionFence),
-			authorization.principal, nil
-	}
 	authorization, err := evaluateFederationRequest(
 		ctx, cfg, authHeader, projectID, capability, operation,
 	)
@@ -79,6 +73,11 @@ func evaluateFederationRequest(
 		return federationAuthorization{}, err
 	}
 	var transactionFence db.TransactionFence
+	if operation.Mutation {
+		transactionFence = sanitizeNativeFederationTransactionFence(
+			cfg.DB.FederationEnrollmentTransactionFence(enrollment, projectID, capability),
+		)
+	}
 	if cfg.HostFederationAccess != nil {
 		decision, accessErr := cfg.HostFederationAccess.AuthorizeFederation(
 			ctx,
@@ -100,7 +99,10 @@ func evaluateFederationRequest(
 			return federationAuthorization{}, api.NewError(http.StatusServiceUnavailable,
 				"access_unavailable", "federation transaction access decision unavailable", "", nil)
 		}
-		transactionFence = sanitizeFederationTransactionFence(decision.TransactionFence)
+		transactionFence = composeFederationTransactionFences(
+			transactionFence,
+			sanitizeFederationTransactionFence(decision.TransactionFence),
+		)
 	}
 	return federationAuthorization{
 		principal: federationPrincipal{
@@ -113,6 +115,35 @@ func evaluateFederationRequest(
 		},
 		transactionFence: transactionFence,
 	}, nil
+}
+
+func sanitizeNativeFederationTransactionFence(fence db.TransactionFence) db.TransactionFence {
+	return func(ctx context.Context, transaction db.Transaction) error {
+		err := fence(ctx, transaction)
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, db.ErrNotFound):
+			return ErrHostAccessDenied
+		default:
+			return errHostFederationAccessUnavailable
+		}
+	}
+}
+
+func composeFederationTransactionFences(first, second db.TransactionFence) db.TransactionFence {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+	return func(ctx context.Context, transaction db.Transaction) error {
+		if err := first(ctx, transaction); err != nil {
+			return err
+		}
+		return second(ctx, transaction)
+	}
 }
 
 func sanitizeFederationTransactionFence(fence db.TransactionFence) db.TransactionFence {

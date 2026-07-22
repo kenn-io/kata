@@ -53,6 +53,35 @@ func IsSupportedFederationCapability(capability string) bool {
 	}
 }
 
+// FederationEnrollmentAuthorizationMatches reports whether current still
+// represents the exact active authority admitted before a mutation began.
+func FederationEnrollmentAuthorizationMatches(
+	current, admitted FederationEnrollment,
+	projectID int64,
+	capability string,
+) bool {
+	if current.ID != admitted.ID || current.RevokedAt != nil ||
+		current.SpokeInstanceUID != admitted.SpokeInstanceUID ||
+		current.Capabilities != admitted.Capabilities || current.Actor != admitted.Actor ||
+		current.AllowAdoptionSnapshotAuthors != admitted.AllowAdoptionSnapshotAuthors ||
+		current.AdoptionBaselineOpen != admitted.AdoptionBaselineOpen ||
+		current.AdoptionBaselineNextSourceEventID != admitted.AdoptionBaselineNextSourceEventID ||
+		current.AdoptionBaselineEndSourceEventID != admitted.AdoptionBaselineEndSourceEventID ||
+		!federationEnrollmentProjectMatches(current.ProjectID, projectID) {
+		return false
+	}
+	for _, granted := range strings.Split(current.Capabilities, ",") {
+		if granted == capability {
+			return true
+		}
+	}
+	return false
+}
+
+func federationEnrollmentProjectMatches(enrollmentProjectID *int64, projectID int64) bool {
+	return enrollmentProjectID == nil || *enrollmentProjectID == projectID
+}
+
 // ValidateTokenActor rejects empty actors and reserved bootstrap spellings.
 func ValidateTokenActor(actor string) error {
 	trimmed := strings.TrimSpace(actor)

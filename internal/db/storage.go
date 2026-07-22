@@ -246,6 +246,7 @@ type Storage interface {
 	ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error)
 	RevokeFederationEnrollment(ctx context.Context, id int64) error
 	AuthorizeFederationToken(ctx context.Context, token string, projectID int64, capability string) (FederationEnrollment, error)
+	FederationEnrollmentTransactionFence(enrollment FederationEnrollment, projectID int64, capability string) TransactionFence
 
 	// export (JSONL)
 	ExportMeta(ctx context.Context) iter.Seq2[MetaKV, error]
