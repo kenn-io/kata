@@ -60,6 +60,7 @@ var alreadyImplemented = map[string]bool{
 	"ExportFederationQuarantine":           true, // export.go
 	"ExportFederationSyncStatus":           true, // export.go
 	"FederationBindingByProject":           true, // federation_control.go
+	"FederationEnrollmentTransactionFence": true, // federation_control.go
 	"FederationSyncStatusByProject":        true, // federation_control.go
 	"ListFederationBindings":               true, // federation_control.go
 	"ListFederationEnrollments":            true, // federation_control.go

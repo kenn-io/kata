@@ -283,6 +283,13 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	assert.Equal(t, wildcard.Enrollment.ID, authorized.ID)
+	fence := store.FederationEnrollmentTransactionFence(authorized, hub.ID, "pull")
+	_, _, err = store.CreateIssue(db.WithTransactionFence(ctx, fence), db.CreateIssueParams{
+		ProjectID: hub.ID, Title: "authorized federation fence", Author: "member",
+	})
+	if err != nil {
+		return err
+	}
 	_, err = store.AuthorizeFederationToken(ctx, wildcard.Token, spoke.ID, "pull")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	count, err := store.CountActiveFederationEnrollments(ctx, hub.ID)
@@ -299,6 +306,11 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	_, err = store.AuthorizeFederationToken(ctx, created.Token, hub.ID, "pull")
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	revokedFence := store.FederationEnrollmentTransactionFence(created.Enrollment, hub.ID, "pull")
+	_, _, err = store.CreateIssue(db.WithTransactionFence(ctx, revokedFence), db.CreateIssueParams{
+		ProjectID: hub.ID, Title: "revoked federation fence", Author: "member",
+	})
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	assert.ErrorIs(t, store.RevokeFederationEnrollment(ctx, created.Enrollment.ID+10000), db.ErrNotFound)
 
