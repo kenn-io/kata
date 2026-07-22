@@ -70,19 +70,16 @@ func (s *Service) CreateFederationEnrollment(
 	if !found || project.DeletedAt != nil {
 		return CreatedFederationEnrollment{}, ErrProjectNotFound
 	}
-	if _, err := s.store.EnableProjectFederation(callCtx, project.ID, actor); err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return CreatedFederationEnrollment{}, ErrProjectNotFound
-		}
-		return CreatedFederationEnrollment{}, fmt.Errorf("kata: enable project federation: %w", err)
-	}
-	created, err := s.store.CreateFederationEnrollment(callCtx, db.CreateFederationEnrollmentParams{
+	created, err := s.store.CreateProjectFederationEnrollment(callCtx, db.CreateFederationEnrollmentParams{
 		SpokeInstanceUID:             spec.SpokeInstanceUID,
 		ProjectID:                    &project.ID,
 		Capabilities:                 capabilities,
 		Actor:                        actor,
 		AllowAdoptionSnapshotAuthors: spec.AllowAdoptionSnapshotAuthors,
 	})
+	if errors.Is(err, db.ErrNotFound) {
+		return CreatedFederationEnrollment{}, ErrProjectNotFound
+	}
 	if err != nil {
 		return CreatedFederationEnrollment{}, fmt.Errorf("kata: create federation enrollment: %w", err)
 	}

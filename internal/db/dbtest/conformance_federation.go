@@ -238,6 +238,39 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 		return err
 	}
 	assert.Equal(t, "wildcard-enrollment-secret", wildcard.Token)
+	rollbackProject, err := store.CreateProject(ctx, "atomic-enrollment-rollback")
+	if err != nil {
+		return err
+	}
+	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: rollbackProject.ID, Title: "must not become a baseline", Author: "member",
+	}); err != nil {
+		return err
+	}
+	eventsBeforeFailure, err := store.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: rollbackProject.ID, Limit: 100,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = store.CreateProjectFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		Token: "wildcard-enrollment-secret", SpokeInstanceUID: spokeUID,
+		ProjectID: &rollbackProject.ID, Capabilities: "pull", Actor: "member",
+	})
+	require.Error(t, err, "duplicate token must fail after federation enablement begins")
+	_, err = store.FederationBindingByProject(ctx, rollbackProject.ID)
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	eventsAfterFailure, err := store.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: rollbackProject.ID, Limit: 100,
+	})
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, eventsBeforeFailure, eventsAfterFailure,
+		"failed enrollment must roll back federation baseline events")
+	_, err = store.AuthorizeFederationToken(ctx, wildcard.Token, rollbackProject.ID, "pull")
+	assert.ErrorIs(t, err, db.ErrNotFound,
+		"failed enrollment must not expose the project to an existing wildcard credential")
 	authorized, err := store.AuthorizeFederationToken(ctx, created.Token, hub.ID, "pull")
 	if err != nil {
 		return err

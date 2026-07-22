@@ -23,55 +23,68 @@ func (s *Store) EnableProjectFederation(
 	var output db.FederationBinding
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.FederationBinding{}
-		project, err := scanProject(tx.QueryRowContext(ctx,
-			projectSelect+` WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, projectID))
-		if err != nil {
-			return err
+		var err error
+		output, err = s.enableProjectFederationTx(ctx, tx, projectID, actor)
+		return err
+	})
+	return output, err
+}
+
+func (s *Store) enableProjectFederationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	actor string,
+) (db.FederationBinding, error) {
+	project, err := scanProject(tx.QueryRowContext(ctx,
+		projectSelect+` WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, projectID))
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
+		federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
+	if err == nil {
+		if existing.Role != db.FederationRoleHub {
+			return db.FederationBinding{}, fmt.Errorf("project %d already has %q federation binding", projectID, existing.Role)
 		}
-		existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
-			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, projectID))
-		if err == nil {
-			if existing.Role != db.FederationRoleHub {
-				return fmt.Errorf("project %d already has %q federation binding", projectID, existing.Role)
+		if existing.Enabled {
+			projectIDs, err := federationBindingGroupProjectIDs(ctx, tx, existing)
+			if err != nil {
+				return db.FederationBinding{}, err
 			}
-			if existing.Enabled {
-				projectIDs, err := federationBindingGroupProjectIDs(ctx, tx, existing)
-				if err != nil {
-					return err
-				}
-				if err := reconcileFederatedLinkGroup(ctx, tx, projectIDs, 0, nil); err != nil {
-					return err
-				}
+			if err := reconcileFederatedLinkGroup(ctx, tx, projectIDs, 0, nil); err != nil {
+				return db.FederationBinding{}, err
 			}
-			output = existing
-			return nil
 		}
-		if !errors.Is(err, db.ErrNotFound) {
-			return err
-		}
-		enableEvent, err := s.insertFederationBaselineEventsTx(ctx, tx, project, actor)
-		if err != nil {
-			return err
-		}
-		pullCursor := enableEvent.ID - 1
-		if pullCursor < 0 {
-			pullCursor = 0
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO federation_bindings(
+		return existing, nil
+	}
+	if !errors.Is(err, db.ErrNotFound) {
+		return db.FederationBinding{}, err
+	}
+	enableEvent, err := s.insertFederationBaselineEventsTx(ctx, tx, project, actor)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	pullCursor := enableEvent.ID - 1
+	if pullCursor < 0 {
+		pullCursor = 0
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO federation_bindings(
 project_id,role,hub_url,hub_project_id,hub_project_uid,
 replay_horizon_event_id,pull_cursor_event_id,enabled
 ) VALUES($1,$2,'',0,$3,$4,$5,1)`, project.ID, string(db.FederationRoleHub),
-			project.UID, enableEvent.ID, pullCursor); err != nil {
-			return mapSQLError(err, nil)
-		}
-		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
-			federationBindingSelect+` WHERE project_id=$1`, project.ID))
-		if err != nil {
-			return err
-		}
-		return reconcileFederationBindingTransitionLinks(ctx, tx, nil, output)
-	})
-	return output, err
+		project.UID, enableEvent.ID, pullCursor); err != nil {
+		return db.FederationBinding{}, mapSQLError(err, nil)
+	}
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
+		federationBindingSelect+` WHERE project_id=$1`, project.ID))
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding); err != nil {
+		return db.FederationBinding{}, err
+	}
+	return binding, nil
 }
 
 // RefreshProjectFederationBaseline writes a new baseline for an enabled hub binding.

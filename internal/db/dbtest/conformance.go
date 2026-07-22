@@ -278,6 +278,7 @@ var storageScenarios = []scenario{
 			"ActiveFederationQuarantine", "ActiveFederationQuarantinesByProject",
 			"AdvanceFederationPullCursor", "AdvanceFederationPushCursor", "AuthorizeFederationToken",
 			"ClearFederationSyncError", "CloseIssueWithEvents", "CountActiveFederationEnrollments", "CreateFederationEnrollment",
+			"CreateProjectFederationEnrollment",
 			"CreateIssue", "CreateLink", "CreateProject", "EnableFederationPush", "ExportFederationBindings",
 			"ExportFederationEnrollments", "ExportFederationQuarantine", "ExportFederationSyncStatus",
 			"FederationBindingByProject", "FederationSyncStatusByProject", "ListFederationBindings",

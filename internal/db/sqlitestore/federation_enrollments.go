@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
-	katauid "go.kenn.io/kata/internal/uid"
 )
 
 // CreateFederationEnrollment inserts an active enrollment. When p.Token is
@@ -16,15 +15,30 @@ func (d *Store) CreateFederationEnrollment(
 	ctx context.Context,
 	p db.CreateFederationEnrollmentParams,
 ) (db.CreatedFederationEnrollment, error) {
-	if p.Token == "" {
-		token, err := db.NewFederationToken()
-		if err != nil {
-			return db.CreatedFederationEnrollment{}, err
-		}
-		p.Token = token
+	prepared, err := db.PrepareFederationEnrollmentParams(p)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
 	}
 	return retryWrite1(ctx, d, func() (db.CreatedFederationEnrollment, error) {
-		return d.createFederationEnrollment(ctx, p)
+		return d.createFederationEnrollment(ctx, prepared)
+	})
+}
+
+// CreateProjectFederationEnrollment enables one hub project and creates its
+// scoped enrollment in the same transaction.
+func (d *Store) CreateProjectFederationEnrollment(
+	ctx context.Context,
+	p db.CreateFederationEnrollmentParams,
+) (db.CreatedFederationEnrollment, error) {
+	prepared, err := db.PrepareFederationEnrollmentParams(p)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if prepared.ProjectID == nil || *prepared.ProjectID <= 0 {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf("project-scoped federation enrollment requires project id")
+	}
+	return retryWrite1(ctx, d, func() (db.CreatedFederationEnrollment, error) {
+		return d.createProjectFederationEnrollment(ctx, prepared)
 	})
 }
 
@@ -32,29 +46,52 @@ func (d *Store) createFederationEnrollment(
 	ctx context.Context,
 	p db.CreateFederationEnrollmentParams,
 ) (db.CreatedFederationEnrollment, error) {
-	if !katauid.Valid(p.SpokeInstanceUID) {
-		return db.CreatedFederationEnrollment{}, fmt.Errorf("invalid spoke instance uid %q", p.SpokeInstanceUID)
-	}
-	capabilities, err := db.CanonicalFederationCapabilities(p.Capabilities)
-	if err != nil {
-		return db.CreatedFederationEnrollment{}, err
-	}
-	actor := strings.TrimSpace(p.Actor)
-	if err := db.ValidateTokenActor(actor); err != nil {
-		return db.CreatedFederationEnrollment{}, fmt.Errorf("federation enrollment actor: %w", err)
-	}
-	if p.AllowAdoptionSnapshotAuthors && p.ProjectID == nil {
-		return db.CreatedFederationEnrollment{}, fmt.Errorf("allow adoption snapshot authors requires project-scoped enrollment")
-	}
-	var projectID any
-	if p.ProjectID != nil {
-		projectID = *p.ProjectID
-	}
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	created, err := createFederationEnrollmentTx(ctx, tx, p)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	return created, nil
+}
+
+func (d *Store) createProjectFederationEnrollment(
+	ctx context.Context,
+	p db.CreateFederationEnrollmentParams,
+) (db.CreatedFederationEnrollment, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := d.enableProjectFederationTx(ctx, tx, *p.ProjectID, p.Actor); err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	created, err := createFederationEnrollmentTx(ctx, tx, p)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	return created, nil
+}
+
+func createFederationEnrollmentTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	p db.CreateFederationEnrollmentParams,
+) (db.CreatedFederationEnrollment, error) {
+	var projectID any
+	if p.ProjectID != nil {
+		projectID = *p.ProjectID
+	}
 
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO federation_enrollments(
@@ -62,7 +99,7 @@ func (d *Store) createFederationEnrollment(
 		  allow_adoption_snapshot_authors
 		)
 		VALUES(?, ?, ?, ?, ?, ?)`,
-		db.FederationTokenHash(p.Token), p.SpokeInstanceUID, projectID, capabilities, actor,
+		db.FederationTokenHash(p.Token), p.SpokeInstanceUID, projectID, p.Capabilities, p.Actor,
 		p.AllowAdoptionSnapshotAuthors)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, fmt.Errorf("create federation enrollment: %w", err)
@@ -73,9 +110,6 @@ func (d *Store) createFederationEnrollment(
 	}
 	enrollment, err := federationEnrollmentByIDTx(ctx, tx, id)
 	if err != nil {
-		return db.CreatedFederationEnrollment{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
 	return db.CreatedFederationEnrollment{Enrollment: enrollment, Token: p.Token}, nil

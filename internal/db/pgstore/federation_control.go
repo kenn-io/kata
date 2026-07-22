@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
-	katauid "go.kenn.io/kata/internal/uid"
 )
 
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id,
@@ -239,52 +238,70 @@ func (s *Store) CreateFederationEnrollment(
 	ctx context.Context,
 	input db.CreateFederationEnrollmentParams,
 ) (db.CreatedFederationEnrollment, error) {
-	if input.Token == "" {
-		token, err := db.NewFederationToken()
-		if err != nil {
-			return db.CreatedFederationEnrollment{}, err
-		}
-		input.Token = token
-	}
-	if !katauid.Valid(input.SpokeInstanceUID) {
-		return db.CreatedFederationEnrollment{}, fmt.Errorf("invalid spoke instance uid %q", input.SpokeInstanceUID)
-	}
-	capabilities, err := db.CanonicalFederationCapabilities(input.Capabilities)
+	prepared, err := db.PrepareFederationEnrollmentParams(input)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
-	}
-	actor := strings.TrimSpace(input.Actor)
-	if err := db.ValidateTokenActor(actor); err != nil {
-		return db.CreatedFederationEnrollment{}, fmt.Errorf("federation enrollment actor: %w", err)
-	}
-	if input.AllowAdoptionSnapshotAuthors && input.ProjectID == nil {
-		return db.CreatedFederationEnrollment{}, fmt.Errorf("allow adoption snapshot authors requires project-scoped enrollment")
-	}
-	var projectID any
-	if input.ProjectID != nil {
-		projectID = *input.ProjectID
 	}
 	var output db.CreatedFederationEnrollment
 	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.CreatedFederationEnrollment{}
-		var id int64
-		err := tx.QueryRowContext(ctx, `INSERT INTO federation_enrollments(
+		var err error
+		output, err = createFederationEnrollmentTx(ctx, tx, prepared)
+		return err
+	})
+	return output, err
+}
+
+// CreateProjectFederationEnrollment enables one hub project and creates its
+// scoped enrollment in the same transaction.
+func (s *Store) CreateProjectFederationEnrollment(
+	ctx context.Context,
+	input db.CreateFederationEnrollmentParams,
+) (db.CreatedFederationEnrollment, error) {
+	prepared, err := db.PrepareFederationEnrollmentParams(input)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if prepared.ProjectID == nil || *prepared.ProjectID <= 0 {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf("project-scoped federation enrollment requires project id")
+	}
+	var output db.CreatedFederationEnrollment
+	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		output = db.CreatedFederationEnrollment{}
+		if _, err := s.enableProjectFederationTx(ctx, tx, *prepared.ProjectID, prepared.Actor); err != nil {
+			return err
+		}
+		var err error
+		output, err = createFederationEnrollmentTx(ctx, tx, prepared)
+		return err
+	})
+	return output, err
+}
+
+func createFederationEnrollmentTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	input db.CreateFederationEnrollmentParams,
+) (db.CreatedFederationEnrollment, error) {
+	var projectID any
+	if input.ProjectID != nil {
+		projectID = *input.ProjectID
+	}
+	var id int64
+	err := tx.QueryRowContext(ctx, `INSERT INTO federation_enrollments(
   token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,
   allow_adoption_snapshot_authors
 ) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, db.FederationTokenHash(input.Token),
-			input.SpokeInstanceUID, projectID, capabilities, actor,
-			boolNumber(input.AllowAdoptionSnapshotAuthors)).Scan(&id)
-		if err != nil {
-			return mapSQLError(err, nil)
-		}
-		enrollment, err := federationEnrollmentByIDTx(ctx, tx, id, false)
-		if err != nil {
-			return err
-		}
-		output = db.CreatedFederationEnrollment{Enrollment: enrollment, Token: input.Token}
-		return nil
-	})
-	return output, err
+		input.SpokeInstanceUID, projectID, input.Capabilities, input.Actor,
+		boolNumber(input.AllowAdoptionSnapshotAuthors)).Scan(&id)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, mapSQLError(err, nil)
+	}
+	enrollment, err := federationEnrollmentByIDTx(ctx, tx, id, false)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	return db.CreatedFederationEnrollment{Enrollment: enrollment, Token: input.Token}, nil
 }
 
 // ListFederationEnrollments returns enrollment history in identity order.

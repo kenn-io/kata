@@ -38,7 +38,7 @@ type Storage interface { Only(context.Context) error }
 func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 	methods, err := CollectStorageMethodInventory("../../storage.go")
 	require.NoError(t, err)
-	require.Len(t, methods, 209)
+	require.Len(t, methods, 210)
 
 	var implemented []string
 	var stubbed []string
@@ -99,6 +99,7 @@ func TestStorageMethodInventoryClassifiesEveryMethod(t *testing.T) {
 		"CreateLink",
 		"CreateLinkAndEvent",
 		"CreateProject",
+		"CreateProjectFederationEnrollment",
 		"CreateProjectWithUID",
 		"CreateRecurrence",
 		"DeleteLinkAndEvent",

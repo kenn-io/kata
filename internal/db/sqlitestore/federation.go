@@ -738,7 +738,22 @@ func (d *Store) enableProjectFederation(ctx context.Context, projectID int64, ac
 		return db.FederationBinding{}, fmt.Errorf("begin federation enable: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	binding, err := d.enableProjectFederationTx(ctx, tx, projectID, actor)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.FederationBinding{}, fmt.Errorf("commit federation enable: %w", err)
+	}
+	return binding, nil
+}
 
+func (d *Store) enableProjectFederationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	actor string,
+) (db.FederationBinding, error) {
 	project, err := scanProject(tx.QueryRowContext(ctx,
 		projectSelect+` WHERE id = ? AND deleted_at IS NULL`, projectID))
 	if err != nil {
@@ -759,9 +774,6 @@ func (d *Store) enableProjectFederation(ctx context.Context, projectID int64, ac
 			if err := reconcileFederatedLinkGroup(ctx, tx, groupProjectIDs, groupProjectIDs, 0, nil); err != nil {
 				return db.FederationBinding{}, err
 			}
-		}
-		if err := tx.Commit(); err != nil {
-			return db.FederationBinding{}, fmt.Errorf("commit existing federation binding: %w", err)
 		}
 		return existing, nil
 	}
@@ -794,9 +806,6 @@ func (d *Store) enableProjectFederation(ctx context.Context, projectID int64, ac
 	}
 	if err := reconcileFederationBindingTransitionLinks(ctx, tx, nil, binding); err != nil {
 		return db.FederationBinding{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return db.FederationBinding{}, fmt.Errorf("commit federation enable: %w", err)
 	}
 	return binding, nil
 }
