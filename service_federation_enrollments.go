@@ -1,0 +1,213 @@
+package kata
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"go.kenn.io/kata/internal/db"
+	katauid "go.kenn.io/kata/internal/uid"
+)
+
+// ErrFederationEnrollmentNotFound reports that an enrollment does not belong
+// to the requested project or does not exist.
+var ErrFederationEnrollmentNotFound = errors.New("kata: federation enrollment not found")
+
+// FederationEnrollmentSpec describes a project-scoped transport credential.
+// Kata generates the plaintext token and returns it only from creation.
+type FederationEnrollmentSpec struct {
+	ProjectUID                   string
+	SpokeInstanceUID             string
+	Capabilities                 string
+	Actor                        string
+	AllowAdoptionSnapshotAuthors bool
+}
+
+// FederationEnrollment is the host-visible enrollment history. It omits the
+// stored token hash and never contains the plaintext credential.
+type FederationEnrollment struct {
+	ID                           int64
+	ProjectUID                   string
+	SpokeInstanceUID             string
+	Capabilities                 string
+	Actor                        string
+	AllowAdoptionSnapshotAuthors bool
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
+	RevokedAt                    *time.Time
+}
+
+// CreatedFederationEnrollment contains a new enrollment and its one-time
+// plaintext credential.
+type CreatedFederationEnrollment struct {
+	Enrollment FederationEnrollment
+	Token      string
+}
+
+// CreateFederationEnrollment enables hub federation for the project when
+// necessary and creates a project-scoped transport credential. It is an
+// in-process application method; the caller must authorize the operation.
+func (s *Service) CreateFederationEnrollment(
+	ctx context.Context,
+	spec FederationEnrollmentSpec,
+) (CreatedFederationEnrollment, error) {
+	capabilities, actor, err := validateFederationEnrollmentSpec(spec)
+	if err != nil {
+		return CreatedFederationEnrollment{}, err
+	}
+	callCtx, done, err := s.beginHostCall(ctx)
+	if err != nil {
+		return CreatedFederationEnrollment{}, err
+	}
+	defer done()
+
+	project, found, err := s.projectByUID(callCtx, spec.ProjectUID)
+	if err != nil {
+		return CreatedFederationEnrollment{}, err
+	}
+	if !found || project.DeletedAt != nil {
+		return CreatedFederationEnrollment{}, ErrProjectNotFound
+	}
+	if _, err := s.store.EnableProjectFederation(callCtx, project.ID, actor); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return CreatedFederationEnrollment{}, ErrProjectNotFound
+		}
+		return CreatedFederationEnrollment{}, fmt.Errorf("kata: enable project federation: %w", err)
+	}
+	created, err := s.store.CreateFederationEnrollment(callCtx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID:             spec.SpokeInstanceUID,
+		ProjectID:                    &project.ID,
+		Capabilities:                 capabilities,
+		Actor:                        actor,
+		AllowAdoptionSnapshotAuthors: spec.AllowAdoptionSnapshotAuthors,
+	})
+	if err != nil {
+		return CreatedFederationEnrollment{}, fmt.Errorf("kata: create federation enrollment: %w", err)
+	}
+	return CreatedFederationEnrollment{
+		Enrollment: publicFederationEnrollment(created.Enrollment, project.UID),
+		Token:      created.Token,
+	}, nil
+}
+
+// ListFederationEnrollments returns retained enrollment history for one stable
+// project identity. Plaintext credentials and their stored hashes are omitted.
+func (s *Service) ListFederationEnrollments(
+	ctx context.Context,
+	projectUID string,
+) ([]FederationEnrollment, error) {
+	if !validHostProjectUID(projectUID) {
+		return nil, ErrProjectNotFound
+	}
+	callCtx, done, err := s.beginHostCall(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+
+	project, found, err := s.projectByUID(callCtx, projectUID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrProjectNotFound
+	}
+	enrollments, err := s.store.ListFederationEnrollments(callCtx)
+	if err != nil {
+		return nil, fmt.Errorf("kata: list federation enrollments: %w", err)
+	}
+	result := make([]FederationEnrollment, 0)
+	for _, enrollment := range enrollments {
+		if enrollment.ProjectID != nil && *enrollment.ProjectID == project.ID {
+			result = append(result, publicFederationEnrollment(enrollment, project.UID))
+		}
+	}
+	return result, nil
+}
+
+// RevokeFederationEnrollment permanently revokes one credential belonging to
+// the requested project. Repeating an exact revocation is harmless.
+func (s *Service) RevokeFederationEnrollment(
+	ctx context.Context,
+	projectUID string,
+	enrollmentID int64,
+) error {
+	if !validHostProjectUID(projectUID) || enrollmentID <= 0 {
+		return ErrFederationEnrollmentNotFound
+	}
+	callCtx, done, err := s.beginHostCall(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+
+	project, found, err := s.projectByUID(callCtx, projectUID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrProjectNotFound
+	}
+	enrollments, err := s.store.ListFederationEnrollments(callCtx)
+	if err != nil {
+		return fmt.Errorf("kata: find federation enrollment: %w", err)
+	}
+	for _, enrollment := range enrollments {
+		if enrollment.ID != enrollmentID || enrollment.ProjectID == nil ||
+			*enrollment.ProjectID != project.ID {
+			continue
+		}
+		if enrollment.RevokedAt != nil {
+			return nil
+		}
+		if err := s.store.RevokeFederationEnrollment(callCtx, enrollmentID); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				return ErrFederationEnrollmentNotFound
+			}
+			return fmt.Errorf("kata: revoke federation enrollment: %w", err)
+		}
+		return nil
+	}
+	return ErrFederationEnrollmentNotFound
+}
+
+func validateFederationEnrollmentSpec(spec FederationEnrollmentSpec) (string, string, error) {
+	if !validHostProjectUID(spec.ProjectUID) {
+		return "", "", ErrProjectNotFound
+	}
+	if !katauid.Valid(spec.SpokeInstanceUID) {
+		return "", "", errors.New("kata: invalid spoke instance UID")
+	}
+	capabilities, err := db.CanonicalFederationCapabilities(spec.Capabilities)
+	if err != nil {
+		return "", "", fmt.Errorf("kata: invalid federation capabilities: %w", err)
+	}
+	actor := strings.TrimSpace(spec.Actor)
+	if err := db.ValidateTokenActor(actor); err != nil {
+		return "", "", fmt.Errorf("kata: invalid federation enrollment actor: %w", err)
+	}
+	return capabilities, actor, nil
+}
+
+func validHostProjectUID(projectUID string) bool {
+	return katauid.Valid(projectUID) && projectUID != db.SystemProjectUID
+}
+
+func publicFederationEnrollment(
+	enrollment db.FederationEnrollment,
+	projectUID string,
+) FederationEnrollment {
+	return FederationEnrollment{
+		ID:                           enrollment.ID,
+		ProjectUID:                   projectUID,
+		SpokeInstanceUID:             enrollment.SpokeInstanceUID,
+		Capabilities:                 enrollment.Capabilities,
+		Actor:                        enrollment.Actor,
+		AllowAdoptionSnapshotAuthors: enrollment.AllowAdoptionSnapshotAuthors,
+		CreatedAt:                    enrollment.CreatedAt,
+		UpdatedAt:                    enrollment.UpdatedAt,
+		RevokedAt:                    enrollment.RevokedAt,
+	}
+}

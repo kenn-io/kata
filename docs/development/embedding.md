@@ -293,6 +293,35 @@ requires an actor for the retained event history. These methods are in-process
 application methods: they do not authenticate a network caller and should be
 invoked only after the host has authorized its own catalog lifecycle change.
 
+## Host-managed federation enrollments
+
+Restricted embedding keeps Kata's scoped federation transport routes but
+removes its native enrollment-administration routes. After applying its own
+authorization policy, a host can issue a project-scoped transport credential
+directly through the service:
+
+```go
+created, err := service.CreateFederationEnrollment(ctx, kata.FederationEnrollmentSpec{
+	ProjectUID:       "01HZNQ7VFPK1XGD8R5MABCD4EX",
+	SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+	Capabilities:     "pull,push,claim",
+	Actor:            "Example Operator",
+})
+```
+
+Creation enables hub federation for the active project when necessary. Kata
+generates the bearer secret, stores only its hash, and returns the plaintext in
+`created.Token` exactly once. `ListFederationEnrollments` returns retained
+history for one stable project UID without either form of the secret.
+`RevokeFederationEnrollment` requires both the project UID and enrollment ID,
+so an ID from another project is not accepted; repeating an exact revocation is
+harmless. History remains listable and credentials remain revocable after a
+project is archived, but archived projects cannot receive new enrollments.
+
+Like the project lifecycle methods, these are trusted in-process application
+methods rather than network authentication boundaries. The embedding host must
+authorize create, list, and revoke operations before calling them.
+
 ## Storage and PostgreSQL policy
 
 `Config.DSN` is required and accepts a bare SQLite path, a `sqlite://` URL, or a

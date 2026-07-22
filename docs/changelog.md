@@ -8,6 +8,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**New features**
+
+- Added project-scoped federation enrollment creation, history, and revocation
+  methods to the mountable Go service for hosts that use the restricted
+  embedding profile.
+
 ## 0.12.0
 <small>2026-07-20</small>
 
