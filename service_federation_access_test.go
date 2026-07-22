@@ -3,6 +3,7 @@ package kata_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -251,6 +252,139 @@ func TestServiceFederationAccessSanitizesFenceFailure(t *testing.T) {
 		`{"status":503,"error":{"code":"access_unavailable","message":"federation credential authorization is unavailable"}}`,
 		response.Body.String())
 	assert.NotContains(t, response.Body.String(), "private controller detail")
+}
+
+func TestServiceFederationAccessPreservesOrdinaryMutationFence(t *testing.T) {
+	tests := []struct {
+		name       string
+		access     *recordingAccessController
+		wantStatus int
+	}{
+		{
+			name:       "missing ordinary fence",
+			access:     &recordingAccessController{omitTransactionFence: true},
+			wantStatus: http.StatusServiceUnavailable,
+		},
+		{
+			name: "denying ordinary fence",
+			access: &recordingAccessController{transactionFence: func(context.Context, kata.Transaction) error {
+				return kata.ErrAccessDenied
+			}},
+			wantStatus: http.StatusNotFound,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var federationFenceCalls int
+			federation := &recordingFederationAccessController{
+				decide: func(request kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
+					decision := kata.FederationAccessDecision{}
+					if request.Operation.Mutation {
+						decision.TransactionFence = func(context.Context, kata.Transaction) error {
+							federationFenceCalls++
+							return nil
+						}
+					}
+					return decision, nil
+				},
+			}
+			service, project, enrollment, databasePath := newComposedFederationAccessService(t, tt.access, federation)
+			forceFederationBaselineRefresh(t, databasePath, project)
+
+			response := getFederationMetadataAsPrincipal(t, service, project.ID, enrollment.Token)
+
+			assert.Equal(t, tt.wantStatus, response.Code, response.Body.String())
+			assert.Zero(t, federationFenceCalls, "federation fence must not run after ordinary access rejects")
+		})
+	}
+}
+
+func TestServiceFederationAccessRunsBothMutationFencesInOrder(t *testing.T) {
+	var calls []string
+	access := &recordingAccessController{transactionFence: func(context.Context, kata.Transaction) error {
+		calls = append(calls, "ordinary")
+		return nil
+	}}
+	federation := &recordingFederationAccessController{
+		decide: func(request kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
+			decision := kata.FederationAccessDecision{}
+			if request.Operation.Mutation {
+				decision.TransactionFence = func(context.Context, kata.Transaction) error {
+					calls = append(calls, "federation")
+					return nil
+				}
+			}
+			return decision, nil
+		},
+	}
+	service, project, enrollment, databasePath := newComposedFederationAccessService(t, access, federation)
+	forceFederationBaselineRefresh(t, databasePath, project)
+
+	response := getFederationMetadataAsPrincipal(t, service, project.ID, enrollment.Token)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Equal(t, []string{"ordinary", "federation"}, calls)
+}
+
+func newComposedFederationAccessService(
+	t *testing.T,
+	access kata.AccessController,
+	federation kata.FederationAccessController,
+) (*kata.Service, kata.Project, kata.CreatedFederationEnrollment, string) {
+	t.Helper()
+	databasePath := filepath.Join(t.TempDir(), "service.db")
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN: databasePath, Access: access, FederationAccess: federation,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	project := ensureEnrollmentTestProject(
+		t, service, "01HZNQ7VFPK1XGD8R5MABCD4EX", "example-project",
+	)
+	enrollment, err := service.CreateFederationEnrollment(context.Background(), kata.FederationEnrollmentSpec{
+		ProjectUID:       project.UID,
+		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
+		Capabilities:     "pull,push",
+		Actor:            "Example Operator",
+	})
+	require.NoError(t, err)
+	return service, project, enrollment, databasePath
+}
+
+func forceFederationBaselineRefresh(t *testing.T, databasePath string, project kata.Project) {
+	t.Helper()
+	inspection, err := sql.Open("sqlite", databasePath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, inspection.Close()) })
+	_, err = inspection.Exec(`
+		INSERT INTO purge_log(
+			uid, origin_instance_uid, project_id, purged_issue_id,
+			project_uid, project_name, issue_title, issue_author,
+			comment_count, link_count, label_count, event_count,
+			purge_reset_after_event_id, short_id, actor
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?)`,
+		"01HZNQ7VFPK1XGD8R5MABCD4EB", "01HZNQ7VFPK1XGD8R5MABCD4EC",
+		project.ID, 999, project.UID, project.Name, "purged issue", "Example User",
+		999999, "d4eb", "Example User")
+	require.NoError(t, err)
+}
+
+func getFederationMetadataAsPrincipal(
+	t *testing.T,
+	service *kata.Service,
+	projectID int64,
+	token string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+
+		strconv.FormatInt(projectID, 10)+"/federation/metadata", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	request = request.WithContext(kata.WithPrincipal(request.Context(), kata.Principal{
+		Subject: "user-123", Actor: "Example User",
+	}))
+	response := httptest.NewRecorder()
+	service.Handler().ServeHTTP(response, request)
+	return response
 }
 
 func acquireFederationAccessClaim(

@@ -258,7 +258,10 @@ fails closed. Federation metadata and lease-status requests also require a fence
 because they may refresh baselines, expire claims, or update a spoke's cached
 lease state even though their HTTP method is `GET`. Tokenless lease-status reads
 remain available in explicitly trusted-caller mode; once a bearer credential is
-supplied, Kata authenticates and authorizes that credential. The callback
+supplied, Kata authenticates and authorizes that credential. When a request
+carries both an in-process principal and a scoped federation credential, the
+ordinary host-access fence runs first and the federation fence runs only after
+it succeeds; neither authorization layer replaces the other. The callback
 follows the same retry and transaction rules as the ordinary host-access fence
 described above.
 

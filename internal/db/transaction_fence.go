@@ -27,6 +27,25 @@ func WithTransactionFence(ctx context.Context, fence TransactionFence) context.C
 	return context.WithValue(ctx, transactionFenceContextKey{}, fence)
 }
 
+// WithAdditionalTransactionFence appends fence after any fence already carried
+// by ctx. The existing fence runs first and a rejection prevents the additional
+// fence and domain mutation from running.
+func WithAdditionalTransactionFence(ctx context.Context, fence TransactionFence) context.Context {
+	if fence == nil {
+		return ctx
+	}
+	existing, _ := ctx.Value(transactionFenceContextKey{}).(TransactionFence)
+	if existing == nil {
+		return WithTransactionFence(ctx, fence)
+	}
+	return WithTransactionFence(ctx, func(fenceCtx context.Context, transaction Transaction) error {
+		if err := existing(fenceCtx, transaction); err != nil {
+			return err
+		}
+		return fence(fenceCtx, transaction)
+	})
+}
+
 // ApplyTransactionFence invokes the request fence, if any, against tx.
 func ApplyTransactionFence(ctx context.Context, tx Transaction) error {
 	fence, _ := ctx.Value(transactionFenceContextKey{}).(TransactionFence)

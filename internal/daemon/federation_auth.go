@@ -70,7 +70,7 @@ func authorizeFederationRequest(
 			return ctx, federationPrincipal{}, api.NewError(http.StatusServiceUnavailable,
 				"access_unavailable", "federation transaction access decision unavailable", "", nil)
 		}
-		ctx = db.WithTransactionFence(ctx, sanitizeFederationTransactionFence(decision.TransactionFence))
+		ctx = db.WithAdditionalTransactionFence(ctx, sanitizeFederationTransactionFence(decision.TransactionFence))
 	}
 	return ctx, federationPrincipal{
 		EnrollmentID:                 enrollment.ID,

@@ -18,7 +18,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   lifecycle state. Federation mutations share the controller's transaction
   fence with event or lease writes. Conditionally mutating metadata and lease
   status reads use the same fence, and controller failures return only bounded,
-  generic authorization errors.
+  generic authorization errors. Principal and federation fences compose when
+  both apply to one request.
 
 ## 0.12.0
 <small>2026-07-20</small>
