@@ -78,6 +78,10 @@ type ServerConfig struct {
 	// by a mounting application. It is nil for the standalone daemon.
 	HostAccess HostAccessController
 
+	// HostFederationAccess optionally adds host-owned authorization after Kata
+	// authenticates a project-scoped federation enrollment.
+	HostFederationAccess HostFederationAccessController
+
 	// EmbeddingProfile removes native administrative routes when their
 	// lifecycle is owned by a mounting application. The standalone daemon uses
 	// the zero value and retains every route.

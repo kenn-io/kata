@@ -29,7 +29,8 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      http.MethodPost,
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/acquire",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
-		principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body, true, true)
+		ctx, principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body,
+			HostFederationOperation{ID: "acquireIssueLease", Mutation: true}, true, true)
 		if err != nil {
 			return nil, err
 		}
@@ -45,7 +46,8 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      http.MethodPost,
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/renew",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
-		principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body, true, true)
+		ctx, principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body,
+			HostFederationOperation{ID: "renewIssueLease", Mutation: true}, true, true)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +63,8 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      http.MethodPost,
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/release",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
-		principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body, true, true)
+		ctx, principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body,
+			HostFederationOperation{ID: "releaseIssueLease", Mutation: true}, true, true)
 		if err != nil {
 			return nil, err
 		}
@@ -77,7 +80,8 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      http.MethodPost,
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease/actions/force_release",
 	}, func(ctx context.Context, in *api.ClaimActionRequest) (*api.ClaimActionResponse, error) {
-		principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body, false, true)
+		ctx, principal, err := resolveClaimPrincipal(ctx, cfg, in.ProjectID, in.Authorization, in.Body,
+			HostFederationOperation{ID: "forceReleaseIssueLease", Mutation: true}, false, true)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +122,9 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      http.MethodGet,
 		Path:        "/api/v1/projects/{project_id}/issues/{ref}/lease",
 	}, func(ctx context.Context, in *api.ClaimStatusRequest) (*api.ClaimStatusResponse, error) {
-		if err := authorizeClaimStatusRead(ctx, cfg, in.ProjectID, in.Authorization); err != nil {
+		var err error
+		ctx, err = authorizeClaimStatusRead(ctx, cfg, in.ProjectID, in.Authorization)
+		if err != nil {
 			return nil, err
 		}
 		body, err := handleClaimStatus(ctx, cfg, in.ProjectID, in.Ref)
@@ -717,6 +723,8 @@ func ttlDuration(seconds int64) time.Duration {
 
 func claimAPIError(err error) error {
 	switch {
+	case errors.Is(err, ErrHostAccessDenied):
+		return federationCredentialDenied()
 	case errors.Is(err, db.ErrClaimDenied):
 		return api.NewError(http.StatusConflict, "claim_denied", err.Error(), "", nil)
 	case errors.Is(err, db.ErrClaimRequired):

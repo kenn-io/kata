@@ -71,6 +71,7 @@ jobs:
           KATA_TEST_POSTGRES_DSN: postgres://kata:kata@127.0.0.1:5432/kata_test?sslmode=disable
         run: >-
           env -u KATA_AUTH_TOKEN go test -count=1 -p 1
+          .
           ./internal/testenv
           ./internal/db/pgstore
           ./internal/db/storeopen

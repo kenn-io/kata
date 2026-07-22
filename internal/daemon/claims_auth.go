@@ -27,47 +27,50 @@ func resolveClaimPrincipal(
 	projectID int64,
 	authz string,
 	body api.ClaimActionBody,
+	operation HostFederationOperation,
 	allowEnrollment bool,
 	requireMutationLocal bool,
-) (claimPrincipal, error) {
+) (context.Context, claimPrincipal, error) {
 	if cfg.HostAccess != nil {
 		if requestPrincipal, ok := PrincipalFromContext(ctx); ok {
 			if !validHostPrincipal(requestPrincipal) {
-				return claimPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
+				return ctx, claimPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
 					"valid host principal required", "", nil)
 			}
-			return hostClaimPrincipal(cfg, body, requestPrincipal.Subject), nil
+			return ctx, hostClaimPrincipal(cfg, body, requestPrincipal.Subject), nil
 		}
 		if allowEnrollment && hasBearerHeader(authz) {
-			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body)
+			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body, operation)
 		}
-		return claimPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
+		return ctx, claimPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
 			"host principal or scoped federation bearer required", "", nil)
 	}
 	if cfg.Auth.Token != "" {
 		if principal, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, body, false); ok || err != nil {
-			return principal, err
+			return ctx, principal, err
 		}
 		if allowEnrollment && hasBearerHeader(authz) {
-			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body)
+			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body, operation)
 		}
-		return claimPrincipal{}, localAuthError(cfg, authz)
+		return ctx, claimPrincipal{}, localAuthError(cfg, authz)
 	}
 
 	if allowEnrollment && hasBearerHeader(authz) {
-		principal, err := resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body)
+		authorizedCtx, principal, err := resolveEnrollmentClaimPrincipal(
+			ctx, cfg, projectID, authz, body, operation,
+		)
 		if err == nil {
-			return principal, nil
+			return authorizedCtx, principal, nil
 		}
-		if cfg.InsecureReadonly {
-			return claimPrincipal{}, err
+		if cfg.InsecureReadonly || cfg.HostFederationAccess != nil {
+			return ctx, claimPrincipal{}, err
 		}
 	}
 
 	if requireMutationLocal && cfg.InsecureReadonly {
-		return claimPrincipal{}, localAuthError(cfg, authz)
+		return ctx, claimPrincipal{}, localAuthError(cfg, authz)
 	}
-	return localClaimPrincipal(cfg, body), nil
+	return ctx, localClaimPrincipal(cfg, body), nil
 }
 
 func hostClaimPrincipal(cfg ServerConfig, body api.ClaimActionBody, subject string) claimPrincipal {
@@ -88,12 +91,14 @@ func resolveEnrollmentClaimPrincipal(
 	projectID int64,
 	authz string,
 	body api.ClaimActionBody,
-) (claimPrincipal, error) {
-	fed, err := authorizeFederationRequest(ctx, cfg.DB, authz, projectID, "claim")
+	operation HostFederationOperation,
+) (context.Context, claimPrincipal, error) {
+	authorizedCtx, fed, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
+		operation)
 	if err != nil {
-		return claimPrincipal{}, err
+		return ctx, claimPrincipal{}, err
 	}
-	return claimPrincipal{ClaimPrincipal: db.ClaimPrincipal{
+	return authorizedCtx, claimPrincipal{ClaimPrincipal: db.ClaimPrincipal{
 		HolderInstanceUID: fed.SpokeInstanceUID,
 		Holder:            fed.Actor,
 		ClientKind:        strings.TrimSpace(body.ClientKind),
@@ -105,37 +110,40 @@ func authorizeClaimStatusRead(
 	cfg ServerConfig,
 	projectID int64,
 	authz string,
-) error {
+) (context.Context, error) {
 	if cfg.HostAccess != nil {
 		if requestPrincipal, ok := PrincipalFromContext(ctx); ok {
 			if validHostPrincipal(requestPrincipal) {
-				return nil
+				return ctx, nil
 			}
-			return api.NewError(http.StatusUnauthorized, "auth_required",
+			return ctx, api.NewError(http.StatusUnauthorized, "auth_required",
 				"valid host principal required", "", nil)
 		}
 		if hasBearerHeader(authz) {
-			_, err := authorizeFederationRequest(ctx, cfg.DB, authz, projectID, "claim")
-			return err
+			authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
+				HostFederationOperation{ID: "getIssueLeaseStatus"})
+			return authorizedCtx, err
 		}
-		return api.NewError(http.StatusUnauthorized, "auth_required",
+		return ctx, api.NewError(http.StatusUnauthorized, "auth_required",
 			"host principal or scoped federation bearer required", "", nil)
 	}
 	if cfg.Auth.Token == "" {
 		if cfg.InsecureReadonly {
 			if !hasBearerHeader(authz) {
-				return localAuthError(cfg, authz)
+				return ctx, localAuthError(cfg, authz)
 			}
-			_, err := authorizeFederationRequest(ctx, cfg.DB, authz, projectID, "claim")
-			return err
+			authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
+				HostFederationOperation{ID: "getIssueLeaseStatus"})
+			return authorizedCtx, err
 		}
-		return nil
+		return ctx, nil
 	}
 	if _, ok, err := resolveLocalClaimPrincipal(ctx, cfg, authz, api.ClaimActionBody{}, true); ok || err != nil {
-		return err
+		return ctx, err
 	}
-	_, err := authorizeFederationRequest(ctx, cfg.DB, authz, projectID, "claim")
-	return err
+	authorizedCtx, _, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
+		HostFederationOperation{ID: "getIssueLeaseStatus"})
+	return authorizedCtx, err
 }
 
 func resolveLocalClaimPrincipal(

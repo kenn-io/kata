@@ -21,30 +21,58 @@ type federationPrincipal struct {
 
 func authorizeFederationRequest(
 	ctx context.Context,
-	store db.Storage,
+	cfg ServerConfig,
 	authHeader string,
 	projectID int64,
 	capability string,
-) (federationPrincipal, error) {
+	operation HostFederationOperation,
+) (context.Context, federationPrincipal, error) {
 	if !strings.HasPrefix(authHeader, authBearerPrefix) {
-		return federationPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
+		return ctx, federationPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
 			"Authorization bearer required", "", nil)
 	}
 	token := strings.TrimPrefix(authHeader, authBearerPrefix)
 	if token == "" {
-		return federationPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
+		return ctx, federationPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
 			"Authorization bearer required", "", nil)
 	}
 
-	enrollment, err := store.AuthorizeFederationToken(ctx, token, projectID, capability)
+	enrollment, err := cfg.DB.AuthorizeFederationToken(ctx, token, projectID, capability)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return federationPrincipal{}, api.NewError(http.StatusForbidden, "auth_invalid",
+			return ctx, federationPrincipal{}, api.NewError(http.StatusForbidden, "auth_invalid",
 				"federation token is invalid for this project or capability", "", nil)
 		}
-		return federationPrincipal{}, internalAPIError(err)
+		return ctx, federationPrincipal{}, internalAPIError(err)
 	}
-	return federationPrincipal{
+	project, err := activeProjectByID(ctx, cfg.DB, projectID)
+	if err != nil {
+		return ctx, federationPrincipal{}, err
+	}
+	if cfg.HostFederationAccess != nil {
+		decision, accessErr := cfg.HostFederationAccess.AuthorizeFederation(
+			ctx,
+			HostFederationAccessRequest{
+				Enrollment: enrollment,
+				Project:    project,
+				Capability: capability,
+				Operation:  operation,
+			},
+		)
+		if errors.Is(accessErr, ErrHostAccessDenied) {
+			return ctx, federationPrincipal{}, federationCredentialDenied()
+		}
+		if accessErr != nil {
+			return ctx, federationPrincipal{}, api.NewError(http.StatusServiceUnavailable,
+				"access_unavailable", "federation credential authorization is unavailable", "", nil)
+		}
+		if operation.Mutation && decision.TransactionFence == nil {
+			return ctx, federationPrincipal{}, api.NewError(http.StatusServiceUnavailable,
+				"access_unavailable", "federation transaction access decision unavailable", "", nil)
+		}
+		ctx = db.WithTransactionFence(ctx, decision.TransactionFence)
+	}
+	return ctx, federationPrincipal{
 		EnrollmentID:                 enrollment.ID,
 		SpokeInstanceUID:             enrollment.SpokeInstanceUID,
 		Capabilities:                 enrollment.Capabilities,
@@ -52,4 +80,9 @@ func authorizeFederationRequest(
 		AllowAdoptionSnapshotAuthors: enrollment.AllowAdoptionSnapshotAuthors,
 		AllowAdoptionBaseline:        enrollment.AllowAdoptionSnapshotAuthors || enrollment.AdoptionBaselineOpen,
 	}, nil
+}
+
+func federationCredentialDenied() error {
+	return api.NewError(http.StatusForbidden, "auth_invalid",
+		"federation credential is not currently authorized", "", nil)
 }

@@ -101,6 +101,10 @@ type Config struct {
 	// Access selects host-supplied in-process authentication and authorization.
 	// It is mutually exclusive with Auth.
 	Access AccessController
+	// FederationAccess optionally adds host-owned authorization after Kata has
+	// authenticated a project-scoped federation credential. It does not replace
+	// Kata's credential authentication.
+	FederationAccess FederationAccessController
 	// WorkerTransactionFence revalidates host authority from inside every
 	// background-worker writable storage transaction. It is required when
 	// Access is set.
@@ -232,6 +236,12 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if cfg.Access != nil {
 		hostAccess = hostAccessControllerAdapter{controller: cfg.Access}
 	}
+	var hostFederationAccess daemon.HostFederationAccessController
+	if cfg.FederationAccess != nil {
+		hostFederationAccess = hostFederationAccessControllerAdapter{
+			controller: cfg.FederationAccess,
+		}
+	}
 	server := daemon.NewServer(daemon.ServerConfig{
 		DB:                    store,
 		StartedAt:             startedAt,
@@ -244,6 +254,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		Hooks:                 hookSink,
 		Auth:                  config.AuthConfig{Token: cfg.Auth.Token},
 		HostAccess:            hostAccess,
+		HostFederationAccess:  hostFederationAccess,
 		EmbeddingProfile:      daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                logger,
 	})
@@ -324,6 +335,44 @@ func boolCount(values ...bool) int {
 
 type hostAccessControllerAdapter struct {
 	controller AccessController
+}
+
+type hostFederationAccessControllerAdapter struct {
+	controller FederationAccessController
+}
+
+func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
+	ctx context.Context,
+	request daemon.HostFederationAccessRequest,
+) (daemon.HostFederationAccessDecision, error) {
+	if a.controller == nil {
+		return daemon.HostFederationAccessDecision{}, nil
+	}
+	decision, err := a.controller.AuthorizeFederation(ctx, FederationAccessRequest{
+		Enrollment: publicFederationEnrollment(request.Enrollment, request.Project.UID),
+		Project:    publicProject(request.Project),
+		Capability: FederationCapability(request.Capability),
+		Operation: FederationOperation{
+			ID: request.Operation.ID, Mutation: request.Operation.Mutation,
+		},
+	})
+	if errors.Is(err, ErrAccessDenied) {
+		return daemon.HostFederationAccessDecision{}, daemon.ErrHostAccessDenied
+	}
+	if err != nil {
+		return daemon.HostFederationAccessDecision{}, err
+	}
+	var transactionFence db.TransactionFence
+	if decision.TransactionFence != nil {
+		transactionFence = func(ctx context.Context, transaction db.Transaction) error {
+			err := decision.TransactionFence(ctx, transaction)
+			if errors.Is(err, ErrAccessDenied) {
+				return daemon.ErrHostAccessDenied
+			}
+			return err
+		}
+	}
+	return daemon.HostFederationAccessDecision{TransactionFence: transactionFence}, nil
 }
 
 func (a hostAccessControllerAdapter) Authorize(

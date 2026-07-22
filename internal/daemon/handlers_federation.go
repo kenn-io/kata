@@ -141,7 +141,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/federation/metadata",
 	}, func(ctx context.Context, in *api.FederationProjectMetadataRequest) (*api.ProjectFederationResponse, error) {
-		if _, err := authorizeFederationRequest(ctx, cfg.DB, in.Authorization, in.ProjectID, "pull"); err != nil {
+		var err error
+		ctx, _, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
+			HostFederationOperation{ID: "getFederationProjectMetadata"})
+		if err != nil {
 			return nil, err
 		}
 		body, err := projectFederationBody(ctx, cfg.DB, in.ProjectID)
@@ -437,7 +440,10 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/projects/{project_id}/federation/events",
 	}, func(ctx context.Context, in *api.FederationPollEventsRequest) (*api.PollEventsResponse, error) {
-		if _, err := authorizeFederationRequest(ctx, cfg.DB, in.Authorization, in.ProjectID, "pull"); err != nil {
+		var err error
+		ctx, _, err = authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "pull",
+			HostFederationOperation{ID: "pollFederationProjectEvents"})
+		if err != nil {
 			return nil, err
 		}
 		if in.ProjectID <= 0 {
@@ -455,7 +461,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Path:         "/api/v1/projects/{project_id}/federation/events:ingest",
 		MaxBodyBytes: 64 << 20,
 	}, func(ctx context.Context, in *api.FederationIngestEventsRequest) (*api.FederationIngestEventsResponse, error) {
-		principal, err := authorizeFederationRequest(ctx, cfg.DB, in.Authorization, in.ProjectID, "push")
+		ctx, principal, err := authorizeFederationRequest(ctx, cfg, in.Authorization, in.ProjectID, "push",
+			HostFederationOperation{ID: "ingestFederationProjectEvents", Mutation: true})
 		if err != nil {
 			return nil, err
 		}
@@ -563,6 +570,8 @@ func federationIngestEventsToDB(events []api.FederationIngestEventEnvelope) []db
 
 func federationIngestError(err error) error {
 	switch {
+	case errors.Is(err, ErrHostAccessDenied):
+		return federationCredentialDenied()
 	case errors.Is(err, db.ErrRemoteEventConflict):
 		return api.NewError(http.StatusConflict, "remote_event_conflict", err.Error(), "", nil)
 	case errors.Is(err, db.ErrRemoteEventHashMismatch), errors.Is(err, db.ErrFederationIngestValidation):
