@@ -392,6 +392,17 @@ func DeleteManagedFederationCredential(
 	return updateFederationCredentials(func(creds *FederationCredentials) error {
 		current, found := creds.Projects[match.ProjectUID]
 		if !found {
+			spokeProject := strings.TrimSpace(match.Credential.SpokeProjectName)
+			for projectUID, credential := range creds.Projects {
+				if projectUID != match.ProjectUID &&
+					credential.ManagedByConfig &&
+					strings.TrimSpace(credential.SpokeProjectName) == spokeProject {
+					return fmt.Errorf(
+						"%w: managed reservation moved before cleanup",
+						ErrFederationCredentialConflict,
+					)
+				}
+			}
 			return nil
 		}
 		if current != match.Credential || !current.ManagedByConfig {

@@ -333,6 +333,30 @@ func TestDeleteManagedFederationCredentialRequiresExactKeyAndValue(t *testing.T)
 	assert.NotContains(t, credentials.Projects, match.ProjectUID)
 }
 
+func TestDeleteManagedFederationCredentialRejectsReservationMovedToAnotherKey(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	store := config.DefaultFederationCredentialStore()
+	match := config.FederationManagedCredentialReservation{
+		ProjectUID: "01HUBPROJECT00000000000000",
+		Credential: config.FederationCredential{
+			HubURL: "https://daemon.example", HubProjectID: 42, Token: "pending-token",
+			ManagedByConfig: true, SpokeProjectName: "spoke-project",
+		},
+	}
+	require.NoError(t, store.ReserveManagedFederationCredential(ctx, match))
+	require.NoError(t, store.DeleteFederationCredential(ctx, match.ProjectUID))
+	movedUID := "01HUBPROJECT00000000000001"
+	require.NoError(t, store.StoreFederationCredential(ctx, movedUID, match.Credential))
+
+	err := store.DeleteManagedFederationCredential(ctx, match)
+
+	require.ErrorIs(t, err, config.ErrFederationCredentialConflict)
+	credentials, readErr := config.ReadFederationCredentials()
+	require.NoError(t, readErr)
+	assert.Equal(t, match.Credential, credentials.Projects[movedUID])
+}
+
 func TestRekeyFederationCredentialMovesManualLocalUIDToHubUIDOnce(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := context.Background()

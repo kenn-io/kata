@@ -400,10 +400,34 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 						map[string]any{"open_issues": openIssues})
 				}
 			}
-			return &api.LeaveFederationReplicaResponse{Body: api.LeaveFederationReplicaResultBody{
+			body := api.LeaveFederationReplicaResultBody{
 				Disposition: disposition,
 				Project:     dbProjectToOut(project),
-			}}, nil
+			}
+			managed, ok := cfg.federationCredentialStore().(config.FederationManagedCredentialStore)
+			if ok {
+				match, found, findErr := managed.FindManagedFederationCredential(ctx, project.Name)
+				switch {
+				case errors.Is(findErr, config.ErrFederationCredentialConflict):
+					return nil, api.NewError(
+						http.StatusConflict,
+						"federation_credential_conflict",
+						"managed federation credential cleanup is blocked by conflicting reservations",
+						"resolve the conflicting credentials, then retry leave",
+						nil,
+					)
+				case findErr != nil:
+					return nil, internalAPIError(findErr)
+				case found:
+					body.PendingEnrollment = &api.PendingFederationEnrollmentCleanup{
+						HubURL:        match.Credential.HubURL,
+						HubProjectID:  match.Credential.HubProjectID,
+						HubProjectUID: match.ProjectUID,
+						AllowInsecure: match.Credential.AllowInsecure,
+					}
+				}
+			}
+			return &api.LeaveFederationReplicaResponse{Body: body}, nil
 		}
 
 		body := api.LeaveFederationReplicaResultBody{Disposition: disposition}

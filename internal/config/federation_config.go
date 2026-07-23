@@ -58,6 +58,12 @@ func validateFederationConfig(cfg *DaemonConfig) error {
 		if mapping.Actor == "" {
 			return errors.New(prefix + ".actor is required")
 		}
+		if err := ValidateProjectName(mapping.SpokeProject); err != nil {
+			return fmt.Errorf("%s.spoke_project: %w", prefix, err)
+		}
+		if err := ValidateProjectName(mapping.HubProject); err != nil {
+			return fmt.Errorf("%s.hub_project: %w", prefix, err)
+		}
 
 		catalog, ok := cfg.CatalogDaemon(mapping.Hub)
 		if !ok {

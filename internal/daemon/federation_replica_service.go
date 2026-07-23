@@ -20,6 +20,12 @@ var (
 	ErrFederationReplicaBindingConflict = errors.New("federation replica binding conflict")
 	// ErrFederationReplicaCredentialConflict classifies a credential targeting another hub.
 	ErrFederationReplicaCredentialConflict = errors.New("federation replica credential conflict")
+	// ErrFederationReplicaReservationChanged identifies an exact managed
+	// reservation removed or replaced while its hub request was in flight.
+	ErrFederationReplicaReservationChanged = fmt.Errorf(
+		"%w: managed reservation changed",
+		ErrFederationReplicaCredentialConflict,
+	)
 	// ErrFederationReplicaCredentialIO classifies bounded credential-store failures.
 	ErrFederationReplicaCredentialIO = errors.New("federation replica credential I/O")
 
@@ -96,6 +102,7 @@ type ReserveFederationReplicaCredentialParams struct {
 	HubProjectUID string
 	ProjectName   string
 	Credential    config.FederationCredential
+	ExpectedBound bool
 }
 
 // LeaveFederationReplica detaches a spoke replica and removes its local
@@ -305,10 +312,24 @@ func prevalidateFederationReplicaReservation(
 	}
 	binding, err := store.FederationBindingByProject(ctx, project.ID)
 	if errors.Is(err, db.ErrNotFound) {
+		if p.ExpectedBound {
+			return federationReplicaError(
+				ErrFederationReplicaBindingConflict,
+				"local federation binding disappeared before credential reservation",
+				"",
+			)
+		}
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("prevalidate federation credential reservation binding: %w", err)
+	}
+	if !p.ExpectedBound {
+		return federationReplicaError(
+			ErrFederationReplicaBindingConflict,
+			"local federation binding appeared before credential reservation",
+			"",
+		)
 	}
 	expected := EnsureFederationReplicaParams{
 		HubURL:        p.Credential.HubURL,
@@ -404,7 +425,7 @@ func revalidateManagedReservation(
 		match.ProjectUID != p.ManagedReservation.ProjectUID ||
 		match.Credential != p.ManagedReservation.Expected {
 		return federationReplicaError(
-			ErrFederationReplicaCredentialConflict,
+			ErrFederationReplicaReservationChanged,
 			"managed federation reservation changed while contacting the hub",
 			"retry reconciliation or run kata federation leave for the project",
 		)
@@ -749,6 +770,21 @@ func ensureFederationReplicaCredentialRekey(
 	}
 	if source == nil {
 		return nil
+	}
+	sourceProject, err := store.ProjectByUID(ctx, source.ProjectUID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf("resolve federation credential rekey source: %w", err)
+	}
+	if err == nil {
+		if _, bindingErr := store.FederationBindingByProject(ctx, sourceProject.ID); bindingErr == nil {
+			return federationReplicaError(
+				ErrFederationReplicaBindingConflict,
+				"federation credential adoption source is already bound",
+				"",
+			)
+		} else if !errors.Is(bindingErr, db.ErrNotFound) {
+			return fmt.Errorf("read federation credential rekey source binding: %w", bindingErr)
+		}
 	}
 	managed, err := managedCredentialStore(credentials)
 	if err != nil {

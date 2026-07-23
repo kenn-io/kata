@@ -2075,6 +2075,8 @@ components:
           type: boolean
         disposition:
           type: string
+        pending_enrollment:
+          $ref: "#/components/schemas/PendingFederationEnrollmentCleanup"
         project:
           $ref: "#/components/schemas/ProjectOut"
       required:
@@ -2490,6 +2492,23 @@ components:
         - client_kind
         - claim_kind
         - requested_at
+      type: object
+    PendingFederationEnrollmentCleanup:
+      additionalProperties: true
+      properties:
+        allow_insecure:
+          type: boolean
+        hub_project_id:
+          format: int64
+          type: integer
+        hub_project_uid:
+          type: string
+        hub_url:
+          type: string
+      required:
+        - hub_url
+        - hub_project_id
+        - hub_project_uid
       type: object
     PingResponseBody:
       additionalProperties: true

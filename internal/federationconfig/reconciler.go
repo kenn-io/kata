@@ -384,15 +384,22 @@ func ReconcileMapping(
 	if err != nil {
 		return err
 	}
-	credential, err := ensureMappingEnrollment(
+	enrollment, err := ensureMappingEnrollment(
 		ctx, store, hub, catalog, mapping, preflight,
 	)
 	if err != nil {
 		return err
 	}
-	return convergeLocalMapping(
-		ctx, store, credentials, wake, mapping, preflight, credential,
+	reservationChanged, err := convergeLocalMapping(
+		ctx, store, credentials, wake, mapping, preflight, enrollment.credential,
 	)
+	if err == nil || enrollment.id == 0 || !reservationChanged {
+		return err
+	}
+	if revokeErr := hub.RevokeEnrollment(ctx, enrollment.id); revokeErr != nil {
+		return safeHubError(revokeErr)
+	}
+	return err
 }
 
 type mappingPreflight struct {
@@ -620,7 +627,7 @@ func preflightMapping(
 		}
 		if err := reserveManagedFederationCredential(
 			ctx, store, managed, mapping.SpokeProject, hubProject.UID,
-			pendingCredential,
+			pendingCredential, preflight.hasBinding,
 		); err != nil {
 			return preflight, err
 		}
@@ -639,6 +646,11 @@ func preflightMapping(
 	return preflight, nil
 }
 
+type mappingEnrollment struct {
+	credential config.FederationCredential
+	id         int64
+}
+
 func ensureMappingEnrollment(
 	ctx context.Context,
 	store db.Storage,
@@ -646,7 +658,7 @@ func ensureMappingEnrollment(
 	catalog config.CatalogDaemonConfig,
 	mapping config.FederationProjectConfig,
 	preflight mappingPreflight,
-) (config.FederationCredential, error) {
+) (mappingEnrollment, error) {
 	credential := preflight.credential.credential
 	if preflight.hasBinding {
 		pendingReplacement := credential.ManagedByConfig &&
@@ -654,12 +666,14 @@ func ensureMappingEnrollment(
 		if !pendingReplacement {
 			if strings.TrimSpace(preflight.binding.Actor) != "" &&
 				strings.TrimSpace(preflight.binding.Actor) != strings.TrimSpace(credential.Actor) {
-				return config.FederationCredential{}, reconcileError(
+				return mappingEnrollment{}, reconcileError(
 					ErrBindingConflict,
 					"existing federation binding actor differs from credential",
 				)
 			}
-			return withManagementMetadata(credential, catalog, mapping), nil
+			return mappingEnrollment{
+				credential: withManagementMetadata(credential, catalog, mapping),
+			}, nil
 		}
 	}
 
@@ -679,11 +693,11 @@ func ensureMappingEnrollment(
 		enrollment, err = hub.EnsureEnrollment(ctx, enrollmentRequest)
 	}
 	if err != nil {
-		return config.FederationCredential{}, safeHubError(err)
+		return mappingEnrollment{}, safeHubError(err)
 	}
 	enrollmentActor := strings.TrimSpace(enrollment.Actor)
 	if enrollment.ID <= 0 || db.ValidateTokenActor(enrollmentActor) != nil {
-		return config.FederationCredential{},
+		return mappingEnrollment{},
 			reconcileError(ErrHubValidation, "federation hub returned invalid enrollment metadata")
 	}
 
@@ -693,7 +707,7 @@ func ensureMappingEnrollment(
 	credential.Actor = enrollmentActor
 	credential.AllowInsecure = catalog.AllowInsecure
 	credential = withManagementMetadata(credential, catalog, mapping)
-	return credential, nil
+	return mappingEnrollment{credential: credential, id: enrollment.ID}, nil
 }
 
 func convergeLocalMapping(
@@ -704,11 +718,11 @@ func convergeLocalMapping(
 	mapping config.FederationProjectConfig,
 	preflight mappingPreflight,
 	credential config.FederationCredential,
-) error {
+) (bool, error) {
 	if preflight.hasBinding &&
 		preflight.credential.credential.ManagedByConfig &&
 		bindingOperational(preflight.binding, preflight.credential.credential) {
-		return nil
+		return false, nil
 	}
 
 	params := daemon.EnsureFederationReplicaParams{
@@ -742,22 +756,27 @@ func convergeLocalMapping(
 	_, err := daemon.EnsureFederationReplica(ctx, store, credentials, localWake, params)
 	if err != nil {
 		switch {
+		case errors.Is(err, daemon.ErrFederationReplicaReservationChanged):
+			return true, reconcileError(
+				ErrConfigurationConflict,
+				"federation credential changed during local convergence",
+			)
 		case errors.Is(err, daemon.ErrFederationReplicaCredentialIO):
-			return reconcileError(ErrCredentialIO, "update local federation credential")
+			return false, reconcileError(ErrCredentialIO, "update local federation credential")
 		case errors.Is(err, daemon.ErrFederationReplicaCredentialConflict),
 			errors.Is(err, config.ErrFederationCredentialConflict):
-			return reconcileError(
+			return false, reconcileError(
 				ErrConfigurationConflict,
 				"federation credential changed during local convergence",
 			)
 		case errors.Is(err, daemon.ErrFederationReplicaBindingConflict):
-			return reconcileError(ErrBindingConflict, "existing federation binding is incompatible")
+			return false, reconcileError(ErrBindingConflict, "existing federation binding is incompatible")
 		default:
-			return reconcileError(ErrLocalStorage, "ensure local federation replica")
+			return false, reconcileError(ErrLocalStorage, "ensure local federation replica")
 		}
 	}
 
-	return nil
+	return false, nil
 }
 
 func readManagedReservation(
@@ -794,6 +813,7 @@ func reserveManagedFederationCredential(
 	managed config.FederationManagedCredentialStore,
 	projectName, hubProjectUID string,
 	credential config.FederationCredential,
+	expectedBound bool,
 ) error {
 	err := daemon.ReserveFederationReplicaCredential(
 		ctx,
@@ -803,6 +823,7 @@ func reserveManagedFederationCredential(
 			HubProjectUID: hubProjectUID,
 			ProjectName:   projectName,
 			Credential:    credential,
+			ExpectedBound: expectedBound,
 		},
 	)
 	switch {

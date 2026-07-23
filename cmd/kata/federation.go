@@ -658,16 +658,18 @@ func resolveLeaveProject(ctx context.Context, client *http.Client, baseURL strin
 // When standalone is true, the project has no federation binding; leave skips
 // hub revoke and confirmation for plain detach (the daemon call still runs to
 // clean up a stale credential) and proceeds to archive-only for --delete.
-// hubURL, hubProjectID, and instanceUID are only valid when standalone is
-// false.
+// A standalone project can still carry pendingEnrollment when reconciliation
+// committed a hub enrollment before local adoption. In that case the
+// non-secret hub coordinates come from the daemon's leave preflight.
 type spokeLeaveTarget struct {
-	projectID     int64
-	projectName   string
-	hubURL        string
-	hubProjectID  int64
-	instanceUID   string
-	allowInsecure bool
-	standalone    bool
+	projectID         int64
+	projectName       string
+	hubURL            string
+	hubProjectID      int64
+	instanceUID       string
+	allowInsecure     bool
+	standalone        bool
+	pendingEnrollment bool
 }
 
 func federationLeaveCmd() *cobra.Command {
@@ -712,7 +714,7 @@ func federationLeaveCmd() *cobra.Command {
 			// discovered only after the revoke would strand the spoke locally
 			// bound with the hub side gone. Advisory only — the authoritative
 			// checks stay inside the daemon's transactions.
-			if !target.standalone && !localOnly {
+			if !localOnly {
 				actor, _ := resolveActor(ctx, flags.As, nil)
 				status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
 					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
@@ -723,15 +725,29 @@ func federationLeaveCmd() *cobra.Command {
 				if status >= 400 {
 					return apiErrFromBody(status, bs)
 				}
+				var preflight api.LeaveFederationReplicaResultBody
+				if err := json.Unmarshal(bs, &preflight); err != nil {
+					return err
+				}
+				if target.standalone && preflight.PendingEnrollment != nil {
+					target.hubURL = strings.TrimRight(preflight.PendingEnrollment.HubURL, "/")
+					target.hubProjectID = preflight.PendingEnrollment.HubProjectID
+					target.allowInsecure = preflight.PendingEnrollment.AllowInsecure
+					target.instanceUID, err = federationSpokeInstanceUID(ctx, client, baseURL)
+					if err != nil {
+						return err
+					}
+					target.pendingEnrollment = true
+				}
 			}
-			// Standalone path: project has no federation binding, so there is no
-			// hub contact either way. Plain leave skips the confirmation (nothing
-			// is detached or archived) but must NOT skip the daemon leave call:
-			// the route is the idempotent resume that deletes a stale hub
-			// credential left by a partial leave (binding gone, credential delete
-			// failed). --delete gates the archive on the same confirmation as the
-			// bound path (no hub revoke note, since there is no hub contact here).
-			if target.standalone {
+			// A truly standalone project has no hub contact. A standalone
+			// project with a pending managed enrollment follows the revoke path
+			// before the daemon removes its reservation. Plain standalone leave
+			// still calls the daemon: that idempotent resume deletes stale local
+			// credentials left by a partial leave. --delete gates an archive on
+			// the same confirmation as the bound path.
+			hasHubEnrollment := !target.standalone || target.pendingEnrollment
+			if target.standalone && !target.pendingEnrollment {
 				if deleteFlag {
 					if err := confirmFederationLeave(cmd, target, "archive", true, yes); err != nil {
 						return err
@@ -740,7 +756,7 @@ func federationLeaveCmd() *cobra.Command {
 			} else if err := confirmFederationLeave(cmd, target, disposition, localOnly, yes); err != nil {
 				return err
 			}
-			if !target.standalone {
+			if hasHubEnrollment {
 				if localOnly {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 						"warning: --local-only skips hub revoke; the enrollment token remains valid until you run `kata federation revoke <id>` on the hub %s\n",

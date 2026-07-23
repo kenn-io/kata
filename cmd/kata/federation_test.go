@@ -2051,6 +2051,38 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 			"stale hub credential must be deleted by the resume path")
 	})
 
+	t.Run("plain leave revokes enrollment for pending managed reservation", func(t *testing.T) {
+		resetFlags(t)
+		env := testenv.New(t)
+		ctx := context.Background()
+		project, err := env.DB.CreateProject(ctx, "standalone-project")
+		require.NoError(t, err)
+		hub, hubServer := newFakeLeaveHub(t, env.DB.InstanceUID(), 42)
+		reservation := config.FederationManagedCredentialReservation{
+			ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX",
+			Credential: config.FederationCredential{
+				HubURL:           hubServer.URL,
+				HubProjectID:     42,
+				Token:            "pending-token",
+				Capabilities:     "pull,push",
+				Actor:            "user-a",
+				AllowInsecure:    true,
+				ManagedByConfig:  true,
+				SpokeProjectName: project.Name,
+			},
+		}
+		require.NoError(t, config.ReserveManagedFederationCredential(reservation))
+
+		out := requireCmdOutput(t, env, "federation", "leave",
+			"--project", project.Name, "--yes")
+
+		assert.Contains(t, out, "already standalone")
+		assert.Equal(t, []int64{hub.enrollmentID}, hub.revokedIDs)
+		_, found, readErr := config.FindManagedFederationCredential(project.Name)
+		require.NoError(t, readErr)
+		assert.False(t, found)
+	})
+
 	t.Run("plain leave on no-binding project honors --json", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)

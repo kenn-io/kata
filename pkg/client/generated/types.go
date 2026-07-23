@@ -1860,16 +1860,24 @@ type LeaveFederationReplicaRequestBody struct {
 }
 
 type LeaveFederationReplicaResultBody struct {
-	Archived    *bool      `json:"archived,omitempty"`
-	Detached    bool       `json:"detached"`
-	Disposition string     `json:"disposition" validate:"required"`
-	Project     ProjectOut `json:"project"`
+	Archived          *bool                               `json:"archived,omitempty"`
+	Detached          bool                                `json:"detached"`
+	Disposition       string                              `json:"disposition" validate:"required"`
+	PendingEnrollment *PendingFederationEnrollmentCleanup `json:"pending_enrollment,omitempty"`
+	Project           ProjectOut                          `json:"project"`
 }
 
 func (l LeaveFederationReplicaResultBody) Validate() error {
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(l.Disposition, "required"); err != nil {
 		errors = errors.Append("Disposition", err)
+	}
+	if l.PendingEnrollment != nil {
+		if v, ok := any(l.PendingEnrollment).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PendingEnrollment", err)
+			}
+		}
 	}
 	if v, ok := any(l.Project).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
@@ -2354,6 +2362,17 @@ type PendingClaimOut struct {
 }
 
 func (p PendingClaimOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
+type PendingFederationEnrollmentCleanup struct {
+	AllowInsecure *bool  `json:"allow_insecure,omitempty"`
+	HubProjectID  int64  `json:"hub_project_id"`
+	HubProjectUID string `json:"hub_project_uid" validate:"required"`
+	HubURL        string `json:"hub_url" validate:"required"`
+}
+
+func (p PendingFederationEnrollmentCleanup) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(p))
 }
 

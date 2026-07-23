@@ -75,3 +75,13 @@ func TestNewHubClientReportsSanitizedConstructionStage(t *testing.T) {
 		})
 	}
 }
+
+func TestHubErrorTypedNilIsSafe(t *testing.T) {
+	var hubErr *HubError
+	var err error = hubErr
+
+	assert.NotPanics(t, func() {
+		assert.False(t, errors.Is(err, ErrHubUnavailable))
+		assert.Empty(t, err.Error())
+	})
+}

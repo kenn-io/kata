@@ -243,7 +243,9 @@ Credential-file updates use a same-directory, failure-atomic replacement so a
 failed write cannot truncate the last readable credential set.
 
 If the named hub project is deleted and recreated, its UID changes. kata
-reports a configuration conflict and does not silently enroll the replacement.
+reports a conflict and does not silently enroll the replacement. The category
+is `configuration_conflict` before adoption and `binding_conflict` after the
+local project is bound.
 Run `kata federation leave <spoke-project>` to clear the old managed
 reservation, verify the mapping, and allow reconciliation to enroll again.
 
@@ -263,7 +265,9 @@ kata federation leave spoke-project
 Explicit leave also removes exact config-managed credential reservations left
 by an interrupted startup reconciliation, including reservations created
 before local adoption completed. Conflicting or manual credentials are retained
-and reported as cleanup errors instead of being deleted.
+and reported as cleanup errors instead of being deleted. If leave removes a
+reservation while hub enrollment or rotation is in flight, reconciliation
+compensates by revoking the completed enrollment rather than stranding it.
 
 Structural mistakes still fail config loading, including missing fields, a hub
 that is not a remote catalog entry, duplicate `spoke_project` values, or two

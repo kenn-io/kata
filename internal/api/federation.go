@@ -484,6 +484,18 @@ type LeaveFederationReplicaResultBody struct {
 	Detached    bool   `json:"detached"`
 	Disposition string `json:"disposition"`
 	Archived    bool   `json:"archived,omitempty"`
+	// PendingEnrollment identifies a config-managed enrollment that may have
+	// committed before local adoption. It omits the enrollment credential.
+	PendingEnrollment *PendingFederationEnrollmentCleanup `json:"pending_enrollment,omitempty"`
+}
+
+// PendingFederationEnrollmentCleanup gives leave clients the non-secret hub
+// coordinates needed to revoke an interrupted config-managed enrollment.
+type PendingFederationEnrollmentCleanup struct {
+	HubURL        string `json:"hub_url"`
+	HubProjectID  int64  `json:"hub_project_id"`
+	HubProjectUID string `json:"hub_project_uid"`
+	AllowInsecure bool   `json:"allow_insecure,omitempty"`
 }
 
 // LeaveFederationReplicaResponse wraps LeaveFederationReplicaResultBody.

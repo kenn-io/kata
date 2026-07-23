@@ -40,6 +40,8 @@ type fakeHub struct {
 	ensureCalls       int
 	enrollmentCalls   []federationconfig.EnrollmentRequest
 	rotationCalls     []federationconfig.EnrollmentRequest
+	revokeCalls       []int64
+	revokeErr         error
 	onEnsureProject   func()
 	onEnrollment      func(federationconfig.EnrollmentRequest)
 	onRotation        func(federationconfig.EnrollmentRequest)
@@ -135,6 +137,13 @@ func (h *fakeHub) RotateEnrollment(
 		onRotation(request)
 	}
 	return enrollment, err
+}
+
+func (h *fakeHub) RevokeEnrollment(_ context.Context, enrollmentID int64) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.revokeCalls = append(h.revokeCalls, enrollmentID)
+	return h.revokeErr
 }
 
 type fakeCredentialStore struct {
@@ -1103,6 +1112,7 @@ func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *test
 		require.FailNow(t, "wait for reconciliation after leave", "error: %v", ctx.Err())
 	}
 	require.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+	assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls)
 	_, found, readErr := credentials.FederationCredential(ctx, hubProjectUID)
 	require.NoError(t, readErr)
 	assert.False(t, found)
@@ -1144,6 +1154,7 @@ func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testin
 		require.FailNow(t, "wait for reconciliation after leave", "error: %v", ctx.Err())
 	}
 	require.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+	assert.Equal(t, []int64{hub.enrollment.ID}, hub.revokeCalls)
 	_, found, readErr := credentials.FederationCredential(ctx, hubProjectUID)
 	require.NoError(t, readErr)
 	assert.False(t, found)

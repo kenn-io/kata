@@ -103,7 +103,8 @@ credential mutation uses failure-atomic file replacement.
 
 The reservation is tied to the resolved hub UID. If a named hub project is
 deleted and recreated, the replacement has a different UID and reconciliation
-reports a configuration conflict instead of silently enrolling it. Run
+reports a conflict instead of silently enrolling it. Before local adoption the
+category is `configuration_conflict`; after binding it is `binding_conflict`. Run
 `kata federation leave <spoke-project>` to clear the old managed reservation,
 verify the mapping, and let reconciliation enroll the intended project.
 
@@ -130,8 +131,8 @@ Leave also cleans up exact config-managed credential reservations from an
 interrupted startup reconciliation, before or after adoption. It fails closed
 and retains any conflicting or manual credential rather than deleting it. If a
 leave races with reconciliation while it is doing hub enrollment or rotation
-I/O, leave wins locally; reconciliation retries later without recreating the
-credential that leave removed.
+I/O, leave wins locally; reconciliation revokes the completed hub enrollment
+and retries later without recreating the credential that leave removed.
 
 See [Configuration](../reference/configuration.md#declarative-federation-mappings)
 for validation rules and [HTTP API schema](../reference/http-api.md#federation-enrollment-and-health-endpoints)

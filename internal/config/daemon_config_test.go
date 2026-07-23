@@ -321,6 +321,36 @@ actor = " "
 			wantErr: "federation.project[0].actor",
 		},
 		{
+			name: "invalid spoke project name",
+			config: `
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke\u0007project"
+hub_project = "hub-project"
+actor = "user-a"
+`,
+			wantErr: "federation.project[0].spoke_project",
+		},
+		{
+			name: "invalid hub project name",
+			config: `
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub\u0007project"
+actor = "user-a"
+`,
+			wantErr: "federation.project[0].hub_project",
+		},
+		{
 			name: "unknown catalog name",
 			config: `
 [[federation.project]]

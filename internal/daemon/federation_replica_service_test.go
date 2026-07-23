@@ -547,6 +547,46 @@ func TestReserveFederationReplicaCredentialRequiresManagedStore(t *testing.T) {
 	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
 }
 
+func TestReserveFederationReplicaCredentialRejectsBindingThatAppearedAfterPreflight(t *testing.T) {
+	ctx := context.Background()
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(
+		ctx, "spoke-project", replicaHubProjectUID,
+	)
+	require.NoError(t, err)
+	params := replicaServiceParams()
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               params.HubURL,
+		HubProjectID:         params.HubProjectID,
+		HubProjectUID:        params.HubProjectUID,
+		ReplayHorizonEventID: params.ReplayHorizonEventID,
+		Actor:                params.Credential.Actor,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	reservation := params.Credential
+	reservation.ManagedByConfig = true
+	reservation.SpokeProjectName = project.Name
+
+	err = daemon.ReserveFederationReplicaCredential(
+		ctx, store, credentials,
+		daemon.ReserveFederationReplicaCredentialParams{
+			HubProjectUID: params.HubProjectUID,
+			ProjectName:   project.Name,
+			Credential:    reservation,
+			ExpectedBound: false,
+		},
+	)
+
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaBindingConflict)
+	_, found, readErr := credentials.FederationCredential(ctx, params.HubProjectUID)
+	require.NoError(t, readErr)
+	assert.False(t, found)
+}
+
 func TestLeaveFederationReplicaRequiresManagedStoreForMarkedProject(t *testing.T) {
 	ctx := context.Background()
 	store := openReplicaServiceStore(t)
@@ -846,6 +886,7 @@ func TestEnsureFederationReplicaRejectsRemovedManagedReservation(t *testing.T) {
 
 	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
 
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaReservationChanged)
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
 	unchanged, projectErr := store.ProjectByID(ctx, project.ID)
 	require.NoError(t, projectErr)
@@ -939,6 +980,45 @@ func TestEnsureFederationReplicaRekeysCredentialBeforeAdoption(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, wantReplacement, stored)
 	assert.Equal(t, 1, credentials.rekeyCalls)
+}
+
+func TestEnsureFederationReplicaValidatesBindingBeforeCredentialRekey(t *testing.T) {
+	ctx := context.Background()
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://other-hub.example",
+		HubProjectID:         99,
+		HubProjectUID:        "01HZNQ7VFPK1XGD8R5MABCD4EZ",
+		ReplayHorizonEventID: 4,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	source := replicaServiceParams().Credential
+	credentials.put(project.UID, source)
+	params := replicaServiceParams()
+	params.ProjectName = project.Name
+	params.AdoptExisting = true
+	params.CredentialRekey = &daemon.FederationReplicaCredentialRekeySource{
+		ProjectUID: project.UID,
+		Expected:   source,
+	}
+
+	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, nil, params)
+
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaBindingConflict)
+	stored, found, readErr := credentials.FederationCredential(ctx, project.UID)
+	require.NoError(t, readErr)
+	require.True(t, found)
+	assert.Equal(t, source, stored)
+	_, found, readErr = credentials.FederationCredential(ctx, replicaHubProjectUID)
+	require.NoError(t, readErr)
+	assert.False(t, found)
+	assert.Zero(t, credentials.rekeyCalls)
 }
 
 func TestEnsureFederationReplicaClassifiesAtomicRekeyConflictWithoutMutation(t *testing.T) {

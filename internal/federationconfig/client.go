@@ -49,6 +49,9 @@ type HubError struct {
 // Error implements error without retaining request coordinates or response
 // bodies, either of which may contain private data or echoed credentials.
 func (e *HubError) Error() string {
+	if e == nil {
+		return ""
+	}
 	if e.StatusCode != 0 {
 		return fmt.Sprintf("federation hub %s failed with HTTP status %d", e.Operation, e.StatusCode)
 	}
@@ -57,6 +60,9 @@ func (e *HubError) Error() string {
 
 // Unwrap exposes the stable error category.
 func (e *HubError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
 	return e.Kind
 }
 
@@ -86,6 +92,7 @@ type Hub interface {
 	EnsureProject(context.Context, string, string) (HubProject, error)
 	EnsureEnrollment(context.Context, EnrollmentRequest) (Enrollment, error)
 	RotateEnrollment(context.Context, EnrollmentRequest) (Enrollment, error)
+	RevokeEnrollment(context.Context, int64) error
 }
 
 // HubClient binds every request and the selected catalog bearer to one
@@ -287,6 +294,22 @@ func (c *HubClient) RotateEnrollment(
 ) (Enrollment, error) {
 	return c.enrollmentRequest(ctx, "/api/v1/federation/enrollments/actions/rotate",
 		"rotate enrollment", request)
+}
+
+// RevokeEnrollment compensates an enrollment or rotation whose local
+// reservation was explicitly removed while the hub request was in flight.
+func (c *HubClient) RevokeEnrollment(ctx context.Context, enrollmentID int64) error {
+	if enrollmentID <= 0 {
+		return hubError(ErrHubValidation, "revoke enrollment", 0)
+	}
+	return c.doJSON(
+		ctx,
+		http.MethodPost,
+		"/api/v1/federation/enrollments/"+strconv.FormatInt(enrollmentID, 10)+"/revoke",
+		nil,
+		nil,
+		"revoke enrollment",
+	)
 }
 
 func (c *HubClient) enrollmentRequest(

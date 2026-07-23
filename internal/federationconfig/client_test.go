@@ -670,6 +670,24 @@ func TestHubClientHTTPStatusCategories(t *testing.T) {
 	}
 }
 
+func TestHubClientRevokesEnrollmentByExactID(t *testing.T) {
+	unsetHubClientGlobalAuth(t)
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		assert.Equal(t, http.MethodPost, r.Method)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 47, "revoked": true})
+	}))
+	t.Cleanup(server.Close)
+	hub, err := federationconfig.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+		Name: "primary", URL: server.URL, AllowInsecure: true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, hub.RevokeEnrollment(context.Background(), 47))
+	assert.Equal(t, "/api/v1/federation/enrollments/47/revoke", gotPath)
+}
+
 func assertEnrollmentRequest(t *testing.T, r *http.Request) {
 	t.Helper()
 	var body struct {
