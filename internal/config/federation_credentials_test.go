@@ -163,61 +163,153 @@ func TestFederationCredentialManagedMetadataRoundTripsAndRedactsToken(t *testing
 	assert.NotContains(t, fmt.Sprintf("%+v", metadata), token)
 }
 
-func TestFederationCredentialReservationForProjectFindsExactAliases(t *testing.T) {
+func TestReserveFederationCredentialUsesOneExactHubUID(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	const (
-		localUID = "01HZNQ7VFPK1XGD8R5MABCD4EW"
-		hubUID   = "01HZNQ7VFPK1XGD8R5MABCD4EX"
-	)
-	credential := config.FederationCredential{
-		HubURL:           "https://hub.example",
+	ctx := context.Background()
+	store := config.DefaultFederationCredentialStore().(config.FederationManagedCredentialStore)
+	managed := config.FederationCredential{
+		HubURL:           "https://daemon.example",
 		HubProjectID:     42,
-		Token:            "pending-token-a",
+		Token:            "pending-token",
 		ManagedByConfig:  true,
 		SpokeProjectName: "spoke-project",
 	}
-	require.NoError(t, config.ReserveFederationCredentials(
-		config.FederationCredentialReservation{
-			ProjectUIDs: []string{localUID, hubUID},
-			Credential:  credential,
-		},
-	))
 
-	store := config.DefaultFederationCredentialStore()
-	finder, ok := store.(config.FederationCredentialReservationFinder)
-	require.True(t, ok)
-	got, found, err := finder.FederationCredentialReservationForProject(
-		context.Background(), "spoke-project",
-	)
+	require.NoError(t, store.ReserveManagedFederationCredential(ctx,
+		config.FederationManagedCredentialReservation{
+			ProjectUID: "01HUBPROJECT00000000000000",
+			Credential: managed,
+		}))
+	require.NoError(t, store.ReserveManagedFederationCredential(ctx,
+		config.FederationManagedCredentialReservation{
+			ProjectUID: "01HUBPROJECT00000000000000",
+			Credential: managed,
+		}))
+
+	match, found, err := store.FindManagedFederationCredential(ctx, "spoke-project")
 	require.NoError(t, err)
 	require.True(t, found)
-	assert.Equal(t, []string{localUID, hubUID}, got.ProjectUIDs)
-	assert.Equal(t, credential, got.Credential)
+	assert.Equal(t, "01HUBPROJECT00000000000000", match.ProjectUID)
+	assert.Equal(t, managed, match.Credential)
 }
 
-func TestFederationCredentialReservationForProjectRejectsDistinctMatches(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	first := config.FederationCredential{
-		HubURL:           "https://hub.example",
-		HubProjectID:     42,
-		Token:            "pending-token-a",
-		ManagedByConfig:  true,
-		SpokeProjectName: "spoke-project",
-	}
-	second := first
-	second.Token = "pending-token-b"
-	require.NoError(t, config.WriteFederationCredential(
-		"01HZNQ7VFPK1XGD8R5MABCD4EX", first,
-	))
-	require.NoError(t, config.WriteFederationCredential(
-		"01HZNQ7VFPK1XGD8R5MABCD4EY", second,
-	))
+func TestReserveFederationCredentialConflictDoesNotRewriteFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	ctx := context.Background()
+	store := config.DefaultFederationCredentialStore().(config.FederationManagedCredentialStore)
+	const hubUID = "01HUBPROJECT00000000000000"
+	require.NoError(t, store.StoreFederationCredential(ctx, hubUID,
+		config.FederationCredential{
+			HubURL:       "https://daemon.example",
+			HubProjectID: 42,
+			Token:        "manual-token",
+		}))
+	path := filepath.Join(home, "credentials.toml")
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
 
-	finder := config.DefaultFederationCredentialStore().(config.FederationCredentialReservationFinder)
-	_, _, err := finder.FederationCredentialReservationForProject(
-		context.Background(), "spoke-project",
-	)
+	err = store.ReserveManagedFederationCredential(ctx,
+		config.FederationManagedCredentialReservation{
+			ProjectUID: hubUID,
+			Credential: config.FederationCredential{
+				HubURL:           "https://daemon.example",
+				HubProjectID:     42,
+				Token:            "pending-token",
+				ManagedByConfig:  true,
+				SpokeProjectName: "spoke-project",
+			},
+		})
 	require.ErrorIs(t, err, config.ErrFederationCredentialConflict)
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+}
+
+func TestFindManagedFederationCredentialRejectsTwoMarkedEntries(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	store := config.DefaultFederationCredentialStore().(config.FederationManagedCredentialStore)
+	managed := config.FederationCredential{
+		HubURL: "https://daemon.example", HubProjectID: 42, Token: "pending-token",
+		ManagedByConfig: true, SpokeProjectName: "spoke-project",
+	}
+	require.NoError(t, store.StoreFederationCredential(ctx,
+		"01HUBPROJECT00000000000000", managed))
+	require.NoError(t, store.StoreFederationCredential(ctx,
+		"01HUBPROJECT00000000000001", managed))
+
+	_, _, err := store.FindManagedFederationCredential(ctx, "spoke-project")
+	require.ErrorIs(t, err, config.ErrFederationCredentialConflict)
+	credentials, readErr := config.ReadFederationCredentials()
+	require.NoError(t, readErr)
+	assert.Equal(t, managed, credentials.Projects["01HUBPROJECT00000000000000"])
+	assert.Equal(t, managed, credentials.Projects["01HUBPROJECT00000000000001"])
+}
+
+func TestDeleteManagedFederationCredentialRequiresExactKeyAndValue(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	store := config.DefaultFederationCredentialStore().(config.FederationManagedCredentialStore)
+	match := config.FederationManagedCredentialReservation{
+		ProjectUID: "01HUBPROJECT00000000000000",
+		Credential: config.FederationCredential{
+			HubURL: "https://daemon.example", HubProjectID: 42, Token: "pending-token",
+			ManagedByConfig: true, SpokeProjectName: "spoke-project",
+		},
+	}
+	require.NoError(t, store.ReserveManagedFederationCredential(ctx, match))
+
+	wrongKey := match
+	wrongKey.ProjectUID = "01HUBPROJECT00000000000001"
+	require.NoError(t, store.StoreFederationCredential(ctx, wrongKey.ProjectUID,
+		config.FederationCredential{Token: "manual-token"}))
+	require.ErrorIs(t, store.DeleteManagedFederationCredential(ctx, wrongKey),
+		config.ErrFederationCredentialConflict)
+	wrongValue := match
+	wrongValue.Credential.Token = "changed-token"
+	require.NoError(t, store.StoreFederationCredential(ctx, match.ProjectUID,
+		wrongValue.Credential))
+	require.ErrorIs(t, store.DeleteManagedFederationCredential(ctx, match),
+		config.ErrFederationCredentialConflict)
+	credentials, err := config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, wrongValue.Credential, credentials.Projects[match.ProjectUID])
+	assert.Equal(t, config.FederationCredential{Token: "manual-token"},
+		credentials.Projects[wrongKey.ProjectUID])
+
+	require.NoError(t, store.StoreFederationCredential(ctx, match.ProjectUID, match.Credential))
+	require.NoError(t, store.DeleteManagedFederationCredential(ctx, match))
+	credentials, err = config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.NotContains(t, credentials.Projects, match.ProjectUID)
+}
+
+func TestRekeyFederationCredentialMovesManualLocalUIDToHubUIDOnce(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	store := config.DefaultFederationCredentialStore().(config.FederationManagedCredentialStore)
+	manual := config.FederationCredential{
+		HubURL: "https://daemon.example", HubProjectID: 42, Token: "manual-token",
+	}
+	replacement := manual
+	replacement.ManagedByConfig = true
+	replacement.SpokeProjectName = "spoke-project"
+	rekey := config.FederationCredentialRekey{
+		FromProjectUID: "01LOCALPROJECT000000000000",
+		ToProjectUID:   "01HUBPROJECT00000000000000",
+		Expected:       manual,
+		Replacement:    replacement,
+	}
+	require.NoError(t, store.StoreFederationCredential(ctx, rekey.FromProjectUID, manual))
+	require.NoError(t, store.RekeyFederationCredential(ctx, rekey))
+	require.NoError(t, store.RekeyFederationCredential(ctx, rekey))
+
+	credentials, err := config.ReadFederationCredentials()
+	require.NoError(t, err)
+	assert.NotContains(t, credentials.Projects, rekey.FromProjectUID)
+	assert.Equal(t, replacement, credentials.Projects[rekey.ToProjectUID])
+	assert.Len(t, credentials.Projects, 1)
 }
 
 func TestWriteFederationCredentialTightensExistingFileMode(t *testing.T) {
@@ -529,33 +621,6 @@ func TestReserveFederationCredentialDistinctValueConflictsWithoutOverwrite(t *te
 	require.NoError(t, readErr)
 	assert.Equal(t, existing, credentials.Projects[projectUID])
 	assert.Len(t, credentials.Projects, 1)
-}
-
-func TestReserveFederationCredentialsAtomicallyReservesAliases(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	const (
-		localUID = "01HZNQ7VFPK1XGD8R5MABCD4EA"
-		hubUID   = "01HZNQ7VFPK1XGD8R5MABCD4EX"
-	)
-	credential := config.FederationCredential{
-		HubURL: "https://hub.example", HubProjectID: 42,
-		Token: "token-a", Capabilities: "claim,pull,push",
-		ManagedByConfig: true, HubCatalog: "primary",
-		HubProjectName: "hub-project", RequestedActor: "user-a",
-	}
-
-	require.NoError(t, config.ReserveFederationCredentials(
-		config.FederationCredentialReservation{
-			ProjectUIDs: []string{localUID, hubUID},
-			Credential:  credential,
-		},
-	))
-
-	credentials, err := config.ReadFederationCredentials()
-	require.NoError(t, err)
-	assert.Equal(t, credential, credentials.Projects[localUID])
-	assert.Equal(t, credential, credentials.Projects[hubUID])
-	assert.Len(t, credentials.Projects, 2)
 }
 
 func TestReserveFederationCredentialsAliasConflictWritesNothing(t *testing.T) {

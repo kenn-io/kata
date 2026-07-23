@@ -84,6 +84,13 @@ type FederationCredentialReservationCleanup struct {
 	Expected          FederationCredential
 }
 
+// FederationManagedCredentialReservation is one config-managed credential
+// reserved under its stable hub project UID.
+type FederationManagedCredentialReservation struct {
+	ProjectUID string
+	Credential FederationCredential
+}
+
 // ErrFederationCredentialConflict classifies a rekey whose source or target
 // changed after the caller inspected the credential file.
 var ErrFederationCredentialConflict = errors.New("federation credential conflict")
@@ -103,7 +110,26 @@ type FederationCredentialStore interface {
 	DeleteFederationCredential(context.Context, string) error
 }
 
-// FederationCredentialRekeyer is the optional atomic move capability required
+// FederationManagedCredentialStore is the managed credential boundary used by
+// config-driven federation. Managed credentials have one durable hub UID key.
+type FederationManagedCredentialStore interface {
+	FederationCredentialStore
+	ReserveManagedFederationCredential(
+		context.Context, FederationManagedCredentialReservation,
+	) error
+	FindManagedFederationCredential(
+		context.Context, string,
+	) (FederationManagedCredentialReservation, bool, error)
+	RekeyFederationCredential(context.Context, FederationCredentialRekey) error
+	DeleteManagedFederationCredential(
+		context.Context, FederationManagedCredentialReservation,
+	) error
+}
+
+// FederationCredentialRekeyer is a legacy optional capability retained until
+// callers migrate to FederationManagedCredentialStore.
+//
+// It is the optional atomic move capability required
 // when config reconciliation adopts a standalone project under a different hub
 // UID. Keeping it separate preserves compatibility for service-scoped stores
 // that never perform that transition.
@@ -111,14 +137,14 @@ type FederationCredentialRekeyer interface {
 	RekeyFederationCredential(context.Context, FederationCredentialRekey) error
 }
 
-// FederationCredentialReserver is the optional compare-and-store capability
+// FederationCredentialReserver is a legacy optional compare-and-store capability
 // used to reserve a config-managed enrollment token without overwriting a
 // concurrent manual credential.
 type FederationCredentialReserver interface {
 	ReserveFederationCredentials(context.Context, FederationCredentialReservation) error
 }
 
-// FederationCredentialReservationFinder is the optional lookup used to
+// FederationCredentialReservationFinder is a legacy optional lookup used to
 // discover a config-managed reservation independently of its credential key.
 type FederationCredentialReservationFinder interface {
 	FederationCredentialReservationForProject(
@@ -126,7 +152,7 @@ type FederationCredentialReservationFinder interface {
 	) (FederationCredentialReservationMatch, bool, error)
 }
 
-// FederationCredentialReservationCleaner is the optional atomic cleanup used
+// FederationCredentialReservationCleaner is a legacy optional cleanup used
 // when leaving a project that may have config-reservation aliases.
 type FederationCredentialReservationCleaner interface {
 	DeleteFederationCredentialReservationForProject(
@@ -171,6 +197,24 @@ func (homeFederationCredentialStore) ReserveFederationCredentials(
 	_ context.Context, reservation FederationCredentialReservation,
 ) error {
 	return ReserveFederationCredentials(reservation)
+}
+
+func (homeFederationCredentialStore) ReserveManagedFederationCredential(
+	_ context.Context, reservation FederationManagedCredentialReservation,
+) error {
+	return ReserveManagedFederationCredential(reservation)
+}
+
+func (homeFederationCredentialStore) FindManagedFederationCredential(
+	_ context.Context, projectName string,
+) (FederationManagedCredentialReservation, bool, error) {
+	return FindManagedFederationCredential(projectName)
+}
+
+func (homeFederationCredentialStore) DeleteManagedFederationCredential(
+	_ context.Context, reservation FederationManagedCredentialReservation,
+) error {
+	return DeleteManagedFederationCredential(reservation)
 }
 
 func (homeFederationCredentialStore) FederationCredentialReservationForProject(
@@ -435,6 +479,84 @@ func ReserveFederationCredential(projectUID string, credential FederationCredent
 	return ReserveFederationCredentials(FederationCredentialReservation{
 		ProjectUIDs: []string{projectUID},
 		Credential:  credential,
+	})
+}
+
+// ReserveManagedFederationCredential atomically reserves a config-managed
+// credential under exactly one stable hub project UID. An exact replay is
+// idempotent; a different existing credential is left unchanged and conflicts.
+func ReserveManagedFederationCredential(
+	reservation FederationManagedCredentialReservation,
+) error {
+	projectUID := strings.TrimSpace(reservation.ProjectUID)
+	if projectUID == "" {
+		return fmt.Errorf("%w: reservation project UID is empty", ErrFederationCredentialConflict)
+	}
+	return updateFederationCredentials(func(creds *FederationCredentials) error {
+		existing, found := creds.Projects[projectUID]
+		if found && existing != reservation.Credential {
+			return fmt.Errorf("%w: reservation target credential differs", ErrFederationCredentialConflict)
+		}
+		if !found {
+			creds.Projects[projectUID] = reservation.Credential
+		}
+		return nil
+	})
+}
+
+// FindManagedFederationCredential locates the one managed reservation for a
+// spoke project. Multiple marked entries are an ambiguous legacy alias state.
+func FindManagedFederationCredential(
+	projectName string,
+) (FederationManagedCredentialReservation, bool, error) {
+	projectName = strings.TrimSpace(projectName)
+	if projectName == "" {
+		return FederationManagedCredentialReservation{}, false, nil
+	}
+	federationCredentialsMu.Lock()
+	defer federationCredentialsMu.Unlock()
+
+	creds, err := readFederationCredentials()
+	if err != nil {
+		return FederationManagedCredentialReservation{}, false, err
+	}
+	var match FederationManagedCredentialReservation
+	found := false
+	for projectUID, credential := range creds.Projects {
+		if !credential.ManagedByConfig ||
+			strings.TrimSpace(credential.SpokeProjectName) != projectName {
+			continue
+		}
+		if found {
+			return FederationManagedCredentialReservation{}, false, fmt.Errorf(
+				"%w: multiple managed reservations for project %s",
+				ErrFederationCredentialConflict, projectName,
+			)
+		}
+		match = FederationManagedCredentialReservation{
+			ProjectUID: projectUID,
+			Credential: credential,
+		}
+		found = true
+	}
+	return match, found, nil
+}
+
+// DeleteManagedFederationCredential removes an observed managed reservation
+// only if its durable hub UID and credential value are unchanged.
+func DeleteManagedFederationCredential(
+	match FederationManagedCredentialReservation,
+) error {
+	return updateFederationCredentials(func(creds *FederationCredentials) error {
+		current, found := creds.Projects[match.ProjectUID]
+		if !found {
+			return nil
+		}
+		if current != match.Credential || !current.ManagedByConfig {
+			return fmt.Errorf("%w: managed reservation changed before cleanup", ErrFederationCredentialConflict)
+		}
+		delete(creds.Projects, match.ProjectUID)
+		return nil
 	})
 }
 
