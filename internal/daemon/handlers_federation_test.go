@@ -396,7 +396,7 @@ func TestFederationReplicaSetupRejectsIncompatibleRetry(t *testing.T) {
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)
 
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
-	assert.Contains(t, string(raw), `"code":"federation_credential_conflict"`)
+	assert.Contains(t, string(raw), `"code":"federation_binding_conflict"`)
 	creds, err := config.ReadFederationCredentials()
 	require.NoError(t, err)
 	assert.Equal(t, "original-token", creds.Projects["01HZNQ7VFPK1XGD8R5MABCD4EX"].Token)

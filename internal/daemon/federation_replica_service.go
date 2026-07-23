@@ -342,7 +342,7 @@ func ensureFederationReplicaState(
 	if err := rejectConflictingManagedReservation(ctx, credentials, p); err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
-	if err := ensureFederationReplicaCredentialTarget(ctx, credentials, p); err != nil {
+	if err := ensureFederationReplicaCredentialTarget(ctx, store, credentials, p); err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
 	if err := ensureFederationReplicaCredentialRekey(ctx, store, credentials, p); err != nil {
@@ -628,6 +628,7 @@ func federationCapabilitiesContain(capabilities, want string) bool {
 
 func ensureFederationReplicaCredentialTarget(
 	ctx context.Context,
+	store db.Storage,
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
 ) error {
@@ -649,29 +650,63 @@ func ensureFederationReplicaCredentialTarget(
 	}
 	existingOrigin, err := config.CanonicalHTTPOrigin(existing.HubURL)
 	if err != nil {
-		return federationReplicaError(
-			ErrFederationReplicaCredentialConflict,
+		return federationReplicaCredentialTargetConflict(
+			ctx, store, p,
 			"existing federation credential has an invalid hub_url",
-			"",
 		)
 	}
 	requestedOrigin, _ := config.CanonicalHTTPOrigin(p.Credential.HubURL)
 	if existingOrigin != requestedOrigin {
-		return federationReplicaError(
-			ErrFederationReplicaCredentialConflict,
+		return federationReplicaCredentialTargetConflict(
+			ctx, store, p,
 			"existing federation credential targets another hub origin",
-			"",
 		)
 	}
 	if existing.HubProjectID != p.Credential.HubProjectID ||
 		(existing.ManagedByConfig && existing.Token != p.Credential.Token) {
-		return federationReplicaError(
-			ErrFederationReplicaCredentialConflict,
+		return federationReplicaCredentialTargetConflict(
+			ctx, store, p,
 			"existing federation credential differs from the requested hub",
-			"",
 		)
 	}
 	return nil
+}
+
+func federationReplicaCredentialTargetConflict(
+	ctx context.Context,
+	store db.Storage,
+	p EnsureFederationReplicaParams,
+	credentialMessage string,
+) error {
+	project, err := store.ProjectByUID(ctx, p.HubProjectUID)
+	if err == nil {
+		binding, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+		if bindingErr == nil {
+			if details := replicaBindingConflictDetails(binding, p); len(details) > 0 {
+				return federationReplicaError(
+					ErrFederationReplicaBindingConflict,
+					"existing federation binding differs from the requested hub: "+
+						strings.Join(details, ", "),
+					"",
+				)
+			}
+		} else if !errors.Is(bindingErr, db.ErrNotFound) {
+			return fmt.Errorf(
+				"read existing federation binding after credential conflict: %w",
+				bindingErr,
+			)
+		}
+	} else if !errors.Is(err, db.ErrNotFound) {
+		return fmt.Errorf(
+			"read existing federation project after credential conflict: %w",
+			err,
+		)
+	}
+	return federationReplicaError(
+		ErrFederationReplicaCredentialConflict,
+		credentialMessage,
+		"",
+	)
 }
 
 func ensureFederationReplicaCredentialRekey(

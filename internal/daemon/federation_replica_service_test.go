@@ -1148,6 +1148,94 @@ func TestEnsureFederationReplicaWakeMayReenterAfterCompletedState(t *testing.T) 
 	assert.Equal(t, int64(1), wakes.Load())
 }
 
+func TestEnsureFederationReplicaConcurrentDifferentHubJoinsStayConsistent(t *testing.T) {
+	const repetitions = 24
+	for repetition := range repetitions {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		store := openReplicaServiceStore(t)
+		project, err := store.CreateProjectWithUID(
+			ctx, "hub-project", replicaHubProjectUID,
+		)
+		require.NoError(t, err)
+		credentials := newReplicaCredentialStore()
+		first := replicaServiceParams()
+		first.PushEnabled = false
+		first.Credential.Capabilities = "pull"
+		first.HubURL = "https://hub-a.example/api"
+		first.Credential.HubURL = first.HubURL
+		first.Credential.Token = "token-a"
+		second := first
+		second.HubURL = "https://hub-b.example/api"
+		second.HubProjectID = 73
+		second.Credential.HubURL = second.HubURL
+		second.Credential.HubProjectID = second.HubProjectID
+		second.Credential.Token = "token-b"
+		var wakes atomic.Int64
+		type callResult struct {
+			params daemon.EnsureFederationReplicaParams
+			result daemon.EnsureFederationReplicaResult
+			err    error
+		}
+		results := make(chan callResult, 2)
+		start := make(chan struct{})
+		for _, params := range []daemon.EnsureFederationReplicaParams{first, second} {
+			go func() {
+				<-start
+				result, callErr := daemon.EnsureFederationReplica(
+					ctx, store, credentials, func() { wakes.Add(1) }, params,
+				)
+				results <- callResult{params: params, result: result, err: callErr}
+			}()
+		}
+		close(start)
+
+		got := [2]callResult{}
+		for i := range got {
+			select {
+			case got[i] = <-results:
+			case <-ctx.Done():
+				require.FailNow(
+					t, "wait for concurrent ensure results",
+					"repetition: %d, error: %v", repetition, ctx.Err(),
+				)
+			}
+		}
+		cancel()
+
+		var winner *callResult
+		failures := 0
+		for i := range got {
+			if got[i].err == nil {
+				require.Nil(t, winner, "repetition %d", repetition)
+				winner = &got[i]
+				continue
+			}
+			failures++
+			assert.ErrorIs(
+				t, got[i].err, daemon.ErrFederationReplicaBindingConflict,
+				"repetition %d", repetition,
+			)
+		}
+		require.NotNil(t, winner, "repetition %d", repetition)
+		assert.Equal(t, 1, failures, "repetition %d", repetition)
+		assert.Equal(t, int64(1), wakes.Load(), "repetition %d", repetition)
+
+		binding, err := store.FederationBindingByProject(t.Context(), project.ID)
+		require.NoError(t, err)
+		stored, ok, err := credentials.FederationCredential(
+			t.Context(), project.UID,
+		)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, winner.params.HubURL, binding.HubURL)
+		assert.Equal(t, winner.params.HubProjectID, binding.HubProjectID)
+		assert.Equal(t, winner.params.HubProjectUID, binding.HubProjectUID)
+		assert.Equal(t, winner.params.HubURL, stored.HubURL)
+		assert.Equal(t, winner.params.HubProjectID, stored.HubProjectID)
+		assert.Equal(t, winner.params.Credential.Token, stored.Token)
+	}
+}
+
 func TestEnsureFederationReplicaRejectsPushCredentialBeforeBindingMutation(t *testing.T) {
 	ctx := context.Background()
 	store := openReplicaServiceStore(t)

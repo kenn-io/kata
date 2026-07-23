@@ -4,77 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestManagedCredentialMutationsSerializeWholeReadModifyWrite(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	firstReplacementStarted := make(chan struct{})
-	releaseFirstReplacement := make(chan struct{})
-	defer func() {
-		select {
-		case <-releaseFirstReplacement:
-		default:
-			close(releaseFirstReplacement)
-		}
-	}()
-
-	originalWriter := writeFederationCredentialsTempFile
-	var writes sync.Once
-	writeFederationCredentialsTempFile = func(file *os.File, data []byte) error {
-		writes.Do(func() {
-			close(firstReplacementStarted)
-			<-releaseFirstReplacement
-		})
-		return originalWriter(file, data)
-	}
-	t.Cleanup(func() { writeFederationCredentialsTempFile = originalWriter })
-
-	firstDone := make(chan error, 1)
-	go func() {
-		firstDone <- ReserveManagedFederationCredential(
-			FederationManagedCredentialReservation{
-				ProjectUID: "01HUBPROJECT00000000000000",
-				Credential: FederationCredential{
-					Token: "first-token", ManagedByConfig: true,
-					SpokeProjectName: "first-project",
-				},
-			})
-	}()
-	<-firstReplacementStarted
-
-	secondAttemptStarted := make(chan struct{})
-	secondDone := make(chan error, 1)
-	go func() {
-		close(secondAttemptStarted)
-		secondDone <- ReserveManagedFederationCredential(
-			FederationManagedCredentialReservation{
-				ProjectUID: "01HUBPROJECT00000000000001",
-				Credential: FederationCredential{
-					Token: "second-token", ManagedByConfig: true,
-					SpokeProjectName: "second-project",
-				},
-			})
-	}()
-	<-secondAttemptStarted
-	select {
-	case err := <-secondDone:
-		t.Fatalf("second managed mutation completed before first replacement released: %v", err)
-	default:
-	}
-
-	close(releaseFirstReplacement)
-	require.NoError(t, <-firstDone)
-	require.NoError(t, <-secondDone)
-	credentials, err := ReadFederationCredentials()
-	require.NoError(t, err)
-	assert.Contains(t, credentials.Projects, "01HUBPROJECT00000000000000")
-	assert.Contains(t, credentials.Projects, "01HUBPROJECT00000000000001")
-}
 
 func TestWriteFederationCredentialPartialTempWriteLeavesOldFileUnchanged(t *testing.T) {
 	home := t.TempDir()

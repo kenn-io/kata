@@ -181,12 +181,13 @@ func (s baseCredentialStore) DeleteFederationCredential(
 	return s.delegate.DeleteFederationCredential(ctx, projectUID)
 }
 
-type failProjectByUIDStore struct {
+type failAdoptionLookupAfterRekeyStore struct {
 	db.Storage
-	mu      sync.Mutex
-	failUID string
-	failAt  int
-	calls   int
+	mu          sync.Mutex
+	credentials *fakeCredentialStore
+	localUID    string
+	hubUID      string
+	failed      bool
 }
 
 type replicaCallKindContextKey struct{}
@@ -238,14 +239,14 @@ func (s *orderedReplicaServiceStore) ProjectByUID(
 	return s.Storage.ProjectByUID(ctx, projectUID)
 }
 
-func (s *failProjectByUIDStore) ProjectByUID(
+func (s *failAdoptionLookupAfterRekeyStore) ProjectByUID(
 	ctx context.Context, projectUID string,
 ) (db.Project, error) {
+	_, localFound := s.credentials.get(s.localUID)
+	_, hubFound := s.credentials.get(s.hubUID)
 	s.mu.Lock()
-	if projectUID == s.failUID {
-		s.calls++
-	}
-	if projectUID == s.failUID && s.calls == s.failAt {
+	if projectUID == s.hubUID && !s.failed && hubFound && !localFound {
+		s.failed = true
 		s.mu.Unlock()
 		return db.Project{}, errors.New("injected project lookup failure")
 	}
@@ -671,10 +672,11 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	baseStore := openReconcileStore(t)
 	project, err := baseStore.CreateProject(context.Background(), "spoke-project")
 	require.NoError(t, err)
-	store := &failProjectByUIDStore{
-		Storage: baseStore, failUID: hubProjectUID, failAt: 2,
-	}
 	credentials := newFakeCredentialStore()
+	store := &failAdoptionLookupAfterRekeyStore{
+		Storage: baseStore, credentials: credentials,
+		localUID: project.UID, hubUID: hubProjectUID,
+	}
 	manual := managedCredential()
 	manual.ManagedByConfig = false
 	manual.HubCatalog = ""

@@ -193,6 +193,54 @@ func TestReserveFederationCredentialUsesOneExactHubUID(t *testing.T) {
 	assert.Equal(t, managed, match.Credential)
 }
 
+func TestConcurrentManagedCredentialReservationsPreserveEveryEntry(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	store := config.DefaultFederationCredentialStore()
+	const (
+		repetitions = 12
+		workers     = 12
+	)
+	expected := make(map[string]config.FederationCredential, repetitions*workers)
+
+	for repetition := range repetitions {
+		start := make(chan struct{})
+		results := make(chan error, workers)
+		for worker := range workers {
+			projectUID := fmt.Sprintf("managed-%02d-%02d", repetition, worker)
+			credential := config.FederationCredential{
+				HubURL:           fmt.Sprintf("https://hub-%02d.example", repetition),
+				HubProjectID:     int64(repetition*workers + worker + 1),
+				Token:            fmt.Sprintf("token-%02d-%02d", repetition, worker),
+				ManagedByConfig:  true,
+				SpokeProjectName: fmt.Sprintf("spoke-project-%02d-%02d", repetition, worker),
+			}
+			expected[projectUID] = credential
+			go func() {
+				<-start
+				results <- store.ReserveManagedFederationCredential(
+					ctx,
+					config.FederationManagedCredentialReservation{
+						ProjectUID: projectUID,
+						Credential: credential,
+					},
+				)
+			}()
+		}
+		close(start)
+		for range workers {
+			require.NoError(t, <-results)
+		}
+
+		credentials, err := config.ReadFederationCredentials()
+		require.NoError(t, err)
+		require.Len(t, credentials.Projects, len(expected))
+		for projectUID, credential := range expected {
+			assert.Equal(t, credential, credentials.Projects[projectUID], projectUID)
+		}
+	}
+}
+
 func TestReserveFederationCredentialConflictDoesNotRewriteFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
