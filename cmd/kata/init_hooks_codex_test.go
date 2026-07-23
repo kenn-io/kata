@@ -68,11 +68,13 @@ func TestApplyCodexHooks_FreshWorkspace(t *testing.T) {
 	assert.True(t, changed)
 	assert.Empty(t, warnings)
 
-	// hooks.json holds exactly the one matcher-less SessionStart command group.
+	// The managed SessionStart group covers real session transitions without
+	// resetting attention during context compaction.
 	assert.Equal(t, map[string]any{
 		"hooks": map[string]any{
 			"SessionStart": []any{map[string]any{
-				"hooks": []any{expectedCodexHandler()},
+				"matcher": "startup|resume|clear",
+				"hooks":   []any{expectedCodexHandler()},
 			}},
 		},
 	}, readCodexHooks(t, dir))
@@ -97,6 +99,35 @@ func TestApplyCodexHooks_Idempotent(t *testing.T) {
 	after, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
+}
+
+func TestApplyCodexHooks_NarrowsLegacyMatcherlessHook(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexHooks(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"hooks": []any{expectedCodexHandler()},
+			}},
+		},
+	})
+
+	changed, warnings, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Empty(t, warnings)
+	assert.Equal(t, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"matcher": "startup|resume|clear",
+				"hooks":   []any{expectedCodexHandler()},
+			}},
+		},
+	}, readCodexHooks(t, dir))
+
+	changed, warnings, err = applyCodexHooks(dir)
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Empty(t, warnings)
 }
 
 func TestApplyCodexHooks_PreservesExistingContent(t *testing.T) {
@@ -129,11 +160,14 @@ func TestApplyCodexHooks_PreservesExistingContent(t *testing.T) {
 	hooks := file["hooks"].(map[string]any)
 	assert.Equal(t, preTool, hooks["PreToolUse"])
 
-	// The matcher-scoped group does not cover the managed matcher-less wiring,
+	// The narrower matcher-scoped group does not cover the full managed wiring,
 	// so it is preserved and the managed group is appended after it.
 	assert.Equal(t, []any{
 		scopedStart,
-		map[string]any{"hooks": []any{expectedCodexHandler()}},
+		map[string]any{
+			"matcher": "startup|resume|clear",
+			"hooks":   []any{expectedCodexHandler()},
+		},
 	}, hooks["SessionStart"])
 }
 
@@ -207,7 +241,8 @@ func TestApplyCodexHooks_WarnsOnConfigTomlHooks(t *testing.T) {
 		assert.Equal(t, map[string]any{
 			"hooks": map[string]any{
 				"SessionStart": []any{map[string]any{
-					"hooks": []any{expectedCodexHandler()},
+					"matcher": "startup|resume|clear",
+					"hooks":   []any{expectedCodexHandler()},
 				}},
 			},
 		}, readCodexHooks(t, dir))

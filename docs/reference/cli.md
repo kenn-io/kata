@@ -59,14 +59,15 @@ Pass `--with-codex-hooks` to install the start half of the same
 [attention harness hooks](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 into the workspace's Codex CLI config. It additively installs one command
 hook entry in `.codex/hooks.json`: `SessionStart` runs `kata attention-hook
-start`, using the launcher-provided `KATA_REF` and intentionally doing nothing
-when it is absent. Codex has no stable session-end hook event yet, so this
-flag does not install an end hook; pair it with a launcher wrapper that runs
-`kata attention-hook end` after the `codex` invocation exits. Everything else
-in `hooks.json` is preserved, re-running is a no-op, a symlinked `hooks.json`
-or `.codex` directory is refused, and a pre-existing `[hooks]` table in
-`.codex/config.toml` produces a non-fatal warning since Codex loads both
-files' hooks together.
+start` for new, resumed, and cleared sessions, but not context compaction,
+using the launcher-provided `KATA_REF` and intentionally doing nothing when it
+is absent. Codex has no stable session-end hook event yet, so this flag does
+not install an end hook; pair it with a launcher wrapper that runs `kata
+attention-hook end` after the `codex` invocation exits. Everything else in
+`hooks.json` is preserved, re-running is a no-op, a symlinked `hooks.json` or
+`.codex` directory is refused, and a pre-existing `[hooks]` table in
+`.codex/config.toml` produces a non-fatal warning since Codex loads both files'
+hooks together.
 
 ## Issue lifecycle
 

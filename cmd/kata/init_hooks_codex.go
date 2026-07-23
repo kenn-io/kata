@@ -14,9 +14,11 @@ import (
 )
 
 // `kata init --with-codex-hooks` wires the work.attention harness into a Codex
-// CLI workspace by writing .codex/hooks.json. It installs a single SessionStart
-// command hook that runs `kata attention-hook start`, the same hidden
-// subcommand the Claude Code wiring calls.
+// CLI workspace by writing .codex/hooks.json. It installs a SessionStart
+// command hook for startup, resume, and clear transitions that runs
+// `kata attention-hook start`, the same hidden subcommand the Claude Code
+// wiring calls. Context compaction is excluded so it cannot reset live
+// attention state.
 //
 // Codex executes a command hook's `command` string through a login shell
 // ($SHELL -lc), so the whole invocation is one string rather than Claude
@@ -37,6 +39,8 @@ import (
 // codexHookHandler renders the managed Codex command-hook entry. timeout is in
 // seconds and is stored as a json.Number so a re-run's decoded file compares
 // equal to this desired handler (the merge is DeepEqual-based).
+const codexSessionStartMatcher = "startup|resume|clear"
+
 func codexHookHandler() map[string]any {
 	return map[string]any{
 		"type":    "command",
@@ -77,9 +81,10 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 // (all I/O relative to the workspace root). The file is user-owned, so the
 // merge is additive: unknown keys (including "description") and existing hook
 // groups are preserved verbatim modulo re-encoding, and the managed group is
-// appended only when its exact handler is not already present in a matcher-less
-// SessionStart group. A file that fails to parse is left untouched and
-// reported.
+// appended only when its exact handler is not already present under the desired
+// SessionStart matcher. Older matcher-less kata groups are narrowed during
+// re-run so context compaction cannot reset attention. A file that fails to
+// parse is left untouched and reported.
 func ensureCodexHooksFile(root *os.Root) (bool, error) {
 	const rel = ".codex/hooks.json"
 	path := filepath.Join(root.Name(), rel) // display only
@@ -151,9 +156,10 @@ func ensureCodexHooksFile(root *os.Root) (bool, error) {
 }
 
 // upsertCodexHook appends the managed SessionStart command group unless the
-// exact managed handler is already present in a matcher-less SessionStart
-// group. Existing groups are otherwise preserved, including matcher-scoped
-// groups that cannot be interpreted as the managed wiring.
+// exact managed handler is already present under the desired matcher. It also
+// narrows matcher-less groups created by the original installer so compaction
+// does not rerun the start hook. Existing groups with other explicit matchers
+// are preserved as user-owned wiring.
 func upsertCodexHook(file map[string]any) (bool, error) {
 	hooks, err := ensureObject(file, "hooks")
 	if err != nil {
@@ -168,25 +174,65 @@ func upsertCodexHook(file map[string]any) (bool, error) {
 			return false, fmt.Errorf("hooks.%s has an unexpected shape", event)
 		}
 	}
+
+	desiredExists := false
 	for _, g := range groups {
 		gm, ok := g.(map[string]any)
 		if !ok {
 			continue
 		}
-		// The managed group carries no matcher; a matcher-scoped group cannot
-		// stand in for it, so skip those.
-		if _, hasMatcher := gm["matcher"]; hasMatcher {
+		matcher, _ := gm["matcher"].(string)
+		if matcher != codexSessionStartMatcher {
 			continue
 		}
 		entries, _ := gm["hooks"].([]any)
 		for _, e := range entries {
 			if reflect.DeepEqual(e, codexHookHandler()) {
-				return false, nil
+				desiredExists = true
+				break
 			}
 		}
 	}
+
+	legacyChanged := false
+	for _, g := range groups {
+		gm, ok := g.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, hasMatcher := gm["matcher"]; hasMatcher {
+			continue
+		}
+		entries, ok := gm["hooks"].([]any)
+		if !ok {
+			continue
+		}
+		filtered := make([]any, 0, len(entries))
+		for _, e := range entries {
+			if reflect.DeepEqual(e, codexHookHandler()) {
+				legacyChanged = true
+				continue
+			}
+			filtered = append(filtered, e)
+		}
+		if len(filtered) == len(entries) {
+			continue
+		}
+		if len(filtered) == 0 && !desiredExists {
+			gm["matcher"] = codexSessionStartMatcher
+			gm["hooks"] = []any{codexHookHandler()}
+			desiredExists = true
+			continue
+		}
+		gm["hooks"] = filtered
+	}
+
+	if desiredExists {
+		return legacyChanged, nil
+	}
 	hooks[event] = append(groups, map[string]any{
-		"hooks": []any{codexHookHandler()},
+		"matcher": codexSessionStartMatcher,
+		"hooks":   []any{codexHookHandler()},
 	})
 	return true, nil
 }
