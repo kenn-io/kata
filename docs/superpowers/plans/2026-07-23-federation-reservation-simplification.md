@@ -62,25 +62,22 @@
 - Produces:
 
 ```go
-type FederationCredentialReservation struct {
-	ProjectUID string
-	Credential FederationCredential
-}
-
-type FederationCredentialReservationMatch struct {
+type FederationManagedCredentialReservation struct {
 	ProjectUID string
 	Credential FederationCredential
 }
 
 type FederationManagedCredentialStore interface {
 	FederationCredentialStore
-	ReserveFederationCredential(context.Context, FederationCredentialReservation) error
-	FederationCredentialReservationForProject(
+	ReserveManagedFederationCredential(
+		context.Context, FederationManagedCredentialReservation,
+	) error
+	FindManagedFederationCredential(
 		context.Context, string,
-	) (FederationCredentialReservationMatch, bool, error)
+	) (FederationManagedCredentialReservation, bool, error)
 	RekeyFederationCredential(context.Context, FederationCredentialRekey) error
-	DeleteFederationCredentialReservation(
-		context.Context, FederationCredentialReservationMatch,
+	DeleteManagedFederationCredential(
+		context.Context, FederationManagedCredentialReservation,
 	) error
 }
 ```
@@ -105,18 +102,18 @@ func TestReserveFederationCredentialUsesOneExactHubUID(t *testing.T) {
 		SpokeProjectName: "spoke-project",
 	}
 
-	require.NoError(t, store.ReserveFederationCredential(ctx,
-		config.FederationCredentialReservation{
+	require.NoError(t, store.ReserveManagedFederationCredential(ctx,
+		config.FederationManagedCredentialReservation{
 			ProjectUID: "01HUBPROJECT00000000000000",
 			Credential: managed,
 		}))
-	require.NoError(t, store.ReserveFederationCredential(ctx,
-		config.FederationCredentialReservation{
+	require.NoError(t, store.ReserveManagedFederationCredential(ctx,
+		config.FederationManagedCredentialReservation{
 			ProjectUID: "01HUBPROJECT00000000000000",
 			Credential: managed,
 		}))
 
-	match, found, err := store.FederationCredentialReservationForProject(
+	match, found, err := store.FindManagedFederationCredential(
 		ctx, "spoke-project",
 	)
 	require.NoError(t, err)
@@ -144,8 +141,8 @@ func TestReserveFederationCredentialConflictDoesNotRewriteFile(t *testing.T) {
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	err = store.ReserveFederationCredential(ctx,
-		config.FederationCredentialReservation{
+	err = store.ReserveManagedFederationCredential(ctx,
+		config.FederationManagedCredentialReservation{
 			ProjectUID: hubUID,
 			Credential: config.FederationCredential{
 				HubURL:           "https://daemon.example",
@@ -165,10 +162,10 @@ func TestReserveFederationCredentialConflictDoesNotRewriteFile(t *testing.T) {
 
 Add these focused cases:
 
-- `TestFederationCredentialReservationForProjectRejectsTwoMarkedEntries`:
+- `TestFindManagedFederationCredentialRejectsTwoMarkedEntries`:
   write two marked entries for `spoke-project`, assert
   `ErrFederationCredentialConflict`, and assert neither entry changed.
-- `TestDeleteFederationCredentialReservationRequiresExactKeyAndValue`: observe
+- `TestDeleteManagedFederationCredentialRequiresExactKeyAndValue`: observe
   `(H, expected)`, change either the key or value, assert conflict and no
   deletion, then restore the exact pair and assert deletion.
 - `TestRekeyFederationCredentialMovesManualLocalUIDToHubUIDOnce`: write a
@@ -185,7 +182,7 @@ Delete tests that assert duplicate local/hub aliases are created or garbage-coll
 Run:
 
 ```bash
-go test ./internal/config -run 'Test(ReserveFederationCredentialUsesOneExactHubUID|ReserveFederationCredentialConflictDoesNotRewriteFile|FederationCredentialReservationForProjectRejectsTwoMarkedEntries|DeleteFederationCredentialReservationRequiresExactKeyAndValue|RekeyFederationCredentialMovesManualLocalUIDToHubUIDOnce|ManagedCredentialMutationsSerializeWholeReadModifyWrite)$' -count=1
+go test ./internal/config -run 'Test(ReserveFederationCredentialUsesOneExactHubUID|ReserveFederationCredentialConflictDoesNotRewriteFile|FindManagedFederationCredentialRejectsTwoMarkedEntries|DeleteManagedFederationCredentialRequiresExactKeyAndValue|RekeyFederationCredentialMovesManualLocalUIDToHubUIDOnce|ManagedCredentialMutationsSerializeWholeReadModifyWrite)$' -count=1
 ```
 
 Expected: build failure because the new single-key managed methods and result fields do not exist.
@@ -195,7 +192,9 @@ Expected: build failure because the new single-key managed methods and result fi
 Replace the four optional capability interfaces and multi-key cleanup structs with the interface in this task. Implement reservation as one locked compare-and-store:
 
 ```go
-func ReserveFederationCredential(reservation FederationCredentialReservation) error {
+func ReserveManagedFederationCredential(
+	reservation FederationManagedCredentialReservation,
+) error {
 	projectUID := strings.TrimSpace(reservation.ProjectUID)
 	if projectUID == "" {
 		return fmt.Errorf("%w: reservation project UID is empty",
@@ -219,12 +218,12 @@ Make lookup return a single key and reject the second matching marker even when 
 
 ```go
 if found {
-	return FederationCredentialReservationMatch{}, false, fmt.Errorf(
+	return FederationManagedCredentialReservation{}, false, fmt.Errorf(
 		"%w: multiple managed reservations for project %s",
 		ErrFederationCredentialConflict, projectName,
 	)
 }
-match = FederationCredentialReservationMatch{
+match = FederationManagedCredentialReservation{
 	ProjectUID: projectUID,
 	Credential: credential,
 }
@@ -234,8 +233,8 @@ found = true
 Make exact deletion require both the observed key and value:
 
 ```go
-func DeleteFederationCredentialReservation(
-	match FederationCredentialReservationMatch,
+func DeleteManagedFederationCredential(
+	match FederationManagedCredentialReservation,
 ) error {
 	return updateFederationCredentials(func(creds *FederationCredentials) error {
 		current, found := creds.Projects[match.ProjectUID]
@@ -253,7 +252,12 @@ func DeleteFederationCredentialReservation(
 }
 ```
 
-Keep `RekeyFederationCredential` failure-atomic for the single manual `L → H` transition. Remove `ProjectUIDs`, alias sorting, the single-UID test wrapper, and all four old optional interfaces.
+Keep `RekeyFederationCredential` failure-atomic for the single manual `L → H`
+transition. Retain the existing alias structs, functions, and four optional
+interfaces as temporary compatibility adapters so the daemon and reconciler
+continue to compile before Tasks 3–4 migrate them. Mark them internal legacy
+helpers and remove them in Task 7; new tests and callers use only
+`FederationManagedCredentialStore`.
 
 - [ ] **Step 4: Run config tests**
 
@@ -583,8 +587,8 @@ skipping managed lookup or cleanup.
 Change reservation to one hub UID:
 
 ```go
-err := managed.ReserveFederationCredential(ctx,
-	config.FederationCredentialReservation{
+err := managed.ReserveManagedFederationCredential(ctx,
+	config.FederationManagedCredentialReservation{
 		ProjectUID: p.HubProjectUID,
 		Credential: p.Credential,
 	})
@@ -594,7 +598,7 @@ Before any local adoption, rekey, binding update, or credential persistence insi
 
 ```go
 if p.ManagedReservation != nil {
-	match, found, err := managed.FederationCredentialReservationForProject(
+	match, found, err := managed.FindManagedFederationCredential(
 		ctx, p.ProjectName,
 	)
 	if err != nil {
@@ -710,7 +714,7 @@ type mappingPreflight struct {
 	hasBinding         bool
 	hubProject         HubProject
 	credential         credentialLookup
-	managedReservation config.FederationCredentialReservationMatch
+	managedReservation config.FederationManagedCredentialReservation
 	hasReservation     bool
 	hubOrigin          string
 	capabilities       federation.Capabilities
@@ -842,7 +846,7 @@ func ReconcileMapping(
 Do not introduce another alias/backfill helper. Generated credentials reserve only:
 
 ```go
-config.FederationCredentialReservation{
+config.FederationManagedCredentialReservation{
 	ProjectUID: preflight.hubProject.UID,
 	Credential: pendingCredential,
 }
