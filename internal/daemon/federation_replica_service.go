@@ -438,9 +438,11 @@ func rejectConflictingManagedReservation(
 		return nil
 	}
 	reservation := match.Credential
-	reservationOrigin, err := config.CanonicalHTTPOrigin(reservation.HubURL)
-	if err != nil ||
-		reservationOrigin != p.HubURL ||
+	reservationOrigin, reservationOriginErr := config.CanonicalHTTPOrigin(reservation.HubURL)
+	requestedOrigin, requestedOriginErr := config.CanonicalHTTPOrigin(p.HubURL)
+	if reservationOriginErr != nil ||
+		requestedOriginErr != nil ||
+		reservationOrigin != requestedOrigin ||
 		reservation.HubProjectID != p.HubProjectID ||
 		reservation.Token != p.Credential.Token {
 		return federationReplicaError(
@@ -521,7 +523,14 @@ func normalizeFederationReplicaParams(
 		)
 	}
 	p.HubURL = hubBaseURL
-	hubOrigin, _ := config.CanonicalHTTPOrigin(hubBaseURL)
+	hubOrigin, err := config.CanonicalHTTPOrigin(hubBaseURL)
+	if err != nil {
+		return EnsureFederationReplicaParams{}, federationReplicaError(
+			ErrFederationReplicaInvalidInput,
+			"hub_url must be a valid HTTP(S) base URL",
+			"",
+		)
+	}
 	if !katauid.Valid(p.HubProjectUID) {
 		return EnsureFederationReplicaParams{}, federationReplicaError(
 			ErrFederationReplicaInvalidInput, "hub_project_uid must be a valid UID", "",
@@ -588,7 +597,14 @@ func normalizeFederationReplicaParams(
 				"",
 			)
 		}
-		credentialOrigin, _ := config.CanonicalHTTPOrigin(credentialBaseURL)
+		credentialOrigin, err := config.CanonicalHTTPOrigin(credentialBaseURL)
+		if err != nil {
+			return EnsureFederationReplicaParams{}, federationReplicaError(
+				ErrFederationReplicaInvalidInput,
+				"hub_url must be a valid HTTP(S) base URL",
+				"",
+			)
+		}
 		if credentialOrigin != hubOrigin || p.Credential.HubProjectID != p.HubProjectID {
 			return EnsureFederationReplicaParams{}, federationReplicaError(
 				ErrFederationReplicaInvalidInput,
@@ -602,15 +618,26 @@ func normalizeFederationReplicaParams(
 }
 
 func normalizeFederationHubBaseURL(raw string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
-		u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		u.Host == "" || u.Hostname() == "" || u.User != nil ||
+		u.ForceQuery || u.RawQuery != "" || strings.Contains(raw, "#") {
 		return "", errors.New(
 			"hub_url must be an HTTP(S) base URL without user info, query, or fragment",
 		)
 	}
-	u.Path = strings.TrimRight(u.Path, "/")
-	u.RawPath = ""
+	if _, err := config.CanonicalHTTPOrigin(raw); err != nil {
+		return "", errors.New("hub_url must be a valid HTTP(S) base URL")
+	}
+	if u.RawPath == "" {
+		u.Path = strings.TrimRight(u.Path, "/")
+	} else {
+		for strings.HasSuffix(u.RawPath, "/") {
+			u.RawPath = strings.TrimSuffix(u.RawPath, "/")
+			u.Path = strings.TrimSuffix(u.Path, "/")
+		}
+	}
 	return u.String(), nil
 }
 

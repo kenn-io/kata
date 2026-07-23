@@ -288,6 +288,38 @@ func TestEnsureFederationReplicaPreservesHubURLPathPrefix(t *testing.T) {
 	assert.Equal(t, "https://daemon.example/kata/hub", stored.HubURL)
 }
 
+func TestEnsureFederationReplicaPreservesEscapedHubURLPathPrefix(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	credentials := newReplicaCredentialStore()
+	params := replicaServiceParams()
+	params.HubURL = "https://daemon.example/kata%2Fhub/"
+	params.Credential.HubURL = params.HubURL
+
+	result, err := daemon.EnsureFederationReplica(
+		context.Background(), store, credentials, nil, params,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://daemon.example/kata%2Fhub", result.Binding.HubURL)
+	stored, found, err := credentials.FederationCredential(
+		context.Background(), result.Project.UID,
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "https://daemon.example/kata%2Fhub", stored.HubURL)
+
+	downstreamURL, err := url.JoinPath(
+		stored.HubURL,
+		"/api/v1/federation/enrollments",
+	)
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		"https://daemon.example/kata%2Fhub/api/v1/federation/enrollments",
+		downstreamURL,
+	)
+}
+
 func TestEnsureFederationReplicaRejectsUnsafeHubURLComponents(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
@@ -314,6 +346,18 @@ func TestEnsureFederationReplicaRejectsUnsafeHubURLComponents(t *testing.T) {
 			marker:  "planted-fragment",
 		},
 		{
+			name:    "empty query delimiter",
+			hubURL:  "https://daemon.example/kata/hub?",
+			wantErr: true,
+			marker:  "?",
+		},
+		{
+			name:    "empty fragment delimiter",
+			hubURL:  "https://daemon.example/kata/hub#",
+			wantErr: true,
+			marker:  "#",
+		},
+		{
 			name:   "clean path prefix",
 			hubURL: "https://daemon.example/kata/hub/",
 		},
@@ -337,6 +381,60 @@ func TestEnsureFederationReplicaRejectsUnsafeHubURLComponents(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, "https://daemon.example/kata/hub", result.Binding.HubURL)
+		})
+	}
+}
+
+func TestEnsureFederationReplicaRejectsMalformedHubOrigins(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		hubURL string
+		marker string
+	}{
+		{
+			name:   "empty hostname with port",
+			hubURL: "https://:443/kata/hub",
+			marker: ":443",
+		},
+		{
+			name:   "invalid port",
+			hubURL: "https://daemon.example:not-a-port/kata/hub",
+			marker: "not-a-port",
+		},
+		{
+			name:   "zero port",
+			hubURL: "https://daemon.example:0/kata/hub",
+			marker: ":0",
+		},
+		{
+			name:   "out of range port",
+			hubURL: "https://daemon.example:65536/kata/hub",
+			marker: "65536",
+		},
+		{
+			name:   "missing hostname",
+			hubURL: "https:///kata/hub",
+			marker: "kata/hub",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := openReplicaServiceStore(t)
+			credentials := newReplicaCredentialStore()
+			params := replicaServiceParams()
+			params.HubURL = tt.hubURL
+			params.Credential.HubURL = tt.hubURL
+
+			_, err := daemon.EnsureFederationReplica(
+				context.Background(), store, credentials, nil, params,
+			)
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, daemon.ErrFederationReplicaInvalidInput)
+			assert.NotContains(t, err.Error(), tt.marker)
+			projects, listErr := store.ListProjects(context.Background())
+			require.NoError(t, listErr)
+			assert.Empty(t, projects)
+			assert.Zero(t, credentials.storeCallCount())
 		})
 	}
 }
@@ -598,6 +696,28 @@ func TestEnsureFederationReplicaRejectsManualAdoptionConflictingWithManagedReser
 	require.NoError(t, credentialErr)
 	assert.False(t, found)
 	assert.Zero(t, wakes)
+}
+
+func TestEnsureFederationReplicaAcceptsManagedReservationAtCanonicalOrigin(t *testing.T) {
+	ctx := context.Background()
+	store := openReplicaServiceStore(t)
+	delegate := newReplicaCredentialStore()
+	reservation := replicaServiceParams().Credential
+	reservation.HubURL = "HTTP://HUB.EXAMPLE:00080/configured/base"
+	reservation.ManagedByConfig = true
+	reservation.SpokeProjectName = "hub-project"
+	delegate.put(replicaHubProjectUID, reservation)
+	credentials := reservationFindingCredentialStore{replicaCredentialStore: delegate}
+	params := replicaServiceParams()
+	params.HubURL = "http://hub.example/manual/base/"
+	params.Credential.HubURL = params.HubURL
+
+	result, err := daemon.EnsureFederationReplica(
+		ctx, store, credentials, nil, params,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://hub.example/manual/base", result.Binding.HubURL)
 }
 
 func TestReserveFederationReplicaCredentialRejectsRecreatedHubAgainstManagedReservation(t *testing.T) {
