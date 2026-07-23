@@ -2065,6 +2065,8 @@ components:
           type: boolean
         preflight:
           type: boolean
+        prepare:
+          type: boolean
       type: object
     LeaveFederationReplicaResultBody:
       additionalProperties: true

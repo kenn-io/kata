@@ -1857,6 +1857,7 @@ type LeaveFederationReplicaRequestBody struct {
 	Disposition *string `json:"disposition,omitempty"`
 	Force       *bool   `json:"force,omitempty"`
 	Preflight   *bool   `json:"preflight,omitempty"`
+	Prepare     *bool   `json:"prepare,omitempty"`
 }
 
 type LeaveFederationReplicaResultBody struct {

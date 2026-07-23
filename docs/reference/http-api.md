@@ -136,6 +136,16 @@ actor, and adoption policy returns the same active enrollment. An attribute
 mismatch or a revoked replacement enrollment returns `409` with
 `federation_enrollment_token_conflict`.
 
+`POST /api/v1/federation/replicas/{project_id}/actions/leave` accepts two
+mutually exclusive coordination flags. `preflight=true` performs the existing
+read-only eligibility check. `prepare=true` validates the same local
+conditions, durably marks any config-managed credential as leaving, blocks new
+config reconciliation for that mapping, and waits for earlier enrollment or
+rotation requests to drain. Its `pending_enrollment` response gives the
+non-secret hub coordinates needed for revoke. The client then performs hub
+cleanup and calls the endpoint again without either flag for authoritative
+local teardown. Repeating prepare and finalization is safe after interruption.
+
 When config-driven mappings are present, `GET /api/v1/health` adds an optional
 `federation_config` object:
 

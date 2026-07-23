@@ -106,7 +106,7 @@ deleted and recreated, the replacement has a different UID and reconciliation
 reports a conflict instead of silently enrolling it. Before local adoption the
 category is `configuration_conflict`; after binding it is `binding_conflict`. Run
 `kata federation leave <spoke-project>` to clear the old managed reservation,
-verify the mapping, and let reconciliation enroll the intended project.
+verify the mapping, and restart the daemon to enroll the intended project.
 
 Reconciliation starts in the background after storage and the federation
 runner are ready. The daemon listener and normal project work do not wait for
@@ -131,8 +131,13 @@ Leave also cleans up exact config-managed credential reservations from an
 interrupted startup reconciliation, before or after adoption. It fails closed
 and retains any conflicting or manual credential rather than deleting it. If a
 leave races with reconciliation while it is doing hub enrollment or rotation
-I/O, leave wins locally; reconciliation revokes the completed hub enrollment
-and retries later without recreating the credential that leave removed.
+I/O, leave first records a durable leave marker and waits for the earlier
+request to finish. Reconciliation records and revokes any enrollment that
+completed, without recreating the credential that leave removes. The enrollment
+ID remains in the marker until local teardown, which makes a retry or restart
+safe. If the daemon crashed before recording the ID, it replays the reserved
+token to recover the exact enrollment and revoke it. A completed leave
+suppresses that mapping until the daemon restarts.
 
 See [Configuration](../reference/configuration.md#declarative-federation-mappings)
 for validation rules and [HTTP API schema](../reference/http-api.md#federation-enrollment-and-health-endpoints)
@@ -497,6 +502,15 @@ reservation whether reconciliation stopped before or after adoption. If the
 credential changes while leave is cleaning it up, the API returns
 `federation_credential_conflict`; resolve the conflict in `credentials.toml`
 and retry `kata federation leave <project>`.
+
+After confirmation, the CLI asks the spoke daemon to prepare the leave before
+it contacts the hub. Preparation durably marks a config-managed reservation,
+blocks new reconciliation work for that mapping, and waits for earlier hub
+enrollment or rotation requests to finish. Any completed enrollment is recorded
+and revoked idempotently before local teardown. If the command or daemon stops
+midway, rerun the same leave command; the marker prevents automatic
+re-enrollment and carries the cleanup forward. A successful leave suppresses
+the still-configured mapping until the daemon restarts.
 
 Add `--delete` to also archive the now-standalone project (reversible with
 `kata projects restore`); `--delete --force` archives even when the project has

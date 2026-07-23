@@ -85,6 +85,14 @@ func (serviceCredentialStoreAdapter) DeleteManagedFederationCredential(
 	return errManagedFederationCredentialsUnsupported
 }
 
+func (serviceCredentialStoreAdapter) ReplaceManagedFederationCredential(
+	context.Context,
+	config.FederationManagedCredentialReservation,
+	config.FederationManagedCredentialReservation,
+) error {
+	return errManagedFederationCredentialsUnsupported
+}
+
 func internalFederationCredential(credential FederationCredential) config.FederationCredential {
 	return config.FederationCredential{
 		HubURL:        credential.HubURL,

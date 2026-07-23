@@ -247,7 +247,7 @@ reports a conflict and does not silently enroll the replacement. The category
 is `configuration_conflict` before adoption and `binding_conflict` after the
 local project is bound.
 Run `kata federation leave <spoke-project>` to clear the old managed
-reservation, verify the mapping, and allow reconciliation to enroll again.
+reservation, verify the mapping, and restart the daemon to enroll again.
 
 Mappings are loaded once when the daemon starts. Restart the daemon after
 adding or changing one. Reconciliation runs asynchronously: hub outages,
@@ -268,6 +268,14 @@ before local adoption completed. Conflicting or manual credentials are retained
 and reported as cleanup errors instead of being deleted. If leave removes a
 reservation while hub enrollment or rotation is in flight, reconciliation
 compensates by revoking the completed enrollment rather than stranding it.
+Before contacting the hub, leave durably marks the reservation and drains any
+earlier reconciliation request. A completed enrollment ID remains recorded
+until local teardown finishes, so a retry or daemon restart can repeat the
+idempotent revoke. If a crash happens before that ID is recorded, reconciliation
+replays the reserved token to recover the exact enrollment and then revokes it.
+After leave completes, the mapping stays suppressed for the lifetime of that
+daemon process; restart when you deliberately want the configured mapping to
+enroll again.
 
 Structural mistakes still fail config loading, including missing fields, a hub
 that is not a remote catalog entry, duplicate `spoke_project` values, or two

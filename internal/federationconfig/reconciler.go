@@ -378,15 +378,68 @@ func ReconcileMapping(
 			"credential store does not support managed federation operations",
 		)
 	}
+	if daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) {
+		return nil
+	}
+	if handled, err := reconcilePendingLeave(
+		ctx, store, managed, hub, catalog, mapping,
+	); handled {
+		return err
+	}
 	preflight, err := preflightMapping(
 		ctx, store, credentials, managed, hub, catalog, mapping,
 	)
 	if err != nil {
 		return err
 	}
+	endHubOperation, err := daemon.BeginFederationReplicaHubOperation(
+		ctx,
+		store,
+		credentials,
+		mapping.SpokeProject,
+		config.FederationManagedCredentialReservation{
+			ProjectUID: preflight.credential.key,
+			Credential: preflight.credential.credential,
+		},
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, daemon.ErrFederationReplicaLeavePending):
+			return nil
+		case errors.Is(err, daemon.ErrFederationReplicaCredentialIO):
+			return reconcileError(ErrCredentialIO, "read federation credential before enrollment")
+		default:
+			return reconcileError(
+				ErrConfigurationConflict,
+				"federation credential changed before enrollment",
+			)
+		}
+	}
 	enrollment, err := ensureMappingEnrollment(
 		ctx, store, hub, catalog, mapping, preflight,
 	)
+	enrollmentID := int64(0)
+	if err == nil {
+		enrollmentID = enrollment.id
+	}
+	leavePending, finishErr := endHubOperation(ctx, enrollmentID)
+	if finishErr != nil {
+		return reconcileError(ErrCredentialIO, "finish federation hub operation")
+	}
+	if leavePending {
+		if err != nil {
+			return nil
+		}
+		if revokeErr := hub.RevokeEnrollment(ctx, enrollment.id); revokeErr != nil {
+			return safeHubError(revokeErr)
+		}
+		if confirmErr := confirmPendingEnrollmentCleanup(
+			ctx, managed, mapping.SpokeProject, enrollment.id,
+		); confirmErr != nil {
+			return confirmErr
+		}
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -396,10 +449,218 @@ func ReconcileMapping(
 	if err == nil || enrollment.id == 0 || !reservationChanged {
 		return err
 	}
+	pending, pendingFound, pendingErr := managed.FindManagedFederationCredential(
+		ctx, mapping.SpokeProject,
+	)
+	if pendingErr != nil {
+		return reconcileError(ErrCredentialIO, "read pending federation leave")
+	}
+	if pendingFound && pending.Credential.LeavePending {
+		replacement := pending
+		replacement.Credential.PendingEnrollmentID = enrollment.id
+		if replaceErr := managed.ReplaceManagedFederationCredential(
+			ctx, pending, replacement,
+		); replaceErr != nil {
+			return reconcileError(ErrCredentialIO, "record pending enrollment cleanup")
+		}
+		pending = replacement
+	}
+	if daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) &&
+		!pendingFound {
+		// A completed local-only leave deliberately skips hub cleanup. The
+		// process-local suppression still prevents this mapping from being
+		// recreated until restart.
+		return nil
+	}
 	if revokeErr := hub.RevokeEnrollment(ctx, enrollment.id); revokeErr != nil {
+		if daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) {
+			return nil
+		}
 		return safeHubError(revokeErr)
 	}
-	return err
+	if pendingFound && pending.Credential.LeavePending {
+		if confirmErr := confirmPendingEnrollmentCleanup(
+			ctx, managed, mapping.SpokeProject, enrollment.id,
+		); confirmErr != nil &&
+			!daemon.FederationReplicaMappingSuppressed(store, mapping.SpokeProject) {
+			return confirmErr
+		}
+	}
+	return nil
+}
+
+func confirmPendingEnrollmentCleanup(
+	ctx context.Context,
+	managed config.FederationManagedCredentialStore,
+	projectName string,
+	enrollmentID int64,
+) error {
+	pending, found, err := managed.FindManagedFederationCredential(ctx, projectName)
+	if err != nil {
+		return reconcileError(ErrCredentialIO, "read pending enrollment cleanup")
+	}
+	if !found || !pending.Credential.LeavePending ||
+		pending.Credential.PendingEnrollmentID == 0 {
+		return nil
+	}
+	if pending.Credential.PendingEnrollmentID != enrollmentID {
+		return reconcileError(
+			ErrConfigurationConflict,
+			"pending enrollment cleanup changed during revocation",
+		)
+	}
+	return nil
+}
+
+func reconcilePendingLeave(
+	ctx context.Context,
+	store db.Storage,
+	managed config.FederationManagedCredentialStore,
+	hub Hub,
+	catalog config.CatalogDaemonConfig,
+	mapping config.FederationProjectConfig,
+) (bool, error) {
+	pending, found, err := managed.FindManagedFederationCredential(ctx, mapping.SpokeProject)
+	if err != nil {
+		if errors.Is(err, config.ErrFederationCredentialConflict) {
+			return true, reconcileError(
+				ErrConfigurationConflict,
+				"managed federation reservations disagree during leave",
+			)
+		}
+		return true, reconcileError(ErrCredentialIO, "read pending federation leave")
+	}
+	if !found || !pending.Credential.LeavePending {
+		return false, nil
+	}
+	if !credentialManagementMatches(pending.Credential, catalog, mapping) {
+		return true, reconcileError(
+			ErrConfigurationConflict,
+			"pending federation leave belongs to another mapping",
+		)
+	}
+	if pending.Credential.PendingEnrollmentID == 0 {
+		endRecovery, beginErr := daemon.BeginFederationReplicaLeaveRecovery(
+			ctx,
+			store,
+			managed,
+			mapping.SpokeProject,
+			pending,
+		)
+		if beginErr != nil {
+			switch {
+			case errors.Is(beginErr, daemon.ErrFederationReplicaLeavePending):
+				return true, nil
+			case errors.Is(beginErr, daemon.ErrFederationReplicaCredentialIO):
+				return true, reconcileError(
+					ErrCredentialIO,
+					"read pending enrollment recovery credential",
+				)
+			default:
+				return true, reconcileError(
+					ErrConfigurationConflict,
+					"pending federation leave changed before recovery",
+				)
+			}
+		}
+		enrollment, err := recoverPendingLeaveEnrollment(
+			ctx, store, hub, mapping, pending.Credential,
+		)
+		enrollmentID := int64(0)
+		if err == nil {
+			enrollmentID = enrollment.ID
+		}
+		_, finishErr := endRecovery(ctx, enrollmentID)
+		if finishErr != nil {
+			return true, reconcileError(
+				ErrCredentialIO,
+				"finish pending enrollment recovery",
+			)
+		}
+		if err != nil {
+			return true, err
+		}
+		pending, found, err = managed.FindManagedFederationCredential(
+			ctx, mapping.SpokeProject,
+		)
+		if err != nil {
+			return true, reconcileError(
+				ErrCredentialIO,
+				"read recovered pending enrollment",
+			)
+		}
+		if !found || !pending.Credential.LeavePending ||
+			pending.Credential.PendingEnrollmentID != enrollment.ID {
+			return true, reconcileError(
+				ErrConfigurationConflict,
+				"pending federation leave changed during recovery",
+			)
+		}
+	}
+	if err := hub.RevokeEnrollment(ctx, pending.Credential.PendingEnrollmentID); err != nil {
+		return true, safeHubError(err)
+	}
+	return true, nil
+}
+
+func recoverPendingLeaveEnrollment(
+	ctx context.Context,
+	store db.Storage,
+	hub Hub,
+	mapping config.FederationProjectConfig,
+	credential config.FederationCredential,
+) (Enrollment, error) {
+	if credential.HubProjectID <= 0 || strings.TrimSpace(credential.Token) == "" {
+		return Enrollment{}, reconcileError(
+			ErrConfigurationConflict,
+			"pending federation leave has invalid enrollment metadata",
+		)
+	}
+	capabilities, err := federation.NormalizeCapabilities(credential.Capabilities)
+	if err != nil {
+		return Enrollment{}, reconcileError(
+			ErrConfigurationConflict,
+			"pending federation leave has invalid capabilities",
+		)
+	}
+	project, err := store.ProjectByName(ctx, mapping.SpokeProject)
+	if err != nil {
+		return Enrollment{}, reconcileError(
+			ErrLocalStorage,
+			"read local project during pending federation leave",
+		)
+	}
+	_, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+	if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
+		return Enrollment{}, reconcileError(
+			ErrLocalStorage,
+			"read local binding during pending federation leave",
+		)
+	}
+	request := EnrollmentRequest{
+		ProjectID:                    credential.HubProjectID,
+		SpokeInstanceUID:             store.InstanceUID(),
+		Token:                        credential.Token,
+		Capabilities:                 capabilities.API,
+		Actor:                        mapping.Actor,
+		AllowAdoptionSnapshotAuthors: true,
+	}
+	var enrollment Enrollment
+	if bindingErr == nil {
+		enrollment, err = hub.RotateEnrollment(ctx, request)
+	} else {
+		enrollment, err = hub.EnsureEnrollment(ctx, request)
+	}
+	if err != nil {
+		return Enrollment{}, safeHubError(err)
+	}
+	if enrollment.ID <= 0 {
+		return Enrollment{}, reconcileError(
+			ErrHubValidation,
+			"federation hub returned invalid enrollment metadata",
+		)
+	}
+	return enrollment, nil
 }
 
 type mappingPreflight struct {

@@ -26,6 +26,12 @@ var (
 		"%w: managed reservation changed",
 		ErrFederationReplicaCredentialConflict,
 	)
+	// ErrFederationReplicaLeavePending identifies a project whose explicit
+	// leave intent blocks new config-driven hub operations.
+	ErrFederationReplicaLeavePending = fmt.Errorf(
+		"%w: explicit leave pending",
+		ErrFederationReplicaCredentialConflict,
+	)
 	// ErrFederationReplicaCredentialIO classifies bounded credential-store failures.
 	ErrFederationReplicaCredentialIO = errors.New("federation replica credential I/O")
 
@@ -45,6 +51,18 @@ var (
 // do not call this service, so the lock order (service, then credential store)
 // has no reverse edge.
 var ensureFederationReplicaMu sync.Mutex
+
+type federationReplicaHubOperationState struct {
+	count int
+	done  chan struct{}
+}
+
+var (
+	federationReplicaHubOperations = make(map[string]*federationReplicaHubOperationState)
+	federationReplicaLeaveIntents  = make(map[string]struct{})
+	federationReplicaSuppressionMu sync.RWMutex
+	federationReplicaSuppressed    = make(map[string]struct{})
+)
 
 // FederationReplicaError is a classified application error returned by
 // EnsureFederationReplica. HTTP handlers translate it into the public wire
@@ -103,6 +121,253 @@ type ReserveFederationReplicaCredentialParams struct {
 	ProjectName   string
 	Credential    config.FederationCredential
 	ExpectedBound bool
+}
+
+// PrepareFederationReplicaLeaveResult reports the durable managed leave marker
+// after every earlier hub operation for the project has drained.
+type PrepareFederationReplicaLeaveResult struct {
+	ManagedReservation      config.FederationManagedCredentialReservation
+	ManagedReservationFound bool
+}
+
+// FinishFederationReplicaHubOperation records a completed enrollment for
+// durable leave cleanup before releasing the operation drain.
+type FinishFederationReplicaHubOperation func(context.Context, int64) (bool, error)
+
+// BeginFederationReplicaHubOperation registers one config-driven enrollment
+// or rotation before network I/O. The returned function must always be called.
+func BeginFederationReplicaHubOperation(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	projectName string,
+	baseline config.FederationManagedCredentialReservation,
+) (FinishFederationReplicaHubOperation, error) {
+	return beginFederationReplicaHubOperation(
+		ctx, store, credentials, projectName, baseline, false,
+	)
+}
+
+// BeginFederationReplicaLeaveRecovery registers exact-token replay used to
+// recover an enrollment ID after a crash interrupted explicit leave.
+func BeginFederationReplicaLeaveRecovery(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	projectName string,
+	baseline config.FederationManagedCredentialReservation,
+) (FinishFederationReplicaHubOperation, error) {
+	return beginFederationReplicaHubOperation(
+		ctx, store, credentials, projectName, baseline, true,
+	)
+}
+
+func beginFederationReplicaHubOperation(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	projectName string,
+	baseline config.FederationManagedCredentialReservation,
+	recoverPendingLeave bool,
+) (FinishFederationReplicaHubOperation, error) {
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return nil, err
+	}
+	ensureFederationReplicaMu.Lock()
+	defer ensureFederationReplicaMu.Unlock()
+
+	key := federationReplicaTransitionKey(store, projectName)
+	if _, pending := federationReplicaLeaveIntents[key]; pending {
+		return nil, federationReplicaError(
+			ErrFederationReplicaLeavePending,
+			"explicit federation leave is pending",
+			"",
+		)
+	}
+	if federationReplicaIsSuppressed(key) {
+		return nil, federationReplicaError(
+			ErrFederationReplicaLeavePending,
+			"federation mapping was explicitly left",
+			"",
+		)
+	}
+	current, found, err := credentials.FederationCredential(ctx, baseline.ProjectUID)
+	if err != nil {
+		return nil, credentialIOError("read federation credential before hub operation")
+	}
+	validPendingState := recoverPendingLeave &&
+		current.LeavePending &&
+		current.PendingEnrollmentID == 0
+	if !found || current != baseline.Credential ||
+		(recoverPendingLeave && !validPendingState) ||
+		(!recoverPendingLeave && current.LeavePending) {
+		return nil, federationReplicaError(
+			ErrFederationReplicaReservationChanged,
+			"federation credential changed before contacting the hub",
+			"",
+		)
+	}
+	state := federationReplicaHubOperations[key]
+	if state == nil {
+		state = &federationReplicaHubOperationState{done: make(chan struct{})}
+		federationReplicaHubOperations[key] = state
+	}
+	state.count++
+	var once sync.Once
+	var (
+		leavePending bool
+		finishErr    error
+	)
+	return func(finishCtx context.Context, enrollmentID int64) (bool, error) {
+		once.Do(func() {
+			ensureFederationReplicaMu.Lock()
+			defer ensureFederationReplicaMu.Unlock()
+			match, found, err := managed.FindManagedFederationCredential(
+				finishCtx, projectName,
+			)
+			if err != nil {
+				finishErr = credentialIOError(
+					"read managed reservation after hub operation",
+				)
+			} else if found && match.Credential.LeavePending {
+				leavePending = true
+				if enrollmentID > 0 {
+					replacement := match
+					replacement.Credential.PendingEnrollmentID = enrollmentID
+					if err := managed.ReplaceManagedFederationCredential(
+						finishCtx, match, replacement,
+					); err != nil {
+						finishErr = credentialIOError(
+							"record pending enrollment after hub operation",
+						)
+					}
+				}
+			} else {
+				_, leavePending = federationReplicaLeaveIntents[key]
+			}
+			state := federationReplicaHubOperations[key]
+			if state == nil {
+				return
+			}
+			state.count--
+			if state.count == 0 {
+				delete(federationReplicaHubOperations, key)
+				close(state.done)
+			}
+		})
+		return leavePending, finishErr
+	}, nil
+}
+
+// PrepareFederationReplicaLeave durably marks a managed reservation as leaving
+// and waits until every earlier hub operation for the project has completed.
+func PrepareFederationReplicaLeave(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	projectID int64,
+) (PrepareFederationReplicaLeaveResult, error) {
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return PrepareFederationReplicaLeaveResult{}, err
+	}
+	project, err := store.ProjectByID(ctx, projectID)
+	if err != nil {
+		return PrepareFederationReplicaLeaveResult{}, fmt.Errorf(
+			"read federation replica project before leave preparation: %w", err,
+		)
+	}
+	key := federationReplicaTransitionKey(store, project.Name)
+
+	ensureFederationReplicaMu.Lock()
+	federationReplicaLeaveIntents[key] = struct{}{}
+	setFederationReplicaSuppressed(key, true)
+	match, found, err := managed.FindManagedFederationCredential(ctx, project.Name)
+	if err != nil {
+		delete(federationReplicaLeaveIntents, key)
+		setFederationReplicaSuppressed(key, false)
+		ensureFederationReplicaMu.Unlock()
+		if errors.Is(err, config.ErrFederationCredentialConflict) {
+			return PrepareFederationReplicaLeaveResult{}, err
+		}
+		return PrepareFederationReplicaLeaveResult{}, credentialIOError(
+			"read managed reservation before leave preparation",
+		)
+	}
+	if found && !match.Credential.LeavePending {
+		replacement := match
+		replacement.Credential.LeavePending = true
+		replacement.Credential.PendingEnrollmentID = 0
+		if err := managed.ReplaceManagedFederationCredential(ctx, match, replacement); err != nil {
+			delete(federationReplicaLeaveIntents, key)
+			setFederationReplicaSuppressed(key, false)
+			ensureFederationReplicaMu.Unlock()
+			if errors.Is(err, config.ErrFederationCredentialConflict) {
+				return PrepareFederationReplicaLeaveResult{}, err
+			}
+			return PrepareFederationReplicaLeaveResult{}, credentialIOError(
+				"mark managed reservation for leave",
+			)
+		}
+		match = replacement
+	}
+	ensureFederationReplicaMu.Unlock()
+
+	for {
+		ensureFederationReplicaMu.Lock()
+		state := federationReplicaHubOperations[key]
+		if state == nil {
+			match, found, err = managed.FindManagedFederationCredential(ctx, project.Name)
+			ensureFederationReplicaMu.Unlock()
+			if err != nil {
+				if errors.Is(err, config.ErrFederationCredentialConflict) {
+					return PrepareFederationReplicaLeaveResult{}, err
+				}
+				return PrepareFederationReplicaLeaveResult{}, credentialIOError(
+					"read prepared managed reservation",
+				)
+			}
+			return PrepareFederationReplicaLeaveResult{
+				ManagedReservation:      match,
+				ManagedReservationFound: found,
+			}, nil
+		}
+		done := state.done
+		ensureFederationReplicaMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return PrepareFederationReplicaLeaveResult{}, ctx.Err()
+		case <-done:
+		}
+	}
+}
+
+func federationReplicaTransitionKey(store db.Storage, projectName string) string {
+	return store.InstanceUID() + "\x00" + strings.TrimSpace(projectName)
+}
+
+// FederationReplicaMappingSuppressed reports whether explicit leave completed
+// for this mapping in the current daemon process.
+func FederationReplicaMappingSuppressed(store db.Storage, projectName string) bool {
+	return federationReplicaIsSuppressed(federationReplicaTransitionKey(store, projectName))
+}
+
+func federationReplicaIsSuppressed(key string) bool {
+	federationReplicaSuppressionMu.RLock()
+	defer federationReplicaSuppressionMu.RUnlock()
+	_, suppressed := federationReplicaSuppressed[key]
+	return suppressed
+}
+
+func setFederationReplicaSuppressed(key string, suppressed bool) {
+	federationReplicaSuppressionMu.Lock()
+	defer federationReplicaSuppressionMu.Unlock()
+	if suppressed {
+		federationReplicaSuppressed[key] = struct{}{}
+		return
+	}
+	delete(federationReplicaSuppressed, key)
 }
 
 // LeaveFederationReplica detaches a spoke replica and removes its local
@@ -193,6 +458,9 @@ func leaveFederationReplicaState(
 			)
 		}
 	}
+	key := federationReplicaTransitionKey(store, project.Name)
+	setFederationReplicaSuppressed(key, true)
+	delete(federationReplicaLeaveIntents, key)
 	return result, nil
 }
 
@@ -395,6 +663,9 @@ func ensureFederationReplicaState(
 			return EnsureFederationReplicaResult{}, err
 		}
 	}
+	key := federationReplicaTransitionKey(store, p.ProjectName)
+	setFederationReplicaSuppressed(key, false)
+	delete(federationReplicaLeaveIntents, key)
 	return result, nil
 }
 

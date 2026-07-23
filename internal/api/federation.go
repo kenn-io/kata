@@ -474,6 +474,10 @@ type LeaveFederationReplicaRequestBody struct {
 	// the irreversible hub revoke. Advisory only: the authoritative check
 	// stays inside RemoveProject's transaction.
 	Preflight bool `json:"preflight,omitempty"`
+	// Prepare durably marks config-managed reconciliation as leaving and
+	// waits for earlier enrollment or rotation calls to drain. It does not
+	// revoke, detach, archive, or delete credentials.
+	Prepare bool `json:"prepare,omitempty"`
 }
 
 // LeaveFederationReplicaResultBody reports the outcome of a leave.

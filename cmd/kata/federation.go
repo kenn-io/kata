@@ -746,7 +746,6 @@ func federationLeaveCmd() *cobra.Command {
 			// still calls the daemon: that idempotent resume deletes stale local
 			// credentials left by a partial leave. --delete gates an archive on
 			// the same confirmation as the bound path.
-			hasHubEnrollment := !target.standalone || target.pendingEnrollment
 			if target.standalone && !target.pendingEnrollment {
 				if deleteFlag {
 					if err := confirmFederationLeave(cmd, target, "archive", true, yes); err != nil {
@@ -756,6 +755,35 @@ func federationLeaveCmd() *cobra.Command {
 			} else if err := confirmFederationLeave(cmd, target, disposition, localOnly, yes); err != nil {
 				return err
 			}
+			if !localOnly {
+				actor, _ := resolveActor(ctx, flags.As, nil)
+				status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
+					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/leave", baseURL, target.projectID),
+					map[string]any{"disposition": disposition, "force": force, "actor": actor, "prepare": true})
+				if err != nil {
+					return err
+				}
+				if status >= 400 {
+					return apiErrFromBody(status, bs)
+				}
+				var prepared api.LeaveFederationReplicaResultBody
+				if err := json.Unmarshal(bs, &prepared); err != nil {
+					return err
+				}
+				if prepared.PendingEnrollment != nil {
+					target.hubURL = strings.TrimRight(prepared.PendingEnrollment.HubURL, "/")
+					target.hubProjectID = prepared.PendingEnrollment.HubProjectID
+					target.allowInsecure = prepared.PendingEnrollment.AllowInsecure
+					if target.instanceUID == "" {
+						target.instanceUID, err = federationSpokeInstanceUID(ctx, client, baseURL)
+						if err != nil {
+							return err
+						}
+					}
+					target.pendingEnrollment = true
+				}
+			}
+			hasHubEnrollment := !target.standalone || target.pendingEnrollment
 			if hasHubEnrollment {
 				if localOnly {
 					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),

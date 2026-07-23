@@ -1476,6 +1476,7 @@ type fakeLeaveHub struct {
 	// nil project scope (a global grant for the same spoke instance).
 	globalEnrollmentID int64
 	revokedIDs         []int64
+	onList             func()
 }
 
 func newFakeLeaveHub(t *testing.T, spokeInstanceUID string, hubProjectID int64) (*fakeLeaveHub, *httptest.Server) {
@@ -1486,6 +1487,9 @@ func newFakeLeaveHub(t *testing.T, spokeInstanceUID string, hubProjectID int64) 
 		case r.URL.Path == "/api/v1/ping":
 			_, _ = w.Write([]byte(`{"ok":true,"service":"kata","version":"test"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/enrollments":
+			if h.onList != nil {
+				h.onList()
+			}
 			pid := h.hubProjectID
 			out := api.ListFederationEnrollmentsBody{Enrollments: []api.FederationEnrollmentOut{{
 				ID:               h.enrollmentID,
@@ -2072,6 +2076,13 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 			},
 		}
 		require.NoError(t, config.ReserveManagedFederationCredential(reservation))
+		hub.onList = func() {
+			current, found, readErr := config.FindManagedFederationCredential(project.Name)
+			require.NoError(t, readErr)
+			require.True(t, found)
+			assert.True(t, current.Credential.LeavePending,
+				"daemon must durably prepare leave before hub enumeration")
+		}
 
 		out := requireCmdOutput(t, env, "federation", "leave",
 			"--project", project.Name, "--yes")

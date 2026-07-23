@@ -373,13 +373,21 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(bErr)
 		}
 
-		if in.Body.Preflight {
-			// Advisory dry-run: surface what the real call would refuse —
-			// most importantly an archive's open-issue refusal — WITHOUT
-			// mutating anything, so leave clients can verify archive
-			// eligibility before the irreversible hub revoke. Advisory only:
-			// the authoritative check stays inside RemoveProject's
-			// transaction below.
+		if in.Body.Preflight && in.Body.Prepare {
+			return nil, api.NewError(
+				http.StatusBadRequest,
+				"validation",
+				"preflight and prepare cannot both be true",
+				"",
+				nil,
+			)
+		}
+		if in.Body.Preflight || in.Body.Prepare {
+			// Both phases surface what the real call would refuse, most
+			// importantly an archive's open-issue refusal. Preflight is
+			// read-only; prepare then durably blocks config reconciliation and
+			// drains earlier hub operations before the irreversible hub revoke.
+			// The authoritative archive check stays in RemoveProject below.
 			project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
 			switch {
 			case errors.Is(err, db.ErrNotFound):
@@ -406,7 +414,24 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			managed, ok := cfg.federationCredentialStore().(config.FederationManagedCredentialStore)
 			if ok {
-				match, found, findErr := managed.FindManagedFederationCredential(ctx, project.Name)
+				var (
+					match   config.FederationManagedCredentialReservation
+					found   bool
+					findErr error
+				)
+				if in.Body.Prepare {
+					prepared, prepareErr := PrepareFederationReplicaLeave(
+						ctx,
+						cfg.DB,
+						cfg.federationCredentialStore(),
+						in.ProjectID,
+					)
+					match = prepared.ManagedReservation
+					found = prepared.ManagedReservationFound
+					findErr = prepareErr
+				} else {
+					match, found, findErr = managed.FindManagedFederationCredential(ctx, project.Name)
+				}
 				switch {
 				case errors.Is(findErr, config.ErrFederationCredentialConflict):
 					return nil, api.NewError(

@@ -182,6 +182,22 @@ func (s *replicaCredentialStore) DeleteManagedFederationCredential(
 	return nil
 }
 
+func (s *replicaCredentialStore) ReplaceManagedFederationCredential(
+	_ context.Context,
+	expected config.FederationManagedCredentialReservation,
+	replacement config.FederationManagedCredentialReservation,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, found := s.credentials[expected.ProjectUID]
+	if !found || current != expected.Credential ||
+		replacement.ProjectUID != expected.ProjectUID {
+		return config.ErrFederationCredentialConflict
+	}
+	s.credentials[expected.ProjectUID] = replacement.Credential
+	return nil
+}
+
 func (s *replicaCredentialStore) put(projectUID string, credential config.FederationCredential) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -585,6 +601,66 @@ func TestReserveFederationReplicaCredentialRejectsBindingThatAppearedAfterPrefli
 	_, found, readErr := credentials.FederationCredential(ctx, params.HubProjectUID)
 	require.NoError(t, readErr)
 	assert.False(t, found)
+}
+
+func TestPrepareFederationReplicaLeaveDrainsAndBlocksHubOperations(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	store := openReplicaServiceStore(t)
+	project, err := store.CreateProjectWithUID(
+		ctx, "spoke-project", replicaLocalProjectUID,
+	)
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	reservation := replicaServiceParams().Credential
+	reservation.ManagedByConfig = true
+	reservation.SpokeProjectName = project.Name
+	baseline := config.FederationManagedCredentialReservation{
+		ProjectUID: replicaHubProjectUID,
+		Credential: reservation,
+	}
+	require.NoError(t, credentials.ReserveManagedFederationCredential(ctx, baseline))
+	endOperation, err := daemon.BeginFederationReplicaHubOperation(
+		ctx, store, credentials, project.Name, baseline,
+	)
+	require.NoError(t, err)
+	prepared := make(chan daemon.PrepareFederationReplicaLeaveResult, 1)
+	prepareErr := make(chan error, 1)
+	go func() {
+		result, callErr := daemon.PrepareFederationReplicaLeave(
+			ctx, store, credentials, project.ID,
+		)
+		prepared <- result
+		prepareErr <- callErr
+	}()
+
+	require.Eventually(t, func() bool {
+		current, found, readErr := credentials.FederationCredential(ctx, replicaHubProjectUID)
+		return readErr == nil && found && current.LeavePending
+	}, time.Second, time.Millisecond)
+	select {
+	case <-prepared:
+		require.FailNow(t, "prepare returned before the in-flight hub operation drained")
+	default:
+	}
+	leavePending, finishErr := endOperation(ctx, 77)
+	require.NoError(t, finishErr)
+	assert.True(t, leavePending)
+	var result daemon.PrepareFederationReplicaLeaveResult
+	select {
+	case result = <-prepared:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for prepared leave", "error: %v", ctx.Err())
+	}
+	require.NoError(t, <-prepareErr)
+	require.True(t, result.ManagedReservationFound)
+	assert.True(t, result.ManagedReservation.Credential.LeavePending)
+	assert.Equal(t, int64(77), result.ManagedReservation.Credential.PendingEnrollmentID)
+
+	_, err = daemon.BeginFederationReplicaHubOperation(
+		ctx, store, credentials, project.Name, result.ManagedReservation,
+	)
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaLeavePending)
 }
 
 func TestLeaveFederationReplicaRequiresManagedStoreForMarkedProject(t *testing.T) {

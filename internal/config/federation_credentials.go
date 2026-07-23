@@ -23,17 +23,19 @@ type FederationCredentials struct {
 // UID. Tokens intentionally live outside SQLite and outside committed
 // workspace config.
 type FederationCredential struct {
-	HubURL           string `toml:"hub_url"`
-	HubProjectID     int64  `toml:"hub_project_id"`
-	Token            string `toml:"token"`
-	Capabilities     string `toml:"capabilities,omitempty"`
-	Actor            string `toml:"actor,omitempty"`
-	AllowInsecure    bool   `toml:"allow_insecure,omitempty"`
-	ManagedByConfig  bool   `toml:"managed_by_config,omitempty"`
-	HubCatalog       string `toml:"hub_catalog,omitempty"`
-	HubProjectName   string `toml:"hub_project_name,omitempty"`
-	RequestedActor   string `toml:"requested_actor,omitempty"`
-	SpokeProjectName string `toml:"spoke_project_name,omitempty"`
+	HubURL              string `toml:"hub_url"`
+	HubProjectID        int64  `toml:"hub_project_id"`
+	Token               string `toml:"token"`
+	Capabilities        string `toml:"capabilities,omitempty"`
+	Actor               string `toml:"actor,omitempty"`
+	AllowInsecure       bool   `toml:"allow_insecure,omitempty"`
+	ManagedByConfig     bool   `toml:"managed_by_config,omitempty"`
+	HubCatalog          string `toml:"hub_catalog,omitempty"`
+	HubProjectName      string `toml:"hub_project_name,omitempty"`
+	RequestedActor      string `toml:"requested_actor,omitempty"`
+	SpokeProjectName    string `toml:"spoke_project_name,omitempty"`
+	LeavePending        bool   `toml:"leave_pending,omitempty"`
+	PendingEnrollmentID int64  `toml:"pending_enrollment_id,omitempty"`
 }
 
 // FederationCredentialMetadata is the redacted credential information safe
@@ -101,6 +103,11 @@ type FederationManagedCredentialStore interface {
 	DeleteManagedFederationCredential(
 		context.Context, FederationManagedCredentialReservation,
 	) error
+	ReplaceManagedFederationCredential(
+		context.Context,
+		FederationManagedCredentialReservation,
+		FederationManagedCredentialReservation,
+	) error
 }
 
 // homeFederationCredentialStore uses the standalone daemon's
@@ -152,6 +159,14 @@ func (homeFederationCredentialStore) DeleteManagedFederationCredential(
 	_ context.Context, reservation FederationManagedCredentialReservation,
 ) error {
 	return DeleteManagedFederationCredential(reservation)
+}
+
+func (homeFederationCredentialStore) ReplaceManagedFederationCredential(
+	_ context.Context,
+	expected FederationManagedCredentialReservation,
+	replacement FederationManagedCredentialReservation,
+) error {
+	return ReplaceManagedFederationCredential(expected, replacement)
 }
 
 // DefaultFederationCredentialStore returns the standalone daemon credential
@@ -409,6 +424,26 @@ func DeleteManagedFederationCredential(
 			return fmt.Errorf("%w: managed reservation changed before cleanup", ErrFederationCredentialConflict)
 		}
 		delete(creds.Projects, match.ProjectUID)
+		return nil
+	})
+}
+
+// ReplaceManagedFederationCredential replaces one exact managed reservation
+// without changing its stable hub UID key.
+func ReplaceManagedFederationCredential(
+	expected FederationManagedCredentialReservation,
+	replacement FederationManagedCredentialReservation,
+) error {
+	if expected.ProjectUID == "" || replacement.ProjectUID != expected.ProjectUID ||
+		!replacement.Credential.ManagedByConfig {
+		return fmt.Errorf("%w: invalid managed reservation replacement", ErrFederationCredentialConflict)
+	}
+	return updateFederationCredentials(func(creds *FederationCredentials) error {
+		current, found := creds.Projects[expected.ProjectUID]
+		if !found || current != expected.Credential || !current.ManagedByConfig {
+			return fmt.Errorf("%w: managed reservation changed before replacement", ErrFederationCredentialConflict)
+		}
+		creds.Projects[expected.ProjectUID] = replacement.Credential
 		return nil
 	})
 }
