@@ -901,7 +901,7 @@ func TestFederationJoinEnrollmentBodyNeverCrossesRedirectOrigin(t *testing.T) {
 					)
 					return
 				}
-				http.Redirect(w, r, target.URL+r.URL.Path, status)
+				http.Redirect(w, r, target.URL+r.URL.Path, status) //nolint:gosec // Test server intentionally redirects only to another local test server.
 			}))
 			defer source.Close()
 			t.Setenv("KATA_SERVER", source.URL)

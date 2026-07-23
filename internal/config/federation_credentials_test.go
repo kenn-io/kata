@@ -254,7 +254,7 @@ func TestReserveFederationCredentialConflictDoesNotRewriteFile(t *testing.T) {
 			Token:        "manual-token",
 		}))
 	path := filepath.Join(home, "credentials.toml")
-	before, err := os.ReadFile(path)
+	before, err := os.ReadFile(path) //nolint:gosec // Test path is rooted in t.TempDir.
 	require.NoError(t, err)
 
 	err = store.ReserveManagedFederationCredential(ctx,
@@ -269,7 +269,7 @@ func TestReserveFederationCredentialConflictDoesNotRewriteFile(t *testing.T) {
 			},
 		})
 	require.ErrorIs(t, err, config.ErrFederationCredentialConflict)
-	after, err := os.ReadFile(path)
+	after, err := os.ReadFile(path) //nolint:gosec // Test path is rooted in t.TempDir.
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
 }

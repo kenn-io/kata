@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	serviceCredentialSourceUID = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
-	serviceCredentialTargetUID = "01HZNQ7VFPK1XGD8R5MABCD4F0"
+	serviceAdapterSourceProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
+	serviceAdapterTargetProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4F0"
 )
 
 func TestServiceCredentialStoreAdapterReserveManagedIsBoundedAndNonMutating(t *testing.T) {
@@ -19,21 +19,21 @@ func TestServiceCredentialStoreAdapterReserveManagedIsBoundedAndNonMutating(t *t
 	store := newServiceFederationCredentialStore()
 	original := serviceAdapterPublicCredential()
 	require.NoError(t, store.StoreFederationCredential(
-		ctx, serviceCredentialTargetUID, original,
+		ctx, serviceAdapterTargetProjectUID, original,
 	))
 	adapter := serviceCredentialStoreAdapter{store: store}
 
 	err := adapter.ReserveManagedFederationCredential(
 		ctx,
 		config.FederationManagedCredentialReservation{
-			ProjectUID: serviceCredentialTargetUID,
+			ProjectUID: serviceAdapterTargetProjectUID,
 			Credential: serviceAdapterManagedCredential(),
 		},
 	)
 
 	assertBoundedManagedUnsupportedError(t, err)
 	assertPublicCredentialUnchanged(
-		t, ctx, store, serviceCredentialTargetUID, original,
+		ctx, t, store, serviceAdapterTargetProjectUID, original,
 	)
 }
 
@@ -44,18 +44,18 @@ func TestServiceCredentialStoreAdapterRekeyIsBoundedAndNonMutating(t *testing.T)
 	target := source
 	target.Token = "target-token"
 	require.NoError(t, store.StoreFederationCredential(
-		ctx, serviceCredentialSourceUID, source,
+		ctx, serviceAdapterSourceProjectUID, source,
 	))
 	require.NoError(t, store.StoreFederationCredential(
-		ctx, serviceCredentialTargetUID, target,
+		ctx, serviceAdapterTargetProjectUID, target,
 	))
 	adapter := serviceCredentialStoreAdapter{store: store}
 
 	err := adapter.RekeyFederationCredential(
 		ctx,
 		config.FederationCredentialRekey{
-			FromProjectUID: serviceCredentialSourceUID,
-			ToProjectUID:   serviceCredentialTargetUID,
+			FromProjectUID: serviceAdapterSourceProjectUID,
+			ToProjectUID:   serviceAdapterTargetProjectUID,
 			Expected:       internalFederationCredential(source),
 			Replacement:    serviceAdapterManagedCredential(),
 		},
@@ -63,10 +63,10 @@ func TestServiceCredentialStoreAdapterRekeyIsBoundedAndNonMutating(t *testing.T)
 
 	assertBoundedManagedUnsupportedError(t, err)
 	assertPublicCredentialUnchanged(
-		t, ctx, store, serviceCredentialSourceUID, source,
+		ctx, t, store, serviceAdapterSourceProjectUID, source,
 	)
 	assertPublicCredentialUnchanged(
-		t, ctx, store, serviceCredentialTargetUID, target,
+		ctx, t, store, serviceAdapterTargetProjectUID, target,
 	)
 }
 
@@ -75,21 +75,21 @@ func TestServiceCredentialStoreAdapterDeleteManagedIsBoundedAndNonMutating(t *te
 	store := newServiceFederationCredentialStore()
 	original := serviceAdapterPublicCredential()
 	require.NoError(t, store.StoreFederationCredential(
-		ctx, serviceCredentialTargetUID, original,
+		ctx, serviceAdapterTargetProjectUID, original,
 	))
 	adapter := serviceCredentialStoreAdapter{store: store}
 
 	err := adapter.DeleteManagedFederationCredential(
 		ctx,
 		config.FederationManagedCredentialReservation{
-			ProjectUID: serviceCredentialTargetUID,
+			ProjectUID: serviceAdapterTargetProjectUID,
 			Credential: serviceAdapterManagedCredential(),
 		},
 	)
 
 	assertBoundedManagedUnsupportedError(t, err)
 	assertPublicCredentialUnchanged(
-		t, ctx, store, serviceCredentialTargetUID, original,
+		ctx, t, store, serviceAdapterTargetProjectUID, original,
 	)
 }
 
@@ -98,7 +98,7 @@ func TestServiceCredentialStoreAdapterFindManagedReturnsCleanNotFound(t *testing
 	store := newServiceFederationCredentialStore()
 	original := serviceAdapterPublicCredential()
 	require.NoError(t, store.StoreFederationCredential(
-		ctx, serviceCredentialTargetUID, original,
+		ctx, serviceAdapterTargetProjectUID, original,
 	))
 	adapter := serviceCredentialStoreAdapter{store: store}
 
@@ -110,7 +110,7 @@ func TestServiceCredentialStoreAdapterFindManagedReturnsCleanNotFound(t *testing
 	assert.False(t, found)
 	assert.Zero(t, reservation)
 	assertPublicCredentialUnchanged(
-		t, ctx, store, serviceCredentialTargetUID, original,
+		ctx, t, store, serviceAdapterTargetProjectUID, original,
 	)
 }
 
@@ -124,8 +124,8 @@ func assertBoundedManagedUnsupportedError(t *testing.T, err error) {
 }
 
 func assertPublicCredentialUnchanged(
-	t *testing.T,
 	ctx context.Context,
+	t *testing.T,
 	store FederationCredentialStore,
 	projectUID string,
 	expected FederationCredential,
