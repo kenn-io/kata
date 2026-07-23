@@ -262,6 +262,9 @@ func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
 
 	r.mu.Lock()
 	state := &r.states[index]
+	catalogName := r.targets[index].Catalog.Name
+	spokeProject := r.targets[index].Mapping.SpokeProject
+	hubProject := r.targets[index].Mapping.HubProject
 	transitioned := state.state != stateName ||
 		state.lastErrorCategory != category ||
 		state.lastErrorStatus != status
@@ -285,8 +288,8 @@ func (r *Reconciler) recordAttempt(index int, attemptAt time.Time, err error) {
 
 	if transitioned && r.logger != nil {
 		r.logger.Printf(
-			"federation config reconciliation state=%s category=%s status=%d",
-			stateName, category, status,
+			"federation config reconciliation hub=%s spoke_project=%s hub_project=%s state=%s category=%s status=%d",
+			catalogName, spokeProject, hubProject, stateName, category, status,
 		)
 	}
 }
@@ -307,6 +310,8 @@ func classifyReconciliationError(err error) (string, int) {
 		return "binding_conflict", status
 	case errors.Is(err, ErrCredentialIO):
 		return "credential_io", status
+	case errors.Is(err, ErrLocalStorage):
+		return "local_storage", status
 	case errors.Is(err, ErrHubUnavailable):
 		return "hub_unavailable", status
 	case errors.Is(err, ErrHubAuthentication):
@@ -314,7 +319,7 @@ func classifyReconciliationError(err error) (string, int) {
 	case errors.Is(err, ErrHubValidation):
 		return "hub_validation", status
 	default:
-		return "local_storage", status
+		return "internal", status
 	}
 }
 

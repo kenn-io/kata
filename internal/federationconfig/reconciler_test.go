@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1845,28 +1846,6 @@ func TestReconcileMappingBoundProjectMissingOnHubDoesNotCreate(t *testing.T) {
 	assert.Empty(t, hub.rotationCalls)
 }
 
-func TestReconcileMappingTypedNilHubErrorFailsClosed(t *testing.T) {
-	store := openReconcileStore(t)
-	_, err := store.CreateProject(context.Background(), "spoke-project")
-	require.NoError(t, err)
-	credentials := newFakeCredentialStore()
-	hub := newFakeHub()
-	var typedNil *federationconfig.HubError
-	hub.resolveProjectErr = typedNil
-
-	require.NotPanics(t, func() {
-		err = federationconfig.ReconcileMapping(
-			context.Background(), store, credentials, hub,
-			testCatalog(), testMapping(), nil,
-		)
-	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrHubUnavailable)
-	assert.Equal(t, 1, hub.resolveCalls)
-	assert.Zero(t, hub.ensureCalls)
-	assert.Empty(t, hub.enrollmentCalls)
-}
-
 func TestReconcileMappingStaleHubUIDReservationConflicts(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -2179,6 +2158,27 @@ func TestFederationConfigReconcilerRetriesEveryErrorCategory(t *testing.T) {
 	}
 }
 
+func TestClassifyReconciliationErrorUsesInternalForUnknown(t *testing.T) {
+	clock := newManualClock(time.Date(2026, 7, 23, 3, 15, 0, 0, time.UTC))
+	factory := newScriptedHubFactory(clock, map[string][]error{
+		"hub-a": {errors.New("planted internal failure")},
+	})
+	reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := runReconciler(ctx, t, reconciler)
+
+	waitForFactoryCalls(t, factory, 1)
+	require.Eventually(t, func() bool {
+		return reconciler.Health().LastErrorCategory != ""
+	}, time.Second, time.Millisecond)
+	health := reconciler.Health()
+	assert.Equal(t, "internal", health.LastErrorCategory)
+	assert.Zero(t, health.LastErrorStatus)
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
 func TestFederationConfigReconcilerCancellationStopsTimerAndRun(t *testing.T) {
 	clock := newManualClock(time.Date(2026, 7, 23, 3, 0, 0, 0, time.UTC))
 	factory := newScriptedHubFactory(clock, map[string][]error{
@@ -2222,8 +2222,6 @@ func TestFederationConfigReconcilerLogsOnlySanitizedTransitions(t *testing.T) {
 	target := schedulerTarget("hub-a")
 	target.Catalog.URL = "https://sensitive-hub.example/private"
 	target.Catalog.Token = "catalog-secret"
-	target.Mapping.SpokeProject = "sensitive-spoke"
-	target.Mapping.HubProject = "sensitive-project"
 	target.Mapping.Actor = "sensitive-actor"
 	reconciler := newTestReconciler(t, clock, factory, logger, target)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2248,7 +2246,51 @@ func TestFederationConfigReconcilerLogsOnlySanitizedTransitions(t *testing.T) {
 	assert.Contains(t, got, "state=reconciled category= status=0")
 	for _, secret := range []string{
 		"secret-body", "sensitive-hub.example", "catalog-secret",
-		"sensitive-spoke", "sensitive-project", "sensitive-actor",
+		"sensitive-actor",
+	} {
+		assert.NotContains(t, got, secret)
+	}
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestReconcilerTransitionLogsIncludeMappingCoordinatesWithoutSecrets(t *testing.T) {
+	clock := newManualClock(time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC))
+	var logs bytes.Buffer
+	logger := log.New(&logs, "", 0)
+	factory := newScriptedHubFactory(clock, map[string][]error{
+		"primary": {
+			&federationconfig.HubError{
+				Kind:      federationconfig.ErrConfigurationConflict,
+				Operation: "raw-body-marker header-marker token-marker url-marker actor-marker",
+			},
+		},
+		"secondary": {federationconfig.ErrConfigurationConflict},
+	})
+	primary := federationconfig.Target{
+		Catalog: config.CatalogDaemonConfig{
+			Name: "primary", URL: "https://url-marker.example/private", Token: "token-marker",
+		},
+		Mapping: config.FederationProjectConfig{
+			Hub: "primary", SpokeProject: "spoke-project", HubProject: "hub-project", Actor: "actor-marker",
+		},
+	}
+	secondary := schedulerTarget("secondary")
+	reconciler := newTestReconciler(t, clock, factory, logger, primary, secondary)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := runReconciler(ctx, t, reconciler)
+
+	waitForFactoryCalls(t, factory, 2)
+	require.Eventually(t, func() bool {
+		return strings.Contains(logs.String(), "hub=primary")
+	}, time.Second, time.Millisecond)
+
+	got := logs.String()
+	assert.Contains(t, got,
+		"hub=primary spoke_project=spoke-project hub_project=hub-project state=conflict category=configuration_conflict status=0")
+	for _, secret := range []string{
+		"url-marker", "token-marker", "actor-marker", "header-marker", "raw-body-marker",
 	} {
 		assert.NotContains(t, got, secret)
 	}

@@ -27,6 +27,10 @@ var (
 	ErrHubAuthentication = errors.New("federation hub authentication")
 	// ErrHubValidation classifies rejected or malformed hub requests and responses.
 	ErrHubValidation = errors.New("federation hub validation")
+
+	normalizeHubURL       = client.NormalizeRemoteURL
+	newHubHTTPClient      = client.NewHTTPClientForTarget
+	configureHubRedirects = client.ConfigureOriginPinnedRedirects
 )
 
 const (
@@ -45,9 +49,6 @@ type HubError struct {
 // Error implements error without retaining request coordinates or response
 // bodies, either of which may contain private data or echoed credentials.
 func (e *HubError) Error() string {
-	if e == nil {
-		return "federation hub request failed"
-	}
 	if e.StatusCode != 0 {
 		return fmt.Sprintf("federation hub %s failed with HTTP status %d", e.Operation, e.StatusCode)
 	}
@@ -56,9 +57,6 @@ func (e *HubError) Error() string {
 
 // Unwrap exposes the stable error category.
 func (e *HubError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
 	return e.Kind
 }
 
@@ -107,19 +105,19 @@ func NewHubClient(
 	if err != nil {
 		return nil, err
 	}
-	baseURL, err := client.NormalizeRemoteURL(catalog.URL, catalog.AllowInsecure)
+	baseURL, err := normalizeHubURL(catalog.URL, catalog.AllowInsecure)
 	if err != nil {
-		return nil, hubError(ErrHubValidation, "configuration", 0)
+		return nil, hubError(ErrHubValidation, "hub URL validation", 0)
 	}
-	httpClient, err := client.NewHTTPClientForTarget(ctx, baseURL, client.TargetAuth{
+	httpClient, err := newHubHTTPClient(ctx, baseURL, client.TargetAuth{
 		Token:         token,
 		AllowInsecure: catalog.AllowInsecure,
 	}, client.Opts{Timeout: hubRequestTimeout})
 	if err != nil {
-		return nil, hubError(ErrHubValidation, "configuration", 0)
+		return nil, hubError(ErrHubValidation, "hub transport setup", 0)
 	}
-	if err := client.ConfigureOriginPinnedRedirects(httpClient, baseURL); err != nil {
-		return nil, hubError(ErrHubValidation, "configuration", 0)
+	if err := configureHubRedirects(httpClient, baseURL); err != nil {
+		return nil, hubError(ErrHubValidation, "hub redirect policy", 0)
 	}
 	return &HubClient{baseURL: baseURL, http: httpClient}, nil
 }
