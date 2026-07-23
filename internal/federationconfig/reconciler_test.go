@@ -2257,7 +2257,7 @@ func TestFederationConfigReconcilerLogsOnlySanitizedTransitions(t *testing.T) {
 
 func TestReconcilerTransitionLogsIncludeMappingCoordinatesWithoutSecrets(t *testing.T) {
 	clock := newManualClock(time.Date(2026, 7, 23, 3, 45, 0, 0, time.UTC))
-	var logs bytes.Buffer
+	var logs synchronizedLogCapture
 	logger := log.New(&logs, "", 0)
 	factory := newScriptedHubFactory(clock, map[string][]error{
 		"primary": {
@@ -2297,6 +2297,23 @@ func TestReconcilerTransitionLogsIncludeMappingCoordinatesWithoutSecrets(t *test
 
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+type synchronizedLogCapture struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (c *synchronizedLogCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Buffer.Write(p)
+}
+
+func (c *synchronizedLogCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Buffer.String()
 }
 
 type manualClock struct {
