@@ -152,7 +152,8 @@ When config-driven mappings are present, `GET /api/v1/health` adds an optional
 
 Error categories are `configuration_conflict`, `binding_conflict`,
 `credential_io`, `hub_unavailable`, `hub_authentication`, `hub_validation`,
-and `local_storage`.
+`local_storage`, and `internal`. `internal` indicates an unexpected sanitized
+reconciler failure.
 
 The block is absent when no mappings are configured. It never exposes tokens,
 hashes, headers, URLs, project names, actors, or raw remote response bodies.

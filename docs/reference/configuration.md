@@ -235,13 +235,17 @@ sending another credential.
 Each mapping ensures the named hub project and a `pull,push,lease` enrollment,
 then creates the local `spoke_project` if it is missing or adopts the existing
 standalone project. Enrollment credentials are generated automatically and
-stored in the spoke's owner-only federation credential store. When the hub
-authenticates the catalog bearer as a DB-backed identity token, that token's
-actor overrides the mapping's requested `actor`. Standalone adoption rekeys an
-existing compatible credential from the local project UID to the hub project
-UID under the shared adoption lock before changing the database identity.
+stored in the spoke's owner-only federation credential store. A generated
+credential is durably reserved once under the resolved hub project UID before
+enrollment. When the hub authenticates the catalog bearer as a DB-backed
+identity token, that token's actor overrides the mapping's requested `actor`.
 Credential-file updates use a same-directory, failure-atomic replacement so a
 failed write cannot truncate the last readable credential set.
+
+If the named hub project is deleted and recreated, its UID changes. kata
+reports a configuration conflict and does not silently enroll the replacement.
+Run `kata federation leave <spoke-project>` to clear the old managed
+reservation, verify the mapping, and allow reconciliation to enroll again.
 
 Mappings are loaded once when the daemon starts. Restart the daemon after
 adding or changing one. Reconciliation runs asynchronously: hub outages,

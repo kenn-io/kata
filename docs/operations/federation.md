@@ -95,13 +95,17 @@ On daemon start, the mapping ensures or creates `hub-project`, enables it for
 federation, creates a project-scoped `pull,push,lease` enrollment, and binds
 `spoke-project` with push enabled. A missing local project is created
 automatically; an existing standalone project is adopted. After ensuring the
-hub project, the spoke generates and persists an enrollment secret when no
-compatible credential exists, then asks the hub to enroll it. The secret lives
-only in the owner-only federation credential file and is safely reused after a
-restart or lost response. Every credential mutation uses failure-atomic file
-replacement. When adopting a standalone project whose local UID differs from
-the hub UID, reconciliation moves the credential to the hub UID under the
-shared adoption lock before changing the database identity.
+hub project, the spoke generates and durably reserves an enrollment secret
+under that hub project's UID when no compatible credential exists, then asks
+the hub to enroll it. The secret lives only in the owner-only federation
+credential file and is safely reused after a restart or lost response. Every
+credential mutation uses failure-atomic file replacement.
+
+The reservation is tied to the resolved hub UID. If a named hub project is
+deleted and recreated, the replacement has a different UID and reconciliation
+reports a configuration conflict instead of silently enrolling it. Run
+`kata federation leave <spoke-project>` to clear the old managed reservation,
+verify the mapping, and let reconciliation enroll the intended project.
 
 Reconciliation starts in the background after storage and the federation
 runner are ready. The daemon listener and normal project work do not wait for
@@ -123,9 +127,11 @@ kata federation leave spoke-project
 ```
 
 Leave also cleans up exact config-managed credential reservations from an
-interrupted startup reconciliation, even when adoption did not finish. It
-fails closed and retains any conflicting or manual credential rather than
-deleting it.
+interrupted startup reconciliation, before or after adoption. It fails closed
+and retains any conflicting or manual credential rather than deleting it. If a
+leave races with reconciliation while it is doing hub enrollment or rotation
+I/O, leave wins locally; reconciliation retries later without recreating the
+credential that leave removed.
 
 See [Configuration](../reference/configuration.md#declarative-federation-mappings)
 for validation rules and [HTTP API schema](../reference/http-api.md#federation-enrollment-and-health-endpoints)
@@ -367,6 +373,11 @@ and the printed join command uses the hub-returned actor.
 The `--hub-url` value is the URL the spoke will store and use later for pull,
 push, and lease transport.
 
+Manual `--hub-url` values may include a reverse-proxy path prefix, such as
+`https://hub.example/kata`; the prefix is retained for later federation
+requests. They must be HTTP(S) base URLs without user info, a query, or a
+fragment.
+
 The CLI prints a pasteable `kata federation join ...` command containing the
 generated token. Treat that command as secret-bearing material.
 
@@ -479,6 +490,12 @@ By default this **detaches**: the local `federation_bindings`,
 credential is deleted, and all of the project's issues and current state are
 kept. Leaving is revoke-first — the hub enrollment is revoked before any local
 teardown, so a hub failure leaves local state intact for a clean retry.
+
+For config-driven federation, leave also removes the exact managed credential
+reservation whether reconciliation stopped before or after adoption. If the
+credential changes while leave is cleaning it up, the API returns
+`federation_credential_conflict`; resolve the conflict in `credentials.toml`
+and retry `kata federation leave <project>`.
 
 Add `--delete` to also archive the now-standalone project (reversible with
 `kata projects restore`); `--delete --force` archives even when the project has
