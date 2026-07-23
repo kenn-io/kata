@@ -384,15 +384,14 @@ func ReconcileMapping(
 	if err != nil {
 		return err
 	}
-	enrollment, credential, err := ensureMappingEnrollment(
-		ctx, store, managed, hub, catalog, mapping, preflight,
+	credential, err := ensureMappingEnrollment(
+		ctx, store, hub, catalog, mapping, preflight,
 	)
 	if err != nil {
 		return err
 	}
 	return convergeLocalMapping(
-		ctx, store, credentials, wake, catalog, mapping,
-		preflight, enrollment, credential,
+		ctx, store, credentials, wake, mapping, preflight, credential,
 	)
 }
 
@@ -643,12 +642,11 @@ func preflightMapping(
 func ensureMappingEnrollment(
 	ctx context.Context,
 	store db.Storage,
-	_ config.FederationManagedCredentialStore,
 	hub Hub,
 	catalog config.CatalogDaemonConfig,
 	mapping config.FederationProjectConfig,
 	preflight mappingPreflight,
-) (Enrollment, config.FederationCredential, error) {
+) (config.FederationCredential, error) {
 	credential := preflight.credential.credential
 	if preflight.hasBinding {
 		pendingReplacement := credential.ManagedByConfig &&
@@ -656,14 +654,12 @@ func ensureMappingEnrollment(
 		if !pendingReplacement {
 			if strings.TrimSpace(preflight.binding.Actor) != "" &&
 				strings.TrimSpace(preflight.binding.Actor) != strings.TrimSpace(credential.Actor) {
-				return Enrollment{}, config.FederationCredential{},
-					reconcileError(
-						ErrBindingConflict,
-						"existing federation binding actor differs from credential",
-					)
+				return config.FederationCredential{}, reconcileError(
+					ErrBindingConflict,
+					"existing federation binding actor differs from credential",
+				)
 			}
-			return Enrollment{Actor: strings.TrimSpace(credential.Actor)},
-				withManagementMetadata(credential, catalog, mapping), nil
+			return withManagementMetadata(credential, catalog, mapping), nil
 		}
 	}
 
@@ -683,11 +679,11 @@ func ensureMappingEnrollment(
 		enrollment, err = hub.EnsureEnrollment(ctx, enrollmentRequest)
 	}
 	if err != nil {
-		return Enrollment{}, config.FederationCredential{}, safeHubError(err)
+		return config.FederationCredential{}, safeHubError(err)
 	}
 	enrollmentActor := strings.TrimSpace(enrollment.Actor)
 	if enrollment.ID <= 0 || db.ValidateTokenActor(enrollmentActor) != nil {
-		return Enrollment{}, config.FederationCredential{},
+		return config.FederationCredential{},
 			reconcileError(ErrHubValidation, "federation hub returned invalid enrollment metadata")
 	}
 
@@ -697,7 +693,7 @@ func ensureMappingEnrollment(
 	credential.Actor = enrollmentActor
 	credential.AllowInsecure = catalog.AllowInsecure
 	credential = withManagementMetadata(credential, catalog, mapping)
-	return enrollment, credential, nil
+	return credential, nil
 }
 
 func convergeLocalMapping(
@@ -705,10 +701,8 @@ func convergeLocalMapping(
 	store db.Storage,
 	credentials config.FederationCredentialStore,
 	wake func(),
-	_ config.CatalogDaemonConfig,
 	mapping config.FederationProjectConfig,
 	preflight mappingPreflight,
-	_ Enrollment,
 	credential config.FederationCredential,
 ) error {
 	if preflight.hasBinding &&

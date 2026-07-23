@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -62,28 +61,6 @@ type FederationCredentialRekey struct {
 	Replacement    FederationCredential
 }
 
-// FederationCredentialReservation describes one credential value that must be
-// reserved under every listed project UID in a single atomic update.
-type FederationCredentialReservation struct {
-	ProjectUIDs []string
-	Credential  FederationCredential
-}
-
-// FederationCredentialReservationMatch is one config-managed reservation and
-// every credential key currently carrying its exact value.
-type FederationCredentialReservationMatch struct {
-	ProjectUIDs []string
-	Credential  FederationCredential
-}
-
-// FederationCredentialReservationCleanup constrains alias cleanup to the
-// exact managed reservation observed for one current local project.
-type FederationCredentialReservationCleanup struct {
-	SpokeProjectName  string
-	CurrentProjectUID string
-	Expected          FederationCredential
-}
-
 // FederationManagedCredentialReservation is one config-managed credential
 // reserved under its stable hub project UID.
 type FederationManagedCredentialReservation struct {
@@ -126,40 +103,6 @@ type FederationManagedCredentialStore interface {
 	) error
 }
 
-// FederationCredentialRekeyer is a legacy optional capability retained until
-// callers migrate to FederationManagedCredentialStore.
-//
-// It is the optional atomic move capability required
-// when config reconciliation adopts a standalone project under a different hub
-// UID. Keeping it separate preserves compatibility for service-scoped stores
-// that never perform that transition.
-type FederationCredentialRekeyer interface {
-	RekeyFederationCredential(context.Context, FederationCredentialRekey) error
-}
-
-// FederationCredentialReserver is a legacy optional compare-and-store capability
-// used to reserve a config-managed enrollment token without overwriting a
-// concurrent manual credential.
-type FederationCredentialReserver interface {
-	ReserveFederationCredentials(context.Context, FederationCredentialReservation) error
-}
-
-// FederationCredentialReservationFinder is a legacy optional lookup used to
-// discover a config-managed reservation independently of its credential key.
-type FederationCredentialReservationFinder interface {
-	FederationCredentialReservationForProject(
-		context.Context, string,
-	) (FederationCredentialReservationMatch, bool, error)
-}
-
-// FederationCredentialReservationCleaner is a legacy optional cleanup used
-// when leaving a project that may have config-reservation aliases.
-type FederationCredentialReservationCleaner interface {
-	DeleteFederationCredentialReservationForProject(
-		context.Context, FederationCredentialReservationCleanup,
-	) error
-}
-
 // homeFederationCredentialStore uses the standalone daemon's
 // <KATA_HOME>/credentials.toml file.
 type homeFederationCredentialStore struct{}
@@ -193,12 +136,6 @@ func (homeFederationCredentialStore) RekeyFederationCredential(
 	return RekeyFederationCredential(rekey)
 }
 
-func (homeFederationCredentialStore) ReserveFederationCredentials(
-	_ context.Context, reservation FederationCredentialReservation,
-) error {
-	return ReserveFederationCredentials(reservation)
-}
-
 func (homeFederationCredentialStore) ReserveManagedFederationCredential(
 	_ context.Context, reservation FederationManagedCredentialReservation,
 ) error {
@@ -217,94 +154,9 @@ func (homeFederationCredentialStore) DeleteManagedFederationCredential(
 	return DeleteManagedFederationCredential(reservation)
 }
 
-func (homeFederationCredentialStore) FederationCredentialReservationForProject(
-	_ context.Context, projectName string,
-) (FederationCredentialReservationMatch, bool, error) {
-	projectName = strings.TrimSpace(projectName)
-	if projectName == "" {
-		return FederationCredentialReservationMatch{}, false, nil
-	}
-	federationCredentialsMu.Lock()
-	defer federationCredentialsMu.Unlock()
-
-	credentials, err := readFederationCredentials()
-	if err != nil {
-		return FederationCredentialReservationMatch{}, false, err
-	}
-	var match FederationCredentialReservationMatch
-	found := false
-	for projectUID, credential := range credentials.Projects {
-		if !credential.ManagedByConfig ||
-			strings.TrimSpace(credential.SpokeProjectName) != projectName {
-			continue
-		}
-		if found && credential != match.Credential {
-			return FederationCredentialReservationMatch{}, false, fmt.Errorf(
-				"%w: managed reservations for project %s disagree",
-				ErrFederationCredentialConflict,
-				projectName,
-			)
-		}
-		match.Credential = credential
-		match.ProjectUIDs = append(match.ProjectUIDs, projectUID)
-		found = true
-	}
-	sort.Strings(match.ProjectUIDs)
-	return match, found, nil
-}
-
-func (homeFederationCredentialStore) DeleteFederationCredentialReservationForProject(
-	_ context.Context, cleanup FederationCredentialReservationCleanup,
-) error {
-	cleanup.SpokeProjectName = strings.TrimSpace(cleanup.SpokeProjectName)
-	cleanup.CurrentProjectUID = strings.TrimSpace(cleanup.CurrentProjectUID)
-	if cleanup.SpokeProjectName == "" ||
-		cleanup.CurrentProjectUID == "" ||
-		!cleanup.Expected.ManagedByConfig ||
-		strings.TrimSpace(cleanup.Expected.SpokeProjectName) != cleanup.SpokeProjectName {
-		return fmt.Errorf("%w: invalid managed reservation cleanup", ErrFederationCredentialConflict)
-	}
-
-	federationCredentialsMu.Lock()
-	defer federationCredentialsMu.Unlock()
-
-	credentials, err := readFederationCredentials()
-	if err != nil {
-		return err
-	}
-	if current, found := credentials.Projects[cleanup.CurrentProjectUID]; found &&
-		current != cleanup.Expected {
-		return fmt.Errorf(
-			"%w: current project credential differs from managed reservation",
-			ErrFederationCredentialConflict,
-		)
-	}
-	aliases := make([]string, 0, 2)
-	for projectUID, credential := range credentials.Projects {
-		if !credential.ManagedByConfig ||
-			strings.TrimSpace(credential.SpokeProjectName) != cleanup.SpokeProjectName {
-			continue
-		}
-		if credential != cleanup.Expected {
-			return fmt.Errorf(
-				"%w: managed reservation changed before cleanup",
-				ErrFederationCredentialConflict,
-			)
-		}
-		aliases = append(aliases, projectUID)
-	}
-	if len(aliases) == 0 {
-		return nil
-	}
-	for _, projectUID := range aliases {
-		delete(credentials.Projects, projectUID)
-	}
-	return writeFederationCredentials(credentials)
-}
-
 // DefaultFederationCredentialStore returns the standalone daemon credential
 // store. Embedded services supply their own isolated store.
-func DefaultFederationCredentialStore() FederationCredentialStore {
+func DefaultFederationCredentialStore() FederationManagedCredentialStore {
 	return homeFederationCredentialStore{}
 }
 
@@ -472,16 +324,6 @@ func WriteFederationCredential(projectUID string, c FederationCredential) error 
 	})
 }
 
-// ReserveFederationCredential stores credential only when projectUID is
-// absent. An exact existing value is an idempotent success; any distinct value
-// is a conflict and remains unchanged.
-func ReserveFederationCredential(projectUID string, credential FederationCredential) error {
-	return ReserveFederationCredentials(FederationCredentialReservation{
-		ProjectUIDs: []string{projectUID},
-		Credential:  credential,
-	})
-}
-
 // ReserveManagedFederationCredential atomically reserves a config-managed
 // credential under exactly one stable hub project UID. An exact replay is
 // idempotent; a different existing credential is left unchanged and conflicts.
@@ -505,7 +347,7 @@ func ReserveManagedFederationCredential(
 }
 
 // FindManagedFederationCredential locates the one managed reservation for a
-// spoke project. Multiple marked entries are an ambiguous legacy alias state.
+// spoke project. Multiple marked entries are ambiguous and conflict.
 func FindManagedFederationCredential(
 	projectName string,
 ) (FederationManagedCredentialReservation, bool, error) {
@@ -560,57 +402,6 @@ func DeleteManagedFederationCredential(
 	})
 }
 
-// ReserveFederationCredentials stores one credential under every requested
-// project UID in a single credentials-file update. Exact existing aliases are
-// idempotent; any distinct alias conflicts before the file is changed.
-func ReserveFederationCredentials(reservation FederationCredentialReservation) error {
-	projectUIDs := make([]string, 0, len(reservation.ProjectUIDs))
-	seen := make(map[string]struct{}, len(reservation.ProjectUIDs))
-	for _, projectUID := range reservation.ProjectUIDs {
-		if projectUID == "" {
-			return fmt.Errorf("%w: reservation project UID is empty", ErrFederationCredentialConflict)
-		}
-		if _, ok := seen[projectUID]; ok {
-			continue
-		}
-		seen[projectUID] = struct{}{}
-		projectUIDs = append(projectUIDs, projectUID)
-	}
-	if len(projectUIDs) == 0 {
-		return fmt.Errorf("%w: reservation project UIDs are empty", ErrFederationCredentialConflict)
-	}
-
-	federationCredentialsMu.Lock()
-	defer federationCredentialsMu.Unlock()
-
-	creds, err := readFederationCredentials()
-	if err != nil {
-		return err
-	}
-	writeRequired := false
-	for _, projectUID := range projectUIDs {
-		existing, ok := creds.Projects[projectUID]
-		if !ok {
-			writeRequired = true
-			continue
-		}
-		if existing != reservation.Credential {
-			return fmt.Errorf(
-				"%w: reservation target credential differs for project %s",
-				ErrFederationCredentialConflict,
-				projectUID,
-			)
-		}
-	}
-	if !writeRequired {
-		return nil
-	}
-	for _, projectUID := range projectUIDs {
-		creds.Projects[projectUID] = reservation.Credential
-	}
-	return writeFederationCredentials(creds)
-}
-
 // RekeyFederationCredential atomically replaces FromProjectUID with
 // ToProjectUID inside one serialized credentials-file read-modify-write.
 func RekeyFederationCredential(rekey FederationCredentialRekey) error {
@@ -641,14 +432,8 @@ func RekeyFederationCredential(rekey FederationCredentialRekey) error {
 }
 
 func updateFederationCredentials(update func(*FederationCredentials) error) error {
-	return updateFederationCredentialsWithLock(&federationCredentialsMu, update)
-}
-
-func updateFederationCredentialsWithLock(
-	lock sync.Locker, update func(*FederationCredentials) error,
-) error {
-	lock.Lock()
-	defer lock.Unlock()
+	federationCredentialsMu.Lock()
+	defer federationCredentialsMu.Unlock()
 
 	creds, err := readFederationCredentials()
 	if err != nil {

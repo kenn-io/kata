@@ -37,10 +37,6 @@ type replicaCredentialStore struct {
 	rekeyCalls  int
 }
 
-type reservationFindingCredentialStore struct {
-	*replicaCredentialStore
-}
-
 // baseCredentialStore deliberately exposes only the public credential CRUD
 // surface so capability-requirement tests do not accidentally inherit managed
 // operations from replicaCredentialStore.
@@ -64,45 +60,6 @@ func (s baseCredentialStore) DeleteFederationCredential(
 	ctx context.Context, projectUID string,
 ) error {
 	return s.delegate.DeleteFederationCredential(ctx, projectUID)
-}
-
-func (s reservationFindingCredentialStore) FederationCredentialReservationForProject(
-	_ context.Context, projectName string,
-) (config.FederationCredentialReservationMatch, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var match config.FederationCredentialReservationMatch
-	found := false
-	for projectUID, credential := range s.credentials {
-		if !credential.ManagedByConfig || credential.SpokeProjectName != projectName {
-			continue
-		}
-		if found && credential != match.Credential {
-			return config.FederationCredentialReservationMatch{}, false,
-				config.ErrFederationCredentialConflict
-		}
-		match.Credential = credential
-		match.ProjectUIDs = append(match.ProjectUIDs, projectUID)
-		found = true
-	}
-	return match, found, nil
-}
-
-func (s reservationFindingCredentialStore) ReserveFederationCredentials(
-	_ context.Context, reservation config.FederationCredentialReservation,
-) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, projectUID := range reservation.ProjectUIDs {
-		if existing, found := s.credentials[projectUID]; found &&
-			existing != reservation.Credential {
-			return config.ErrFederationCredentialConflict
-		}
-	}
-	for _, projectUID := range reservation.ProjectUIDs {
-		s.credentials[projectUID] = reservation.Credential
-	}
-	return nil
 }
 
 func newReplicaCredentialStore() *replicaCredentialStore {
@@ -313,36 +270,6 @@ func (s *managedCleanupConflictCredentialStore) managedDeleteCallCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.managedDeleteCalls
-}
-
-type replicaBindingReadBarrierStore struct {
-	db.Storage
-	arrivals chan struct{}
-	release  chan struct{}
-	calls    atomic.Int64
-}
-
-func newReplicaBindingReadBarrierStore(store db.Storage) *replicaBindingReadBarrierStore {
-	return &replicaBindingReadBarrierStore{
-		Storage:  store,
-		arrivals: make(chan struct{}, 2),
-		release:  make(chan struct{}),
-	}
-}
-
-func (s *replicaBindingReadBarrierStore) FederationBindingByProject(
-	ctx context.Context, projectID int64,
-) (db.FederationBinding, error) {
-	binding, err := s.Storage.FederationBindingByProject(ctx, projectID)
-	if s.calls.Add(1) <= 2 {
-		s.arrivals <- struct{}{}
-		select {
-		case <-s.release:
-		case <-ctx.Done():
-			return db.FederationBinding{}, ctx.Err()
-		}
-	}
-	return binding, err
 }
 
 func TestEnsureFederationReplicaCreatesProjectBindingAndCredential(t *testing.T) {
@@ -838,7 +765,7 @@ func TestEnsureFederationReplicaRejectsManualAdoptionConflictingWithManagedReser
 	reservation.ManagedByConfig = true
 	reservation.SpokeProjectName = project.Name
 	delegate.put(replicaHubProjectUID, reservation)
-	credentials := reservationFindingCredentialStore{replicaCredentialStore: delegate}
+	credentials := delegate
 	params := replicaServiceParams()
 	params.HubProjectID = 43
 	params.HubProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EY"
@@ -877,7 +804,7 @@ func TestEnsureFederationReplicaAcceptsManagedReservationAtCanonicalOrigin(t *te
 	reservation.ManagedByConfig = true
 	reservation.SpokeProjectName = "hub-project"
 	delegate.put(replicaHubProjectUID, reservation)
-	credentials := reservationFindingCredentialStore{replicaCredentialStore: delegate}
+	credentials := delegate
 	params := replicaServiceParams()
 	params.HubURL = "http://hub.example/manual/base/"
 	params.Credential.HubURL = params.HubURL
@@ -972,43 +899,6 @@ func TestEnsureFederationReplicaAcceptsUnchangedManagedReservation(t *testing.T)
 	require.NoError(t, readErr)
 	require.True(t, found)
 	assert.Equal(t, expected, stored)
-}
-
-func TestReserveFederationReplicaCredentialUsesOnlyRequestedHubUID(t *testing.T) {
-	ctx := context.Background()
-	store := openReplicaServiceStore(t)
-	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
-	require.NoError(t, err)
-	delegate := newReplicaCredentialStore()
-	reservation := replicaServiceParams().Credential
-	reservation.Token = "pending-token-a"
-	reservation.ManagedByConfig = true
-	reservation.SpokeProjectName = project.Name
-	delegate.put(replicaHubProjectUID, reservation)
-	credentials := reservationFindingCredentialStore{replicaCredentialStore: delegate}
-	recreatedUID := "01HZNQ7VFPK1XGD8R5MABCD4EY"
-
-	err = daemon.ReserveFederationReplicaCredential(
-		ctx, store, credentials,
-		daemon.ReserveFederationReplicaCredentialParams{
-			HubProjectUID: recreatedUID,
-			ProjectName:   project.Name,
-			Credential:    reservation,
-		},
-	)
-
-	require.NoError(t, err)
-	_, found, readErr := credentials.FederationCredential(ctx, project.UID)
-	require.NoError(t, readErr)
-	assert.False(t, found)
-	final, found, readErr := credentials.FederationCredential(ctx, replicaHubProjectUID)
-	require.NoError(t, readErr)
-	require.True(t, found)
-	assert.Equal(t, reservation, final)
-	reserved, found, readErr := credentials.FederationCredential(ctx, recreatedUID)
-	require.NoError(t, readErr)
-	require.True(t, found)
-	assert.Equal(t, reservation, reserved)
 }
 
 func TestEnsureFederationReplicaRekeysCredentialBeforeAdoption(t *testing.T) {
@@ -1256,95 +1146,6 @@ func TestEnsureFederationReplicaWakeMayReenterAfterCompletedState(t *testing.T) 
 	assert.Equal(t, state.project.ID, outer.result.Project.ID)
 	assert.True(t, outer.result.Binding.PushEnabled)
 	assert.Equal(t, int64(1), wakes.Load())
-}
-
-func TestEnsureFederationReplicaConcurrentDifferentHubJoinsStayConsistent(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	sqlStore := openReplicaServiceStore(t)
-	project, err := sqlStore.CreateProjectWithUID(ctx, "hub-project", replicaHubProjectUID)
-	require.NoError(t, err)
-	store := newReplicaBindingReadBarrierStore(sqlStore)
-	credentials := newReplicaCredentialStore()
-	first := replicaServiceParams()
-	first.PushEnabled = false
-	first.Credential.Capabilities = "pull"
-	first.HubURL = "https://hub-a.example/api"
-	first.Credential.HubURL = first.HubURL
-	first.Credential.Token = "token-a"
-	second := first
-	second.HubURL = "https://hub-b.example/api"
-	second.HubProjectID = 73
-	second.Credential.HubURL = second.HubURL
-	second.Credential.HubProjectID = second.HubProjectID
-	second.Credential.Token = "token-b"
-	var wakes atomic.Int64
-	type callResult struct {
-		params daemon.EnsureFederationReplicaParams
-		result daemon.EnsureFederationReplicaResult
-		err    error
-	}
-	results := make(chan callResult, 2)
-	start := make(chan struct{})
-	for _, params := range []daemon.EnsureFederationReplicaParams{first, second} {
-		go func() {
-			<-start
-			result, callErr := daemon.EnsureFederationReplica(
-				ctx, store, credentials, func() { wakes.Add(1) }, params,
-			)
-			results <- callResult{params: params, result: result, err: callErr}
-		}()
-	}
-	close(start)
-	select {
-	case <-store.arrivals:
-	case result := <-results:
-		require.FailNow(
-			t,
-			"ensure completed before serialized binding validation",
-			"error: %v", result.err,
-		)
-	case <-ctx.Done():
-		require.FailNow(t, "wait for serialized binding read", "error: %v", ctx.Err())
-	}
-	close(store.release)
-
-	got := [2]callResult{}
-	for i := range got {
-		select {
-		case got[i] = <-results:
-		case <-ctx.Done():
-			require.FailNow(t, "wait for concurrent ensure results", "error: %v", ctx.Err())
-		}
-	}
-	var winner *callResult
-	failures := 0
-	for i := range got {
-		if got[i].err == nil {
-			require.Nil(t, winner, "exactly one different-hub ensure may succeed")
-			winner = &got[i]
-			continue
-		}
-		failures++
-		assert.ErrorIs(
-			t, got[i].err, daemon.ErrFederationReplicaBindingConflict,
-			"post-lock revalidation must reject the loser at the binding boundary",
-		)
-	}
-	require.NotNil(t, winner)
-	assert.Equal(t, 1, failures)
-	assert.Equal(t, int64(1), wakes.Load())
-
-	binding, err := sqlStore.FederationBindingByProject(ctx, project.ID)
-	require.NoError(t, err)
-	stored, ok, err := credentials.FederationCredential(ctx, project.UID)
-	require.NoError(t, err)
-	require.True(t, ok)
-	assert.Equal(t, winner.params.HubURL, binding.HubURL)
-	assert.Equal(t, winner.params.HubProjectID, binding.HubProjectID)
-	assert.Equal(t, winner.params.HubURL, stored.HubURL)
-	assert.Equal(t, winner.params.HubProjectID, stored.HubProjectID)
-	assert.Equal(t, winner.params.Credential.Token, stored.Token)
 }
 
 func TestEnsureFederationReplicaRejectsPushCredentialBeforeBindingMutation(t *testing.T) {

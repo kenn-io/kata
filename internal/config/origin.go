@@ -43,13 +43,7 @@ func CanonicalHTTPOrigin(raw string) (string, error) {
 	return (&url.URL{Scheme: scheme, Host: host}).String(), nil
 }
 
-func httpOriginPort(u *url.URL) (port string, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			port = ""
-			err = fmt.Errorf("invalid HTTP origin port: %v", recovered)
-		}
-	}()
+func httpOriginPort(u *url.URL) (string, error) {
 	raw := u.Port()
 	if raw == "" {
 		return "", nil

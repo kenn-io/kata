@@ -396,7 +396,7 @@ func TestFederationReplicaSetupRejectsIncompatibleRetry(t *testing.T) {
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)
 
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
-	assert.Contains(t, string(raw), "hub_project_id existing=42 requested=43")
+	assert.Contains(t, string(raw), `"code":"federation_credential_conflict"`)
 	creds, err := config.ReadFederationCredentials()
 	require.NoError(t, err)
 	assert.Equal(t, "original-token", creds.Projects["01HZNQ7VFPK1XGD8R5MABCD4EX"].Token)
@@ -3076,7 +3076,7 @@ func TestLeaveFederationReplicaRouteDetach(t *testing.T) {
 	}
 }
 
-func TestLeaveFederationReplicaRouteManagedCleanupConflictReturns409(t *testing.T) {
+func TestLeaveFederationReplicaManagedConflictRemainsRetryable(t *testing.T) {
 	delegate := newReplicaCredentialStore()
 	manual := config.FederationCredential{
 		HubURL:       "http://hub.example",

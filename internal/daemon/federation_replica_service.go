@@ -342,9 +342,6 @@ func ensureFederationReplicaState(
 	if err := rejectConflictingManagedReservation(ctx, credentials, p); err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
-	if err := prevalidateExistingFederationReplica(ctx, store, p); err != nil {
-		return EnsureFederationReplicaResult{}, err
-	}
 	if err := ensureFederationReplicaCredentialTarget(ctx, credentials, p); err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
@@ -453,39 +450,6 @@ func rejectConflictingManagedReservation(
 		)
 	}
 	return nil
-}
-
-func prevalidateExistingFederationReplica(
-	ctx context.Context,
-	store db.Storage,
-	p EnsureFederationReplicaParams,
-) error {
-	project, err := store.ProjectByUID(ctx, p.HubProjectUID)
-	if errors.Is(err, db.ErrNotFound) && p.AdoptExisting {
-		project, err = store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
-	}
-	if errors.Is(err, db.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("prevalidate federation replica project: %w", err)
-	}
-
-	binding, err := store.FederationBindingByProject(ctx, project.ID)
-	if errors.Is(err, db.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("prevalidate federation replica binding: %w", err)
-	}
-	if details := replicaBindingConflictDetails(binding, p); len(details) > 0 {
-		return federationReplicaError(
-			ErrFederationReplicaBindingConflict,
-			"existing federation binding differs from the requested hub: "+strings.Join(details, ", "),
-			"",
-		)
-	}
-	return validateExistingReplicaCredentialCapabilities(binding, p)
 }
 
 func validateExistingReplicaCredentialCapabilities(
