@@ -314,12 +314,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			cfg.federationCredentialStore(),
 			cfg.FederationWake,
 			EnsureFederationReplicaParams{
-				HubURL:                 in.Body.HubURL,
-				HubProjectID:           in.Body.HubProjectID,
-				HubProjectUID:          in.Body.HubProjectUID,
-				ProjectName:            in.Body.ProjectName,
-				ReplayHorizonEventID:   in.Body.ReplayHorizonEventID,
-				BaselineThroughEventID: in.Body.BaselineThroughEventID,
+				HubURL:               in.Body.HubURL,
+				HubProjectID:         in.Body.HubProjectID,
+				HubProjectUID:        in.Body.HubProjectUID,
+				ProjectName:          in.Body.ProjectName,
+				ReplayHorizonEventID: in.Body.ReplayHorizonEventID,
 				Credential: config.FederationCredential{
 					HubURL:        in.Body.HubURL,
 					HubProjectID:  in.Body.HubProjectID,
@@ -455,6 +454,15 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
 		case errors.Is(err, db.ErrFederationNotSpoke):
 			return nil, api.NewError(http.StatusConflict, "not_a_spoke", "federation binding is not a spoke", "", nil)
+		case errors.Is(err, ErrFederationReplicaCredentialConflict),
+			errors.Is(err, config.ErrFederationCredentialConflict):
+			return nil, api.NewError(
+				http.StatusConflict,
+				"federation_credential_conflict",
+				"federation credential changed during leave",
+				"resolve the credential conflict in credentials.toml, then retry kata federation leave",
+				nil,
+			)
 		case err != nil:
 			return nil, internalAPIError(err)
 		}

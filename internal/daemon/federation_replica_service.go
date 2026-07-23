@@ -20,6 +20,8 @@ var (
 	ErrFederationReplicaBindingConflict = errors.New("federation replica binding conflict")
 	// ErrFederationReplicaCredentialConflict classifies a credential targeting another hub.
 	ErrFederationReplicaCredentialConflict = errors.New("federation replica credential conflict")
+	// ErrFederationReplicaCredentialIO classifies bounded credential-store failures.
+	ErrFederationReplicaCredentialIO = errors.New("federation replica credential I/O")
 
 	errFederationReplicaCapabilityMismatch = fmt.Errorf(
 		"%w: capability mismatch", ErrFederationReplicaInvalidInput,
@@ -57,15 +59,27 @@ func (e *FederationReplicaError) Unwrap() error {
 	return e.kind
 }
 
+// Hint returns the actionable recovery guidance associated with the error.
+func (e *FederationReplicaError) Hint() string {
+	return e.hint
+}
+
+// FederationReplicaManagedReservation identifies the managed credential that
+// must still exist unchanged after the caller finishes hub I/O.
+type FederationReplicaManagedReservation struct {
+	ProjectUID string
+	Expected   config.FederationCredential
+}
+
 // EnsureFederationReplicaParams describes a local spoke replica to create,
 // rejoin, or adopt without depending on HTTP request types.
 type EnsureFederationReplicaParams struct {
 	HubURL, HubProjectUID, ProjectName string
 	HubProjectID                       int64
 	ReplayHorizonEventID               int64
-	BaselineThroughEventID             int64
 	Credential                         config.FederationCredential
 	CredentialRekey                    *FederationReplicaCredentialRekeySource
+	ManagedReservation                 *FederationReplicaManagedReservation
 	PushEnabled, AdoptExisting         bool
 }
 
@@ -110,6 +124,11 @@ func leaveFederationReplicaState(
 	credentials config.FederationCredentialStore,
 	projectID int64,
 ) (db.LeaveFederationResult, error) {
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return db.LeaveFederationResult{}, err
+	}
+
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
@@ -119,28 +138,16 @@ func leaveFederationReplicaState(
 			"read federation replica project before leave: %w", err,
 		)
 	}
-	var reservationCleanup *config.FederationCredentialReservationCleanup
-	if finder, ok := credentials.(config.FederationCredentialReservationFinder); ok {
-		match, found, findErr := finder.FederationCredentialReservationForProject(
-			ctx, project.Name,
+	match, managedReservationFound, err := managed.FindManagedFederationCredential(
+		ctx, project.Name,
+	)
+	if err != nil {
+		if errors.Is(err, config.ErrFederationCredentialConflict) {
+			return db.LeaveFederationResult{}, err
+		}
+		return db.LeaveFederationResult{}, credentialIOError(
+			"read managed reservation before leave",
 		)
-		if findErr != nil {
-			return db.LeaveFederationResult{}, fmt.Errorf(
-				"read managed federation reservation before leave: %w", findErr,
-			)
-		}
-		if found {
-			if _, ok := credentials.(config.FederationCredentialReservationCleaner); !ok {
-				return db.LeaveFederationResult{}, errors.New(
-					"delete managed federation reservation: credential store does not support atomic cleanup",
-				)
-			}
-			reservationCleanup = &config.FederationCredentialReservationCleanup{
-				SpokeProjectName:  project.Name,
-				CurrentProjectUID: project.UID,
-				Expected:          match.Credential,
-			}
-		}
 	}
 
 	// The handler's early role check protects archive-before-detach. Repeat it
@@ -160,24 +167,22 @@ func leaveFederationReplicaState(
 	if err != nil {
 		return db.LeaveFederationResult{}, err
 	}
-	if reservationCleanup != nil {
-		cleaner := credentials.(config.FederationCredentialReservationCleaner)
-		if err := cleaner.DeleteFederationCredentialReservationForProject(
-			ctx, *reservationCleanup,
-		); err != nil {
-			return db.LeaveFederationResult{}, fmt.Errorf(
-				"delete managed federation reservation aliases: %w", err,
+	if managedReservationFound {
+		if err := managed.DeleteManagedFederationCredential(ctx, match); err != nil {
+			if errors.Is(err, config.ErrFederationCredentialConflict) {
+				return db.LeaveFederationResult{}, err
+			}
+			return db.LeaveFederationResult{}, credentialIOError(
+				"delete managed reservation after leave",
 			)
 		}
 	} else if result.ProjectUID != "" {
-		if credentials == nil {
-			return db.LeaveFederationResult{}, errors.New(
-				"delete federation replica credential: credential store is nil",
-			)
-		}
 		if err := credentials.DeleteFederationCredential(ctx, result.ProjectUID); err != nil {
-			return db.LeaveFederationResult{}, fmt.Errorf(
-				"delete federation replica credential: %w", err,
+			if errors.Is(err, config.ErrFederationCredentialConflict) {
+				return db.LeaveFederationResult{}, err
+			}
+			return db.LeaveFederationResult{}, credentialIOError(
+				"delete federation replica credential after leave",
 			)
 		}
 	}
@@ -209,12 +214,6 @@ func EnsureFederationReplica(
 		return EnsureFederationReplicaResult{}, err
 	}
 	p = normalized
-	// Check immutable conflicts before taking the service lock so rejected
-	// retries neither wait behind unrelated joins nor mutate an existing
-	// binding. Repeat the check under the lock to close the check-and-act gap.
-	if err := prevalidateExistingFederationReplica(ctx, store, p); err != nil {
-		return EnsureFederationReplicaResult{}, err
-	}
 
 	result, err := ensureFederationReplicaState(ctx, store, credentials, p)
 	if err != nil {
@@ -231,7 +230,7 @@ func EnsureFederationReplica(
 // released before the caller performs any hub network operation.
 func ReserveFederationReplicaCredential(
 	ctx context.Context,
-	store db.Storage,
+	_ db.Storage,
 	credentials config.FederationCredentialStore,
 	p ReserveFederationReplicaCredentialParams,
 ) error {
@@ -255,58 +254,21 @@ func ReserveFederationReplicaCredential(
 		)
 	}
 
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return err
+	}
+
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
-	if credentials == nil {
-		return errors.New("reserve federation replica credential: credential store is nil")
-	}
-	reserver, ok := credentials.(config.FederationCredentialReserver)
-	if !ok {
-		return errors.New("reserve federation replica credential: credential store does not support atomic reservation")
-	}
-	projectUIDs := []string{p.HubProjectUID}
-	project, err := store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
-	if err != nil && !errors.Is(err, db.ErrNotFound) {
-		return fmt.Errorf("resolve federation replica reservation source: %w", err)
-	}
-	projectFound := err == nil
-	if projectFound && project.UID != p.HubProjectUID {
-		projectUIDs = []string{project.UID, p.HubProjectUID}
-	}
-	if err := rejectConflictingReservationAliases(
-		ctx, credentials, p.ProjectName, projectUIDs, p.Credential,
+	if err := managed.ReserveManagedFederationCredential(
+		ctx,
+		config.FederationManagedCredentialReservation{
+			ProjectUID: p.HubProjectUID,
+			Credential: p.Credential,
+		},
 	); err != nil {
-		return err
-	}
-	existing, found, err := credentials.FederationCredential(ctx, p.HubProjectUID)
-	if err != nil {
-		return fmt.Errorf("read federation replica reservation target: %w", err)
-	}
-	if found && existing != p.Credential {
-		return federationReplicaError(
-			ErrFederationReplicaCredentialConflict,
-			"existing federation credential differs from the requested reservation",
-			"",
-		)
-	}
-	if projectFound && project.UID != p.HubProjectUID {
-		source, sourceFound, readErr := credentials.FederationCredential(ctx, project.UID)
-		if readErr != nil {
-			return fmt.Errorf("read federation replica reservation source: %w", readErr)
-		}
-		if sourceFound && source != p.Credential {
-			return federationReplicaError(
-				ErrFederationReplicaCredentialConflict,
-				"standalone project credential differs from the requested reservation",
-				"",
-			)
-		}
-	}
-	if err := reserver.ReserveFederationCredentials(ctx, config.FederationCredentialReservation{
-		ProjectUIDs: projectUIDs,
-		Credential:  p.Credential,
-	}); err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
 			return federationReplicaError(
 				ErrFederationReplicaCredentialConflict,
@@ -314,57 +276,7 @@ func ReserveFederationReplicaCredential(
 				"",
 			)
 		}
-		return fmt.Errorf("reserve federation replica credential: %w", err)
-	}
-	return nil
-}
-
-func rejectConflictingReservationAliases(
-	ctx context.Context,
-	credentials config.FederationCredentialStore,
-	projectName string,
-	allowedProjectUIDs []string,
-	expected config.FederationCredential,
-) error {
-	finder, ok := credentials.(config.FederationCredentialReservationFinder)
-	if !ok {
-		return nil
-	}
-	match, found, err := finder.FederationCredentialReservationForProject(
-		ctx, projectName,
-	)
-	if err != nil {
-		if errors.Is(err, config.ErrFederationCredentialConflict) {
-			return federationReplicaError(
-				ErrFederationReplicaCredentialConflict,
-				"managed federation reservations for the project disagree",
-				"",
-			)
-		}
-		return fmt.Errorf("read managed federation reservation before reserve: %w", err)
-	}
-	if !found {
-		return nil
-	}
-	if match.Credential != expected {
-		return federationReplicaError(
-			ErrFederationReplicaCredentialConflict,
-			"managed federation reservation differs from requested reservation",
-			"",
-		)
-	}
-	allowed := make(map[string]struct{}, len(allowedProjectUIDs))
-	for _, projectUID := range allowedProjectUIDs {
-		allowed[projectUID] = struct{}{}
-	}
-	for _, projectUID := range match.ProjectUIDs {
-		if _, ok := allowed[projectUID]; !ok {
-			return federationReplicaError(
-				ErrFederationReplicaCredentialConflict,
-				"managed federation reservation uses another project UID",
-				"",
-			)
-		}
+		return credentialIOError("reserve managed federation credential")
 	}
 	return nil
 }
@@ -378,6 +290,9 @@ func ensureFederationReplicaState(
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
+	if err := revalidateManagedReservation(ctx, credentials, p); err != nil {
+		return EnsureFederationReplicaResult{}, err
+	}
 	if err := rejectConflictingManagedReservation(ctx, credentials, p); err != nil {
 		return EnsureFederationReplicaResult{}, err
 	}
@@ -397,10 +312,17 @@ func ensureFederationReplicaState(
 	}
 	if p.Credential.Token != "" {
 		if credentials == nil {
-			return EnsureFederationReplicaResult{}, fmt.Errorf("store federation replica credential: credential store is nil")
+			return EnsureFederationReplicaResult{}, credentialIOError(
+				"store federation replica credential",
+			)
 		}
 		if err := credentials.StoreFederationCredential(ctx, result.Project.UID, p.Credential); err != nil {
-			return EnsureFederationReplicaResult{}, fmt.Errorf("store federation replica credential: %w", err)
+			if errors.Is(err, config.ErrFederationCredentialConflict) {
+				return EnsureFederationReplicaResult{}, err
+			}
+			return EnsureFederationReplicaResult{}, credentialIOError(
+				"store federation replica credential",
+			)
 		}
 	}
 	if p.PushEnabled && !result.Binding.PushEnabled {
@@ -412,18 +334,51 @@ func ensureFederationReplicaState(
 	return result, nil
 }
 
+func revalidateManagedReservation(
+	ctx context.Context,
+	credentials config.FederationCredentialStore,
+	p EnsureFederationReplicaParams,
+) error {
+	if p.ManagedReservation == nil {
+		return nil
+	}
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return err
+	}
+	match, found, err := managed.FindManagedFederationCredential(ctx, p.ProjectName)
+	if err != nil {
+		if errors.Is(err, config.ErrFederationCredentialConflict) {
+			return federationReplicaError(
+				ErrFederationReplicaCredentialConflict,
+				"managed federation reservations for the project disagree",
+				"resolve the credential conflict, then retry reconciliation",
+			)
+		}
+		return credentialIOError("read managed reservation")
+	}
+	if !found ||
+		match.ProjectUID != p.ManagedReservation.ProjectUID ||
+		match.Credential != p.ManagedReservation.Expected {
+		return federationReplicaError(
+			ErrFederationReplicaCredentialConflict,
+			"managed federation reservation changed while contacting the hub",
+			"retry reconciliation or run kata federation leave for the project",
+		)
+	}
+	return nil
+}
+
 func rejectConflictingManagedReservation(
 	ctx context.Context,
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
 ) error {
-	finder, ok := credentials.(config.FederationCredentialReservationFinder)
+	finder, ok := credentials.(config.FederationManagedCredentialStore)
 	if !ok {
 		return nil
 	}
-	match, found, err := finder.FederationCredentialReservationForProject(
-		ctx, p.ProjectName,
-	)
+	match, found, err := finder.FindManagedFederationCredential(ctx, p.ProjectName)
 	if err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
 			return federationReplicaError(
@@ -432,7 +387,7 @@ func rejectConflictingManagedReservation(
 				"",
 			)
 		}
-		return fmt.Errorf("read managed federation reservation: %w", err)
+		return credentialIOError("read managed federation reservation")
 	}
 	if !found {
 		return nil
@@ -670,11 +625,14 @@ func ensureFederationReplicaCredentialTarget(
 		return nil
 	}
 	if credentials == nil {
-		return fmt.Errorf("read federation replica credential: credential store is nil")
+		return credentialIOError("read federation replica credential")
 	}
 	existing, ok, err := credentials.FederationCredential(ctx, p.HubProjectUID)
 	if err != nil {
-		return fmt.Errorf("read federation replica credential: %w", err)
+		if errors.Is(err, config.ErrFederationCredentialConflict) {
+			return err
+		}
+		return credentialIOError("read federation replica credential")
 	}
 	if !ok {
 		return nil
@@ -683,30 +641,23 @@ func ensureFederationReplicaCredentialTarget(
 	if err != nil {
 		return federationReplicaError(
 			ErrFederationReplicaCredentialConflict,
-			fmt.Sprintf("existing federation credential has invalid hub_url %q: %v", existing.HubURL, err),
+			"existing federation credential has an invalid hub_url",
 			"",
 		)
 	}
 	requestedOrigin, _ := config.CanonicalHTTPOrigin(p.Credential.HubURL)
-	details := make([]string, 0, 2)
 	if existingOrigin != requestedOrigin {
-		details = append(details, fmt.Sprintf(
-			"hub_url existing=%s requested=%s", existing.HubURL, p.Credential.HubURL,
-		))
-	}
-	if existing.HubProjectID != p.Credential.HubProjectID {
-		details = append(details, fmt.Sprintf(
-			"hub_project_id existing=%d requested=%d",
-			existing.HubProjectID, p.Credential.HubProjectID,
-		))
-	}
-	if existing.ManagedByConfig && existing.Token != p.Credential.Token {
-		details = append(details, "managed credential token differs")
-	}
-	if len(details) > 0 {
 		return federationReplicaError(
 			ErrFederationReplicaCredentialConflict,
-			"existing federation credential differs from the requested hub: "+strings.Join(details, ", "),
+			"existing federation credential targets another hub origin",
+			"",
+		)
+	}
+	if existing.HubProjectID != p.Credential.HubProjectID ||
+		(existing.ManagedByConfig && existing.Token != p.Credential.Token) {
+		return federationReplicaError(
+			ErrFederationReplicaCredentialConflict,
+			"existing federation credential differs from the requested hub",
 			"",
 		)
 	}
@@ -727,11 +678,14 @@ func ensureFederationReplicaCredentialRekey(
 		}
 		if err == nil && project.UID != p.HubProjectUID {
 			if credentials == nil {
-				return fmt.Errorf("read federation credential adoption source: credential store is nil")
+				return credentialIOError("read federation credential adoption source")
 			}
 			existing, ok, readErr := credentials.FederationCredential(ctx, project.UID)
 			if readErr != nil {
-				return fmt.Errorf("read federation credential adoption source: %w", readErr)
+				if errors.Is(readErr, config.ErrFederationCredentialConflict) {
+					return readErr
+				}
+				return credentialIOError("read federation credential adoption source")
 			}
 			if ok {
 				if existing != p.Credential {
@@ -751,14 +705,11 @@ func ensureFederationReplicaCredentialRekey(
 	if source == nil {
 		return nil
 	}
-	if credentials == nil {
-		return fmt.Errorf("rekey federation replica credential: credential store is nil")
+	managed, err := managedCredentialStore(credentials)
+	if err != nil {
+		return err
 	}
-	rekeyer, ok := credentials.(config.FederationCredentialRekeyer)
-	if !ok {
-		return errors.New("rekey federation replica credential: credential store does not support atomic rekey")
-	}
-	if err := rekeyer.RekeyFederationCredential(ctx, config.FederationCredentialRekey{
+	if err := managed.RekeyFederationCredential(ctx, config.FederationCredentialRekey{
 		FromProjectUID: source.ProjectUID,
 		ToProjectUID:   p.HubProjectUID,
 		Expected:       source.Expected,
@@ -771,9 +722,26 @@ func ensureFederationReplicaCredentialRekey(
 				"",
 			)
 		}
-		return fmt.Errorf("rekey federation replica credential: %w", err)
+		return credentialIOError("rekey federation replica credential")
 	}
 	return nil
+}
+
+func managedCredentialStore(
+	credentials config.FederationCredentialStore,
+) (config.FederationManagedCredentialStore, error) {
+	managed, ok := credentials.(config.FederationManagedCredentialStore)
+	if !ok {
+		return nil, fmt.Errorf(
+			"%w: credential store lacks managed federation operations",
+			ErrFederationReplicaCredentialIO,
+		)
+	}
+	return managed, nil
+}
+
+func credentialIOError(operation string) error {
+	return fmt.Errorf("%w: %s", ErrFederationReplicaCredentialIO, operation)
 }
 
 func ensureReplicaBindingOrAdopt(

@@ -725,12 +725,11 @@ func TestReconcileMappingRacesManualJoinWithoutOrphanOrManagedOverwrite(t *testi
 	}()
 
 	manualParams := daemon.EnsureFederationReplicaParams{
-		HubURL:                 "https://hub.example",
-		HubProjectID:           42,
-		HubProjectUID:          hubProjectUID,
-		ProjectName:            project.Name,
-		ReplayHorizonEventID:   9,
-		BaselineThroughEventID: 6,
+		HubURL:               "https://hub.example",
+		HubProjectID:         42,
+		HubProjectUID:        hubProjectUID,
+		ProjectName:          project.Name,
+		ReplayHorizonEventID: 9,
 		Credential: config.FederationCredential{
 			HubURL: "https://hub.example", HubProjectID: 42,
 			Token: "manual-token-b", Capabilities: "claim,pull,push",
@@ -811,12 +810,11 @@ func TestReconcileMappingH1ReservationLosesToPausedManualH2JoinWithoutEnrollment
 	}
 
 	manualParams := daemon.EnsureFederationReplicaParams{
-		HubURL:                 "https://hub.example",
-		HubProjectID:           43,
-		HubProjectUID:          recreatedProjectUID,
-		ProjectName:            project.Name,
-		ReplayHorizonEventID:   9,
-		BaselineThroughEventID: 6,
+		HubURL:               "https://hub.example",
+		HubProjectID:         43,
+		HubProjectUID:        recreatedProjectUID,
+		ProjectName:          project.Name,
+		ReplayHorizonEventID: 9,
 		Credential: config.FederationCredential{
 			HubURL: "https://hub.example", HubProjectID: 43,
 			Token: "manual-token-b", Capabilities: "claim,pull,push",
@@ -912,12 +910,11 @@ func TestReconcileMappingH1ReservationWinsBeforeManualH2JoinAndHubEnrollment(t *
 	require.True(t, ok)
 	assert.True(t, reserved.ManagedByConfig)
 	manualParams := daemon.EnsureFederationReplicaParams{
-		HubURL:                 "https://hub.example",
-		HubProjectID:           43,
-		HubProjectUID:          recreatedProjectUID,
-		ProjectName:            project.Name,
-		ReplayHorizonEventID:   9,
-		BaselineThroughEventID: 6,
+		HubURL:               "https://hub.example",
+		HubProjectID:         43,
+		HubProjectUID:        recreatedProjectUID,
+		ProjectName:          project.Name,
+		ReplayHorizonEventID: 9,
 		Credential: config.FederationCredential{
 			HubURL: "https://hub.example", HubProjectID: 43,
 			Token: "manual-token-b", Capabilities: "claim,pull,push",
@@ -972,12 +969,11 @@ func TestReconcileMappingHubOnlyCrashStateRejectsManualH2AlreadyInService(t *tes
 	const manualKind = "manual-h2-before-backfill"
 	credentials := newManualReservationLookupBarrierCredentialStore(delegate, manualKind)
 	manualParams := daemon.EnsureFederationReplicaParams{
-		HubURL:                 "https://hub.example",
-		HubProjectID:           43,
-		HubProjectUID:          recreatedProjectUID,
-		ProjectName:            project.Name,
-		ReplayHorizonEventID:   9,
-		BaselineThroughEventID: 6,
+		HubURL:               "https://hub.example",
+		HubProjectID:         43,
+		HubProjectUID:        recreatedProjectUID,
+		ProjectName:          project.Name,
+		ReplayHorizonEventID: 9,
 		Credential: config.FederationCredential{
 			HubURL: "https://hub.example", HubProjectID: 43,
 			Token: "manual-token-b", Capabilities: "claim,pull,push",
@@ -1085,12 +1081,11 @@ func TestReconcileMappingHubOnlyCrashStateBackfillWinsBeforeManualH2(t *testing.
 	assert.Equal(t, pending, hubAlias)
 
 	manualParams := daemon.EnsureFederationReplicaParams{
-		HubURL:                 "https://hub.example",
-		HubProjectID:           43,
-		HubProjectUID:          recreatedProjectUID,
-		ProjectName:            project.Name,
-		ReplayHorizonEventID:   9,
-		BaselineThroughEventID: 6,
+		HubURL:               "https://hub.example",
+		HubProjectID:         43,
+		HubProjectUID:        recreatedProjectUID,
+		ProjectName:          project.Name,
+		ReplayHorizonEventID: 9,
 		Credential: config.FederationCredential{
 			HubURL: "https://hub.example", HubProjectID: 43,
 			Token: "manual-token-b", Capabilities: "claim,pull,push",

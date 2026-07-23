@@ -3076,6 +3076,77 @@ func TestLeaveFederationReplicaRouteDetach(t *testing.T) {
 	}
 }
 
+func TestLeaveFederationReplicaRouteManagedCleanupConflictReturns409(t *testing.T) {
+	delegate := newReplicaCredentialStore()
+	manual := config.FederationCredential{
+		HubURL:       "http://hub.example",
+		HubProjectID: 42,
+		Token:        "manual-token",
+		Actor:        "example-actor",
+	}
+	credentials := &managedCleanupConflictCredentialStore{
+		replicaCredentialStore: delegate,
+		replacement:            manual,
+		conflictOnDelete:       true,
+	}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		cfg.FederationCredentials = credentials
+	})
+	ctx := context.Background()
+	project, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID:            project.ID,
+		Role:                 db.FederationRoleSpoke,
+		HubURL:               "http://hub.example",
+		HubProjectID:         42,
+		HubProjectUID:        project.UID,
+		ReplayHorizonEventID: 9,
+		Enabled:              true,
+	})
+	require.NoError(t, err)
+	expected := manual
+	expected.Token = "managed-token"
+	expected.ManagedByConfig = true
+	expected.SpokeProjectName = project.Name
+	reservation := config.FederationManagedCredentialReservation{
+		ProjectUID: project.UID,
+		Credential: expected,
+	}
+	require.NoError(t, credentials.ReserveManagedFederationCredential(ctx, reservation))
+
+	resp, raw := envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "detach", "actor": "example-actor"}, nil)
+
+	assertAPIError(
+		t, resp.StatusCode, raw,
+		http.StatusConflict, "federation_credential_conflict",
+	)
+	assert.Contains(t, string(raw), "resolve the credential conflict")
+	_, bindingErr := env.DB.FederationBindingByProject(ctx, project.ID)
+	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
+	stored, found, readErr := credentials.FederationCredential(ctx, project.UID)
+	require.NoError(t, readErr)
+	require.True(t, found)
+	assert.Equal(t, manual, stored)
+	assert.Equal(t, 1, credentials.managedDeleteCallCount())
+
+	// Resolve the manual edit back to the exact managed reservation and retry.
+	// The binding is already gone, so reaching exact cleanup again proves the
+	// leave path is resumable independently of detach state.
+	credentials.put(project.UID, expected)
+	resp, raw = envDoRaw(t, env, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/leave", project.ID),
+		map[string]any{"disposition": "detach", "actor": "example-actor"}, nil)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
+	_, found, readErr = credentials.FederationCredential(ctx, project.UID)
+	require.NoError(t, readErr)
+	assert.False(t, found)
+	assert.Equal(t, 2, credentials.managedDeleteCallCount())
+}
+
 func TestLeaveFederationReplicaWaitsForEnsureCredentialPersistence(t *testing.T) {
 	credentials := newReplicaCredentialStoreBarrier()
 	defer credentials.releaseStore()

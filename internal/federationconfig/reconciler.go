@@ -646,16 +646,15 @@ func ReconcileMapping(
 	_, err = daemon.EnsureFederationReplica(
 		ctx, store, classifiedCredentialStore{delegate: credentials}, wake,
 		daemon.EnsureFederationReplicaParams{
-			HubURL:                 hubOrigin,
-			HubProjectID:           hubProject.ID,
-			HubProjectUID:          hubProject.UID,
-			ProjectName:            mapping.SpokeProject,
-			ReplayHorizonEventID:   hubProject.ReplayHorizonEventID,
-			BaselineThroughEventID: hubProject.BaselineThroughEventID,
-			Credential:             credential,
-			CredentialRekey:        credentialRekey,
-			PushEnabled:            true,
-			AdoptExisting:          true,
+			HubURL:               hubOrigin,
+			HubProjectID:         hubProject.ID,
+			HubProjectUID:        hubProject.UID,
+			ProjectName:          mapping.SpokeProject,
+			ReplayHorizonEventID: hubProject.ReplayHorizonEventID,
+			Credential:           credential,
+			CredentialRekey:      credentialRekey,
+			PushEnabled:          true,
+			AdoptExisting:        true,
 		},
 	)
 	if err != nil {
@@ -760,16 +759,15 @@ func ensureLocalManualReplica(
 	_, err := daemon.EnsureFederationReplica(
 		ctx, store, classifiedCredentialStore{delegate: credentials}, wake,
 		daemon.EnsureFederationReplicaParams{
-			HubURL:                 hubOrigin,
-			HubProjectID:           hubProject.ID,
-			HubProjectUID:          hubProject.UID,
-			ProjectName:            localProject.Name,
-			ReplayHorizonEventID:   hubProject.ReplayHorizonEventID,
-			BaselineThroughEventID: hubProject.BaselineThroughEventID,
-			Credential:             credential,
-			CredentialRekey:        credentialRekey,
-			PushEnabled:            true,
-			AdoptExisting:          true,
+			HubURL:               hubOrigin,
+			HubProjectID:         hubProject.ID,
+			HubProjectUID:        hubProject.UID,
+			ProjectName:          localProject.Name,
+			ReplayHorizonEventID: hubProject.ReplayHorizonEventID,
+			Credential:           credential,
+			CredentialRekey:      credentialRekey,
+			PushEnabled:          true,
+			AdoptExisting:        true,
 		},
 	)
 	if err == nil {
