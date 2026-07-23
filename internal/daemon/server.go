@@ -74,6 +74,10 @@ type ServerConfig struct {
 	// the health response omits the embeddings block entirely.
 	ReconcilerHealth func() ReconcilerHealth
 
+	// FederationConfigHealth snapshots declarative federation convergence for
+	// /health. Nil means no mappings are configured, so the block is omitted.
+	FederationConfigHealth func() api.FederationConfigHealth
+
 	// HostAccess enables in-process authentication and authorization supplied
 	// by a mounting application. It is nil for the standalone daemon.
 	HostAccess HostAccessController
@@ -414,13 +418,13 @@ func registerMove(humaAPI huma.API, cfg ServerConfig) {
 	registerMoveHandlers(humaAPI, cfg)
 }
 
-// validateActor returns a 400 validation error when actor is empty after
-// trimming whitespace. Huma's `required:"true"` only checks presence, so a
-// blank or whitespace-only actor sneaks through to the DB and surfaces as a
-// 500 from the events.actor / issue_labels.author CHECK constraint.
+// validateActor returns a 400 validation error when actor is empty or uses a
+// reserved bootstrap spelling. Huma's `required:"true"` only checks presence,
+// so actor policy is enforced again after request authentication resolves the
+// authoritative actor.
 func validateActor(actor string) error {
-	if strings.TrimSpace(actor) == "" {
-		return api.NewError(400, "validation", "actor must be non-empty", "", nil)
+	if err := db.ValidateTokenActor(actor); err != nil {
+		return api.NewError(400, "validation", err.Error(), "", nil)
 	}
 	return nil
 }

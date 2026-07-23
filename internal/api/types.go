@@ -32,14 +32,15 @@ type PingResponse struct {
 // than a parse failure. Current daemons always populate it.
 type HealthResponse struct {
 	Body struct {
-		OK               bool              `json:"ok"`
-		DBPath           string            `json:"db_path"`
-		SchemaVersion    int               `json:"schema_version"`
-		APISchemaVersion string            `json:"api_schema_version,omitempty"`
-		Version          string            `json:"version"`
-		Uptime           string            `json:"uptime"`
-		StartedAt        time.Time         `json:"started_at"`
-		Embeddings       *EmbeddingsHealth `json:"embeddings,omitempty"`
+		OK               bool                    `json:"ok"`
+		DBPath           string                  `json:"db_path"`
+		SchemaVersion    int                     `json:"schema_version"`
+		APISchemaVersion string                  `json:"api_schema_version,omitempty"`
+		Version          string                  `json:"version"`
+		Uptime           string                  `json:"uptime"`
+		StartedAt        time.Time               `json:"started_at"`
+		Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
+		FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 	}
 }
 
@@ -58,6 +59,20 @@ type EmbeddingsHealth struct {
 	ETASeconds      *int64     `json:"eta_seconds,omitempty"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	LastProgressAt  *time.Time `json:"last_progress_at,omitempty"`
+}
+
+// FederationConfigHealth is the sanitized process-local convergence state for
+// declarative federation mappings. It intentionally contains no mapping
+// coordinates, actors, credentials, or remote diagnostics.
+type FederationConfigHealth struct {
+	Configured        int        `json:"configured"`
+	Reconciled        int        `json:"reconciled"`
+	Pending           int        `json:"pending"`
+	Conflicted        int        `json:"conflicted"`
+	LastAttemptAt     *time.Time `json:"last_attempt_at,omitempty"`
+	LastSuccessAt     *time.Time `json:"last_success_at,omitempty"`
+	LastErrorCategory string     `json:"last_error_category,omitempty"`
+	LastErrorStatus   int        `json:"last_error_status,omitempty"`
 }
 
 // InstanceResponse mirrors /api/v1/instance. Surfaces the local kata

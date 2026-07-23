@@ -10,6 +10,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 **New features**
 
+- Added startup-configured spoke-to-hub project mappings that create or adopt
+  local projects, enroll them idempotently, retry hub failures without
+  affecting daemon readiness, and expose sanitized aggregate progress in
+  `/health`. Federation teardown remains an explicit `kata federation leave`.
 - Added project-scoped federation enrollment creation, history, and revocation
   methods to the mountable Go service for hosts that use the restricted
   embedding profile.

@@ -77,6 +77,44 @@ hlc_physical_ms,hlc_counter,content_hash
 				project.Name, "project.restored", "worker", `{}`, strings.Repeat("e", 64))
 			return err
 		},
+		InstallEnrollmentInsertFailure: func(ctx context.Context, store db.Storage) (func() error, error) {
+			postgresStore := store.(*pgstore.Store)
+			_, err := postgresStore.ExecContext(ctx, `
+				CREATE FUNCTION fail_federation_enrollment_rotation_insert()
+				RETURNS trigger
+				LANGUAGE plpgsql
+				AS $$
+				BEGIN
+					RAISE EXCEPTION 'injected enrollment rotation insert failure';
+				END
+				$$;
+				CREATE TRIGGER fail_federation_enrollment_rotation_insert
+				BEFORE INSERT ON federation_enrollments
+				FOR EACH ROW
+				EXECUTE FUNCTION fail_federation_enrollment_rotation_insert()`)
+			return func() error {
+				if _, dropErr := postgresStore.ExecContext(
+					context.Background(),
+					`DROP TRIGGER IF EXISTS fail_federation_enrollment_rotation_insert ON federation_enrollments`,
+				); dropErr != nil {
+					return dropErr
+				}
+				_, dropErr := postgresStore.ExecContext(
+					context.Background(),
+					`DROP FUNCTION IF EXISTS fail_federation_enrollment_rotation_insert()`,
+				)
+				return dropErr
+			}, err
+		},
+		InstallEnrollmentRotationStage: func(
+			store db.Storage,
+			stage func(context.Context) error,
+		) func() {
+			return pgstore.InstallEnrollmentRotationStageForTest(
+				store.(*pgstore.Store),
+				stage,
+			)
+		},
 		ExpectedFailures: pgstore.ExpectedConformanceFailures(),
 	})
 }

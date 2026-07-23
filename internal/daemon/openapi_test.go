@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -187,10 +188,58 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	}
 }
 
-func TestAPISchemaVersionReflectsReadyHydrationContract(t *testing.T) {
-	if APISchemaVersion != "0.6.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.6.0 for hydrated ready rows (IssueOut projection with required qualified_id)", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsConfigDrivenFederationContract(t *testing.T) {
+	if APISchemaVersion != "0.7.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.7.0 for config-driven federation reconciliation", APISchemaVersion)
 	}
+}
+
+func TestOpenAPIDocumentIncludesConfigDrivenFederationContract(t *testing.T) {
+	doc := OpenAPIDocument()
+
+	rotation := doc.Paths["/api/v1/federation/enrollments/actions/rotate"]
+	require.NotNil(t, rotation, "missing enrollment rotation path")
+	require.NotNil(t, rotation.Post, "missing POST enrollment rotation operation")
+
+	health := doc.Components.Schemas.Map()["HealthResponseBody"]
+	require.NotNil(t, health, "missing HealthResponseBody schema")
+	require.Contains(t, health.Properties, "federation_config")
+	require.False(t, slices.Contains(health.Required, "federation_config"),
+		"federation_config must stay optional when no mappings are configured")
+
+	enrollments := doc.Paths["/api/v1/federation/enrollments"]
+	require.NotNil(t, enrollments, "missing federation enrollment path")
+	require.NotNil(t, enrollments.Post, "missing POST federation enrollment operation")
+	require.Contains(t, enrollments.Post.Description, "caller-supplied token")
+	require.Contains(t, enrollments.Post.Description, "same active enrollment")
+	require.Contains(t, enrollments.Post.Description, "409")
+}
+
+func TestOpenAPIRotationRequestRequiresPositiveProjectID(t *testing.T) {
+	rotationRequest := OpenAPIDocument().Components.Schemas.Map()["RotateFederationEnrollmentRequestBody"]
+	require.NotNil(t, rotationRequest, "missing rotation request schema")
+	projectID := rotationRequest.Properties["project_id"]
+	require.NotNil(t, projectID, "missing rotation project_id schema")
+	require.True(t, slices.Contains(rotationRequest.Required, "project_id"),
+		"rotation project_id must be required")
+	require.False(t, projectID.Nullable, "rotation project_id must not accept null")
+	require.NotNil(t, projectID.Minimum, "rotation project_id must publish its positive minimum")
+	require.Equal(t, float64(1), *projectID.Minimum)
+}
+
+func TestOpenAPIRotationDocumentsReplayConflict(t *testing.T) {
+	rotation := OpenAPIDocument().Paths["/api/v1/federation/enrollments/actions/rotate"]
+	require.NotNil(t, rotation, "missing enrollment rotation path")
+	require.NotNil(t, rotation.Post, "missing POST enrollment rotation operation")
+	require.Contains(t, rotation.Post.Description, "spoke instance")
+	require.Contains(t, rotation.Post.Description, "project")
+	require.Contains(t, rotation.Post.Description, "canonical capabilities")
+	require.Contains(t, rotation.Post.Description, "token-authenticated actor")
+	require.Contains(t, rotation.Post.Description, "adoption policy")
+	require.Contains(t, rotation.Post.Description, "same active enrollment")
+	require.Contains(t, rotation.Post.Description, "revoked replacement")
+	require.Contains(t, rotation.Post.Description, "409")
+	require.Contains(t, rotation.Post.Description, "federation_enrollment_token_conflict")
 }
 
 func TestOpenAPIDocumentIncludesEventsStream(t *testing.T) {

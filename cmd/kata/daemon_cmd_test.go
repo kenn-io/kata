@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,16 +19,19 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/federationconfig"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
@@ -835,6 +840,282 @@ model = "example-model"
 			assert.True(t, kitdaemon.ProcessAlive(child.Process.Pid), "invalid replacement config must leave the daemon running")
 		})
 	}
+}
+
+func TestValidateFederationStartupConfigActors(t *testing.T) {
+	tests := []struct {
+		name    string
+		actor   string
+		wantErr string
+	}{
+		{name: "valid", actor: "user-a"},
+		{name: "empty", actor: "", wantErr: "actor must be non-empty"},
+		{name: "reserved", actor: "BOOTSTRAP", wantErr: `actor "bootstrap" is reserved`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.DaemonConfig{
+				Federation: config.FederationConfig{
+					Projects: []config.FederationProjectConfig{{Actor: tt.actor}},
+				},
+			}
+
+			err := validateFederationStartupConfig(cfg)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "federation.project[0].actor")
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestDaemonFederationConfigUnavailableHubDoesNotDelayReadiness(t *testing.T) {
+	requestStarted := make(chan struct{})
+	var requestOnce sync.Once
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestOnce.Do(func() { close(requestStarted) })
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(hub.Close)
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
+	baseURL := startDaemonWithFederationConfig(t, federationDaemonConfig(
+		hub.URL, `token = "catalog-bearer"`,
+	))
+	select {
+	case <-requestStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("federation config reconciliation did not begin")
+	}
+
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Get(baseURL + "/api/v1/ping") //nolint:noctx // bounded loopback test request
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	var ping struct {
+		OK bool `json:"ok"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&ping))
+	assert.True(t, ping.OK)
+
+	health := readDaemonFederationHealth(t, baseURL)
+	releaseOnce.Do(func() { close(release) })
+	assert.True(t, health.OK)
+	require.NotNil(t, health.FederationConfig)
+	assert.Equal(t, 1, health.FederationConfig.Configured)
+	assert.Equal(t, 1, health.FederationConfig.Pending)
+	require.NotNil(t, health.FederationConfig.LastAttemptAt)
+}
+
+const daemonFederationHubProjectUID = "01HZNQ7VFPK1XGD8R5MABCD4EZ"
+
+func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) {
+	address := unusedLoopbackAddress(t)
+	var lateServer *http.Server
+	t.Cleanup(func() {
+		if lateServer != nil {
+			_ = lateServer.Close()
+		}
+	})
+	baseURL := startDaemonWithFederationConfig(t, federationDaemonConfig(
+		"http://"+address, `token = "catalog-bearer"`,
+	))
+
+	require.Eventually(t, func() bool {
+		health := readDaemonFederationHealth(t, baseURL)
+		return health.FederationConfig != nil &&
+			health.FederationConfig.LastErrorCategory == "hub_unavailable"
+	}, 3*time.Second, 20*time.Millisecond)
+
+	var catalogRequests atomic.Int32
+	listener, err := net.Listen("tcp", address)
+	require.NoError(t, err)
+	lateServer = &http.Server{ //nolint:gosec // loopback-only test server
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer catalog-bearer" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			catalogRequests.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/api/v1/projects/resolve":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"project": map[string]any{
+						"id": 42, "uid": daemonFederationHubProjectUID, "name": "hub-project",
+					},
+				})
+			case "/api/v1/projects/42/federation/enable":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"project_id": 42, "project_uid": daemonFederationHubProjectUID,
+					"project_name": "hub-project", "replay_horizon_event_id": 9,
+					"baseline_through_event_id": 6,
+				})
+			case "/api/v1/federation/enrollments":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": 71, "actor": "identity-user",
+				})
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}),
+	}
+	go func() {
+		_ = lateServer.Serve(listener)
+	}()
+
+	require.Eventually(t, func() bool {
+		health := readDaemonFederationHealth(t, baseURL)
+		return health.OK &&
+			health.FederationConfig != nil &&
+			health.FederationConfig.Reconciled == 1 &&
+			health.FederationConfig.Pending == 0 &&
+			health.FederationConfig.Conflicted == 0
+	}, 5*time.Second, 20*time.Millisecond)
+	assert.Positive(t, catalogRequests.Load())
+}
+
+func TestDaemonFederationConfigEmptyTokenEnvFailsOpenWithoutGlobalBearer(t *testing.T) {
+	t.Setenv("KATA_AUTH_TOKEN", "daemon-global-bearer")
+	t.Setenv("KATA_TEST_EMPTY_HUB_TOKEN", "")
+	var requests atomic.Int32
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(hub.Close)
+
+	baseURL := startDaemonWithFederationConfig(t, federationDaemonConfig(
+		hub.URL, `token_env = "KATA_TEST_EMPTY_HUB_TOKEN"`,
+	))
+	require.Eventually(t, func() bool {
+		health := readDaemonFederationHealth(t, baseURL)
+		return health.OK &&
+			health.FederationConfig != nil &&
+			health.FederationConfig.Pending == 1 &&
+			health.FederationConfig.LastErrorCategory == "hub_authentication"
+	}, 3*time.Second, 20*time.Millisecond)
+	assert.Zero(t, requests.Load(), "empty catalog token_env must fail before sending any bearer")
+}
+
+func TestDaemonFederationConfigNoMappingsSkipsReconcilerFactory(t *testing.T) {
+	var factoryCalls atomic.Int32
+	original := newFederationConfigReconciler
+	newFederationConfigReconciler = func(
+		cfg federationconfig.ReconcilerConfig,
+	) federationConfigReconciler {
+		factoryCalls.Add(1)
+		return original(cfg)
+	}
+	t.Cleanup(func() { newFederationConfigReconciler = original })
+
+	baseURL := startDaemonWithFederationConfig(t, "")
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Get(baseURL + "/api/v1/ping") //nolint:noctx // bounded loopback test request
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Zero(t, factoryCalls.Load())
+}
+
+type daemonFederationHealth struct {
+	OK               bool                        `json:"ok"`
+	FederationConfig *api.FederationConfigHealth `json:"federation_config"`
+}
+
+func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
+	t.Helper()
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+	require.NoError(t, os.WriteFile(
+		filepath.Join(home, "config.toml"), []byte(configBody), 0o600,
+	))
+
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon did not stop cleanly: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Error("daemon did not stop after context cancellation")
+		}
+	})
+
+	namespace, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	var record daemonRuntimeRecordJSON
+	require.Eventually(t, func() bool {
+		body, readErr := os.ReadFile(runtimePath) //nolint:gosec // test-owned KATA_HOME
+		return readErr == nil && json.Unmarshal(body, &record) == nil
+	}, 3*time.Second, 10*time.Millisecond)
+	return "http://" + record.Address
+}
+
+func readDaemonFederationHealth(t *testing.T, baseURL string) daemonFederationHealth {
+	t.Helper()
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Get(baseURL + "/api/v1/health") //nolint:noctx // bounded loopback test request
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	var health daemonFederationHealth
+	require.NoError(t, json.Unmarshal(body, &health), string(body))
+	return health
+}
+
+func federationDaemonConfig(hubURL, authLine string) string {
+	return fmt.Sprintf(`
+[[daemon]]
+name = "primary"
+url = %q
+%s
+allow_insecure = true
+
+[[federation.project]]
+hub = "primary"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+actor = "user-a"
+`, hubURL, authLine)
+}
+
+func unusedLoopbackAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	address := listener.Addr().String()
+	require.NoError(t, listener.Close())
+	return address
 }
 
 func TestDaemonReload_AgentReportsReloadedPID(t *testing.T) {

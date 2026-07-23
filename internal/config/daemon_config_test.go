@@ -234,6 +234,226 @@ token_env = "  KATA_WORK_TOKEN  "
 	assert.Empty(t, cfg.Daemons[0].Token)
 }
 
+func TestReadDaemonConfigFederationProjects(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	t.Setenv("KATA_TEAM_HUB_TOKEN", "")
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+token_env = "KATA_TEAM_HUB_TOKEN"
+
+[[federation.project]]
+hub = " team-hub "
+spoke_project = " spoke-project "
+hub_project = " hub-project "
+actor = " user-a "
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.Federation.Projects, 1)
+	assert.Equal(t, config.FederationProjectConfig{
+		Hub:          "team-hub",
+		SpokeProject: "spoke-project",
+		HubProject:   "hub-project",
+		Actor:        "user-a",
+	}, cfg.Federation.Projects[0])
+
+	target, ok := cfg.CatalogDaemon("team-hub")
+	require.True(t, ok)
+	assert.Equal(t, config.CatalogDaemonConfig{ //nolint:gosec // TokenEnv is an environment variable name, not a credential.
+		Name:     "team-hub",
+		URL:      "https://hub.example",
+		TokenEnv: "KATA_TEAM_HUB_TOKEN",
+	}, target, "the catalog entry remains the source of URL and auth policy")
+}
+
+func TestReadDaemonConfigRejectsInvalidFederationProjects(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		wantErr string
+	}{
+		{
+			name: "empty hub",
+			config: `
+[[federation.project]]
+hub = " "
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+actor = "user-a"
+`,
+			wantErr: "federation.project[0].hub",
+		},
+		{
+			name: "empty spoke project",
+			config: `
+[[federation.project]]
+hub = "team-hub"
+spoke_project = " "
+hub_project = "hub-project"
+actor = "user-a"
+`,
+			wantErr: "federation.project[0].spoke_project",
+		},
+		{
+			name: "empty hub project",
+			config: `
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = " "
+actor = "user-a"
+`,
+			wantErr: "federation.project[0].hub_project",
+		},
+		{
+			name: "empty actor",
+			config: `
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+actor = " "
+`,
+			wantErr: "federation.project[0].actor",
+		},
+		{
+			name: "unknown catalog name",
+			config: `
+[[federation.project]]
+hub = "missing-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+actor = "user-a"
+`,
+			wantErr: `hub "missing-hub" is not in daemon catalog`,
+		},
+		{
+			name: "local catalog target",
+			config: `
+[[daemon]]
+name = "local-hub"
+local = true
+
+[[federation.project]]
+hub = "local-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+actor = "user-a"
+`,
+			wantErr: `hub "local-hub" must reference a remote daemon with url`,
+		},
+		{
+			name: "URL-less catalog target",
+			config: `
+[[daemon]]
+name = "team-hub"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+actor = "user-a"
+`,
+			wantErr: "exactly one of local or url is required",
+		},
+		{
+			name: "duplicate spoke project",
+			config: `
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project-a"
+actor = "user-a"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project-b"
+actor = "user-b"
+`,
+			wantErr: `duplicate spoke_project "spoke-project"`,
+		},
+		{
+			name: "exact duplicate hub target",
+			config: `
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project-a"
+hub_project = "hub-project"
+actor = "user-a"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project-b"
+hub_project = "hub-project"
+actor = "user-b"
+`,
+			wantErr: `duplicate hub target "https://hub.example"/"hub-project"`,
+		},
+		{
+			name: "canonical hub aliases target the same project",
+			config: `
+[[daemon]]
+name = "team-hub-a"
+url = "https://Hub.Example:443"
+
+[[daemon]]
+name = "team-hub-b"
+url = "https://hub.example"
+
+[[federation.project]]
+hub = "team-hub-a"
+spoke_project = "spoke-project-a"
+hub_project = "hub-project"
+actor = "user-a"
+
+[[federation.project]]
+hub = "team-hub-b"
+spoke_project = "spoke-project-b"
+hub_project = "hub-project"
+actor = "user-b"
+`,
+			wantErr: `duplicate hub target "https://hub.example"/"hub-project"`,
+		},
+		{
+			name: "unknown mapping key",
+			config: `
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+actor = "user-a"
+credential = "not-allowed"
+`,
+			wantErr: "federation.project.credential",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tt.config), 0o600))
+
+			_, err := config.ReadDaemonConfig()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestReadDaemonConfig_GitHubSyncDefaultsTokenEnv(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 

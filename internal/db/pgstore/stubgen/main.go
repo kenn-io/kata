@@ -53,6 +53,7 @@ var alreadyImplemented = map[string]bool{
 	"CountActiveFederationEnrollments":     true, // federation_control.go
 	"CreateFederationEnrollment":           true, // federation_control.go
 	"CreateProjectFederationEnrollment":    true, // federation_control.go
+	"RotateFederationEnrollment":           true, // federation_control.go
 	"EnableFederationPush":                 true, // federation_control.go
 	"EnableProjectFederation":              true, // federation_projection.go
 	"ExportFederationBindings":             true, // export.go

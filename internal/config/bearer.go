@@ -90,7 +90,7 @@ func BearerOriginForBaseURLWithTrust(baseURL string, trustPrivateNetwork bool) (
 	if err := CheckBearerTargetSafeURLWithTrust(u, trustPrivateNetwork); err != nil {
 		return "", err
 	}
-	return u.Scheme + "://" + u.Host, nil
+	return CanonicalHTTPOrigin(baseURL)
 }
 
 // BearerOriginForBaseURLAllowInsecure validates only the URL shape and returns
@@ -103,7 +103,7 @@ func BearerOriginForBaseURLAllowInsecure(baseURL string) (string, error) {
 		return "", fmt.Errorf("parse base URL %q for bearer-token safety check: %w", baseURL, err)
 	}
 	if u.Host == "kata.invalid" {
-		return u.Scheme + "://" + u.Host, nil
+		return CanonicalHTTPOrigin(baseURL)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", fmt.Errorf("unsupported URL scheme %q for bearer-token client", u.Scheme)
@@ -111,7 +111,7 @@ func BearerOriginForBaseURLAllowInsecure(baseURL string) (string, error) {
 	if u.Host == "" {
 		return "", fmt.Errorf("bearer-token target %q must include host", u.Redacted())
 	}
-	return u.Scheme + "://" + u.Host, nil
+	return CanonicalHTTPOrigin(baseURL)
 }
 
 type bearerTransport struct {
@@ -130,10 +130,18 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 	}
-	if reqOrigin := req.URL.Scheme + "://" + req.URL.Host; reqOrigin != t.origin {
+	reqOrigin, err := CanonicalHTTPOrigin(req.URL.String())
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize bearer request origin: %w", err)
+	}
+	boundOrigin, err := CanonicalHTTPOrigin(t.origin)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize bound bearer origin: %w", err)
+	}
+	if reqOrigin != boundOrigin {
 		return nil, fmt.Errorf("refusing to attach bearer token to %q - "+
 			"client is bound to daemon origin %q; cross-origin redirects "+
-			"are blocked to prevent token leakage", reqOrigin, t.origin)
+			"are blocked to prevent token leakage", reqOrigin, boundOrigin)
 	}
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+t.token)

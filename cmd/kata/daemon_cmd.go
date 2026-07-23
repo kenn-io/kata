@@ -496,6 +496,9 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
+	if err := validateFederationStartupConfig(dcfg); err != nil {
+		return daemonStartupPreflight{}, err
+	}
 	listen = effectiveDaemonListenWithConfig(listen, dcfg)
 	ns, err := daemon.NewNamespace()
 	if err != nil {
@@ -740,6 +743,9 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	go runReloadLoop(ctx, sigs, hookCfgPath, disp, daemonLog)
 	broadcaster := daemon.NewEventBroadcaster()
 	federationWake := startFederationRunner(ctx, store, broadcaster, disp, daemonLog)
+	federationConfigHealth := startFederationConfigReconciler(
+		ctx, dcfg, store, federationWake, daemonLog,
+	)
 	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
 	gitHubSyncWake := startGitHubSyncRunner(ctx, store, gitHubSyncFetcher, broadcaster, disp, daemonLog)
 	closeThrottleWindow, err := dcfg.Close.Throttle.ThrottleWindow()
@@ -773,11 +779,12 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,
 		},
-		Auth:             dcfg.Auth,
-		InsecureReadonly: insecureReadonly,
-		Embedder:         embedder,
-		VectorIndex:      vectorIndex,
-		ReconcilerHealth: reconcilerHealth,
+		Auth:                   dcfg.Auth,
+		InsecureReadonly:       insecureReadonly,
+		Embedder:               embedder,
+		VectorIndex:            vectorIndex,
+		ReconcilerHealth:       reconcilerHealth,
+		FederationConfigHealth: federationConfigHealth,
 	})
 	defer func() { _ = srv.Close() }()
 

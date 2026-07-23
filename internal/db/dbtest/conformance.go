@@ -23,6 +23,8 @@ type Backend struct {
 	SeedLegacyPendingClaim         func(context.Context, db.Storage, string) error
 	SeedClaimViolation             func(context.Context, db.Storage, db.Project, db.Issue, string, json.RawMessage) error
 	SeedUnsupportedFederationEvent func(context.Context, db.Storage, db.Project, string) error
+	InstallEnrollmentInsertFailure func(context.Context, db.Storage) (func() error, error)
+	InstallEnrollmentRotationStage func(db.Storage, func(context.Context) error) func()
 	ExpectedFailures               map[string]error
 }
 
@@ -290,6 +292,14 @@ var storageScenarios = []scenario{
 			"SkipFederationQuarantine", "UpsertFederationBinding",
 		},
 		run: checkFederationControlLifecycle,
+	},
+	{
+		name: "federation enrollment rotation",
+		methods: []string{
+			"CreateFederationEnrollment", "CreateProject", "ListFederationEnrollments",
+			"RotateFederationEnrollment",
+		},
+		runWithBackend: checkFederationEnrollmentRotation,
 	},
 	{
 		name: "federation event transport",

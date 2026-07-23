@@ -35,7 +35,7 @@ func (d *Store) CreateProjectFederationEnrollment(
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
-	if prepared.ProjectID == nil || *prepared.ProjectID <= 0 {
+	if prepared.Params.ProjectID == nil || *prepared.Params.ProjectID <= 0 {
 		return db.CreatedFederationEnrollment{}, fmt.Errorf("project-scoped federation enrollment requires project id")
 	}
 	return retryWrite1(ctx, d, func() (db.CreatedFederationEnrollment, error) {
@@ -43,16 +43,87 @@ func (d *Store) CreateProjectFederationEnrollment(
 	})
 }
 
-func (d *Store) createFederationEnrollment(
+// RotateFederationEnrollment revokes active grants for one spoke and project
+// before inserting the caller-supplied replacement in the same transaction.
+func (d *Store) RotateFederationEnrollment(
 	ctx context.Context,
 	p db.CreateFederationEnrollmentParams,
+) (db.CreatedFederationEnrollment, error) {
+	if p.Token == "" {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf("federation enrollment rotation requires replacement token")
+	}
+	prepared, err := db.PrepareFederationEnrollmentParams(p)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if prepared.Params.ProjectID == nil || *prepared.Params.ProjectID <= 0 {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf(
+			"federation enrollment rotation requires project id",
+		)
+	}
+	return retryWrite1(ctx, d, func() (db.CreatedFederationEnrollment, error) {
+		return d.rotateFederationEnrollment(ctx, prepared)
+	})
+}
+
+func (d *Store) createFederationEnrollment(
+	ctx context.Context,
+	prepared db.PreparedFederationEnrollment,
 ) (db.CreatedFederationEnrollment, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	created, err := createFederationEnrollmentTx(ctx, tx, p)
+	created, err := createFederationEnrollmentTx(ctx, tx, prepared)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	return created, nil
+}
+
+func (d *Store) rotateFederationEnrollment(
+	ctx context.Context,
+	prepared db.PreparedFederationEnrollment,
+) (db.CreatedFederationEnrollment, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	p := prepared.Params
+	existing, err := scanFederationEnrollment(tx.QueryRowContext(ctx,
+		federationEnrollmentSelect+` WHERE token_hash = ?`, db.FederationTokenHash(p.Token)))
+	if err == nil {
+		if !db.FederationEnrollmentMatchesCreate(existing, p) {
+			return db.CreatedFederationEnrollment{}, db.ErrFederationEnrollmentTokenConflict
+		}
+		return db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}, nil
+	}
+	if !errors.Is(err, db.ErrNotFound) {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if d.rotationStage != nil {
+		if err := d.rotationStage(ctx); err != nil {
+			return db.CreatedFederationEnrollment{}, err
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE federation_enrollments
+		   SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE revoked_at IS NULL
+		   AND spoke_instance_uid = ?
+		   AND project_id = ?`,
+		p.SpokeInstanceUID, *p.ProjectID); err != nil {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf("revoke federation enrollments for rotation: %w", err)
+	}
+	created, err := createFederationEnrollmentTx(ctx, tx, prepared)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
@@ -64,17 +135,18 @@ func (d *Store) createFederationEnrollment(
 
 func (d *Store) createProjectFederationEnrollment(
 	ctx context.Context,
-	p db.CreateFederationEnrollmentParams,
+	prepared db.PreparedFederationEnrollment,
 ) (db.CreatedFederationEnrollment, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	p := prepared.Params
 	if _, err := d.enableProjectFederationTx(ctx, tx, *p.ProjectID, p.Actor); err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
-	created, err := createFederationEnrollmentTx(ctx, tx, p)
+	created, err := createFederationEnrollmentTx(ctx, tx, prepared)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
@@ -87,8 +159,9 @@ func (d *Store) createProjectFederationEnrollment(
 func createFederationEnrollmentTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	p db.CreateFederationEnrollmentParams,
+	prepared db.PreparedFederationEnrollment,
 ) (db.CreatedFederationEnrollment, error) {
+	p := prepared.Params
 	var projectID any
 	if p.ProjectID != nil {
 		projectID = *p.ProjectID
@@ -99,11 +172,30 @@ func createFederationEnrollmentTx(
 		  token_hash, spoke_instance_uid, project_id, capabilities, bound_actor,
 		  allow_adoption_snapshot_authors
 		)
-		VALUES(?, ?, ?, ?, ?, ?)`,
+		VALUES(?, ?, ?, ?, ?, ?)
+		ON CONFLICT(token_hash) DO NOTHING`,
 		db.FederationTokenHash(p.Token), p.SpokeInstanceUID, projectID, p.Capabilities, p.Actor,
 		p.AllowAdoptionSnapshotAuthors)
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, fmt.Errorf("create federation enrollment: %w", err)
+	}
+	inserted, err := res.RowsAffected()
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf("federation enrollment rows affected: %w", err)
+	}
+	if inserted == 0 {
+		if !prepared.ExplicitToken {
+			return db.CreatedFederationEnrollment{}, fmt.Errorf("create federation enrollment: generated token collision")
+		}
+		enrollment, selectErr := scanFederationEnrollment(tx.QueryRowContext(ctx,
+			federationEnrollmentSelect+` WHERE token_hash = ?`, db.FederationTokenHash(p.Token)))
+		if selectErr != nil {
+			return db.CreatedFederationEnrollment{}, selectErr
+		}
+		if !db.FederationEnrollmentMatchesCreate(enrollment, p) {
+			return db.CreatedFederationEnrollment{}, db.ErrFederationEnrollmentTokenConflict
+		}
+		return db.CreatedFederationEnrollment{Enrollment: enrollment, Token: p.Token}, nil
 	}
 	id, err := res.LastInsertId()
 	if err != nil {

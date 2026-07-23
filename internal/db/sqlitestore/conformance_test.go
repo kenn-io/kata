@@ -54,5 +54,30 @@ hlc_physical_ms,hlc_counter,content_hash
 				"project.restored", "worker", `{}`, strings.Repeat("e", 64))
 			return err
 		},
+		InstallEnrollmentInsertFailure: func(ctx context.Context, store db.Storage) (func() error, error) {
+			sqlStore := store.(*sqlitestore.Store)
+			_, err := sqlStore.ExecContext(ctx, `
+				CREATE TRIGGER fail_federation_enrollment_rotation_insert
+				BEFORE INSERT ON federation_enrollments
+				BEGIN
+					SELECT RAISE(FAIL, 'injected enrollment rotation insert failure');
+				END`)
+			return func() error {
+				_, dropErr := sqlStore.ExecContext(
+					context.Background(),
+					`DROP TRIGGER IF EXISTS fail_federation_enrollment_rotation_insert`,
+				)
+				return dropErr
+			}, err
+		},
+		InstallEnrollmentRotationStage: func(
+			store db.Storage,
+			stage func(context.Context) error,
+		) func() {
+			return sqlitestore.InstallEnrollmentRotationStageForTest(
+				store.(*sqlitestore.Store),
+				stage,
+			)
+		},
 	})
 }

@@ -173,6 +173,10 @@ var (
 
 // Federation sentinels.
 var (
+	// ErrFederationEnrollmentTokenConflict reports replay of an enrollment token
+	// whose persisted grant differs from the requested grant or is revoked.
+	ErrFederationEnrollmentTokenConflict = errors.New("federation enrollment token conflict")
+
 	// ErrRemoteEventHashMismatch reports a remote event whose advertised content
 	// hash does not match the portable event fields.
 	ErrRemoteEventHashMismatch = errors.New("remote event content hash mismatch")

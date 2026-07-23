@@ -158,6 +158,8 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "createFederationEnrollment",
 		Method:      "POST",
 		Path:        "/api/v1/federation/enrollments",
+		Summary:     "Create a federation enrollment",
+		Description: "Creates a hub-side transport grant. When the request includes a caller-supplied token, an exact retry returns the same active enrollment; reusing that token for different attributes or after revocation returns 409.",
 	}, func(ctx context.Context, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {
 		if !katauid.Valid(in.Body.SpokeInstanceUID) {
 			return nil, api.NewError(http.StatusBadRequest, "validation", "spoke_instance_uid must be a valid instance UID", "", nil)
@@ -194,10 +196,65 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Actor:                        actor,
 			AllowAdoptionSnapshotAuthors: in.Body.AllowAdoptionSnapshotAuthors,
 		})
+		if errors.Is(err, db.ErrFederationEnrollmentTokenConflict) {
+			return nil, api.NewError(http.StatusConflict, "federation_enrollment_token_conflict",
+				"federation enrollment token conflicts with an existing enrollment", "", nil)
+		}
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
 		return &api.CreateFederationEnrollmentResponse{
+			Body: federationEnrollmentToOut(created.Enrollment, created.Token),
+		}, nil
+	})
+
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "rotateFederationEnrollment",
+		Method:      "POST",
+		Path:        "/api/v1/federation/enrollments/actions/rotate",
+		Summary:     "Rotate a federation enrollment",
+		Description: "Transactionally revokes active project-scoped grants for the spoke and installs the caller-supplied replacement token. After canonical capability normalization and token-authenticated actor resolution, an exact replay with the same replacement token, spoke instance, project, canonical capabilities, resolved actor, and adoption policy returns the same active enrollment. An attribute mismatch or revoked replacement enrollment returns 409 with code federation_enrollment_token_conflict.",
+	}, func(ctx context.Context, in *api.RotateFederationEnrollmentRequest) (*api.RotateFederationEnrollmentResponse, error) {
+		if !katauid.Valid(in.Body.SpokeInstanceUID) {
+			return nil, api.NewError(http.StatusBadRequest, "validation", "spoke_instance_uid must be a valid instance UID", "", nil)
+		}
+		if _, err := db.CanonicalFederationCapabilities(in.Body.Capabilities); err != nil {
+			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+		}
+		if in.Body.ProjectID <= 0 {
+			return nil, api.NewError(http.StatusBadRequest, "validation",
+				"project_id must be a positive integer", "", nil)
+		}
+		if in.Body.Token == "" {
+			return nil, api.NewError(http.StatusBadRequest, "validation",
+				"replacement token is required", "", nil)
+		}
+		var err error
+		ctx, err = authorizeHostProjectScope(ctx, []int64{in.Body.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		actor, err := attributedActor(ctx, in.Body.Actor)
+		if err != nil {
+			return nil, err
+		}
+		projectID := in.Body.ProjectID
+		created, err := cfg.DB.RotateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token:                        in.Body.Token,
+			SpokeInstanceUID:             in.Body.SpokeInstanceUID,
+			ProjectID:                    &projectID,
+			Capabilities:                 in.Body.Capabilities,
+			Actor:                        strings.TrimSpace(actor),
+			AllowAdoptionSnapshotAuthors: in.Body.AllowAdoptionSnapshotAuthors,
+		})
+		if errors.Is(err, db.ErrFederationEnrollmentTokenConflict) {
+			return nil, api.NewError(http.StatusConflict, "federation_enrollment_token_conflict",
+				"federation enrollment token conflicts with an existing enrollment", "", nil)
+		}
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		return &api.RotateFederationEnrollmentResponse{
 			Body: federationEnrollmentToOut(created.Enrollment, created.Token),
 		}, nil
 	})
@@ -241,66 +298,42 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/federation/replicas",
 	}, func(ctx context.Context, in *api.CreateFederationReplicaRequest) (*api.CreateFederationReplicaResponse, error) {
-		if in.Body.HubURL == "" || in.Body.HubProjectID <= 0 || in.Body.HubProjectUID == "" ||
-			in.Body.ProjectName == "" || in.Body.ReplayHorizonEventID <= 0 {
-			return nil, api.NewError(400, "validation", "hub_url, hub_project_id, hub_project_uid, project_name, and replay_horizon_event_id are required", "", nil)
-		}
-		if !katauid.Valid(in.Body.HubProjectUID) {
-			return nil, api.NewError(400, "validation", "hub_project_uid must be a valid UID", "", nil)
-		}
-		capabilities, err := normalizedReplicaCapabilities(in.Body.Capabilities)
-		if err != nil {
-			return nil, err
-		}
-		if in.Body.PushEnabled && !federationCapabilitiesContain(capabilities, "push") {
-			return nil, api.NewError(400, "federation_capability_mismatch", "push-enabled federation replica requires push capability", "", nil)
-		}
 		actor := actorFor(ctx, in.Body.Actor)
 		if err := db.ValidateTokenActor(actor); err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
-		in.Body.Actor = strings.TrimSpace(actor)
-		if in.Body.AdoptExisting {
-			if !in.Body.PushEnabled {
-				return nil, api.NewError(400, "federation_capability_mismatch", "adopting an existing project requires push to be enabled", "", nil)
-			}
-			if !federationCapabilitiesContain(capabilities, "pull") || !federationCapabilitiesContain(capabilities, "push") {
-				return nil, api.NewError(400, "federation_capability_mismatch", "adopting an existing project requires pull and push capabilities", "", nil)
-			}
-		}
-		project, binding, adopted, adoptionSnapshotCount, err := ensureReplicaBindingOrAdopt(ctx, cfg.DB, in)
+		result, err := EnsureFederationReplica(
+			ctx,
+			cfg.DB,
+			cfg.federationCredentialStore(),
+			cfg.FederationWake,
+			EnsureFederationReplicaParams{
+				HubURL:                 in.Body.HubURL,
+				HubProjectID:           in.Body.HubProjectID,
+				HubProjectUID:          in.Body.HubProjectUID,
+				ProjectName:            in.Body.ProjectName,
+				ReplayHorizonEventID:   in.Body.ReplayHorizonEventID,
+				BaselineThroughEventID: in.Body.BaselineThroughEventID,
+				Credential: config.FederationCredential{
+					HubURL:        in.Body.HubURL,
+					HubProjectID:  in.Body.HubProjectID,
+					Token:         in.Body.Token,
+					Capabilities:  in.Body.Capabilities,
+					Actor:         strings.TrimSpace(actor),
+					AllowInsecure: in.Body.AllowInsecure,
+				},
+				PushEnabled:   in.Body.PushEnabled,
+				AdoptExisting: in.Body.AdoptExisting,
+			},
+		)
 		if err != nil {
-			return nil, err
-		}
-		if binding.PushEnabled && in.Body.Token != "" && !federationCapabilitiesContain(capabilities, "push") {
-			return nil, api.NewError(400, "federation_capability_mismatch", "push-enabled federation replica credentials require push capability", "", nil)
-		}
-		if in.Body.Token != "" {
-			if err := cfg.federationCredentialStore().StoreFederationCredential(ctx, project.UID, config.FederationCredential{
-				HubURL:        in.Body.HubURL,
-				HubProjectID:  in.Body.HubProjectID,
-				Token:         in.Body.Token,
-				Capabilities:  capabilities,
-				Actor:         strings.TrimSpace(in.Body.Actor),
-				AllowInsecure: in.Body.AllowInsecure,
-			}); err != nil {
-				return nil, internalAPIError(err)
-			}
-		}
-		if in.Body.PushEnabled && !binding.PushEnabled {
-			binding, err = enableReplicaPush(ctx, cfg.DB, project.ID)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if cfg.FederationWake != nil {
-			cfg.FederationWake()
+			return nil, federationReplicaAPIError(err)
 		}
 		return &api.CreateFederationReplicaResponse{Body: api.CreateFederationReplicaBody{
-			Project:               dbProjectToOut(project),
-			Binding:               federationBindingToOut(binding),
-			Adopted:               adopted,
-			AdoptionSnapshotCount: adoptionSnapshotCount,
+			Project:               dbProjectToOut(result.Project),
+			Binding:               federationBindingToOut(result.Binding),
+			Adopted:               result.Adopted,
+			AdoptionSnapshotCount: result.AdoptionSnapshotCount,
 		}}, nil
 	})
 
@@ -404,7 +437,13 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 		}
 
-		res, err := cfg.DB.LeaveFederationReplica(ctx, in.ProjectID)
+		res, err := LeaveFederationReplica(
+			ctx,
+			cfg.DB,
+			cfg.federationCredentialStore(),
+			cfg.FederationWake,
+			in.ProjectID,
+		)
 		switch {
 		case errors.Is(err, db.ErrNotFound):
 			return nil, api.NewError(http.StatusNotFound, "project_not_found", "project not found", "", nil)
@@ -417,20 +456,12 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// (only the credential delete below may still have work to do), so the
 		// response must not claim a detach happened.
 		body.Detached = res.Role == db.FederationRoleSpoke
-		if res.ProjectUID != "" {
-			if err := cfg.federationCredentialStore().DeleteFederationCredential(ctx, res.ProjectUID); err != nil {
-				return nil, internalAPIError(err)
-			}
-		}
 		if !body.Archived {
 			project, err := cfg.DB.ProjectByID(ctx, in.ProjectID)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			body.Project = dbProjectToOut(project)
-		}
-		if cfg.FederationWake != nil {
-			cfg.FederationWake()
 		}
 		return &api.LeaveFederationReplicaResponse{Body: body}, nil
 	})
@@ -583,279 +614,55 @@ func federationIngestError(err error) error {
 	}
 }
 
-func normalizedReplicaCapabilities(raw string) (string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return "", nil
+func federationReplicaAPIError(err error) error {
+	var serviceErr *FederationReplicaError
+	if !errors.As(err, &serviceErr) {
+		return internalAPIError(err)
 	}
-	capabilities, err := db.CanonicalFederationCapabilities(raw)
-	if err != nil {
-		return "", api.NewError(400, "validation", err.Error(), "", nil)
+	switch {
+	case errors.Is(err, errFederationReplicaCapabilityMismatch):
+		return api.NewError(
+			http.StatusBadRequest, "federation_capability_mismatch",
+			serviceErr.message, serviceErr.hint, nil,
+		)
+	case errors.Is(err, ErrFederationReplicaInvalidInput):
+		return api.NewError(
+			http.StatusBadRequest, "validation",
+			serviceErr.message, serviceErr.hint, nil,
+		)
+	case errors.Is(err, ErrFederationReplicaBindingConflict):
+		return api.NewError(
+			http.StatusConflict, "federation_binding_conflict",
+			serviceErr.message, serviceErr.hint, nil,
+		)
+	case errors.Is(err, ErrFederationReplicaCredentialConflict):
+		return api.NewError(
+			http.StatusConflict, "federation_credential_conflict",
+			serviceErr.message, serviceErr.hint, nil,
+		)
+	case errors.Is(err, errFederationReplicaProjectCollision):
+		return api.NewError(
+			http.StatusConflict, "federation_project_collision",
+			serviceErr.message, serviceErr.hint, nil,
+		)
+	case errors.Is(err, errFederationReplicaProjectNotFound):
+		return api.NewError(
+			http.StatusNotFound, "federation_project_not_found",
+			serviceErr.message, serviceErr.hint, nil,
+		)
+	case errors.Is(err, errFederationReplicaRejoinNameMismatch):
+		return api.NewError(
+			http.StatusConflict, "federation_rejoin_name_mismatch",
+			serviceErr.message, serviceErr.hint, nil,
+		)
+	case errors.Is(err, errFederationReplicaIssueSyncConflict):
+		return api.NewError(
+			http.StatusConflict, "issue_sync_federation_conflict",
+			serviceErr.message, serviceErr.hint, nil,
+		)
+	default:
+		return internalAPIError(err)
 	}
-	return capabilities, nil
-}
-
-func federationCapabilitiesContain(capabilities, want string) bool {
-	for _, part := range strings.Split(capabilities, ",") {
-		if strings.TrimSpace(part) == want {
-			return true
-		}
-	}
-	return false
-}
-
-func ensureReplicaBindingOrAdopt(
-	ctx context.Context,
-	store db.Storage,
-	in *api.CreateFederationReplicaRequest,
-) (db.Project, db.FederationBinding, bool, int64, error) {
-	if in.Body.AdoptExisting {
-		if result, adopted, err := adoptExistingReplica(ctx, store, in); err != nil {
-			return db.Project{}, db.FederationBinding{}, false, 0, err
-		} else if adopted {
-			return result.Project, result.Binding, true, result.AdoptionSnapshotCount, nil
-		}
-	}
-	project, binding, err := ensureReplicaBinding(ctx, store, in)
-	return project, binding, false, 0, err
-}
-
-func adoptExistingReplica(
-	ctx context.Context,
-	store db.Storage,
-	in *api.CreateFederationReplicaRequest,
-) (db.AdoptProjectIntoFederationResult, bool, error) {
-	projectName := strings.TrimSpace(in.Body.ProjectName)
-	if err := config.ValidateProjectName(projectName); err != nil {
-		return db.AdoptProjectIntoFederationResult{}, false, api.NewError(400, "validation", err.Error(), "", nil)
-	}
-	if project, err := store.ProjectByUID(ctx, in.Body.HubProjectUID); err == nil {
-		if project.DeletedAt != nil {
-			return db.AdoptProjectIntoFederationResult{}, false,
-				api.NewError(409, "federation_project_collision", "hub project UID belongs to an archived local project", "", nil)
-		}
-		binding, bindErr := store.FederationBindingByProject(ctx, project.ID)
-		if bindErr != nil {
-			if errors.Is(bindErr, db.ErrNotFound) {
-				if project.Name != projectName {
-					return db.AdoptProjectIntoFederationResult{}, false,
-						api.NewError(409, "federation_project_collision",
-							fmt.Sprintf("hub project UID belongs to local project %q; cannot adopt local project %q", project.Name, projectName), "", nil)
-				}
-				// An explicit adopt_existing on an unbound UID-holder is
-				// honored: adoption is the actor-safe transmission path for
-				// local events authored by other actors (raw push would be
-				// rejected by the hub's actor binding). The post-leave rejoin
-				// railroading is prevented upstream — the enroll command and
-				// the TUI no longer request adoption for UID-holders.
-				result, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
-					ProjectID:            project.ID,
-					HubURL:               in.Body.HubURL,
-					HubProjectID:         in.Body.HubProjectID,
-					HubProjectUID:        in.Body.HubProjectUID,
-					ReplayHorizonEventID: in.Body.ReplayHorizonEventID,
-					Actor:                strings.TrimSpace(in.Body.Actor),
-					AllowInsecure:        in.Body.AllowInsecure,
-				})
-				if err != nil {
-					if errors.Is(err, db.ErrIssueSyncFederationBinding) {
-						return db.AdoptProjectIntoFederationResult{}, false, issueSyncFederationConflict()
-					}
-					return db.AdoptProjectIntoFederationResult{}, false, internalAPIError(err)
-				}
-				return result, true, nil
-			}
-			return db.AdoptProjectIntoFederationResult{}, false, internalAPIError(bindErr)
-		}
-		if details := replicaBindingConflictDetails(binding, in); len(details) > 0 {
-			return db.AdoptProjectIntoFederationResult{}, false,
-				api.NewError(409, "federation_binding_conflict",
-					"existing federation binding differs from the requested hub: "+strings.Join(details, ", "), "", nil)
-		}
-		if project.Name != projectName {
-			return db.AdoptProjectIntoFederationResult{}, false,
-				api.NewError(409, "federation_project_collision",
-					fmt.Sprintf("hub project UID is already bound to local project %q; cannot adopt local project %q", project.Name, projectName), "", nil)
-		}
-		return db.AdoptProjectIntoFederationResult{}, false, nil
-	} else if !errors.Is(err, db.ErrNotFound) {
-		return db.AdoptProjectIntoFederationResult{}, false, internalAPIError(err)
-	}
-	existing, err := store.ProjectByNameIncludingArchived(ctx, projectName)
-	if errors.Is(err, db.ErrNotFound) {
-		return db.AdoptProjectIntoFederationResult{}, false,
-			api.NewError(404, "federation_project_not_found", "adoption requested but no local project exists with this name", "", nil)
-	}
-	if err != nil {
-		return db.AdoptProjectIntoFederationResult{}, false, internalAPIError(err)
-	}
-	if existing.UID == in.Body.HubProjectUID {
-		return db.AdoptProjectIntoFederationResult{}, false,
-			api.NewError(409, "federation_project_collision", "hub project UID already exists locally but is not bound to federation", "", nil)
-	}
-	if existing.DeletedAt != nil {
-		return db.AdoptProjectIntoFederationResult{}, true,
-			api.NewError(409, "federation_project_collision", "a deleted project with this name cannot be adopted into federation", "", nil)
-	}
-	if binding, err := store.FederationBindingByProject(ctx, existing.ID); err == nil {
-		return db.AdoptProjectIntoFederationResult{}, true,
-			api.NewError(409, "federation_binding_conflict",
-				fmt.Sprintf("project already has %q federation binding", binding.Role), "", nil)
-	} else if !errors.Is(err, db.ErrNotFound) {
-		return db.AdoptProjectIntoFederationResult{}, true, internalAPIError(err)
-	}
-	result, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
-		ProjectID:            existing.ID,
-		HubURL:               in.Body.HubURL,
-		HubProjectID:         in.Body.HubProjectID,
-		HubProjectUID:        in.Body.HubProjectUID,
-		ReplayHorizonEventID: in.Body.ReplayHorizonEventID,
-		Actor:                strings.TrimSpace(in.Body.Actor),
-		AllowInsecure:        in.Body.AllowInsecure,
-	})
-	if err != nil {
-		if errors.Is(err, db.ErrIssueSyncFederationBinding) {
-			return db.AdoptProjectIntoFederationResult{}, true, issueSyncFederationConflict()
-		}
-		return db.AdoptProjectIntoFederationResult{}, true, internalAPIError(err)
-	}
-	return result, true, nil
-}
-
-func ensureReplicaBinding(
-	ctx context.Context,
-	store db.Storage,
-	in *api.CreateFederationReplicaRequest,
-) (db.Project, db.FederationBinding, error) {
-	projectName := strings.TrimSpace(in.Body.ProjectName)
-	if err := config.ValidateProjectName(projectName); err != nil {
-		return db.Project{}, db.FederationBinding{}, api.NewError(400, "validation", err.Error(), "", nil)
-	}
-	project, err := store.ProjectByUID(ctx, in.Body.HubProjectUID)
-	createdProject := false
-	if errors.Is(err, db.ErrNotFound) {
-		if existing, lookupErr := store.ProjectByNameIncludingArchived(ctx, projectName); lookupErr == nil {
-			if existing.UID != in.Body.HubProjectUID {
-				return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision", "a project with this name already has a different UID; rerun with --adopt-existing --push to adopt it into federation", "", nil)
-			}
-		} else if !errors.Is(lookupErr, db.ErrNotFound) {
-			return db.Project{}, db.FederationBinding{}, internalAPIError(lookupErr)
-		}
-		project, err = store.CreateProjectWithUID(ctx, projectName, in.Body.HubProjectUID)
-		if err != nil {
-			return db.Project{}, db.FederationBinding{}, internalAPIError(err)
-		}
-		createdProject = true
-	} else if err != nil {
-		return db.Project{}, db.FederationBinding{}, internalAPIError(err)
-	} else if project.DeletedAt != nil {
-		return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_project_collision",
-			fmt.Sprintf("an archived local project %q already has the hub project UID; restore it with `kata projects restore` first", project.Name), "", nil)
-	}
-
-	replayHorizon := in.Body.ReplayHorizonEventID
-	cursor := replayHorizon - 1
-	if cursor < 0 {
-		cursor = 0
-	}
-	pushEnabled := false
-	pushCursor := int64(0)
-	existing, err := store.FederationBindingByProject(ctx, project.ID)
-	if err == nil {
-		if details := replicaBindingConflictDetails(existing, in); len(details) > 0 {
-			return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_binding_conflict",
-				"existing federation binding differs from the requested hub: "+strings.Join(details, ", "), "", nil)
-		}
-		replayHorizon = existing.ReplayHorizonEventID
-		cursor = existing.PullCursorEventID
-		pushEnabled = existing.PushEnabled
-		pushCursor = existing.PushCursorEventID
-	} else if !errors.Is(err, db.ErrNotFound) {
-		return db.Project{}, db.FederationBinding{}, internalAPIError(err)
-	} else if !createdProject {
-		// An unbound local project holding the hub project UID is the normal
-		// post-leave state: leave removes the binding but the project keeps the
-		// shared identity. A join naming that project is a rejoin — rebind it.
-		// Pull restarts just below the replay horizon (event-UID dedup absorbs
-		// the overlap) and a push-enabled rejoin re-offers local-origin events
-		// from cursor 0 so the hub dedups what it already has and absorbs edits
-		// made while the project was standalone.
-		//
-		// Trust model: a spoke and the hubs it federates with trust each other
-		// (docs/design/federation.md "Tokens And Trust Boundaries" / "No
-		// Multi-Tenant Authorization Model"). The UID is an unguessable ULID, so
-		// a hub reporting it as a project identity means it IS the project that
-		// federated there; we do not defend against a hostile hub forging a known
-		// UID to capture local data (out of scope). The operator-facing rejoin
-		// preview (CLI/TUI) is the confirmation surface.
-		if project.Name != projectName {
-			return db.Project{}, db.FederationBinding{}, api.NewError(409, "federation_rejoin_name_mismatch",
-				fmt.Sprintf("hub project UID is held by local project %q, which previously left this federation; rerun join with --project %q to rejoin it", project.Name, project.Name), "", nil)
-		}
-		if in.Body.PushEnabled {
-			pushEnabled = true
-		}
-	}
-
-	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
-		ProjectID:            project.ID,
-		Role:                 db.FederationRoleSpoke,
-		HubURL:               in.Body.HubURL,
-		HubProjectID:         in.Body.HubProjectID,
-		HubProjectUID:        in.Body.HubProjectUID,
-		ReplayHorizonEventID: replayHorizon,
-		PullCursorEventID:    cursor,
-		PushEnabled:          pushEnabled,
-		PushCursorEventID:    pushCursor,
-		Actor:                strings.TrimSpace(in.Body.Actor),
-		AllowInsecure:        in.Body.AllowInsecure,
-		Enabled:              true,
-	})
-	if err != nil {
-		if errors.Is(err, db.ErrIssueSyncFederationBinding) {
-			return db.Project{}, db.FederationBinding{}, issueSyncFederationConflict()
-		}
-		return db.Project{}, db.FederationBinding{}, internalAPIError(err)
-	}
-	return project, binding, nil
-}
-
-func enableReplicaPush(ctx context.Context, store db.Storage, projectID int64) (db.FederationBinding, error) {
-	localCursor, err := maxLocalOriginEventID(ctx, store, projectID)
-	if err != nil {
-		return db.FederationBinding{}, internalAPIError(err)
-	}
-	binding, err := store.EnableFederationPush(ctx, projectID, localCursor)
-	if err != nil {
-		return db.FederationBinding{}, internalAPIError(err)
-	}
-	return binding, nil
-}
-
-func maxLocalOriginEventID(ctx context.Context, store db.Storage, projectID int64) (int64, error) {
-	return store.MaxLocalOriginEventID(ctx, projectID)
-}
-
-func replicaBindingConflictDetails(existing db.FederationBinding, in *api.CreateFederationReplicaRequest) []string {
-	existingActor := strings.TrimSpace(existing.Actor)
-	requestedActor := strings.TrimSpace(in.Body.Actor)
-	actorCompatible := existingActor == requestedActor || (existingActor == "" && requestedActor != "")
-	details := make([]string, 0, 5)
-	if existing.Role != db.FederationRoleSpoke {
-		details = append(details, fmt.Sprintf("role existing=%s requested=%s", existing.Role, db.FederationRoleSpoke))
-	}
-	if existing.HubURL != in.Body.HubURL {
-		details = append(details, fmt.Sprintf("hub_url existing=%s requested=%s", existing.HubURL, in.Body.HubURL))
-	}
-	if existing.HubProjectID != in.Body.HubProjectID {
-		details = append(details, fmt.Sprintf("hub_project_id existing=%d requested=%d", existing.HubProjectID, in.Body.HubProjectID))
-	}
-	if existing.HubProjectUID != in.Body.HubProjectUID {
-		details = append(details, fmt.Sprintf("hub_project_uid existing=%s requested=%s", existing.HubProjectUID, in.Body.HubProjectUID))
-	}
-	if !actorCompatible {
-		details = append(details, fmt.Sprintf("actor existing=%s requested=%s", existingActor, requestedActor))
-	}
-	return details
 }
 
 func federationBindingToOut(binding db.FederationBinding) api.FederationBindingOut {

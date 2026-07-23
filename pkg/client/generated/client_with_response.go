@@ -236,6 +236,7 @@ func (c *Client) ListFederationEnrollmentsWithResponse(ctx context.Context, reqE
 	}
 }
 
+// CreateFederationEnrollment Create a federation enrollment
 func (c *Client) CreateFederationEnrollmentWithResponse(ctx context.Context, options *CreateFederationEnrollmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateFederationEnrollmentResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
@@ -272,6 +273,56 @@ func (c *Client) CreateFederationEnrollmentWithResponse(ctx context.Context, opt
 					ContentType:   resp.Headers.Get("Content-Type"),
 					ContentLength: len(bodyBytes),
 					TargetType:    "CreateFederationEnrollmentResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	case 500:
+		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	default:
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+// RotateFederationEnrollment Rotate a federation enrollment
+func (c *Client) RotateFederationEnrollmentWithResponse(ctx context.Context, options *RotateFederationEnrollmentRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RotateFederationEnrollmentResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/federation/enrollments/actions/rotate",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/federation/enrollments/actions/rotate")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &RotateFederationEnrollmentResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(RotateFederationEnrollmentResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "RotateFederationEnrollmentResponse",
 					Body:          bodyBytes,
 					Err:           err,
 				}

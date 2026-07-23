@@ -241,10 +241,17 @@ func federationEnrollCmd() *cobra.Command {
 }
 
 func federationEnrollHTTPClient(ctx context.Context, hubBaseURL string, allowInsecure bool) (*http.Client, error) {
-	return clientpkg.NewHTTPClient(ctx, hubBaseURL, clientpkg.Opts{
+	httpClient, err := clientpkg.NewHTTPClient(ctx, hubBaseURL, clientpkg.Opts{
 		Timeout:       envHTTPTimeout(defaultHTTPTimeout),
 		AllowInsecure: allowInsecure,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if err := clientpkg.ConfigureOriginPinnedRedirects(httpClient, hubBaseURL); err != nil {
+		return nil, err
+	}
+	return httpClient, nil
 }
 
 func federationEnrollHTTPClientError(err error) error {

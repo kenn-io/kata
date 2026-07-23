@@ -45,6 +45,7 @@ type Store struct {
 	readOnly         bool
 	readQ            readQuerier
 	idempotencyLocks *idempotencyLockSet
+	rotationStage    func(context.Context) error
 }
 
 // readQuerier is the read-only query surface shared between *sql.DB and *sql.Tx.

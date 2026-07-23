@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +16,108 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
+
+type federationRotationResult struct {
+	created db.CreatedFederationEnrollment
+	err     error
+}
+
+type federationRotationStageBarrier struct {
+	arrivals chan struct{}
+	release  chan struct{}
+	calls    atomic.Int64
+}
+
+func newFederationRotationStageBarrier() *federationRotationStageBarrier {
+	return &federationRotationStageBarrier{
+		arrivals: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+}
+
+func (b *federationRotationStageBarrier) afterLookup(ctx context.Context) error {
+	if b.calls.Add(1) > 2 {
+		return nil
+	}
+	select {
+	case b.arrivals <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func runConcurrentFederationRotations(
+	t *testing.T,
+	store db.Storage,
+	backend Backend,
+	params []db.CreateFederationEnrollmentParams,
+) [2]federationRotationResult {
+	t.Helper()
+	require.Len(t, params, 2)
+	require.NotNil(t, backend.InstallEnrollmentRotationStage)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	barrier := newFederationRotationStageBarrier()
+	removeStage := backend.InstallEnrollmentRotationStage(store, barrier.afterLookup)
+	defer removeStage()
+
+	results := make(chan federationRotationResult, 2)
+	for _, input := range params {
+		go func() {
+			created, err := store.RotateFederationEnrollment(ctx, input)
+			results <- federationRotationResult{created: created, err: err}
+		}()
+	}
+
+	for range 2 {
+		select {
+		case <-barrier.arrivals:
+		case result := <-results:
+			require.FailNow(
+				t,
+				"rotation completed before both transactions passed replacement lookup",
+				"result error: %v",
+				result.err,
+			)
+		case <-ctx.Done():
+			require.FailNow(
+				t,
+				"wait for concurrent rotation transaction stages",
+				"error: %v",
+				ctx.Err(),
+			)
+		}
+	}
+	assert.Equal(t, int64(2), barrier.calls.Load())
+	select {
+	case result := <-results:
+		require.FailNow(
+			t,
+			"rotation completed before transaction-stage release",
+			"result error: %v",
+			result.err,
+		)
+	default:
+	}
+	close(barrier.release)
+
+	var output [2]federationRotationResult
+	for i := range output {
+		select {
+		case output[i] = <-results:
+		case <-ctx.Done():
+			require.FailNow(t, "wait for concurrent rotation results", "error: %v", ctx.Err())
+		}
+	}
+	return output
+}
 
 func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
@@ -281,6 +385,7 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 		ProjectID: &rollbackProject.ID, Capabilities: "pull", Actor: "member",
 	})
 	require.Error(t, err, "duplicate token must fail after federation enablement begins")
+	assert.ErrorIs(t, err, db.ErrFederationEnrollmentTokenConflict)
 	_, err = store.FederationBindingByProject(ctx, rollbackProject.ID)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	eventsAfterFailure, err := store.EventsAfter(ctx, db.EventsAfterParams{
@@ -346,6 +451,152 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	})
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	assert.ErrorIs(t, store.RevokeFederationEnrollment(ctx, created.Enrollment.ID+10000), db.ErrNotFound)
+
+	t.Run("explicit enrollment token replay", func(t *testing.T) {
+		replayProject, projectErr := store.CreateProject(ctx, "federation-enrollment-replay-project")
+		require.NoError(t, projectErr)
+		params := db.CreateFederationEnrollmentParams{
+			Token: "replay-enrollment-secret", SpokeInstanceUID: spokeUID,
+			ProjectID: &replayProject.ID, Capabilities: "push,pull", Actor: "member",
+		}
+		first, createErr := store.CreateProjectFederationEnrollment(ctx, params)
+		require.NoError(t, createErr)
+
+		sameProjectID := replayProject.ID
+		params.ProjectID = &sameProjectID
+		params.Capabilities = "pull,push"
+		replayed, replayErr := store.CreateProjectFederationEnrollment(ctx, params)
+		require.NoError(t, replayErr)
+		assert.Equal(t, first.Enrollment.ID, replayed.Enrollment.ID)
+		assert.Equal(t, params.Token, replayed.Token)
+
+		enrollments, listErr := store.ListFederationEnrollments(ctx)
+		require.NoError(t, listErr)
+		matchingRows := 0
+		for _, enrollment := range enrollments {
+			if enrollment.TokenHash == db.FederationTokenHash(params.Token) {
+				matchingRows++
+			}
+		}
+		assert.Equal(t, 1, matchingRows)
+	})
+
+	t.Run("explicit wildcard enrollment token replay", func(t *testing.T) {
+		replayed, replayErr := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token: "wildcard-enrollment-secret", SpokeInstanceUID: spokeUID,
+			Capabilities: "pull", Actor: "member",
+		})
+		require.NoError(t, replayErr)
+		assert.Equal(t, wildcard.Enrollment.ID, replayed.Enrollment.ID)
+		assert.Nil(t, replayed.Enrollment.ProjectID)
+	})
+
+	t.Run("explicit enrollment token mismatch", func(t *testing.T) {
+		otherSpokeUID, uidErr := uid.New()
+		require.NoError(t, uidErr)
+		base := db.CreateFederationEnrollmentParams{
+			Token: "mismatch-enrollment-secret", SpokeInstanceUID: spokeUID,
+			ProjectID: &peer.ID, Capabilities: "push,pull", Actor: "member",
+		}
+		_, createErr := store.CreateFederationEnrollment(ctx, base)
+		require.NoError(t, createErr)
+
+		for _, tc := range []struct {
+			name   string
+			mutate func(*db.CreateFederationEnrollmentParams)
+		}{
+			{name: "spoke uid", mutate: func(p *db.CreateFederationEnrollmentParams) {
+				p.SpokeInstanceUID = otherSpokeUID
+			}},
+			{name: "project id", mutate: func(p *db.CreateFederationEnrollmentParams) {
+				p.ProjectID = nil
+			}},
+			{name: "capabilities", mutate: func(p *db.CreateFederationEnrollmentParams) {
+				p.Capabilities = "pull"
+			}},
+			{name: "actor", mutate: func(p *db.CreateFederationEnrollmentParams) {
+				p.Actor = "other-member"
+			}},
+			{name: "adoption policy", mutate: func(p *db.CreateFederationEnrollmentParams) {
+				p.AllowAdoptionSnapshotAuthors = true
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				candidate := base
+				tc.mutate(&candidate)
+				_, replayErr := store.CreateFederationEnrollment(ctx, candidate)
+				assert.ErrorIs(t, replayErr, db.ErrFederationEnrollmentTokenConflict)
+			})
+		}
+	})
+
+	t.Run("revoked explicit enrollment token conflicts", func(t *testing.T) {
+		params := db.CreateFederationEnrollmentParams{
+			Token: "revoked-replay-enrollment-secret", SpokeInstanceUID: spokeUID,
+			ProjectID: &peer.ID, Capabilities: "pull", Actor: "member",
+		}
+		first, createErr := store.CreateFederationEnrollment(ctx, params)
+		require.NoError(t, createErr)
+		require.NoError(t, store.RevokeFederationEnrollment(ctx, first.Enrollment.ID))
+
+		_, replayErr := store.CreateFederationEnrollment(ctx, params)
+		assert.ErrorIs(t, replayErr, db.ErrFederationEnrollmentTokenConflict)
+	})
+
+	t.Run("concurrent explicit enrollment token replay", func(t *testing.T) {
+		params := db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+			Token: "concurrent-replay-enrollment-secret", SpokeInstanceUID: spokeUID,
+			ProjectID: &peer.ID, Capabilities: "pull", Actor: "member",
+		}
+		type result struct {
+			created db.CreatedFederationEnrollment
+			err     error
+		}
+		start := make(chan struct{})
+		results := make(chan result, 2)
+		var ready sync.WaitGroup
+		ready.Add(2)
+		for range 2 {
+			go func() {
+				ready.Done()
+				<-start
+				created, createErr := store.CreateFederationEnrollment(ctx, params)
+				results <- result{created: created, err: createErr}
+			}()
+		}
+		ready.Wait()
+		close(start)
+		first := <-results
+		second := <-results
+		require.NoError(t, first.err)
+		require.NoError(t, second.err)
+		assert.Equal(t, first.created.Enrollment.ID, second.created.Enrollment.ID)
+
+		enrollments, listErr := store.ListFederationEnrollments(ctx)
+		require.NoError(t, listErr)
+		matchingRows := 0
+		for _, enrollment := range enrollments {
+			if enrollment.TokenHash == db.FederationTokenHash(params.Token) {
+				matchingRows++
+			}
+		}
+		assert.Equal(t, 1, matchingRows)
+	})
+
+	t.Run("generated enrollment tokens remain distinct", func(t *testing.T) {
+		params := db.CreateFederationEnrollmentParams{
+			SpokeInstanceUID: spokeUID, ProjectID: &peer.ID,
+			Capabilities: "pull", Actor: "member",
+		}
+		first, firstErr := store.CreateFederationEnrollment(ctx, params)
+		require.NoError(t, firstErr)
+		second, secondErr := store.CreateFederationEnrollment(ctx, params)
+		require.NoError(t, secondErr)
+		assert.NotEqual(t, first.Enrollment.ID, second.Enrollment.ID)
+		assert.NotEqual(t, first.Token, second.Token)
+		assert.Nil(t, first.Enrollment.RevokedAt)
+		assert.Nil(t, second.Enrollment.RevokedAt)
+	})
 
 	quarantineAt := time.Date(2026, 7, 16, 14, 0, 0, 0, time.UTC)
 	pushQuarantine, err := store.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
@@ -458,6 +709,276 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, enrollmentExports, 1)
 	assert.Equal(t, created.Enrollment.ID, enrollmentExports[0].ID)
+	return nil
+}
+
+func checkFederationEnrollmentRotation(t *testing.T, store db.Storage, backend Backend) error {
+	t.Helper()
+	ctx := context.Background()
+	require.NotNil(t, backend.InstallEnrollmentInsertFailure)
+
+	enrollmentByID := func(t *testing.T, id int64) db.FederationEnrollment {
+		t.Helper()
+		enrollments, err := store.ListFederationEnrollments(ctx)
+		require.NoError(t, err)
+		for _, enrollment := range enrollments {
+			if enrollment.ID == id {
+				return enrollment
+			}
+		}
+		require.FailNow(t, "federation enrollment not found", "id=%d", id)
+		return db.FederationEnrollment{}
+	}
+	enrollmentCountByToken := func(t *testing.T, token string) int {
+		t.Helper()
+		enrollments, err := store.ListFederationEnrollments(ctx)
+		require.NoError(t, err)
+		count := 0
+		for _, enrollment := range enrollments {
+			if enrollment.TokenHash == db.FederationTokenHash(token) {
+				count++
+			}
+		}
+		return count
+	}
+	newSpokeUID := func(t *testing.T) string {
+		t.Helper()
+		value, err := uid.New()
+		require.NoError(t, err)
+		return value
+	}
+	createEnrollment := func(
+		t *testing.T,
+		token string,
+		spokeUID string,
+		projectID *int64,
+		actor string,
+	) db.CreatedFederationEnrollment {
+		t.Helper()
+		created, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token: token, SpokeInstanceUID: spokeUID, ProjectID: projectID,
+			Capabilities: "pull", Actor: actor,
+		})
+		require.NoError(t, err)
+		return created
+	}
+
+	t.Run("rotate revokes only matching spoke and project grants", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "rotation-scope-project")
+		require.NoError(t, err)
+		otherProject, err := store.CreateProject(ctx, "rotation-other-project")
+		require.NoError(t, err)
+		spokeUID := newSpokeUID(t)
+		otherSpokeUID := newSpokeUID(t)
+
+		old := createEnrollment(t, "rotation-old-token", spokeUID, &project.ID, "member")
+		secondOld := createEnrollment(t, "rotation-second-old-token", spokeUID, &project.ID, "other-member")
+		wildcard := createEnrollment(t, "rotation-wildcard-token", spokeUID, nil, "member")
+		otherProjectGrant := createEnrollment(
+			t, "rotation-other-project-token", spokeUID, &otherProject.ID, "member",
+		)
+		otherSpokeGrant := createEnrollment(
+			t, "rotation-other-spoke-token", otherSpokeUID, &project.ID, "member",
+		)
+
+		rotated, err := store.RotateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token: "rotation-replacement-token", SpokeInstanceUID: spokeUID, ProjectID: &project.ID,
+			Capabilities: "push,pull", Actor: "member",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "rotation-replacement-token", rotated.Token)
+		assert.Nil(t, rotated.Enrollment.RevokedAt)
+		assert.Equal(t, db.FederationTokenHash(rotated.Token), rotated.Enrollment.TokenHash)
+
+		assert.NotNil(t, enrollmentByID(t, old.Enrollment.ID).RevokedAt)
+		assert.NotNil(t, enrollmentByID(t, secondOld.Enrollment.ID).RevokedAt)
+		assert.Nil(t, enrollmentByID(t, wildcard.Enrollment.ID).RevokedAt)
+		assert.Nil(t, enrollmentByID(t, otherProjectGrant.Enrollment.ID).RevokedAt)
+		assert.Nil(t, enrollmentByID(t, otherSpokeGrant.Enrollment.ID).RevokedAt)
+		assert.Nil(t, enrollmentByID(t, rotated.Enrollment.ID).RevokedAt)
+	})
+
+	t.Run("rotate validates project scope and replacement token", func(t *testing.T) {
+		projectID := int64(0)
+		spokeUID := newSpokeUID(t)
+		base := db.CreateFederationEnrollmentParams{
+			Token: "rotation-validation-token", SpokeInstanceUID: spokeUID,
+			ProjectID: &projectID, Capabilities: "pull", Actor: "member",
+		}
+		_, err := store.RotateFederationEnrollment(ctx, base)
+		assert.Error(t, err)
+
+		base.ProjectID = nil
+		_, err = store.RotateFederationEnrollment(ctx, base)
+		assert.Error(t, err)
+
+		project, err := store.CreateProject(ctx, "rotation-validation-project")
+		require.NoError(t, err)
+		base.ProjectID = &project.ID
+		base.Token = ""
+		_, err = store.RotateFederationEnrollment(ctx, base)
+		assert.Error(t, err)
+	})
+
+	t.Run("rotate creates replacement without an old grant", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "rotation-no-match-project")
+		require.NoError(t, err)
+		spokeUID := newSpokeUID(t)
+
+		rotated, err := store.RotateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+			Token: "rotation-no-match-token", SpokeInstanceUID: spokeUID, ProjectID: &project.ID,
+			Capabilities: "pull", Actor: "member",
+		})
+		require.NoError(t, err)
+		assert.Nil(t, rotated.Enrollment.RevokedAt)
+		assert.Equal(t, 1, enrollmentCountByToken(t, rotated.Token))
+	})
+
+	t.Run("rotate retries a lost response exactly", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "rotation-retry-project")
+		require.NoError(t, err)
+		spokeUID := newSpokeUID(t)
+		old := createEnrollment(t, "rotation-retry-old-token", spokeUID, &project.ID, "member")
+		params := db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+			Token: "rotation-retry-replacement-token", SpokeInstanceUID: spokeUID, ProjectID: &project.ID,
+			Capabilities: "push,pull", Actor: "member",
+		}
+
+		first, err := store.RotateFederationEnrollment(ctx, params)
+		require.NoError(t, err)
+		replayed, err := store.RotateFederationEnrollment(ctx, params)
+		require.NoError(t, err)
+
+		assert.Equal(t, first.Enrollment.ID, replayed.Enrollment.ID)
+		assert.Equal(t, first.Token, replayed.Token)
+		assert.Equal(t, 1, enrollmentCountByToken(t, params.Token))
+		assert.NotNil(t, enrollmentByID(t, old.Enrollment.ID).RevokedAt)
+		assert.Nil(t, enrollmentByID(t, replayed.Enrollment.ID).RevokedAt)
+	})
+
+	t.Run("rotate rejects a mismatched replacement before revocation", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "rotation-conflict-project")
+		require.NoError(t, err)
+		spokeUID := newSpokeUID(t)
+		params := db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+			Token: "rotation-conflict-replacement-token", SpokeInstanceUID: spokeUID, ProjectID: &project.ID,
+			Capabilities: "pull", Actor: "member",
+		}
+		_, err = store.RotateFederationEnrollment(ctx, params)
+		require.NoError(t, err)
+		activeBeforeConflict := createEnrollment(
+			t, "rotation-conflict-active-token", spokeUID, &project.ID, "member",
+		)
+
+		params.Actor = "different-member"
+		_, err = store.RotateFederationEnrollment(ctx, params)
+		assert.ErrorIs(t, err, db.ErrFederationEnrollmentTokenConflict)
+		assert.Nil(t, enrollmentByID(t, activeBeforeConflict.Enrollment.ID).RevokedAt)
+		assert.Equal(t, 1, enrollmentCountByToken(t, params.Token))
+	})
+
+	t.Run("concurrent exact rotations return one replacement", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "rotation-concurrent-exact-project")
+		require.NoError(t, err)
+		spokeUID := newSpokeUID(t)
+		old := createEnrollment(
+			t, "rotation-concurrent-exact-old-token", spokeUID, &project.ID, "member",
+		)
+		params := db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+			Token: "rotation-concurrent-exact-replacement-token", SpokeInstanceUID: spokeUID,
+			ProjectID: &project.ID, Capabilities: "push,pull", Actor: "member",
+		}
+		results := runConcurrentFederationRotations(
+			t, store, backend,
+			[]db.CreateFederationEnrollmentParams{params, params},
+		)
+		first := results[0]
+		second := results[1]
+		require.NoError(t, first.err)
+		require.NoError(t, second.err)
+		assert.Equal(t, first.created.Enrollment.ID, second.created.Enrollment.ID)
+		assert.Equal(t, params.Token, first.created.Token)
+		assert.Equal(t, params.Token, second.created.Token)
+		assert.Equal(t, 1, enrollmentCountByToken(t, params.Token))
+		assert.NotNil(t, enrollmentByID(t, old.Enrollment.ID).RevokedAt)
+		assert.Nil(t, enrollmentByID(t, first.created.Enrollment.ID).RevokedAt)
+	})
+
+	t.Run("concurrent conflicting rotations leave one active replacement", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "rotation-concurrent-conflict-project")
+		require.NoError(t, err)
+		spokeUID := newSpokeUID(t)
+		old := createEnrollment(
+			t, "rotation-concurrent-conflict-old-token", spokeUID, &project.ID, "member",
+		)
+		const replacementToken = "rotation-concurrent-conflict-replacement-token"
+		params := []db.CreateFederationEnrollmentParams{
+			{
+				Token: replacementToken, SpokeInstanceUID: spokeUID, ProjectID: &project.ID,
+				Capabilities: "pull", Actor: "member-a",
+			},
+			{
+				Token: replacementToken, SpokeInstanceUID: spokeUID, ProjectID: &project.ID,
+				Capabilities: "pull", Actor: "member-b",
+			},
+		}
+		results := runConcurrentFederationRotations(t, store, backend, params)
+		first := results[0]
+		second := results[1]
+		successes := []federationRotationResult{}
+		conflicts := 0
+		for _, result := range []federationRotationResult{first, second} {
+			switch {
+			case result.err == nil:
+				successes = append(successes, result)
+			case errors.Is(result.err, db.ErrFederationEnrollmentTokenConflict):
+				conflicts++
+			default:
+				require.NoError(t, result.err)
+			}
+		}
+		require.Len(t, successes, 1)
+		assert.Equal(t, 1, conflicts)
+		assert.Equal(t, replacementToken, successes[0].created.Token)
+		assert.Equal(t, 1, enrollmentCountByToken(t, replacementToken))
+		assert.NotNil(t, enrollmentByID(t, old.Enrollment.ID).RevokedAt)
+
+		enrollments, listErr := store.ListFederationEnrollments(ctx)
+		require.NoError(t, listErr)
+		activeForScope := 0
+		for _, enrollment := range enrollments {
+			if enrollment.SpokeInstanceUID == spokeUID &&
+				enrollment.ProjectID != nil &&
+				*enrollment.ProjectID == project.ID &&
+				enrollment.RevokedAt == nil {
+				activeForScope++
+				assert.Equal(t, successes[0].created.Enrollment.ID, enrollment.ID)
+			}
+		}
+		assert.Equal(t, 1, activeForScope)
+	})
+
+	t.Run("rotate rolls back revocation when replacement insert fails", func(t *testing.T) {
+		project, err := store.CreateProject(ctx, "rotation-rollback-project")
+		require.NoError(t, err)
+		spokeUID := newSpokeUID(t)
+		old := createEnrollment(t, "rotation-rollback-old-token", spokeUID, &project.ID, "member")
+		removeFailure, err := backend.InstallEnrollmentInsertFailure(ctx, store)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, removeFailure()) })
+
+		params := db.CreateFederationEnrollmentParams{
+			Token: "rotation-rollback-replacement-token", SpokeInstanceUID: spokeUID, ProjectID: &project.ID,
+			Capabilities: "pull", Actor: "member",
+		}
+		_, err = store.RotateFederationEnrollment(ctx, params)
+		require.Error(t, err)
+		require.NoError(t, removeFailure())
+
+		assert.Nil(t, enrollmentByID(t, old.Enrollment.ID).RevokedAt)
+		assert.Equal(t, 0, enrollmentCountByToken(t, params.Token))
+	})
+
 	return nil
 }
 

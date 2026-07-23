@@ -235,6 +235,50 @@ func (o *CreateFederationEnrollmentRequestOptions) GetHeader() (map[string]strin
 	return nil, nil
 }
 
+// RotateFederationEnrollmentRequestOptions is the options needed to make a request to RotateFederationEnrollment.
+type RotateFederationEnrollmentRequestOptions struct {
+	Body *RotateFederationEnrollmentBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *RotateFederationEnrollmentRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *RotateFederationEnrollmentRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *RotateFederationEnrollmentRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *RotateFederationEnrollmentRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *RotateFederationEnrollmentRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // RevokeFederationEnrollmentRequestOptions is the options needed to make a request to RevokeFederationEnrollment.
 type RevokeFederationEnrollmentRequestOptions struct {
 	PathParams *RevokeFederationEnrollmentPath

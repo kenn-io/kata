@@ -1100,6 +1100,17 @@ func (f FederationBindingOut) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
+type FederationConfigHealth struct {
+	Configured        int64      `json:"configured"`
+	Conflicted        int64      `json:"conflicted"`
+	LastAttemptAt     *time.Time `json:"last_attempt_at,omitempty"`
+	LastErrorCategory *string    `json:"last_error_category,omitempty"`
+	LastErrorStatus   *int64     `json:"last_error_status,omitempty"`
+	LastSuccessAt     *time.Time `json:"last_success_at,omitempty"`
+	Pending           int64      `json:"pending"`
+	Reconciled        int64      `json:"reconciled"`
+}
+
 type FederationEnrollmentOut struct {
 	Actor            string     `json:"actor" validate:"required"`
 	Capabilities     string     `json:"capabilities" validate:"required"`
@@ -1285,14 +1296,15 @@ func (f FederationViolationSummary) Validate() error {
 }
 
 type HealthResponseBody struct {
-	APISchemaVersion *string           `json:"api_schema_version,omitempty"`
-	DBPath           string            `json:"db_path" validate:"required"`
-	Embeddings       *EmbeddingsHealth `json:"embeddings,omitempty"`
-	Ok               bool              `json:"ok"`
-	SchemaVersion    int64             `json:"schema_version"`
-	StartedAt        time.Time         `json:"started_at" validate:"required"`
-	Uptime           string            `json:"uptime" validate:"required"`
-	Version          string            `json:"version" validate:"required"`
+	APISchemaVersion *string                 `json:"api_schema_version,omitempty"`
+	DBPath           string                  `json:"db_path" validate:"required"`
+	Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
+	FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
+	Ok               bool                    `json:"ok"`
+	SchemaVersion    int64                   `json:"schema_version"`
+	StartedAt        time.Time               `json:"started_at" validate:"required"`
+	Uptime           string                  `json:"uptime" validate:"required"`
+	Version          string                  `json:"version" validate:"required"`
 }
 
 func (h HealthResponseBody) Validate() error {
@@ -1304,6 +1316,13 @@ func (h HealthResponseBody) Validate() error {
 		if v, ok := any(h.Embeddings).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Embeddings", err)
+			}
+		}
+	}
+	if h.FederationConfig != nil {
+		if v, ok := any(h.FederationConfig).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("FederationConfig", err)
 			}
 		}
 	}
@@ -3063,6 +3082,19 @@ func (r RewriteAuthorIdentityResult) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type RotateFederationEnrollmentRequestBody struct {
+	Actor                        *string `json:"actor,omitempty"`
+	AllowAdoptionSnapshotAuthors *bool   `json:"allow_adoption_snapshot_authors,omitempty"`
+	Capabilities                 string  `json:"capabilities" validate:"required"`
+	ProjectID                    int64   `json:"project_id" validate:"gte=1"`
+	SpokeInstanceUID             string  `json:"spoke_instance_uid" validate:"required"`
+	Token                        string  `json:"token" validate:"required"`
+}
+
+func (r RotateFederationEnrollmentRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
 type RunIssueSyncOnceRequestBody = map[string]any

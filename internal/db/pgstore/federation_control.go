@@ -262,13 +262,14 @@ func (s *Store) CreateProjectFederationEnrollment(
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, err
 	}
-	if prepared.ProjectID == nil || *prepared.ProjectID <= 0 {
+	if prepared.Params.ProjectID == nil || *prepared.Params.ProjectID <= 0 {
 		return db.CreatedFederationEnrollment{}, fmt.Errorf("project-scoped federation enrollment requires project id")
 	}
 	var output db.CreatedFederationEnrollment
 	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.CreatedFederationEnrollment{}
-		if _, err := s.enableProjectFederationTx(ctx, tx, *prepared.ProjectID, prepared.Actor); err != nil {
+		p := prepared.Params
+		if _, err := s.enableProjectFederationTx(ctx, tx, *p.ProjectID, p.Actor); err != nil {
 			return err
 		}
 		var err error
@@ -278,11 +279,65 @@ func (s *Store) CreateProjectFederationEnrollment(
 	return output, err
 }
 
+// RotateFederationEnrollment replaces active grants for one spoke and project
+// atomically with the caller-supplied credential.
+func (s *Store) RotateFederationEnrollment(
+	ctx context.Context,
+	input db.CreateFederationEnrollmentParams,
+) (db.CreatedFederationEnrollment, error) {
+	if input.Token == "" {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf("federation enrollment rotation requires replacement token")
+	}
+	prepared, err := db.PrepareFederationEnrollmentParams(input)
+	if err != nil {
+		return db.CreatedFederationEnrollment{}, err
+	}
+	if prepared.Params.ProjectID == nil || *prepared.Params.ProjectID <= 0 {
+		return db.CreatedFederationEnrollment{}, fmt.Errorf(
+			"federation enrollment rotation requires project id",
+		)
+	}
+	var output db.CreatedFederationEnrollment
+	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		output = db.CreatedFederationEnrollment{}
+		p := prepared.Params
+		existing, err := scanFederationEnrollment(tx.QueryRowContext(ctx,
+			federationEnrollmentSelect+` WHERE token_hash=$1`, db.FederationTokenHash(p.Token)))
+		if err == nil {
+			if !db.FederationEnrollmentMatchesCreate(existing, p) {
+				return db.ErrFederationEnrollmentTokenConflict
+			}
+			output = db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}
+			return nil
+		}
+		if !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		if s.rotationStage != nil {
+			if err := s.rotationStage(ctx); err != nil {
+				return err
+			}
+		}
+
+		if _, err := tx.ExecContext(ctx, `UPDATE federation_enrollments SET
+revoked_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE revoked_at IS NULL AND spoke_instance_uid=$1 AND project_id=$2`,
+			p.SpokeInstanceUID, *p.ProjectID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		output, err = createFederationEnrollmentTx(ctx, tx, prepared)
+		return err
+	})
+	return output, err
+}
+
 func createFederationEnrollmentTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	input db.CreateFederationEnrollmentParams,
+	prepared db.PreparedFederationEnrollment,
 ) (db.CreatedFederationEnrollment, error) {
+	input := prepared.Params
 	var projectID any
 	if input.ProjectID != nil {
 		projectID = *input.ProjectID
@@ -291,9 +346,25 @@ func createFederationEnrollmentTx(
 	err := tx.QueryRowContext(ctx, `INSERT INTO federation_enrollments(
   token_hash,spoke_instance_uid,project_id,capabilities,bound_actor,
   allow_adoption_snapshot_authors
-) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, db.FederationTokenHash(input.Token),
+) VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(token_hash) DO NOTHING
+RETURNING id`, db.FederationTokenHash(input.Token),
 		input.SpokeInstanceUID, projectID, input.Capabilities, input.Actor,
 		boolNumber(input.AllowAdoptionSnapshotAuthors)).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		if !prepared.ExplicitToken {
+			return db.CreatedFederationEnrollment{}, fmt.Errorf("create federation enrollment: generated token collision")
+		}
+		enrollment, selectErr := scanFederationEnrollment(tx.QueryRowContext(ctx,
+			federationEnrollmentSelect+` WHERE token_hash=$1`, db.FederationTokenHash(input.Token)))
+		if selectErr != nil {
+			return db.CreatedFederationEnrollment{}, selectErr
+		}
+		if !db.FederationEnrollmentMatchesCreate(enrollment, input) {
+			return db.CreatedFederationEnrollment{}, db.ErrFederationEnrollmentTokenConflict
+		}
+		return db.CreatedFederationEnrollment{Enrollment: enrollment, Token: input.Token}, nil
+	}
 	if err != nil {
 		return db.CreatedFederationEnrollment{}, mapSQLError(err, nil)
 	}

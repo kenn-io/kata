@@ -65,6 +65,72 @@ client-supplied actor strings such as `--actor`, `--as`, or `KATA_AUTHOR`.
 If you only have the bootstrap token, first mint a personal token as described
 in [Identity tokens](remote-daemon.md#identity-tokens).
 
+## Config-driven enrollment
+
+Operators who do not want to repeat the TUI or manual enroll/join ceremony can
+declare spoke-to-hub project mappings in the spoke's
+`<KATA_HOME>/config.toml`:
+
+```toml
+[[daemon]]
+name = "team-hub"
+url = "https://hub.example"
+token_env = "KATA_TEAM_HUB_TOKEN"
+
+[[federation.project]]
+hub = "team-hub"
+spoke_project = "spoke-project"
+hub_project = "hub-project"
+actor = "user-a"
+```
+
+Set `KATA_TEAM_HUB_TOKEN` in the spoke daemon's environment to a normal hub
+administration credential. The reconciler uses only the selected catalog
+entry's credential for that hub origin; it never substitutes the spoke
+daemon's global bearer token. If the selected token is a DB-backed identity
+token, the hub uses its identity as the enrollment and binding actor and
+ignores the configured actor value.
+
+On daemon start, the mapping ensures or creates `hub-project`, enables it for
+federation, creates a project-scoped `pull,push,lease` enrollment, and binds
+`spoke-project` with push enabled. A missing local project is created
+automatically; an existing standalone project is adopted. After ensuring the
+hub project, the spoke generates and persists an enrollment secret when no
+compatible credential exists, then asks the hub to enroll it. The secret lives
+only in the owner-only federation credential file and is safely reused after a
+restart or lost response. Every credential mutation uses failure-atomic file
+replacement. When adopting a standalone project whose local UID differs from
+the hub UID, reconciliation moves the credential to the hub UID under the
+shared adoption lock before changing the database identity.
+
+Reconciliation starts in the background after storage and the federation
+runner are ready. The daemon listener and normal project work do not wait for
+the hub. Runtime failures are fail-open and each mapping retries independently,
+starting after one second and backing off to at most five minutes. Inspect the
+sanitized aggregate under `federation_config` in `GET /api/v1/health`;
+`ok` remains true during hub outages, authentication failures, and conflicts.
+An unset selected `token_env` is reported as `hub_authentication` and follows
+the same retry path.
+
+The config is startup-only. Restart the spoke daemon after adding or changing
+a mapping. Once a mapping succeeds it stays quiet until the next restart.
+Removing the mapping and restarting does not revoke the enrollment or convert
+the replica back to standalone; configuration removal is not teardown. Leave
+explicitly when that is the intended operation:
+
+```sh
+kata federation leave spoke-project
+```
+
+Leave also cleans up exact config-managed credential reservations from an
+interrupted startup reconciliation, even when adoption did not finish. It
+fails closed and retains any conflicting or manual credential rather than
+deleting it.
+
+See [Configuration](../reference/configuration.md#declarative-federation-mappings)
+for validation rules and [HTTP API schema](../reference/http-api.md#federation-enrollment-and-health-endpoints)
+for the health and credential-rotation contract.
+
 ## TUI enrollment workflow
 
 The TUI federation view is scoped to the active daemon. Press `F` from the

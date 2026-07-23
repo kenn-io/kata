@@ -217,6 +217,24 @@ type CreateFederationEnrollmentResponse struct {
 	Body FederationEnrollmentOut
 }
 
+// RotateFederationEnrollmentRequest replaces project-scoped transport grants
+// for one spoke with a caller-supplied credential.
+type RotateFederationEnrollmentRequest struct {
+	Body struct {
+		SpokeInstanceUID             string `json:"spoke_instance_uid"`
+		ProjectID                    int64  `json:"project_id" minimum:"1"`
+		Capabilities                 string `json:"capabilities"`
+		Token                        string `json:"token"`
+		Actor                        string `json:"actor,omitempty"`
+		AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty"`
+	}
+}
+
+// RotateFederationEnrollmentResponse wraps the active replacement grant.
+type RotateFederationEnrollmentResponse struct {
+	Body FederationEnrollmentOut
+}
+
 // ListFederationEnrollmentsRequest lists hub-side federation transport grants.
 type ListFederationEnrollmentsRequest struct{}
 

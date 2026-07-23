@@ -61,6 +61,10 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 				LastProgressAt:  h.LastProgressAt,
 			}
 		}
+		if cfg.FederationConfigHealth != nil {
+			health := cfg.FederationConfigHealth()
+			out.Body.FederationConfig = &health
+		}
 		return out, nil
 	})
 }

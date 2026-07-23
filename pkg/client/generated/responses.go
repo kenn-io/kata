@@ -29,6 +29,10 @@ type CreateFederationEnrollmentResponse = FederationEnrollmentOut
 
 type CreateFederationEnrollmentErrorResponse = ErrorEnvelope
 
+type RotateFederationEnrollmentResponse = FederationEnrollmentOut
+
+type RotateFederationEnrollmentErrorResponse = ErrorEnvelope
+
 type RevokeFederationEnrollmentResponse = RevokeFederationEnrollmentBody
 
 type RevokeFederationEnrollmentErrorResponse = ErrorEnvelope
@@ -366,6 +370,13 @@ type CreateFederationEnrollmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateFederationEnrollmentResponse
+}
+
+type RotateFederationEnrollmentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RotateFederationEnrollmentResponse
 }
 
 type RevokeFederationEnrollmentResp struct {

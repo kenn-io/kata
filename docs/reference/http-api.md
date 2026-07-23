@@ -38,7 +38,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.6.0",
+  "api_schema_version": "0.7.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db"
@@ -70,6 +70,7 @@ response of an older daemon that predates it. Treat an **absent or empty**
 
 | Version | Change |
 | --- | --- |
+| `0.7.0` | Added transactional federation enrollment rotation, idempotent replay semantics for caller-supplied enrollment tokens, and the optional `federation_config` health block used by startup reconciliation. |
 | `0.6.0` | Ready responses now return fully hydrated issues. Project-scoped ready rows are `IssueOut` instead of the slimmer `Issue` projection, and global ready rows (`ReadyGlobalIssueOut`, renamed from `ReadyGlobalIssue`) embed `IssueOut` plus `project_name` — so both gain `labels`, `qualified_id` (required), link peers (`parent`, `blocks`, `blocked_by`, `related`), `blocked`, and `child_counts`. Clients regenerated from the schema see the new component name; the shipped Go client keeps `ReadyGlobalIssue` as a deprecated alias. |
 | `0.5.0` | Added metadata patch endpoints for issues and projects, issue create metadata, and metadata-key filters on project issue lists. Generated clients can patch metadata with `If-Match` revisions, send initial metadata in create requests, and request selected metadata keys with the `meta` query parameter. |
 | `0.4.0` | Added semantic-search response mode metadata and embeddings health fields. Search responses now always include the effective `mode`; configured daemons may also report sanitized embedding reconciler status from `/health`, including backlog and provider HTTP status without raw provider diagnostics. |
@@ -108,6 +109,55 @@ These are the current intentions, not a contractual guarantee:
 If you build against this schema and hit a gap, please open an issue — the
 contract is meant to be useful to external clients, and feedback shapes how far
 the compatibility guarantees are taken.
+
+## Federation Enrollment and Health Endpoints
+
+`POST /api/v1/federation/enrollments` accepts an optional `token`. Omitting it
+preserves create-once behavior and returns a newly generated plaintext
+enrollment token. When the caller supplies a token, an exact retry with the
+same spoke instance UID, project ID, canonical capabilities, resolved actor,
+and adoption policy returns the same active enrollment. Reusing that token with
+different attributes, or after its enrollment was revoked, returns `409` with
+`federation_enrollment_token_conflict`. Token-auth identity resolution happens
+before this comparison, so a DB-backed identity token's actor overrides the
+request body's `actor`.
+
+`POST /api/v1/federation/enrollments/actions/rotate` repairs a project-scoped
+spoke whose local binding exists but whose enrollment credential was lost. It
+uses the same normal hub administration authorization as enrollment creation
+and requires `spoke_instance_uid`, a positive `project_id`, `capabilities`, and
+an explicit replacement `token`; `actor` and
+`allow_adoption_snapshot_authors` have the same meaning as on creation. In one
+transaction the hub revokes active grants for that spoke and project and
+installs the replacement. After canonical capability normalization and
+token-authenticated actor resolution, retrying the same replacement token with
+the same spoke instance UID, project ID, canonical capabilities, resolved
+actor, and adoption policy returns the same active enrollment. An attribute
+mismatch or a revoked replacement enrollment returns `409` with
+`federation_enrollment_token_conflict`.
+
+When config-driven mappings are present, `GET /api/v1/health` adds an optional
+`federation_config` object:
+
+| Field | Meaning |
+| --- | --- |
+| `configured` | Number of startup mappings. |
+| `reconciled` | Mappings that reached the requested active binding. |
+| `pending` | Mappings awaiting their first attempt or retrying a runtime failure. |
+| `conflicted` | Mappings whose latest attempt found incompatible configuration, credentials, or a local binding. They continue retrying in case an operator resolves the conflict. |
+| `last_attempt_at` | Latest attempt time across all mappings, when any attempt has run. |
+| `last_success_at` | Latest successful reconciliation time across all mappings, when any has succeeded. |
+| `last_error_category` | Sanitized category from the most recent failed attempt; omitted until a failure occurs. |
+| `last_error_status` | Remote HTTP status for that failure when one is available; omitted otherwise. |
+
+Error categories are `configuration_conflict`, `binding_conflict`,
+`credential_io`, `hub_unavailable`, `hub_authentication`, `hub_validation`,
+and `local_storage`.
+
+The block is absent when no mappings are configured. It never exposes tokens,
+hashes, headers, URLs, project names, actors, or raw remote response bodies.
+Reconciliation is fail-open: `ok` remains `true` while mappings are pending or
+conflicted, so hub availability does not control spoke readiness.
 
 ## Comment Endpoints
 

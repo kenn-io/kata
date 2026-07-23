@@ -1167,6 +1167,25 @@ func TestNormalizeRemoteURL_SchemeGuard(t *testing.T) {
 	}
 }
 
+func TestNormalizeRemoteURLCanonicalOrigin(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"https://Daemon.Example:443/path?q=1#fragment", "https://daemon.example"},
+		{"http://127.0.0.1:80/path", "http://127.0.0.1"},
+		{"https://Daemon.Example:8443/path", "https://daemon.example:8443"},
+		{"https://[2001:db8::1]:443/path", "https://[2001:db8::1]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := normalizeRemoteURL(tt.input, false)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // TestResolveRemote_EnvSchemeGuardRejectsPublicHTTP verifies the guard
 // fires through the env-driven entry point with a clear actionable
 // error mentioning KATA_ALLOW_INSECURE.

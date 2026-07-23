@@ -119,3 +119,82 @@ func TestHealth_DoesNotExposeEmbeddingProviderDiagnostics(t *testing.T) {
 	assert.False(t, hasLastError, "unauthenticated health must omit raw embedding provider diagnostics")
 	assert.Contains(t, body.Embeddings, "last_error_status")
 }
+
+func TestHealthFederationConfigOmitsBlockWhenUnconfigured(t *testing.T) {
+	ts, _ := startDefaultTestServer(t)
+
+	var body struct {
+		FederationConfig *api.FederationConfigHealth `json:"federation_config"`
+	}
+	getAndUnmarshal(t, ts, "/api/v1/health", http.StatusOK, &body)
+	assert.Nil(t, body.FederationConfig)
+}
+
+func TestHealthFederationConfigIncludesSanitizedAggregate(t *testing.T) {
+	d := openTestDB(t)
+	lastAttempt := time.Date(2026, 7, 23, 4, 0, 0, 0, time.UTC)
+	lastSuccess := lastAttempt.Add(-time.Second)
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB:        d.db,
+		StartedAt: d.now,
+		FederationConfigHealth: func() api.FederationConfigHealth {
+			return api.FederationConfigHealth{
+				Configured:        4,
+				Reconciled:        1,
+				Pending:           2,
+				Conflicted:        1,
+				LastAttemptAt:     &lastAttempt,
+				LastSuccessAt:     &lastSuccess,
+				LastErrorCategory: "binding_conflict",
+				LastErrorStatus:   http.StatusConflict,
+			}
+		},
+	})
+
+	resp, bs := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(bs))
+	var body struct {
+		OK               bool                        `json:"ok"`
+		FederationConfig *api.FederationConfigHealth `json:"federation_config"`
+	}
+	require.NoError(t, json.Unmarshal(bs, &body))
+	assert.True(t, body.OK, "pending and conflicted config must remain fail open")
+	require.NotNil(t, body.FederationConfig)
+	assert.Equal(t, api.FederationConfigHealth{
+		Configured:        4,
+		Reconciled:        1,
+		Pending:           2,
+		Conflicted:        1,
+		LastAttemptAt:     &lastAttempt,
+		LastSuccessAt:     &lastSuccess,
+		LastErrorCategory: "binding_conflict",
+		LastErrorStatus:   http.StatusConflict,
+	}, *body.FederationConfig)
+
+	for _, privateValue := range []string{
+		"https://sensitive-hub.example",
+		"sensitive-spoke",
+		"sensitive-project",
+		"sensitive-actor",
+		"catalog-secret",
+		"reflected response body",
+	} {
+		assert.NotContains(t, string(bs), privateValue)
+	}
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(bs, &fields))
+	var federationFields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(fields["federation_config"], &federationFields))
+	assert.ElementsMatch(t, []string{
+		"configured", "reconciled", "pending", "conflicted",
+		"last_attempt_at", "last_success_at", "last_error_category", "last_error_status",
+	}, mapKeys(federationFields))
+}
+
+func mapKeys(values map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}

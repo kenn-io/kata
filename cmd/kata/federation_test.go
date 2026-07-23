@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -786,6 +787,93 @@ func TestFederationEnrollHTTPClientAllowsExplicitInsecurePlaintext(t *testing.T)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
+}
+
+func TestFederationEnrollHTTPClientNeverReplaysExplicitTokenCrossOrigin(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	const enrollmentToken = "explicit-enrollment-secret"
+
+	for _, status := range []int{
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var (
+				mu             sync.Mutex
+				targetRequests int
+				targetBodies   []string
+			)
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				mu.Lock()
+				targetRequests++
+				targetBodies = append(targetBodies, string(body))
+				mu.Unlock()
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(target.Close)
+
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, target.URL+r.URL.Path, status) //nolint:gosec // test server intentionally redirects only to another local test server.
+			}))
+			t.Cleanup(source.Close)
+
+			client, err := federationEnrollHTTPClient(context.Background(), source.URL, true)
+			require.NoError(t, err)
+			_, _, err = httpDoJSON(
+				context.Background(),
+				client,
+				http.MethodPost,
+				source.URL+"/api/v1/federation/enrollments",
+				map[string]any{"token": enrollmentToken},
+			)
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), enrollmentToken)
+
+			mu.Lock()
+			defer mu.Unlock()
+			assert.Zero(t, targetRequests)
+			assert.Empty(t, targetBodies)
+		})
+	}
+}
+
+func TestFederationEnrollHTTPClientFollowsSameOriginRedirect(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_AUTH_TOKEN", "")
+	const enrollmentToken = "explicit-enrollment-secret"
+
+	var redirectedBody struct {
+		Token string `json:"token"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/federation/enrollments":
+			http.Redirect(w, r, "/redirected-enrollment", http.StatusTemporaryRedirect)
+		case "/redirected-enrollment":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&redirectedBody))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":71}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := federationEnrollHTTPClient(context.Background(), server.URL, true)
+	require.NoError(t, err)
+	status, _, err := httpDoJSON(
+		context.Background(),
+		client,
+		http.MethodPost,
+		server.URL+"/api/v1/federation/enrollments",
+		map[string]any{"token": enrollmentToken},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, status)
+	assert.Equal(t, enrollmentToken, redirectedBody.Token)
 }
 
 func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *testing.T) {

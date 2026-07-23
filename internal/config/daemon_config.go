@@ -30,6 +30,8 @@ type DaemonConfig struct {
 	// target here; other clients may also read this shared catalog, so it is
 	// top-level rather than nested under [tui].
 	Daemons []CatalogDaemonConfig `toml:"daemon"`
+	// Federation declares project mappings managed by daemon startup.
+	Federation FederationConfig `toml:"federation"`
 	// TUI carries client-side interactive UI defaults. Unlike remote
 	// daemon overrides, these are user preferences and belong in
 	// <KATA_HOME>/config.toml.
@@ -303,6 +305,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Close.Throttle.Window = strings.TrimSpace(cfg.Close.Throttle.Window)
 		trimSearchEmbeddings(&cfg)
 		trimDaemonCatalog(&cfg)
+		trimFederationConfig(&cfg)
 		trimGitHubSync(&cfg)
 	case errors.Is(err, os.ErrNotExist):
 		// Absent file: fall through with zero-value cfg. Env merge and
@@ -325,6 +328,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		return nil, err
 	}
 	if err := normalizeDaemonCatalog(&cfg); err != nil {
+		return nil, err
+	}
+	if err := validateFederationConfig(&cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil

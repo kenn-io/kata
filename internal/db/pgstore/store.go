@@ -40,6 +40,7 @@ type Store struct {
 	federationLease      *federationRunnerLeaseState
 	idempotencyDB        *sql.DB
 	exportQ              exportQueryer
+	rotationStage        func(context.Context) error
 }
 
 // Close releases a process-lifetime serving lease before closing the pool.

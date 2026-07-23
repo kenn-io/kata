@@ -213,7 +213,8 @@ func hostAccessResolvedByHandler(operationID string) bool {
 	case "mergeProject",
 		"moveIssue",
 		"listAllIssues",
-		"createFederationEnrollment":
+		"createFederationEnrollment",
+		"rotateFederationEnrollment":
 		return true
 	default:
 		return false

@@ -180,6 +180,8 @@ type serviceFederationCredentialStore struct {
 	entries map[string]FederationCredential
 }
 
+var _ FederationCredentialStore = (*serviceFederationCredentialStore)(nil)
+
 func newServiceFederationCredentialStore() *serviceFederationCredentialStore {
 	return &serviceFederationCredentialStore{entries: make(map[string]FederationCredential)}
 }

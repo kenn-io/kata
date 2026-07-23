@@ -697,7 +697,7 @@ func normalizeRemoteURL(v string, allowInsecure bool) (string, error) {
 	if err := requireSecureOrPrivate(u, allowInsecure); err != nil {
 		return "", err
 	}
-	return u.Scheme + "://" + u.Host, nil
+	return config.CanonicalHTTPOrigin(u.String())
 }
 
 // requireSecureOrPrivate returns nil when the URL is safe to dial over
