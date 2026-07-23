@@ -657,11 +657,8 @@ func ensureMappingEnrollment(
 						"existing federation binding actor differs from credential",
 					)
 			}
-			if !credential.ManagedByConfig ||
-				bindingOperational(preflight.binding, credential) {
-				return Enrollment{Actor: strings.TrimSpace(credential.Actor)},
-					withManagementMetadata(credential, catalog, mapping), nil
-			}
+			return Enrollment{Actor: strings.TrimSpace(credential.Actor)},
+				withManagementMetadata(credential, catalog, mapping), nil
 		}
 	}
 

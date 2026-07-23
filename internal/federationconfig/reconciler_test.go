@@ -28,6 +28,7 @@ const (
 )
 
 type fakeHub struct {
+	mu                sync.Mutex
 	project           federationconfig.HubProject
 	enrollment        federationconfig.Enrollment
 	resolveProjectErr error
@@ -41,11 +42,18 @@ type fakeHub struct {
 	onEnsureProject   func()
 	onEnrollment      func(federationconfig.EnrollmentRequest)
 	onRotation        func(federationconfig.EnrollmentRequest)
+
+	ensureEnrollmentStarted chan struct{}
+	releaseEnsureEnrollment chan struct{}
+	rotateEnrollmentStarted chan struct{}
+	releaseRotateEnrollment chan struct{}
 }
 
 func (h *fakeHub) ResolveProject(
 	_ context.Context, name string,
 ) (federationconfig.HubProject, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.resolveCalls++
 	if h.resolveProjectErr != nil {
 		return federationconfig.HubProject{}, h.resolveProjectErr
@@ -60,43 +68,73 @@ func (h *fakeHub) ResolveProject(
 func (h *fakeHub) EnsureProject(
 	_ context.Context, name, actor string,
 ) (federationconfig.HubProject, error) {
+	h.mu.Lock()
 	h.ensureCalls++
-	if h.onEnsureProject != nil {
-		h.onEnsureProject()
-	}
+	onEnsureProject := h.onEnsureProject
 	if h.ensureProjectErr != nil {
+		h.mu.Unlock()
 		return federationconfig.HubProject{}, h.ensureProjectErr
 	}
 	project := h.project
+	h.mu.Unlock()
+	if onEnsureProject != nil {
+		onEnsureProject()
+	}
 	project.Name = name
 	_ = actor
 	return project, nil
 }
 
 func (h *fakeHub) EnsureEnrollment(
-	_ context.Context, request federationconfig.EnrollmentRequest,
+	ctx context.Context, request federationconfig.EnrollmentRequest,
 ) (federationconfig.Enrollment, error) {
+	h.mu.Lock()
 	h.enrollmentCalls = append(h.enrollmentCalls, request)
-	if h.onEnrollment != nil {
-		h.onEnrollment(request)
+	if h.ensureEnrollmentStarted != nil {
+		close(h.ensureEnrollmentStarted)
 	}
-	if h.enrollmentErr != nil {
-		return h.enrollment, h.enrollmentErr
+	if h.releaseEnsureEnrollment != nil {
+		select {
+		case <-h.releaseEnsureEnrollment:
+		case <-ctx.Done():
+			h.mu.Unlock()
+			return federationconfig.Enrollment{}, ctx.Err()
+		}
 	}
-	return h.enrollment, nil
+	onEnrollment := h.onEnrollment
+	enrollment := h.enrollment
+	err := h.enrollmentErr
+	h.mu.Unlock()
+	if onEnrollment != nil {
+		onEnrollment(request)
+	}
+	return enrollment, err
 }
 
 func (h *fakeHub) RotateEnrollment(
-	_ context.Context, request federationconfig.EnrollmentRequest,
+	ctx context.Context, request federationconfig.EnrollmentRequest,
 ) (federationconfig.Enrollment, error) {
+	h.mu.Lock()
 	h.rotationCalls = append(h.rotationCalls, request)
-	if h.onRotation != nil {
-		h.onRotation(request)
+	if h.rotateEnrollmentStarted != nil {
+		close(h.rotateEnrollmentStarted)
 	}
-	if h.rotationErr != nil {
-		return h.enrollment, h.rotationErr
+	if h.releaseRotateEnrollment != nil {
+		select {
+		case <-h.releaseRotateEnrollment:
+		case <-ctx.Done():
+			h.mu.Unlock()
+			return federationconfig.Enrollment{}, ctx.Err()
+		}
 	}
-	return h.enrollment, nil
+	onRotation := h.onRotation
+	enrollment := h.enrollment
+	err := h.rotationErr
+	h.mu.Unlock()
+	if onRotation != nil {
+		onRotation(request)
+	}
+	return enrollment, err
 }
 
 type fakeCredentialStore struct {
@@ -1064,6 +1102,7 @@ func TestReconcileMappingRejectsInvalidEnrollmentActorWithoutStateOverwrite(t *t
 
 			credentials := newFakeCredentialStore()
 			original := managedCredential()
+			original.Actor = ""
 			credentials.credentials[project.UID] = original
 			hub := newFakeHub()
 			hub.enrollment.Actor = tt.actor
@@ -1155,7 +1194,90 @@ func TestReconcileMappingLostEnrollmentResponseRepeatsExactToken(t *testing.T) {
 	assert.Equal(t, first, hub.enrollmentCalls[1])
 }
 
-func TestReconcileMappingMatchingBindingMissingCredentialRotates(t *testing.T) {
+func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	store := openReconcileStore(t)
+	credentials := newFakeCredentialStore()
+	hub := newFakeHub()
+	hub.ensureEnrollmentStarted = make(chan struct{})
+	hub.releaseEnsureEnrollment = make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- federationconfig.ReconcileMapping(
+			ctx, store, credentials, hub,
+			testCatalog(), testMapping(), nil,
+		)
+	}()
+
+	select {
+	case <-hub.ensureEnrollmentStarted:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for paused enrollment", "error: %v", ctx.Err())
+	}
+	localProject, err := store.ProjectByName(ctx, "spoke-project")
+	require.NoError(t, err)
+	_, err = daemon.LeaveFederationReplica(
+		ctx, store, credentials, nil, localProject.ID,
+	)
+	require.NoError(t, err)
+	close(hub.releaseEnsureEnrollment)
+
+	select {
+	case err = <-result:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for reconciliation after leave", "error: %v", ctx.Err())
+	}
+	require.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+	_, found, readErr := credentials.FederationCredential(ctx, hubProjectUID)
+	require.NoError(t, readErr)
+	assert.False(t, found)
+	_, bindingErr := store.FederationBindingByProject(ctx, localProject.ID)
+	require.ErrorIs(t, bindingErr, db.ErrNotFound)
+}
+
+func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	store := openReconcileStore(t)
+	localProject := createMatchingBoundProject(t, store)
+	credentials := newFakeCredentialStore()
+	hub := newFakeHub()
+	hub.rotateEnrollmentStarted = make(chan struct{})
+	hub.releaseRotateEnrollment = make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- federationconfig.ReconcileMapping(
+			ctx, store, credentials, hub,
+			testCatalog(), testMapping(), nil,
+		)
+	}()
+
+	select {
+	case <-hub.rotateEnrollmentStarted:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for paused rotation", "error: %v", ctx.Err())
+	}
+	_, err := daemon.LeaveFederationReplica(
+		ctx, store, credentials, nil, localProject.ID,
+	)
+	require.NoError(t, err)
+	close(hub.releaseRotateEnrollment)
+
+	select {
+	case err = <-result:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for reconciliation after leave", "error: %v", ctx.Err())
+	}
+	require.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+	_, found, readErr := credentials.FederationCredential(ctx, hubProjectUID)
+	require.NoError(t, readErr)
+	assert.False(t, found)
+	_, bindingErr := store.FederationBindingByProject(ctx, localProject.ID)
+	require.ErrorIs(t, bindingErr, db.ErrNotFound)
+}
+
+func TestReconcileMappingMissingCredentialRotatesEnrollment(t *testing.T) {
 	store := openReconcileStore(t)
 	project := createMatchingBoundProject(t, store)
 	credentials := newFakeCredentialStore()
@@ -1184,7 +1306,7 @@ func TestReconcileMappingMatchingBindingMissingCredentialRotates(t *testing.T) {
 	assert.Equal(t, 1, wakes)
 }
 
-func TestReconcileMappingLostRotationResponseRepeatsExactReplacement(t *testing.T) {
+func TestReconcileMappingIncompleteReplacementReplaysRotation(t *testing.T) {
 	store := openReconcileStore(t)
 	project := createMatchingBoundProject(t, store)
 	credentials := newFakeCredentialStore()
@@ -1255,7 +1377,42 @@ func TestReconcileMappingMatchingBindingAndCredentialIsImmediatelyConverged(t *t
 	assert.Zero(t, wakes)
 }
 
-func TestReconcileMappingIncompleteBindingReplaysExactTokenAndRepairsPush(t *testing.T) {
+func TestReconcileMappingPushRepairDoesNotRotateEnrollment(t *testing.T) {
+	store := openReconcileStore(t)
+	project := createMatchingBoundProject(t, store)
+	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	binding.PushEnabled = false
+	_, err = store.UpsertFederationBinding(context.Background(), binding)
+	require.NoError(t, err)
+
+	credentials := newFakeCredentialStore()
+	original := managedCredential()
+	credentials.credentials[project.UID] = original
+	hub := newFakeHub()
+	wakes := 0
+
+	err = federationconfig.ReconcileMapping(
+		context.Background(), store, credentials, hub,
+		testCatalog(), testMapping(), func() { wakes++ },
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, hub.enrollmentCalls)
+	assert.Empty(t, hub.rotationCalls)
+	repaired, err := store.FederationBindingByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.True(t, repaired.PushEnabled)
+	assert.Equal(t, original.Actor, repaired.Actor)
+	final, found := credentials.get(project.UID)
+	require.True(t, found)
+	assert.Equal(t, original.Token, final.Token)
+	assert.Equal(t, original.Actor, final.Actor)
+	assert.True(t, final.ManagedByConfig)
+	assert.Equal(t, 1, wakes)
+}
+
+func TestReconcileMappingIncompleteBindingWithValidCredentialRepairsLocally(t *testing.T) {
 	tests := []struct {
 		name        string
 		enabled     bool
@@ -1288,8 +1445,7 @@ func TestReconcileMappingIncompleteBindingReplaysExactTokenAndRepairsPush(t *tes
 			)
 			require.NoError(t, err)
 			assert.Empty(t, hub.enrollmentCalls)
-			require.Len(t, hub.rotationCalls, 1)
-			assert.Equal(t, original.Token, hub.rotationCalls[0].Token)
+			assert.Empty(t, hub.rotationCalls)
 
 			repaired, err := store.FederationBindingByProject(context.Background(), project.ID)
 			require.NoError(t, err)
@@ -1421,8 +1577,7 @@ func TestReconcileMappingManagedCredentialEmptyBindingActorRepairs(t *testing.T)
 	)
 	require.NoError(t, err)
 	assert.Empty(t, hub.enrollmentCalls)
-	require.Len(t, hub.rotationCalls, 1)
-	assert.Equal(t, original.Token, hub.rotationCalls[0].Token)
+	assert.Empty(t, hub.rotationCalls)
 
 	repaired, err := store.FederationBindingByProject(context.Background(), project.ID)
 	require.NoError(t, err)
@@ -1712,72 +1867,71 @@ func TestReconcileMappingTypedNilHubErrorFailsClosed(t *testing.T) {
 	assert.Empty(t, hub.enrollmentCalls)
 }
 
-func TestReconcileMappingH1OnlyReservationRejectsRecreatedH2BeforeEnable(t *testing.T) {
-	store := openReconcileStore(t)
-	project, err := store.CreateProject(context.Background(), "spoke-project")
-	require.NoError(t, err)
-	credentials := newFakeCredentialStore()
-	pending := managedCredential()
-	pending.Actor = ""
-	pending.Token = "pending-token-a"
-	credentials.credentials[hubProjectUID] = pending
-	hub := newFakeHub()
-	hub.project.UID = recreatedProjectUID
-	hub.project.ID = pending.HubProjectID
-
-	err = federationconfig.ReconcileMapping(
-		context.Background(), store, credentials, hub,
-		testCatalog(), testMapping(), nil,
-	)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
-	assert.Equal(t, 1, hub.resolveCalls)
-	assert.Zero(t, hub.ensureCalls)
-	assert.Empty(t, hub.enrollmentCalls)
-	assert.Empty(t, hub.rotationCalls)
-	assert.Empty(t, credentials.managedReserveCalls)
-	unchanged, readErr := store.ProjectByName(context.Background(), project.Name)
-	require.NoError(t, readErr)
-	assert.Equal(t, project.UID, unchanged.UID)
-	_, bindingErr := store.FederationBindingByProject(context.Background(), project.ID)
-	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
-	final, found := credentials.get(hubProjectUID)
-	require.True(t, found)
-	assert.Equal(t, pending, final)
-}
-
-func TestReconcileMappingH1OnlyReservationRejectsMissingHubBeforeCreate(t *testing.T) {
-	store := openReconcileStore(t)
-	project, err := store.CreateProject(context.Background(), "spoke-project")
-	require.NoError(t, err)
-	credentials := newFakeCredentialStore()
-	pending := managedCredential()
-	pending.Actor = ""
-	pending.Token = "pending-token-a"
-	credentials.credentials[hubProjectUID] = pending
-	hub := newFakeHub()
-	hub.resolveProjectErr = &federationconfig.HubError{
-		Kind:       federationconfig.ErrHubValidation,
-		Operation:  "resolve project",
-		StatusCode: http.StatusNotFound,
+func TestReconcileMappingStaleHubUIDReservationConflicts(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*fakeHub)
+	}{
+		{
+			name: "same name recreated",
+			configure: func(hub *fakeHub) {
+				hub.project.ID = 84
+				hub.project.UID = recreatedProjectUID
+			},
+		},
+		{
+			name: "old project missing",
+			configure: func(hub *fakeHub) {
+				hub.resolveProjectErr = &federationconfig.HubError{
+					Kind:       federationconfig.ErrHubValidation,
+					Operation:  "resolve project",
+					StatusCode: http.StatusNotFound,
+				}
+			},
+		},
 	}
 
-	err = federationconfig.ReconcileMapping(
-		context.Background(), store, credentials, hub,
-		testCatalog(), testMapping(), nil,
-	)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
-	assert.Equal(t, 1, hub.resolveCalls)
-	assert.Zero(t, hub.ensureCalls)
-	assert.Empty(t, hub.enrollmentCalls)
-	assert.Empty(t, hub.rotationCalls)
-	assert.Empty(t, credentials.managedReserveCalls)
-	unchanged, readErr := store.ProjectByName(context.Background(), project.Name)
-	require.NoError(t, readErr)
-	assert.Equal(t, project.UID, unchanged.UID)
-	_, bindingErr := store.FederationBindingByProject(context.Background(), project.ID)
-	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := openReconcileStore(t)
+			project, err := store.CreateProject(context.Background(), "spoke-project")
+			require.NoError(t, err)
+			credentials := newFakeCredentialStore()
+			pending := managedCredential()
+			pending.Actor = ""
+			pending.Token = "pending-token-a"
+			credentials.credentials[hubProjectUID] = pending
+			hub := newFakeHub()
+			tt.configure(hub)
+
+			err = federationconfig.ReconcileMapping(
+				context.Background(), store, credentials, hub,
+				testCatalog(), testMapping(), nil,
+			)
+
+			require.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+			assert.Equal(t, 1, hub.resolveCalls)
+			assert.Zero(t, hub.ensureCalls)
+			assert.Empty(t, hub.enrollmentCalls)
+			assert.Empty(t, hub.rotationCalls)
+			assert.Empty(t, credentials.managedReserveCalls)
+			unchanged, readErr := store.ProjectByName(context.Background(), project.Name)
+			require.NoError(t, readErr)
+			assert.Equal(t, project.UID, unchanged.UID)
+			_, bindingErr := store.FederationBindingByProject(
+				context.Background(), project.ID,
+			)
+			assert.ErrorIs(t, bindingErr, db.ErrNotFound)
+			final, found := credentials.get(hubProjectUID)
+			require.True(t, found)
+			assert.Equal(t, pending, final)
+			_, newFound, readErr := credentials.FederationCredential(
+				context.Background(), recreatedProjectUID,
+			)
+			require.NoError(t, readErr)
+			assert.False(t, newFound)
+		})
+	}
 }
 
 func TestReconcileMappingHubUIDOwnedByAnotherLocalProjectConflictsBeforeEnable(t *testing.T) {
