@@ -45,6 +45,32 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 	assert.True(t, created.Enrollment.AllowAdoptionSnapshotAuthors)
 	assert.Nil(t, created.Enrollment.RevokedAt)
 
+	foundEnrollment, found, err := service.FindActiveFederationEnrollment(
+		context.Background(),
+		kata.FederationEnrollmentSpec{
+			ProjectUID:                   firstProject.UID,
+			SpokeInstanceUID:             created.Enrollment.SpokeInstanceUID,
+			Capabilities:                 created.Enrollment.Capabilities,
+			Actor:                        created.Enrollment.Actor,
+			AllowAdoptionSnapshotAuthors: created.Enrollment.AllowAdoptionSnapshotAuthors,
+		},
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, created.Enrollment, foundEnrollment)
+
+	_, found, err = service.FindActiveFederationEnrollment(
+		context.Background(),
+		kata.FederationEnrollmentSpec{
+			ProjectUID:       firstProject.UID,
+			SpokeInstanceUID: created.Enrollment.SpokeInstanceUID,
+			Capabilities:     created.Enrollment.Capabilities,
+			Actor:            "Different Operator",
+		},
+	)
+	require.NoError(t, err)
+	assert.False(t, found)
+
 	firstHistory, err := service.ListFederationEnrollments(context.Background(), firstProject.UID)
 	require.NoError(t, err)
 	require.Len(t, firstHistory, 1)
@@ -69,6 +95,18 @@ func TestServiceFederationEnrollmentLifecycleIsProjectScoped(t *testing.T) {
 		context.Background(), firstProject.UID, created.Enrollment.ID,
 	), "exact revocation retries must be harmless")
 	assertFederationTokenStatus(t, service, firstProject.ID, created.Token, http.StatusForbidden)
+	_, found, err = service.FindActiveFederationEnrollment(
+		context.Background(),
+		kata.FederationEnrollmentSpec{
+			ProjectUID:                   firstProject.UID,
+			SpokeInstanceUID:             created.Enrollment.SpokeInstanceUID,
+			Capabilities:                 created.Enrollment.Capabilities,
+			Actor:                        created.Enrollment.Actor,
+			AllowAdoptionSnapshotAuthors: created.Enrollment.AllowAdoptionSnapshotAuthors,
+		},
+	)
+	require.NoError(t, err)
+	assert.False(t, found)
 
 	firstHistory, err = service.ListFederationEnrollments(context.Background(), firstProject.UID)
 	require.NoError(t, err)

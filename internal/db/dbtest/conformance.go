@@ -282,7 +282,7 @@ var storageScenarios = []scenario{
 			"CreateIssue", "CreateLink", "CreateProject", "EnableFederationPush", "ExportFederationBindings",
 			"ExportFederationEnrollments", "ExportFederationQuarantine", "ExportFederationSyncStatus",
 			"FederationBindingByProject", "FederationEnrollmentTransactionFence",
-			"FederationSyncStatusByProject", "ListFederationBindings",
+			"FederationSyncStatusByProject", "FindActiveFederationEnrollment", "ListFederationBindings",
 			"ListFederationEnrollments", "LinkByEndpoints", "PurgeIssue", "RecordFederationQuarantine", "RecordFederationSyncError",
 			"RecordFederationSyncPullStarted", "RecordFederationSyncPullSuccess",
 			"RecordFederationSyncPushStarted", "RecordFederationSyncPushSuccess",

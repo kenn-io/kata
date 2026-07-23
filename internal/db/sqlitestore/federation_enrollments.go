@@ -134,6 +134,25 @@ func (d *Store) ListFederationEnrollments(ctx context.Context) ([]db.FederationE
 	return out, rows.Err()
 }
 
+// FindActiveFederationEnrollment returns the newest active enrollment whose
+// public correlation fields exactly match the request.
+func (d *Store) FindActiveFederationEnrollment(
+	ctx context.Context,
+	p db.ActiveFederationEnrollmentParams,
+) (db.FederationEnrollment, error) {
+	return scanFederationEnrollment(d.QueryRowContext(ctx, federationEnrollmentSelect+`
+		 WHERE project_id = ?
+		   AND spoke_instance_uid = ?
+		   AND capabilities = ?
+		   AND bound_actor = ?
+		   AND allow_adoption_snapshot_authors = ?
+		   AND revoked_at IS NULL
+		 ORDER BY id DESC
+		 LIMIT 1`,
+		p.ProjectID, p.SpokeInstanceUID, p.Capabilities, p.Actor,
+		p.AllowAdoptionSnapshotAuthors))
+}
+
 // RevokeFederationEnrollment marks an enrollment inactive. Revocation is
 // one-way; repeated calls leave the original revoked_at intact.
 func (d *Store) RevokeFederationEnrollment(ctx context.Context, id int64) error {

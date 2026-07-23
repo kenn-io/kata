@@ -230,6 +230,29 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	assert.NotEqual(t, created.Token, created.Enrollment.TokenHash)
 	assert.Equal(t, db.FederationTokenHash(created.Token), created.Enrollment.TokenHash)
 	assert.Equal(t, "pull,push", created.Enrollment.Capabilities)
+	foundEnrollment, err := store.FindActiveFederationEnrollment(
+		ctx,
+		db.ActiveFederationEnrollmentParams{
+			ProjectID:        hub.ID,
+			SpokeInstanceUID: spokeUID,
+			Capabilities:     "pull,push",
+			Actor:            "member",
+		},
+	)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, created.Enrollment, foundEnrollment)
+	_, err = store.FindActiveFederationEnrollment(
+		ctx,
+		db.ActiveFederationEnrollmentParams{
+			ProjectID:        hub.ID,
+			SpokeInstanceUID: spokeUID,
+			Capabilities:     "pull,push",
+			Actor:            "different member",
+		},
+	)
+	assert.ErrorIs(t, err, db.ErrNotFound)
 	wildcard, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token: "wildcard-enrollment-secret", SpokeInstanceUID: spokeUID,
 		Capabilities: "pull", Actor: "member",
@@ -305,6 +328,16 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	if err := store.RevokeFederationEnrollment(ctx, created.Enrollment.ID); err != nil {
 		return err
 	}
+	_, err = store.FindActiveFederationEnrollment(
+		ctx,
+		db.ActiveFederationEnrollmentParams{
+			ProjectID:        hub.ID,
+			SpokeInstanceUID: spokeUID,
+			Capabilities:     "pull,push",
+			Actor:            "member",
+		},
+	)
+	assert.ErrorIs(t, err, db.ErrNotFound)
 	_, err = store.AuthorizeFederationToken(ctx, created.Token, hub.ID, "pull")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	revokedFence := store.FederationEnrollmentTransactionFence(created.Enrollment, hub.ID, "pull")

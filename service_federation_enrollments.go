@@ -124,6 +124,52 @@ func (s *Service) ListFederationEnrollments(
 	return result, nil
 }
 
+// FindActiveFederationEnrollment finds an active project credential by its
+// public correlation fields without scanning retained enrollment history.
+// Plaintext credentials and their stored hashes are never returned.
+func (s *Service) FindActiveFederationEnrollment(
+	ctx context.Context,
+	spec FederationEnrollmentSpec,
+) (FederationEnrollment, bool, error) {
+	capabilities, actor, err := validateFederationEnrollmentSpec(spec)
+	if err != nil {
+		return FederationEnrollment{}, false, err
+	}
+	callCtx, done, err := s.beginHostCall(ctx)
+	if err != nil {
+		return FederationEnrollment{}, false, err
+	}
+	defer done()
+
+	project, found, err := s.projectByUID(callCtx, spec.ProjectUID)
+	if err != nil {
+		return FederationEnrollment{}, false, err
+	}
+	if !found {
+		return FederationEnrollment{}, false, ErrProjectNotFound
+	}
+	enrollment, err := s.store.FindActiveFederationEnrollment(
+		callCtx,
+		db.ActiveFederationEnrollmentParams{
+			ProjectID:                    project.ID,
+			SpokeInstanceUID:             spec.SpokeInstanceUID,
+			Capabilities:                 capabilities,
+			Actor:                        actor,
+			AllowAdoptionSnapshotAuthors: spec.AllowAdoptionSnapshotAuthors,
+		},
+	)
+	if errors.Is(err, db.ErrNotFound) {
+		return FederationEnrollment{}, false, nil
+	}
+	if err != nil {
+		return FederationEnrollment{}, false, fmt.Errorf(
+			"kata: find active federation enrollment: %w",
+			err,
+		)
+	}
+	return publicFederationEnrollment(enrollment, project.UID), true, nil
+}
+
 // RevokeFederationEnrollment permanently revokes one credential belonging to
 // the requested project. Repeating an exact revocation is harmless.
 func (s *Service) RevokeFederationEnrollment(

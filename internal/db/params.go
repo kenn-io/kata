@@ -655,6 +655,16 @@ type CreateFederationEnrollmentParams struct {
 	AllowAdoptionSnapshotAuthors bool
 }
 
+// ActiveFederationEnrollmentParams identifies an active enrollment without
+// using its secret. All fields are matched exactly.
+type ActiveFederationEnrollmentParams struct {
+	ProjectID                    int64
+	SpokeInstanceUID             string
+	Capabilities                 string
+	Actor                        string
+	AllowAdoptionSnapshotAuthors bool
+}
+
 // CreatedFederationEnrollment returns the created row plus the plaintext token
 // so callers can display generated credentials exactly once.
 type CreatedFederationEnrollment struct {

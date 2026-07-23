@@ -322,6 +322,25 @@ func (s *Store) ListFederationEnrollments(ctx context.Context) ([]db.FederationE
 	return output, mapSQLError(rows.Err(), nil)
 }
 
+// FindActiveFederationEnrollment returns the newest active enrollment whose
+// public correlation fields exactly match the request.
+func (s *Store) FindActiveFederationEnrollment(
+	ctx context.Context,
+	p db.ActiveFederationEnrollmentParams,
+) (db.FederationEnrollment, error) {
+	return scanFederationEnrollment(s.QueryRowContext(ctx, federationEnrollmentSelect+`
+WHERE project_id=$1
+  AND spoke_instance_uid=$2
+  AND capabilities=$3
+  AND bound_actor=$4
+  AND allow_adoption_snapshot_authors=$5
+  AND revoked_at IS NULL
+ORDER BY id DESC
+LIMIT 1`,
+		p.ProjectID, p.SpokeInstanceUID, p.Capabilities, p.Actor,
+		boolNumber(p.AllowAdoptionSnapshotAuthors)))
+}
+
 // RevokeFederationEnrollment marks an enrollment inactive without changing its first revocation time.
 func (s *Store) RevokeFederationEnrollment(ctx context.Context, id int64) error {
 	result, err := s.ExecContext(ctx, `UPDATE federation_enrollments SET

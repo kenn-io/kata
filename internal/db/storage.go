@@ -243,6 +243,7 @@ type Storage interface {
 	// federation: enrollments
 	CreateFederationEnrollment(ctx context.Context, p CreateFederationEnrollmentParams) (CreatedFederationEnrollment, error)
 	CreateProjectFederationEnrollment(ctx context.Context, p CreateFederationEnrollmentParams) (CreatedFederationEnrollment, error)
+	FindActiveFederationEnrollment(ctx context.Context, p ActiveFederationEnrollmentParams) (FederationEnrollment, error)
 	ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error)
 	RevokeFederationEnrollment(ctx context.Context, id int64) error
 	AuthorizeFederationToken(ctx context.Context, token string, projectID int64, capability string) (FederationEnrollment, error)
