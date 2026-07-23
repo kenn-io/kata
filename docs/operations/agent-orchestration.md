@@ -122,6 +122,31 @@ exec-form command does not delegate to a repository script whose contents can
 change independently. Re-running the command is a no-op, and symlinked
 `.claude` or `settings.json` paths are refused.
 
+For Codex CLI workspaces, `kata init --with-codex-hooks` installs the
+start half of the same wiring into `.codex/hooks.json`: a `SessionStart`
+command hook runs `kata attention-hook start`, using the same launcher-provided
+`KATA_REF` and hidden subcommand as the Claude Code wiring. Codex prompts to
+trust project-layer hooks the first time it loads them, so expect one
+interactive confirmation on first run. Re-running the command is a no-op, and
+symlinked `.codex` or `hooks.json` paths are refused; if `.codex/config.toml`
+already defines a `[hooks]` table, the command prints a non-fatal warning that
+Codex loads both files' hooks together.
+
+Codex has no stable session-end hook event yet — the upstream event exists but
+is not yet in a stable Codex release — so `--with-codex-hooks` does not wire an
+end half, and wiring it once Codex ships a stable release is tracked as a
+follow-up. Until then, cover the end half with a launcher wrapper around the
+`codex` invocation (this also works for `codex exec`, since hook subprocesses
+inherit the parent environment). Run the end hook from an `EXIT` trap so it
+still fires if `codex` exits non-zero (or under `set -e`), and let the wrapper
+propagate Codex's own exit status rather than the always-succeeding hook's:
+
+```sh
+export KATA_REF=abc4
+trap 'status=$?; kata attention-hook end; exit "$status"' EXIT
+codex ...
+```
+
 ## Coordinate: wait and dashboards
 
 A delegating **coordinator** joins on sub-tasks with `kata wait`. Launch two

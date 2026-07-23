@@ -20,6 +20,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   status reads use the same fence, and controller failures return only bounded,
   generic authorization errors. Principal and federation fences compose when
   both apply to one request.
+- Added `kata init --with-codex-hooks` to install the `work.attention` harness
+  into a Codex CLI workspace's `.codex/hooks.json`. Only the `SessionStart`
+  half is wired, since Codex has no stable session-end hook event yet; cover
+  the end half with a launcher wrapper until upstream ships one.
 
 ## 0.12.0
 <small>2026-07-20</small>

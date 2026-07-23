@@ -19,20 +19,22 @@ import (
 
 // initOptions holds the flags specific to `kata init`.
 type initOptions struct {
-	Project    string
-	Replace    bool
-	Reassign   bool
-	WithAgents bool
-	WithHooks  bool
+	Project        string
+	Replace        bool
+	Reassign       bool
+	WithAgents     bool
+	WithHooks      bool
+	WithCodexHooks bool
 }
 
 // callInitOpts is the parameter bag passed to callInit.
 type callInitOpts struct {
-	Project    string
-	Replace    bool
-	Reassign   bool
-	WithAgents bool
-	WithHooks  bool
+	Project        string
+	Replace        bool
+	Reassign       bool
+	WithAgents     bool
+	WithHooks      bool
+	WithCodexHooks bool
 }
 
 // cliError is a structured error that carries an exit code for main().
@@ -142,6 +144,7 @@ get committed.`,
 	cmd.Flags().BoolVar(&opts.Reassign, "reassign", false, "move an existing alias to this project")
 	cmd.Flags().BoolVar(&opts.WithAgents, "with-agents", false, "write kata agent guidance into AGENTS.md/CLAUDE.md in the workspace")
 	cmd.Flags().BoolVar(&opts.WithHooks, "with-hooks", false, "install work.attention harness hooks into the workspace's Claude Code config (.claude/)")
+	cmd.Flags().BoolVar(&opts.WithCodexHooks, "with-codex-hooks", false, "install Codex CLI work.attention hook wiring (.codex/hooks.json)")
 
 	return cmd
 }
@@ -315,8 +318,17 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 			warnHooksUpdate(err)
 		}
 	}
+	codexHooksChanged := false
+	if opts.WithCodexHooks {
+		var warnings []string
+		codexHooksChanged, warnings, err = applyCodexHooks(dest)
+		if err != nil {
+			warnCodexHooksUpdate(err)
+		}
+		emitHookWarnings(warnings)
+	}
 
-	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged || hooksChanged)
+	return formatInitOutput(bs, resp.Project.Name, dest, resp.Created, resp.Created || tomlChanged || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged)
 }
 
 // runStartPathInit is the fallback used when the client cannot derive a name
@@ -373,10 +385,19 @@ func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callI
 			warnHooksUpdate(err)
 		}
 	}
+	codexHooksChanged := false
+	if opts.WithCodexHooks {
+		var warnings []string
+		codexHooksChanged, warnings, err = applyCodexHooks(gitignoreDir)
+		if err != nil {
+			warnCodexHooksUpdate(err)
+		}
+		emitHookWarnings(warnings)
+	}
 
 	// The path-based daemon flow writes workspace files remotely and exposes no
 	// local file-change bit today; project creation is the closest stable signal.
-	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged || agentsChanged || hooksChanged)
+	return formatInitOutput(bs, resp.Project.Name, gitignoreDir, resp.Created, resp.Created || gitignoreChanged || agentsChanged || hooksChanged || codexHooksChanged)
 }
 
 func warnGitignoreUpdate(err error) {
@@ -398,6 +419,25 @@ func warnHooksUpdate(err error) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "kata: warning: could not install attention hooks: %v\n", err)
+}
+
+func warnCodexHooksUpdate(err error) {
+	if currentOutputMode() != outputHuman {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "kata: warning: could not install Codex attention hooks: %v\n", err)
+}
+
+// emitHookWarnings surfaces non-fatal advisories from a hook installer (e.g. a
+// pre-existing [hooks] table in .codex/config.toml) on stderr. Suppressed in
+// machine-output modes, matching the other init warnings.
+func emitHookWarnings(warnings []string) {
+	if currentOutputMode() != outputHuman {
+		return
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "kata: warning: %s\n", w)
+	}
 }
 
 // warnBeadsConflict tells the user kata declined to edit a file in place

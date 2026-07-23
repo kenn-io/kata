@@ -46,6 +46,15 @@ start` for new, resumed, and cleared sessions (but not context compaction), and
 than clear/resume transitions. Both use the
 launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
 
+For Codex CLI workspaces, `kata init --with-codex-hooks` installs the start
+half of the same wiring into `.codex/hooks.json`: a `SessionStart` command
+hook runs `kata attention-hook start`, using the same launcher-provided
+`KATA_REF`. Codex has no stable session-end hook event yet, so pair this with
+a launcher wrapper that runs `kata attention-hook end` after the `codex`
+invocation exits — see
+[agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
+for the recipe.
+
 ## Search before creating
 
 ```sh
