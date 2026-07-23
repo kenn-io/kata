@@ -24,6 +24,16 @@ type federationAuthorization struct {
 	transactionFence db.TransactionFence
 }
 
+type federationAuthorizationContextKey struct{}
+
+type cachedFederationAuthorization struct {
+	authHeader    string
+	projectID     int64
+	capability    string
+	operation     HostFederationOperation
+	authorization federationAuthorization
+}
+
 func authorizeFederationRequest(
 	ctx context.Context,
 	cfg ServerConfig,
@@ -32,14 +42,49 @@ func authorizeFederationRequest(
 	capability string,
 	operation HostFederationOperation,
 ) (context.Context, federationPrincipal, error) {
-	authorization, err := evaluateFederationRequest(
-		ctx, cfg, authHeader, projectID, capability, operation,
+	authorization, ok := federationAuthorizationFromContext(
+		ctx, authHeader, projectID, capability, operation,
 	)
-	if err != nil {
-		return ctx, federationPrincipal{}, err
+	if !ok {
+		var err error
+		authorization, err = evaluateFederationRequest(
+			ctx, cfg, authHeader, projectID, capability, operation,
+		)
+		if err != nil {
+			return ctx, federationPrincipal{}, err
+		}
 	}
 	return db.WithAdditionalTransactionFence(ctx, authorization.transactionFence),
 		authorization.principal, nil
+}
+
+func withFederationAuthorization(
+	ctx context.Context,
+	authHeader string,
+	projectID int64,
+	capability string,
+	operation HostFederationOperation,
+	authorization federationAuthorization,
+) context.Context {
+	return context.WithValue(ctx, federationAuthorizationContextKey{}, cachedFederationAuthorization{
+		authHeader: authHeader, projectID: projectID, capability: capability,
+		operation: operation, authorization: authorization,
+	})
+}
+
+func federationAuthorizationFromContext(
+	ctx context.Context,
+	authHeader string,
+	projectID int64,
+	capability string,
+	operation HostFederationOperation,
+) (federationAuthorization, bool) {
+	cached, ok := ctx.Value(federationAuthorizationContextKey{}).(cachedFederationAuthorization)
+	if !ok || cached.authHeader != authHeader || cached.projectID != projectID ||
+		cached.capability != capability || cached.operation != operation {
+		return federationAuthorization{}, false
+	}
+	return cached.authorization, true
 }
 
 func evaluateFederationRequest(

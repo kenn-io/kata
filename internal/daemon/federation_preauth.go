@@ -31,13 +31,17 @@ func withFederationIngestPreauthorization(cfg ServerConfig, next http.Handler) h
 			writeFederationPreauthorizationError(w, err)
 			return
 		}
-		_, err = evaluateFederationRequest(
-			ctx, cfg, r.Header.Get("Authorization"), projectID, "push", operation,
+		authHeader := r.Header.Get("Authorization")
+		authorization, err := evaluateFederationRequest(
+			ctx, cfg, authHeader, projectID, "push", operation,
 		)
 		if err != nil {
 			writeFederationPreauthorizationError(w, err)
 			return
 		}
+		ctx = withFederationAuthorization(
+			ctx, authHeader, projectID, "push", operation, authorization,
+		)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
