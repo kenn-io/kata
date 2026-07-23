@@ -267,6 +267,80 @@ func TestEnsureFederationReplicaCreatesProjectBindingAndCredential(t *testing.T)
 	assert.Equal(t, 1, credentials.storeCallCount())
 }
 
+func TestEnsureFederationReplicaPreservesHubURLPathPrefix(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	credentials := newReplicaCredentialStore()
+	params := replicaServiceParams()
+	params.HubURL = "https://daemon.example/kata/hub/"
+	params.Credential.HubURL = params.HubURL
+
+	result, err := daemon.EnsureFederationReplica(
+		context.Background(), store, credentials, nil, params,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://daemon.example/kata/hub", result.Binding.HubURL)
+	stored, found, err := credentials.FederationCredential(
+		context.Background(), result.Project.UID,
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "https://daemon.example/kata/hub", stored.HubURL)
+}
+
+func TestEnsureFederationReplicaRejectsUnsafeHubURLComponents(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		hubURL  string
+		wantErr bool
+		marker  string
+	}{
+		{
+			name:    "user info",
+			hubURL:  "https://planted-user@daemon.example/kata/hub",
+			wantErr: true,
+			marker:  "planted-user",
+		},
+		{
+			name:    "query",
+			hubURL:  "https://daemon.example/kata/hub?planted-query=1",
+			wantErr: true,
+			marker:  "planted-query",
+		},
+		{
+			name:    "fragment",
+			hubURL:  "https://daemon.example/kata/hub#planted-fragment",
+			wantErr: true,
+			marker:  "planted-fragment",
+		},
+		{
+			name:   "clean path prefix",
+			hubURL: "https://daemon.example/kata/hub/",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := openReplicaServiceStore(t)
+			credentials := newReplicaCredentialStore()
+			params := replicaServiceParams()
+			params.HubURL = tt.hubURL
+			params.Credential.HubURL = tt.hubURL
+
+			result, err := daemon.EnsureFederationReplica(
+				context.Background(), store, credentials, nil, params,
+			)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, daemon.ErrFederationReplicaInvalidInput)
+				assert.NotContains(t, err.Error(), tt.marker)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "https://daemon.example/kata/hub", result.Binding.HubURL)
+		})
+	}
+}
+
 func TestLeaveFederationReplicaCredentialCleanupFailureResumesWithoutExtraWake(t *testing.T) {
 	ctx := context.Background()
 	store := openReplicaServiceStore(t)
@@ -695,7 +769,7 @@ func TestEnsureFederationReplicaMatchingBindingIsIdempotentAcrossCanonicalOrigin
 	require.NoError(t, err)
 	assert.Equal(t, created.Project.ID, got.Project.ID)
 	assert.Equal(t, int64(8), got.Binding.PullCursorEventID)
-	assert.Equal(t, "http://hub.example", got.Binding.HubURL)
+	assert.Equal(t, "http://hub.example/another/path", got.Binding.HubURL)
 	assert.False(t, got.Adopted)
 	assert.Equal(t, 2, wakes, "each successful ensure must wake exactly once")
 	projects, err := store.ListProjects(ctx)
@@ -705,17 +779,17 @@ func TestEnsureFederationReplicaMatchingBindingIsIdempotentAcrossCanonicalOrigin
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, "replacement-token", stored.Token)
-	assert.Equal(t, "http://hub.example", stored.HubURL)
+	assert.Equal(t, "http://hub.example/another/path", stored.HubURL)
 	persisted, err := store.FederationBindingByProject(ctx, got.Project.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "http://hub.example", persisted.HubURL)
+	assert.Equal(t, "http://hub.example/another/path", persisted.HubURL)
 
 	downstreamURL, err := url.JoinPath(
 		persisted.HubURL,
 		"/api/v1/federation/enrollments",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "http://hub.example/api/v1/federation/enrollments", downstreamURL)
+	assert.Equal(t, "http://hub.example/another/path/api/v1/federation/enrollments", downstreamURL)
 }
 
 func TestEnsureFederationReplicaWakeMayReenterAfterCompletedState(t *testing.T) {
@@ -893,11 +967,9 @@ func TestEnsureFederationReplicaConcurrentDifferentHubJoinsStayConsistent(t *tes
 	stored, ok, err := credentials.FederationCredential(ctx, project.UID)
 	require.NoError(t, err)
 	require.True(t, ok)
-	winnerOrigin, err := config.CanonicalHTTPOrigin(winner.params.HubURL)
-	require.NoError(t, err)
-	assert.Equal(t, winnerOrigin, binding.HubURL)
+	assert.Equal(t, winner.params.HubURL, binding.HubURL)
 	assert.Equal(t, winner.params.HubProjectID, binding.HubProjectID)
-	assert.Equal(t, winnerOrigin, stored.HubURL)
+	assert.Equal(t, winner.params.HubURL, stored.HubURL)
 	assert.Equal(t, winner.params.HubProjectID, stored.HubProjectID)
 	assert.Equal(t, winner.params.Credential.Token, stored.Token)
 }

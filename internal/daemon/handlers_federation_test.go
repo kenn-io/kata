@@ -214,6 +214,24 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	assert.Empty(t, creds.Projects[out.Project.UID].RequestedActor)
 }
 
+func TestCreateFederationReplicaRoutePreservesHubURLPathPrefix(t *testing.T) {
+	env := testenv.New(t)
+
+	var out api.CreateFederationReplicaBody
+	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
+		"hub_url":                 "https://daemon.example/kata/hub/",
+		"hub_project_id":          42,
+		"hub_project_uid":         "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		"project_name":            "hub-project",
+		"replay_horizon_event_id": 9,
+		"actor":                   "manual-agent",
+		"token":                   "hub-token",
+	}, &out)
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "https://daemon.example/kata/hub", out.Binding.HubURL)
+}
+
 func TestCreateFederationReplicaAcceptsCanonicalEquivalentHubOrigin(t *testing.T) {
 	env := testenv.New(t)
 	body := map[string]any{

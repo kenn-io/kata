@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -511,15 +512,16 @@ func normalizeFederationReplicaParams(
 			"",
 		)
 	}
-	hubOrigin, err := config.CanonicalHTTPOrigin(p.HubURL)
+	hubBaseURL, err := normalizeFederationHubBaseURL(p.HubURL)
 	if err != nil {
 		return EnsureFederationReplicaParams{}, federationReplicaError(
 			ErrFederationReplicaInvalidInput,
-			fmt.Sprintf("hub_url must be a valid HTTP(S) origin: %v", err),
+			err.Error(),
 			"",
 		)
 	}
-	p.HubURL = hubOrigin
+	p.HubURL = hubBaseURL
+	hubOrigin, _ := config.CanonicalHTTPOrigin(hubBaseURL)
 	if !katauid.Valid(p.HubProjectUID) {
 		return EnsureFederationReplicaParams{}, federationReplicaError(
 			ErrFederationReplicaInvalidInput, "hub_project_uid must be a valid UID", "",
@@ -578,14 +580,15 @@ func normalizeFederationReplicaParams(
 		}
 	}
 	if p.Credential.Token != "" {
-		credentialOrigin, err := config.CanonicalHTTPOrigin(p.Credential.HubURL)
+		credentialBaseURL, err := normalizeFederationHubBaseURL(p.Credential.HubURL)
 		if err != nil {
 			return EnsureFederationReplicaParams{}, federationReplicaError(
 				ErrFederationReplicaInvalidInput,
-				fmt.Sprintf("credential hub_url must be a valid HTTP(S) origin: %v", err),
+				err.Error(),
 				"",
 			)
 		}
+		credentialOrigin, _ := config.CanonicalHTTPOrigin(credentialBaseURL)
 		if credentialOrigin != hubOrigin || p.Credential.HubProjectID != p.HubProjectID {
 			return EnsureFederationReplicaParams{}, federationReplicaError(
 				ErrFederationReplicaInvalidInput,
@@ -593,9 +596,22 @@ func normalizeFederationReplicaParams(
 				"",
 			)
 		}
-		p.Credential.HubURL = credentialOrigin
+		p.Credential.HubURL = credentialBaseURL
 	}
 	return p, nil
+}
+
+func normalizeFederationHubBaseURL(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+		u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New(
+			"hub_url must be an HTTP(S) base URL without user info, query, or fragment",
+		)
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	return u.String(), nil
 }
 
 func normalizedReplicaCapabilities(raw string) (string, error) {

@@ -589,6 +589,9 @@ func federationJoinCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := clientpkg.ConfigureOriginPinnedRedirects(client, baseURL); err != nil {
+				return err
+			}
 			status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
 				baseURL+"/api/v1/federation/replicas",
 				map[string]any{

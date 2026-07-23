@@ -188,6 +188,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		if err := db.ValidateTokenActor(actor); err != nil {
+			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+		}
 		created, err := cfg.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 			Token:                        in.Body.Token,
 			SpokeInstanceUID:             in.Body.SpokeInstanceUID,
@@ -237,6 +240,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
+		}
+		if err := db.ValidateTokenActor(actor); err != nil {
+			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
 		}
 		projectID := in.Body.ProjectID
 		created, err := cfg.DB.RotateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{

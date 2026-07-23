@@ -418,13 +418,12 @@ func registerMove(humaAPI huma.API, cfg ServerConfig) {
 	registerMoveHandlers(humaAPI, cfg)
 }
 
-// validateActor returns a 400 validation error when actor is empty or uses a
-// reserved bootstrap spelling. Huma's `required:"true"` only checks presence,
-// so actor policy is enforced again after request authentication resolves the
-// authoritative actor.
+// validateActor returns a 400 validation error when actor is empty. Huma's
+// `required:"true"` only checks presence, so actor validation is enforced
+// again after request authentication resolves the authoritative actor.
 func validateActor(actor string) error {
-	if err := db.ValidateTokenActor(actor); err != nil {
-		return api.NewError(400, "validation", err.Error(), "", nil)
+	if strings.TrimSpace(actor) == "" {
+		return api.NewError(400, "validation", "actor is required", "", nil)
 	}
 	return nil
 }

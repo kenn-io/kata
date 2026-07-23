@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -34,4 +35,21 @@ func TestServer_MutationRequiresJSON(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusUnsupportedMediaType, resp.StatusCode)
+}
+
+func TestAttributedWriteDoesNotApplyFederationTokenActorPolicy(t *testing.T) {
+	resp := createIssueWithActor(t, "bootstrap")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func createIssueWithActor(t *testing.T, actor string) *http.Response {
+	t.Helper()
+	ts, handle := startDefaultTestServer(t)
+	project, err := handle.db.CreateProject(context.Background(), "spoke-project")
+	require.NoError(t, err)
+	resp, _ := doReq(t, ts, http.MethodPost, issuesURL(project.ID), map[string]any{
+		"actor": actor,
+		"title": "example issue",
+	}, nil)
+	return resp
 }

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -874,6 +875,52 @@ func TestFederationEnrollHTTPClientFollowsSameOriginRedirect(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, status)
 	assert.Equal(t, enrollmentToken, redirectedBody.Token)
+}
+
+func TestFederationJoinEnrollmentBodyNeverCrossesRedirectOrigin(t *testing.T) {
+	for _, status := range []int{
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect,
+	} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			testenv.New(t)
+			var targetRequests atomic.Int64
+			target := httptest.NewServer(http.HandlerFunc(func(
+				w http.ResponseWriter, _ *http.Request,
+			) {
+				targetRequests.Add(1)
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer target.Close()
+			source := httptest.NewServer(http.HandlerFunc(func(
+				w http.ResponseWriter, r *http.Request,
+			) {
+				if r.URL.Path == "/api/v1/ping" {
+					_, _ = io.WriteString(
+						w, `{"ok":true,"service":"kata","version":"test"}`,
+					)
+					return
+				}
+				http.Redirect(w, r, target.URL+r.URL.Path, status)
+			}))
+			defer source.Close()
+			t.Setenv("KATA_SERVER", source.URL)
+
+			_, err := runCmdOutput(t, nil, "federation", "join",
+				"--project", "spoke-project",
+				"--hub-url", "https://daemon.example/hub",
+				"--hub-project-id", "42",
+				"--hub-project-uid", "01HZNQ7VFPK1XGD8R5MABCD4EG",
+				"--replay-horizon", "7",
+				"--token", "planted-enrollment-token",
+				"--actor", "user-a",
+				"--push")
+
+			require.Error(t, err)
+			assert.Zero(t, targetRequests.Load())
+			assert.NotContains(t, err.Error(), "planted-enrollment-token")
+		})
+	}
 }
 
 func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *testing.T) {
