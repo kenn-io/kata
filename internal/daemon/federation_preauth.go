@@ -110,6 +110,9 @@ func federationIngestProjectID(method, path string) (projectID int64, matched, v
 func writeFederationPreauthorizationError(w http.ResponseWriter, err error) {
 	var apiErr *api.APIError
 	if errors.As(err, &apiErr) {
+		if apiErr.Status == http.StatusTooManyRequests {
+			w.Header().Set("Retry-After", "5")
+		}
 		api.WriteEnvelope(w, apiErr.Status, apiErr.Code, apiErr.Message)
 		return
 	}

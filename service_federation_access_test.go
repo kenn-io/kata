@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -99,6 +100,46 @@ func TestServiceFederationAccessRejectsInvalidCredentialBeforeHostDecision(t *te
 
 	assert.Equal(t, http.StatusForbidden, response.Code)
 	assert.Empty(t, controller.snapshot())
+}
+
+func TestServiceFederationAccessAdmissionLimitStopsIngestBeforeBodyRead(t *testing.T) {
+	controller := &recordingFederationAccessController{
+		decide: func(kata.FederationAccessRequest) (kata.FederationAccessDecision, error) {
+			return kata.FederationAccessDecision{}, kata.ErrFederationAdmissionLimited
+		},
+	}
+	service, project, enrollment := newFederationAccessService(t, controller)
+	body := &readTrackingBody{content: []byte(`{"events":[]}`)}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+
+		strconv.FormatInt(project.ID, 10)+"/federation/events:ingest", body)
+	request.Header.Set("Authorization", "Bearer "+enrollment.Token)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	service.Handler().ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())
+	assert.Equal(t, "5", response.Header().Get("Retry-After"))
+	assert.Zero(t, body.reads)
+	require.Len(t, controller.snapshot(), 1)
+	assert.Equal(t, kata.FederationOperation{
+		ID: "ingestFederationProjectEvents", Mutation: true,
+	}, controller.snapshot()[0].Operation)
+}
+
+type readTrackingBody struct {
+	content []byte
+	reads   int
+}
+
+func (b *readTrackingBody) Read(p []byte) (int, error) {
+	b.reads++
+	if len(b.content) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, b.content)
+	b.content = b.content[n:]
+	return n, nil
 }
 
 func TestServiceFederationAccessChecksBearerOnLeaseStatus(t *testing.T) {

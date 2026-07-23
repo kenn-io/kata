@@ -1,6 +1,14 @@
 package kata
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrFederationAdmissionLimited asks Kata to reject an authenticated
+// federation request with 429 before reading a large request body. Embedding
+// hosts may return it when their bounded request admission is full.
+var ErrFederationAdmissionLimited = errors.New("kata: federation request admission limited")
 
 // FederationCapability is the transport authority requested by one
 // authenticated federation operation.

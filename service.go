@@ -359,6 +359,9 @@ func (a hostFederationAccessControllerAdapter) AuthorizeFederation(
 	if errors.Is(err, ErrAccessDenied) {
 		return daemon.HostFederationAccessDecision{}, daemon.ErrHostAccessDenied
 	}
+	if errors.Is(err, ErrFederationAdmissionLimited) {
+		return daemon.HostFederationAccessDecision{}, daemon.ErrHostFederationAdmissionLimited
+	}
 	if err != nil {
 		return daemon.HostFederationAccessDecision{}, err
 	}

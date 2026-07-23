@@ -9,6 +9,10 @@ import (
 
 var errHostFederationAccessUnavailable = errors.New("host federation access unavailable")
 
+// ErrHostFederationAdmissionLimited is the internal adapter form of a host's
+// bounded authenticated-request admission signal.
+var ErrHostFederationAdmissionLimited = errors.New("host federation request admission limited")
+
 // HostFederationOperation identifies one authenticated transport operation.
 type HostFederationOperation struct {
 	ID       string

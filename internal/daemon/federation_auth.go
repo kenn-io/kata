@@ -91,6 +91,10 @@ func evaluateFederationRequest(
 		if errors.Is(accessErr, ErrHostAccessDenied) {
 			return federationAuthorization{}, federationCredentialDenied()
 		}
+		if errors.Is(accessErr, ErrHostFederationAdmissionLimited) {
+			return federationAuthorization{}, api.NewError(http.StatusTooManyRequests,
+				"admission_limited", "federation request admission is full", "", nil)
+		}
 		if accessErr != nil {
 			return federationAuthorization{}, api.NewError(http.StatusServiceUnavailable,
 				"access_unavailable", "federation credential authorization is unavailable", "", nil)
