@@ -823,6 +823,92 @@ func TestReconcileMappingRacesManualJoinWithoutOrphanOrManagedOverwrite(t *testi
 	assert.Equal(t, final, afterRetry, "manual retry must not overwrite the managed credential")
 }
 
+func TestReconcileMappingManualH2JoinWinsBeforeH1ReservationWithoutEnrollment(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	baseStore := openReconcileStore(t)
+	project, err := baseStore.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	const manualCall = "manual-h2"
+	store := newOrderedReplicaServiceStore(
+		baseStore, recreatedProjectUID, manualCall,
+	)
+	credentials := newFakeCredentialStore()
+	hubProjectEnsured := make(chan struct{})
+	var ensureOnce sync.Once
+	hub := newFakeHub()
+	hub.onEnsureProject = func() {
+		ensureOnce.Do(func() { close(hubProjectEnsured) })
+	}
+
+	manualParams := daemon.EnsureFederationReplicaParams{
+		HubURL:               "https://hub.example",
+		HubProjectID:         43,
+		HubProjectUID:        recreatedProjectUID,
+		ProjectName:          project.Name,
+		ReplayHorizonEventID: 9,
+		Credential: config.FederationCredential{
+			HubURL: "https://hub.example", HubProjectID: 43,
+			Token: "manual-token-b", Capabilities: "claim,pull,push",
+			Actor: "identity-user",
+		},
+		PushEnabled: true, AdoptExisting: true,
+	}
+	manualResult := make(chan error, 1)
+	go func() {
+		_, callErr := daemon.EnsureFederationReplica(
+			context.WithValue(ctx, replicaCallKindContextKey{}, manualCall),
+			store, credentials, nil, manualParams,
+		)
+		manualResult <- callErr
+	}()
+	select {
+	case <-store.arrived[manualCall]:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for paused manual H2 join", "error: %v", ctx.Err())
+	}
+
+	configResult := make(chan error, 1)
+	go func() {
+		configResult <- federationconfig.ReconcileMapping(
+			ctx, store, credentials, hub, testCatalog(), testMapping(), nil,
+		)
+	}()
+	select {
+	case <-hubProjectEnsured:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for config hub project ensure", "error: %v", ctx.Err())
+	}
+	close(store.release[manualCall])
+
+	select {
+	case err = <-manualResult:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for manual H2 join", "error: %v", ctx.Err())
+	}
+	require.NoError(t, err)
+	select {
+	case err = <-configResult:
+	case <-ctx.Done():
+		require.FailNow(t, "wait for losing H1 reconciliation", "error: %v", ctx.Err())
+	}
+	require.ErrorIs(t, err, federationconfig.ErrBindingConflict)
+	assert.Empty(t, hub.enrollmentCalls)
+	assert.Empty(t, hub.rotationCalls)
+
+	adopted, err := baseStore.ProjectByName(ctx, project.Name)
+	require.NoError(t, err)
+	assert.Equal(t, recreatedProjectUID, adopted.UID)
+	_, found := credentials.get(project.UID)
+	assert.False(t, found)
+	_, found = credentials.get(hubProjectUID)
+	assert.False(t, found, "losing H1 reconciliation must not reserve a credential")
+	winner, found := credentials.get(recreatedProjectUID)
+	require.True(t, found)
+	assert.Equal(t, "manual-token-b", winner.Token)
+	assert.False(t, winner.ManagedByConfig)
+}
+
 func TestReconcileMappingH1ReservationWinsBeforeManualH2JoinAndHubEnrollment(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()

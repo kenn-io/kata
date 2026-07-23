@@ -816,6 +816,8 @@ func reserveManagedFederationCredential(
 		return reconcileError(ErrCredentialIO, "reserve federation enrollment credential")
 	case errors.Is(err, daemon.ErrFederationReplicaCredentialConflict):
 		return reconcileError(ErrConfigurationConflict, "federation credential reservation conflict")
+	case errors.Is(err, daemon.ErrFederationReplicaBindingConflict):
+		return reconcileError(ErrBindingConflict, "local federation binding changed before credential reservation")
 	default:
 		return reconcileError(ErrLocalStorage, "reserve federation enrollment credential")
 	}

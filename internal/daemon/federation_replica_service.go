@@ -230,7 +230,7 @@ func EnsureFederationReplica(
 // released before the caller performs any hub network operation.
 func ReserveFederationReplicaCredential(
 	ctx context.Context,
-	_ db.Storage,
+	store db.Storage,
 	credentials config.FederationCredentialStore,
 	p ReserveFederationReplicaCredentialParams,
 ) error {
@@ -262,6 +262,9 @@ func ReserveFederationReplicaCredential(
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 
+	if err := prevalidateFederationReplicaReservation(ctx, store, p); err != nil {
+		return err
+	}
 	if err := managed.ReserveManagedFederationCredential(
 		ctx,
 		config.FederationManagedCredentialReservation{
@@ -279,6 +282,49 @@ func ReserveFederationReplicaCredential(
 		return credentialIOError("reserve managed federation credential")
 	}
 	return nil
+}
+
+func prevalidateFederationReplicaReservation(
+	ctx context.Context,
+	store db.Storage,
+	p ReserveFederationReplicaCredentialParams,
+) error {
+	project, err := store.ProjectByNameIncludingArchived(ctx, p.ProjectName)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("prevalidate federation credential reservation project: %w", err)
+	}
+	if project.DeletedAt != nil {
+		return federationReplicaError(
+			ErrFederationReplicaBindingConflict,
+			"local federation project changed before credential reservation",
+			"",
+		)
+	}
+	binding, err := store.FederationBindingByProject(ctx, project.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("prevalidate federation credential reservation binding: %w", err)
+	}
+	expected := EnsureFederationReplicaParams{
+		HubURL:        p.Credential.HubURL,
+		HubProjectID:  p.Credential.HubProjectID,
+		HubProjectUID: p.HubProjectUID,
+		Credential:    p.Credential,
+	}
+	expected.Credential.Actor = strings.TrimSpace(binding.Actor)
+	if details := replicaBindingConflictDetails(binding, expected); len(details) > 0 {
+		return federationReplicaError(
+			ErrFederationReplicaBindingConflict,
+			"local federation binding changed before credential reservation",
+			"",
+		)
+	}
+	return validateExistingReplicaCredentialCapabilities(binding, expected)
 }
 
 func ensureFederationReplicaState(
