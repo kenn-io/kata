@@ -366,99 +366,157 @@ func ReconcileMapping(
 	mapping config.FederationProjectConfig,
 	wake func(),
 ) error {
+	managed, ok := credentials.(config.FederationManagedCredentialStore)
+	if !ok {
+		return reconcileError(
+			ErrCredentialIO,
+			"credential store does not support managed federation operations",
+		)
+	}
+	preflight, err := preflightMapping(
+		ctx, store, credentials, managed, hub, catalog, mapping,
+	)
+	if err != nil {
+		return err
+	}
+	enrollment, credential, err := ensureMappingEnrollment(
+		ctx, store, managed, hub, catalog, mapping, preflight,
+	)
+	if err != nil {
+		return err
+	}
+	return convergeLocalMapping(
+		ctx, store, credentials, wake, catalog, mapping,
+		preflight, enrollment, credential,
+	)
+}
+
+type mappingPreflight struct {
+	localProject       db.Project
+	binding            db.FederationBinding
+	hasBinding         bool
+	hubProject         HubProject
+	credential         credentialLookup
+	managedReservation config.FederationManagedCredentialReservation
+	hasReservation     bool
+	hubOrigin          string
+	capabilities       federation.Capabilities
+}
+
+func preflightMapping(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	managed config.FederationManagedCredentialStore,
+	hub Hub,
+	catalog config.CatalogDaemonConfig,
+	mapping config.FederationProjectConfig,
+) (mappingPreflight, error) {
+	var preflight mappingPreflight
 	if store == nil || credentials == nil || hub == nil ||
 		mapping.Hub != catalog.Name ||
 		strings.TrimSpace(mapping.SpokeProject) == "" ||
 		strings.TrimSpace(mapping.HubProject) == "" ||
 		strings.TrimSpace(mapping.Actor) == "" {
-		return reconcileError(ErrConfigurationConflict, "invalid federation mapping dependencies")
+		return preflight,
+			reconcileError(ErrConfigurationConflict, "invalid federation mapping dependencies")
 	}
 	hubOrigin, err := config.CanonicalHTTPOrigin(catalog.URL)
 	if err != nil {
-		return reconcileError(ErrConfigurationConflict, "invalid federation hub origin")
+		return preflight,
+			reconcileError(ErrConfigurationConflict, "invalid federation hub origin")
 	}
 	capabilities, err := federation.NormalizeCapabilities(configCapabilities)
 	if err != nil {
-		return reconcileError(ErrConfigurationConflict, "invalid federation capability configuration")
+		return preflight,
+			reconcileError(ErrConfigurationConflict, "invalid federation capability configuration")
 	}
+	preflight.hubOrigin = hubOrigin
+	preflight.capabilities = capabilities
 
 	localProject, err := resolveOrCreateLocalProject(ctx, store, mapping.SpokeProject)
 	if err != nil {
-		return err
+		return preflight, err
 	}
+	preflight.localProject = localProject
 	binding, hasBinding, err := readCompatibleBindingOrigin(
 		ctx, store, localProject.ID, hubOrigin,
 	)
 	if err != nil {
-		return err
+		return preflight, err
 	}
+	preflight.binding = binding
+	preflight.hasBinding = hasBinding
 	_, hasLocalCredential, err := credentials.FederationCredential(ctx, localProject.UID)
 	if err != nil {
-		return reconcileError(ErrCredentialIO, "read federation credential")
+		return preflight, reconcileError(ErrCredentialIO, "read federation credential")
 	}
-	reservationMatch, hasManagedReservation, err := readManagedReservation(
-		ctx, credentials, catalog, mapping,
+	managedReservation, hasManagedReservation, err := readManagedReservation(
+		ctx, managed, catalog, mapping,
 	)
 	if err != nil {
-		return err
+		return preflight, err
 	}
+	preflight.managedReservation = managedReservation
+	preflight.hasReservation = hasManagedReservation
 
 	resolvedHubProject, resolveErr := hub.ResolveProject(ctx, mapping.HubProject)
 	hubProjectExists := resolveErr == nil
 	var credentialState credentialLookup
 	credentialStateRead := false
 	if resolveErr != nil && !hubProjectNotFound(resolveErr) {
-		return safeHubError(resolveErr)
+		return preflight, safeHubError(resolveErr)
 	}
 	if !hubProjectExists {
 		if hasBinding {
-			return reconcileError(ErrBindingConflict, "bound federation project is missing from hub")
+			return preflight,
+				reconcileError(ErrBindingConflict, "bound federation project is missing from hub")
 		}
 		if hasLocalCredential || hasManagedReservation {
-			return reconcileError(ErrConfigurationConflict, "credentialed federation project is missing from hub")
+			return preflight,
+				reconcileError(ErrConfigurationConflict, "credentialed federation project is missing from hub")
 		}
 	} else {
 		if err := validateResolvedHubProject(resolvedHubProject); err != nil {
-			return err
+			return preflight, err
 		}
 		if hasBinding &&
 			(binding.HubProjectUID != resolvedHubProject.UID ||
 				binding.HubProjectID != resolvedHubProject.ID) {
-			return reconcileError(ErrBindingConflict, "existing federation binding targets another project")
+			return preflight,
+				reconcileError(ErrBindingConflict, "existing federation binding targets another project")
 		}
 		if hasManagedReservation {
 			if !credentialMatchesTarget(
-				reservationMatch.Credential, hubOrigin, resolvedHubProject.ID,
+				managedReservation.Credential, hubOrigin, resolvedHubProject.ID,
 				catalog.AllowInsecure, capabilities.API,
 			) {
-				return reconcileError(
+				return preflight, reconcileError(
 					ErrConfigurationConflict,
 					"managed federation reservation targets a different hub",
 				)
 			}
-			for _, projectUID := range reservationMatch.ProjectUIDs {
-				if projectUID != localProject.UID &&
-					projectUID != resolvedHubProject.UID {
-					return reconcileError(
-						ErrConfigurationConflict,
-						"managed federation reservation uses another hub project UID",
-					)
-				}
+			if managedReservation.ProjectUID != resolvedHubProject.UID {
+				return preflight, reconcileError(
+					ErrConfigurationConflict,
+					"managed federation reservation uses another hub project UID",
+				)
 			}
 		}
 		credentialState, err = readCredentialState(
 			ctx, credentials, localProject.UID, resolvedHubProject.UID,
 		)
 		if err != nil {
-			return err
+			return preflight, err
 		}
 		credentialStateRead = true
 		if hasManagedReservation &&
 			(!credentialState.found ||
-				credentialState.credential != reservationMatch.Credential) {
-			return reconcileError(
+				credentialState.key != managedReservation.ProjectUID ||
+				credentialState.credential != managedReservation.Credential) {
+			return preflight, reconcileError(
 				ErrConfigurationConflict,
-				"managed federation reservation differs from credential aliases",
+				"managed federation reservation differs from credential state",
 			)
 		}
 		if credentialState.found &&
@@ -466,43 +524,46 @@ func ReconcileMapping(
 				credentialState.credential, hubOrigin, resolvedHubProject.ID,
 				catalog.AllowInsecure, capabilities.API,
 			) {
-			return reconcileError(
+			return preflight, reconcileError(
 				ErrConfigurationConflict,
 				"existing federation credential targets a different hub",
 			)
 		}
 		if err := validateHubProjectOwnership(ctx, store, localProject.ID, resolvedHubProject.UID); err != nil {
-			return err
+			return preflight, err
 		}
 	}
 
 	hubProject, err := hub.EnsureProject(ctx, mapping.HubProject, mapping.Actor)
 	if err != nil {
-		return safeHubError(err)
+		return preflight, safeHubError(err)
 	}
 	if hubProject.ID <= 0 ||
 		!katauid.Valid(hubProject.UID) ||
 		hubProject.ReplayHorizonEventID <= 0 {
-		return reconcileError(ErrHubValidation, "federation hub returned invalid project metadata")
+		return preflight,
+			reconcileError(ErrHubValidation, "federation hub returned invalid project metadata")
 	}
 	if hubProjectExists &&
 		(hubProject.ID != resolvedHubProject.ID ||
 			hubProject.UID != resolvedHubProject.UID ||
 			hubProject.Name != resolvedHubProject.Name) {
-		return reconcileError(ErrHubValidation, "federation hub project changed during enable")
+		return preflight,
+			reconcileError(ErrHubValidation, "federation hub project changed during enable")
 	}
 	if !hubProjectExists {
 		if err := validateHubProjectOwnership(ctx, store, localProject.ID, hubProject.UID); err != nil {
-			return err
+			return preflight, err
 		}
 	}
+	preflight.hubProject = hubProject
 
 	if !credentialStateRead {
 		credentialState, err = readCredentialState(
 			ctx, credentials, localProject.UID, hubProject.UID,
 		)
 		if err != nil {
-			return err
+			return preflight, err
 		}
 	}
 	if credentialState.found &&
@@ -510,74 +571,34 @@ func ReconcileMapping(
 			credentialState.credential, hubOrigin, hubProject.ID,
 			catalog.AllowInsecure, capabilities.API,
 		) {
-		return reconcileError(
+		return preflight, reconcileError(
 			ErrConfigurationConflict,
 			"existing federation credential targets a different hub",
 		)
 	}
 
-	if hasBinding && credentialState.found {
-		credential := credentialState.credential
-		if credential.ManagedByConfig &&
-			!credentialManagementMatches(credential, catalog, mapping) {
-			return reconcileError(
+	if credentialState.found && credentialState.credential.ManagedByConfig {
+		if !hasManagedReservation {
+			return preflight, reconcileError(
+				ErrConfigurationConflict,
+				"managed federation credential is not reserved for this mapping",
+			)
+		}
+		if !credentialManagementMatches(credentialState.credential, catalog, mapping) {
+			return preflight, reconcileError(
 				ErrConfigurationConflict,
 				"existing managed federation credential belongs to another mapping",
 			)
 		}
-		pendingReplacement := credential.ManagedByConfig &&
-			strings.TrimSpace(credential.Actor) == ""
-		if !pendingReplacement {
-			if strings.TrimSpace(binding.Actor) != "" &&
-				strings.TrimSpace(binding.Actor) != strings.TrimSpace(credential.Actor) {
-				return reconcileError(ErrBindingConflict, "existing federation binding actor differs from credential")
-			}
-			operational := bindingOperational(binding, credential)
-			if credential.ManagedByConfig {
-				if operational {
-					return nil
-				}
-			} else {
-				adopted := withManagementMetadata(credential, catalog, mapping)
-				repairWake := wake
-				if operational {
-					repairWake = nil
-				}
-				return ensureLocalManualReplica(
-					ctx,
-					store,
-					credentials,
-					repairWake,
-					localProject,
-					hubProject,
-					hubOrigin,
-					credentialState,
-					adopted,
-				)
-			}
-		}
 	}
 
-	if !hasBinding &&
-		credentialState.found &&
-		credentialState.key == hubProject.UID &&
-		localProject.UID != hubProject.UID {
-		if err := reserveFederationCredentialAliases(
-			ctx, store, credentials, localProject.Name, hubProject.UID,
-			credentialState.credential,
-		); err != nil {
-			return err
-		}
-		credentialState.key = localProject.UID
-	}
-
-	credential := credentialState.credential
 	if !credentialState.found {
 		token, tokenErr := db.NewFederationToken()
 		if tokenErr != nil {
-			return reconcileError(ErrCredentialIO, "generate federation enrollment credential")
+			return preflight,
+				reconcileError(ErrCredentialIO, "generate federation enrollment credential")
 		}
-		credential = config.FederationCredential{
+		pendingCredential := config.FederationCredential{
 			HubURL:       hubOrigin,
 			HubProjectID: hubProject.ID,
 			Token:        token,
@@ -593,80 +614,148 @@ func ReconcileMapping(
 			RequestedActor:   mapping.Actor,
 			SpokeProjectName: mapping.SpokeProject,
 		}
-		if err := reserveFederationCredentialAliases(
-			ctx, store, credentials, mapping.SpokeProject, hubProject.UID,
-			credential,
+		if err := reserveManagedFederationCredential(
+			ctx, store, managed, mapping.SpokeProject, hubProject.UID,
+			pendingCredential,
 		); err != nil {
-			return err
+			return preflight, err
 		}
+		preflight.managedReservation = config.FederationManagedCredentialReservation{
+			ProjectUID: hubProject.UID,
+			Credential: pendingCredential,
+		}
+		preflight.hasReservation = true
 		credentialState = credentialLookup{
-			credential: credential,
-			key:        localProject.UID,
+			credential: pendingCredential,
+			key:        hubProject.UID,
 			found:      true,
+		}
+	}
+	preflight.credential = credentialState
+	return preflight, nil
+}
+
+func ensureMappingEnrollment(
+	ctx context.Context,
+	store db.Storage,
+	_ config.FederationManagedCredentialStore,
+	hub Hub,
+	catalog config.CatalogDaemonConfig,
+	mapping config.FederationProjectConfig,
+	preflight mappingPreflight,
+) (Enrollment, config.FederationCredential, error) {
+	credential := preflight.credential.credential
+	if preflight.hasBinding {
+		pendingReplacement := credential.ManagedByConfig &&
+			strings.TrimSpace(credential.Actor) == ""
+		if !pendingReplacement {
+			if strings.TrimSpace(preflight.binding.Actor) != "" &&
+				strings.TrimSpace(preflight.binding.Actor) != strings.TrimSpace(credential.Actor) {
+				return Enrollment{}, config.FederationCredential{},
+					reconcileError(
+						ErrBindingConflict,
+						"existing federation binding actor differs from credential",
+					)
+			}
+			if !credential.ManagedByConfig ||
+				bindingOperational(preflight.binding, credential) {
+				return Enrollment{Actor: strings.TrimSpace(credential.Actor)},
+					withManagementMetadata(credential, catalog, mapping), nil
+			}
 		}
 	}
 
 	enrollmentRequest := EnrollmentRequest{
-		ProjectID:                    hubProject.ID,
+		ProjectID:                    preflight.hubProject.ID,
 		SpokeInstanceUID:             store.InstanceUID(),
 		Token:                        credential.Token,
-		Capabilities:                 capabilities.API,
+		Capabilities:                 preflight.capabilities.API,
 		Actor:                        mapping.Actor,
 		AllowAdoptionSnapshotAuthors: true,
 	}
 	var enrollment Enrollment
-	if hasBinding {
+	var err error
+	if preflight.hasBinding {
 		enrollment, err = hub.RotateEnrollment(ctx, enrollmentRequest)
 	} else {
 		enrollment, err = hub.EnsureEnrollment(ctx, enrollmentRequest)
 	}
 	if err != nil {
-		return safeHubError(err)
+		return Enrollment{}, config.FederationCredential{}, safeHubError(err)
 	}
 	enrollmentActor := strings.TrimSpace(enrollment.Actor)
 	if enrollment.ID <= 0 || db.ValidateTokenActor(enrollmentActor) != nil {
-		return reconcileError(ErrHubValidation, "federation hub returned invalid enrollment metadata")
+		return Enrollment{}, config.FederationCredential{},
+			reconcileError(ErrHubValidation, "federation hub returned invalid enrollment metadata")
 	}
 
-	credential.HubURL = hubOrigin
-	credential.HubProjectID = hubProject.ID
-	credential.Capabilities = capabilities.API
+	credential.HubURL = preflight.hubOrigin
+	credential.HubProjectID = preflight.hubProject.ID
+	credential.Capabilities = preflight.capabilities.API
 	credential.Actor = enrollmentActor
 	credential.AllowInsecure = catalog.AllowInsecure
 	credential = withManagementMetadata(credential, catalog, mapping)
+	return enrollment, credential, nil
+}
 
-	var credentialRekey *daemon.FederationReplicaCredentialRekeySource
-	if credentialState.key != "" && credentialState.key != hubProject.UID {
-		credentialRekey = &daemon.FederationReplicaCredentialRekeySource{
-			ProjectUID: credentialState.key,
-			Expected:   credentialState.credential,
+func convergeLocalMapping(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	wake func(),
+	_ config.CatalogDaemonConfig,
+	mapping config.FederationProjectConfig,
+	preflight mappingPreflight,
+	_ Enrollment,
+	credential config.FederationCredential,
+) error {
+	if preflight.hasBinding &&
+		preflight.credential.credential.ManagedByConfig &&
+		bindingOperational(preflight.binding, preflight.credential.credential) {
+		return nil
+	}
+
+	params := daemon.EnsureFederationReplicaParams{
+		HubURL:               preflight.hubOrigin,
+		HubProjectID:         preflight.hubProject.ID,
+		HubProjectUID:        preflight.hubProject.UID,
+		ProjectName:          mapping.SpokeProject,
+		ReplayHorizonEventID: preflight.hubProject.ReplayHorizonEventID,
+		Credential:           credential,
+		PushEnabled:          true,
+		AdoptExisting:        true,
+	}
+	if preflight.credential.key != "" &&
+		preflight.credential.key != preflight.hubProject.UID {
+		params.CredentialRekey = &daemon.FederationReplicaCredentialRekeySource{
+			ProjectUID: preflight.credential.key,
+			Expected:   preflight.credential.credential,
+		}
+	} else if preflight.hasReservation {
+		params.ManagedReservation = &daemon.FederationReplicaManagedReservation{
+			ProjectUID: preflight.managedReservation.ProjectUID,
+			Expected:   preflight.managedReservation.Credential,
 		}
 	}
 
-	_, err = daemon.EnsureFederationReplica(
-		ctx, store, classifiedCredentialStore{delegate: credentials}, wake,
-		daemon.EnsureFederationReplicaParams{
-			HubURL:               hubOrigin,
-			HubProjectID:         hubProject.ID,
-			HubProjectUID:        hubProject.UID,
-			ProjectName:          mapping.SpokeProject,
-			ReplayHorizonEventID: hubProject.ReplayHorizonEventID,
-			Credential:           credential,
-			CredentialRekey:      credentialRekey,
-			PushEnabled:          true,
-			AdoptExisting:        true,
-		},
-	)
+	localWake := wake
+	if preflight.hasBinding &&
+		bindingOperational(preflight.binding, preflight.credential.credential) {
+		localWake = nil
+	}
+	_, err := daemon.EnsureFederationReplica(ctx, store, credentials, localWake, params)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrCredentialIO):
-			return reconcileError(ErrCredentialIO, "store local federation credential")
-		case errors.Is(err, config.ErrFederationCredentialConflict):
-			return reconcileError(ErrConfigurationConflict, "federation credential changed during atomic rekey")
+		case errors.Is(err, daemon.ErrFederationReplicaCredentialIO):
+			return reconcileError(ErrCredentialIO, "update local federation credential")
+		case errors.Is(err, daemon.ErrFederationReplicaCredentialConflict),
+			errors.Is(err, config.ErrFederationCredentialConflict):
+			return reconcileError(
+				ErrConfigurationConflict,
+				"federation credential changed during local convergence",
+			)
 		case errors.Is(err, daemon.ErrFederationReplicaBindingConflict):
 			return reconcileError(ErrBindingConflict, "existing federation binding is incompatible")
-		case errors.Is(err, daemon.ErrFederationReplicaCredentialConflict):
-			return reconcileError(ErrConfigurationConflict, "existing federation credential is incompatible")
 		default:
 			return reconcileError(ErrLocalStorage, "ensure local federation replica")
 		}
@@ -677,49 +766,43 @@ func ReconcileMapping(
 
 func readManagedReservation(
 	ctx context.Context,
-	credentials config.FederationCredentialStore,
+	managed config.FederationManagedCredentialStore,
 	catalog config.CatalogDaemonConfig,
 	mapping config.FederationProjectConfig,
-) (config.FederationCredentialReservationMatch, bool, error) {
-	finder, ok := credentials.(config.FederationCredentialReservationFinder)
-	if !ok {
-		return config.FederationCredentialReservationMatch{}, false, nil
-	}
-	match, found, err := finder.FederationCredentialReservationForProject(
-		ctx, mapping.SpokeProject,
-	)
+) (config.FederationManagedCredentialReservation, bool, error) {
+	match, found, err := managed.FindManagedFederationCredential(ctx, mapping.SpokeProject)
 	if err != nil {
 		if errors.Is(err, config.ErrFederationCredentialConflict) {
-			return config.FederationCredentialReservationMatch{}, false,
+			return config.FederationManagedCredentialReservation{}, false,
 				reconcileError(ErrConfigurationConflict, "managed federation reservations disagree")
 		}
-		return config.FederationCredentialReservationMatch{}, false,
+		return config.FederationManagedCredentialReservation{}, false,
 			reconcileError(ErrCredentialIO, "read managed federation reservation")
 	}
 	if !found {
-		return config.FederationCredentialReservationMatch{}, false, nil
+		return config.FederationManagedCredentialReservation{}, false, nil
 	}
-	if len(match.ProjectUIDs) == 0 ||
+	if strings.TrimSpace(match.ProjectUID) == "" ||
 		!match.Credential.ManagedByConfig ||
 		match.Credential.SpokeProjectName != mapping.SpokeProject ||
 		!credentialManagementMatches(match.Credential, catalog, mapping) {
-		return config.FederationCredentialReservationMatch{}, false,
+		return config.FederationManagedCredentialReservation{}, false,
 			reconcileError(ErrConfigurationConflict, "managed federation reservation metadata differs")
 	}
 	return match, true, nil
 }
 
-func reserveFederationCredentialAliases(
+func reserveManagedFederationCredential(
 	ctx context.Context,
 	store db.Storage,
-	credentials config.FederationCredentialStore,
+	managed config.FederationManagedCredentialStore,
 	projectName, hubProjectUID string,
 	credential config.FederationCredential,
 ) error {
 	err := daemon.ReserveFederationReplicaCredential(
 		ctx,
 		store,
-		classifiedCredentialStore{delegate: credentials},
+		managed,
 		daemon.ReserveFederationReplicaCredentialParams{
 			HubProjectUID: hubProjectUID,
 			ProjectName:   projectName,
@@ -729,61 +812,12 @@ func reserveFederationCredentialAliases(
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, ErrCredentialIO):
+	case errors.Is(err, daemon.ErrFederationReplicaCredentialIO):
 		return reconcileError(ErrCredentialIO, "reserve federation enrollment credential")
 	case errors.Is(err, daemon.ErrFederationReplicaCredentialConflict):
 		return reconcileError(ErrConfigurationConflict, "federation credential reservation conflict")
 	default:
 		return reconcileError(ErrLocalStorage, "reserve federation enrollment credential")
-	}
-}
-
-func ensureLocalManualReplica(
-	ctx context.Context,
-	store db.Storage,
-	credentials config.FederationCredentialStore,
-	wake func(),
-	localProject db.Project,
-	hubProject HubProject,
-	hubOrigin string,
-	credentialState credentialLookup,
-	credential config.FederationCredential,
-) error {
-	var credentialRekey *daemon.FederationReplicaCredentialRekeySource
-	if credentialState.key != "" && credentialState.key != hubProject.UID {
-		credentialRekey = &daemon.FederationReplicaCredentialRekeySource{
-			ProjectUID: credentialState.key,
-			Expected:   credentialState.credential,
-		}
-	}
-	_, err := daemon.EnsureFederationReplica(
-		ctx, store, classifiedCredentialStore{delegate: credentials}, wake,
-		daemon.EnsureFederationReplicaParams{
-			HubURL:               hubOrigin,
-			HubProjectID:         hubProject.ID,
-			HubProjectUID:        hubProject.UID,
-			ProjectName:          localProject.Name,
-			ReplayHorizonEventID: hubProject.ReplayHorizonEventID,
-			Credential:           credential,
-			CredentialRekey:      credentialRekey,
-			PushEnabled:          true,
-			AdoptExisting:        true,
-		},
-	)
-	if err == nil {
-		return nil
-	}
-	switch {
-	case errors.Is(err, ErrCredentialIO):
-		return reconcileError(ErrCredentialIO, "store local federation credential")
-	case errors.Is(err, config.ErrFederationCredentialConflict):
-		return reconcileError(ErrConfigurationConflict, "federation credential changed during atomic rekey")
-	case errors.Is(err, daemon.ErrFederationReplicaBindingConflict):
-		return reconcileError(ErrBindingConflict, "existing federation binding is incompatible")
-	case errors.Is(err, daemon.ErrFederationReplicaCredentialConflict):
-		return reconcileError(ErrConfigurationConflict, "existing federation credential is incompatible")
-	default:
-		return reconcileError(ErrLocalStorage, "ensure local federation replica")
 	}
 }
 
@@ -870,99 +904,6 @@ type credentialLookup struct {
 	credential config.FederationCredential
 	key        string
 	found      bool
-}
-
-type classifiedCredentialStore struct {
-	delegate config.FederationCredentialStore
-}
-
-func (s classifiedCredentialStore) FederationCredential(
-	ctx context.Context, projectUID string,
-) (config.FederationCredential, bool, error) {
-	credential, ok, err := s.delegate.FederationCredential(ctx, projectUID)
-	if err != nil {
-		return config.FederationCredential{}, false,
-			reconcileError(ErrCredentialIO, "read federation credential")
-	}
-	return credential, ok, nil
-}
-
-func (s classifiedCredentialStore) StoreFederationCredential(
-	ctx context.Context, projectUID string, credential config.FederationCredential,
-) error {
-	if err := s.delegate.StoreFederationCredential(ctx, projectUID, credential); err != nil {
-		return reconcileError(ErrCredentialIO, "store federation credential")
-	}
-	return nil
-}
-
-func (s classifiedCredentialStore) DeleteFederationCredential(
-	ctx context.Context, projectUID string,
-) error {
-	if err := s.delegate.DeleteFederationCredential(ctx, projectUID); err != nil {
-		return reconcileError(ErrCredentialIO, "delete federation credential")
-	}
-	return nil
-}
-
-func (s classifiedCredentialStore) RekeyFederationCredential(
-	ctx context.Context, rekey config.FederationCredentialRekey,
-) error {
-	rekeyer, ok := s.delegate.(config.FederationCredentialRekeyer)
-	if !ok {
-		return reconcileError(
-			ErrCredentialIO,
-			"credential store does not support atomic federation rekey",
-		)
-	}
-	if err := rekeyer.RekeyFederationCredential(ctx, rekey); err != nil {
-		if errors.Is(err, config.ErrFederationCredentialConflict) {
-			return err
-		}
-		return reconcileError(ErrCredentialIO, "atomically rekey federation credential")
-	}
-	return nil
-}
-
-func (s classifiedCredentialStore) ReserveFederationCredentials(
-	ctx context.Context,
-	reservation config.FederationCredentialReservation,
-) error {
-	reserver, ok := s.delegate.(config.FederationCredentialReserver)
-	if !ok {
-		return reconcileError(
-			ErrCredentialIO,
-			"credential store does not support atomic federation reservation",
-		)
-	}
-	if err := reserver.ReserveFederationCredentials(ctx, reservation); err != nil {
-		if errors.Is(err, config.ErrFederationCredentialConflict) {
-			return err
-		}
-		return reconcileError(ErrCredentialIO, "atomically reserve federation credential")
-	}
-	return nil
-}
-
-func (s classifiedCredentialStore) FederationCredentialReservationForProject(
-	ctx context.Context,
-	projectName string,
-) (config.FederationCredentialReservationMatch, bool, error) {
-	finder, ok := s.delegate.(config.FederationCredentialReservationFinder)
-	if !ok {
-		return config.FederationCredentialReservationMatch{}, false, nil
-	}
-	match, found, err := finder.FederationCredentialReservationForProject(
-		ctx, projectName,
-	)
-	if err != nil {
-		if errors.Is(err, config.ErrFederationCredentialConflict) {
-			return config.FederationCredentialReservationMatch{}, false, err
-		}
-		return config.FederationCredentialReservationMatch{}, false,
-			reconcileError(ErrCredentialIO, "read managed federation reservation")
-	}
-	return match, found, nil
 }
 
 func readCredentialState(

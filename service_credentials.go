@@ -2,6 +2,7 @@ package kata
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"go.kenn.io/kata/internal/config"
@@ -32,6 +33,10 @@ type serviceCredentialStoreAdapter struct {
 	store FederationCredentialStore
 }
 
+var errManagedFederationCredentialsUnsupported = errors.New(
+	"mounted federation credential store does not support managed operations",
+)
+
 func (a serviceCredentialStoreAdapter) FederationCredential(
 	ctx context.Context, projectUID string,
 ) (config.FederationCredential, bool, error) {
@@ -50,6 +55,34 @@ func (a serviceCredentialStoreAdapter) StoreFederationCredential(
 
 func (a serviceCredentialStoreAdapter) DeleteFederationCredential(ctx context.Context, projectUID string) error {
 	return a.store.DeleteFederationCredential(ctx, projectUID)
+}
+
+// Public mounted credentials cannot carry the management marker or spoke
+// project name, so they are structurally unmanaged. The internal adapter
+// exposes that fact to shared daemon services without expanding the public
+// three-method credential-store contract.
+func (serviceCredentialStoreAdapter) FindManagedFederationCredential(
+	context.Context, string,
+) (config.FederationManagedCredentialReservation, bool, error) {
+	return config.FederationManagedCredentialReservation{}, false, nil
+}
+
+func (serviceCredentialStoreAdapter) ReserveManagedFederationCredential(
+	context.Context, config.FederationManagedCredentialReservation,
+) error {
+	return errManagedFederationCredentialsUnsupported
+}
+
+func (serviceCredentialStoreAdapter) RekeyFederationCredential(
+	context.Context, config.FederationCredentialRekey,
+) error {
+	return errManagedFederationCredentialsUnsupported
+}
+
+func (serviceCredentialStoreAdapter) DeleteManagedFederationCredential(
+	context.Context, config.FederationManagedCredentialReservation,
+) error {
+	return errManagedFederationCredentialsUnsupported
 }
 
 func internalFederationCredential(credential FederationCredential) config.FederationCredential {

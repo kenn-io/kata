@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
@@ -181,6 +182,7 @@ type serviceFederationCredentialStore struct {
 }
 
 var _ FederationCredentialStore = (*serviceFederationCredentialStore)(nil)
+var _ config.FederationManagedCredentialStore = serviceCredentialStoreAdapter{}
 
 func newServiceFederationCredentialStore() *serviceFederationCredentialStore {
 	return &serviceFederationCredentialStore{entries: make(map[string]FederationCredential)}
