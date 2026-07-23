@@ -846,6 +846,9 @@ func checkFederationEnrollmentRotation(t *testing.T, store db.Storage, backend B
 
 		first, err := store.RotateFederationEnrollment(ctx, params)
 		require.NoError(t, err)
+		laterGrant := createEnrollment(
+			t, "rotation-retry-later-token", spokeUID, &project.ID, "other-member",
+		)
 		replayed, err := store.RotateFederationEnrollment(ctx, params)
 		require.NoError(t, err)
 
@@ -853,6 +856,7 @@ func checkFederationEnrollmentRotation(t *testing.T, store db.Storage, backend B
 		assert.Equal(t, first.Token, replayed.Token)
 		assert.Equal(t, 1, enrollmentCountByToken(t, params.Token))
 		assert.NotNil(t, enrollmentByID(t, old.Enrollment.ID).RevokedAt)
+		assert.NotNil(t, enrollmentByID(t, laterGrant.Enrollment.ID).RevokedAt)
 		assert.Nil(t, enrollmentByID(t, replayed.Enrollment.ID).RevokedAt)
 	})
 

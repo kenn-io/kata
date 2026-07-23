@@ -98,16 +98,14 @@ func (d *Store) rotateFederationEnrollment(
 	p := prepared.Params
 	existing, err := scanFederationEnrollment(tx.QueryRowContext(ctx,
 		federationEnrollmentSelect+` WHERE token_hash = ?`, db.FederationTokenHash(p.Token)))
-	if err == nil {
+	matched := err == nil
+	if matched {
 		if !db.FederationEnrollmentMatchesCreate(existing, p) {
 			return db.CreatedFederationEnrollment{}, db.ErrFederationEnrollmentTokenConflict
 		}
-		return db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}, nil
-	}
-	if !errors.Is(err, db.ErrNotFound) {
+	} else if !errors.Is(err, db.ErrNotFound) {
 		return db.CreatedFederationEnrollment{}, err
-	}
-	if d.rotationStage != nil {
+	} else if d.rotationStage != nil {
 		if err := d.rotationStage(ctx); err != nil {
 			return db.CreatedFederationEnrollment{}, err
 		}
@@ -119,9 +117,16 @@ func (d *Store) rotateFederationEnrollment(
 		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		 WHERE revoked_at IS NULL
 		   AND spoke_instance_uid = ?
-		   AND project_id = ?`,
-		p.SpokeInstanceUID, *p.ProjectID); err != nil {
+		   AND project_id = ?
+		   AND token_hash <> ?`,
+		p.SpokeInstanceUID, *p.ProjectID, db.FederationTokenHash(p.Token)); err != nil {
 		return db.CreatedFederationEnrollment{}, fmt.Errorf("revoke federation enrollments for rotation: %w", err)
+	}
+	if matched {
+		if err := tx.Commit(); err != nil {
+			return db.CreatedFederationEnrollment{}, err
+		}
+		return db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}, nil
 	}
 	created, err := createFederationEnrollmentTx(ctx, tx, prepared)
 	if err != nil {

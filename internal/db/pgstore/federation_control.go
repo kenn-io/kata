@@ -303,17 +303,14 @@ func (s *Store) RotateFederationEnrollment(
 		p := prepared.Params
 		existing, err := scanFederationEnrollment(tx.QueryRowContext(ctx,
 			federationEnrollmentSelect+` WHERE token_hash=$1`, db.FederationTokenHash(p.Token)))
-		if err == nil {
+		matched := err == nil
+		if matched {
 			if !db.FederationEnrollmentMatchesCreate(existing, p) {
 				return db.ErrFederationEnrollmentTokenConflict
 			}
-			output = db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}
-			return nil
-		}
-		if !errors.Is(err, db.ErrNotFound) {
+		} else if !errors.Is(err, db.ErrNotFound) {
 			return err
-		}
-		if s.rotationStage != nil {
+		} else if s.rotationStage != nil {
 			if err := s.rotationStage(ctx); err != nil {
 				return err
 			}
@@ -322,9 +319,13 @@ func (s *Store) RotateFederationEnrollment(
 		if _, err := tx.ExecContext(ctx, `UPDATE federation_enrollments SET
 revoked_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
 updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-WHERE revoked_at IS NULL AND spoke_instance_uid=$1 AND project_id=$2`,
-			p.SpokeInstanceUID, *p.ProjectID); err != nil {
+WHERE revoked_at IS NULL AND spoke_instance_uid=$1 AND project_id=$2 AND token_hash<>$3`,
+			p.SpokeInstanceUID, *p.ProjectID, db.FederationTokenHash(p.Token)); err != nil {
 			return mapSQLError(err, nil)
+		}
+		if matched {
+			output = db.CreatedFederationEnrollment{Enrollment: existing, Token: p.Token}
+			return nil
 		}
 		output, err = createFederationEnrollmentTx(ctx, tx, prepared)
 		return err
