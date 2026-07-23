@@ -25,6 +25,9 @@ The mountable service API added on `main` remains intact:
 Config reconciliation is a standalone-daemon concern and uses the home
 credential store. Extended managed-credential operations therefore remain an
 optional internal capability rather than expanding the public store contract.
+The reconciler and managed leave-cleanup paths require that capability and fail
+with a clear internal configuration error when it is absent. They never
+silently skip reservation checks or cleanup.
 
 ## Credential State Model
 
@@ -58,6 +61,16 @@ A crash before the move leaves the manual credential at `L` and exact-token
 enrollment replay remains safe. A crash after the move leaves the marked
 credential at `H`, which the next reconciliation discovers.
 
+### Recreated hub project
+
+If a marked reservation points at `H` but resolving the configured hub project
+now returns a different UID `H'`, reconciliation reports a configuration
+conflict. It never creates or reserves a replacement credential under `H'`.
+This preserves the rule that recreating a project with the same name does not
+silently replace an established binding. The operator remedy is explicit
+`kata federation leave`, followed by reconciliation against the intended
+project.
+
 ### Leave
 
 Explicit leave finds at most one marked credential by spoke project name and
@@ -88,6 +101,13 @@ The replica-service mutex serializes all in-process reserve, join, adopt, and
 leave transitions. Cross-process coordination is unchanged: one `KATA_HOME`
 continues to assume one owning daemon process.
 
+Hub enrollment and rotation calls occur outside the replica-service mutex.
+After each such call, the reconciler reacquires the mutex before local adoption
+or credential persistence and verifies that the exact marked reservation it
+started with still exists unchanged. If explicit leave removed or changed the
+reservation during hub I/O, reconciliation returns a retryable conflict and
+does not recreate or persist the credential.
+
 ## Reconciler And Service Simplification
 
 - Remove multi-key reservation types, local/hub alias writes, alias backfill,
@@ -101,7 +121,9 @@ continues to assume one owning daemon process.
   rather than contain every branch.
 - Remove the unused replica-service baseline parameter, the test-only
   single-UID reservation wrapper, the unnecessary `url.URL.Port` panic
-  recovery, and the duplicate pre-lock binding prevalidation.
+  recovery, the duplicate pre-lock binding prevalidation, and the manufactured
+  typed-nil hub-error behavior and test. Ordinary non-nil guards required when
+  dereferencing successful `errors.As` results remain.
 - Retain deterministic public-operation race tests, but remove tests whose only
   purpose was proving local/hub alias mechanics.
 
@@ -149,6 +171,14 @@ stable internal credential-I/O sentinel. Exact-value conflicts remain separate
 from I/O failures so reconciliation can report `configuration_conflict` and the
 HTTP layer can return 409.
 
+Unknown reconciler failures use an explicit sanitized `internal` health
+category instead of being mislabeled as `local_storage`.
+
+Hub-client construction errors retain bounded operation-specific context, such
+as URL parsing, TLS setup, or redirect-policy setup, instead of collapsing
+distinct failures into a context-free configuration error. They still exclude
+URLs, credentials, headers, and raw response bodies.
+
 The reconciler remains fail-open: runtime hub, credential, or binding failures
 update retry state and health without delaying listener readiness or changing
 `/health` to unhealthy.
@@ -165,6 +195,9 @@ Test-first changes cover:
 - transition logs naming mapping coordinates without secret-bearing fields;
 - local push repair performing no rotation;
 - generated-token crash recovery with an `H`-only reservation;
+- a stale `H` reservation conflicting with a recreated hub project `H'`;
+- required managed-store capabilities failing clearly when unavailable;
+- leave during hub I/O preventing post-call credential resurrection;
 - manual joins losing deterministically to an `H` reservation in both
   interleavings;
 - explicit leave cleaning an `H`-only pre-adoption reservation;
@@ -172,7 +205,10 @@ Test-first changes cover:
 - mounted-service active-enrollment lookup continuing to pass on SQLite and
   PostgreSQL alongside rotation and explicit-token replay.
 
+Error tests also cover the explicit `internal` health category, bounded
+hub-client construction context, and ordinary (not manufactured typed-nil) hub
+error classification.
+
 Final verification includes the full shuffled suite, owning-package race tests,
 lint, vet, nilaway, API generation, docs checks, schema-path audit, and privacy
 scrub.
-
