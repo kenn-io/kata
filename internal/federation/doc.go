@@ -1,2 +1,3 @@
-// Package federation contains the spoke-side hub client and sync runner.
+// Package federation contains spoke-side hub clients, synchronization, and
+// declarative project-mapping reconciliation.
 package federation

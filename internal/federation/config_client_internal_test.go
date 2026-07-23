@@ -1,4 +1,4 @@
-package federationconfig
+package federation
 
 import (
 	"context"

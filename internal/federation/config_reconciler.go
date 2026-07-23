@@ -1,4 +1,4 @@
-package federationconfig
+package federation
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federation"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -539,6 +538,17 @@ func reconcilePendingLeave(
 			"pending federation leave belongs to another mapping",
 		)
 	}
+	storedOrigin, storedOriginErr := config.CanonicalHTTPOrigin(
+		pending.Credential.HubURL,
+	)
+	catalogOrigin, catalogOriginErr := config.CanonicalHTTPOrigin(catalog.URL)
+	if storedOriginErr != nil || catalogOriginErr != nil ||
+		storedOrigin != catalogOrigin {
+		return true, reconcileError(
+			ErrConfigurationConflict,
+			"pending federation leave targets another hub origin",
+		)
+	}
 	if pending.Credential.PendingEnrollmentID == 0 {
 		endRecovery, beginErr := daemon.BeginFederationReplicaLeaveRecovery(
 			ctx,
@@ -616,7 +626,7 @@ func recoverPendingLeaveEnrollment(
 			"pending federation leave has invalid enrollment metadata",
 		)
 	}
-	capabilities, err := federation.NormalizeCapabilities(credential.Capabilities)
+	capabilities, err := NormalizeCapabilities(credential.Capabilities)
 	if err != nil {
 		return Enrollment{}, reconcileError(
 			ErrConfigurationConflict,
@@ -672,7 +682,7 @@ type mappingPreflight struct {
 	managedReservation config.FederationManagedCredentialReservation
 	hasReservation     bool
 	hubOrigin          string
-	capabilities       federation.Capabilities
+	capabilities       Capabilities
 }
 
 func preflightMapping(
@@ -698,7 +708,7 @@ func preflightMapping(
 		return preflight,
 			reconcileError(ErrConfigurationConflict, "invalid federation hub origin")
 	}
-	capabilities, err := federation.NormalizeCapabilities(configCapabilities)
+	capabilities, err := NormalizeCapabilities(configCapabilities)
 	if err != nil {
 		return preflight,
 			reconcileError(ErrConfigurationConflict, "invalid federation capability configuration")

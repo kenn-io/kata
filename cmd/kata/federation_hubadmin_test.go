@@ -119,6 +119,35 @@ func TestResolveHubAdminAuthAutomaticallyMatchesCanonicalOriginAndKeepsBindingPa
 	assert.Equal(t, "http://bound.example/reverse-proxy", out.url)
 }
 
+func TestResolveHubAdminAuthPrefersExactPathWithinSharedOrigin(t *testing.T) {
+	out, err := resolveHubAdminAuth(catalog(
+		config.CatalogDaemonConfig{
+			Name: "hub-a", URL: "https://bound.example/hub-a", Token: "token-a",
+		},
+		config.CatalogDaemonConfig{
+			Name: "hub-b", URL: "HTTPS://BOUND.EXAMPLE:443/hub-b/", Token: "token-b",
+		},
+	), hubAuthInputs{hubURL: "https://bound.example/hub-b"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "token-b", out.token)
+	assert.Equal(t, "https://bound.example/hub-b", out.url)
+}
+
+func TestResolveHubAdminAuthRejectsAmbiguousSharedOrigin(t *testing.T) {
+	_, err := resolveHubAdminAuth(catalog(
+		config.CatalogDaemonConfig{
+			Name: "hub-a", URL: "https://bound.example/hub-a", Token: "token-a",
+		},
+		config.CatalogDaemonConfig{
+			Name: "hub-b", URL: "https://bound.example/hub-b", Token: "token-b",
+		},
+	), hubAuthInputs{hubURL: "https://bound.example/other"})
+
+	cliErr := requireCLIError(t, err, ExitValidation)
+	assert.Equal(t, "hub_catalog_origin_ambiguous", cliErr.Code)
+}
+
 func TestResolveHubAdminAuthCanonicalOriginErrors(t *testing.T) {
 	t.Run("named catalog URL", func(t *testing.T) {
 		_, err := resolveHubAdminAuth(catalog(config.CatalogDaemonConfig{

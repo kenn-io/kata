@@ -7,18 +7,18 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/federationconfig"
+	"go.kenn.io/kata/internal/federation"
 )
 
 type federationConfigReconciler interface {
 	Run(context.Context) error
-	Health() federationconfig.Health
+	Health() federation.Health
 }
 
 var newFederationConfigReconciler = func(
-	cfg federationconfig.ReconcilerConfig,
+	cfg federation.ReconcilerConfig,
 ) federationConfigReconciler {
-	return federationconfig.NewReconciler(cfg)
+	return federation.NewReconciler(cfg)
 }
 
 func startFederationConfigReconciler(
@@ -32,22 +32,22 @@ func startFederationConfigReconciler(
 		return nil
 	}
 
-	targets := make([]federationconfig.Target, 0, len(daemonConfig.Federation.Projects))
+	targets := make([]federation.Target, 0, len(daemonConfig.Federation.Projects))
 	for _, mapping := range daemonConfig.Federation.Projects {
 		catalog, _ := daemonConfig.CatalogDaemon(mapping.Hub)
-		targets = append(targets, federationconfig.Target{
+		targets = append(targets, federation.Target{
 			Catalog: catalog,
 			Mapping: mapping,
 		})
 	}
-	reconciler := newFederationConfigReconciler(federationconfig.ReconcilerConfig{
+	reconciler := newFederationConfigReconciler(federation.ReconcilerConfig{
 		Store:       store,
 		Credentials: config.DefaultFederationCredentialStore(),
 		Targets:     targets,
 		HubFactory: func(
 			ctx context.Context, catalog config.CatalogDaemonConfig,
-		) (federationconfig.Hub, error) {
-			return federationconfig.NewHubClient(ctx, catalog)
+		) (federation.Hub, error) {
+			return federation.NewHubClient(ctx, catalog)
 		},
 		Wake:   federationWake,
 		Logger: daemonLog,

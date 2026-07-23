@@ -1,5 +1,4 @@
-// Package federationconfig reconciles declarative federation project mappings.
-package federationconfig
+package federation
 
 import (
 	"bytes"

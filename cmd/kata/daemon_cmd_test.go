@@ -31,7 +31,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/federationconfig"
+	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/telemetry"
@@ -1013,7 +1013,7 @@ func TestDaemonFederationConfigNoMappingsSkipsReconcilerFactory(t *testing.T) {
 	var factoryCalls atomic.Int32
 	original := newFederationConfigReconciler
 	newFederationConfigReconciler = func(
-		cfg federationconfig.ReconcilerConfig,
+		cfg federation.ReconcilerConfig,
 	) federationConfigReconciler {
 		factoryCalls.Add(1)
 		return original(cfg)

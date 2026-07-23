@@ -1,9 +1,10 @@
-package federationconfig_test
+package federation_test
 
 import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -20,7 +21,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
-	"go.kenn.io/kata/internal/federationconfig"
+	"go.kenn.io/kata/internal/federation"
 )
 
 const (
@@ -30,21 +31,21 @@ const (
 
 type fakeHub struct {
 	mu                sync.Mutex
-	project           federationconfig.HubProject
-	enrollment        federationconfig.Enrollment
+	project           federation.HubProject
+	enrollment        federation.Enrollment
 	resolveProjectErr error
 	ensureProjectErr  error
 	enrollmentErr     error
 	rotationErr       error
 	resolveCalls      int
 	ensureCalls       int
-	enrollmentCalls   []federationconfig.EnrollmentRequest
-	rotationCalls     []federationconfig.EnrollmentRequest
+	enrollmentCalls   []federation.EnrollmentRequest
+	rotationCalls     []federation.EnrollmentRequest
 	revokeCalls       []int64
 	revokeErr         error
 	onEnsureProject   func()
-	onEnrollment      func(federationconfig.EnrollmentRequest)
-	onRotation        func(federationconfig.EnrollmentRequest)
+	onEnrollment      func(federation.EnrollmentRequest)
+	onRotation        func(federation.EnrollmentRequest)
 
 	ensureEnrollmentStarted chan struct{}
 	releaseEnsureEnrollment chan struct{}
@@ -54,12 +55,12 @@ type fakeHub struct {
 
 func (h *fakeHub) ResolveProject(
 	_ context.Context, name string,
-) (federationconfig.HubProject, error) {
+) (federation.HubProject, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.resolveCalls++
 	if h.resolveProjectErr != nil {
-		return federationconfig.HubProject{}, h.resolveProjectErr
+		return federation.HubProject{}, h.resolveProjectErr
 	}
 	project := h.project
 	project.Name = name
@@ -69,13 +70,13 @@ func (h *fakeHub) ResolveProject(
 
 func (h *fakeHub) EnsureProject(
 	_ context.Context, name, actor string,
-) (federationconfig.HubProject, error) {
+) (federation.HubProject, error) {
 	h.mu.Lock()
 	h.ensureCalls++
 	onEnsureProject := h.onEnsureProject
 	if h.ensureProjectErr != nil {
 		h.mu.Unlock()
-		return federationconfig.HubProject{}, h.ensureProjectErr
+		return federation.HubProject{}, h.ensureProjectErr
 	}
 	project := h.project
 	h.mu.Unlock()
@@ -88,8 +89,8 @@ func (h *fakeHub) EnsureProject(
 }
 
 func (h *fakeHub) EnsureEnrollment(
-	ctx context.Context, request federationconfig.EnrollmentRequest,
-) (federationconfig.Enrollment, error) {
+	ctx context.Context, request federation.EnrollmentRequest,
+) (federation.Enrollment, error) {
 	h.mu.Lock()
 	h.enrollmentCalls = append(h.enrollmentCalls, request)
 	if h.ensureEnrollmentStarted != nil {
@@ -100,7 +101,7 @@ func (h *fakeHub) EnsureEnrollment(
 		case <-h.releaseEnsureEnrollment:
 		case <-ctx.Done():
 			h.mu.Unlock()
-			return federationconfig.Enrollment{}, ctx.Err()
+			return federation.Enrollment{}, ctx.Err()
 		}
 	}
 	onEnrollment := h.onEnrollment
@@ -114,8 +115,8 @@ func (h *fakeHub) EnsureEnrollment(
 }
 
 func (h *fakeHub) RotateEnrollment(
-	ctx context.Context, request federationconfig.EnrollmentRequest,
-) (federationconfig.Enrollment, error) {
+	ctx context.Context, request federation.EnrollmentRequest,
+) (federation.Enrollment, error) {
 	h.mu.Lock()
 	h.rotationCalls = append(h.rotationCalls, request)
 	if h.rotateEnrollmentStarted != nil {
@@ -126,7 +127,7 @@ func (h *fakeHub) RotateEnrollment(
 		case <-h.releaseRotateEnrollment:
 		case <-ctx.Done():
 			h.mu.Unlock()
-			return federationconfig.Enrollment{}, ctx.Err()
+			return federation.Enrollment{}, ctx.Err()
 		}
 	}
 	onRotation := h.onRotation
@@ -411,7 +412,7 @@ func TestReconcileMappingCreatesEnrollsAdoptsPushesAndWakes(t *testing.T) {
 	credentials := newFakeCredentialStore()
 	hub := newFakeHub()
 	wakes := 0
-	hub.onEnrollment = func(request federationconfig.EnrollmentRequest) {
+	hub.onEnrollment = func(request federation.EnrollmentRequest) {
 		project, err := store.ProjectByName(context.Background(), "spoke-project")
 		require.NoError(t, err, "local project must exist before hub enrollment")
 		assert.NotEqual(t, hubProjectUID, project.UID)
@@ -423,7 +424,7 @@ func TestReconcileMappingCreatesEnrollsAdoptsPushesAndWakes(t *testing.T) {
 		assert.NotEmpty(t, request.Token)
 	}
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -469,7 +470,7 @@ func TestReconcileMappingInitialReservationUsesOnlyHubUID(t *testing.T) {
 	hub := newFakeHub()
 	enrollmentArrived := make(chan struct{})
 	releaseEnrollment := make(chan struct{})
-	hub.onEnrollment = func(federationconfig.EnrollmentRequest) {
+	hub.onEnrollment = func(federation.EnrollmentRequest) {
 		close(enrollmentArrived)
 		select {
 		case <-releaseEnrollment:
@@ -479,7 +480,7 @@ func TestReconcileMappingInitialReservationUsesOnlyHubUID(t *testing.T) {
 
 	result := make(chan error, 1)
 	go func() {
-		result <- federationconfig.ReconcileMapping(
+		result <- federation.ReconcileMapping(
 			ctx, store, credentials, hub, testCatalog(), testMapping(), nil,
 		)
 	}()
@@ -516,11 +517,11 @@ func TestReconcileMappingGeneratedReservationRequiresManagedStore(t *testing.T) 
 	credentials := &baseCredentialStore{delegate: delegate}
 	hub := newFakeHub()
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		ctx, store, credentials, hub, testCatalog(), testMapping(), nil,
 	)
 
-	require.ErrorIs(t, err, federationconfig.ErrCredentialIO)
+	require.ErrorIs(t, err, federation.ErrCredentialIO)
 	assert.Empty(t, hub.enrollmentCalls)
 	assert.Empty(t, hub.rotationCalls)
 	assert.Zero(t, hub.resolveCalls)
@@ -541,11 +542,11 @@ func TestReconcileMappingManagedCleanupLookupRequiresManagedStore(t *testing.T) 
 	credentials := &baseCredentialStore{delegate: delegate}
 	hub := newFakeHub()
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		ctx, store, credentials, hub, testCatalog(), testMapping(), nil,
 	)
 
-	require.ErrorIs(t, err, federationconfig.ErrCredentialIO)
+	require.ErrorIs(t, err, federation.ErrCredentialIO)
 	assert.Empty(t, hub.enrollmentCalls)
 	assert.Empty(t, hub.rotationCalls)
 	assert.Zero(t, hub.resolveCalls)
@@ -572,7 +573,7 @@ func TestReconcileMappingManualCredentialMovesLocalUIDToHubUID(t *testing.T) {
 	manual.SpokeProjectName = ""
 	credentials.credentials[project.UID] = manual
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		ctx, store, credentials, newFakeHub(), testCatalog(), testMapping(), nil,
 	)
 	require.NoError(t, err)
@@ -600,7 +601,7 @@ func TestReconcileMappingAdoptsExistingStandaloneWorkWithSnapshot(t *testing.T) 
 	hub := newFakeHub()
 	wakes := 0
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -635,12 +636,12 @@ func TestReconcileMappingAtomicRekeyFailureLeavesStandaloneStateRetryable(t *tes
 	hub := newFakeHub()
 	wakes := 0
 
-	firstErr := federationconfig.ReconcileMapping(
+	firstErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.Error(t, firstErr)
-	assert.ErrorIs(t, firstErr, federationconfig.ErrCredentialIO)
+	assert.ErrorIs(t, firstErr, federation.ErrCredentialIO)
 	require.Len(t, hub.enrollmentCalls, 1)
 	assert.Equal(t, manual.Token, hub.enrollmentCalls[0].Token)
 	require.Len(t, credentials.rekeyCalls, 1)
@@ -665,7 +666,7 @@ func TestReconcileMappingAtomicRekeyFailureLeavesStandaloneStateRetryable(t *tes
 	assert.False(t, ok)
 
 	credentials.rekeyErr = nil
-	secondErr := federationconfig.ReconcileMapping(
+	secondErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -711,12 +712,12 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	hub := newFakeHub()
 	wakes := 0
 
-	firstErr := federationconfig.ReconcileMapping(
+	firstErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.Error(t, firstErr)
-	assert.ErrorIs(t, firstErr, federationconfig.ErrLocalStorage)
+	assert.ErrorIs(t, firstErr, federation.ErrLocalStorage)
 	require.Len(t, hub.enrollmentCalls, 1)
 	assert.Equal(t, manual.Token, hub.enrollmentCalls[0].Token)
 	require.Len(t, credentials.rekeyCalls, 1)
@@ -737,7 +738,7 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	assert.Equal(t, "identity-user", rekeyed.Actor)
 	assert.True(t, rekeyed.ManagedByConfig)
 
-	secondErr := federationconfig.ReconcileMapping(
+	secondErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -807,7 +808,7 @@ func TestReconcileMappingManualH2JoinWinsBeforeH1ReservationWithoutEnrollment(t 
 
 	configResult := make(chan error, 1)
 	go func() {
-		configResult <- federationconfig.ReconcileMapping(
+		configResult <- federation.ReconcileMapping(
 			ctx, store, credentials, hub, testCatalog(), testMapping(), nil,
 		)
 	}()
@@ -829,7 +830,7 @@ func TestReconcileMappingManualH2JoinWinsBeforeH1ReservationWithoutEnrollment(t 
 	case <-ctx.Done():
 		require.FailNow(t, "wait for losing H1 reconciliation", "error: %v", ctx.Err())
 	}
-	require.ErrorIs(t, err, federationconfig.ErrBindingConflict)
+	require.ErrorIs(t, err, federation.ErrBindingConflict)
 	assert.Empty(t, hub.enrollmentCalls)
 	assert.Empty(t, hub.rotationCalls)
 
@@ -856,7 +857,7 @@ func TestReconcileMappingRacesManualJoinWithoutManagedOverwrite(t *testing.T) {
 	enrollmentArrived := make(chan struct{})
 	releaseEnrollment := make(chan struct{})
 	hub := newFakeHub()
-	hub.onEnrollment = func(federationconfig.EnrollmentRequest) {
+	hub.onEnrollment = func(federation.EnrollmentRequest) {
 		close(enrollmentArrived)
 		select {
 		case <-releaseEnrollment:
@@ -865,7 +866,7 @@ func TestReconcileMappingRacesManualJoinWithoutManagedOverwrite(t *testing.T) {
 	}
 	configResult := make(chan error, 1)
 	go func() {
-		configResult <- federationconfig.ReconcileMapping(
+		configResult <- federation.ReconcileMapping(
 			ctx, store, credentials, hub, testCatalog(), testMapping(), nil,
 		)
 	}()
@@ -930,7 +931,7 @@ func TestReconcileMappingHubReturnedActorWinsCredentialAndBinding(t *testing.T) 
 	hub := newFakeHub()
 	hub.enrollment.Actor = "token-bound-user"
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
@@ -957,12 +958,12 @@ func TestReconcileMappingRejectsMalformedHubProjectUIDBeforeFederationMutation(t
 	hub.project.UID = malformedUID
 	wakes := 0
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrHubValidation)
+	assert.ErrorIs(t, err, federation.ErrHubValidation)
 	assert.NotContains(t, err.Error(), malformedUID)
 	assert.NotContains(t, err.Error(), testCatalogBearer)
 	assert.Empty(t, credentials.storeCalls)
@@ -1007,12 +1008,12 @@ func TestReconcileMappingRejectsInvalidEnrollmentActorWithoutStateOverwrite(t *t
 			hub.enrollment.Actor = tt.actor
 			wakes := 0
 
-			err = federationconfig.ReconcileMapping(
+			err = federation.ReconcileMapping(
 				context.Background(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
 			require.Error(t, err)
-			assert.ErrorIs(t, err, federationconfig.ErrHubValidation)
+			assert.ErrorIs(t, err, federation.ErrHubValidation)
 			assert.NotContains(t, err.Error(), testCatalogBearer)
 			assert.NotContains(t, err.Error(), original.Token)
 			assert.NotContains(t, err.Error(), tt.actor)
@@ -1038,7 +1039,7 @@ func TestReconcileMappingCrashAfterCredentialPersistenceReusesToken(t *testing.T
 	hub := newFakeHub()
 	hub.enrollmentErr = errors.New("hub unavailable")
 
-	firstErr := federationconfig.ReconcileMapping(
+	firstErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
@@ -1055,7 +1056,7 @@ func TestReconcileMappingCrashAfterCredentialPersistenceReusesToken(t *testing.T
 	assert.Equal(t, firstToken, persisted.Token)
 
 	hub.enrollmentErr = nil
-	secondErr := federationconfig.ReconcileMapping(
+	secondErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
@@ -1075,7 +1076,7 @@ func TestReconcileMappingLostEnrollmentResponseRepeatsExactToken(t *testing.T) {
 	hub := newFakeHub()
 	hub.enrollmentErr = errors.New("response lost after enrollment commit")
 
-	firstErr := federationconfig.ReconcileMapping(
+	firstErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
@@ -1084,7 +1085,7 @@ func TestReconcileMappingLostEnrollmentResponseRepeatsExactToken(t *testing.T) {
 	first := hub.enrollmentCalls[0]
 
 	hub.enrollmentErr = nil
-	secondErr := federationconfig.ReconcileMapping(
+	secondErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
@@ -1101,16 +1102,16 @@ func TestReconcileMappingRetriesDurablePendingLeaveRevocation(t *testing.T) {
 	pending.PendingEnrollmentID = 77
 	credentials.credentials[hubProjectUID] = pending
 	hub := newFakeHub()
-	hub.revokeErr = &federationconfig.HubError{
-		Kind: federationconfig.ErrHubUnavailable, Operation: "revoke enrollment",
+	hub.revokeErr = &federation.HubError{
+		Kind: federation.ErrHubUnavailable, Operation: "revoke enrollment",
 	}
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 
-	require.ErrorIs(t, err, federationconfig.ErrHubUnavailable)
+	require.ErrorIs(t, err, federation.ErrHubUnavailable)
 	assert.Equal(t, []int64{77}, hub.revokeCalls)
 	retained, found := credentials.get(hubProjectUID)
 	require.True(t, found)
@@ -1120,7 +1121,7 @@ func TestReconcileMappingRetriesDurablePendingLeaveRevocation(t *testing.T) {
 	assert.Empty(t, hub.rotationCalls)
 
 	hub.revokeErr = nil
-	require.NoError(t, federationconfig.ReconcileMapping(
+	require.NoError(t, federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	))
@@ -1130,13 +1131,39 @@ func TestReconcileMappingRetriesDurablePendingLeaveRevocation(t *testing.T) {
 	assert.True(t, cleared.LeavePending)
 	assert.Equal(t, int64(77), cleared.PendingEnrollmentID)
 
-	require.NoError(t, federationconfig.ReconcileMapping(
+	require.NoError(t, federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	))
 	assert.Equal(t, []int64{77, 77, 77}, hub.revokeCalls)
 	assert.Empty(t, hub.enrollmentCalls)
 	assert.Empty(t, hub.rotationCalls)
+}
+
+func TestReconcileMappingPendingLeaveRejectsChangedCatalogOrigin(t *testing.T) {
+	for _, pendingEnrollmentID := range []int64{0, 77} {
+		t.Run(fmt.Sprintf("enrollment_%d", pendingEnrollmentID), func(t *testing.T) {
+			store := openReconcileStore(t)
+			credentials := newFakeCredentialStore()
+			pending := managedCredential()
+			pending.LeavePending = true
+			pending.PendingEnrollmentID = pendingEnrollmentID
+			credentials.credentials[hubProjectUID] = pending
+			hub := newFakeHub()
+			catalog := testCatalog()
+			catalog.URL = "https://replacement.example"
+
+			err := federation.ReconcileMapping(
+				context.Background(), store, credentials, hub,
+				catalog, testMapping(), nil,
+			)
+
+			require.ErrorIs(t, err, federation.ErrConfigurationConflict)
+			assert.Empty(t, hub.enrollmentCalls)
+			assert.Empty(t, hub.rotationCalls)
+			assert.Empty(t, hub.revokeCalls)
+		})
+	}
 }
 
 func TestReconcileMappingRecoversPendingLeaveWithoutEnrollmentID(t *testing.T) {
@@ -1164,7 +1191,7 @@ func TestReconcileMappingRecoversPendingLeaveWithoutEnrollmentID(t *testing.T) {
 			credentials.credentials[hubProjectUID] = pending
 			hub := newFakeHub()
 
-			require.NoError(t, federationconfig.ReconcileMapping(
+			require.NoError(t, federation.ReconcileMapping(
 				context.Background(), store, credentials, hub,
 				testCatalog(), testMapping(), nil,
 			))
@@ -1177,7 +1204,7 @@ func TestReconcileMappingRecoversPendingLeaveWithoutEnrollmentID(t *testing.T) {
 			assert.True(t, retained.LeavePending)
 			assert.Equal(t, hub.enrollment.ID, retained.PendingEnrollmentID)
 
-			require.NoError(t, federationconfig.ReconcileMapping(
+			require.NoError(t, federation.ReconcileMapping(
 				context.Background(), store, credentials, hub,
 				testCatalog(), testMapping(), nil,
 			))
@@ -1203,7 +1230,7 @@ func TestPrepareLeaveDrainsPendingEnrollmentRecovery(t *testing.T) {
 	hub.releaseEnsureEnrollment = make(chan struct{})
 	reconciled := make(chan error, 1)
 	go func() {
-		reconciled <- federationconfig.ReconcileMapping(
+		reconciled <- federation.ReconcileMapping(
 			ctx, store, credentials, hub,
 			testCatalog(), testMapping(), nil,
 		)
@@ -1247,7 +1274,7 @@ func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *test
 	hub.releaseEnsureEnrollment = make(chan struct{})
 	result := make(chan error, 1)
 	go func() {
-		result <- federationconfig.ReconcileMapping(
+		result <- federation.ReconcileMapping(
 			ctx, store, credentials, hub,
 			testCatalog(), testMapping(), nil,
 		)
@@ -1291,7 +1318,7 @@ func TestReconcileMappingLeaveDuringEnrollmentDoesNotResurrectCredential(t *test
 	_, bindingErr := store.FederationBindingByProject(ctx, localProject.ID)
 	require.ErrorIs(t, bindingErr, db.ErrNotFound)
 
-	require.NoError(t, federationconfig.ReconcileMapping(
+	require.NoError(t, federation.ReconcileMapping(
 		ctx, store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	))
@@ -1309,7 +1336,7 @@ func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testin
 	hub.releaseRotateEnrollment = make(chan struct{})
 	result := make(chan error, 1)
 	go func() {
-		result <- federationconfig.ReconcileMapping(
+		result <- federation.ReconcileMapping(
 			ctx, store, credentials, hub,
 			testCatalog(), testMapping(), nil,
 		)
@@ -1352,7 +1379,7 @@ func TestReconcileMappingLeaveDuringRotationDoesNotResurrectCredential(t *testin
 	_, bindingErr := store.FederationBindingByProject(ctx, localProject.ID)
 	require.ErrorIs(t, bindingErr, db.ErrNotFound)
 
-	require.NoError(t, federationconfig.ReconcileMapping(
+	require.NoError(t, federation.ReconcileMapping(
 		ctx, store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	))
@@ -1365,14 +1392,14 @@ func TestReconcileMappingMissingCredentialRotatesEnrollment(t *testing.T) {
 	credentials := newFakeCredentialStore()
 	hub := newFakeHub()
 	wakes := 0
-	hub.onRotation = func(request federationconfig.EnrollmentRequest) {
+	hub.onRotation = func(request federation.EnrollmentRequest) {
 		persisted, ok := credentials.get(project.UID)
 		require.True(t, ok, "replacement token must be durable before rotation")
 		assert.Equal(t, persisted.Token, request.Token)
 		assert.NotEmpty(t, request.Token)
 	}
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -1395,12 +1422,12 @@ func TestReconcileMappingIncompleteReplacementReplaysRotation(t *testing.T) {
 	hub := newFakeHub()
 	hub.rotationErr = errors.New("response lost after rotation commit")
 
-	firstErr := federationconfig.ReconcileMapping(
+	firstErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, firstErr)
-	assert.ErrorIs(t, firstErr, federationconfig.ErrHubUnavailable)
+	assert.ErrorIs(t, firstErr, federation.ErrHubUnavailable)
 	require.Len(t, hub.rotationCalls, 1)
 	first := hub.rotationCalls[0]
 	pending, ok := credentials.get(project.UID)
@@ -1408,7 +1435,7 @@ func TestReconcileMappingIncompleteReplacementReplaysRotation(t *testing.T) {
 	assert.Equal(t, first.Token, pending.Token)
 
 	hub.rotationErr = nil
-	secondErr := federationconfig.ReconcileMapping(
+	secondErr := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
@@ -1428,12 +1455,12 @@ func TestReconcileMappingCredentialFailureInsideReplicaServiceStaysClassified(t 
 	credentials.failStoreAt = 1
 	hub := newFakeHub()
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrCredentialIO)
+	assert.ErrorIs(t, err, federation.ErrCredentialIO)
 	assert.NotContains(t, err.Error(), testCatalogBearer)
 	require.Len(t, hub.enrollmentCalls, 1)
 	require.Len(t, credentials.managedReserveCalls, 1)
@@ -1448,7 +1475,7 @@ func TestReconcileMappingMatchingBindingAndCredentialIsImmediatelyConverged(t *t
 	hub := newFakeHub()
 	wakes := 0
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -1474,7 +1501,7 @@ func TestReconcileMappingPushRepairDoesNotRotateEnrollment(t *testing.T) {
 	hub := newFakeHub()
 	wakes := 0
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -1521,7 +1548,7 @@ func TestReconcileMappingIncompleteBindingWithValidCredentialRepairsLocally(t *t
 			hub := newFakeHub()
 			wakes := 0
 
-			err = federationconfig.ReconcileMapping(
+			err = federation.ReconcileMapping(
 				context.Background(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
@@ -1558,7 +1585,7 @@ func TestReconcileMappingMatchingManualCredentialBecomesManaged(t *testing.T) {
 	hub := newFakeHub()
 	wakes := 0
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -1609,7 +1636,7 @@ func TestReconcileMappingIncompleteBindingWithManualCredentialAdoptsAndRepairs(t
 			hub.rotationErr = errors.New("manual credential must not be rotated")
 			wakes := 0
 
-			err = federationconfig.ReconcileMapping(
+			err = federation.ReconcileMapping(
 				context.Background(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
@@ -1653,7 +1680,7 @@ func TestReconcileMappingManagedCredentialEmptyBindingActorRepairs(t *testing.T)
 	hub := newFakeHub()
 	wakes := 0
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
@@ -1729,12 +1756,12 @@ func TestReconcileMappingRejectsManagedMetadataMismatchRegardlessOfBindingComple
 			hub := newFakeHub()
 			wakes := 0
 
-			err = federationconfig.ReconcileMapping(
+			err = federation.ReconcileMapping(
 				context.Background(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
 			require.Error(t, err)
-			assert.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+			assert.ErrorIs(t, err, federation.ErrConfigurationConflict)
 			assert.Empty(t, credentials.storeCalls)
 			assert.Empty(t, credentials.deleteCalls)
 			assert.Empty(t, hub.enrollmentCalls)
@@ -1763,12 +1790,12 @@ func TestReconcileMappingRejectsNonmatchingManualCredentialWithoutOverwrite(t *t
 	credentials.credentials[project.UID] = manual
 	hub := newFakeHub()
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+	assert.ErrorIs(t, err, federation.ErrConfigurationConflict)
 	assert.NotContains(t, err.Error(), manual.Token)
 	assert.NotContains(t, err.Error(), testCatalogBearer)
 	assert.Equal(t, manual, credentials.credentials[project.UID])
@@ -1792,12 +1819,12 @@ func TestReconcileMappingRejectsHubKeyCredentialMismatchBeforeEnable(t *testing.
 	credentials.credentials[hubProjectUID] = mismatched
 	hub := newFakeHub()
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+	assert.ErrorIs(t, err, federation.ErrConfigurationConflict)
 	assert.Equal(t, 1, hub.resolveCalls)
 	assert.Zero(t, hub.ensureCalls)
 	assert.Empty(t, hub.enrollmentCalls)
@@ -1857,12 +1884,12 @@ func TestReconcileMappingRejectsBindingConflictsWithoutMutation(t *testing.T) {
 			hub := newFakeHub()
 			wakes := 0
 
-			err = federationconfig.ReconcileMapping(
+			err = federation.ReconcileMapping(
 				context.Background(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
 			require.Error(t, err)
-			assert.ErrorIs(t, err, federationconfig.ErrBindingConflict)
+			assert.ErrorIs(t, err, federation.ErrBindingConflict)
 			after, readErr := store.FederationBindingByProject(context.Background(), project.ID)
 			require.NoError(t, readErr)
 			assert.Equal(t, before, after)
@@ -1887,12 +1914,12 @@ func TestReconcileMappingRecreatedSameNameHubProjectUIDConflicts(t *testing.T) {
 	hub := newFakeHub()
 	hub.project.UID = recreatedProjectUID
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrBindingConflict)
+	assert.ErrorIs(t, err, federation.ErrBindingConflict)
 	after, readErr := store.FederationBindingByProject(context.Background(), project.ID)
 	require.NoError(t, readErr)
 	assert.Equal(t, before, after)
@@ -1909,18 +1936,18 @@ func TestReconcileMappingBoundProjectMissingOnHubDoesNotCreate(t *testing.T) {
 	credentials := newFakeCredentialStore()
 	credentials.credentials[project.UID] = managedCredential()
 	hub := newFakeHub()
-	hub.resolveProjectErr = &federationconfig.HubError{
-		Kind:       federationconfig.ErrHubValidation,
+	hub.resolveProjectErr = &federation.HubError{
+		Kind:       federation.ErrHubValidation,
 		Operation:  "resolve project",
 		StatusCode: http.StatusNotFound,
 	}
 
-	err := federationconfig.ReconcileMapping(
+	err := federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrBindingConflict)
+	assert.ErrorIs(t, err, federation.ErrBindingConflict)
 	assert.Equal(t, 1, hub.resolveCalls)
 	assert.Zero(t, hub.ensureCalls)
 	assert.Empty(t, hub.enrollmentCalls)
@@ -1942,8 +1969,8 @@ func TestReconcileMappingStaleHubUIDReservationConflicts(t *testing.T) {
 		{
 			name: "old project missing",
 			configure: func(hub *fakeHub) {
-				hub.resolveProjectErr = &federationconfig.HubError{
-					Kind:       federationconfig.ErrHubValidation,
+				hub.resolveProjectErr = &federation.HubError{
+					Kind:       federation.ErrHubValidation,
 					Operation:  "resolve project",
 					StatusCode: http.StatusNotFound,
 				}
@@ -1964,12 +1991,12 @@ func TestReconcileMappingStaleHubUIDReservationConflicts(t *testing.T) {
 			hub := newFakeHub()
 			tt.configure(hub)
 
-			err = federationconfig.ReconcileMapping(
+			err = federation.ReconcileMapping(
 				context.Background(), store, credentials, hub,
 				testCatalog(), testMapping(), nil,
 			)
 
-			require.ErrorIs(t, err, federationconfig.ErrConfigurationConflict)
+			require.ErrorIs(t, err, federation.ErrConfigurationConflict)
 			assert.Equal(t, 1, hub.resolveCalls)
 			assert.Zero(t, hub.ensureCalls)
 			assert.Empty(t, hub.enrollmentCalls)
@@ -2003,12 +2030,12 @@ func TestReconcileMappingHubUIDOwnedByAnotherLocalProjectConflictsBeforeEnable(t
 	credentials := newFakeCredentialStore()
 	hub := newFakeHub()
 
-	err = federationconfig.ReconcileMapping(
+	err = federation.ReconcileMapping(
 		context.Background(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, federationconfig.ErrBindingConflict)
+	assert.ErrorIs(t, err, federation.ErrBindingConflict)
 	assert.Equal(t, 1, hub.resolveCalls)
 	assert.Zero(t, hub.ensureCalls)
 	assert.Empty(t, hub.enrollmentCalls)
@@ -2022,10 +2049,10 @@ func TestReconcileMappingHubUIDOwnedByAnotherLocalProjectConflictsBeforeEnable(t
 func TestFederationConfigReconcilerProcessesDueMappingsInConfigOrder(t *testing.T) {
 	clock := newManualClock(time.Date(2026, 7, 23, 1, 0, 0, 0, time.UTC))
 	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": {federationconfig.ErrHubUnavailable},
-		"hub-b": {federationconfig.ErrConfigurationConflict},
-		"hub-c": {&federationconfig.HubError{
-			Kind:       federationconfig.ErrHubAuthentication,
+		"hub-a": {federation.ErrHubUnavailable},
+		"hub-b": {federation.ErrConfigurationConflict},
+		"hub-c": {&federation.HubError{
+			Kind:       federation.ErrHubAuthentication,
 			Operation:  "authenticate",
 			StatusCode: http.StatusUnauthorized,
 		}},
@@ -2067,12 +2094,12 @@ func TestFederationConfigReconcilerMaintainsIndependentBackoffAndQuietsSuccess(t
 	clock := newManualClock(time.Date(2026, 7, 23, 1, 30, 0, 0, time.UTC))
 	factory := newScriptedHubFactory(clock, map[string][]error{
 		"hub-a": {
-			federationconfig.ErrHubUnavailable,
-			federationconfig.ErrHubUnavailable,
+			federation.ErrHubUnavailable,
+			federation.ErrHubUnavailable,
 			nil,
 		},
 		"hub-b": {
-			federationconfig.ErrHubUnavailable,
+			federation.ErrHubUnavailable,
 			nil,
 		},
 	})
@@ -2102,7 +2129,7 @@ func TestFederationConfigReconcilerMaintainsIndependentBackoffAndQuietsSuccess(t
 	assert.True(t, calls[4].at.Equal(clock.start.Add(3*time.Second)))
 
 	health := reconciler.Health()
-	assert.Equal(t, federationconfig.Health{
+	assert.Equal(t, federation.Health{
 		Configured:    2,
 		Reconciled:    2,
 		LastAttemptAt: timePointer(clock.start.Add(3 * time.Second)),
@@ -2121,13 +2148,13 @@ func TestFederationConfigReconcilerMaintainsIndependentBackoffAndQuietsSuccess(t
 func TestFederationConfigReconcilerRecordsSuccessAtCompletion(t *testing.T) {
 	clock := newManualClock(time.Date(2026, 7, 23, 1, 45, 0, 0, time.UTC))
 	store := openReconcileStore(t)
-	reconciler := federationconfig.NewReconciler(federationconfig.ReconcilerConfig{
+	reconciler := federation.NewReconciler(federation.ReconcilerConfig{
 		Store:       store,
 		Credentials: newFakeCredentialStore(),
-		Targets:     []federationconfig.Target{schedulerTarget("hub-a")},
+		Targets:     []federation.Target{schedulerTarget("hub-a")},
 		HubFactory: func(
 			_ context.Context, _ config.CatalogDaemonConfig,
-		) (federationconfig.Hub, error) {
+		) (federation.Hub, error) {
 			clock.Advance(2 * time.Second)
 			hub := newFakeHub()
 			hub.project.UID = "01HZNQ7VFPK1XGD8R5MABCD4E1"
@@ -2153,7 +2180,7 @@ func TestFederationConfigReconcilerRecordsSuccessAtCompletion(t *testing.T) {
 func TestFederationConfigReconcilerCapsBackoffAtFiveMinutes(t *testing.T) {
 	clock := newManualClock(time.Date(2026, 7, 23, 2, 0, 0, 0, time.UTC))
 	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": repeatError(federationconfig.ErrHubUnavailable, 20),
+		"hub-a": repeatError(federation.ErrHubUnavailable, 20),
 	})
 	reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2184,22 +2211,22 @@ func TestFederationConfigReconcilerRetriesEveryErrorCategory(t *testing.T) {
 		wantStatus   int
 		wantConflict int
 	}{
-		{name: "configuration conflict", err: federationconfig.ErrConfigurationConflict, wantCategory: "configuration_conflict", wantConflict: 1},
-		{name: "binding conflict", err: federationconfig.ErrBindingConflict, wantCategory: "binding_conflict", wantConflict: 1},
-		{name: "credential io", err: federationconfig.ErrCredentialIO, wantCategory: "credential_io"},
-		{name: "hub unavailable", err: federationconfig.ErrHubUnavailable, wantCategory: "hub_unavailable"},
+		{name: "configuration conflict", err: federation.ErrConfigurationConflict, wantCategory: "configuration_conflict", wantConflict: 1},
+		{name: "binding conflict", err: federation.ErrBindingConflict, wantCategory: "binding_conflict", wantConflict: 1},
+		{name: "credential io", err: federation.ErrCredentialIO, wantCategory: "credential_io"},
+		{name: "hub unavailable", err: federation.ErrHubUnavailable, wantCategory: "hub_unavailable"},
 		{
 			name: "hub authentication",
-			err: &federationconfig.HubError{
-				Kind:       federationconfig.ErrHubAuthentication,
+			err: &federation.HubError{
+				Kind:       federation.ErrHubAuthentication,
 				Operation:  "authenticate",
 				StatusCode: http.StatusForbidden,
 			},
 			wantCategory: "hub_authentication",
 			wantStatus:   http.StatusForbidden,
 		},
-		{name: "hub validation", err: federationconfig.ErrHubValidation, wantCategory: "hub_validation"},
-		{name: "local storage", err: federationconfig.ErrLocalStorage, wantCategory: "local_storage"},
+		{name: "hub validation", err: federation.ErrHubValidation, wantCategory: "hub_validation"},
+		{name: "local storage", err: federation.ErrLocalStorage, wantCategory: "local_storage"},
 	}
 
 	for _, tt := range tests {
@@ -2263,7 +2290,7 @@ func TestClassifyReconciliationErrorUsesInternalForUnknown(t *testing.T) {
 func TestFederationConfigReconcilerCancellationStopsTimerAndRun(t *testing.T) {
 	clock := newManualClock(time.Date(2026, 7, 23, 3, 0, 0, 0, time.UTC))
 	factory := newScriptedHubFactory(clock, map[string][]error{
-		"hub-a": {federationconfig.ErrHubUnavailable},
+		"hub-a": {federation.ErrHubUnavailable},
 	})
 	reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2282,18 +2309,18 @@ func TestFederationConfigReconcilerLogsOnlySanitizedTransitions(t *testing.T) {
 	logger := log.New(&logs, "", 0)
 	factory := newScriptedHubFactory(clock, map[string][]error{
 		"hub-a": {
-			&federationconfig.HubError{
-				Kind:       federationconfig.ErrHubUnavailable,
+			&federation.HubError{
+				Kind:       federation.ErrHubUnavailable,
 				Operation:  "response reflected secret-body",
 				StatusCode: http.StatusServiceUnavailable,
 			},
-			&federationconfig.HubError{
-				Kind:       federationconfig.ErrHubUnavailable,
+			&federation.HubError{
+				Kind:       federation.ErrHubUnavailable,
 				Operation:  "response reflected secret-body",
 				StatusCode: http.StatusServiceUnavailable,
 			},
-			&federationconfig.HubError{
-				Kind:       federationconfig.ErrHubAuthentication,
+			&federation.HubError{
+				Kind:       federation.ErrHubAuthentication,
 				Operation:  "response reflected secret-body",
 				StatusCode: http.StatusUnauthorized,
 			},
@@ -2342,14 +2369,14 @@ func TestReconcilerTransitionLogsIncludeMappingCoordinatesWithoutSecrets(t *test
 	logger := log.New(&logs, "", 0)
 	factory := newScriptedHubFactory(clock, map[string][]error{
 		"primary": {
-			&federationconfig.HubError{
-				Kind:      federationconfig.ErrConfigurationConflict,
+			&federation.HubError{
+				Kind:      federation.ErrConfigurationConflict,
 				Operation: "raw-body-marker header-marker token-marker url-marker actor-marker",
 			},
 		},
-		"secondary": {federationconfig.ErrConfigurationConflict},
+		"secondary": {federation.ErrConfigurationConflict},
 	})
-	primary := federationconfig.Target{
+	primary := federation.Target{
 		Catalog: config.CatalogDaemonConfig{
 			Name: "primary", URL: "https://url-marker.example/private", Token: "token-marker",
 		},
@@ -2423,7 +2450,7 @@ func (c *manualClock) Now() time.Time {
 	return c.now
 }
 
-func (c *manualClock) NewTimer(delay time.Duration) federationconfig.Timer {
+func (c *manualClock) NewTimer(delay time.Duration) federation.Timer {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	timer := &manualTimer{
@@ -2503,7 +2530,7 @@ func newScriptedHubFactory(
 
 func (f *scriptedHubFactory) NewHub(
 	_ context.Context, catalog config.CatalogDaemonConfig,
-) (federationconfig.Hub, error) {
+) (federation.Hub, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	index := 0
@@ -2534,8 +2561,8 @@ func (f *scriptedHubFactory) snapshotCalls() []factoryCall {
 	return append([]factoryCall(nil), f.calls...)
 }
 
-func schedulerTarget(name string) federationconfig.Target {
-	return federationconfig.Target{
+func schedulerTarget(name string) federation.Target {
+	return federation.Target{
 		Catalog: config.CatalogDaemonConfig{
 			Name: name,
 			URL:  "https://" + name + ".example",
@@ -2554,11 +2581,11 @@ func newTestReconciler(
 	clock *manualClock,
 	factory *scriptedHubFactory,
 	logger *log.Logger,
-	targets ...federationconfig.Target,
-) *federationconfig.Reconciler {
+	targets ...federation.Target,
+) *federation.Reconciler {
 	t.Helper()
 	store := openReconcileStore(t)
-	return federationconfig.NewReconciler(federationconfig.ReconcilerConfig{
+	return federation.NewReconciler(federation.ReconcilerConfig{
 		Store:       store,
 		Credentials: newFakeCredentialStore(),
 		Targets:     targets,
@@ -2569,7 +2596,7 @@ func newTestReconciler(
 }
 
 func runReconciler(
-	ctx context.Context, t *testing.T, reconciler *federationconfig.Reconciler,
+	ctx context.Context, t *testing.T, reconciler *federation.Reconciler,
 ) <-chan error {
 	t.Helper()
 	done := make(chan error, 1)
@@ -2594,7 +2621,7 @@ func waitForTimerCount(t *testing.T, clock *manualClock, count int) {
 }
 
 func waitForReconciled(
-	t *testing.T, reconciler *federationconfig.Reconciler, count int,
+	t *testing.T, reconciler *federation.Reconciler, count int,
 ) {
 	t.Helper()
 	require.Eventually(t, func() bool {
@@ -2620,11 +2647,11 @@ func timePointer(value time.Time) *time.Time {
 
 func newFakeHub() *fakeHub {
 	return &fakeHub{
-		project: federationconfig.HubProject{
+		project: federation.HubProject{
 			ID: 42, UID: hubProjectUID, Name: "hub-project",
 			ReplayHorizonEventID: 9,
 		},
-		enrollment: federationconfig.Enrollment{ID: 71, Actor: "identity-user"},
+		enrollment: federation.Enrollment{ID: 71, Actor: "identity-user"},
 	}
 }
 
@@ -2696,6 +2723,6 @@ func unsetReconcileAuthToken(t *testing.T) {
 }
 
 var (
-	_ federationconfig.Hub             = (*fakeHub)(nil)
+	_ federation.Hub                   = (*fakeHub)(nil)
 	_ config.FederationCredentialStore = (*fakeCredentialStore)(nil)
 )
