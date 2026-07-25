@@ -1,23 +1,29 @@
 name: Tests
 
 on:
-  pull_request:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Git ref to check out
+        required: false
+        type: string
+        default: ""
   push:
     branches:
       - main
-
 permissions:
   contents: read
 
 jobs:
   go:
     name: Go tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request_target' || github.ref == 'refs/heads/main') && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -33,7 +39,7 @@ jobs:
 
   postgres:
     name: PostgreSQL ${{ matrix.postgres }} conformance
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request_target' || github.ref == 'refs/heads/main') && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +64,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -89,6 +96,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -111,12 +119,13 @@ jobs:
 
   lint:
     name: golangci-lint
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request_target' || github.ref == 'refs/heads/main') && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -133,12 +142,13 @@ jobs:
 
   release-scripts:
     name: Release script tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request_target' || github.ref == 'refs/heads/main') && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Run release script tests
@@ -146,12 +156,13 @@ jobs:
 
   nilaway:
     name: nilaway
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request_target' || github.ref == 'refs/heads/main') && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -168,12 +179,13 @@ jobs:
 
   federation-stress:
     name: Federation stress tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request_target' || github.ref == 'refs/heads/main') && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -187,12 +199,13 @@ jobs:
 
   federation-docker:
     name: Federation Docker tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'pull_request_target' || github.ref == 'refs/heads/main') && 'kenn-linux-x64-public' || 'ubuntu-latest' }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
 
       - name: Set up Go
