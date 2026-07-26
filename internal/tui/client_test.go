@@ -1076,6 +1076,68 @@ func TestClientResolveProjectPathFreeDoesNotSendStartPath(t *testing.T) {
 	assert.Zero(t, called.Load(), "path-free resolution must not send a client path to the daemon")
 }
 
+func TestClientResolveProjectPathFreeDoesNotSendLocalGitAlias(t *testing.T) {
+	dir := testfix.InitGitRepo(t)
+	var called atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"project":{"id":42}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, srv.Client())
+
+	_, err := c.ResolveProjectPathFree(t.Context(), dir)
+
+	require.ErrorIs(t, err, errPathFreeProjectNotInitialized)
+	assert.Zero(t, called.Load(), "path-free resolution must not send a local:/// Git alias")
+}
+
+func TestClientResolveProjectPathFreeUsesNameInsteadOfLocalWorkspaceAlias(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, config.WriteProjectConfig(dir, "example-workspace"))
+
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"project":{"id":42,"name":"example-workspace"}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, srv.Client())
+
+	_, err := c.ResolveProjectPathFree(t.Context(), dir)
+
+	require.NoError(t, err)
+	assert.Equal(t, "example-workspace", got["name"])
+	assert.NotContains(t, got, "alias")
+	assert.NotContains(t, got, "start_path")
+}
+
+func TestClientResolveProjectPathFreeSendsPortableGitAlias(t *testing.T) {
+	dir := testfix.InitGitRepo(t)
+	testfix.RunGit(t, dir, "remote", "add", "origin", "https://example.com/example/example-workspace.git")
+
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"project":{"id":42,"name":"example-workspace"}}`))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, srv.Client())
+
+	_, err := c.ResolveProjectPathFree(t.Context(), dir)
+
+	require.NoError(t, err)
+	assert.NotContains(t, got, "name")
+	assert.NotContains(t, got, "start_path")
+	assert.Equal(t, map[string]any{
+		"identity": "example.com/example/example-workspace",
+		"kind":     "git",
+	}, got["alias"])
+}
+
 // TestClient_ResolveProject_SendsNameAndAliasForWorkspaceConfig is
 // regression coverage for issue #35: when .kata.toml is readable, the
 // TUI must send {name, alias} so a daemon on another host can resolve
