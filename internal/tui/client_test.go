@@ -1061,6 +1061,21 @@ func TestClient_ResolveProject_FallsBackOnMissingConfig(t *testing.T) {
 	assert.False(t, hasName)
 }
 
+func TestClientResolveProjectPathFreeDoesNotSendStartPath(t *testing.T) {
+	dir := t.TempDir()
+	var called atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		called.Add(1)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, srv.Client())
+
+	_, err := c.ResolveProjectPathFree(t.Context(), dir)
+
+	require.ErrorIs(t, err, errPathFreeProjectNotInitialized)
+	assert.Zero(t, called.Load(), "path-free resolution must not send a client path to the daemon")
+}
+
 // TestClient_ResolveProject_SendsNameAndAliasForWorkspaceConfig is
 // regression coverage for issue #35: when .kata.toml is readable, the
 // TUI must send {name, alias} so a daemon on another host can resolve

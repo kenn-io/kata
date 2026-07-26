@@ -101,6 +101,79 @@ func TestConnectDaemonTargetLocalUsesLocalOnlyEnsurePath(t *testing.T) {
 	assert.Equal(t, viewEmpty, conn.init.view)
 }
 
+func TestConnectResolvedRemoteUsesPathFreeBoot(t *testing.T) {
+	oldNewClient := newHTTPClientForTUI
+	oldBootScope := bootResolveScopeForTUI
+	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
+	t.Cleanup(func() {
+		newHTTPClientForTUI = oldNewClient
+		bootResolveScopeForTUI = oldBootScope
+		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
+	})
+
+	newHTTPClientForTUI = func(
+		context.Context,
+		string,
+		daemonTarget,
+		clientOptsKind,
+	) (*http.Client, error) {
+		return &http.Client{}, nil
+	}
+	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		t.Fatal("remote daemon must not use start_path-capable boot")
+		return bootInit{}, nil
+	}
+	var called bool
+	bootResolveScopePathFreeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		called = true
+		return bootInit{view: viewProjects}, nil
+	}
+
+	conn, err := connectResolvedDaemonTarget(t.Context(),
+		daemonTarget{Name: "shared", URL: "https://daemon.example"},
+		"https://daemon.example")
+
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, viewProjects, conn.init.view)
+}
+
+func TestConnectResolvedImplicitLoopbackUsesLocalBoot(t *testing.T) {
+	oldNewClient := newHTTPClientForTUI
+	oldBootScope := bootResolveScopeForTUI
+	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
+	t.Cleanup(func() {
+		newHTTPClientForTUI = oldNewClient
+		bootResolveScopeForTUI = oldBootScope
+		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
+	})
+
+	newHTTPClientForTUI = func(
+		context.Context,
+		string,
+		daemonTarget,
+		clientOptsKind,
+	) (*http.Client, error) {
+		return &http.Client{}, nil
+	}
+	var called bool
+	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		called = true
+		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
+	}
+	bootResolveScopePathFreeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		t.Fatal("implicit loopback daemon shares the client filesystem")
+		return bootInit{}, nil
+	}
+	endpoint := "http://127.0.0.1:7777"
+
+	conn, err := connectResolvedDaemonTarget(t.Context(), implicitDaemonTarget(endpoint), endpoint)
+
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, viewEmpty, conn.init.view)
+}
+
 func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) {
 	oldRead := readDaemonConfigForTUI
 	oldEnsure := ensureRunningForTUI
@@ -179,11 +252,13 @@ func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testin
 	oldEnsure := ensureRunningForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
+	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
 		readDaemonConfigForTUI = oldRead
 		ensureRunningForTUI = oldEnsure
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
+		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
 	})
 
 	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
@@ -198,6 +273,7 @@ func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testin
 	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
 		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
 	}
+	bootResolveScopePathFreeForTUI = bootResolveScopeForTUI
 
 	conn, err := bootDaemonConnection(context.Background(), Options{})
 
@@ -402,11 +478,13 @@ func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
 	oldProbe := probeRemoteForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
+	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
 		normalizeRemoteURLForTUI = oldNormalize
 		probeRemoteForTUI = oldProbe
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
+		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
 	})
 
 	target := daemonTarget{Name: "shared", URL: "http://daemon.internal:7777", Token: "tok", AllowInsecure: true}
@@ -428,6 +506,7 @@ func TestConnectDaemonTargetRemoteUsesPerDaemonAuth(t *testing.T) {
 	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
 		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
 	}
+	bootResolveScopePathFreeForTUI = bootResolveScopeForTUI
 
 	conn, err := connectDaemonTarget(context.Background(), target)
 
@@ -445,11 +524,13 @@ func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
 	oldProbe := probeRemoteForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
+	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
 		normalizeRemoteURLForTUI = oldNormalize
 		probeRemoteForTUI = oldProbe
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
+		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
 	})
 	t.Setenv("KATA_WORK_TOKEN", "secret-from-env")
 
@@ -470,6 +551,7 @@ func TestConnectDaemonTargetRemoteResolvesTokenEnvOnUse(t *testing.T) {
 	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
 		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
 	}
+	bootResolveScopePathFreeForTUI = bootResolveScopeForTUI
 
 	conn, err := connectDaemonTarget(context.Background(), target)
 
@@ -484,11 +566,13 @@ func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.
 	oldProbe := probeRemoteForTUI
 	oldNewClient := newHTTPClientForTUI
 	oldBootScope := bootResolveScopeForTUI
+	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
 	t.Cleanup(func() {
 		normalizeRemoteURLForTUI = oldNormalize
 		probeRemoteForTUI = oldProbe
 		newHTTPClientForTUI = oldNewClient
 		bootResolveScopeForTUI = oldBootScope
+		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
 	})
 	t.Setenv("KATA_AUTH_TOKEN", "env-token")
 	t.Setenv("KATA_HOME", t.TempDir())
@@ -511,6 +595,7 @@ func TestConnectDaemonTargetRemoteAuthTokenEnvOverridesUnsetTokenEnv(t *testing.
 	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
 		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
 	}
+	bootResolveScopePathFreeForTUI = bootResolveScopeForTUI
 
 	conn, err := connectDaemonTarget(context.Background(), target)
 

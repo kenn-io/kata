@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -84,8 +85,9 @@ var (
 			},
 			opts)
 	}
-	bootResolveScopeForTUI    = bootResolveScope
-	connectDaemonTargetForTUI = connectDaemonTarget
+	bootResolveScopeForTUI         = bootResolveScope
+	bootResolveScopePathFreeForTUI = bootResolveScopePathFree
+	connectDaemonTargetForTUI      = connectDaemonTarget
 )
 
 func daemonTargetsFromConfig(daemons []config.CatalogDaemonConfig) []daemonTarget {
@@ -203,7 +205,11 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 		c.setLocalHTTPClientRefresh(localHTTPClientRefreshForTarget(endpoint, target))
 	}
 	cwd, _ := os.Getwd()
-	bi, err := bootResolveScopeForTUI(ctx, c, cwd)
+	resolveScope := bootResolveScopeForTUI
+	if daemonTargetUsesRemoteFilesystem(target, endpoint) {
+		resolveScope = bootResolveScopePathFreeForTUI
+	}
+	bi, err := resolveScope(ctx, c, cwd)
 	if err != nil {
 		return daemonConnection{}, err
 	}
@@ -214,6 +220,21 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 		target:   target,
 		init:     bi,
 	}, nil
+}
+
+func daemonTargetUsesRemoteFilesystem(target daemonTarget, endpoint string) bool {
+	if target.Local || endpoint == client.UnixBase {
+		return false
+	}
+	if !target.Implicit {
+		return true
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return true
+	}
+	ip := net.ParseIP(u.Hostname())
+	return ip == nil || !ip.IsLoopback()
 }
 
 func localHTTPClientRefreshForTarget(

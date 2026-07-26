@@ -234,9 +234,29 @@ func (c *Client) EditBody(
 // returns a canonical name that differs from the local .kata.toml, the
 // client rewrites the file in place.
 func (c *Client) ResolveProject(ctx context.Context, startPath string) (*ResolveResp, error) {
+	return c.resolveProject(ctx, startPath, true)
+}
+
+var errPathFreeProjectNotInitialized = errors.New("project not initialized in client workspace")
+
+// ResolveProjectPathFree resolves only wire shapes that a daemon on another
+// host can understand. An unbound non-Git directory returns a local sentinel
+// instead of sending start_path, which belongs to the client's filesystem.
+func (c *Client) ResolveProjectPathFree(ctx context.Context, startPath string) (*ResolveResp, error) {
+	return c.resolveProject(ctx, startPath, false)
+}
+
+func (c *Client) resolveProject(
+	ctx context.Context,
+	startPath string,
+	allowStartPath bool,
+) (*ResolveResp, error) {
 	req, repair, err := buildResolveRequest(ctx, startPath)
 	if err != nil {
 		return nil, err
+	}
+	if _, ok := req["start_path"]; ok && !allowStartPath {
+		return nil, errPathFreeProjectNotInitialized
 	}
 	var resp ResolveResp
 	if err := c.do(ctx, http.MethodPost, "/api/v1/projects/resolve", req, &resp); err != nil {

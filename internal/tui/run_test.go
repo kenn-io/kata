@@ -196,6 +196,23 @@ func TestBoot_UnresolvedWithProjects_LandsViewProjects(t *testing.T) {
 	assert.Equal(t, "kata", bi.projects[0].Name)
 }
 
+func TestBootRemoteUnboundPathLandsOnProjects(t *testing.T) {
+	srv := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/projects": func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "stats", r.URL.Query().Get("include"))
+			_, _ = w.Write([]byte(`{"projects":[{"id":7,"name":"example-workspace"}]}`))
+		},
+	})
+	c := NewClient(srv.URL, srv.Client())
+
+	bi, err := bootResolveScopePathFree(t.Context(), c, t.TempDir())
+
+	require.NoError(t, err)
+	assert.Equal(t, viewProjects, bi.view)
+	require.Len(t, bi.projects, 1)
+	assert.Equal(t, "example-workspace", bi.projects[0].Name)
+}
+
 // TestBootScopedResolveSeedsProjectUID: a TUI launched inside a project must
 // know that project's UID from the first frame. The adopt-first enroll flow's
 // rejoin detection reads projectUIDByID; before the async project-list fetch

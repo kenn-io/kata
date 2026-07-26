@@ -241,7 +241,20 @@ type bootInit struct {
 //
 // On error, the bootInit is the zero value; callers must check err first.
 func bootResolveScope(ctx context.Context, c *Client, cwd string) (bootInit, error) {
-	rr, err := c.ResolveProject(ctx, cwd)
+	return bootResolveScopeWith(ctx, c, cwd, c.ResolveProject)
+}
+
+func bootResolveScopePathFree(ctx context.Context, c *Client, cwd string) (bootInit, error) {
+	return bootResolveScopeWith(ctx, c, cwd, c.ResolveProjectPathFree)
+}
+
+func bootResolveScopeWith(
+	ctx context.Context,
+	c *Client,
+	cwd string,
+	resolve func(context.Context, string) (*ResolveResp, error),
+) (bootInit, error) {
+	rr, err := resolve(ctx, cwd)
 	if err == nil {
 		return bootInit{
 			scope: scope{
@@ -266,7 +279,8 @@ func bootResolveScope(ctx context.Context, c *Client, cwd string) (bootInit, err
 		}, nil
 	}
 	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Code != "project_not_initialized" {
+	if !errors.Is(err, errPathFreeProjectNotInitialized) &&
+		(!errors.As(err, &apiErr) || apiErr.Code != "project_not_initialized") {
 		return bootInit{}, err
 	}
 	rows, err := c.ListProjectsWithStats(ctx)
