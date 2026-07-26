@@ -18,6 +18,16 @@ import (
 // callers honor it via EnsureRunning.
 type BaseURLKey struct{}
 
+// RunningDaemon identifies the endpoint selected by EnsureRunningTarget and
+// whether it came from configured remote resolution. Callers that need to
+// decide whether client-local filesystem paths are valid must use
+// ConfiguredRemote instead of inferring locality from the endpoint address:
+// a configured remote may be reached through a loopback SSH tunnel.
+type RunningDaemon struct {
+	BaseURL          string
+	ConfiguredRemote bool
+}
+
 const (
 	daemonServiceName       = "kata"
 	skipDaemonVersionEnvVar = "KATA_SKIP_DAEMON_VERSION_CHECK"
@@ -44,7 +54,14 @@ var (
 // EnsureRunningInWorkspace instead so the walk anchors to the
 // targeted workspace.
 func EnsureRunning(ctx context.Context) (string, error) {
-	return EnsureRunningInWorkspace(ctx, "")
+	target, err := EnsureRunningTarget(ctx)
+	return target.BaseURL, err
+}
+
+// EnsureRunningTarget is EnsureRunning with endpoint-source metadata for
+// callers that must distinguish configured remotes from local discovery.
+func EnsureRunningTarget(ctx context.Context) (RunningDaemon, error) {
+	return ensureRunningTargetInWorkspace(ctx, "")
 }
 
 // EnsureRunningInWorkspace is the workspace-aware variant of
@@ -55,15 +72,24 @@ func EnsureRunning(ctx context.Context) (string, error) {
 // outside the repo still picks up /repo/.kata.local.toml's [server]
 // override instead of falling through to local auto-start.
 func EnsureRunningInWorkspace(ctx context.Context, workspaceStart string) (string, error) {
+	target, err := ensureRunningTargetInWorkspace(ctx, workspaceStart)
+	return target.BaseURL, err
+}
+
+func ensureRunningTargetInWorkspace(ctx context.Context, workspaceStart string) (RunningDaemon, error) {
 	if v, ok := ctx.Value(BaseURLKey{}).(string); ok && v != "" {
-		return v, nil
+		return RunningDaemon{BaseURL: v}, nil
 	}
 	if url, ok, err := resolveRemote(ctx, workspaceStart); err != nil {
-		return "", err
+		return RunningDaemon{}, err
 	} else if ok {
-		return url, nil
+		return RunningDaemon{BaseURL: url, ConfiguredRemote: true}, nil
 	}
-	return ensureLocalRunning(ctx)
+	url, err := ensureLocalRunning(ctx)
+	if err != nil {
+		return RunningDaemon{}, err
+	}
+	return RunningDaemon{BaseURL: url}, nil
 }
 
 // EnsureLocalRunning returns a live local daemon's base URL, ignoring

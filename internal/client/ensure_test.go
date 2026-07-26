@@ -70,6 +70,49 @@ func TestEnsureLocalRunningIgnoresRemoteOverride(t *testing.T) {
 	assert.Equal(t, 1, restore.startCalls)
 }
 
+func TestEnsureRunningTargetMarksEnvironmentRemote(t *testing.T) {
+	srv := pingingServer(t)
+	t.Setenv("KATA_SERVER", srv.URL)
+
+	target, err := EnsureRunningTarget(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, srv.URL, target.BaseURL)
+	assert.True(t, target.ConfiguredRemote)
+}
+
+func TestEnsureRunningTargetMarksWorkspaceConfigRemote(t *testing.T) {
+	srv := pingingServer(t)
+	t.Setenv("KATA_SERVER", "")
+	workspace := t.TempDir()
+	t.Chdir(workspace)
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"),
+		[]byte("version = 1\n\n[project]\nidentity = \"example.test/spoke-project\"\nname = \"spoke-project\"\n"),
+		0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"),
+		[]byte("version = 1\n\n[server]\nurl = \""+srv.URL+"\"\n"),
+		0o600))
+
+	target, err := EnsureRunningTarget(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, srv.URL, target.BaseURL)
+	assert.True(t, target.ConfiguredRemote)
+}
+
+func TestEnsureRunningTargetMarksLocalDiscovery(t *testing.T) {
+	t.Setenv("KATA_SERVER", "")
+	setupKataEnv(t)
+	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://local-daemon")
+
+	target, err := EnsureRunningTarget(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://local-daemon", target.BaseURL)
+	assert.False(t, target.ConfiguredRemote)
+	assert.Equal(t, 1, restore.startCalls)
+}
+
 func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	setupKataEnv(t)
 	ns, err := daemon.NewNamespace()

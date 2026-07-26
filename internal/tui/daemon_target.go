@@ -21,6 +21,7 @@ type daemonTarget struct {
 	TokenEnv             string
 	AllowInsecure        bool
 	Implicit             bool
+	ConfiguredRemote     bool
 	UseAuthTokenOverride bool
 }
 
@@ -42,7 +43,7 @@ const (
 
 var (
 	readDaemonConfigForTUI   = config.ReadDaemonConfig
-	ensureRunningForTUI      = client.EnsureRunning
+	ensureRunningForTUI      = client.EnsureRunningTarget
 	ensureLocalRunningForTUI = client.EnsureLocalRunning
 	normalizeRemoteURLForTUI = func(v string, allowInsecure bool) (string, error) {
 		return client.NormalizeRemoteURL(v, allowInsecure)
@@ -148,12 +149,13 @@ func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, 
 }
 
 func connectImplicitDaemonTarget(ctx context.Context) (daemonConnection, error) {
-	endpoint, err := ensureRunningForTUI(ctx)
+	running, err := ensureRunningForTUI(ctx)
 	if err != nil {
 		return daemonConnection{}, err
 	}
-	target := implicitDaemonTarget(endpoint)
-	return connectResolvedDaemonTarget(ctx, target, endpoint)
+	target := implicitDaemonTarget(running.BaseURL)
+	target.ConfiguredRemote = running.ConfiguredRemote
+	return connectResolvedDaemonTarget(ctx, target, running.BaseURL)
 }
 
 func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnection, error) {
@@ -225,6 +227,9 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 func daemonTargetUsesRemoteFilesystem(target daemonTarget, endpoint string) bool {
 	if target.Local || endpoint == client.UnixBase {
 		return false
+	}
+	if target.ConfiguredRemote {
+		return true
 	}
 	if !target.Implicit {
 		return true
