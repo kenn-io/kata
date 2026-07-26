@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
+          cache: ${{ runner.os != 'Linux' || !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
 
       - name: Run tests
         env:
@@ -63,7 +63,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
+          cache: ${{ runner.os != 'Linux' || !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
 
       - name: Run PostgreSQL backend and operator tests
         env:
@@ -94,7 +94,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
+          cache: ${{ runner.os != 'Linux' || !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
 
       - name: Build
         run: go build ./...
@@ -122,7 +122,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
+          cache: ${{ runner.os != 'Linux' || !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20  # v9.2.0
@@ -157,7 +157,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
+          cache: ${{ runner.os != 'Linux' || !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
 
       - name: Install nilaway
         run: go install go.uber.org/nilaway/cmd/nilaway@v0.0.0-20260515015210-fd187751154f
@@ -179,7 +179,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
+          cache: ${{ runner.os != 'Linux' || !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
 
       - name: Run federation stress tests
         run: env -u KATA_AUTH_TOKEN make test-stress
@@ -198,7 +198,7 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version-file: go.mod
-          cache: ${{ !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
+          cache: ${{ runner.os != 'Linux' || !(github.repository == 'kenn-io/kata' && (github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository))) }}
 
       - name: Run federation Docker tests
         run: env -u KATA_AUTH_TOKEN make test-federation-docker
