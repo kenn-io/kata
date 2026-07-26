@@ -200,7 +200,7 @@ func TestConnectImplicitConfiguredLoopbackUsesPathFreeBoot(t *testing.T) {
 				t.Chdir(workspace)
 				require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.toml"),
 					[]byte("version = 1\n\n[project]\nidentity = \"example.test/spoke-project\"\nname = \"spoke-project\"\n"),
-					0o644))
+					0o600))
 				require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"),
 					[]byte("version = 1\n\n[server]\nurl = \""+srv.URL+"\"\n"),
 					0o600))
