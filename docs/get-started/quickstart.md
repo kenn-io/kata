@@ -36,6 +36,13 @@ Open the TUI when a human wants to browse or triage:
 kata tui
 ```
 
+Pass an issue ref to open its detail view directly. The optional ref accepts
+the same bare short ID, qualified short ID, and full UID forms as `kata show`:
+
+```sh
+kata tui abc4
+```
+
 In the issue list, press `v` to switch between nested and flat views. Nested
 view groups children under parents; flat view shows matching issues as peers in
 list order, which is useful when recently updated child issues should not be

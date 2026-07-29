@@ -120,6 +120,336 @@ func TestInitialFilter_ZeroValueByDefault(t *testing.T) {
 	}
 }
 
+type fakeInitialIssueAPI struct {
+	detail       *IssueDetail
+	err          error
+	projects     []ProjectSummary
+	listErr      error
+	listProjects int
+	projectID    int64
+	ref          string
+}
+
+func (f *fakeInitialIssueAPI) GetIssueDetail(
+	_ context.Context, projectID int64, ref string,
+) (*IssueDetail, error) {
+	f.projectID = projectID
+	f.ref = ref
+	return f.detail, f.err
+}
+
+func (f *fakeInitialIssueAPI) ListProjects(context.Context) ([]ProjectSummary, error) {
+	f.listProjects++
+	return f.projects, f.listErr
+}
+
+func TestResolveInitialIssue_FetchesBareRefInWorkspaceProject(t *testing.T) {
+	api := &fakeInitialIssueAPI{
+		detail: &IssueDetail{
+			Issue: &Issue{
+				ProjectID: 7,
+				UID:       "01TEST00000000000000000001",
+				ShortID:   "abc4",
+				Title:     "Target",
+			},
+		},
+	}
+	bi := bootInit{scope: scope{projectID: 7}, view: viewList}
+
+	got, err := resolveInitialIssue(t.Context(), api, bi, "abc4")
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), api.projectID)
+	assert.Equal(t, "abc4", api.ref)
+	assert.Zero(t, api.listProjects)
+	require.NotNil(t, got.initialIssue)
+	assert.Equal(t, "abc4", got.initialIssue.ShortID)
+}
+
+func TestResolveInitialIssue_QualifiedRefSelectsNamedProject(t *testing.T) {
+	api := &fakeInitialIssueAPI{
+		projects: []ProjectSummary{
+			{ID: 7, Name: "workspace"},
+			{ID: 9, Name: "other-project", UID: "01TARGETPROJECT000000000000"},
+		},
+		detail: &IssueDetail{
+			Issue: &Issue{
+				ProjectID: 9,
+				UID:       "01TEST00000000000000000001",
+				ShortID:   "abc4",
+				Title:     "Target",
+			},
+		},
+	}
+	bi := bootInit{
+		scope: scope{projectID: 7, projectName: "workspace", workspace: "/tmp/workspace"},
+		view:  viewList,
+	}
+
+	got, err := resolveInitialIssue(t.Context(), api, bi, "other-project#abc4")
+	require.NoError(t, err)
+	assert.Equal(t, 1, api.listProjects)
+	assert.Equal(t, int64(9), api.projectID)
+	assert.Equal(t, "abc4", api.ref)
+	assert.Equal(t, int64(9), got.scope.projectID)
+	assert.Equal(t, "other-project", got.scope.projectName)
+	assert.Equal(t, int64(9), got.scope.homeProjectID)
+	assert.Equal(t, "other-project", got.scope.homeProjectName)
+	assert.Equal(t, viewList, got.view)
+	require.Len(t, got.projects, 1)
+	assert.Equal(t, int64(9), got.projects[0].ID)
+}
+
+func TestResolveInitialIssue_QualifiedRefDoesNotRequireWorkspaceScope(t *testing.T) {
+	api := &fakeInitialIssueAPI{
+		projects: []ProjectSummary{{ID: 9, Name: "other-project"}},
+		detail: &IssueDetail{
+			Issue: &Issue{
+				ProjectID: 9,
+				UID:       "01TEST00000000000000000001",
+				ShortID:   "abc4",
+				Title:     "Target",
+			},
+		},
+	}
+
+	got, err := resolveInitialIssue(
+		t.Context(), api, bootInit{view: viewProjects}, "other-project#abc4",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, int64(9), got.scope.projectID)
+	assert.False(t, got.scope.empty)
+	assert.Equal(t, viewList, got.view)
+	require.NotNil(t, got.initialIssue)
+	assert.Equal(t, "abc4", got.initialIssue.ShortID)
+}
+
+func TestResolveInitialIssue_EmptyRefDoesNotFetch(t *testing.T) {
+	api := &fakeInitialIssueAPI{}
+	bi := bootInit{scope: scope{projectID: 7}, view: viewList}
+
+	got, err := resolveInitialIssue(t.Context(), api, bi, "")
+	require.NoError(t, err)
+	assert.Empty(t, api.ref)
+	assert.Nil(t, got.initialIssue)
+}
+
+func TestResolveInitialIssue_PropagatesLookupError(t *testing.T) {
+	want := errors.New("issue not found")
+	api := &fakeInitialIssueAPI{err: want}
+	bi := bootInit{scope: scope{projectID: 7}, view: viewList}
+
+	_, err := resolveInitialIssue(t.Context(), api, bi, "abcd")
+	assert.ErrorIs(t, err, want)
+}
+
+func TestResolveInitialIssue_RequiresProjectScope(t *testing.T) {
+	api := &fakeInitialIssueAPI{}
+
+	_, err := resolveInitialIssue(t.Context(), api, bootInit{view: viewProjects}, "abc4")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no project bound to this workspace")
+	assert.Empty(t, api.ref)
+}
+
+func TestBootClient_ResolvesRequestedIssueBeforeReturning(t *testing.T) {
+	srv := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/projects/7/issues/abc4": func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issue": map[string]any{
+					"id": 1, "project_id": 7,
+					"uid": "01TEST00000000000000000001", "short_id": "abc4",
+					"title": "Target", "status": "open",
+				},
+				"children": []map[string]any{},
+			})
+		},
+	})
+	client := NewClient(srv.URL, srv.Client())
+	old := bootDaemonConnectionForTUI
+	bootDaemonConnectionForTUI = func(context.Context, Options) (daemonConnection, error) {
+		return daemonConnection{
+			api:      client,
+			sseHC:    srv.Client(),
+			endpoint: srv.URL,
+			init: bootInit{
+				scope: scope{projectID: 7, projectName: "example-project"},
+				view:  viewList,
+			},
+		}, nil
+	}
+	t.Cleanup(func() { bootDaemonConnectionForTUI = old })
+
+	_, _, bi, _, _, err := bootClient(t.Context(), Options{InitialIssueRef: "abc4"})
+
+	require.NoError(t, err)
+	require.NotNil(t, bi.initialIssue)
+	assert.Equal(t, "abc4", bi.initialIssue.ShortID)
+}
+
+func TestBootClient_QualifiedRefUsesNamedProjectOverWorkspace(t *testing.T) {
+	srv := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"projects":[
+				{"id":7,"name":"workspace"},
+				{"id":9,"uid":"01TARGETPROJECT000000000000","name":"other-project"}
+			]}`))
+		},
+		"/api/v1/projects/9/issues/abc4": func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issue": map[string]any{
+					"id": 1, "project_id": 9,
+					"uid": "01TEST00000000000000000001", "short_id": "abc4",
+					"title": "Target", "status": "open",
+				},
+				"children": []map[string]any{},
+			})
+		},
+	})
+	client := NewClient(srv.URL, srv.Client())
+	old := bootDaemonConnectionForTUI
+	bootDaemonConnectionForTUI = func(context.Context, Options) (daemonConnection, error) {
+		return daemonConnection{
+			api:      client,
+			sseHC:    srv.Client(),
+			endpoint: srv.URL,
+			init: bootInit{
+				scope: scope{projectID: 7, projectName: "workspace"},
+				view:  viewList,
+			},
+		}, nil
+	}
+	t.Cleanup(func() { bootDaemonConnectionForTUI = old })
+
+	_, _, bi, _, _, err := bootClient(
+		t.Context(), Options{
+			ProjectName:     "missing-project",
+			InitialIssueRef: "other-project#abc4",
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(9), bi.scope.projectID)
+	assert.Equal(t, "other-project", bi.scope.projectName)
+	require.NotNil(t, bi.initialIssue)
+	assert.Equal(t, int64(9), bi.initialIssue.ProjectID)
+}
+
+func TestBootClient_ProjectSelectorScopesBareRef(t *testing.T) {
+	srv := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"projects":[
+				{"id":7,"name":"workspace"},
+				{"id":9,"name":"project-b"}
+			]}`))
+		},
+		"/api/v1/projects/9/issues/abc4": func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issue": map[string]any{
+					"id": 1, "project_id": 9,
+					"uid": "01TEST00000000000000000001", "short_id": "abc4",
+					"title": "Target", "status": "open",
+				},
+				"children": []map[string]any{},
+			})
+		},
+	})
+	client := NewClient(srv.URL, srv.Client())
+	old := bootDaemonConnectionForTUI
+	bootDaemonConnectionForTUI = func(context.Context, Options) (daemonConnection, error) {
+		return daemonConnection{
+			api:  client,
+			init: bootInit{scope: scope{projectID: 7, projectName: "workspace"}, view: viewList},
+		}, nil
+	}
+	t.Cleanup(func() { bootDaemonConnectionForTUI = old })
+
+	_, _, bi, _, _, err := bootClient(t.Context(), Options{
+		ProjectName:     "project-b",
+		InitialIssueRef: "abc4",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(9), bi.scope.projectID)
+	require.NotNil(t, bi.initialIssue)
+	assert.Equal(t, int64(9), bi.initialIssue.ProjectID)
+}
+
+func TestBootClient_WorkspaceSelectorScopesBareRef(t *testing.T) {
+	workspace := t.TempDir()
+	srv := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/projects/9/issues/abc4": func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issue": map[string]any{
+					"id": 1, "project_id": 9,
+					"uid": "01TEST00000000000000000001", "short_id": "abc4",
+					"title": "Target", "status": "open",
+				},
+				"children": []map[string]any{},
+			})
+		},
+	})
+	client := NewClient(srv.URL, srv.Client())
+	old := bootDaemonConnectionForTUI
+	bootDaemonConnectionForTUI = func(context.Context, Options) (daemonConnection, error) {
+		return daemonConnection{
+			api:  client,
+			init: bootInit{scope: scope{projectID: 9, projectName: "project-b"}, view: viewList},
+		}, nil
+	}
+	t.Cleanup(func() { bootDaemonConnectionForTUI = old })
+
+	_, _, bi, _, _, err := bootClient(t.Context(), Options{
+		Workspace:       workspace,
+		InitialIssueRef: "abc4",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(9), bi.scope.projectID)
+	require.NotNil(t, bi.initialIssue)
+	assert.Equal(t, int64(9), bi.initialIssue.ProjectID)
+}
+
+func TestBootClient_QualifiedRefWorksFromUnboundWorkspace(t *testing.T) {
+	srv := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(
+				`{"projects":[{"id":9,"name":"other-project"}]}`,
+			))
+		},
+		"/api/v1/projects/9/issues/abc4": func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issue": map[string]any{
+					"id": 1, "project_id": 9,
+					"uid": "01TEST00000000000000000001", "short_id": "abc4",
+					"title": "Target", "status": "open",
+				},
+				"children": []map[string]any{},
+			})
+		},
+	})
+	client := NewClient(srv.URL, srv.Client())
+	old := bootDaemonConnectionForTUI
+	bootDaemonConnectionForTUI = func(context.Context, Options) (daemonConnection, error) {
+		return daemonConnection{
+			api:      client,
+			sseHC:    srv.Client(),
+			endpoint: srv.URL,
+			init:     bootInit{view: viewProjects},
+		}, nil
+	}
+	t.Cleanup(func() { bootDaemonConnectionForTUI = old })
+
+	_, _, bi, _, _, err := bootClient(
+		t.Context(), Options{InitialIssueRef: "other-project#abc4"},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(9), bi.scope.projectID)
+	assert.Equal(t, viewList, bi.view)
+	require.NotNil(t, bi.initialIssue)
+	assert.Equal(t, "abc4", bi.initialIssue.ShortID)
+}
+
 // TestOutputIsTerminal_RejectsNonFile confirms a non-*os.File writer
 // (e.g., bytes.Buffer in tests) is treated as a non-terminal so Run
 // surfaces errNotATTY instead of writing alt-screen control sequences
@@ -260,4 +590,50 @@ func TestBuildRunModel_SeedsViewProjectsCacheFromBoot(t *testing.T) {
 	require.Contains(t, m.projectStats, int64(7))
 	assert.Equal(t, 3, m.projectStats[7].Open)
 	assert.Equal(t, 1, m.projectStats[7].Closed)
+}
+
+func TestBuildRunModel_SeedsInitialIssue(t *testing.T) {
+	bi := bootInit{
+		scope: scope{projectID: 7, projectName: "example-project"},
+		view:  viewList,
+		initialIssue: &Issue{
+			ProjectID: 7,
+			UID:       "01TEST00000000000000000001",
+			ShortID:   "abc4",
+			Title:     "Target",
+		},
+	}
+
+	m := buildRunModel(Options{InitialIssueRef: "abc4"}, &Client{}, bi)
+
+	assert.Equal(t, viewDetail, m.view)
+	require.NotNil(t, m.detail.issue)
+	assert.Equal(t, "abc4", m.detail.issue.ShortID)
+	assert.Equal(t, int64(7), m.detail.scopePID)
+}
+
+func TestInitialDetail_InitAddsFourDetailFetches(t *testing.T) {
+	baseInit := bootInit{
+		scope: scope{projectID: 7, projectName: "example-project"},
+		view:  viewList,
+	}
+	directInit := baseInit
+	directInit.initialIssue = &Issue{
+		ProjectID: 7,
+		UID:       "01TEST00000000000000000001",
+		ShortID:   "abc4",
+		Title:     "Target",
+	}
+
+	baseBatch, ok := buildRunModel(Options{}, &Client{}, baseInit).Init()().(tea.BatchMsg)
+	require.True(t, ok)
+	directBatch, ok := buildRunModel(
+		Options{InitialIssueRef: "abc4"}, &Client{}, directInit,
+	).Init()().(tea.BatchMsg)
+	require.True(t, ok)
+	require.Len(t, directBatch, len(baseBatch)+1)
+
+	detailBatch, ok := directBatch[len(directBatch)-1]().(tea.BatchMsg)
+	require.True(t, ok)
+	assert.Len(t, detailBatch, 4, "initial detail must fetch issue, comments, events, and links")
 }

@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/tui"
 )
+
+var runTUI = tui.Run
 
 // newTUICmd registers the TUI command. --all-projects is intentionally
 // absent today: the daemon has no cross-project list endpoint
@@ -19,16 +22,17 @@ func newTUICmd() *cobra.Command {
 	var uidFormat string
 	var mouse bool
 	cmd := &cobra.Command{
-		Use:   "tui",
+		Use:   "tui [issue-ref]",
 		Short: "open the interactive issue browser",
 		Long: `kata tui opens a Bubble Tea TUI scoped to the current project (per .kata.toml).
+Pass an optional issue ref to open that issue's detail view directly.
 Press ? for help, q to quit.
 
 Mouse support is opt-in. Set [tui] mouse = true in <KATA_HOME>/config.toml
 or pass --mouse for one run. Hold Option (macOS) or Shift (Linux) for native
 terminal text selection while mouse tracking is enabled.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if currentOutputMode() == outputAgent {
 				return &cliError{Message: "kata tui does not support --agent; run without output formatting", Kind: kindUsage, ExitCode: ExitUsage}
 			}
@@ -47,12 +51,26 @@ terminal text selection while mouse tracking is enabled.`,
 			if err != nil {
 				return err
 			}
-			return tui.Run(ctx, tui.Options{
+			var initialIssueRef string
+			if len(args) == 1 {
+				initialIssueRef = args[0]
+			}
+			workspace := strings.TrimSpace(flags.Workspace)
+			if workspace != "" {
+				workspace, err = resolveStartPath(workspace)
+				if err != nil {
+					return err
+				}
+			}
+			return runTUI(ctx, tui.Options{
 				Stdout:           cmd.OutOrStdout(),
 				Stderr:           cmd.ErrOrStderr(),
 				DisplayUIDFormat: uidFormat,
 				DaemonName:       flags.Daemon,
 				Mouse:            mouseEnabled,
+				InitialIssueRef:  initialIssueRef,
+				ProjectName:      strings.TrimSpace(flags.Project),
+				Workspace:        workspace,
 			})
 		},
 	}

@@ -65,6 +65,7 @@ kata create "fix login race"           # prints a short id, e.g. abc4
 kata list                              # see open work
 kata show abc4                         # inspect by short id
 kata tui                               # browse and triage interactively
+kata tui abc4                          # open an issue directly in the TUI
 ```
 
 `kata create` prints each issue's short id; use it in later commands. Close only

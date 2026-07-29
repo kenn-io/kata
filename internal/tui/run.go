@@ -4,13 +4,16 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kata/internal/shortid"
 	"golang.org/x/term"
 )
 
@@ -87,6 +90,9 @@ type Options struct {
 	DisplayUIDFormat string    // none, short, or full
 	DaemonName       string    // named daemon catalog entry for this run
 	Mouse            bool      // opt-in mouse capture and mouse-driven navigation
+	InitialIssueRef  string    // optional issue ref to open directly
+	ProjectName      string    // optional explicit project selector
+	Workspace        string    // optional workspace path for project and daemon resolution
 }
 
 // Run starts the TUI. Blocks until the user quits or ctx is cancelled.
@@ -152,6 +158,9 @@ func buildRunModel(opts Options, c *Client, bi bootInit, conns ...daemonConnecti
 		}
 		m.projectsCursor = cursorForScope(projectsRows(m.projectsByID, m.projectIdentByID, m.projectStats), bi.scope)
 	}
+	if bi.initialIssue != nil {
+		m = m.seedOpenDetail(*bi.initialIssue)
+	}
 	return m
 }
 
@@ -190,11 +199,133 @@ func sseProjectScope(_ scope) *int64 {
 // We re-use NewHTTPClient with ResponseHeaderTimeout instead of building
 // a bespoke transport so unix-socket dialing stays in one place.
 func bootClient(ctx context.Context, opts Options) (*Client, *http.Client, bootInit, string, daemonConnection, error) {
-	conn, err := bootDaemonConnection(ctx, opts)
+	conn, err := bootDaemonConnectionForTUI(ctx, opts)
+	if err != nil {
+		return nil, nil, bootInit{}, "", daemonConnection{}, err
+	}
+	conn.init, err = applyInitialScopeSelectors(ctx, conn.api, conn.init, opts)
+	if err != nil {
+		return nil, nil, bootInit{}, "", daemonConnection{}, err
+	}
+	conn.init, err = resolveInitialIssue(ctx, conn.api, conn.init, opts.InitialIssueRef)
 	if err != nil {
 		return nil, nil, bootInit{}, "", daemonConnection{}, err
 	}
 	return conn.api, conn.sseHC, conn.init, conn.endpoint, conn, nil
+}
+
+var bootDaemonConnectionForTUI = bootDaemonConnection
+
+type initialIssueAPI interface {
+	GetIssueDetail(context.Context, int64, string) (*IssueDetail, error)
+	ListProjects(context.Context) ([]ProjectSummary, error)
+}
+
+func resolveInitialIssue(
+	ctx context.Context, api initialIssueAPI, bi bootInit, ref string,
+) (bootInit, error) {
+	if ref == "" {
+		return bi, nil
+	}
+	parsed, err := shortid.Parse(ref)
+	if err != nil {
+		return bootInit{}, fmt.Errorf("%q is not a valid issue ref: %w", ref, err)
+	}
+	projectID, apiRef, err := resolveInitialIssueTarget(ctx, api, &bi, parsed)
+	if err != nil {
+		return bootInit{}, err
+	}
+	detail, err := api.GetIssueDetail(ctx, projectID, apiRef)
+	if err != nil {
+		return bootInit{}, err
+	}
+	if detail == nil || detail.Issue == nil {
+		return bootInit{}, fmt.Errorf("kata tui %q returned an empty issue response", ref)
+	}
+	bi.initialIssue = detail.Issue
+	return bi, nil
+}
+
+func resolveInitialIssueTarget(
+	ctx context.Context, api initialIssueAPI, bi *bootInit, ref shortid.Ref,
+) (int64, string, error) {
+	if ref.Project != "" {
+		project, err := findProjectByName(ctx, api, ref.Project)
+		if err != nil {
+			return 0, "", err
+		}
+		selectInitialProject(bi, project)
+		return project.ID, ref.ShortID, nil
+	}
+	if bi.scope.projectID == 0 || bi.scope.empty || bi.scope.allProjects {
+		return 0, "", fmt.Errorf(
+			"no project bound to this workspace; use a qualified ref (e.g. kata#abc4)",
+		)
+	}
+	if ref.ULID != "" {
+		return bi.scope.projectID, ref.ULID, nil
+	}
+	return bi.scope.projectID, ref.ShortID, nil
+}
+
+func applyInitialScopeSelectors(
+	ctx context.Context, api initialIssueAPI, bi bootInit, opts Options,
+) (bootInit, error) {
+	qualified, err := initialIssueRefIsQualified(opts.InitialIssueRef)
+	if err != nil {
+		return bootInit{}, err
+	}
+	if qualified {
+		return bi, nil
+	}
+	projectName := strings.TrimSpace(opts.ProjectName)
+	if projectName == "" {
+		return bi, nil
+	}
+	project, err := findProjectByName(ctx, api, projectName)
+	if err != nil {
+		return bootInit{}, err
+	}
+	selectInitialProject(&bi, project)
+	return bi, nil
+}
+
+func initialIssueRefIsQualified(ref string) (bool, error) {
+	if ref == "" {
+		return false, nil
+	}
+	parsed, err := shortid.Parse(ref)
+	if err != nil {
+		return false, fmt.Errorf("%q is not a valid issue ref: %w", ref, err)
+	}
+	return parsed.Project != "", nil
+}
+
+func selectInitialProject(bi *bootInit, project ProjectSummary) {
+	bi.scope = scope{
+		projectID:       project.ID,
+		projectName:     project.Name,
+		workspace:       bi.scope.workspace,
+		homeProjectID:   project.ID,
+		homeProjectName: project.Name,
+	}
+	bi.view = viewList
+	bi.projects = []ProjectSummaryWithStats{{ProjectSummary: project}}
+}
+
+func findProjectByName(
+	ctx context.Context, api initialIssueAPI, name string,
+) (ProjectSummary, error) {
+	projects, err := api.ListProjects(ctx)
+	if err != nil {
+		return ProjectSummary{}, err
+	}
+	for _, project := range projects {
+		if project.Name == name {
+			return project, nil
+		}
+	}
+	return ProjectSummary{}, fmt.Errorf("project %q not found", name)
 }
 
 // scope describes the issue-set the TUI is browsing. Exactly one of
@@ -221,9 +352,10 @@ type scope struct {
 // the first frame can render with stats — no second roundtrip. For
 // viewList and viewEmpty, projects is nil.
 type bootInit struct {
-	scope    scope
-	view     viewID
-	projects []ProjectSummaryWithStats
+	scope        scope
+	view         viewID
+	projects     []ProjectSummaryWithStats
+	initialIssue *Issue
 }
 
 // bootResolveScope picks the initial scope + view from cwd. Spec §4.2:

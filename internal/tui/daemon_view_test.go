@@ -402,6 +402,60 @@ func TestDaemonSwitchResetsProjectsGeneration(t *testing.T) {
 	assert.Equal(t, uint64(0), out.projectsGen)
 }
 
+func TestSwitchDaemonCmdReappliesProjectSelector(t *testing.T) {
+	srv := mockDaemon(t, map[string]http.HandlerFunc{
+		"/api/v1/projects": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"projects":[{"id":9,"name":"project-b"}]}`))
+		},
+	})
+	client := NewClient(srv.URL, srv.Client())
+	oldConnect := connectDaemonTargetForTUI
+	t.Cleanup(func() { connectDaemonTargetForTUI = oldConnect })
+	connectDaemonTargetForTUI = func(_ context.Context, target daemonTarget) (daemonConnection, error) {
+		return daemonConnection{api: client, target: target}, nil
+	}
+
+	msg := switchDaemonCmd(
+		daemonTarget{Name: "shared", URL: "https://daemon.example"},
+		1,
+		Options{ProjectName: "project-b"},
+	)()
+	result, ok := msg.(daemonSwitchResultMsg)
+	require.True(t, ok)
+	require.NoError(t, result.err)
+	assert.True(t, result.target.skipInitialScope)
+	assert.Equal(t, int64(9), result.conn.init.scope.projectID)
+	assert.Equal(t, "project-b", result.conn.init.scope.projectName)
+}
+
+func TestSwitchDaemonCmdPreservesWorkspaceSelector(t *testing.T) {
+	workspace := t.TempDir()
+	oldConnect := connectDaemonTargetForTUI
+	t.Cleanup(func() { connectDaemonTargetForTUI = oldConnect })
+	connectDaemonTargetForTUI = func(_ context.Context, target daemonTarget) (daemonConnection, error) {
+		assert.Equal(t, workspace, target.workspaceStart)
+		assert.False(t, target.skipInitialScope)
+		return daemonConnection{
+			api:    &Client{},
+			target: target,
+			init: bootInit{
+				view:  viewList,
+				scope: homedScope(9, "project-b"),
+			},
+		}, nil
+	}
+
+	msg := switchDaemonCmd(
+		daemonTarget{Name: "shared", URL: "https://daemon.example"},
+		1,
+		Options{Workspace: workspace},
+	)()
+	result, ok := msg.(daemonSwitchResultMsg)
+	require.True(t, ok)
+	require.NoError(t, result.err)
+	assert.Equal(t, int64(9), result.conn.init.scope.projectID)
+}
+
 func setupDaemonViewSource() Model {
 	m := initialModel(Options{})
 	m.view = viewList

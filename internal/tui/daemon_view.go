@@ -55,14 +55,25 @@ func (m Model) routeDaemonsViewKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.daemonSwitchAttempt++
-		return m, switchDaemonCmd(rows[m.daemonCursor].target, m.daemonSwitchAttempt)
+		return m, switchDaemonCmd(
+			rows[m.daemonCursor].target, m.daemonSwitchAttempt, m.opts,
+		)
 	}
 	return m, nil
 }
 
-func switchDaemonCmd(target daemonTarget, attempt uint64) tea.Cmd {
+func switchDaemonCmd(target daemonTarget, attempt uint64, opts Options) tea.Cmd {
 	return func() tea.Msg {
-		conn, err := connectDaemonTargetForTUI(context.Background(), target)
+		ctx := context.Background()
+		target = daemonTargetWithLaunchSelectors(target, opts)
+		conn, err := connectDaemonTargetForTUI(ctx, target)
+		if err == nil {
+			scopeOpts := Options{
+				ProjectName: opts.ProjectName,
+				Workspace:   opts.Workspace,
+			}
+			conn.init, err = applyInitialScopeSelectors(ctx, conn.api, conn.init, scopeOpts)
+		}
 		return daemonSwitchResultMsg{attempt: attempt, conn: conn, target: target, err: err}
 	}
 }
