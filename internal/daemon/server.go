@@ -36,6 +36,7 @@ type ServerConfig struct {
 	Broadcaster              *EventBroadcaster
 	FederationWake           func()
 	FederationCredentials    config.FederationCredentialStore
+	FederationCatalog        []config.CatalogDaemonConfig
 	GitHubSyncFetcher        githubsync.Fetcher
 	GitHubSyncConfig         config.GitHubSyncConfig
 	GitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
@@ -165,6 +166,7 @@ func NewServer(cfg ServerConfig) *Server {
 	if cfg.FederationCredentials == nil {
 		cfg.FederationCredentials = config.DefaultFederationCredentialStore()
 	}
+	cfg.FederationCatalog = append([]config.CatalogDaemonConfig(nil), cfg.FederationCatalog...)
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)

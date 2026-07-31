@@ -25,16 +25,18 @@ const (
 )
 
 type replicaCredentialStore struct {
-	mu          sync.Mutex
-	credentials map[string]config.FederationCredential
-	readErr     error
-	storeErr    error
-	deleteErr   error
-	rekeyErr    error
-	readCalls   int
-	storeCalls  int
-	deleteCalls int
-	rekeyCalls  int
+	mu           sync.Mutex
+	credentials  map[string]config.FederationCredential
+	readErr      error
+	storeErr     error
+	deleteErr    error
+	rekeyErr     error
+	replaceErr   error
+	readCalls    int
+	storeCalls   int
+	deleteCalls  int
+	rekeyCalls   int
+	replaceCalls int
 }
 
 // baseCredentialStore deliberately exposes only the public credential CRUD
@@ -195,6 +197,27 @@ func (s *replicaCredentialStore) ReplaceManagedFederationCredential(
 		return config.ErrFederationCredentialConflict
 	}
 	s.credentials[expected.ProjectUID] = replacement.Credential
+	return nil
+}
+
+func (s *replicaCredentialStore) ReplaceFederationCredential(
+	_ context.Context,
+	replacement config.FederationCredentialReplacement,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.replaceCalls++
+	if s.replaceErr != nil {
+		return s.replaceErr
+	}
+	current, found := s.credentials[replacement.ProjectUID]
+	if found && current == replacement.Replacement {
+		return nil
+	}
+	if !found || current != replacement.Expected {
+		return config.ErrFederationCredentialConflict
+	}
+	s.credentials[replacement.ProjectUID] = replacement.Replacement
 	return nil
 }
 
@@ -1814,4 +1837,5 @@ func unsetReplicaAuthToken(t *testing.T) {
 
 var _ config.FederationCredentialStore = (*replicaCredentialStore)(nil)
 var _ config.FederationManagedCredentialStore = (*replicaCredentialStore)(nil)
+var _ config.FederationCredentialReplacer = (*replicaCredentialStore)(nil)
 var _ config.FederationCredentialStore = baseCredentialStore{}
