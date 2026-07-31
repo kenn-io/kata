@@ -35,6 +35,7 @@ func newFederationCmd() *cobra.Command {
 		federationEnrollmentsCmd(),
 		federationJoinCmd(),
 		federationLeaveCmd(),
+		federationRebindCmd(),
 		federationRevokeCmd(),
 		federationStatusCmd(),
 		federationQuarantineCmd(),
