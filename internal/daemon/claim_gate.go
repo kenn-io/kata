@@ -19,6 +19,9 @@ func requireFederatedIssueClaim(
 	issue db.Issue,
 	actor string,
 ) error {
+	finishTransport := beginClaimFederationTransport(cfg, projectID)
+	defer finishTransport()
+
 	binding, err := cfg.DB.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil

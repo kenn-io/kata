@@ -1,10 +1,15 @@
 package daemon_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +31,27 @@ const (
 type rebindFailingStore struct {
 	db.Storage
 	err error
+}
+
+type rebindBlockingClaimCommitStore struct {
+	db.Storage
+	commitStarted chan struct{}
+	commitRelease chan struct{}
+}
+
+func (s rebindBlockingClaimCommitStore) ApplyClaimStatus(
+	ctx context.Context,
+	projectID int64,
+	issueUID string,
+	status db.ClaimStatus,
+) error {
+	close(s.commitStarted)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.commitRelease:
+	}
+	return s.Storage.ApplyClaimStatus(ctx, projectID, issueUID, status)
 }
 
 func (s rebindFailingStore) RebindFederationBinding(
@@ -125,6 +151,190 @@ func TestRebindFederationReplicaWaitsForOldEndpointSync(t *testing.T) {
 	assert.Equal(t, rebindTargetURL, currentBinding.HubURL)
 }
 
+func TestRebindFederationReplicaWaitsForImmediateClaimForwardCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		suffix string
+		body   []byte
+	}{
+		{name: "acquire", method: http.MethodPost, suffix: "lease/actions/acquire", body: []byte(`{"holder":"spoke-cli","client_kind":"cli","claim_kind":"hard"}`)},
+		{name: "renew", method: http.MethodPost, suffix: "lease/actions/renew", body: []byte(`{"holder":"spoke-cli","client_kind":"cli","ttl_seconds":300}`)},
+		{name: "release", method: http.MethodPost, suffix: "lease/actions/release", body: []byte(`{"holder":"spoke-cli","client_kind":"cli","reason":"done"}`)},
+		{name: "status", method: http.MethodGet, suffix: "lease"},
+		{name: "show refresh", method: http.MethodGet},
+		{name: "claim gate refresh", method: http.MethodPatch, body: []byte(`{"actor":"sync-agent","title":"updated title"}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			commitStarted := make(chan struct{})
+			commitRelease := make(chan struct{})
+			var releaseOnce sync.Once
+			releaseCommit := func() { releaseOnce.Do(func() { close(commitRelease) }) }
+			t.Cleanup(releaseCommit)
+
+			store := openReplicaServiceStore(t)
+			project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaHubProjectUID)
+			require.NoError(t, err)
+			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+				ProjectID: project.ID,
+				Title:     "claim target",
+				Author:    "tester",
+			})
+			require.NoError(t, err)
+
+			now := time.Now().UTC()
+			claim := &api.IssueClaimOut{
+				ClaimUID:          replicaLocalProjectUID,
+				ProjectID:         42,
+				IssueUID:          issue.UID,
+				Holder:            "sync-agent",
+				HolderInstanceUID: store.InstanceUID(),
+				ClientKind:        "cli",
+				ClaimKind:         "hard",
+				AcquiredAt:        now,
+				Revision:          1,
+				UpdatedAt:         now,
+			}
+			oldHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodGet {
+					require.NoError(t, json.NewEncoder(w).Encode(api.ClaimStatusBody{
+						Held: true,
+						Holder: api.ClaimPrincipalOut{
+							HolderInstanceUID: store.InstanceUID(), Holder: "sync-agent", ClientKind: "cli",
+						},
+						Claim: claim, HubNow: now,
+					}))
+					return
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(api.ClaimActionResponseBody{
+					Granted: true,
+					Holder: api.ClaimPrincipalOut{
+						HolderInstanceUID: store.InstanceUID(), Holder: "sync-agent", ClientKind: "cli",
+					},
+					Claim: claim,
+				}))
+			}))
+			t.Cleanup(oldHub.Close)
+
+			binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID: project.ID, Role: db.FederationRoleSpoke,
+				HubURL: oldHub.URL, HubProjectID: 42, HubProjectUID: project.UID,
+				ReplayHorizonEventID: 1, PushEnabled: true, Actor: "sync-agent",
+				AllowInsecure: true, Enabled: true,
+			})
+			require.NoError(t, err)
+			credentials := newReplicaCredentialStore()
+			credential := rebindCredential(oldHub.URL, false, false)
+			credential.Capabilities = "claim"
+			credentials.put(project.UID, credential)
+
+			blockingStore := rebindBlockingClaimCommitStore{
+				Storage: store, commitStarted: commitStarted, commitRelease: commitRelease,
+			}
+			server := startTestServer(t, daemon.ServerConfig{
+				DB: blockingStore, StartedAt: now, FederationCredentials: credentials,
+				FederationCatalog: []config.CatalogDaemonConfig{{
+					Name: "primary-hub", URL: rebindTargetURL,
+				}},
+				FederationRebindFetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
+					return api.ProjectFederationBody{ProjectID: 42, ProjectUID: project.UID}, nil
+				},
+			})
+			claimPath := issuePathRef(project.ID, issue.ShortID, tc.suffix)
+			claimDone := make(chan error, 1)
+			go func() {
+				req, requestErr := http.NewRequestWithContext(
+					ctx, tc.method, server.URL+claimPath, bytes.NewReader(tc.body),
+				)
+				if requestErr != nil {
+					claimDone <- requestErr
+					return
+				}
+				if len(tc.body) > 0 {
+					req.Header.Set("Content-Type", "application/json")
+				}
+				resp, requestErr := http.DefaultClient.Do(req)
+				if requestErr != nil {
+					claimDone <- requestErr
+					return
+				}
+				_, copyErr := io.Copy(io.Discard, resp.Body)
+				closeErr := resp.Body.Close()
+				if copyErr != nil {
+					claimDone <- copyErr
+					return
+				}
+				if closeErr != nil {
+					claimDone <- closeErr
+					return
+				}
+				if resp.StatusCode != http.StatusOK {
+					claimDone <- fmt.Errorf("claim request returned HTTP %d", resp.StatusCode)
+					return
+				}
+				claimDone <- nil
+			}()
+
+			select {
+			case <-commitStarted:
+			case <-time.After(time.Second):
+				t.Fatal("forwarded claim response did not reach its local commit")
+			}
+
+			rebindDone := make(chan error, 1)
+			go func() {
+				req, requestErr := http.NewRequestWithContext(
+					ctx,
+					http.MethodPost,
+					fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/rebind", server.URL, project.ID),
+					bytes.NewBufferString(`{"hub_catalog":"primary-hub"}`),
+				)
+				if requestErr != nil {
+					rebindDone <- requestErr
+					return
+				}
+				req.Header.Set("Content-Type", "application/json")
+				resp, requestErr := http.DefaultClient.Do(req)
+				if requestErr != nil {
+					rebindDone <- requestErr
+					return
+				}
+				_, copyErr := io.Copy(io.Discard, resp.Body)
+				closeErr := resp.Body.Close()
+				if copyErr != nil {
+					rebindDone <- copyErr
+					return
+				}
+				if closeErr != nil {
+					rebindDone <- closeErr
+					return
+				}
+				if resp.StatusCode != http.StatusOK {
+					rebindDone <- fmt.Errorf("rebind request returned HTTP %d", resp.StatusCode)
+					return
+				}
+				rebindDone <- nil
+			}()
+
+			select {
+			case rebindErr := <-rebindDone:
+				releaseCommit()
+				t.Fatalf("rebind completed before the forwarded claim committed: %v", rebindErr)
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			releaseCommit()
+			require.NoError(t, <-claimDone)
+			require.NoError(t, <-rebindDone)
+			converged, err := store.FederationBindingByProject(ctx, binding.ProjectID)
+			require.NoError(t, err)
+			assert.Equal(t, rebindTargetURL, converged.HubURL)
+		})
+	}
+}
+
 func TestRebindFederationReplicaDistinguishesReverseProxyPaths(t *testing.T) {
 	const sourceURL = "https://hub.example/old-prefix"
 	const targetURL = "https://hub.example/new-prefix"
@@ -146,6 +356,35 @@ func TestRebindFederationReplicaDistinguishesReverseProxyPaths(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, daemon.FederationRebindStateRebound, result.State)
 	assert.Equal(t, targetURL, result.Binding.HubURL)
+}
+
+func TestRebindFederationReplicaConvergesCanonicalTargetFromRawDefaultPort(t *testing.T) {
+	const equivalentTargetURL = "https://hub.example:443/kata"
+	ctx := context.Background()
+	store, project, binding := prepareFederationRebind(t, rebindTargetURL)
+	binding.HubURL = equivalentTargetURL
+	binding.AllowInsecure = false
+	_, err := store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, rebindCredential(equivalentTargetURL, true, false))
+
+	result, err := daemon.RebindFederationReplica(
+		ctx, store, credentials,
+		daemon.RebindFederationReplicaParams{
+			ProjectID:  project.ID,
+			HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindTargetURL},
+			FetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
+				return api.ProjectFederationBody{ProjectID: 42, ProjectUID: project.UID}, nil
+			},
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, daemon.FederationRebindStateUnchanged, result.State)
+	converged, err := store.FederationBindingByProject(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, rebindTargetURL, converged.HubURL)
 }
 
 func TestRebindFederationReplicaConvergesEveryDurableState(t *testing.T) {

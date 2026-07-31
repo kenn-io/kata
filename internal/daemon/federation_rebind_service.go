@@ -282,10 +282,12 @@ func RebindFederationReplica(
 			"replace federation credential during rebind",
 		)
 	}
+	// Classification compares canonical endpoints, but storage CAS must use the
+	// exact post-drain spelling and security flag that were actually persisted.
 	rebound, err := store.RebindFederationBinding(ctx, db.RebindFederationBindingParams{
 		ProjectID:             project.ID,
-		ExpectedHubURL:        localState.sourceHubURL,
-		ExpectedAllowInsecure: localState.sourceInsecure,
+		ExpectedHubURL:        currentBinding.HubURL,
+		ExpectedAllowInsecure: currentBinding.AllowInsecure,
 		HubProjectID:          binding.HubProjectID,
 		HubProjectUID:         binding.HubProjectUID,
 		TargetHubURL:          targetURL,
