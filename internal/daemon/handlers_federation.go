@@ -379,7 +379,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			cfg.FederationWake()
 		}
 		return &api.RebindFederationReplicaResponse{Body: api.RebindFederationReplicaResponseBody{
-			Project:   dbProjectToOut(result.Project),
+			Project: api.FederationRebindProjectOut{
+				ID: result.Project.ID, UID: result.Project.UID, Name: result.Project.Name,
+			},
 			OldOrigin: oldOrigin,
 			NewOrigin: newOrigin,
 			State:     string(result.State),

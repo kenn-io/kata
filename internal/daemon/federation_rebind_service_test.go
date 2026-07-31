@@ -3,6 +3,8 @@ package daemon_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federation"
 )
 
 const (
@@ -63,6 +66,86 @@ func TestRebindFederationReplicaRejectsTargetBeforeCredentialRead(t *testing.T) 
 			assert.Zero(t, fetchCalls)
 		})
 	}
+}
+
+func TestRebindFederationReplicaWaitsForOldEndpointSync(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	oldHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(requestStarted)
+		<-releaseRequest
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"events":[],"next_after_id":11}`))
+	}))
+	t.Cleanup(oldHub.Close)
+
+	store, project, binding := prepareFederationRebind(t, oldHub.URL)
+	credentials := newReplicaCredentialStore()
+	credential := rebindCredential(oldHub.URL, false, false)
+	credentials.put(project.UID, credential)
+	syncDone := make(chan error, 1)
+	go func() {
+		syncDone <- federation.SyncFederationOnce(context.Background(), store, binding, credential)
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old endpoint sync did not reach the hub")
+	}
+
+	rebindDone := make(chan error, 1)
+	go func() {
+		_, err := daemon.RebindFederationReplica(
+			context.Background(), store, credentials,
+			daemon.RebindFederationReplicaParams{
+				ProjectID:  project.ID,
+				HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindTargetURL},
+				FetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
+					return api.ProjectFederationBody{ProjectID: 42, ProjectUID: project.UID}, nil
+				},
+			},
+		)
+		rebindDone <- err
+	}()
+
+	select {
+	case err := <-rebindDone:
+		t.Fatalf("rebind completed before the old endpoint sync drained: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	currentBinding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, oldHub.URL, currentBinding.HubURL)
+
+	close(releaseRequest)
+	require.NoError(t, <-syncDone)
+	require.NoError(t, <-rebindDone)
+	currentBinding, err = store.FederationBindingByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, rebindTargetURL, currentBinding.HubURL)
+}
+
+func TestRebindFederationReplicaDistinguishesReverseProxyPaths(t *testing.T) {
+	const sourceURL = "https://hub.example/old-prefix"
+	const targetURL = "https://hub.example/new-prefix"
+	store, project, _ := prepareFederationRebind(t, sourceURL)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, rebindCredential(sourceURL, false, false))
+
+	result, err := daemon.RebindFederationReplica(
+		context.Background(), store, credentials,
+		daemon.RebindFederationReplicaParams{
+			ProjectID:  project.ID,
+			HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: targetURL},
+			FetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
+				return api.ProjectFederationBody{ProjectID: 42, ProjectUID: project.UID}, nil
+			},
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, daemon.FederationRebindStateRebound, result.State)
+	assert.Equal(t, targetURL, result.Binding.HubURL)
 }
 
 func TestRebindFederationReplicaConvergesEveryDurableState(t *testing.T) {

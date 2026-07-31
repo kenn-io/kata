@@ -1259,6 +1259,16 @@ func (f FederationQuarantineSummary) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
+type FederationRebindProjectOut struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name" validate:"required"`
+	UID  string `json:"uid" validate:"required"`
+}
+
+func (f FederationRebindProjectOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
+}
+
 type FederationStatusBody struct {
 	Statuses []FederationProjectStatus `json:"statuses,omitempty" validate:"required"`
 }
@@ -2905,10 +2915,10 @@ func (r RebindFederationReplicaRequestBody) Validate() error {
 }
 
 type RebindFederationReplicaResponseBody struct {
-	NewOrigin string     `json:"new_origin" validate:"required"`
-	OldOrigin string     `json:"old_origin" validate:"required"`
-	Project   ProjectOut `json:"project"`
-	State     string     `json:"state" validate:"required"`
+	NewOrigin string                     `json:"new_origin" validate:"required"`
+	OldOrigin string                     `json:"old_origin" validate:"required"`
+	Project   FederationRebindProjectOut `json:"project"`
+	State     string                     `json:"state" validate:"required"`
 }
 
 func (r RebindFederationReplicaResponseBody) Validate() error {

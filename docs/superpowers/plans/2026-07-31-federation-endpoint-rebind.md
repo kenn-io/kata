@@ -269,7 +269,7 @@ Reuse existing replica invalid-input, not-spoke, credential-conflict, and bindin
 
 - [ ] **Step 4: Implement the default HTTPS metadata fetcher**
 
-Normalize through the daemon package’s existing `normalizeFederationHubBaseURL`, then additionally require HTTPS. This preserves a reverse-proxy path prefix while rejecting user info, query, and fragment; do not use `client.NormalizeRemoteURL`, which intentionally strips paths for ordinary daemon targets. Create the outbound client through `client.NewHTTPClientForTarget`, call `client.ConfigureOriginPinnedRedirects`, append the metadata route after any path prefix, set only the enrollment bearer token, size-limit and decode `api.ProjectFederationBody`, and never include a remote response body in an error. Use `config.CanonicalHTTPOrigin` for scheme/host/port comparisons so equivalent origin formatting does not create a false state conflict. Classify 401/403 as credential conflict, 404 as binding conflict, and transport/other status failures as hub unavailable. Do not call any catalog admin authentication helper or resolve `TokenEnv`.
+Normalize through the daemon package’s existing `normalizeFederationHubBaseURL`, then additionally require HTTPS. This preserves a reverse-proxy path prefix while rejecting user info, query, and fragment; do not use `client.NormalizeRemoteURL`, which intentionally strips paths for ordinary daemon targets. Create the outbound client through `client.NewHTTPClientForTarget`, call `client.ConfigureOriginPinnedRedirects`, append the metadata route after any path prefix, set only the enrollment bearer token, size-limit and decode `api.ProjectFederationBody`, and never include a remote response body in an error. Compare persisted endpoint state with a canonical full base URL that normalizes scheme/host/port but retains the escaped path prefix; use `config.CanonicalHTTPOrigin` only for redirect pinning and display. Classify 401/403 as credential conflict, 404 as binding conflict, and transport/other status failures as hub unavailable. Do not call any catalog admin authentication helper or resolve `TokenEnv`.
 
 - [ ] **Step 5: Add four-state and failure-safety tests**
 
@@ -282,7 +282,7 @@ Test the complete resume matrix:
 | source | target | both target, `resumed` |
 | target | target | no-op, `unchanged` |
 
-Every successful case still performs remote identity validation. Add tests for ID/UID mismatch, enrollment rejection, credential-write failure, binding-write failure followed by successful retry, stale token/actor/capabilities/management/identity conflicts, preservation of pending pushes/cursors/replay/actor/sync status, a cursor advancing between preflight and commit, same-catalog managed success with all metadata preserved, different/empty managed catalog conflict, manual credentials remaining manual, leave-pending conflict, and concurrent leave waiting on the existing hub-operation drain.
+Every successful case still performs remote identity validation. Add tests for ID/UID mismatch, enrollment rejection, credential-write failure, binding-write failure followed by successful retry, stale token/actor/capabilities/management/identity conflicts, preservation of pending pushes/cursors/replay/actor/sync status, a cursor advancing during preflight, reverse-proxy path changes at one origin, same-catalog managed success with all metadata preserved, different/empty managed catalog conflict, manual credentials remaining manual, leave-pending conflict, concurrent leave waiting on the existing hub-operation drain, and an old-origin sync response that must finish before either endpoint store changes.
 
 - [ ] **Step 6: Run state-machine tests and record RED**
 
@@ -336,6 +336,10 @@ FederationCatalog: append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
 ```
 
 Do not resolve catalog token fields. Embedded callers may leave the catalog empty.
+
+The catalog is loaded at daemon startup. The migration runbook must require a
+restart after editing the selected entry so rebind cannot resolve stale
+startup configuration.
 
 - [ ] **Step 9: Run daemon tests and record GREEN**
 
@@ -399,10 +403,16 @@ type RebindFederationReplicaResponse struct {
 }
 
 type RebindFederationReplicaResponseBody struct {
-    Project   ProjectOut `json:"project"`
-    OldOrigin string     `json:"old_origin"`
-    NewOrigin string     `json:"new_origin"`
-    State     string     `json:"state"`
+    Project   FederationRebindProjectOut `json:"project"`
+    OldOrigin string                     `json:"old_origin"`
+    NewOrigin string                     `json:"new_origin"`
+    State     string                     `json:"state"`
+}
+
+type FederationRebindProjectOut struct {
+    ID   int64  `json:"id"`
+    UID  string `json:"uid"`
+    Name string `json:"name"`
 }
 ```
 
@@ -414,7 +424,7 @@ Register mutation operation ID `rebindFederationReplica` at:
 POST /api/v1/federation/replicas/{project_id}/actions/rebind
 ```
 
-Trim and uniquely resolve `HubCatalog` from `ServerConfig.FederationCatalog`, call the service, and render `ProjectOut` plus display-safe origins produced by `config.CanonicalHTTPOrigin`. Never return URL user info, path, query, fragment, or a raw configured URL. Extend `federationReplicaAPIError` for bounded 502 hub-unavailable errors. Add the operation to the embedded-host restricted federation admin mutation policy. Do not describe the enrollment metadata preflight as read-only.
+Trim and uniquely resolve `HubCatalog` from `ServerConfig.FederationCatalog`, call the service, and render the narrow project identity plus display-safe origins produced by `config.CanonicalHTTPOrigin`. Never return mutable project metadata, URL user info, path, query, fragment, or a raw configured URL. Extend `federationReplicaAPIError` for bounded 502 hub-unavailable errors. Add the operation to the embedded-host restricted federation admin mutation policy. Do not describe the enrollment metadata preflight as read-only.
 
 - [ ] **Step 5: Generate API artifacts**
 

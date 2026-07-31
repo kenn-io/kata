@@ -315,10 +315,18 @@ type RebindFederationReplicaRequestBody struct {
 // RebindFederationReplicaResponseBody reports the converged endpoint without
 // exposing a configured path prefix or any credential material.
 type RebindFederationReplicaResponseBody struct {
-	Project   ProjectOut `json:"project"`
-	OldOrigin string     `json:"old_origin"`
-	NewOrigin string     `json:"new_origin"`
-	State     string     `json:"state"`
+	Project   FederationRebindProjectOut `json:"project"`
+	OldOrigin string                     `json:"old_origin"`
+	NewOrigin string                     `json:"new_origin"`
+	State     string                     `json:"state"`
+}
+
+// FederationRebindProjectOut is the narrow project identity returned by a
+// rebind. Mutable metadata and lifecycle bookkeeping are intentionally absent.
+type FederationRebindProjectOut struct {
+	ID   int64  `json:"id"`
+	UID  string `json:"uid"`
+	Name string `json:"name"`
 }
 
 // RebindFederationReplicaResponse wraps RebindFederationReplicaResponseBody.

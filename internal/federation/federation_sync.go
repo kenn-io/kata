@@ -14,6 +14,7 @@ import (
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationcoord"
 )
 
 const federationPollLimit = 1000
@@ -73,6 +74,10 @@ func SyncFederationOnceWithPulledEvents(
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 ) error {
+	finish := federationcoord.BeginSync(
+		federationcoord.Key(store.InstanceUID(), binding.ProjectID),
+	)
+	defer finish()
 	return syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil)
 }
 
@@ -788,7 +793,22 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		binding := spoke.binding
+		finishSync := federationcoord.BeginSync(
+			federationcoord.Key(r.DB.InstanceUID(), spoke.binding.ProjectID),
+		)
+		binding, bindingReadErr := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
+		if bindingReadErr != nil {
+			finishSync()
+			if errors.Is(bindingReadErr, context.Canceled) {
+				return bindingReadErr
+			}
+			errs = append(errs, bindingReadErr)
+			continue
+		}
+		if !binding.Enabled || binding.Role != db.FederationRoleSpoke {
+			finishSync()
+			continue
+		}
 		bindingErrs := len(errs)
 		project := spoke.project
 		cred, _, credentialErr := credentialStore.FederationCredential(ctx, project.UID)
@@ -797,6 +817,7 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 			if recordErr := r.DB.RecordFederationSyncError(ctx, binding.ProjectID, credentialErr, time.Now().UTC()); recordErr != nil {
 				errs = append(errs, recordErr)
 			}
+			finishSync()
 			continue
 		}
 		if cred.HubURL == "" {
@@ -808,24 +829,28 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 		opts := r.clientOpts()
 		if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
+				finishSync()
 				return err
 			}
 			errs = append(errs, err)
 		}
 		if err := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, r.OnPulledEvents, validateLease); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {
+				finishSync()
 				return err
 			}
 			errs = append(errs, err)
 		}
 		if len(errs) == bindingErrs {
 			if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
+				finishSync()
 				return err
 			}
 			if err := r.DB.ClearFederationSyncError(ctx, binding.ProjectID); err != nil {
 				errs = append(errs, err)
 			}
 		}
+		finishSync()
 	}
 	return errors.Join(errs...)
 }
@@ -839,6 +864,10 @@ func RetryPendingClaimsOnce(
 	creds config.FederationCredential,
 	opts clientpkg.Opts,
 ) error {
+	finish := federationcoord.BeginSync(
+		federationcoord.Key(store.InstanceUID(), binding.ProjectID),
+	)
+	defer finish()
 	return retryPendingClaimsOnceWithFence(ctx, store, binding, creds, opts, nil)
 }
 

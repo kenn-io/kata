@@ -70,6 +70,61 @@ func TestFederationRebindValidatesSelectors(t *testing.T) {
 	}
 }
 
+func TestFederationRebindSinglePreservesDaemonError(t *testing.T) {
+	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/status":
+			writeFederationRebindJSON(t, w, map[string]any{"statuses": []map[string]any{{
+				"project_id": 7, "project_name": "spoke-project", "role": "spoke",
+			}}})
+		case r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusBadGateway)
+			writeFederationRebindJSON(t, w, map[string]any{"error": map[string]any{
+				"code": "federation_hub_unavailable", "message": "target hub unavailable",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := runFederationRebindAgainstServer(t, server.URL,
+		"federation", "rebind", "spoke-project", "--hub", "primary-hub")
+
+	cli := requireCLIError(t, err, ExitInternal)
+	assert.Equal(t, "federation_hub_unavailable", cli.Code)
+	assert.Equal(t, "target hub unavailable", cli.Message)
+}
+
+func TestFederationRebindAgentPartialFailureDoesNotPrintOK(t *testing.T) {
+	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/status":
+			writeFederationRebindJSON(t, w, map[string]any{"statuses": []map[string]any{
+				{"project_id": 3, "project_name": "spoke-three", "role": "spoke"},
+				{"project_id": 5, "project_name": "spoke-five", "role": "spoke"},
+			}})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/3/"):
+			writeFederationRebindJSON(t, w, federationRebindResponse(3, "spoke-three", "rebound"))
+		case r.Method == http.MethodPost:
+			w.WriteHeader(http.StatusBadGateway)
+			writeFederationRebindJSON(t, w, map[string]any{"error": map[string]any{
+				"code": "federation_hub_unavailable", "message": "target hub unavailable",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	t.Setenv("KATA_SERVER", server.URL)
+
+	out, err := runCmdOutput(t, nil,
+		"--agent", "federation", "rebind", "--all", "--hub", "primary-hub")
+
+	require.Error(t, err)
+	assert.NotContains(t, out, "OK federation-rebind")
+	assert.Contains(t, out, "state=rebound")
+	assert.Contains(t, out, "state=failed")
+}
+
 func TestFederationRebindAllIsOrderedContinuesAndRendersEveryResult(t *testing.T) {
 	var mu sync.Mutex
 	var posted []int

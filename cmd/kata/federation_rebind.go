@@ -61,6 +61,9 @@ func federationRebindCmd() *cobra.Command {
 			for _, target := range targets {
 				result, rebindErr := executeFederationRebind(ctx, client, baseURL, target, hubCatalog)
 				if rebindErr != nil {
+					if !all {
+						return rebindErr
+					}
 					failed++
 					result = federationRebindCLIResult{
 						Project: target.ProjectName, ProjectID: target.ProjectID,
@@ -202,8 +205,10 @@ func printFederationRebind(cmd *cobra.Command, results []federationRebindCLIResu
 		_, err := fmt.Fprint(cmd.OutOrStdout(), output.String())
 		return err
 	case outputAgent:
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK federation-rebind count=%d failed=%d\n", len(results), failed); err != nil {
-			return err
+		if failed == 0 {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "OK federation-rebind count=%d failed=0\n", len(results)); err != nil {
+				return err
+			}
 		}
 		for _, result := range results {
 			fields := []agentField{

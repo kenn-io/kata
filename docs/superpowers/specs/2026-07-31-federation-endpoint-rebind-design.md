@@ -87,8 +87,12 @@ It preserves all binding cursor, actor, project, and synchronization fields
 and all credential token, capability, actor, and management fields. The
 operation is conditional on the state captured before remote validation or
 the exact requested target so concurrent leave, rotation, or another rebind
-cannot be silently overwritten. Cursor advancement may continue concurrently
-because the binding update changes only URL/security columns.
+cannot be silently overwritten. Remote validation may overlap ordinary sync,
+but before either local store changes the daemon drains transport work already
+using the old endpoint and blocks new work for that project through the complete
+two-store transition. A queued sync rereads the binding and credential after
+the gate opens, so no old-origin response can commit events, claims, or cursors
+after cutover.
 
 Rebind is idempotently resumable across the database/credential-file boundary.
 Repeating the same rebind must succeed from all four combinations of old or
@@ -196,8 +200,10 @@ project UIDs, or change enrollment rows on the hub.
 
 - HTTPS is required for the replacement target, so the new operation cannot
   silently preserve the old plaintext opt-in.
-- Canonical origin comparison is used for all identity checks; trailing slash
-  and equivalent URL formatting differences do not cause false mismatches.
+- Canonical full-base-URL comparison is used for persisted endpoint state. It
+  normalizes scheme, host, port, and trailing slash while preserving escaped
+  reverse-proxy path prefixes. Origin-only comparison is reserved for redirect
+  pinning and display.
 - The hub project UID is the primary same-project check. A changed project UID
   is a hard refusal requiring the normal leave/rejoin workflow.
 - Existing enrollment authentication is required before local mutation. The

@@ -156,6 +156,9 @@ are never resolved for this call. Success returns the local project,
 display-safe old and new origins, and `rebound`, `resumed`, or `unchanged`.
 Retries safely converge from fully old, credential-moved-first, binding-moved-
 first, or fully migrated state.
+Before local convergence, the action drains project-scoped federation
+transport using the old endpoint and prevents new transport from starting
+until both stores name the target.
 
 When config-driven mappings are present, `GET /api/v1/health` adds an optional
 `federation_config` object:

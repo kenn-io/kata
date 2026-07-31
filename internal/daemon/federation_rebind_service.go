@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationcoord"
 )
 
 const (
@@ -216,6 +217,10 @@ func RebindFederationReplica(
 		)
 	}
 
+	finishSyncDrain := federationcoord.BeginRebind(
+		federationcoord.Key(store.InstanceUID(), project.ID),
+	)
+	defer finishSyncDrain()
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
 	if _, pending := federationReplicaLeaveIntents[key]; pending || federationReplicaIsSuppressed(key) {
@@ -326,7 +331,7 @@ func validateFederationRebindCatalog(catalog config.CatalogDaemonConfig) (string
 			ErrFederationReplicaInvalidInput, "hub catalog entry must be remote", "",
 		)
 	}
-	normalized, err := normalizeFederationHubBaseURL(catalog.URL)
+	normalized, err := canonicalFederationRebindBaseURL(catalog.URL)
 	if err != nil {
 		return "", federationReplicaError(
 			ErrFederationReplicaInvalidInput, "hub catalog URL is invalid", "",
@@ -379,7 +384,7 @@ func classifyFederationRebindState(
 	credential config.FederationCredential,
 	targetURL string,
 ) (federationRebindLocalState, error) {
-	bindingURL, err := normalizeFederationHubBaseURL(binding.HubURL)
+	bindingURL, err := canonicalFederationRebindBaseURL(binding.HubURL)
 	if err != nil {
 		return federationRebindLocalState{}, federationReplicaError(
 			ErrFederationReplicaBindingConflict,
@@ -387,7 +392,7 @@ func classifyFederationRebindState(
 			"",
 		)
 	}
-	credentialURL, err := normalizeFederationHubBaseURL(credential.HubURL)
+	credentialURL, err := canonicalFederationRebindBaseURL(credential.HubURL)
 	if err != nil {
 		return federationRebindLocalState{}, federationReplicaError(
 			ErrFederationReplicaCredentialConflict,
@@ -408,7 +413,7 @@ func classifyFederationRebindState(
 			state.sourceHubURL = credential.HubURL
 			state.sourceInsecure = credential.AllowInsecure
 		} else {
-			sourceURL, sourceErr := normalizeFederationHubBaseURL(state.sourceHubURL)
+			sourceURL, sourceErr := canonicalFederationRebindBaseURL(state.sourceHubURL)
 			if sourceErr != nil || sourceURL != credentialURL ||
 				state.sourceInsecure != credential.AllowInsecure {
 				return federationRebindLocalState{}, federationReplicaError(
@@ -444,7 +449,7 @@ func validateFederationRebindBindingState(
 			"",
 		)
 	}
-	normalized, err := normalizeFederationHubBaseURL(current.HubURL)
+	normalized, err := canonicalFederationRebindBaseURL(current.HubURL)
 	if err != nil {
 		return federationReplicaError(
 			ErrFederationReplicaBindingConflict,
@@ -455,7 +460,7 @@ func validateFederationRebindBindingState(
 	if normalized == targetURL && !current.AllowInsecure {
 		return nil
 	}
-	sourceURL, _ := normalizeFederationHubBaseURL(state.sourceHubURL)
+	sourceURL, _ := canonicalFederationRebindBaseURL(state.sourceHubURL)
 	if normalized == sourceURL && current.AllowInsecure == state.sourceInsecure {
 		return nil
 	}
@@ -464,6 +469,28 @@ func validateFederationRebindBindingState(
 		"federation binding endpoint changed during rebind validation",
 		"retry with the current binding state",
 	)
+}
+
+func canonicalFederationRebindBaseURL(raw string) (string, error) {
+	normalized, err := normalizeFederationHubBaseURL(raw)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", err
+	}
+	origin, err := config.CanonicalHTTPOrigin(normalized)
+	if err != nil {
+		return "", err
+	}
+	canonical, err := url.Parse(origin)
+	if err != nil {
+		return "", err
+	}
+	canonical.Path = parsed.Path
+	canonical.RawPath = parsed.RawPath
+	return canonical.String(), nil
 }
 
 func registerFederationReplicaHubOperationLocked(key string) func() {

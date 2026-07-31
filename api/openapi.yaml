@@ -1367,6 +1367,21 @@ components:
         - error
         - created_at
       type: object
+    FederationRebindProjectOut:
+      additionalProperties: true
+      properties:
+        id:
+          format: int64
+          type: integer
+        name:
+          type: string
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - name
+      type: object
     FederationStatusBody:
       additionalProperties: true
       properties:
@@ -3167,7 +3182,7 @@ components:
         old_origin:
           type: string
         project:
-          $ref: "#/components/schemas/ProjectOut"
+          $ref: "#/components/schemas/FederationRebindProjectOut"
         state:
           type: string
       required:

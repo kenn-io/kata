@@ -304,6 +304,11 @@ func TestFederationRebindHandlerUsesNamedServerCatalog(t *testing.T) {
 	assert.Equal(t, "http://192.0.2.10:7777", output.OldOrigin)
 	assert.Equal(t, "https://hub.example", output.NewOrigin)
 	assert.Equal(t, "rebound", output.State)
+	var rawOutput struct {
+		Project map[string]json.RawMessage `json:"project"`
+	}
+	require.NoError(t, json.Unmarshal(body, &rawOutput))
+	assert.ElementsMatch(t, []string{"id", "uid", "name"}, mapKeys(rawOutput.Project))
 	assert.NotContains(t, string(body), "reverse-proxy")
 	assert.NotContains(t, string(body), "enrollment-secret")
 	assert.NotContains(t, string(body), "catalog-admin-secret")

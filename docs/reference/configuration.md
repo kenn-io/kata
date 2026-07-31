@@ -273,6 +273,10 @@ cursors. The catalog entry's administration `token` or `token_env` is not used
 for this validation. Restart first if the edited catalog has not yet been
 loaded by the daemon.
 
+Before changing either local endpoint record, rebind drains in-flight
+federation transport for that project and blocks new transport until the
+credential and binding agree. A queued sync then rereads the new endpoint.
+
 Removing a mapping and restarting stops managing it; it does not detach the
 existing replica or revoke its hub enrollment. Teardown is always explicit:
 

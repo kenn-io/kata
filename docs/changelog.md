@@ -13,8 +13,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added explicit, retry-safe `kata federation rebind` endpoint migration for
   moving one spoke or every local spoke to a named HTTPS hub catalog entry.
   The daemon validates the unchanged hub project identity with the existing
-  enrollment before preserving tokens, capabilities, actors, and sync cursors
-  across the URL/security-only update.
+  enrollment and drains old-endpoint sync work before preserving tokens,
+  capabilities, actors, and sync cursors across the URL/security-only update.
 - Added startup-configured spoke-to-hub project mappings that create or adopt
   local projects, enroll them idempotently, retry hub failures without
   affecting daemon readiness, and expose sanitized aggregate progress in

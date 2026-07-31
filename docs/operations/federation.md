@@ -176,6 +176,11 @@ only partially, rerunning the same command resumes safely; a fully migrated
 retry returns `unchanged`. Plain HTTP targets are rejected even when the old
 binding allowed insecure transport.
 
+The daemon drains any project sync already using the old endpoint before it
+changes either local store and holds new sync work until both stores converge.
+This prevents an old-origin response from applying events or advancing a cursor
+after cutover; the next sync rereads the new binding and credential.
+
 ## TUI enrollment workflow
 
 The TUI federation view is scoped to the active daemon. Press `F` from the
