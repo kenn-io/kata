@@ -27,7 +27,7 @@ var (
 	// ErrHubValidation classifies rejected or malformed hub requests and responses.
 	ErrHubValidation = errors.New("federation hub validation")
 
-	normalizeHubURL       = client.NormalizeRemoteURL
+	normalizeHubURL       = client.NormalizeRemoteBaseURL
 	newHubHTTPClient      = client.NewHTTPClientForTarget
 	configureHubRedirects = client.ConfigureOriginPinnedRedirects
 )
@@ -111,13 +111,17 @@ func NewHubClient(
 	if err != nil {
 		return nil, err
 	}
-	baseURL, err := normalizeHubURL(catalog.URL, catalog.AllowInsecure)
+	allowInsecure, err := config.EffectiveHTTPAllowInsecure(catalog.URL, catalog.AllowInsecure)
+	if err != nil {
+		return nil, hubError(ErrHubValidation, "hub URL validation", 0)
+	}
+	baseURL, err := normalizeHubURL(catalog.URL, allowInsecure)
 	if err != nil {
 		return nil, hubError(ErrHubValidation, "hub URL validation", 0)
 	}
 	httpClient, err := newHubHTTPClient(ctx, baseURL, client.TargetAuth{
 		Token:         token,
-		AllowInsecure: catalog.AllowInsecure,
+		AllowInsecure: allowInsecure,
 	}, client.Opts{Timeout: hubRequestTimeout})
 	if err != nil {
 		return nil, hubError(ErrHubValidation, "hub transport setup", 0)

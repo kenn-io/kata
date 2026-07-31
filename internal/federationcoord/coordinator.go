@@ -3,6 +3,7 @@
 package federationcoord
 
 import (
+	"context"
 	"strconv"
 	"sync"
 )
@@ -16,18 +17,60 @@ func Key(instanceUID string, projectID int64) string {
 
 // BeginSync admits one shared transport operation. The returned function must
 // be called when all remote responses and local commits are complete.
-func BeginSync(key string) func() {
+func BeginSync(
+	ctx context.Context,
+	key string,
+	backend any,
+	projectID int64,
+) (func(), error) {
 	gate := gateFor(key)
 	gate.RLock()
-	return gate.RUnlock
+	backendRelease := func() {}
+	if locker, ok := backend.(interface {
+		AcquireFederationProjectSharedLock(context.Context, int64) (func(), error)
+	}); ok {
+		var err error
+		backendRelease, err = locker.AcquireFederationProjectSharedLock(ctx, projectID)
+		if err != nil {
+			gate.RUnlock()
+			return nil, err
+		}
+	}
+	return coordinatedRelease(backendRelease, gate.RUnlock), nil
 }
 
 // BeginRebind drains existing transport operations and prevents new ones from
 // starting until the returned function is called.
-func BeginRebind(key string) func() {
+func BeginRebind(
+	ctx context.Context,
+	key string,
+	backend any,
+	projectID int64,
+) (func(), error) {
 	gate := gateFor(key)
 	gate.Lock()
-	return gate.Unlock
+	backendRelease := func() {}
+	if locker, ok := backend.(interface {
+		AcquireFederationProjectExclusiveLock(context.Context, int64) (func(), error)
+	}); ok {
+		var err error
+		backendRelease, err = locker.AcquireFederationProjectExclusiveLock(ctx, projectID)
+		if err != nil {
+			gate.Unlock()
+			return nil, err
+		}
+	}
+	return coordinatedRelease(backendRelease, gate.Unlock), nil
+}
+
+func coordinatedRelease(backendRelease, localRelease func()) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			backendRelease()
+			localRelease()
+		})
+	}
 }
 
 func gateFor(key string) *sync.RWMutex {

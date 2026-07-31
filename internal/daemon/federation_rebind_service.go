@@ -217,9 +217,17 @@ func RebindFederationReplica(
 		)
 	}
 
-	finishSyncDrain := federationcoord.BeginRebind(
+	finishSyncDrain, err := federationcoord.BeginRebind(
+		ctx,
 		federationcoord.Key(store.InstanceUID(), project.ID),
+		store,
+		project.ID,
 	)
+	if err != nil {
+		return RebindFederationReplicaResult{}, fmt.Errorf(
+			"coordinate federation endpoint rebind: %w", err,
+		)
+	}
 	defer finishSyncDrain()
 	ensureFederationReplicaMu.Lock()
 	defer ensureFederationReplicaMu.Unlock()
@@ -474,25 +482,7 @@ func validateFederationRebindBindingState(
 }
 
 func canonicalFederationRebindBaseURL(raw string) (string, error) {
-	normalized, err := normalizeFederationHubBaseURL(raw)
-	if err != nil {
-		return "", err
-	}
-	parsed, err := url.Parse(normalized)
-	if err != nil {
-		return "", err
-	}
-	origin, err := config.CanonicalHTTPOrigin(normalized)
-	if err != nil {
-		return "", err
-	}
-	canonical, err := url.Parse(origin)
-	if err != nil {
-		return "", err
-	}
-	canonical.Path = parsed.Path
-	canonical.RawPath = parsed.RawPath
-	return canonical.String(), nil
+	return config.CanonicalHTTPBaseURL(raw)
 }
 
 func registerFederationReplicaHubOperationLocked(key string) func() {

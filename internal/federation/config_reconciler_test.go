@@ -1486,6 +1486,76 @@ func TestReconcileMappingMatchingBindingAndCredentialIsImmediatelyConverged(t *t
 	assert.Zero(t, wakes)
 }
 
+func TestReconcileMappingRejectsPathOnlyCatalogChange(t *testing.T) {
+	store := openReconcileStore(t)
+	project := createMatchingBoundProject(t, store)
+	credentials := newFakeCredentialStore()
+	credentials.credentials[project.UID] = managedCredential()
+	hub := newFakeHub()
+	catalog := testCatalog()
+	catalog.URL = "https://hub.example/replacement-prefix"
+
+	err := federation.ReconcileMapping(
+		context.Background(), store, credentials, hub,
+		catalog, testMapping(), nil,
+	)
+
+	require.ErrorIs(t, err, federation.ErrBindingConflict)
+	assert.Zero(t, hub.resolveCalls)
+	assert.Empty(t, hub.enrollmentCalls)
+	assert.Empty(t, hub.rotationCalls)
+	assert.Empty(t, credentials.storeCalls)
+}
+
+func TestReconcileMappingHTTPSAllowInsecureUsesEffectiveFalse(t *testing.T) {
+	store := openReconcileStore(t)
+	project := createMatchingBoundProject(t, store)
+	credentials := newFakeCredentialStore()
+	credentials.credentials[project.UID] = managedCredential()
+	hub := newFakeHub()
+	catalog := testCatalog()
+	catalog.AllowInsecure = true
+
+	err := federation.ReconcileMapping(
+		context.Background(), store, credentials, hub,
+		catalog, testMapping(), nil,
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, hub.enrollmentCalls)
+	assert.Empty(t, hub.rotationCalls)
+	assert.Empty(t, credentials.storeCalls)
+	stored, found := credentials.get(project.UID)
+	require.True(t, found)
+	assert.False(t, stored.AllowInsecure)
+	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.False(t, binding.AllowInsecure)
+}
+
+func TestReconcileMappingNewHTTPSCredentialStoresEffectiveAllowInsecure(t *testing.T) {
+	store := openReconcileStore(t)
+	credentials := newFakeCredentialStore()
+	hub := newFakeHub()
+	catalog := testCatalog()
+	catalog.AllowInsecure = true
+
+	err := federation.ReconcileMapping(
+		context.Background(), store, credentials, hub,
+		catalog, testMapping(), nil,
+	)
+
+	require.NoError(t, err)
+	project, err := store.ProjectByName(context.Background(), "spoke-project")
+	require.NoError(t, err)
+	stored, found := credentials.get(project.UID)
+	require.True(t, found)
+	assert.False(t, stored.AllowInsecure)
+	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	assert.False(t, binding.AllowInsecure)
+}
+
 func TestReconcileMappingPushRepairDoesNotRotateEnrollment(t *testing.T) {
 	store := openReconcileStore(t)
 	project := createMatchingBoundProject(t, store)
@@ -2670,7 +2740,7 @@ func testMapping() config.FederationProjectConfig {
 
 func managedCredential() config.FederationCredential {
 	return config.FederationCredential{
-		HubURL: "https://HUB.EXAMPLE:443/path", HubProjectID: 42,
+		HubURL: "https://HUB.EXAMPLE:443", HubProjectID: 42,
 		Token: "managed-enrollment-secret", Capabilities: "claim,pull,push",
 		Actor: "identity-user", ManagedByConfig: true,
 		HubCatalog: "primary", HubProjectName: "hub-project", RequestedActor: "user-a",
@@ -2682,7 +2752,7 @@ func createMatchingBoundProject(t *testing.T, store *sqlitestore.Store) db.Proje
 	t.Helper()
 	project, err := store.CreateProjectWithUID(context.Background(), "spoke-project", hubProjectUID)
 	require.NoError(t, err)
-	upsertSpokeBinding(t, store, project, "https://HUB.EXAMPLE:443/path", hubProjectUID)
+	upsertSpokeBinding(t, store, project, "https://HUB.EXAMPLE:443", hubProjectUID)
 	return project
 }
 

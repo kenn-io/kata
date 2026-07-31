@@ -144,7 +144,10 @@ func handleClaimAcquire(
 	body api.ClaimActionBody,
 	principal db.ClaimPrincipal,
 ) (api.ClaimActionResponseBody, error) {
-	finishTransport := beginClaimFederationTransport(cfg, projectID)
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
 	defer finishTransport()
 
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
@@ -216,7 +219,10 @@ func handleClaimRenew(
 	body api.ClaimActionBody,
 	principal db.ClaimPrincipal,
 ) (api.ClaimActionResponseBody, error) {
-	finishTransport := beginClaimFederationTransport(cfg, projectID)
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
 	defer finishTransport()
 
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
@@ -263,7 +269,10 @@ func handleClaimRelease(
 	body api.ClaimActionBody,
 	principal db.ClaimPrincipal,
 ) (api.ClaimActionResponseBody, error) {
-	finishTransport := beginClaimFederationTransport(cfg, projectID)
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
 	defer finishTransport()
 
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
@@ -304,7 +313,10 @@ func handleClaimRelease(
 }
 
 func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, ref string) (api.ClaimStatusBody, error) {
-	finishTransport := beginClaimFederationTransport(cfg, projectID)
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
+	if err != nil {
+		return api.ClaimStatusBody{}, err
+	}
 	defer finishTransport()
 
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
@@ -361,8 +373,21 @@ func claimBinding(ctx context.Context, store db.Storage, projectID int64) (db.Fe
 	return binding, nil
 }
 
-func beginClaimFederationTransport(cfg ServerConfig, projectID int64) func() {
-	return federationcoord.BeginSync(federationcoord.Key(cfg.DB.InstanceUID(), projectID))
+func beginClaimFederationTransport(
+	ctx context.Context,
+	cfg ServerConfig,
+	projectID int64,
+) (func(), error) {
+	finish, err := federationcoord.BeginSync(
+		ctx,
+		federationcoord.Key(cfg.DB.InstanceUID(), projectID),
+		cfg.DB,
+		projectID,
+	)
+	if err != nil {
+		return nil, internalAPIError(fmt.Errorf("coordinate federation claim transport: %w", err))
+	}
+	return finish, nil
 }
 
 func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPrincipal) db.ClaimPrincipal {
@@ -795,7 +820,10 @@ func showIssueClaimRelevant(ctx context.Context, store db.Storage, projectID int
 }
 
 func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issue) (*time.Time, error) {
-	finishTransport := beginClaimFederationTransport(cfg, issue.ProjectID)
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, issue.ProjectID)
+	if err != nil {
+		return nil, err
+	}
 	defer finishTransport()
 
 	binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)

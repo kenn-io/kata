@@ -43,6 +43,47 @@ func CanonicalHTTPOrigin(raw string) (string, error) {
 	return (&url.URL{Scheme: scheme, Host: host}).String(), nil
 }
 
+// CanonicalHTTPBaseURL returns a canonical HTTP(S) origin plus its configured
+// reverse-proxy path prefix. Query, fragment, and user-info components are
+// rejected because callers append fixed API paths and pin credentials to this
+// exact base.
+func CanonicalHTTPBaseURL(raw string) (string, error) {
+	trimmed := strings.TrimRight(strings.TrimSpace(raw), "/")
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("parse HTTP base URL: %w", err)
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("HTTP base URL must not include query or fragment")
+	}
+	origin, err := CanonicalHTTPOrigin(trimmed)
+	if err != nil {
+		return "", err
+	}
+	base, err := url.Parse(origin)
+	if err != nil {
+		return "", fmt.Errorf("parse canonical HTTP origin: %w", err)
+	}
+	base.Path = u.Path
+	base.RawPath = u.RawPath
+	return base.String(), nil
+}
+
+// EffectiveHTTPAllowInsecure normalizes transport policy for a concrete URL.
+// HTTPS never needs the plaintext opt-in, even when the source configuration
+// redundantly sets it.
+func EffectiveHTTPAllowInsecure(raw string, configured bool) (bool, error) {
+	base, err := CanonicalHTTPBaseURL(raw)
+	if err != nil {
+		return false, err
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return false, err
+	}
+	return configured && u.Scheme == "http", nil
+}
+
 func httpOriginPort(u *url.URL) (string, error) {
 	raw := u.Port()
 	if raw == "" {

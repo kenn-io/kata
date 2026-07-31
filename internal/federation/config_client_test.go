@@ -25,6 +25,30 @@ const (
 	testEnrollment    = "enrollment-secret"
 )
 
+func TestHubClientPreservesCatalogPathPrefix(t *testing.T) {
+	unsetHubClientGlobalAuth(t)
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"project": map[string]any{
+				"id": 42, "uid": hubProjectUID, "name": "hub-project",
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	hub, err := federation.NewHubClient(context.Background(), config.CatalogDaemonConfig{
+		Name: "primary", URL: server.URL + "/reverse-proxy", Token: testCatalogBearer,
+		AllowInsecure: true,
+	})
+	require.NoError(t, err)
+
+	_, err = hub.ResolveProject(context.Background(), "hub-project")
+	require.NoError(t, err)
+	assert.Equal(t, "/reverse-proxy/api/v1/projects/resolve", gotPath)
+}
+
 func TestHubClientLiteralTokenResolvesCreatesEnablesAndEnrolls(t *testing.T) {
 	unsetHubClientGlobalAuth(t)
 

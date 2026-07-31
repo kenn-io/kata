@@ -538,15 +538,15 @@ func reconcilePendingLeave(
 			"pending federation leave belongs to another mapping",
 		)
 	}
-	storedOrigin, storedOriginErr := config.CanonicalHTTPOrigin(
+	storedBaseURL, storedBaseURLErr := config.CanonicalHTTPBaseURL(
 		pending.Credential.HubURL,
 	)
-	catalogOrigin, catalogOriginErr := config.CanonicalHTTPOrigin(catalog.URL)
-	if storedOriginErr != nil || catalogOriginErr != nil ||
-		storedOrigin != catalogOrigin {
+	catalogBaseURL, catalogBaseURLErr := config.CanonicalHTTPBaseURL(catalog.URL)
+	if storedBaseURLErr != nil || catalogBaseURLErr != nil ||
+		storedBaseURL != catalogBaseURL {
 		return true, reconcileError(
 			ErrConfigurationConflict,
-			"pending federation leave targets another hub origin",
+			"pending federation leave targets another hub endpoint",
 		)
 	}
 	if pending.Credential.PendingEnrollmentID == 0 {
@@ -681,7 +681,8 @@ type mappingPreflight struct {
 	credential         credentialLookup
 	managedReservation config.FederationManagedCredentialReservation
 	hasReservation     bool
-	hubOrigin          string
+	hubBaseURL         string
+	allowInsecure      bool
 	capabilities       Capabilities
 }
 
@@ -703,17 +704,23 @@ func preflightMapping(
 		return preflight,
 			reconcileError(ErrConfigurationConflict, "invalid federation mapping dependencies")
 	}
-	hubOrigin, err := config.CanonicalHTTPOrigin(catalog.URL)
+	hubBaseURL, err := config.CanonicalHTTPBaseURL(catalog.URL)
 	if err != nil {
 		return preflight,
-			reconcileError(ErrConfigurationConflict, "invalid federation hub origin")
+			reconcileError(ErrConfigurationConflict, "invalid federation hub endpoint")
+	}
+	allowInsecure, err := config.EffectiveHTTPAllowInsecure(catalog.URL, catalog.AllowInsecure)
+	if err != nil {
+		return preflight,
+			reconcileError(ErrConfigurationConflict, "invalid federation hub transport policy")
 	}
 	capabilities, err := NormalizeCapabilities(configCapabilities)
 	if err != nil {
 		return preflight,
 			reconcileError(ErrConfigurationConflict, "invalid federation capability configuration")
 	}
-	preflight.hubOrigin = hubOrigin
+	preflight.hubBaseURL = hubBaseURL
+	preflight.allowInsecure = allowInsecure
 	preflight.capabilities = capabilities
 
 	localProject, err := resolveOrCreateLocalProject(ctx, store, mapping.SpokeProject)
@@ -721,8 +728,8 @@ func preflightMapping(
 		return preflight, err
 	}
 	preflight.localProject = localProject
-	binding, hasBinding, err := readCompatibleBindingOrigin(
-		ctx, store, localProject.ID, hubOrigin,
+	binding, hasBinding, err := readCompatibleBindingBaseURL(
+		ctx, store, localProject.ID, hubBaseURL,
 	)
 	if err != nil {
 		return preflight, err
@@ -770,8 +777,8 @@ func preflightMapping(
 		}
 		if hasManagedReservation {
 			if !credentialMatchesTarget(
-				managedReservation.Credential, hubOrigin, resolvedHubProject.ID,
-				catalog.AllowInsecure, capabilities.API,
+				managedReservation.Credential, hubBaseURL, resolvedHubProject.ID,
+				allowInsecure, capabilities.API,
 			) {
 				return preflight, reconcileError(
 					ErrConfigurationConflict,
@@ -803,8 +810,8 @@ func preflightMapping(
 		}
 		if credentialState.found &&
 			!credentialMatchesTarget(
-				credentialState.credential, hubOrigin, resolvedHubProject.ID,
-				catalog.AllowInsecure, capabilities.API,
+				credentialState.credential, hubBaseURL, resolvedHubProject.ID,
+				allowInsecure, capabilities.API,
 			) {
 			return preflight, reconcileError(
 				ErrConfigurationConflict,
@@ -850,8 +857,8 @@ func preflightMapping(
 	}
 	if credentialState.found &&
 		!credentialMatchesTarget(
-			credentialState.credential, hubOrigin, hubProject.ID,
-			catalog.AllowInsecure, capabilities.API,
+			credentialState.credential, hubBaseURL, hubProject.ID,
+			allowInsecure, capabilities.API,
 		) {
 		return preflight, reconcileError(
 			ErrConfigurationConflict,
@@ -881,7 +888,7 @@ func preflightMapping(
 				reconcileError(ErrCredentialIO, "generate federation enrollment credential")
 		}
 		pendingCredential := config.FederationCredential{
-			HubURL:       hubOrigin,
+			HubURL:       hubBaseURL,
 			HubProjectID: hubProject.ID,
 			Token:        token,
 			Capabilities: capabilities.API,
@@ -889,7 +896,7 @@ func preflightMapping(
 			// yet been returned by the hub. This distinguishes an exact
 			// lost-response replay from a conflicting established identity.
 			Actor:            "",
-			AllowInsecure:    catalog.AllowInsecure,
+			AllowInsecure:    allowInsecure,
 			ManagedByConfig:  true,
 			HubCatalog:       catalog.Name,
 			HubProjectName:   mapping.HubProject,
@@ -972,11 +979,11 @@ func ensureMappingEnrollment(
 			reconcileError(ErrHubValidation, "federation hub returned invalid enrollment metadata")
 	}
 
-	credential.HubURL = preflight.hubOrigin
+	credential.HubURL = preflight.hubBaseURL
 	credential.HubProjectID = preflight.hubProject.ID
 	credential.Capabilities = preflight.capabilities.API
 	credential.Actor = enrollmentActor
-	credential.AllowInsecure = catalog.AllowInsecure
+	credential.AllowInsecure = preflight.allowInsecure
 	credential = withManagementMetadata(credential, catalog, mapping)
 	return mappingEnrollment{credential: credential, id: enrollment.ID}, nil
 }
@@ -997,7 +1004,7 @@ func convergeLocalMapping(
 	}
 
 	params := daemon.EnsureFederationReplicaParams{
-		HubURL:               preflight.hubOrigin,
+		HubURL:               preflight.hubBaseURL,
 		HubProjectID:         preflight.hubProject.ID,
 		HubProjectUID:        preflight.hubProject.UID,
 		ProjectName:          mapping.SpokeProject,
@@ -1133,11 +1140,11 @@ func resolveOrCreateLocalProject(
 	return db.Project{}, reconcileError(ErrLocalStorage, "create local federation project")
 }
 
-func readCompatibleBindingOrigin(
+func readCompatibleBindingBaseURL(
 	ctx context.Context,
 	store db.Storage,
 	projectID int64,
-	hubOrigin string,
+	hubBaseURL string,
 ) (db.FederationBinding, bool, error) {
 	binding, err := store.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
@@ -1151,10 +1158,10 @@ func readCompatibleBindingOrigin(
 		return db.FederationBinding{}, false,
 			reconcileError(ErrBindingConflict, "existing federation binding has another role")
 	}
-	existingOrigin, err := config.CanonicalHTTPOrigin(binding.HubURL)
-	if err != nil || existingOrigin != hubOrigin {
+	existingBaseURL, err := config.CanonicalHTTPBaseURL(binding.HubURL)
+	if err != nil || existingBaseURL != hubBaseURL {
 		return db.FederationBinding{}, false,
-			reconcileError(ErrBindingConflict, "existing federation binding targets another origin")
+			reconcileError(ErrBindingConflict, "existing federation binding targets another endpoint")
 	}
 	return binding, true, nil
 }
@@ -1238,13 +1245,13 @@ func readCredentialState(
 
 func credentialMatchesTarget(
 	credential config.FederationCredential,
-	hubOrigin string,
+	hubBaseURL string,
 	hubProjectID int64,
 	allowInsecure bool,
 	apiCapabilities string,
 ) bool {
-	credentialOrigin, err := config.CanonicalHTTPOrigin(credential.HubURL)
-	if err != nil || credentialOrigin != hubOrigin ||
+	credentialBaseURL, err := config.CanonicalHTTPBaseURL(credential.HubURL)
+	if err != nil || credentialBaseURL != hubBaseURL ||
 		credential.HubProjectID != hubProjectID ||
 		credential.Token == "" ||
 		credential.AllowInsecure != allowInsecure {

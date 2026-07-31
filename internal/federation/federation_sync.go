@@ -74,9 +74,15 @@ func SyncFederationOnceWithPulledEvents(
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 ) error {
-	finish := federationcoord.BeginSync(
+	finish, err := federationcoord.BeginSync(
+		ctx,
 		federationcoord.Key(store.InstanceUID(), binding.ProjectID),
+		store,
+		binding.ProjectID,
 	)
+	if err != nil {
+		return fmt.Errorf("coordinate federation sync: %w", err)
+	}
 	defer finish()
 	return syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil)
 }
@@ -793,9 +799,19 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 		if err := validateFederationRunnerLease(ctx, validateLease); err != nil {
 			return err
 		}
-		finishSync := federationcoord.BeginSync(
+		finishSync, coordinationErr := federationcoord.BeginSync(
+			ctx,
 			federationcoord.Key(r.DB.InstanceUID(), spoke.binding.ProjectID),
+			r.DB,
+			spoke.binding.ProjectID,
 		)
+		if coordinationErr != nil {
+			if errors.Is(coordinationErr, context.Canceled) {
+				return coordinationErr
+			}
+			errs = append(errs, fmt.Errorf("coordinate federation sync: %w", coordinationErr))
+			continue
+		}
 		binding, bindingReadErr := r.DB.FederationBindingByProject(ctx, spoke.binding.ProjectID)
 		if bindingReadErr != nil {
 			finishSync()
@@ -864,9 +880,15 @@ func RetryPendingClaimsOnce(
 	creds config.FederationCredential,
 	opts clientpkg.Opts,
 ) error {
-	finish := federationcoord.BeginSync(
+	finish, err := federationcoord.BeginSync(
+		ctx,
 		federationcoord.Key(store.InstanceUID(), binding.ProjectID),
+		store,
+		binding.ProjectID,
 	)
+	if err != nil {
+		return fmt.Errorf("coordinate pending federation claims: %w", err)
+	}
 	defer finish()
 	return retryPendingClaimsOnceWithFence(ctx, store, binding, creds, opts, nil)
 }
