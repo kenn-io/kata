@@ -255,6 +255,24 @@ authentication failures, and runtime conflicts do not delay daemon readiness
 or make `/health` unhealthy. Each mapping retries independently with
 exponential backoff from one second to a five-minute cap.
 
+Changing a named catalog entry's URL does not silently rewrite existing spoke
+bindings. For a config-managed spoke, reconciliation reports
+`binding_conflict` and changes nothing during the catalog-edited-but-not-yet-
+rebound window, including after a restart. Resolve that expected migration
+state explicitly:
+
+```sh
+kata federation rebind spoke-project --hub team-hub
+```
+
+The selected spoke daemon resolves `team-hub` from its own startup config. It
+requires HTTPS, validates the existing enrollment against the same hub project
+ID and UID at the new endpoint, then updates the stored endpoint without
+changing the enrollment token, capabilities, actor, project identity, or sync
+cursors. The catalog entry's administration `token` or `token_env` is not used
+for this validation. Restart first if the edited catalog has not yet been
+loaded by the daemon.
+
 Removing a mapping and restarting stops managing it; it does not detach the
 existing replica or revoke its hub enrollment. Teardown is always explicit:
 
