@@ -50,6 +50,59 @@ func (s *Store) FederationBindingByProject(ctx context.Context, projectID int64)
 	return scanFederationBinding(s.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=$1`, projectID))
 }
 
+// RebindFederationBinding conditionally updates one spoke endpoint without
+// rewriting its cursor, push, actor, identity, or sync fields.
+func (s *Store) RebindFederationBinding(
+	ctx context.Context,
+	p db.RebindFederationBindingParams,
+) (db.FederationBinding, error) {
+	var output db.FederationBinding
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		output = db.FederationBinding{}
+		current, err := scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1 FOR UPDATE`, p.ProjectID))
+		if err != nil {
+			return err
+		}
+		if current.Role != db.FederationRoleSpoke {
+			return db.ErrFederationNotSpoke
+		}
+		if current.HubProjectID != p.HubProjectID || current.HubProjectUID != p.HubProjectUID {
+			return db.ErrFederationRebindConflict
+		}
+		if current.HubURL == p.TargetHubURL && !current.AllowInsecure {
+			output = current
+			return nil
+		}
+		if current.HubURL != p.ExpectedHubURL || current.AllowInsecure != p.ExpectedAllowInsecure {
+			return db.ErrFederationRebindConflict
+		}
+
+		result, err := tx.ExecContext(ctx, `UPDATE federation_bindings
+SET hub_url=$1, allow_insecure=0,
+    updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE project_id=$2 AND role=$3 AND hub_project_id=$4 AND hub_project_uid=$5
+  AND hub_url=$6 AND allow_insecure=$7`,
+			p.TargetHubURL, p.ProjectID, string(db.FederationRoleSpoke),
+			p.HubProjectID, p.HubProjectUID, p.ExpectedHubURL,
+			boolNumber(p.ExpectedAllowInsecure))
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return db.ErrFederationRebindConflict
+		}
+		output, err = scanFederationBinding(tx.QueryRowContext(ctx,
+			federationBindingSelect+` WHERE project_id=$1`, p.ProjectID))
+		return err
+	})
+	return output, err
+}
+
 // UpsertFederationBinding creates or replaces one local binding.
 func (s *Store) UpsertFederationBinding(ctx context.Context, input db.FederationBinding) (db.FederationBinding, error) {
 	actor := strings.TrimSpace(input.Actor)

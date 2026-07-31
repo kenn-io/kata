@@ -294,6 +294,14 @@ var storageScenarios = []scenario{
 		run: checkFederationControlLifecycle,
 	},
 	{
+		name: "federation binding endpoint rebind",
+		methods: []string{
+			"CreateProject", "FederationBindingByProject", "RebindFederationBinding",
+			"UpsertFederationBinding",
+		},
+		run: checkFederationBindingEndpointRebind,
+	},
+	{
 		name: "federation enrollment rotation",
 		methods: []string{
 			"CreateFederationEnrollment", "CreateProject", "ListFederationEnrollments",

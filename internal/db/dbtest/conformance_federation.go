@@ -712,6 +712,129 @@ func checkFederationControlLifecycle(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkFederationBindingEndpointRebind(t *testing.T, store db.Storage) error {
+	t.Helper()
+	ctx := context.Background()
+	hub, err := store.CreateProject(ctx, "federation-rebind-hub")
+	if err != nil {
+		return err
+	}
+	spoke, err := store.CreateProject(ctx, "federation-rebind-spoke")
+	if err != nil {
+		return err
+	}
+	standalone, err := store.CreateProject(ctx, "federation-rebind-standalone")
+	if err != nil {
+		return err
+	}
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: hub.ID, Role: db.FederationRoleHub,
+		HubProjectUID: hub.UID, ReplayHorizonEventID: 7, Enabled: true,
+	})
+	if err != nil {
+		return err
+	}
+	original, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: spoke.ID, Role: db.FederationRoleSpoke,
+		HubURL: "http://192.0.2.10:7777", HubProjectID: hub.ID, HubProjectUID: hub.UID,
+		ReplayHorizonEventID: 10, PullCursorEventID: 11,
+		PushEnabled: true, PushCursorEventID: 12,
+		Actor: "sync-agent", AllowInsecure: true, Enabled: true,
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, tc := range []struct {
+		name   string
+		params db.RebindFederationBindingParams
+	}{
+		{
+			name: "stale source URL",
+			params: db.RebindFederationBindingParams{
+				ProjectID: spoke.ID, ExpectedHubURL: "http://192.0.2.11:7777",
+				ExpectedAllowInsecure: true, HubProjectID: hub.ID,
+				HubProjectUID: hub.UID, TargetHubURL: "https://hub.example",
+			},
+		},
+		{
+			name: "stale source security",
+			params: db.RebindFederationBindingParams{
+				ProjectID: spoke.ID, ExpectedHubURL: original.HubURL,
+				ExpectedAllowInsecure: false, HubProjectID: hub.ID,
+				HubProjectUID: hub.UID, TargetHubURL: "https://hub.example",
+			},
+		},
+		{
+			name: "different hub project ID",
+			params: db.RebindFederationBindingParams{
+				ProjectID: spoke.ID, ExpectedHubURL: original.HubURL,
+				ExpectedAllowInsecure: true, HubProjectID: hub.ID + 1,
+				HubProjectUID: hub.UID, TargetHubURL: "https://hub.example",
+			},
+		},
+		{
+			name: "different hub project UID",
+			params: db.RebindFederationBindingParams{
+				ProjectID: spoke.ID, ExpectedHubURL: original.HubURL,
+				ExpectedAllowInsecure: true, HubProjectID: hub.ID,
+				HubProjectUID: standalone.UID, TargetHubURL: "https://hub.example",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, rebindErr := store.RebindFederationBinding(ctx, tc.params)
+			require.ErrorIs(t, rebindErr, db.ErrFederationRebindConflict)
+			unchanged, readErr := store.FederationBindingByProject(ctx, spoke.ID)
+			require.NoError(t, readErr)
+			assert.Equal(t, original, unchanged)
+		})
+	}
+
+	params := db.RebindFederationBindingParams{
+		ProjectID: spoke.ID, ExpectedHubURL: original.HubURL,
+		ExpectedAllowInsecure: true, HubProjectID: hub.ID,
+		HubProjectUID: hub.UID, TargetHubURL: "https://hub.example",
+	}
+	rebound, err := store.RebindFederationBinding(ctx, params)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, "https://hub.example", rebound.HubURL)
+	assert.False(t, rebound.AllowInsecure)
+	assert.Equal(t, original.ProjectID, rebound.ProjectID)
+	assert.Equal(t, original.Role, rebound.Role)
+	assert.Equal(t, original.HubProjectID, rebound.HubProjectID)
+	assert.Equal(t, original.HubProjectUID, rebound.HubProjectUID)
+	assert.Equal(t, original.ReplayHorizonEventID, rebound.ReplayHorizonEventID)
+	assert.Equal(t, original.PullCursorEventID, rebound.PullCursorEventID)
+	assert.Equal(t, original.PushEnabled, rebound.PushEnabled)
+	assert.Equal(t, original.PushCursorEventID, rebound.PushCursorEventID)
+	assert.Equal(t, original.Actor, rebound.Actor)
+	assert.Equal(t, original.Enabled, rebound.Enabled)
+	assert.Equal(t, original.CreatedAt, rebound.CreatedAt)
+	assert.Equal(t, original.LastSyncAt, rebound.LastSyncAt)
+
+	replayed, err := store.RebindFederationBinding(ctx, params)
+	if err != nil {
+		return err
+	}
+	assert.Equal(t, rebound, replayed)
+
+	_, err = store.RebindFederationBinding(ctx, db.RebindFederationBindingParams{
+		ProjectID: hub.ID, ExpectedHubURL: "", ExpectedAllowInsecure: false,
+		HubProjectID: hub.ID, HubProjectUID: hub.UID, TargetHubURL: "https://hub.example",
+	})
+	assert.ErrorIs(t, err, db.ErrFederationNotSpoke)
+	_, err = store.RebindFederationBinding(ctx, db.RebindFederationBindingParams{
+		ProjectID: standalone.ID, ExpectedHubURL: original.HubURL,
+		ExpectedAllowInsecure: true, HubProjectID: hub.ID,
+		HubProjectUID: hub.UID, TargetHubURL: "https://hub.example",
+	})
+	assert.ErrorIs(t, err, db.ErrNotFound)
+	return nil
+}
+
 func checkFederationEnrollmentRotation(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
 	ctx := context.Background()

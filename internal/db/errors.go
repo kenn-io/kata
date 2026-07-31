@@ -221,6 +221,10 @@ var (
 	// ErrFederationNotSpoke is returned when a leave is attempted on a project
 	// whose binding is not a spoke (e.g. a hub).
 	ErrFederationNotSpoke = errors.New("federation binding is not a spoke")
+
+	// ErrFederationRebindConflict is returned when the current binding endpoint
+	// or hub identity no longer matches an endpoint rebind's source snapshot.
+	ErrFederationRebindConflict = errors.New("federation rebind conflict")
 )
 
 // LinkTargetNotFoundError carries the requested issue row id (globally unique
