@@ -51,8 +51,11 @@ var (
 type FederationRebindState string
 
 const (
-	FederationRebindStateRebound   FederationRebindState = "rebound"
-	FederationRebindStateResumed   FederationRebindState = "resumed"
+	// FederationRebindStateRebound means both local stores moved in this call.
+	FederationRebindStateRebound FederationRebindState = "rebound"
+	// FederationRebindStateResumed means this call completed a partial move.
+	FederationRebindStateResumed FederationRebindState = "resumed"
+	// FederationRebindStateUnchanged means both stores already named the target.
 	FederationRebindStateUnchanged FederationRebindState = "unchanged"
 )
 

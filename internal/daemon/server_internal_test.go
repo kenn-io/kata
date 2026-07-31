@@ -74,6 +74,9 @@ func TestNewServerClonesFederationCatalog(t *testing.T) {
 
 	catalog[0].URL = "https://changed.example"
 	catalog = append(catalog, config.CatalogDaemonConfig{Name: "another-hub"})
+	if len(catalog) != 2 {
+		t.Fatalf("caller-owned catalog append failed: %+v", catalog)
+	}
 
 	if got := srv.cfg.FederationCatalog; len(got) != 1 || got[0].URL != "https://hub.example" {
 		t.Fatalf("server catalog changed through caller-owned slice: %+v", got)

@@ -96,9 +96,10 @@ func TestRebindFederationReplicaConvergesEveryDurableState(t *testing.T) {
 				context.Background(), store, credentials,
 				daemon.RebindFederationReplicaParams{
 					ProjectID: project.ID,
-					HubCatalog: config.CatalogDaemonConfig{
+					HubCatalog: config.CatalogDaemonConfig{ //nolint:gosec // contains a non-secret test sentinel
 						Name: "primary-hub", URL: rebindTargetURL,
-						Token: "catalog-admin-secret", TokenEnv: "CATALOG_TOKEN_ENV",
+						Token:    "catalog-admin-secret",
+						TokenEnv: "CATALOG_TOKEN_ENV",
 					},
 					FetchMetadata: func(_ context.Context, hubURL, token string, projectID int64) (api.ProjectFederationBody, error) {
 						fetchCalls++
