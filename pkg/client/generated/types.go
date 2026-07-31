@@ -2896,6 +2896,43 @@ func (r ReadyResponseBody) Validate() error {
 	return errors
 }
 
+type RebindFederationReplicaRequestBody struct {
+	HubCatalog string `json:"hub_catalog" validate:"required"`
+}
+
+func (r RebindFederationReplicaRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type RebindFederationReplicaResponseBody struct {
+	NewOrigin string     `json:"new_origin" validate:"required"`
+	OldOrigin string     `json:"old_origin" validate:"required"`
+	Project   ProjectOut `json:"project"`
+	State     string     `json:"state" validate:"required"`
+}
+
+func (r RebindFederationReplicaResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.NewOrigin, "required"); err != nil {
+		errors = errors.Append("NewOrigin", err)
+	}
+	if err := typesValidator.Var(r.OldOrigin, "required"); err != nil {
+		errors = errors.Append("OldOrigin", err)
+	}
+	if v, ok := any(r.Project).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Project", err)
+		}
+	}
+	if err := typesValidator.Var(r.State, "required"); err != nil {
+		errors = errors.Append("State", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type Recurrence struct {
 	Author              string         `json:"author" validate:"required"`
 	CreatedAt           time.Time      `json:"created_at" validate:"required"`

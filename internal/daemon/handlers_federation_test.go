@@ -257,6 +257,112 @@ func TestCreateFederationReplicaAcceptsCanonicalEquivalentHubOrigin(t *testing.T
 	assert.Equal(t, "replacement-token", creds.Projects["01HZNQ7VFPK1XGD8R5MABCD4EX"].Token)
 }
 
+func TestFederationRebindHandlerUsesNamedServerCatalog(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	project, err := d.db.CreateProjectWithUID(ctx, "spoke-project", replicaHubProjectUID)
+	require.NoError(t, err)
+	_, err = d.db.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke,
+		HubURL: "http://192.0.2.10:7777", HubProjectID: 42, HubProjectUID: project.UID,
+		ReplayHorizonEventID: 10, PullCursorEventID: 11,
+		PushEnabled: true, PushCursorEventID: 12,
+		Actor: "sync-agent", AllowInsecure: true, Enabled: true,
+	})
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, config.FederationCredential{
+		HubURL: "http://192.0.2.10:7777", HubProjectID: 42,
+		Token: "enrollment-secret", Capabilities: "pull,push",
+		Actor: "sync-agent", AllowInsecure: true,
+	})
+	var fetchCalls int
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now, FederationCredentials: credentials,
+		FederationCatalog: []config.CatalogDaemonConfig{{
+			Name: "primary-hub", URL: "https://hub.example/reverse-proxy",
+			Token: "catalog-admin-secret",
+		}},
+		FederationRebindFetchMetadata: func(_ context.Context, hubURL, token string, hubProjectID int64) (api.ProjectFederationBody, error) {
+			fetchCalls++
+			assert.Equal(t, "https://hub.example/reverse-proxy", hubURL)
+			assert.Equal(t, "enrollment-secret", token)
+			assert.Equal(t, int64(42), hubProjectID)
+			return api.ProjectFederationBody{ProjectID: 42, ProjectUID: project.UID}, nil
+		},
+	})
+
+	resp, body := doReq(t, ts, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/rebind", project.ID),
+		map[string]any{"hub_catalog": "primary-hub"}, nil)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	assert.Equal(t, 1, fetchCalls)
+	var output api.RebindFederationReplicaResponseBody
+	require.NoError(t, json.Unmarshal(body, &output))
+	assert.Equal(t, project.ID, output.Project.ID)
+	assert.Equal(t, "http://192.0.2.10:7777", output.OldOrigin)
+	assert.Equal(t, "https://hub.example", output.NewOrigin)
+	assert.Equal(t, "rebound", output.State)
+	assert.NotContains(t, string(body), "reverse-proxy")
+	assert.NotContains(t, string(body), "enrollment-secret")
+	assert.NotContains(t, string(body), "catalog-admin-secret")
+}
+
+func TestFederationRebindHandlerRejectsUnknownOrDuplicateCatalog(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		catalog []config.CatalogDaemonConfig
+	}{
+		{name: "unknown", catalog: []config.CatalogDaemonConfig{{Name: "another-hub", URL: "https://hub.example"}}},
+		{name: "duplicate", catalog: []config.CatalogDaemonConfig{
+			{Name: "primary-hub", URL: "https://one.example"},
+			{Name: "primary-hub", URL: "https://two.example"},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := openTestDB(t)
+			fetchCalls := 0
+			ts := startTestServer(t, daemon.ServerConfig{
+				DB: d.db, StartedAt: d.now, FederationCatalog: tc.catalog,
+				FederationRebindFetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
+					fetchCalls++
+					return api.ProjectFederationBody{}, nil
+				},
+			})
+
+			resp, body := doReq(t, ts, http.MethodPost,
+				"/api/v1/federation/replicas/1/actions/rebind",
+				map[string]any{"hub_catalog": "primary-hub"}, nil)
+
+			assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "validation")
+			assert.Zero(t, fetchCalls)
+		})
+	}
+}
+
+func TestFederationRebindHandlerRejectsHubBinding(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	project, err := d.db.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	_, err = d.db.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleHub,
+		HubProjectUID: project.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now,
+		FederationCatalog: []config.CatalogDaemonConfig{{Name: "primary-hub", URL: "https://hub.example"}},
+	})
+
+	resp, body := doReq(t, ts, http.MethodPost,
+		fmt.Sprintf("/api/v1/federation/replicas/%d/actions/rebind", project.ID),
+		map[string]any{"hub_catalog": "primary-hub"}, nil)
+
+	assertAPIError(t, resp.StatusCode, body, http.StatusConflict, "not_a_spoke")
+}
+
 func TestCreateFederationReplicaRejectsCredentialConflictWithoutOverwrite(t *testing.T) {
 	env := testenv.New(t)
 	body := map[string]any{

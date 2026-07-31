@@ -8,6 +8,8 @@ type RotateFederationEnrollmentBody = RotateFederationEnrollmentRequestBody
 
 type LeaveFederationReplicaBody = LeaveFederationReplicaRequestBody
 
+type RebindFederationReplicaBody = RebindFederationReplicaRequestBody
+
 type InitProjectBody = InitProjectRequestBody
 
 type ResolveProjectBody = ResolveProjectRequestBody

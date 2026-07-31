@@ -343,6 +343,50 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 
 	huma.Register(humaAPI, huma.Operation{
+		OperationID: "rebindFederationReplica",
+		Method:      "POST",
+		Path:        "/api/v1/federation/replicas/{project_id}/actions/rebind",
+	}, func(ctx context.Context, in *api.RebindFederationReplicaRequest) (*api.RebindFederationReplicaResponse, error) {
+		if in.ProjectID <= 0 {
+			return nil, api.NewError(http.StatusBadRequest, "validation", "project_id must be a positive integer", "", nil)
+		}
+		catalog, err := federationRebindCatalogByName(cfg.FederationCatalog, in.Body.HubCatalog)
+		if err != nil {
+			return nil, err
+		}
+		result, err := RebindFederationReplica(
+			ctx,
+			cfg.DB,
+			cfg.federationCredentialStore(),
+			RebindFederationReplicaParams{
+				ProjectID:     in.ProjectID,
+				HubCatalog:    catalog,
+				FetchMetadata: cfg.FederationRebindFetchMetadata,
+			},
+		)
+		if err != nil {
+			return nil, federationReplicaAPIError(err)
+		}
+		oldOrigin, err := config.CanonicalHTTPOrigin(result.PreviousHubURL)
+		if err != nil {
+			return nil, internalAPIError(fmt.Errorf("canonicalize previous federation origin: %w", err))
+		}
+		newOrigin, err := config.CanonicalHTTPOrigin(result.Binding.HubURL)
+		if err != nil {
+			return nil, internalAPIError(fmt.Errorf("canonicalize rebound federation origin: %w", err))
+		}
+		if cfg.FederationWake != nil {
+			cfg.FederationWake()
+		}
+		return &api.RebindFederationReplicaResponse{Body: api.RebindFederationReplicaResponseBody{
+			Project:   dbProjectToOut(result.Project),
+			OldOrigin: oldOrigin,
+			NewOrigin: newOrigin,
+			State:     string(result.State),
+		}}, nil
+	})
+
+	huma.Register(humaAPI, huma.Operation{
 		OperationID: "leaveFederationReplica",
 		Method:      "POST",
 		Path:        "/api/v1/federation/replicas/{project_id}/actions/leave",
@@ -678,6 +722,12 @@ func federationIngestError(err error) error {
 }
 
 func federationReplicaAPIError(err error) error {
+	if errors.Is(err, db.ErrFederationNotSpoke) {
+		return api.NewError(
+			http.StatusConflict, "not_a_spoke",
+			"federation binding is not a spoke", "", nil,
+		)
+	}
 	var serviceErr *FederationReplicaError
 	if !errors.As(err, &serviceErr) {
 		return internalAPIError(err)
@@ -703,6 +753,11 @@ func federationReplicaAPIError(err error) error {
 			http.StatusConflict, "federation_credential_conflict",
 			serviceErr.message, serviceErr.hint, nil,
 		)
+	case errors.Is(err, ErrFederationReplicaHubUnavailable):
+		return api.NewError(
+			http.StatusBadGateway, "federation_hub_unavailable",
+			serviceErr.message, serviceErr.hint, nil,
+		)
 	case errors.Is(err, errFederationReplicaProjectCollision):
 		return api.NewError(
 			http.StatusConflict, "federation_project_collision",
@@ -726,6 +781,33 @@ func federationReplicaAPIError(err error) error {
 	default:
 		return internalAPIError(err)
 	}
+}
+
+func federationRebindCatalogByName(
+	catalog []config.CatalogDaemonConfig,
+	requested string,
+) (config.CatalogDaemonConfig, error) {
+	name := strings.TrimSpace(requested)
+	if name == "" {
+		return config.CatalogDaemonConfig{}, api.NewError(
+			http.StatusBadRequest, "validation", "hub_catalog is required", "", nil,
+		)
+	}
+	var match config.CatalogDaemonConfig
+	matches := 0
+	for _, entry := range catalog {
+		if entry.Name == name {
+			match = entry
+			matches++
+		}
+	}
+	if matches != 1 {
+		return config.CatalogDaemonConfig{}, api.NewError(
+			http.StatusBadRequest, "validation",
+			"hub_catalog must name exactly one configured daemon", "", nil,
+		)
+	}
+	return match, nil
 }
 
 func federationBindingToOut(binding db.FederationBinding) api.FederationBindingOut {

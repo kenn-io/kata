@@ -298,6 +298,34 @@ type CreateFederationReplicaResponse struct {
 	Body CreateFederationReplicaBody
 }
 
+// RebindFederationReplicaRequest selects a daemon-owned catalog entry as the
+// replacement endpoint for an existing spoke binding.
+type RebindFederationReplicaRequest struct {
+	ProjectID int64 `path:"project_id"`
+	Body      RebindFederationReplicaRequestBody
+}
+
+// RebindFederationReplicaRequestBody deliberately carries only a catalog name.
+// The daemon resolves the target URL itself so callers cannot redirect an
+// enrollment credential to an arbitrary origin.
+type RebindFederationReplicaRequestBody struct {
+	HubCatalog string `json:"hub_catalog"`
+}
+
+// RebindFederationReplicaResponseBody reports the converged endpoint without
+// exposing a configured path prefix or any credential material.
+type RebindFederationReplicaResponseBody struct {
+	Project   ProjectOut `json:"project"`
+	OldOrigin string     `json:"old_origin"`
+	NewOrigin string     `json:"new_origin"`
+	State     string     `json:"state"`
+}
+
+// RebindFederationReplicaResponse wraps RebindFederationReplicaResponseBody.
+type RebindFederationReplicaResponse struct {
+	Body RebindFederationReplicaResponseBody
+}
+
 // FederationPollEventsRequest is the enrollment-authenticated federation
 // transport poll route. It mirrors PollEventsRequest but carries its own bearer
 // header because the route bypasses daemon admin bearer auth.

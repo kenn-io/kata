@@ -80,6 +80,16 @@ func TestNewServerClonesFederationCatalog(t *testing.T) {
 	}
 }
 
+func TestFederationRebindHostPolicyIsRestrictedMutation(t *testing.T) {
+	policy, ok := hostOperationPolicy("rebindFederationReplica")
+	if !ok {
+		t.Fatal("rebindFederationReplica has no host operation policy")
+	}
+	if !policy.Mutation || !policy.restricted || policy.Kind != hostOperationFederationAdministration {
+		t.Fatalf("unexpected rebind host policy: %+v", policy)
+	}
+}
+
 func TestServerServesOpenAPIYAML(t *testing.T) {
 	srv := NewServer(ServerConfig{})
 	t.Cleanup(func() { _ = srv.Close() })
