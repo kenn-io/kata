@@ -171,6 +171,11 @@ retains `ManagedByConfig`, `HubCatalog`, `HubProjectName`, `RequestedActor`, and
 the matching catalog URL has been changed, the next reconciliation observes a
 binding and credential that already match its target and remains idempotent.
 
+Between changing the catalog URL and completing rebind, reconciliation reports
+`binding_conflict` because the persisted binding still names the old origin;
+it changes neither local nor hub state. That safe conflict persists across a
+daemon restart, and explicit rebind is the designed resolution.
+
 If a managed credential has no catalog name or `--hub` selects a different
 catalog name, rebind refuses with a stable conflict and directs the operator to
 resolve the declarative mapping instead. Rebind never renames or transfers
