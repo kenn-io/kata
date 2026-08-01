@@ -103,7 +103,9 @@ func federationRebindTargets(
 	args []string,
 	all bool,
 ) ([]api.FederationProjectStatus, error) {
-	status, body, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status", nil)
+	// Archived projects can retain live spoke bindings, so endpoint migrations
+	// must discover them for both explicit selectors and --all.
+	status, body, err := httpDoJSON(ctx, client, http.MethodGet, baseURL+"/api/v1/federation/status?include=archived", nil)
 	if err != nil {
 		return nil, err
 	}

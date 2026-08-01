@@ -95,6 +95,72 @@ func TestFederationRebindSinglePreservesDaemonError(t *testing.T) {
 	assert.Equal(t, "target hub unavailable", cli.Message)
 }
 
+func TestFederationRebindExplicitIncludesArchivedSpoke(t *testing.T) {
+	var posted bool
+	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/status":
+			statuses := []map[string]any{}
+			if r.URL.Query().Get("include") == "archived" {
+				statuses = append(statuses, map[string]any{
+					"project_id": 7, "project_name": "archived-spoke", "role": "spoke",
+				})
+			}
+			writeFederationRebindJSON(t, w, map[string]any{"statuses": statuses})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/federation/replicas/7/actions/rebind":
+			posted = true
+			writeFederationRebindJSON(t, w, federationRebindResponse(7, "archived-spoke", "rebound"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	out, err := runFederationRebindAgainstServer(t, server.URL,
+		"federation", "rebind", "archived-spoke", "--hub", "primary-hub")
+
+	require.NoError(t, err)
+	assert.True(t, posted)
+	assert.Contains(t, out, "archived-spoke")
+}
+
+func TestFederationRebindAllIncludesArchivedSpokes(t *testing.T) {
+	var posted []string
+	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/federation/status":
+			statuses := []map[string]any{
+				{"project_id": 3, "project_name": "active-spoke", "role": "spoke"},
+			}
+			if r.URL.Query().Get("include") == "archived" {
+				statuses = append(statuses, map[string]any{
+					"project_id": 7, "project_name": "archived-spoke", "role": "spoke",
+				})
+			}
+			writeFederationRebindJSON(t, w, map[string]any{"statuses": statuses})
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/federation/replicas/"):
+			parts := strings.Split(r.URL.Path, "/")
+			posted = append(posted, parts[5])
+			id, err := strconv.ParseInt(parts[5], 10, 64)
+			require.NoError(t, err)
+			name := "active-spoke"
+			if id == 7 {
+				name = "archived-spoke"
+			}
+			writeFederationRebindJSON(t, w, federationRebindResponse(id, name, "rebound"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	out, err := runFederationRebindAgainstServer(t, server.URL,
+		"federation", "rebind", "--all", "--hub", "primary-hub")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"3", "7"}, posted)
+	assert.Contains(t, out, "active-spoke")
+	assert.Contains(t, out, "archived-spoke")
+}
+
 func TestFederationRebindAgentPartialFailureDoesNotPrintOK(t *testing.T) {
 	server := newFederationRebindCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
