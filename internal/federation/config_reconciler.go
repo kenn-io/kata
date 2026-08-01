@@ -1251,10 +1251,13 @@ func credentialMatchesTarget(
 	apiCapabilities string,
 ) bool {
 	credentialBaseURL, err := config.CanonicalHTTPBaseURL(credential.HubURL)
+	credentialAllowInsecure, policyErr := config.EffectiveHTTPAllowInsecure(
+		credential.HubURL, credential.AllowInsecure,
+	)
 	if err != nil || credentialBaseURL != hubBaseURL ||
 		credential.HubProjectID != hubProjectID ||
 		credential.Token == "" ||
-		credential.AllowInsecure != allowInsecure {
+		policyErr != nil || credentialAllowInsecure != allowInsecure {
 		return false
 	}
 	capabilities, err := db.CanonicalFederationCapabilities(credential.Capabilities)

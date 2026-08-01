@@ -31,10 +31,10 @@ func (s *Store) acquireFederationProjectLock(
 	projectID int64,
 	shared bool,
 ) (func(), error) {
-	if s.idempotencyDB == nil {
+	if s.federationLockDB == nil {
 		return nil, errors.New("postgres federation project coordinator is unavailable")
 	}
-	tx, err := s.idempotencyDB.BeginTx(ctx, nil)
+	tx, err := s.federationLockDB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin postgres federation project lock: %w", err)
 	}

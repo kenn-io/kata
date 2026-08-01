@@ -1533,6 +1533,34 @@ func TestReconcileMappingHTTPSAllowInsecureUsesEffectiveFalse(t *testing.T) {
 	assert.False(t, binding.AllowInsecure)
 }
 
+func TestReconcileMappingAcceptsLegacyHTTPSAllowInsecure(t *testing.T) {
+	store := openReconcileStore(t)
+	project := createMatchingBoundProject(t, store)
+	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	require.NoError(t, err)
+	binding.AllowInsecure = true
+	_, err = store.UpsertFederationBinding(context.Background(), binding)
+	require.NoError(t, err)
+	credentials := newFakeCredentialStore()
+	legacy := managedCredential()
+	legacy.AllowInsecure = true
+	credentials.credentials[project.UID] = legacy
+	hub := newFakeHub()
+
+	err = federation.ReconcileMapping(
+		context.Background(), store, credentials, hub,
+		testCatalog(), testMapping(), nil,
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, hub.enrollmentCalls)
+	assert.Empty(t, hub.rotationCalls)
+	assert.Empty(t, credentials.storeCalls)
+	stored, found := credentials.get(project.UID)
+	require.True(t, found)
+	assert.True(t, stored.AllowInsecure)
+}
+
 func TestReconcileMappingNewHTTPSCredentialStoresEffectiveAllowInsecure(t *testing.T) {
 	store := openReconcileStore(t)
 	credentials := newFakeCredentialStore()

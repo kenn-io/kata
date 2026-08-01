@@ -153,51 +153,51 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 	ctx := context.Background()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
-	firstStore, err := pgstore.Open(ctx, dsn)
+	store, err := pgstore.Open(ctx, dsn)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = firstStore.Close() })
-	secondStore, err := pgstore.Open(ctx, dsn)
+	t.Cleanup(func() { _ = store.Close() })
+	project, err := store.CreateProject(ctx, "bounded-pool-project")
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = secondStore.Close() })
-	project, err := firstStore.CreateProject(ctx, "bounded-pool-project")
-	require.NoError(t, err)
-	firstStore.SetMaxOpenConns(2)
-	secondStore.SetMaxOpenConns(2)
-
-	firstDaemon := daemon.NewServer(daemon.ServerConfig{
-		DB: firstStore, StartedAt: time.Now().UTC(),
+	peer, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "initial-link target",
+		Author:    "worker",
 	})
-	t.Cleanup(func() { _ = firstDaemon.Close() })
-	firstServer := httptest.NewServer(firstDaemon.Handler())
-	t.Cleanup(firstServer.Close)
-	secondDaemon := daemon.NewServer(daemon.ServerConfig{
-		DB: secondStore, StartedAt: time.Now().UTC(),
-	})
-	t.Cleanup(func() { _ = secondDaemon.Close() })
-	secondServer := httptest.NewServer(secondDaemon.Handler())
-	t.Cleanup(secondServer.Close)
+	require.NoError(t, err)
 
-	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	const requestCount = 4
+	barrierStore := newFederationLockBarrierStore(store, requestCount)
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB: barrierStore, StartedAt: time.Now().UTC(),
+	})
+	t.Cleanup(func() { _ = server.Close() })
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+
+	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	const requestCount = 16
 	start := make(chan struct{})
 	results := make(chan concurrentCreateResult, requestCount)
 	var ready sync.WaitGroup
 	ready.Add(requestCount)
 	for i := range requestCount {
-		baseURL := firstServer.URL
-		if i%2 == 1 {
-			baseURL = secondServer.URL
-		}
 		go func() {
 			ready.Done()
 			<-start
 			key := fmt.Sprintf("distinct-request-%02d", i)
-			results <- postConcurrentCreateWithKey(requestCtx, baseURL, project.ID, key, key)
+			results <- postConcurrentCreateWithKey(
+				requestCtx, httpServer.URL, project.ID, key, key, peer.UID,
+			)
 		}()
 	}
 	ready.Wait()
 	close(start)
+	select {
+	case <-barrierStore.ready:
+	case <-requestCtx.Done():
+		t.Fatal("concurrent creates did not all reach the federation lock while holding idempotency locks")
+	}
+	close(barrierStore.release)
 
 	succeeded := 0
 	for range requestCount {
@@ -207,7 +207,50 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 		}
 	}
 	assert.Equal(t, requestCount, succeeded,
-		"distinct keys must not exhaust the main query pool while holding advisory locks")
+		"distinct keys must not exhaust the idempotency pool before federation locking")
+}
+
+type federationLockBarrierStore struct {
+	db.Storage
+	locker interface {
+		AcquireFederationProjectSharedLock(context.Context, int64) (func(), error)
+	}
+	expected int
+	ready    chan struct{}
+	release  chan struct{}
+	mu       sync.Mutex
+	arrived  int
+}
+
+func newFederationLockBarrierStore(
+	store *pgstore.Store,
+	expected int,
+) *federationLockBarrierStore {
+	return &federationLockBarrierStore{
+		Storage:  store,
+		locker:   store,
+		expected: expected,
+		ready:    make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+}
+
+func (s *federationLockBarrierStore) AcquireFederationProjectSharedLock(
+	ctx context.Context,
+	projectID int64,
+) (func(), error) {
+	s.mu.Lock()
+	s.arrived++
+	if s.arrived == s.expected {
+		close(s.ready)
+	}
+	s.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+	}
+	return s.locker.AcquireFederationProjectSharedLock(ctx, projectID)
 }
 
 type concurrentCreateResult struct {
@@ -218,18 +261,22 @@ type concurrentCreateResult struct {
 
 func postConcurrentCreate(ctx context.Context, baseURL string, projectID int64) concurrentCreateResult {
 	return postConcurrentCreateWithKey(ctx, baseURL, projectID,
-		"concurrent-request", "retry-safe create")
+		"concurrent-request", "retry-safe create", "")
 }
 
 func postConcurrentCreateWithKey(
 	ctx context.Context,
 	baseURL string,
 	projectID int64,
-	key, title string,
+	key, title, linkRef string,
 ) concurrentCreateResult {
-	payload, err := json.Marshal(map[string]any{
+	requestBody := map[string]any{
 		"actor": "worker", "title": title, "body": "one logical request", "force_new": true,
-	})
+	}
+	if linkRef != "" {
+		requestBody["links"] = []map[string]any{{"type": "related", "to_ref": linkRef}}
+	}
+	payload, err := json.Marshal(requestBody)
 	if err != nil {
 		return concurrentCreateResult{err: err}
 	}

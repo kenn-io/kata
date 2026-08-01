@@ -38,6 +38,7 @@ type Store struct {
 	installedFreshSchema bool
 	servingConn          *sql.Conn
 	federationLease      *federationRunnerLeaseState
+	federationLockDB     *sql.DB
 	idempotencyDB        *sql.DB
 	exportQ              exportQueryer
 	rotationStage        func(context.Context) error
@@ -55,7 +56,12 @@ func (s *Store) Close() error {
 		idempotencyErr = s.idempotencyDB.Close()
 		s.idempotencyDB = nil
 	}
-	return errors.Join(leaseErr, idempotencyErr, s.DB.Close())
+	var federationLockErr error
+	if s.federationLockDB != nil {
+		federationLockErr = s.federationLockDB.Close()
+		s.federationLockDB = nil
+	}
+	return errors.Join(leaseErr, idempotencyErr, federationLockErr, s.DB.Close())
 }
 
 type exportQueryer interface {
