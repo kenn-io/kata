@@ -61,6 +61,12 @@ Implementation must not slice rendered strings by byte or rune count, trim them
 to a raw string length, or split an escape sequence while adding a comment
 prefix.
 
+Before ANSI-aware wrapping, kata normalizes renderer line endings: CRLF and
+lone CR become LF, then leading and trailing LF characters are removed. This
+keeps kata's record spacing under kata's control and makes renderer output with
+or without a final newline equivalent. Spaces and internal blank lines remain
+unchanged.
+
 ## Terminal And Color Behavior
 
 Rendering is useful only when the selected output stream is an actual terminal.
@@ -135,10 +141,10 @@ without kata learning renderer-specific policy.
 
 Each non-empty Markdown field starts one renderer invocation. The sanitized
 field is the child's complete stdin and is closed at end of input. stdout is
-captured as that field's rendered value. stderr is captured for diagnostics and
-does not become part of the issue record. All fields are rendered successfully
-before kata prints the first byte, so a later comment failure cannot leave a
-partial record on stdout.
+captured as that field's rendered value. stderr is discarded rather than
+forwarded or included in errors because an arbitrary renderer may echo its
+stdin there. All fields are rendered successfully before kata prints the first
+byte, so a later comment failure cannot leave a partial record on stdout.
 
 Each invocation has its own 10-second timeout. On Unix, the renderer starts as
 the leader of a new process group. Timeout or command-context cancellation
@@ -152,9 +158,9 @@ running. The built-in renderer has no subprocess or timeout.
 
 A missing executable, non-zero exit, timeout, cancellation, or stdout read
 failure returns a human CLI error naming the configured executable and the
-field kind (`description` or `comment`). The error may include the first 4 KiB
-of stderr after terminal-safe sanitization. Errors never include the Markdown
-body itself.
+field kind (`description` or `comment`). The error includes the exit or context
+cause but no child stderr or Markdown body. A user who needs renderer-specific
+diagnostics can run the configured argv directly.
 
 The override owns renderer-specific color and width behavior. Because kata
 captures each child stdout before reinsertion, the child observes a pipe rather
@@ -168,6 +174,14 @@ captured ANSI is written to the terminal.
 `[display]` is a client preference. `kata show` reads it from the invoking
 client's own `<KATA_HOME>/config.toml` only after confirming that `--render` is
 active in human mode on a terminal.
+
+The common daemon-config decoder recognizes the `[display]` subtree only as an
+opaque client section. It does not decode or validate `markdown_renderer` while
+resolving a daemon. After the human-output and terminal gates pass, a separate
+display reader decodes and validates that subtree. A renderer value with the
+wrong TOML type or an unknown display key therefore cannot break plain,
+redirected, or daemon-serving commands, but does fail an active render request.
+Malformed TOML syntax still fails normal config parsing.
 
 No display setting, renderer argv, rendered text, terminal width, or color
 profile is sent in the HTTP request. A remote daemon returns the same raw issue
@@ -189,8 +203,10 @@ Tests will cover behavior rather than configuration-file text:
 - forced output profiles produce deterministic styled and no-color snapshots;
 - an external helper receives each field on stdin with argv and environment
   unchanged;
-- external failure produces no partial stdout and returns bounded diagnostics;
-  and
+- external output with and without a final newline reinserts identically while
+  preserving internal blank lines;
+- external failure produces no partial stdout and does not expose child stderr
+  or field content; and
 - timeout/cancellation terminates the renderer process group on Unix.
 
 The CLI reference and `show --help` will document the flag, field-scoped

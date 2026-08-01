@@ -49,14 +49,18 @@ remain separate units with narrow interfaces.
   verbatim, invoke no shell, append no flags, and leave `exec.Cmd.Env` nil so the
   child inherits the client's environment unchanged.
 - Each external field invocation has a 10-second timeout and two-second
-  termination grace period. Capture at most the first 4 KiB of diagnostic
-  stderr. Never include field content in an error.
+  termination grace period. Discard child stderr so a renderer cannot expose a
+  field by echoing stdin in its diagnostics. Never include field content in an
+  error.
 - On Unix, timeout and cancellation terminate the full renderer process group;
   on Windows, the current process abstraction guarantees only termination of
   the renderer process.
 - Renderer output is ANSI-bearing trusted presentation. Use
   `github.com/charmbracelet/x/ansi` for display width and hard wrapping; never
   byte-slice, rune-slice, or raw-length-trim it.
+- Normalize CRLF and lone CR to LF, then remove leading and trailing LF before
+  wrapping. Preserve spaces and internal blank lines so renderer output with
+  and without a final newline reinserts identically.
 - `[display]` is read from the invoking client's `<KATA_HOME>/config.toml` and
   never crosses the API boundary. No daemon, HTTP, generated-client, database,
   migration, or persisted-schema change is allowed.
@@ -183,6 +187,12 @@ func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
     }
     assert.Equal(t, "カタabcdef", textsafe.StripANSI(strings.Join(lines, "")))
 }
+
+func TestANSIWrappedLinesNormalizesOnlyOuterLineEndings(t *testing.T) {
+    want := []string{"first", "", "second"}
+    assert.Equal(t, want, ANSIWrappedLines("\nfirst\r\n\r\nsecond\r\n", 80))
+    assert.Equal(t, want, ANSIWrappedLines("first\n\nsecond", 80))
+}
 ```
 
 - [ ] **Step 2: Run the tests and confirm the missing package/API failure**
@@ -249,7 +259,9 @@ func RenderLines(markdown string, opts Options) ([]string, error) {
 }
 
 func ANSIWrappedLines(rendered string, width int) []string {
-    rendered = strings.TrimRight(rendered, "\n")
+    rendered = strings.ReplaceAll(rendered, "\r\n", "\n")
+    rendered = strings.ReplaceAll(rendered, "\r", "\n")
+    rendered = strings.Trim(rendered, "\n")
     if rendered == "" {
         return nil
     }
@@ -342,8 +354,10 @@ existing style and ANSI wrapping without maintaining a second implementation.
   `config.DisplayConfig{MarkdownRenderer []string}`.
 - Produces:
   `config.ReadDisplayConfig() (DisplayConfig, error)`.
-- `ReadDaemonConfig` recognizes `[display]` but does not apply display behavior
-  or reject an empty renderer executable on daemon startup.
+- `ReadDaemonConfig` recognizes `[display]` as an opaque client subtree but
+  does not decode or validate its values during daemon resolution.
+- `ReadDisplayConfig` separately decodes and validates only `[display]` after
+  the command's human-output and terminal gates pass.
 
 - [ ] **Step 1: Write failing display-config tests**
 
@@ -376,12 +390,27 @@ markdown_renderer = [""]
     assert.Contains(t, err.Error(), "display.markdown_renderer executable must not be empty")
 }
 
-func TestReadDaemonConfigDoesNotApplyDisplayValidation(t *testing.T) {
+func TestReadDisplayConfigRejectsUnknownDisplayKey(t *testing.T) {
     home := t.TempDir()
     t.Setenv("KATA_HOME", home)
     require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
 [display]
-markdown_renderer = [""]
+markdown_renderer = ["renderer"]
+future_option = true
+`), 0o600))
+
+    _, err := config.ReadDisplayConfig()
+    require.Error(t, err)
+    assert.Contains(t, err.Error(), "display.future_option")
+}
+
+func TestReadDaemonConfigTreatsDisplayAsOpaque(t *testing.T) {
+    home := t.TempDir()
+    t.Setenv("KATA_HOME", home)
+    require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[display]
+markdown_renderer = "not-an-array"
+future_option = true
 `), 0o600))
 
     _, err := config.ReadDaemonConfig()
@@ -389,29 +418,41 @@ markdown_renderer = [""]
 }
 ```
 
-The third test protects the client-only ownership boundary: a renderer typo is
-reported when the client asks to render, not when a daemon serves requests.
+The last two tests protect both halves of the client-only ownership boundary:
+the focused reader reports a display typo when the client asks to render, while
+common daemon resolution leaves the entire display subtree opaque.
 
 - [ ] **Step 2: Run the focused tests and confirm the missing API failure**
 
 Run:
 
 ```sh
-go test ./internal/config -run 'TestRead(DisplayConfig|DaemonConfigDoesNotApplyDisplayValidation)' -count=1
+go test ./internal/config -run 'TestRead(DisplayConfig|DaemonConfigTreatsDisplayAsOpaque)' -count=1
 ```
 
-Expected: FAIL because `DisplayConfig`, `DaemonConfig.Display`, and
+Expected: FAIL because `DisplayConfig`, the opaque-display exception, and
 `ReadDisplayConfig` do not exist.
 
-- [ ] **Step 3: Add the client display shape and focused reader**
+- [ ] **Step 3: Make the common decoder recognize an opaque client section**
 
-Add to `DaemonConfig`:
+Keep `[display]` out of `DaemonConfig`: the daemon must not gain a renderer
+setting. In `ReadDaemonConfig`, retain strict unknown-key rejection for every
+other section but exclude keys whose first TOML path segment is exactly
+`display`:
 
 ```go
-Display DisplayConfig `toml:"display"`
+func isDisplayConfigKey(key toml.Key) bool {
+    return len(key) > 0 && key[0] == "display"
+}
 ```
 
-Add the type and reader:
+Apply this predicate only when filtering `meta.Undecoded()`. The file still has
+to be syntactically valid TOML. Do not ignore similarly named sections such as
+`[display_typo]`.
+
+- [ ] **Step 4: Add the separate focused display reader**
+
+Add the type and reader in `daemon_config.go`:
 
 ```go
 type DisplayConfig struct {
@@ -419,22 +460,49 @@ type DisplayConfig struct {
 }
 
 func ReadDisplayConfig() (DisplayConfig, error) {
-    cfg, err := ReadDaemonConfig()
+    path, err := DaemonConfigPath()
     if err != nil {
         return DisplayConfig{}, err
     }
-    display := cfg.Display
-    if len(display.MarkdownRenderer) > 0 && display.MarkdownRenderer[0] == "" {
+    data, err := os.ReadFile(path)
+    if errors.Is(err, os.ErrNotExist) {
+        return DisplayConfig{}, nil
+    }
+    if err != nil {
+        return DisplayConfig{}, fmt.Errorf("read %s: %w", path, err)
+    }
+
+    var file struct {
+        Display DisplayConfig `toml:"display"`
+    }
+    meta, err := toml.Decode(string(data), &file)
+    if err != nil {
+        return DisplayConfig{}, fmt.Errorf("parse %s: %w", path, err)
+    }
+    var unknown []string
+    for _, key := range meta.Undecoded() {
+        if isDisplayConfigKey(key) {
+            unknown = append(unknown, key.String())
+        }
+    }
+    if len(unknown) > 0 {
+        return DisplayConfig{}, fmt.Errorf(
+            "parse %s: unknown display key(s): %s", path, strings.Join(unknown, ", "),
+        )
+    }
+    if len(file.Display.MarkdownRenderer) > 0 && file.Display.MarkdownRenderer[0] == "" {
         return DisplayConfig{}, fmt.Errorf("display.markdown_renderer executable must not be empty")
     }
-    return display, nil
+    return file.Display, nil
 }
 ```
 
 Do not trim, split, normalize, or append to `MarkdownRenderer`; exact argv
-preservation is the contract.
+preservation is the contract. This decoder ignores unrelated top-level
+sections semantically, although invalid TOML syntax anywhere in the shared file
+still fails parsing.
 
-- [ ] **Step 4: Run config tests and verify green**
+- [ ] **Step 5: Run config tests and verify green**
 
 Run:
 
@@ -444,7 +512,7 @@ go test ./internal/config -count=1
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the client configuration boundary**
+- [ ] **Step 6: Commit the client configuration boundary**
 
 Invoke the commit and privacy-scrub skills, then run:
 
@@ -657,14 +725,18 @@ func TestShowMarkdownRendererHelperProcess(t *testing.T) {
     }
     mode := os.Args[marker+1]
     switch mode {
-    case "echo":
+    case "echo", "echo-newline":
         payload, err := io.ReadAll(os.Stdin)
         if err != nil {
             os.Exit(21)
         }
         fmt.Printf("arg=%s env=%s input=%s", os.Args[marker+2], os.Getenv("SHOW_RENDER_ENV"), payload)
+        if mode == "echo-newline" {
+            fmt.Println()
+        }
     case "fail":
-        _, _ = os.Stderr.WriteString(strings.Repeat("x", rendererStderrLimit+512))
+        payload, _ := io.ReadAll(os.Stdin)
+        _, _ = fmt.Fprintf(os.Stderr, "renderer rejected %s", payload)
         os.Exit(9)
     case "wait":
         select {}
@@ -701,7 +773,19 @@ func TestExternalShowMarkdownRendererPassesArgvEnvAndStdin(t *testing.T) {
     assert.Equal(t, "arg=argument with spaces env=inherited input=**hello**", got)
 }
 
-func TestExternalShowMarkdownRendererBoundsSafeStderr(t *testing.T) {
+func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *testing.T) {
+    t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
+    var got [][]string
+    for _, mode := range []string{"echo", "echo-newline"} {
+        renderer := helperRenderer(mode, "argument")
+        rendered, err := renderer.Render(context.Background(), markdownComment, "body", 80)
+        require.NoError(t, err)
+        got = append(got, markdownrender.ANSIWrappedLines(rendered, 80))
+    }
+    assert.Equal(t, got[0], got[1])
+}
+
+func TestExternalShowMarkdownRendererDiscardsStderr(t *testing.T) {
     t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
     renderer := helperRenderer("fail")
 
@@ -710,7 +794,7 @@ func TestExternalShowMarkdownRendererBoundsSafeStderr(t *testing.T) {
     assert.Contains(t, err.Error(), "renderer")
     assert.Contains(t, err.Error(), "comment")
     assert.NotContains(t, err.Error(), "private body")
-    assert.LessOrEqual(t, len(err.Error()), rendererStderrLimit+512)
+    assert.NotContains(t, err.Error(), "renderer rejected")
 }
 
 func TestExternalShowMarkdownRendererNamesMissingExecutable(t *testing.T) {
@@ -792,8 +876,8 @@ Run:
 go test ./cmd/kata -run 'Test(External|Builtin|Configured)ShowMarkdownRenderer' -count=1
 ```
 
-Expected: FAIL because the renderer types, constants, constructors, and stderr
-bound do not exist.
+Expected: FAIL because the renderer types, constants, and constructors do not
+exist.
 
 - [ ] **Step 4: Implement the renderer interface and built-in backend**
 
@@ -801,9 +885,8 @@ Create `cmd/kata/show_markdown.go` with:
 
 ```go
 const (
-    rendererTimeout     = 10 * time.Second
-    rendererGrace       = 2 * time.Second
-    rendererStderrLimit = 4 << 10
+    rendererTimeout = 10 * time.Second
+    rendererGrace   = 2 * time.Second
 )
 
 type markdownFieldKind string
@@ -851,29 +934,7 @@ func (r *rowRenderer) markdownRenderer() showMarkdownRenderer {
 }
 ```
 
-- [ ] **Step 5: Implement bounded diagnostics and the external backend**
-
-Use an internal writer that records only the first 4 KiB while reporting full
-writes to the child:
-
-```go
-type cappedWriter struct {
-    buf bytes.Buffer
-    max int
-}
-
-func (w *cappedWriter) Write(p []byte) (int, error) {
-    original := len(p)
-    remaining := w.max - w.buf.Len()
-    if remaining > 0 {
-        if len(p) > remaining {
-            p = p[:remaining]
-        }
-        _, _ = w.buf.Write(p)
-    }
-    return original, nil
-}
-```
+- [ ] **Step 5: Implement the external backend without stderr exposure**
 
 Implement `externalShowMarkdownRenderer` with explicit test seams:
 
@@ -899,7 +960,8 @@ Its `Render` method must:
 2. call `exec.CommandContext(renderCtx, argv[0], argv[1:]...)`;
 3. leave `cmd.Env` nil;
 4. set stdin to the sanitized field and stdout to a `bytes.Buffer`;
-5. set stderr to `cappedWriter{max: rendererStderrLimit}`;
+5. set stderr to `io.Discard` so renderer diagnostics cannot echo a field into
+   kata's error path;
 6. call `processtree.Prepare(cmd)`;
 7. set `cmd.Cancel` to call
    `processtree.TerminateWithGrace(cmd, renderer.grace)`;
@@ -910,16 +972,14 @@ Its `Render` method must:
 Use this error builder for process failures:
 
 ```go
-func rendererError(executable string, kind markdownFieldKind, cause error, stderr string) error {
-    safe := strings.TrimSpace(textsafe.Block(stderr))
-    if safe == "" {
-        return fmt.Errorf("markdown renderer %q failed for %s: %w", executable, kind, cause)
-    }
-    return fmt.Errorf("markdown renderer %q failed for %s: %w: %s", executable, kind, cause, safe)
+func rendererError(executable string, kind markdownFieldKind, cause error) error {
+    return fmt.Errorf("markdown renderer %q failed for %s: %w", executable, kind, cause)
 }
 ```
 
-Do not include the field body in diagnostics.
+Do not forward, capture, or include child stderr. The executable, field kind,
+and exit or context cause are the complete kata-owned diagnostic. Users can run
+the configured argv directly when they need renderer-specific stderr.
 
 - [ ] **Step 6: Implement configured backend selection**
 
@@ -958,7 +1018,7 @@ git commit -m "Add Markdown field renderer backends"
 
 The commit body should explain that Glamour is the portable default and that
 external argv, environment, width policy, and process lifetime remain
-user-owned and bounded.
+user-owned while kata bounds each invocation's lifetime.
 
 ---
 
@@ -1044,7 +1104,8 @@ func TestShowRenderNonTTYKeepsPlainOutputAndSkipsDisplayConfig(t *testing.T) {
     t.Setenv("KATA_HOME", home)
     require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
 [display]
-markdown_renderer = [""]
+markdown_renderer = "not-an-array"
+future_option = true
 `), 0o600))
 
     plain := runCLI(t, env, dir, "show", ref)
@@ -1141,8 +1202,8 @@ Run:
 go test ./cmd/kata -run 'TestShowRender(RejectsStructuredModes|NonTTYKeepsPlainOutputAndSkipsDisplayConfig)|TestNext_' -count=1
 ```
 
-Expected: PASS. The non-TTY test must succeed despite the invalid display
-renderer, proving the config was not read.
+Expected: PASS. The non-TTY test must succeed despite the wrong renderer type
+and unknown display key, proving the focused display decoder was not called.
 
 - [ ] **Step 6: Write the failing field-scope renderer test**
 
@@ -1528,7 +1589,8 @@ redirects and pipelines.
 - Documents `kata show <issue-ref> [--render]`.
 - Documents `[display].markdown_renderer` as a local client preference.
 - Documents the built-in default, exact argv/environment ownership, per-field
-  invocation, and non-TTY pipeline behavior.
+  invocation, output normalization, hidden child stderr, and non-TTY pipeline
+  behavior.
 
 - [ ] **Step 1: Update the CLI reference**
 
@@ -1576,7 +1638,15 @@ markdown_renderer = ["glow", "-", "-s", "dark", "-w", "80"]
 kata starts the configured program once per non-empty Markdown field. Because
 the child's stdout is captured, users are responsible for renderer-specific
 color and width flags or inherited environment variables such as
-`CLICOLOR_FORCE`.
+`CLICOLOR_FORCE`. kata treats output with or without a final newline the same,
+while preserving internal blank lines. Renderer stderr is discarded because a
+program may echo the Markdown input there; run the configured argv directly to
+diagnose renderer-specific failures.
+
+The common daemon-config path recognizes `[display]` without decoding it. kata
+validates this client section only when `show --render` is active on a terminal,
+so a display-only typo cannot break daemon startup, plain output, or redirected
+output.
 ````
 
 - [ ] **Step 3: Format and validate documentation**
