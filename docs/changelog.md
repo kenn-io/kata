@@ -52,6 +52,32 @@ and improves agent and embedded-service integrations.
 - Thanks to [Matthew Jacobs](https://github.com/mjacobs) for the Codex CLI
   attention hooks.
 
+## 0.12.1
+<small>2026-07-21</small>
+
+kata 0.12.1 hardens daemon credential routing, embedded-service boundaries, and
+repeatable query filters.
+
+**Improvements**
+
+- Added restricted embedding policies and transaction fences so host-owned
+  authorization is enforced at the same boundary as Kata writes and worker
+  operations.
+- Preserved repeated values in query filters, including label, exclusion,
+  metadata, actor, and digest filters.
+
+**Bug fixes**
+
+- Refused Git-tracked `.kata.local.toml` files so a committed daemon redirect
+  cannot route a global bearer token to an untrusted origin.
+
+**Acknowledgements**
+
+- Thanks to [Matthew Jacobs](https://github.com/mjacobs) for the tracked-local
+  configuration guard that prevents daemon credential misrouting.
+- Thanks to [Wes McKinney](https://github.com/wesm) for restricted embedding
+  policies, transaction fences, and repeated query-filter handling.
+
 ## 0.12.0
 <small>2026-07-20</small>
 
