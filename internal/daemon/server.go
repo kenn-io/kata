@@ -30,12 +30,17 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
-	DB                       db.Storage
-	StartedAt                time.Time
-	Endpoint                 *kitdaemon.Endpoint
-	Broadcaster              *EventBroadcaster
-	FederationWake           func()
-	FederationCredentials    config.FederationCredentialStore
+	DB                            db.Storage
+	StartedAt                     time.Time
+	Endpoint                      *kitdaemon.Endpoint
+	Broadcaster                   *EventBroadcaster
+	FederationWake                func()
+	FederationCredentials         config.FederationCredentialStore
+	FederationCatalog             []config.CatalogDaemonConfig
+	FederationRebindFetchMetadata FederationRebindMetadataFetcher
+	// DisableFederationRebind omits the rebind operation when the embedding
+	// host does not expose a catalog and exact credential replacement.
+	DisableFederationRebind  bool
 	GitHubSyncFetcher        githubsync.Fetcher
 	GitHubSyncConfig         config.GitHubSyncConfig
 	GitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
@@ -165,6 +170,7 @@ func NewServer(cfg ServerConfig) *Server {
 	if cfg.FederationCredentials == nil {
 		cfg.FederationCredentials = config.DefaultFederationCredentialStore()
 	}
+	cfg.FederationCatalog = append([]config.CatalogDaemonConfig(nil), cfg.FederationCatalog...)
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)

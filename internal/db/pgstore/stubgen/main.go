@@ -75,6 +75,7 @@ var alreadyImplemented = map[string]bool{
 	"RecordFederationSyncPushStarted":      true, // federation_control.go
 	"RecordFederationSyncPushSuccess":      true, // federation_control.go
 	"RecordFederationSyncReset":            true, // federation_control.go
+	"RebindFederationBinding":              true, // federation_control.go
 	"RefreshProjectFederationBaseline":     true, // federation_projection.go
 	"RetryFederationQuarantine":            true, // federation_quarantine.go
 	"RevokeFederationEnrollment":           true, // federation_control.go

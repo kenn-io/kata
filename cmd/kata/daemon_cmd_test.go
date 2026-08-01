@@ -1029,6 +1029,35 @@ func TestDaemonFederationConfigNoMappingsSkipsReconcilerFactory(t *testing.T) {
 	assert.Zero(t, factoryCalls.Load())
 }
 
+func TestDaemonWiresNamedCatalogToFederationRebindRoute(t *testing.T) {
+	baseURL := startDaemonWithFederationConfig(t, `
+[[daemon]]
+name = "primary-hub"
+url = "https://hub.example"
+`)
+	requestBody := strings.NewReader(`{"hub_catalog":"primary-hub"}`)
+	request, err := http.NewRequestWithContext(
+		context.Background(), http.MethodPost,
+		baseURL+"/api/v1/federation/replicas/999/actions/rebind", requestBody,
+	)
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusNotFound, response.StatusCode, string(body))
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(body, &envelope))
+	assert.Equal(t, "federation_project_not_found", envelope.Error.Code, string(body))
+}
+
 type daemonFederationHealth struct {
 	OK               bool                        `json:"ok"`
 	FederationConfig *api.FederationConfigHealth `json:"federation_config"`

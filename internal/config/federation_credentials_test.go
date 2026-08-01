@@ -24,6 +24,38 @@ func TestReadFederationCredentialsMissingReturnsEmpty(t *testing.T) {
 	assert.Empty(t, creds.Projects)
 }
 
+func TestFederationTransportCredentialUsesBindingTarget(t *testing.T) {
+	credential := config.FederationCredential{
+		HubURL: "http://old-hub.example", HubProjectID: 41,
+		Token: "enrollment-token", Capabilities: "pull,claim", Actor: "sync-agent",
+		AllowInsecure: true,
+	}
+
+	got := config.FederationTransportCredential(
+		"https://new-hub.example/reverse-proxy", 42, false, credential,
+	)
+
+	assert.Equal(t, "https://new-hub.example/reverse-proxy", got.HubURL)
+	assert.Equal(t, int64(42), got.HubProjectID)
+	assert.False(t, got.AllowInsecure)
+	assert.Equal(t, "enrollment-token", got.Token)
+	assert.Equal(t, "pull,claim", got.Capabilities)
+	assert.Equal(t, "sync-agent", got.Actor)
+}
+
+func TestFederationTransportCredentialPreservesMatchingLegacyPlaintextPolicy(t *testing.T) {
+	credential := config.FederationCredential{
+		HubURL: "http://HUB.EXAMPLE:80/reverse-proxy/", HubProjectID: 42,
+		Token: "enrollment-token", AllowInsecure: true,
+	}
+
+	got := config.FederationTransportCredential(
+		"http://hub.example/reverse-proxy", 42, false, credential,
+	)
+
+	assert.True(t, got.AllowInsecure)
+}
+
 func TestWriteFederationCredentialRoundTrips(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

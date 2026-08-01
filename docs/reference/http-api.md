@@ -146,6 +146,20 @@ non-secret hub coordinates needed for revoke. The client then performs hub
 cleanup and calls the endpoint again without either flag for authoritative
 local teardown. Repeating prepare and finalization is safe after interruption.
 
+`POST /api/v1/federation/replicas/{project_id}/actions/rebind` accepts only
+`{"hub_catalog":"<name>"}`. The server resolves that name from its own daemon
+catalog; callers cannot supply a replacement URL or credential. It requires a
+remote HTTPS entry, deliberately sends the spoke's existing enrollment token
+to that configured endpoint, and proceeds only when federation metadata
+returns the persisted hub project ID and UID. Catalog administration tokens
+are never resolved for this call. Success returns the local project,
+display-safe old and new origins, and `rebound`, `resumed`, or `unchanged`.
+Retries safely converge from fully old, credential-moved-first, binding-moved-
+first, or fully migrated state.
+Before local convergence, the action drains project-scoped federation
+transport using the old endpoint and prevents new transport from starting
+until both stores name the target.
+
 When config-driven mappings are present, `GET /api/v1/health` adds an optional
 `federation_config` object:
 

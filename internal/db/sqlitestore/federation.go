@@ -42,6 +42,81 @@ func (d *Store) FederationBindingByProject(ctx context.Context, projectID int64)
 	return federationBindingByProject(ctx, d, projectID)
 }
 
+// RebindFederationBinding conditionally updates one spoke endpoint without
+// rewriting its cursor, push, actor, identity, or sync fields.
+func (d *Store) RebindFederationBinding(
+	ctx context.Context,
+	p db.RebindFederationBindingParams,
+) (db.FederationBinding, error) {
+	return retryWrite1(ctx, d, func() (db.FederationBinding, error) {
+		return d.rebindFederationBinding(ctx, p)
+	})
+}
+
+func (d *Store) rebindFederationBinding(
+	ctx context.Context,
+	p db.RebindFederationBindingParams,
+) (db.FederationBinding, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	current, err := federationBindingByProject(ctx, tx, p.ProjectID)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if current.Role != db.FederationRoleSpoke {
+		return db.FederationBinding{}, db.ErrFederationNotSpoke
+	}
+	if current.HubProjectID != p.HubProjectID || current.HubProjectUID != p.HubProjectUID {
+		return db.FederationBinding{}, db.ErrFederationRebindConflict
+	}
+	if current.HubURL == p.TargetHubURL && !current.AllowInsecure {
+		return current, nil
+	}
+	if current.HubURL != p.ExpectedHubURL || current.AllowInsecure != p.ExpectedAllowInsecure {
+		return db.FederationBinding{}, db.ErrFederationRebindConflict
+	}
+
+	allowInsecure := 0
+	if p.ExpectedAllowInsecure {
+		allowInsecure = 1
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE federation_bindings
+		   SET hub_url = ?,
+		       allow_insecure = 0,
+		       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+		 WHERE project_id = ?
+		   AND role = ?
+		   AND hub_project_id = ?
+		   AND hub_project_uid = ?
+		   AND hub_url = ?
+		   AND allow_insecure = ?`,
+		p.TargetHubURL, p.ProjectID, string(db.FederationRoleSpoke),
+		p.HubProjectID, p.HubProjectUID, p.ExpectedHubURL, allowInsecure)
+	if err != nil {
+		return db.FederationBinding{}, fmt.Errorf("rebind federation binding: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if count == 0 {
+		return db.FederationBinding{}, db.ErrFederationRebindConflict
+	}
+	rebound, err := federationBindingByProject(ctx, tx, p.ProjectID)
+	if err != nil {
+		return db.FederationBinding{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.FederationBinding{}, err
+	}
+	return rebound, nil
+}
+
 // FederationSyncStatusByProject returns the stored sync status for one local
 // federation project.
 func (d *Store) FederationSyncStatusByProject(ctx context.Context, projectID int64) (db.FederationSyncStatus, error) {

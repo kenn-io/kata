@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federationcoord"
 )
 
 func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
@@ -143,6 +144,12 @@ func handleClaimAcquire(
 	body api.ClaimActionBody,
 	principal db.ClaimPrincipal,
 ) (api.ClaimActionResponseBody, error) {
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
+	defer finishTransport()
+
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
@@ -212,6 +219,12 @@ func handleClaimRenew(
 	body api.ClaimActionBody,
 	principal db.ClaimPrincipal,
 ) (api.ClaimActionResponseBody, error) {
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
+	defer finishTransport()
+
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
@@ -256,6 +269,12 @@ func handleClaimRelease(
 	body api.ClaimActionBody,
 	principal db.ClaimPrincipal,
 ) (api.ClaimActionResponseBody, error) {
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
+	if err != nil {
+		return api.ClaimActionResponseBody{}, err
+	}
+	defer finishTransport()
+
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
@@ -294,6 +313,12 @@ func handleClaimRelease(
 }
 
 func handleClaimStatus(ctx context.Context, cfg ServerConfig, projectID int64, ref string) (api.ClaimStatusBody, error) {
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
+	if err != nil {
+		return api.ClaimStatusBody{}, err
+	}
+	defer finishTransport()
+
 	binding, err := claimBinding(ctx, cfg.DB, projectID)
 	if err != nil {
 		return api.ClaimStatusBody{}, err
@@ -348,6 +373,23 @@ func claimBinding(ctx context.Context, store db.Storage, projectID int64) (db.Fe
 	return binding, nil
 }
 
+func beginClaimFederationTransport(
+	ctx context.Context,
+	cfg ServerConfig,
+	projectID int64,
+) (func(), error) {
+	finish, err := federationcoord.BeginSync(
+		ctx,
+		federationcoord.Key(cfg.DB.InstanceUID(), projectID),
+		cfg.DB,
+		projectID,
+	)
+	if err != nil {
+		return nil, internalAPIError(fmt.Errorf("coordinate federation claim transport: %w", err))
+	}
+	return finish, nil
+}
+
 func boundSpokeClaimPrincipal(binding db.FederationBinding, principal db.ClaimPrincipal) db.ClaimPrincipal {
 	if binding.Role != db.FederationRoleSpoke {
 		return principal
@@ -383,12 +425,9 @@ func claimForwardClient(
 	if strings.TrimSpace(cred.Token) == "" {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation claim credentials are unavailable", "", nil)
 	}
-	if cred.HubURL == "" {
-		cred.HubURL = binding.HubURL
-	}
-	if cred.HubProjectID == 0 {
-		cred.HubProjectID = binding.HubProjectID
-	}
+	cred = config.FederationTransportCredential(
+		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
+	)
 	client, err := newClaimHubClient(ctx, cred.HubURL, cred.Token, cred.AllowInsecure)
 	if err != nil {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", err.Error(), "", nil)
@@ -778,6 +817,12 @@ func showIssueClaimRelevant(ctx context.Context, store db.Storage, projectID int
 }
 
 func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issue) (*time.Time, error) {
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, issue.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer finishTransport()
+
 	binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil

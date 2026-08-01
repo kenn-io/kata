@@ -1317,6 +1317,20 @@ components:
         - error
         - created_at
       type: object
+    FederationRebindProjectOut:
+      properties:
+        id:
+          format: int64
+          type: integer
+        name:
+          type: string
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - name
+      type: object
     FederationStatusBody:
       properties:
         statuses:
@@ -3006,6 +3020,30 @@ components:
       required:
         - issues
       type: object
+    RebindFederationReplicaRequestBody:
+      additionalProperties: false
+      properties:
+        hub_catalog:
+          type: string
+      required:
+        - hub_catalog
+      type: object
+    RebindFederationReplicaResponseBody:
+      properties:
+        new_origin:
+          type: string
+        old_origin:
+          type: string
+        project:
+          $ref: "#/components/schemas/FederationRebindProjectOut"
+        state:
+          type: string
+      required:
+        - project
+        - old_origin
+        - new_origin
+        - state
+      type: object
     Recurrence:
       properties:
         author:
@@ -3754,6 +3792,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LeaveFederationReplicaResultBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/federation/replicas/{project_id}/actions/rebind:
+    post:
+      operationId: rebindFederationReplica
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RebindFederationReplicaRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RebindFederationReplicaResponseBody"
           description: OK
         default:
           content:

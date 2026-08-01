@@ -866,6 +866,7 @@ func TestClaimForwardCrossOriginRedirectDoesNotReachRedirectTarget(t *testing.T)
 		Token:        token,
 		Capabilities: "claim",
 	}))
+	setClaimBindingHubURL(t, spoke, spokeProject.ID, redirector.URL)
 
 	var out claimResponseBody
 	resp := claimPost(t, spoke, spokeProject.ID, issue.ShortID, "claim", map[string]any{
@@ -906,6 +907,7 @@ func TestPendingClaimOfflineAcquireEnqueuesAndReleaseDoesNotClearCache(t *testin
 		Token:        token,
 		Capabilities: "claim",
 	}))
+	setClaimBindingHubURL(t, spoke, spokeProject.ID, offlineHubURL)
 	resp, raw := envDoRaw(t, spoke, http.MethodPost, claimActionPath(spokeProject.ID, issue.ShortID, "release"),
 		map[string]any{"holder": "spoke-cli", "client_kind": "cli", "reason": "done"}, nil)
 	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, string(raw))
@@ -943,6 +945,7 @@ func TestPendingClaimOfflineAcquireDuplicateReturnsExistingRequest(t *testing.T)
 		Token:        token,
 		Capabilities: "claim",
 	}))
+	setClaimBindingHubURL(t, spoke, spokeProject.ID, offlineHubURL)
 	body := map[string]any{
 		"holder":      "offline-cli",
 		"client_kind": "cli",
@@ -979,6 +982,7 @@ func TestPendingClaimUnixHubOfflineAcquireEnqueues(t *testing.T) {
 		Token:        token,
 		Capabilities: "claim",
 	}))
+	setClaimBindingHubURL(t, spoke, spokeProject.ID, "http://kata.invalid")
 
 	var pending claimResponseBody
 	resp := claimPost(t, spoke, spokeProject.ID, issue.ShortID, "claim", map[string]any{
@@ -1106,6 +1110,15 @@ func createClaimForwardingPair(
 	require.NoError(t, err)
 	created := createClaimEnrollment(t, hub, hubProject.ID, spoke.DB.InstanceUID(), capabilities)
 	return hub, spoke, hubProject, spokeProject, issue, created.Token
+}
+
+func setClaimBindingHubURL(t *testing.T, spoke *testenv.Env, projectID int64, hubURL string) {
+	t.Helper()
+	binding, err := spoke.DB.FederationBindingByProject(context.Background(), projectID)
+	require.NoError(t, err)
+	binding.HubURL = hubURL
+	_, err = spoke.DB.UpsertFederationBinding(context.Background(), binding)
+	require.NoError(t, err)
 }
 
 func createClaimEnrollment(
