@@ -38,6 +38,29 @@ type FederationCredential struct {
 	PendingEnrollmentID int64  `toml:"pending_enrollment_id,omitempty"`
 }
 
+// FederationTransportCredential combines secret-bearing credential metadata
+// with the durable binding target used for outbound transport. A legacy
+// credential-only plaintext opt-in is retained only when that credential
+// already identifies the same endpoint and hub project as the binding.
+func FederationTransportCredential(
+	hubURL string,
+	hubProjectID int64,
+	allowInsecure bool,
+	credential FederationCredential,
+) FederationCredential {
+	credentialBaseURL, credentialURLErr := CanonicalHTTPBaseURL(credential.HubURL)
+	bindingBaseURL, bindingURLErr := CanonicalHTTPBaseURL(hubURL)
+	legacyAllowInsecure := credential.AllowInsecure &&
+		credential.HubProjectID == hubProjectID &&
+		credentialURLErr == nil && bindingURLErr == nil &&
+		credentialBaseURL == bindingBaseURL
+
+	credential.HubURL = hubURL
+	credential.HubProjectID = hubProjectID
+	credential.AllowInsecure = allowInsecure || legacyAllowInsecure
+	return credential
+}
+
 // FederationCredentialMetadata is the redacted credential information safe
 // to expose in daemon status responses.
 type FederationCredentialMetadata struct {

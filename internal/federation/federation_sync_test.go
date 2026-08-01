@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -116,6 +117,46 @@ func TestClientOptsForCredentialPreservesAllowInsecureOptIn(t *testing.T) {
 
 	assert.True(t, opts.AllowInsecure)
 	assert.Equal(t, defaultClientTimeout, opts.Timeout)
+}
+
+func TestFederationRunnerUsesBindingEndpointWithStaleCredentialMetadata(t *testing.T) {
+	ctx := context.Background()
+	spoke := testenv.New(t)
+	t.Setenv("KATA_HOME", spoke.Home)
+	project, err := spoke.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+
+	var oldHubRequests atomic.Int64
+	oldHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		oldHubRequests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
+	}))
+	t.Cleanup(oldHub.Close)
+	var targetHubRequests atomic.Int64
+	targetHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHubRequests.Add(1)
+		assert.Equal(t, "/api/v1/projects/42/federation/events", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"events":[],"next_after_id":0}`))
+	}))
+	t.Cleanup(targetHub.Close)
+
+	_, err = spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: project.ID, Role: db.FederationRoleSpoke,
+		HubURL: targetHub.URL, HubProjectID: 42, HubProjectUID: project.UID,
+		ReplayHorizonEventID: 1, AllowInsecure: true, Enabled: true,
+	})
+	require.NoError(t, err)
+	credential := config.FederationCredential{
+		HubURL: oldHub.URL, HubProjectID: 41, Token: "enrollment-token",
+		AllowInsecure: true,
+	}
+
+	require.NoError(t, config.WriteFederationCredential(project.UID, credential))
+	require.NoError(t, (&Runner{DB: spoke.DB}).RunOnce(ctx))
+	assert.Zero(t, oldHubRequests.Load(), "sync used the stale credential endpoint")
+	assert.Equal(t, int64(1), targetHubRequests.Load())
 }
 
 func TestSyncFederationOnceDuplicateOnlyPullMaterializesStaleProjection(t *testing.T) {
@@ -3152,6 +3193,9 @@ func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
 	}))
+	binding, err := spoke.DB.FederationBindingByProject(ctx, spokeProject.ID)
+	require.NoError(t, err)
+	setFederationBindingHubURL(t, spoke.DB, binding, hub.URL)
 	wake <- struct{}{}
 	require.Eventually(t, func() bool {
 		_, err := hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
@@ -3286,6 +3330,7 @@ func TestFederationRunnerRunOnceKeepsClaimRetryErrorWhenPullSucceeds(t *testing.
 		}
 	}))
 	t.Cleanup(hub.Close)
+	binding = setFederationBindingHubURL(t, spoke.DB, binding, hub.URL)
 	require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
 		HubURL:       hub.URL,
 		HubProjectID: 42,
@@ -3443,6 +3488,9 @@ func TestPendingClaimRetryUnknownCapabilitiesTransportFailureRetriesAfterReconne
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
 	}))
+	binding, err := spoke.DB.FederationBindingByProject(ctx, replica.Project.ID)
+	require.NoError(t, err)
+	binding = setFederationBindingHubURL(t, spoke.DB, binding, "http://127.0.0.1:1")
 
 	require.Error(t, (&Runner{DB: spoke.DB}).RunOnce(ctx))
 	var firstAttemptAt time.Time
@@ -3454,6 +3502,7 @@ func TestPendingClaimRetryUnknownCapabilitiesTransportFailureRetriesAfterReconne
 		HubProjectID: hubProject.ID,
 		Token:        created.Token,
 	}))
+	setFederationBindingHubURL(t, spoke.DB, binding, hub.URL)
 
 	require.NoError(t, (&Runner{DB: spoke.DB}).RunOnce(ctx))
 
@@ -3485,6 +3534,7 @@ func TestFederationClaimRetryCapabilityRules(t *testing.T) {
 			http.NotFound(w, r)
 		}))
 		t.Cleanup(hub.Close)
+		binding = setFederationBindingHubURL(t, spoke.DB, binding, hub.URL)
 		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
 			HubURL:       hub.URL,
 			HubProjectID: 42,
@@ -3522,6 +3572,7 @@ func TestFederationClaimRetryCapabilityRules(t *testing.T) {
 			}
 		}))
 		t.Cleanup(hub.Close)
+		binding = setFederationBindingHubURL(t, spoke.DB, binding, hub.URL)
 		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
 			HubURL:       hub.URL,
 			HubProjectID: 42,
@@ -3644,6 +3695,19 @@ func createPendingClaimRetrySpoke(t *testing.T, store *sqlitestore.Store, name s
 	})
 	require.NoError(t, err)
 	return project, issue, binding
+}
+
+func setFederationBindingHubURL(
+	t *testing.T,
+	store *sqlitestore.Store,
+	binding db.FederationBinding,
+	hubURL string,
+) db.FederationBinding {
+	t.Helper()
+	binding.HubURL = hubURL
+	updated, err := store.UpsertFederationBinding(context.Background(), binding)
+	require.NoError(t, err)
+	return updated
 }
 
 func pendingClaimParams(store *sqlitestore.Store, projectID int64, issueRef, holder string) db.PendingClaimParams {

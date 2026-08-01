@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,9 +49,12 @@ func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T)
 
 	requestStarted := make(chan struct{})
 	releaseResponse := make(chan struct{})
+	var oldHubRequests atomic.Int64
 	now := time.Now().UTC()
 	oldHub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(requestStarted)
+		if oldHubRequests.Add(1) == 1 {
+			close(requestStarted)
+		}
 		select {
 		case <-releaseResponse:
 		case <-ctx.Done():
@@ -77,6 +81,34 @@ func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T)
 		}))
 	}))
 	t.Cleanup(oldHub.Close)
+	var targetHubRequests atomic.Int64
+	targetHub := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetHubRequests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimStatusBody{
+			Held: true,
+			Holder: api.ClaimPrincipalOut{
+				HolderInstanceUID: claimStore.InstanceUID(), Holder: "spoke-cli", ClientKind: "cli",
+			},
+			Claim: &api.IssueClaimOut{
+				ClaimUID:          replicaLocalProjectUID,
+				ProjectID:         42,
+				IssueUID:          issue.UID,
+				Holder:            "spoke-cli",
+				HolderInstanceUID: claimStore.InstanceUID(),
+				ClientKind:        "cli",
+				ClaimKind:         "hard",
+				AcquiredAt:        now,
+				Revision:          1,
+				UpdatedAt:         now,
+			},
+			HubNow: now,
+		}))
+	}))
+	t.Cleanup(targetHub.Close)
+	originalDefaultTransport := http.DefaultTransport
+	http.DefaultTransport = targetHub.Client().Transport
+	t.Cleanup(func() { http.DefaultTransport = originalDefaultTransport })
 
 	binding, err := claimStore.UpsertFederationBinding(ctx, db.FederationBinding{
 		ProjectID: project.ID, Role: db.FederationRoleSpoke,
@@ -85,22 +117,24 @@ func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T)
 		AllowInsecure: true, Enabled: true,
 	})
 	require.NoError(t, err)
-	credentials := newReplicaCredentialStore()
+	claimCredentials := newReplicaCredentialStore()
+	rebindCredentials := newReplicaCredentialStore()
 	credential := rebindCredential(oldHub.URL, false, false)
 	credential.Capabilities = "claim"
-	credentials.put(project.UID, credential)
+	claimCredentials.put(project.UID, credential)
+	rebindCredentials.put(project.UID, credential)
 
 	claimDaemon := daemon.NewServer(daemon.ServerConfig{
-		DB: claimStore, StartedAt: now, FederationCredentials: credentials,
+		DB: claimStore, StartedAt: now, FederationCredentials: claimCredentials,
 	})
 	t.Cleanup(func() { require.NoError(t, claimDaemon.Close()) })
 	claimServer := httptest.NewServer(claimDaemon.Handler())
 	t.Cleanup(claimServer.Close)
 
 	rebindDaemon := daemon.NewServer(daemon.ServerConfig{
-		DB: rebindStore, StartedAt: now, FederationCredentials: credentials,
+		DB: rebindStore, StartedAt: now, FederationCredentials: rebindCredentials,
 		FederationCatalog: []config.CatalogDaemonConfig{{
-			Name: "primary-hub", URL: rebindTargetURL,
+			Name: "primary-hub", URL: targetHub.URL,
 		}},
 		FederationRebindFetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
 			return api.ProjectFederationBody{ProjectID: 42, ProjectUID: project.UID}, nil
@@ -139,10 +173,21 @@ func TestRebindFederationReplicaWaitsForClaimAcrossPostgresDaemons(t *testing.T)
 	require.NoError(t, <-rebindDone)
 	converged, err := claimStore.FederationBindingByProject(ctx, binding.ProjectID)
 	require.NoError(t, err)
-	assert.Equal(t, rebindTargetURL, converged.HubURL)
+	assert.Equal(t, targetHub.URL, converged.HubURL)
 	claimStatus, err := claimStore.ClaimStatus(ctx, project.ID, issue.UID, time.Now().UTC())
 	require.NoError(t, err)
 	assert.Equal(t, "spoke-cli", claimStatus.Holder.Holder)
+	staleCredential, found, err := claimCredentials.FederationCredential(ctx, project.UID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, oldHub.URL, staleCredential.HubURL)
+
+	require.NoError(t, getFederationClaimStatus(
+		ctx,
+		claimServer.URL+issuePathRef(project.ID, issue.ShortID, "lease"),
+	))
+	assert.Equal(t, int64(1), oldHubRequests.Load(), "post-cutover claim traffic returned to the old endpoint")
+	assert.Equal(t, int64(1), targetHubRequests.Load(), "post-cutover claim traffic did not use the rebound endpoint")
 }
 
 func postFederationClaimAcquire(ctx context.Context, endpoint string) error {
@@ -170,6 +215,14 @@ func postFederationRebind(ctx context.Context, baseURL string, projectID int64) 
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return requireSuccessfulFederationResponse(req)
+}
+
+func getFederationClaimStatus(ctx context.Context, endpoint string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
 	return requireSuccessfulFederationResponse(req)
 }
 

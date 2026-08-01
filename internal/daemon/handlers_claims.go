@@ -425,12 +425,9 @@ func claimForwardClient(
 	if strings.TrimSpace(cred.Token) == "" {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", "federation claim credentials are unavailable", "", nil)
 	}
-	if cred.HubURL == "" {
-		cred.HubURL = binding.HubURL
-	}
-	if cred.HubProjectID == 0 {
-		cred.HubProjectID = binding.HubProjectID
-	}
+	cred = config.FederationTransportCredential(
+		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
+	)
 	client, err := newClaimHubClient(ctx, cred.HubURL, cred.Token, cred.AllowInsecure)
 	if err != nil {
 		return nil, config.FederationCredential{}, api.NewError(http.StatusServiceUnavailable, "federation_offline", err.Error(), "", nil)

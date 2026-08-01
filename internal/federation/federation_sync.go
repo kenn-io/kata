@@ -836,12 +836,9 @@ func (r *Runner) runOnce(ctx context.Context, validateLease func(context.Context
 			finishSync()
 			continue
 		}
-		if cred.HubURL == "" {
-			cred.HubURL = binding.HubURL
-		}
-		if cred.HubProjectID == 0 {
-			cred.HubProjectID = binding.HubProjectID
-		}
+		cred = config.FederationTransportCredential(
+			binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred,
+		)
 		opts := r.clientOpts()
 		if err := retryPendingClaimsOnceWithFence(ctx, r.DB, binding, cred, opts, validateLease); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, errFederationRunnerLeaseInvalid) {

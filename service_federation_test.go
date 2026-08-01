@@ -89,6 +89,11 @@ func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 		return statusErr == nil && status.LastError != nil
 	}, 2*time.Second, 10*time.Millisecond)
 
+	binding, err := spokeService.store.FederationBindingByProject(ctx, spokeProject.ID)
+	require.NoError(t, err)
+	binding.HubURL = hubServer.URL
+	_, err = spokeService.store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
 	require.NoError(t, credentials.StoreFederationCredential(ctx, spokeProject.UID, FederationCredential{
 		HubURL: hubServer.URL, HubProjectID: hubProject.ID,
 		Token: enrollment.Token, AllowInsecure: true,
