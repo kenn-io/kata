@@ -51,6 +51,34 @@ func TestFederationRebindPreflightUsesEnrollmentTokenAndPreservesPath(t *testing
 	assert.Equal(t, int64(41), metadata.ProjectID)
 }
 
+func TestFederationRebindPreflightDoesNotCleanConfiguredPathPrefix(t *testing.T) {
+	var requestURI string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestURI = r.RequestURI
+		_, _ = w.Write([]byte(`{"project_id":41,"project_uid":"01HZNQ7VFPK1XGD8R5MABCD4EX"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	originalFactory := newFederationRebindHTTPClient
+	newFederationRebindHTTPClient = func(
+		_ context.Context, _ string, token string,
+	) (*http.Client, error) {
+		return federationRebindTestBearerClient(t, server.Client(), server.URL, token), nil
+	}
+	t.Cleanup(func() { newFederationRebindHTTPClient = originalFactory })
+
+	_, err := fetchFederationRebindMetadata(
+		context.Background(), server.URL+"/proxy//segment/../mount", "enrollment-secret", 41,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		"/proxy//segment/../mount/api/v1/projects/41/federation/metadata",
+		requestURI,
+	)
+}
+
 func TestFederationRebindPreflightPinsRedirectOrigin(t *testing.T) {
 	reachedTarget := false
 	target := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {

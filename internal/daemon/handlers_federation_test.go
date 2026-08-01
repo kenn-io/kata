@@ -232,7 +232,7 @@ func TestCreateFederationReplicaRoutePreservesHubURLPathPrefix(t *testing.T) {
 	assert.Equal(t, "https://daemon.example/kata/hub", out.Binding.HubURL)
 }
 
-func TestCreateFederationReplicaAcceptsCanonicalEquivalentHubOrigin(t *testing.T) {
+func TestCreateFederationReplicaAcceptsCanonicalEquivalentHubEndpoint(t *testing.T) {
 	env := testenv.New(t)
 	body := map[string]any{
 		"hub_url":                 "http://LOCALHOST:80/api/v1",
@@ -246,7 +246,7 @@ func TestCreateFederationReplicaAcceptsCanonicalEquivalentHubOrigin(t *testing.T
 	}
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	body["hub_url"] = "http://localhost/other/path"
+	body["hub_url"] = "http://localhost/api/v1/"
 	body["token"] = "replacement-token"
 
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/replicas", body, nil)

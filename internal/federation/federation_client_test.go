@@ -137,6 +137,31 @@ func TestFederationClientProjectFederation(t *testing.T) {
 	assert.Equal(t, int64(11), body.BaselineThroughEventID)
 }
 
+func TestFederationClientPreservesConfiguredPathPrefix(t *testing.T) {
+	var requestURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestURI = r.RequestURI
+		require.NoError(t, json.NewEncoder(w).Encode(api.ProjectFederationBody{
+			ProjectID:  42,
+			ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX",
+		}))
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := NewClient(
+		context.Background(), srv.URL+"/proxy//segment/../mount", "hub-token", clientpkg.Opts{},
+	)
+	require.NoError(t, err)
+	_, err = client.ProjectFederation(context.Background(), 42)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"/proxy//segment/../mount/api/v1/projects/42/federation/metadata",
+		requestURI,
+	)
+}
+
 func TestFederationClientPostJSONRejectsNonJSONResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(bytes.Repeat([]byte("x"), 1))

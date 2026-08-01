@@ -531,7 +531,7 @@ func fetchFederationRebindMetadata(
 			"check the HTTPS catalog endpoint",
 		)
 	}
-	requestURL, err := url.JoinPath(
+	requestURL, err := config.AppendHTTPBaseURLPath(
 		hubURL,
 		fmt.Sprintf("/api/v1/projects/%d/federation/metadata", hubProjectID),
 	)

@@ -53,7 +53,7 @@ func CanonicalHTTPBaseURL(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse HTTP base URL: %w", err)
 	}
-	if u.RawQuery != "" || u.Fragment != "" {
+	if u.ForceQuery || u.RawQuery != "" || strings.Contains(trimmed, "#") {
 		return "", fmt.Errorf("HTTP base URL must not include query or fragment")
 	}
 	origin, err := CanonicalHTTPOrigin(trimmed)
@@ -67,6 +67,21 @@ func CanonicalHTTPBaseURL(raw string) (string, error) {
 	base.Path = u.Path
 	base.RawPath = u.RawPath
 	return base.String(), nil
+}
+
+// AppendHTTPBaseURLPath appends a fixed absolute request path to a canonical
+// HTTP(S) base without cleaning the configured reverse-proxy prefix. All
+// federation transports use this operation so validation and authenticated
+// traffic address the same route.
+func AppendHTTPBaseURLPath(rawBaseURL, requestPath string) (string, error) {
+	baseURL, err := CanonicalHTTPBaseURL(rawBaseURL)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(requestPath, "/") {
+		return "", fmt.Errorf("HTTP request path must start with /")
+	}
+	return baseURL + requestPath, nil
 }
 
 // EffectiveHTTPAllowInsecure normalizes transport policy for a concrete URL.

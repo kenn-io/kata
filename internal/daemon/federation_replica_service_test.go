@@ -934,7 +934,7 @@ func TestEnsureFederationReplicaRejectsManualAdoptionConflictingWithManagedReser
 	assert.Zero(t, wakes)
 }
 
-func TestEnsureFederationReplicaAcceptsManagedReservationAtCanonicalOrigin(t *testing.T) {
+func TestEnsureFederationReplicaAcceptsManagedReservationAtCanonicalEndpoint(t *testing.T) {
 	ctx := context.Background()
 	store := openReplicaServiceStore(t)
 	delegate := newReplicaCredentialStore()
@@ -945,7 +945,7 @@ func TestEnsureFederationReplicaAcceptsManagedReservationAtCanonicalOrigin(t *te
 	delegate.put(replicaHubProjectUID, reservation)
 	credentials := delegate
 	params := replicaServiceParams()
-	params.HubURL = "http://hub.example/manual/base/"
+	params.HubURL = "http://hub.example/configured/base/"
 	params.Credential.HubURL = params.HubURL
 
 	result, err := daemon.EnsureFederationReplica(
@@ -953,7 +953,7 @@ func TestEnsureFederationReplicaAcceptsManagedReservationAtCanonicalOrigin(t *te
 	)
 
 	require.NoError(t, err)
-	assert.Equal(t, "http://hub.example/manual/base", result.Binding.HubURL)
+	assert.Equal(t, "http://hub.example/configured/base", result.Binding.HubURL)
 }
 
 func TestEnsureFederationReplicaRejectsRemovedManagedReservation(t *testing.T) {
@@ -1191,13 +1191,13 @@ func TestEnsureFederationReplicaRejectsReplacementOfManagedTargetCredential(t *t
 	assert.Zero(t, wakes)
 }
 
-func TestEnsureFederationReplicaMatchingBindingIsIdempotentAcrossCanonicalOrigins(t *testing.T) {
+func TestEnsureFederationReplicaMatchingBindingIsIdempotentAcrossCanonicalEndpointSpellings(t *testing.T) {
 	ctx := context.Background()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	wakes := 0
 	first := replicaServiceParams()
-	first.HubURL = " HTTP://HUB.EXAMPLE:00080/api/v1 "
+	first.HubURL = " HTTP://HUB.EXAMPLE:00080/proxy "
 	first.Credential.HubURL = first.HubURL
 	first.PushEnabled = false
 
@@ -1205,7 +1205,7 @@ func TestEnsureFederationReplicaMatchingBindingIsIdempotentAcrossCanonicalOrigin
 	require.NoError(t, err)
 
 	retry := first
-	retry.HubURL = " http://hub.example/another/path "
+	retry.HubURL = " http://hub.example/proxy/ "
 	retry.Credential.HubURL = retry.HubURL
 	retry.Credential.Token = "replacement-token"
 	got, err := daemon.EnsureFederationReplica(ctx, store, credentials, func() { wakes++ }, retry)
@@ -1213,7 +1213,7 @@ func TestEnsureFederationReplicaMatchingBindingIsIdempotentAcrossCanonicalOrigin
 	require.NoError(t, err)
 	assert.Equal(t, created.Project.ID, got.Project.ID)
 	assert.Equal(t, int64(8), got.Binding.PullCursorEventID)
-	assert.Equal(t, "http://hub.example/another/path", got.Binding.HubURL)
+	assert.Equal(t, "http://hub.example/proxy", got.Binding.HubURL)
 	assert.False(t, got.Adopted)
 	assert.Equal(t, 2, wakes, "each successful ensure must wake exactly once")
 	projects, err := store.ListProjects(ctx)
@@ -1223,17 +1223,17 @@ func TestEnsureFederationReplicaMatchingBindingIsIdempotentAcrossCanonicalOrigin
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, "replacement-token", stored.Token)
-	assert.Equal(t, "http://hub.example/another/path", stored.HubURL)
+	assert.Equal(t, "http://hub.example/proxy", stored.HubURL)
 	persisted, err := store.FederationBindingByProject(ctx, got.Project.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "http://hub.example/another/path", persisted.HubURL)
+	assert.Equal(t, "http://hub.example/proxy", persisted.HubURL)
 
 	downstreamURL, err := url.JoinPath(
 		persisted.HubURL,
 		"/api/v1/federation/enrollments",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "http://hub.example/another/path/api/v1/federation/enrollments", downstreamURL)
+	assert.Equal(t, "http://hub.example/proxy/api/v1/federation/enrollments", downstreamURL)
 }
 
 func TestEnsureFederationReplicaWakeMayReenterAfterCompletedState(t *testing.T) {
@@ -1432,11 +1432,11 @@ func TestEnsureFederationReplicaRejectsPushCredentialBeforeBindingMutation(t *te
 	beforeStoreCalls := credentials.storeCallCount()
 	wakes = 0
 	invalid := replicaServiceParams()
-	invalid.HubURL = "HTTP://HUB.EXAMPLE:80/rewritten"
+	invalid.HubURL = "HTTP://HUB.EXAMPLE:80/"
 	invalid.Credential.HubURL = invalid.HubURL
 	invalid.Credential.Token = "pull-only-token"
 	invalid.Credential.Capabilities = "pull"
-	invalid.Credential.AllowInsecure = true
+	invalid.Credential.AllowInsecure = false
 	invalid.PushEnabled = false
 
 	_, err = daemon.EnsureFederationReplica(ctx, store, credentials, func() { wakes++ }, invalid)
@@ -1624,6 +1624,18 @@ func TestEnsureFederationReplicaRejectsBindingConflictsWithoutWaking(t *testing.
 			},
 		},
 		{
+			name: "different path prefix",
+			mutate: func(binding *db.FederationBinding) {
+				binding.HubURL = "http://hub.example/alternate-prefix"
+			},
+		},
+		{
+			name: "different plaintext policy",
+			mutate: func(binding *db.FederationBinding) {
+				binding.AllowInsecure = true
+			},
+		},
+		{
 			name: "different hub project UID",
 			mutate: func(binding *db.FederationBinding) {
 				binding.HubProjectUID = replicaLocalProjectUID
@@ -1655,10 +1667,12 @@ func TestEnsureFederationReplicaRejectsBindingConflictsWithoutWaking(t *testing.
 				Enabled:              true,
 			}
 			tt.mutate(&binding)
-			_, err = store.UpsertFederationBinding(ctx, binding)
+			persistedBefore, err := store.UpsertFederationBinding(ctx, binding)
 			require.NoError(t, err)
 			params := replicaServiceParams()
 			params.Credential.Token = ""
+			storedBefore := replicaServiceParams().Credential
+			credentials.put(replicaHubProjectUID, storedBefore)
 			wakes := 0
 
 			_, err = daemon.EnsureFederationReplica(ctx, store, credentials, func() { wakes++ }, params)
@@ -1668,6 +1682,85 @@ func TestEnsureFederationReplicaRejectsBindingConflictsWithoutWaking(t *testing.
 			var serviceErr *daemon.FederationReplicaError
 			assert.ErrorAs(t, err, &serviceErr)
 			assert.Zero(t, wakes)
+			persistedAfter, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, bindingErr)
+			assert.Equal(t, persistedBefore, persistedAfter)
+			storedAfter, found, credentialErr := credentials.FederationCredential(
+				ctx, replicaHubProjectUID,
+			)
+			require.NoError(t, credentialErr)
+			require.True(t, found)
+			assert.Equal(t, storedBefore, storedAfter)
+		})
+	}
+}
+
+func TestEnsureFederationReplicaZeroTokenRetryRejectsStaleStoredCredentialTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		bindingURL           string
+		bindingAllowInsecure bool
+		storedURL            string
+		storedAllowInsecure  bool
+	}{
+		{
+			name:       "different path prefix",
+			bindingURL: "http://hub.example/new-prefix",
+			storedURL:  "http://hub.example/old-prefix",
+		},
+		{
+			name:                 "different plaintext policy",
+			bindingURL:           "http://hub.example",
+			bindingAllowInsecure: true,
+			storedURL:            "http://hub.example",
+			storedAllowInsecure:  false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := openReplicaServiceStore(t)
+			credentials := newReplicaCredentialStore()
+			project, err := store.CreateProjectWithUID(ctx, "hub-project", replicaHubProjectUID)
+			require.NoError(t, err)
+			bindingBefore, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID:            project.ID,
+				Role:                 db.FederationRoleSpoke,
+				HubURL:               tc.bindingURL,
+				HubProjectID:         42,
+				HubProjectUID:        replicaHubProjectUID,
+				ReplayHorizonEventID: 9,
+				PullCursorEventID:    8,
+				Actor:                "sync-agent",
+				AllowInsecure:        tc.bindingAllowInsecure,
+				Enabled:              true,
+			})
+			require.NoError(t, err)
+			credentialBefore := replicaServiceParams().Credential
+			credentialBefore.HubURL = tc.storedURL
+			credentialBefore.AllowInsecure = tc.storedAllowInsecure
+			credentials.put(replicaHubProjectUID, credentialBefore)
+			params := replicaServiceParams()
+			params.HubURL = tc.bindingURL
+			params.Credential.HubURL = tc.bindingURL
+			params.Credential.AllowInsecure = tc.bindingAllowInsecure
+			params.Credential.Token = ""
+			wakes := 0
+
+			_, err = daemon.EnsureFederationReplica(
+				ctx, store, credentials, func() { wakes++ }, params,
+			)
+
+			require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
+			assert.Zero(t, wakes)
+			bindingAfter, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+			require.NoError(t, bindingErr)
+			assert.Equal(t, bindingBefore, bindingAfter)
+			credentialAfter, found, credentialErr := credentials.FederationCredential(
+				ctx, replicaHubProjectUID,
+			)
+			require.NoError(t, credentialErr)
+			require.True(t, found)
+			assert.Equal(t, credentialBefore, credentialAfter)
 		})
 	}
 }

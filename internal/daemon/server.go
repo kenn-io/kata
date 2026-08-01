@@ -38,12 +38,15 @@ type ServerConfig struct {
 	FederationCredentials         config.FederationCredentialStore
 	FederationCatalog             []config.CatalogDaemonConfig
 	FederationRebindFetchMetadata FederationRebindMetadataFetcher
-	GitHubSyncFetcher             githubsync.Fetcher
-	GitHubSyncConfig              config.GitHubSyncConfig
-	GitHubSyncFetcherFactory      func(config.GitHubSyncConfig) githubsync.Fetcher
-	GitHubSyncRunnerFactory       GitHubSyncRunnerFactory
-	GitHubSyncWake                func()
-	Hooks                         hooks.Sink
+	// DisableFederationRebind omits the rebind operation when the embedding
+	// host does not expose a catalog and exact credential replacement.
+	DisableFederationRebind  bool
+	GitHubSyncFetcher        githubsync.Fetcher
+	GitHubSyncConfig         config.GitHubSyncConfig
+	GitHubSyncFetcherFactory func(config.GitHubSyncConfig) githubsync.Fetcher
+	GitHubSyncRunnerFactory  GitHubSyncRunnerFactory
+	GitHubSyncWake           func()
+	Hooks                    hooks.Sink
 	// CloseThrottle controls whether the opt-in sibling-burst and repeated-
 	// message guards run on close. Zero-value means "guards off".
 	CloseThrottle CloseThrottlePolicy

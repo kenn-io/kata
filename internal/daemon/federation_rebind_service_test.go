@@ -70,6 +70,9 @@ func TestRebindFederationReplicaRejectsTargetBeforeCredentialRead(t *testing.T) 
 		{name: "plaintext", catalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindSourceURL}},
 		{name: "user info", catalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: "https://user@hub.example"}},
 		{name: "query", catalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: "https://hub.example?x=1"}},
+		{name: "empty query", catalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: "https://hub.example?"}},
+		{name: "fragment", catalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: "https://hub.example#section"}},
+		{name: "empty fragment", catalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: "https://hub.example#"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, project, _ := prepareFederationRebind(t, rebindSourceURL)

@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -35,12 +36,16 @@ type Client struct {
 
 // NewClient builds a bearer-pinned HTTP client for a trusted hub.
 func NewClient(ctx context.Context, baseURL string, token string, opts clientpkg.Opts) (*Client, error) {
-	c, err := clientpkg.NewHTTPClientWithBearer(ctx, baseURL, token, opts)
+	canonicalBaseURL, err := config.CanonicalHTTPBaseURL(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	c, err := clientpkg.NewHTTPClientWithBearer(ctx, canonicalBaseURL, token, opts)
 	if err != nil {
 		return nil, err
 	}
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
+		baseURL: canonicalBaseURL,
 		client:  c,
 	}, nil
 }
@@ -107,7 +112,11 @@ func (c *Client) ProjectFederation(ctx context.Context, hubProjectID int64) (api
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil) //nolint:gosec // baseURL is caller-supplied hub config.
+	requestURL, err := config.AppendHTTPBaseURLPath(c.baseURL, path)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil) //nolint:gosec // baseURL is caller-supplied hub config.
 	if err != nil {
 		return err
 	}
@@ -131,7 +140,11 @@ func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
 	if err != nil {
 		return fmt.Errorf("marshal hub %s request: %w", path, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body)) //nolint:gosec // baseURL is caller-supplied hub config.
+	requestURL, err := config.AppendHTTPBaseURLPath(c.baseURL, path)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body)) //nolint:gosec // baseURL is caller-supplied hub config.
 	if err != nil {
 		return err
 	}

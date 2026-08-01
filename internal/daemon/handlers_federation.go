@@ -342,51 +342,53 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}}, nil
 	})
 
-	huma.Register(humaAPI, huma.Operation{
-		OperationID: "rebindFederationReplica",
-		Method:      "POST",
-		Path:        "/api/v1/federation/replicas/{project_id}/actions/rebind",
-	}, func(ctx context.Context, in *api.RebindFederationReplicaRequest) (*api.RebindFederationReplicaResponse, error) {
-		if in.ProjectID <= 0 {
-			return nil, api.NewError(http.StatusBadRequest, "validation", "project_id must be a positive integer", "", nil)
-		}
-		catalog, err := federationRebindCatalogByName(cfg.FederationCatalog, in.Body.HubCatalog)
-		if err != nil {
-			return nil, err
-		}
-		result, err := RebindFederationReplica(
-			ctx,
-			cfg.DB,
-			cfg.federationCredentialStore(),
-			RebindFederationReplicaParams{
-				ProjectID:     in.ProjectID,
-				HubCatalog:    catalog,
-				FetchMetadata: cfg.FederationRebindFetchMetadata,
-			},
-		)
-		if err != nil {
-			return nil, federationReplicaAPIError(err)
-		}
-		oldOrigin, err := config.CanonicalHTTPOrigin(result.PreviousHubURL)
-		if err != nil {
-			return nil, internalAPIError(fmt.Errorf("canonicalize previous federation origin: %w", err))
-		}
-		newOrigin, err := config.CanonicalHTTPOrigin(result.Binding.HubURL)
-		if err != nil {
-			return nil, internalAPIError(fmt.Errorf("canonicalize rebound federation origin: %w", err))
-		}
-		if cfg.FederationWake != nil {
-			cfg.FederationWake()
-		}
-		return &api.RebindFederationReplicaResponse{Body: api.RebindFederationReplicaResponseBody{
-			Project: api.FederationRebindProjectOut{
-				ID: result.Project.ID, UID: result.Project.UID, Name: result.Project.Name,
-			},
-			OldOrigin: oldOrigin,
-			NewOrigin: newOrigin,
-			State:     string(result.State),
-		}}, nil
-	})
+	if !cfg.DisableFederationRebind {
+		huma.Register(humaAPI, huma.Operation{
+			OperationID: "rebindFederationReplica",
+			Method:      "POST",
+			Path:        "/api/v1/federation/replicas/{project_id}/actions/rebind",
+		}, func(ctx context.Context, in *api.RebindFederationReplicaRequest) (*api.RebindFederationReplicaResponse, error) {
+			if in.ProjectID <= 0 {
+				return nil, api.NewError(http.StatusBadRequest, "validation", "project_id must be a positive integer", "", nil)
+			}
+			catalog, err := federationRebindCatalogByName(cfg.FederationCatalog, in.Body.HubCatalog)
+			if err != nil {
+				return nil, err
+			}
+			result, err := RebindFederationReplica(
+				ctx,
+				cfg.DB,
+				cfg.federationCredentialStore(),
+				RebindFederationReplicaParams{
+					ProjectID:     in.ProjectID,
+					HubCatalog:    catalog,
+					FetchMetadata: cfg.FederationRebindFetchMetadata,
+				},
+			)
+			if err != nil {
+				return nil, federationReplicaAPIError(err)
+			}
+			oldOrigin, err := config.CanonicalHTTPOrigin(result.PreviousHubURL)
+			if err != nil {
+				return nil, internalAPIError(fmt.Errorf("canonicalize previous federation origin: %w", err))
+			}
+			newOrigin, err := config.CanonicalHTTPOrigin(result.Binding.HubURL)
+			if err != nil {
+				return nil, internalAPIError(fmt.Errorf("canonicalize rebound federation origin: %w", err))
+			}
+			if cfg.FederationWake != nil {
+				cfg.FederationWake()
+			}
+			return &api.RebindFederationReplicaResponse{Body: api.RebindFederationReplicaResponseBody{
+				Project: api.FederationRebindProjectOut{
+					ID: result.Project.ID, UID: result.Project.UID, Name: result.Project.Name,
+				},
+				OldOrigin: oldOrigin,
+				NewOrigin: newOrigin,
+				State:     string(result.State),
+			}}, nil
+		})
+	}
 
 	huma.Register(humaAPI, huma.Operation{
 		OperationID: "leaveFederationReplica",

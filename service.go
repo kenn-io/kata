@@ -39,7 +39,10 @@ const (
 )
 
 // EmbeddingProfile selects which HTTP administration surfaces a mounted
-// service exposes. The zero value preserves the standalone-compatible API.
+// service exposes. The zero value preserves standalone-compatible operations
+// supported by the public embedding configuration. Federation endpoint rebind
+// remains daemon-only because mounted services do not expose a daemon catalog
+// or exact credential-replacement contract.
 type EmbeddingProfile string
 
 // Embedding profiles supported by Config.Profile.
@@ -243,20 +246,21 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		}
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
-		DB:                    store,
-		StartedAt:             startedAt,
-		Broadcaster:           broadcaster,
-		FederationWake:        wakeFederation,
-		FederationCredentials: federationCredentials,
-		GitHubSyncFetcher:     gitHubSyncFetcher,
-		GitHubSyncConfig:      gitHubSyncConfig,
-		GitHubSyncWake:        wakeGitHubSync,
-		Hooks:                 hookSink,
-		Auth:                  config.AuthConfig{Token: cfg.Auth.Token},
-		HostAccess:            hostAccess,
-		HostFederationAccess:  hostFederationAccess,
-		EmbeddingProfile:      daemon.EmbeddingProfile(cfg.Profile),
-		Logger:                logger,
+		DB:                      store,
+		StartedAt:               startedAt,
+		Broadcaster:             broadcaster,
+		FederationWake:          wakeFederation,
+		FederationCredentials:   federationCredentials,
+		DisableFederationRebind: true,
+		GitHubSyncFetcher:       gitHubSyncFetcher,
+		GitHubSyncConfig:        gitHubSyncConfig,
+		GitHubSyncWake:          wakeGitHubSync,
+		Hooks:                   hookSink,
+		Auth:                    config.AuthConfig{Token: cfg.Auth.Token},
+		HostAccess:              hostAccess,
+		HostFederationAccess:    hostFederationAccess,
+		EmbeddingProfile:        daemon.EmbeddingProfile(cfg.Profile),
+		Logger:                  logger,
 	})
 
 	return &Service{
