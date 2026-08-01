@@ -6,7 +6,11 @@ description: Release history for kata
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
-## Unreleased
+## 0.13.0
+<small>2026-07-31</small>
+
+kata 0.13.0 makes federation endpoint changes safer, automates enrollment,
+and improves agent and embedded-service integrations.
 
 **New features**
 
@@ -22,17 +26,31 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added project-scoped federation enrollment creation, history, and revocation
   methods to the mountable Go service for hosts that use the restricted
   embedding profile.
-- Added an optional federation-access controller for mounting applications that
-  need to revalidate Kata-authenticated project credentials against outside
-  lifecycle state. Federation mutations share the controller's transaction
-  fence with event or lease writes. Conditionally mutating metadata and lease
-  status reads use the same fence, and controller failures return only bounded,
-  generic authorization errors. Principal and federation fences compose when
-  both apply to one request.
 - Added `kata init --with-codex-hooks` to install the `work.attention` harness
   into a Codex CLI workspace's `.codex/hooks.json`. Only the `SessionStart`
   half is wired, since Codex has no stable session-end hook event yet; cover
   the end half with a launcher wrapper until upstream ships one.
+
+**Improvements**
+
+- Kept remote TUI project resolution path-free by using only portable project
+  names and Git identities for configured remote daemons.
+- Authenticated federation ingest before body decoding and added bounded host
+  admission for large uploads, returning a retryable `429` response when an
+  embedding host is saturated.
+- Added federation credential host validation and optional host-side access
+  revalidation so credentials remain bound to their configured origin and
+  embedded hosts can deny revoked outside authority without replacing Kata
+  authentication.
+
+**Acknowledgements**
+
+- Thanks to [Wes McKinney](https://github.com/wesm) for federation endpoint
+  rebinding, configuration-driven enrollment, embedded federation lifecycle
+  controls, path-free remote TUI resolution, safer federation ingest, and
+  credential host validation.
+- Thanks to [Matthew Jacobs](https://github.com/mjacobs) for the Codex CLI
+  attention hooks.
 
 ## 0.12.0
 <small>2026-07-20</small>
