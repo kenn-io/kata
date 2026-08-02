@@ -157,17 +157,20 @@ markdown_renderer = ["glow", "-", "-s", "dark", "-w", "80"]
 ```
 
 kata starts the configured program once per non-empty Markdown field. Each
-invocation has a 10-second timeout. After it expires, kata gives process-tree
-cleanup up to 2 seconds, then bounds any remaining process or captured-pipe
-wait by a separate 2-second interval. A timed-out call can therefore take about
-14 seconds to return. Because the child's stdout is captured, users are
-responsible for renderer-specific color and width flags or inherited environment
-variables such as `CLICOLOR_FORCE`. After capture, kata normalizes the output
-and ANSI-safely hard-wraps it to the terminal width for a description or the
-remaining field width for a comment. kata treats output with or without a final
-newline the same, while preserving internal blank lines. Renderer stderr is
-discarded because a program may echo the Markdown input there; run the
-configured argv directly to diagnose renderer-specific failures.
+invocation has a 10-second timeout. After it expires, kata spends up to 2
+seconds on platform-specific termination: Unix signals and then force-kills the
+renderer process group, while Windows waits through the grace period and then
+force-kills only the renderer process. kata then bounds any remaining process
+or captured-pipe wait by a separate 2-second interval. A timed-out call can
+therefore take about 14 seconds to return. Because the child's stdout is
+captured, users are responsible for renderer-specific color and width flags or
+inherited environment variables such as `CLICOLOR_FORCE`. After capture, kata
+normalizes the output and ANSI-safely hard-wraps it to the terminal width for a
+description or the remaining field width for a comment. kata treats output
+with or without a final newline the same, while preserving internal blank
+lines. Renderer stderr is discarded because a program may echo the Markdown
+input there; run the configured argv directly to diagnose renderer-specific
+failures.
 
 The common daemon-config path recognizes `[display]` without decoding or
 semantically validating it, so unknown display keys and invalid display values
