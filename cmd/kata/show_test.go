@@ -1,21 +1,192 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/textsafe"
 )
+
+type recordedMarkdownField struct {
+	kind  markdownFieldKind
+	body  string
+	width int
+}
+
+type recordingShowMarkdownRenderer struct {
+	calls  []recordedMarkdownField
+	failAt int
+}
+
+func (r *recordingShowMarkdownRenderer) Render(
+	_ context.Context,
+	kind markdownFieldKind,
+	body string,
+	width int,
+) (string, error) {
+	r.calls = append(r.calls, recordedMarkdownField{kind: kind, body: body, width: width})
+	if r.failAt > 0 && len(r.calls) == r.failAt {
+		return "", errors.New("render failed")
+	}
+	return "\x1b[1m" + strings.TrimPrefix(body, "## ") + "\x1b[0m", nil
+}
+
+func createShowMarkdownFixture(t *testing.T, env *testenv.Env, dir string, projectID int64) string {
+	t.Helper()
+	type createResponse struct {
+		Issue struct {
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}
+	created := postJSON[createResponse](
+		t,
+		env.URL+"/api/v1/projects/"+itoa(projectID)+"/issues",
+		map[string]any{
+			"actor": "user-a",
+			"title": "rendered fields",
+			"body":  "## Description",
+		},
+	)
+	runCLI(t, env, dir, "--as", "user-b", "comment", created.Issue.ShortID, "--body", "- comment item")
+	return created.Issue.ShortID
+}
+
+func TestShowRenderRejectsStructuredModes(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "rendered issue")
+	for _, mode := range []string{"--json", "--agent"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := runCLICapture(t, env, dir, mode, "show", ref, "--render")
+			cliErr := requireCLIError(t, err, ExitUsage)
+			assert.Equal(t, kindUsage, cliErr.Kind)
+			assert.Contains(t, cliErr.Message, "--render requires human output")
+		})
+	}
+}
+
+func TestShowRenderNonTTYKeepsPlainOutputAndSkipsDisplayConfig(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createShowMarkdownFixture(t, env, dir, pid)
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[display]
+markdown_renderer = "not-an-array"
+future_option = true
+`), 0o600))
+
+	plain := runCLI(t, env, dir, "show", ref)
+	rendered := runCLI(t, env, dir, "show", ref, "--render")
+	assert.Equal(t, plain, rendered)
+	assert.Contains(t, rendered, "## Description")
+}
+
+func TestRenderShowFieldsScopesRendererToBodyAndComments(t *testing.T) {
+	var response showResponseForCLI
+	require.NoError(t, json.Unmarshal([]byte(`{
+      "issue":{"short_id":"abc4","uid":"01TEST","title":"# literal title","body":"## Body","status":"open","author":"user-a","metadata":{"#key":"- value"}},
+      "comments":[
+        {"uid":"01COMMENT1","author":"user-b","body":"- comment"},
+        {"uid":"01COMMENT2","author":"user-c","body":"## Second"},
+        {"uid":"01COMMENT3","author":"user-d","body":""}
+      ],
+      "labels":[{"label":"- literal label"}]
+    }`), &response))
+	renderer := &recordingShowMarkdownRenderer{}
+
+	_, err := renderShowFields(context.Background(), response, renderer, 80)
+	require.NoError(t, err)
+	require.Len(t, renderer.calls, 3)
+	assert.Equal(t, markdownDescription, renderer.calls[0].kind)
+	assert.Equal(t, "## Body", renderer.calls[0].body)
+	assert.Equal(t, markdownComment, renderer.calls[1].kind)
+	assert.Equal(t, "- comment", renderer.calls[1].body)
+	assert.Equal(t, markdownComment, renderer.calls[2].kind)
+	assert.Equal(t, "## Second", renderer.calls[2].body)
+	assert.Less(t, renderer.calls[1].width, 80)
+	assert.Less(t, renderer.calls[2].width, 80)
+}
+
+func TestPrintShowHumanIndentsRenderedCommentWithANSIWidth(t *testing.T) {
+	var response showResponseForCLI
+	require.NoError(t, json.Unmarshal([]byte(`{
+      "issue":{"short_id":"abc4","uid":"01TEST","title":"title","status":"open","author":"user-a"},
+      "comments":[{"uid":"01COMMENT","author":"user-b","body":"source"}]
+    }`), &response))
+	fields := &renderedShowFields{
+		comments: [][]string{{"\x1b[31mfirst\x1b[0m", "\x1b[31msecond\x1b[0m"}},
+	}
+	var out bytes.Buffer
+
+	require.NoError(t, printShowHuman(&out, response, "example-workspace", fields))
+	plain := textsafe.StripANSI(out.String())
+	prefix := "01COMMENT user-b: "
+	assert.Contains(t, plain, prefix+"first\n"+strings.Repeat(" ", ansi.StringWidth(prefix))+"second\n")
+	assert.Contains(t, out.String(), "\x1b[31mfirst\x1b[0m")
+	assert.Contains(t, out.String(), "\x1b[31msecond\x1b[0m")
+}
+
+func TestRenderAndPrintShowHumanDoesNotPrintPartialRecord(t *testing.T) {
+	var response showResponseForCLI
+	require.NoError(t, json.Unmarshal([]byte(`{
+      "issue":{"short_id":"abc4","uid":"01TEST","title":"title","body":"body","status":"open","author":"user-a"},
+      "comments":[{"uid":"01COMMENT","author":"user-b","body":"comment"}]
+    }`), &response))
+	renderer := &recordingShowMarkdownRenderer{failAt: 2}
+	var out bytes.Buffer
+
+	err := renderAndPrintShowHuman(
+		context.Background(), &out, response, "example-workspace", renderer, 80,
+	)
+	require.Error(t, err)
+	assert.Empty(t, out.String())
+}
+
+func TestShowRenderBuiltinFormatsMarkdownFields(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createShowMarkdownFixture(t, env, dir, pid)
+	stubIsTTY(t, true)
+	t.Setenv("NO_COLOR", "1")
+	output, err := os.CreateTemp(t.TempDir(), "show-output-*")
+	require.NoError(t, err)
+	defer output.Close()
+
+	cmd := newRootCmd()
+	cmd.SetOut(output)
+	cmd.SetErr(output)
+	cmd.SetArgs([]string{"--workspace", dir, "show", ref, "--render"})
+	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	require.NoError(t, cmd.Execute())
+	require.NoError(t, output.Sync())
+	_, err = output.Seek(0, io.SeekStart)
+	require.NoError(t, err)
+	got, err := io.ReadAll(output)
+	require.NoError(t, err)
+
+	text := string(got)
+	assert.Contains(t, text, "Description")
+	assert.Contains(t, text, "- comment item")
+	assert.NotContains(t, text, "## Description")
+	assert.Contains(t, text, "--- comments ---")
+}
 
 func TestShow_RendersLabelsAndLinksSections(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)

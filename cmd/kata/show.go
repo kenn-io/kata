@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,22 +12,43 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/markdownrender"
 	"go.kenn.io/kata/internal/textsafe"
 )
 
 func newShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var render bool
+	cmd := &cobra.Command{
 		Use:   "show <issue-ref>",
 		Short: "show issue + comments",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show an issue and its comments.
+
+--render renders only description and comment Markdown when stdout is a terminal.
+Redirects and pipelines, including "| less -R", keep plain output.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runShow(cmd, args[0], "show")
+			return runShow(cmd, args[0], "show", showRunOptions{Render: render})
 		},
 	}
+	cmd.Flags().BoolVar(&render, "render", false, "render description and comment Markdown on a terminal")
+	return cmd
 }
 
-func runShow(cmd *cobra.Command, issueRef, agentOperation string) error {
+type showRunOptions struct {
+	Render bool
+}
+
+func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOptions) error {
+	if opts.Render && currentOutputMode() != outputHuman {
+		return &cliError{
+			Message:  "kata show --render requires human output",
+			Kind:     kindUsage,
+			ExitCode: ExitUsage,
+		}
+	}
 	ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, issueRef)
 	if err != nil {
 		return err
@@ -60,6 +82,29 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string) error {
 		return printShowAgent(cmd.OutOrStdout(), b, ref.ProjectName, agentOperation)
 	}
 	out := cmd.OutOrStdout()
+	terminal, shouldRender := outputTerminal(out)
+	if !opts.Render || !shouldRender {
+		return printShowHuman(out, b, ref.ProjectName, nil)
+	}
+
+	display, err := config.ReadDisplayConfig()
+	if err != nil {
+		return err
+	}
+	rows := newRowRenderer(out)
+	width := terminalWidth(terminal)
+	renderer := configuredShowMarkdownRenderer(display, rows)
+	return renderAndPrintShowHuman(
+		cmd.Context(), rows.downsample(out), b, ref.ProjectName, renderer, width,
+	)
+}
+
+func printShowHuman(
+	out io.Writer,
+	b showResponseForCLI,
+	subjectProject string,
+	rendered *renderedShowFields,
+) error {
 	if _, err := fmt.Fprintf(out, "%s  %s  [%s]  by %s\n",
 		b.Issue.ShortID,
 		textsafe.Line(b.Issue.Title),
@@ -77,17 +122,31 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string) error {
 		if _, err := fmt.Fprintln(out); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintln(out, textsafe.Block(b.Issue.Body)); err != nil {
-			return err
+		if rendered != nil {
+			for _, line := range rendered.body {
+				if _, err := fmt.Fprintln(out, line); err != nil {
+					return err
+				}
+			}
+		} else {
+			if _, err := fmt.Fprintln(out, textsafe.Block(b.Issue.Body)); err != nil {
+				return err
+			}
 		}
 	}
 	if len(b.Comments) > 0 {
 		if _, err := fmt.Fprintln(out, "\n--- comments ---"); err != nil {
 			return err
 		}
-		for _, c := range b.Comments {
-			if _, err := fmt.Fprintf(out, "%s %s: %s\n",
-				textsafe.Line(c.UID), textsafe.Line(c.Author), textsafe.Block(c.Body)); err != nil {
+		for i, c := range b.Comments {
+			prefix := showCommentPrefix(c.UID, c.Author)
+			if rendered != nil {
+				if err := writeRenderedPrefixedLines(out, prefix, rendered.comments[i]); err != nil {
+					return err
+				}
+				continue
+			}
+			if _, err := fmt.Fprintf(out, "%s%s\n", prefix, textsafe.Block(c.Body)); err != nil {
 				return err
 			}
 		}
@@ -109,7 +168,7 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string) error {
 			return err
 		}
 		for _, l := range b.Links {
-			label, other := linkLabelFromPOV(l.Type, b.Issue.UID, ref.ProjectName, l.From, l.To)
+			label, other := linkLabelFromPOV(l.Type, b.Issue.UID, subjectProject, l.From, l.To)
 			if _, err := fmt.Fprintf(out, "%s: %s\n", label, other); err != nil {
 				return err
 			}
@@ -124,6 +183,23 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string) error {
 				textsafe.Line(kv.key), textsafe.Line(kv.value)); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func writeRenderedPrefixedLines(w io.Writer, prefix string, lines []string) error {
+	if len(lines) == 0 {
+		_, err := fmt.Fprintln(w, prefix)
+		return err
+	}
+	if _, err := fmt.Fprintln(w, prefix+lines[0]); err != nil {
+		return err
+	}
+	indent := strings.Repeat(" ", ansi.StringWidth(prefix))
+	for _, line := range lines[1:] {
+		if _, err := fmt.Fprintln(w, indent+line); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -195,6 +271,63 @@ type showResponseForCLI struct {
 	PendingLeases   []pendingClaimForCLI   `json:"pending_leases"`
 	LeaseHubNow     *time.Time             `json:"lease_hub_now"`
 	LeaseViolations []claimViolationForCLI `json:"lease_violations"`
+}
+
+type renderedShowFields struct {
+	body     []string
+	comments [][]string
+}
+
+func renderShowFields(
+	ctx context.Context,
+	response showResponseForCLI,
+	renderer showMarkdownRenderer,
+	width int,
+) (renderedShowFields, error) {
+	fields := renderedShowFields{comments: make([][]string, len(response.Comments))}
+	if response.Issue.Body != "" {
+		rendered, err := renderer.Render(
+			ctx, markdownDescription, textsafe.Block(response.Issue.Body), width,
+		)
+		if err != nil {
+			return renderedShowFields{}, err
+		}
+		fields.body = markdownrender.ANSIWrappedLines(rendered, width)
+	}
+	for i, comment := range response.Comments {
+		if comment.Body == "" {
+			continue
+		}
+		prefix := showCommentPrefix(comment.UID, comment.Author)
+		fieldWidth := max(1, width-ansi.StringWidth(prefix))
+		rendered, err := renderer.Render(
+			ctx, markdownComment, textsafe.Block(comment.Body), fieldWidth,
+		)
+		if err != nil {
+			return renderedShowFields{}, err
+		}
+		fields.comments[i] = markdownrender.ANSIWrappedLines(rendered, fieldWidth)
+	}
+	return fields, nil
+}
+
+func renderAndPrintShowHuman(
+	ctx context.Context,
+	out io.Writer,
+	response showResponseForCLI,
+	subjectProject string,
+	renderer showMarkdownRenderer,
+	width int,
+) error {
+	rendered, err := renderShowFields(ctx, response, renderer, width)
+	if err != nil {
+		return err
+	}
+	return printShowHuman(out, response, subjectProject, &rendered)
+}
+
+func showCommentPrefix(uid, author string) string {
+	return textsafe.Line(uid) + " " + textsafe.Line(author) + ": "
 }
 
 func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation string) error {
