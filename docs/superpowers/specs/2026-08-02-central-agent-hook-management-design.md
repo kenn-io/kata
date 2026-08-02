@@ -1,0 +1,99 @@
+# Central Agent-Hook Management Design
+
+## Goal
+
+Use `go.kenn.io/kit/agenthook` from kit v0.14.0 for coding-agent hook
+configuration while preserving kata's existing public CLI and attention-state
+behavior.
+
+## Scope
+
+The existing `kata init --with-hooks` and `kata init --with-codex-hooks` flags
+remain the user-facing entry points. They continue to install Claude Code and
+Codex hooks respectively. The hidden `kata attention-hook <start|end>` command
+and its `KATA_REF`-based behavior remain unchanged.
+
+This change does not add a generic agent selector, expose the other kit agent
+profiles, or move kata's runtime hook handling to `agenthook.Handle`.
+
+## Architecture
+
+Kata will replace its local JSON hook merge and atomic-write implementations
+with thin installers that call `agenthook.Install` using workspace-local config
+paths. Each installer supplies the existing event, matcher, timeout, command,
+and ownership marker explicitly:
+
+- Claude Code receives `SessionStart` for `startup|resume|clear` and
+  `SessionEnd` for
+  `logout|prompt_input_exit|bypass_permissions_disabled|other`.
+- Codex receives the existing `SessionStart` hook for
+  `startup|resume|clear`, with the existing ten-second timeout. It does not gain
+  a `SessionEnd` hook in this change.
+
+Kata retains the policy that workspace hook directories and config files must
+not be symlinks. The thin adapter performs the existing fd-relative symlink
+checks before calling kit. Kata also retains the Codex-specific advisory when
+`.codex/config.toml` contains a top-level `[hooks]` table; that warning is CLI
+policy rather than shared config mutation.
+
+The Go module dependency moves from kit v0.9.3 to v0.14.0. Any transitive
+dependency changes are accepted only when required by that upgrade.
+
+## Existing Configuration Migration
+
+Kata v0.13.0 installed Claude commands in command-plus-arguments form, while
+kit v0.14.0 writes a single command string. Before the shared installer runs,
+kata will remove only exact v0.13.0-owned Claude handlers:
+
+- executable `kata`;
+- arguments `attention-hook start` or `attention-hook end`;
+- the corresponding managed event and matcher.
+
+No fuzzy command matching, alias handling, dual reading, or unrelated hook
+cleanup is permitted. The shared installer then writes marker-owned command
+strings and owns all subsequent reinstalls.
+
+This is a bounded forward migration. It remains through kata v0.15.0 so users
+can re-run `kata init` from either of the next two minor releases, and is removed
+from main after v0.15.0 is tagged. Issue `m7d5` tracks that removal.
+
+## Failure Behavior
+
+Malformed hook configuration remains a non-fatal `kata init` warning and is
+left untouched. Symlinked managed paths remain refused. Unrelated top-level
+fields, events, matchers, and hook handlers remain preserved.
+
+If shared installation fails, the corresponding init flag reports the same
+human-readable warning class it uses today. Machine-readable output continues
+to suppress those warnings. Re-running either flag after a successful install
+is a no-op.
+
+Claude start and end registrations require separate commands. The adapter will
+install them in a deterministic order and report failure immediately. Each kit
+write is atomic; a later write failure may leave the earlier registration
+installed, and re-running the same init command safely converges the file.
+
+## Tests
+
+Tests will assert kata-owned behavior at the CLI and adapter boundaries rather
+than retest kit's parser and writer internals. Coverage will verify:
+
+- fresh Claude and Codex installation through the existing flags;
+- exact event, matcher, command, and timeout behavior;
+- preservation of unrelated configuration;
+- idempotent reinstallation;
+- migration of exact v0.13.0 Claude handlers without duplication;
+- refusal of symlinked managed paths;
+- non-destructive failure for malformed configuration; and
+- preservation of the Codex `[hooks]` advisory.
+
+Implementation-detail tests for kata's removed JSON merge and atomic-replace
+helpers will be deleted with those helpers. Existing end-to-end init tests will
+remain the primary contract tests.
+
+## Documentation
+
+The CLI and orchestration documentation will keep the same flags and lifecycle
+semantics. Text that describes kata's custom JSON mutation or Claude exec-form
+handler will be updated to describe the kit-managed command registration,
+idempotency, preservation rules, and retained symlink boundary.
