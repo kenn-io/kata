@@ -52,6 +52,8 @@ func TestShowMarkdownRendererHelperProcess(t *testing.T) {
 			os.Args[0], "-test.run=TestShowMarkdownRendererHelperProcess", "--", "wait",
 		)
 		child.Env = os.Environ()
+		configureShowMarkdownHelperChild(child)
+		child.Stdout = os.Stdout
 		if err := child.Start(); err != nil {
 			os.Exit(23)
 		}
@@ -81,6 +83,18 @@ func TestExternalShowMarkdownRendererPassesArgvEnvAndStdin(t *testing.T) {
 	got, err := renderer.Render(context.Background(), markdownComment, "**hello**", 80)
 	require.NoError(t, err)
 	assert.Equal(t, "arg=argument with spaces env=inherited input=**hello**", got)
+}
+
+func TestExternalShowMarkdownRendererSanitizesStdin(t *testing.T) {
+	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
+	renderer := helperRenderer("echo", "argument")
+
+	got, err := renderer.Render(
+		context.Background(), markdownComment,
+		"before\x1b[2Jafter\x1b]8;;https://evil.example/\x1b\\link\x1b]8;;\x1b\\\u202espoof\tok\nnext", 80,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "arg=argument env= input=beforeafterlinkspoof\tok\nnext", got)
 }
 
 func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *testing.T) {

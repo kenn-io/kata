@@ -85,6 +85,7 @@ func (r *externalShowMarkdownRenderer) Render(
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard
 	processtree.Prepare(cmd)
+	cmd.WaitDelay = r.grace
 	cmd.Cancel = func() error {
 		return processtree.TerminateWithGrace(cmd, r.grace)
 	}

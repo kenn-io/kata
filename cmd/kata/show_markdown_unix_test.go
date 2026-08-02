@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"syscall"
@@ -52,6 +53,36 @@ func TestExternalShowMarkdownRendererCancellationKillsDescendant(t *testing.T) {
 	err := <-errCh
 	require.ErrorIs(t, err, context.Canceled)
 	requireProcessGone(t, pid)
+}
+
+func TestExternalShowMarkdownRendererBoundsInheritedDescendantStdout(t *testing.T) {
+	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
+	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER_DETACH", "1")
+	renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))
+	renderer.timeout = 100 * time.Millisecond
+	renderer.grace = 50 * time.Millisecond
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := renderer.Render(context.Background(), markdownDescription, "body", 80)
+		errCh <- err
+	}()
+
+	pid := waitForHelperPID(t, renderer.argv[len(renderer.argv)-1])
+	t.Cleanup(func() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	})
+
+	started := time.Now()
+	err := <-errCh
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Less(t, time.Since(started), time.Second)
+}
+
+func configureShowMarkdownHelperChild(child *exec.Cmd) {
+	if os.Getenv("GO_WANT_SHOW_MARKDOWN_HELPER_DETACH") == "1" {
+		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 }
 
 func waitForHelperPID(t *testing.T, readyPath string) int {
