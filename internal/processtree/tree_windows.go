@@ -2,7 +2,11 @@
 
 package processtree
 
-import "os/exec"
+import (
+	"errors"
+	"os"
+	"os/exec"
+)
 
 func prepare(_ *exec.Cmd) {}
 
@@ -12,7 +16,11 @@ func kill(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	return cmd.Process.Kill()
+	err := cmd.Process.Kill()
+	if errors.Is(err, os.ErrProcessDone) {
+		return nil
+	}
+	return err
 }
 
 func alive(cmd *exec.Cmd) bool {

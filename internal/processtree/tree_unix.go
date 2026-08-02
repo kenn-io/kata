@@ -16,14 +16,22 @@ func terminate(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	return signal(-cmd.Process.Pid, syscall.SIGTERM)
 }
 
 func kill(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	return signal(-cmd.Process.Pid, syscall.SIGKILL)
+}
+
+func signal(pid int, sig syscall.Signal) error {
+	err := syscall.Kill(pid, sig)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
 }
 
 func alive(cmd *exec.Cmd) bool {
