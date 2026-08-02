@@ -223,6 +223,48 @@ func TestApplyClaudeHooks_SecondSharedInstallFailureLeavesOriginal(t *testing.T)
 	assert.Equal(t, before, after)
 }
 
+func TestApplyClaudeHooks_FreshPublicationFailureLeavesTargetAbsent(t *testing.T) {
+	dir := t.TempDir()
+	originalPublish := publishNewAgentHookConfig
+	publishNewAgentHookConfig = func(*os.Root, string, string) error {
+		return errors.New("injected fresh publication failure")
+	}
+	t.Cleanup(func() { publishNewAgentHookConfig = originalPublish })
+
+	_, err := applyClaudeHooks(dir)
+	require.ErrorContains(t, err, "injected fresh publication failure")
+	assert.NoFileExists(t, filepath.Join(dir, ".claude", "settings.json"))
+}
+
+func TestApplyClaudeHooks_ConcurrentEditAbortsPublication(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := writeSettings(t, dir, map[string]any{
+		"permissions": map[string]any{"allow": []any{"Read"}},
+	})
+	concurrent := []byte("{\n  \"permissions\": {\"allow\": [\"Read\", \"Write\"]}\n}\n")
+
+	originalInstall := installAgentHookConfig
+	calls := 0
+	installAgentHookConfig = func(
+		agent agenthook.Agent,
+		opts agenthook.InstallOptions,
+	) (agenthook.Result, error) {
+		result, err := originalInstall(agent, opts)
+		calls++
+		if calls == 2 && err == nil {
+			require.NoError(t, os.WriteFile(settingsPath, concurrent, 0o644)) //nolint:gosec // test fixture under TempDir
+		}
+		return result, err
+	}
+	t.Cleanup(func() { installAgentHookConfig = originalInstall })
+
+	_, err := applyClaudeHooks(dir)
+	require.ErrorContains(t, err, "changed during hook installation")
+	after, readErr := os.ReadFile(settingsPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, concurrent, after)
+}
+
 func TestApplyClaudeHooks_ReplacesOwnedCommandAfterExecutablePathChanges(t *testing.T) {
 	dir := t.TempDir()
 	unrelated := map[string]any{

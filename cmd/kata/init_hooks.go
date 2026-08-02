@@ -136,6 +136,39 @@ func atomicReplaceSettings(root *os.Root, rel string, encoded []byte) error {
 	return nil
 }
 
+// atomicCreateSettings publishes a fully written sibling staging file with a
+// no-overwrite hard link. A concurrent creator wins cleanly; no reader can
+// observe a partial config at rel.
+func atomicCreateSettings(root *os.Root, rel string, encoded []byte) error {
+	tmp, f, err := createSettingsTemp(root, filepath.Dir(rel))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Remove(tmp) }()
+	writeErr := func() error {
+		if _, err := f.Write(encoded); err != nil {
+			return err
+		}
+		if err := f.Chmod(0o644); err != nil {
+			return err
+		}
+		return f.Sync()
+	}()
+	if closeErr := f.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	if err := publishNewAgentHookConfig(root, tmp, rel); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("refusing to overwrite %s: %w", filepath.Join(root.Name(), rel), err)
+		}
+		return err
+	}
+	return nil
+}
+
 func createSettingsTemp(root *os.Root, dir string) (string, *os.File, error) {
 	for range 10 {
 		var random [8]byte

@@ -21,6 +21,9 @@ type attentionHookRegistration struct {
 type agentHookConfigMigration func(map[string]any) (bool, error)
 
 var installAgentHookConfig = agenthook.Install
+var publishNewAgentHookConfig = func(root *os.Root, staging, rel string) error {
+	return root.Link(staging, rel)
+}
 
 // installAttentionHooks builds the complete final config in a private staging
 // file using kit, then publishes it to the workspace in one atomic write. This
@@ -90,7 +93,7 @@ func installAttentionHooks(
 	if exists && bytes.Equal(original, final) {
 		return false, nil
 	}
-	if err := writeAgentHookConfig(root, rel, final, exists); err != nil {
+	if err := writeAgentHookConfig(root, rel, final, original, exists); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -110,25 +113,26 @@ func attentionHookInstallOptions(
 	}
 }
 
-func writeAgentHookConfig(root *os.Root, rel string, data []byte, exists bool) error {
+func writeAgentHookConfig(
+	root *os.Root,
+	rel string,
+	data, original []byte,
+	exists bool,
+) error {
 	if err := root.MkdirAll(filepath.Dir(rel), 0o750); err != nil {
 		return err
 	}
 	if exists {
+		current, err := root.ReadFile(rel)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(current, original) {
+			return fmt.Errorf("%s changed during hook installation", filepath.Join(root.Name(), rel))
+		}
 		return atomicReplaceSettings(root, rel, data)
 	}
-	f, err := root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if errors.Is(err, os.ErrExist) {
-		return fmt.Errorf("refusing to overwrite %s: %w", filepath.Join(root.Name(), rel), err)
-	}
-	if err != nil {
-		return err
-	}
-	_, writeErr := f.Write(data)
-	if closeErr := f.Close(); writeErr == nil {
-		writeErr = closeErr
-	}
-	return writeErr
+	return atomicCreateSettings(root, rel, data)
 }
 
 // validateManagedHookJSON retains kata's existing refusal to treat null JSON

@@ -6,7 +6,7 @@
 
 **Approved spec/design:** `docs/superpowers/specs/2026-08-02-central-agent-hook-management-design.md`
 
-**Architecture:** Kata copies the current workspace config to a private staging file, adopts only exact v0.13.0 handlers there, lets kit install every desired registration, and atomically publishes the complete final file once. Managed commands carry a mode-specific `--source kata-agent-hook-<mode>` token used as kit's unique ownership marker. Workspace symlink refusal and the Codex TOML advisory remain kata policy; runtime behavior remains `kata attention-hook <start|end>`.
+**Architecture:** Kata copies the current workspace config to a private staging file, adopts only exact v0.13.0 handlers there, lets kit install every desired registration, and atomically publishes the complete final file once. Fresh files use a sibling no-overwrite link; existing files compare their live bytes with the staged snapshot immediately before replacement. Managed commands carry a mode-specific `--source kata-agent-hook-<mode>` token used as kit's unique ownership marker. Workspace symlink refusal and the Codex TOML advisory remain kata policy; runtime behavior remains `kata attention-hook <start|end>`.
 
 **Tech Stack:** Go, Cobra, `go.kenn.io/kit/agenthook` v0.14.0, `testify`, existing CLI end-to-end harness.
 
@@ -21,6 +21,7 @@
 - Use `--source kata-agent-hook-<mode>` as the unique ownership marker; lifecycle command text without that token is unrelated.
 - Adopt only exact v0.13.0 Claude and Codex handlers. Issue `m7d5` removes both bounded migrations after kata v0.15.0.
 - Build the complete migrated result in staging and publish it with one atomic workspace write.
+- Leave fresh targets absent on publication failure, never overwrite a concurrent creator, and abort existing-file publication when live bytes changed after staging.
 - Preserve unrelated config and leave malformed config byte-for-byte untouched.
 - Do not test kit internals, deleted-symbol absence, or dependency version strings.
 
@@ -37,6 +38,7 @@
 - Modify: `cmd/kata/attention_hook_unit_test.go`
 - Modify: `go.mod`
 - Modify: `go.sum`
+- Modify: `internal/daemon/reconciler_test.go`
 
 **Interfaces:**
 - Produces: `installAttentionHooks(root *os.Root, rel string, agent agenthook.Agent, migrate agentHookConfigMigration, registrations ...attentionHookRegistration) (bool, error)`.
@@ -59,7 +61,10 @@ go mod tidy
 go mod verify
 ```
 
-Only the direct kit version and its checksums changed.
+Only the direct kit version and its checksums changed in module metadata. Kit
+v0.10+ batches chunks across documents, so the partial-backlog reconciler test
+sets its fake embedder's batch size to one to preserve the intended two-call
+success-then-failure boundary; production batching remains unchanged.
 
 - [x] **Step 3: Delegate Codex config mutation to kit**
 
@@ -90,7 +95,7 @@ Added failing coverage for:
 
 - [x] **Step 5: Stage and atomically publish complete configs**
 
-`installAttentionHooks` writes the original bytes to a private temporary file, applies exact migration callbacks there, invokes `agenthook.Install` for every registration there, reads the final bytes, and calls `atomicReplaceSettings` once. Any migration or install error returns before the live config changes.
+`installAttentionHooks` writes the original bytes to a private temporary file, applies exact migration callbacks there, invokes `agenthook.Install` for every registration there, and reads the complete final bytes. Any migration or install error returns before the live config changes. A fresh target is fully written and synced in a sibling file before a no-overwrite hard link publishes it. An existing target is compared with the original snapshot immediately before `atomicReplaceSettings`; a mismatch aborts without overwriting the concurrent edit.
 
 - [x] **Step 6: Verify focused Codex behavior**
 
@@ -126,8 +131,10 @@ The RED suite covered:
 - preservation for alternate matcher, alternate command, extra argument, and extra handler field;
 - preservation of unrelated handlers in the same group;
 - marker-owned replacement after executable-path changes;
-- malformed unrelated events leaving the original bytes unchanged; and
-- injected failure on the second staged install leaving the original bytes unchanged.
+- malformed unrelated events leaving the original bytes unchanged;
+- injected failure on the second staged install leaving the original bytes unchanged;
+- injected fresh-publication failure leaving the destination absent; and
+- a concurrent edit surviving optimistic publication abort unchanged.
 
 - [x] **Step 2: Implement exact migration in staging**
 
@@ -164,7 +171,7 @@ registrations := []attentionHookRegistration{
 }
 ```
 
-Both kit writes target staging; one fd-relative atomic rename publishes the final workspace file.
+Both kit writes target staging; one fd-relative atomic publication exposes the final workspace file.
 
 - [x] **Step 4: Verify focused Claude and combined CLI behavior**
 
