@@ -406,11 +406,15 @@ func ReadAuthConfig() (AuthConfig, error) {
 			return AuthConfig{}, fmt.Errorf("parse %s: %w", path, err)
 		}
 		if u := meta.Undecoded(); len(u) > 0 {
-			keys := make([]string, len(u))
-			for i, k := range u {
-				keys[i] = k.String()
+			keys := make([]string, 0, len(u))
+			for _, k := range u {
+				if !isDisplayConfigKey(k) {
+					keys = append(keys, k.String())
+				}
 			}
-			return AuthConfig{}, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+			if len(keys) > 0 {
+				return AuthConfig{}, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+			}
 		}
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
