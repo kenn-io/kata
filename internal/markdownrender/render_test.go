@@ -38,3 +38,8 @@ func TestANSIWrappedLinesNormalizesOnlyOuterLineEndings(t *testing.T) {
 	assert.Equal(t, want, ANSIWrappedLines("\nfirst\r\n\r\nsecond\r\n", 80))
 	assert.Equal(t, want, ANSIWrappedLines("first\n\nsecond", 80))
 }
+
+func TestANSIWrappedLinesRemovesANSIOnlyOuterRowsWithoutLosingState(t *testing.T) {
+	want := []string{"\x1b[31mfirst", "", "second\x1b[0m"}
+	assert.Equal(t, want, ANSIWrappedLines("\x1b[31m\nfirst\n\nsecond\n\x1b[0m", 80))
+}

@@ -50,12 +50,23 @@ func RenderLines(markdown string, opts Options) ([]string, error) {
 func ANSIWrappedLines(rendered string, width int) []string {
 	rendered = strings.ReplaceAll(rendered, "\r\n", "\n")
 	rendered = strings.ReplaceAll(rendered, "\r", "\n")
-	rendered = strings.Trim(rendered, "\n")
-	if rendered == "" {
+	raw := strings.Split(rendered, "\n")
+	first := 0
+	for first < len(raw) && ansi.Strip(raw[first]) == "" {
+		first++
+	}
+	if first == len(raw) {
 		return nil
 	}
+	last := len(raw) - 1
+	for last > first && ansi.Strip(raw[last]) == "" {
+		last--
+	}
+	raw[first] = strings.Join(raw[:first+1], "")
+	raw[last] = strings.Join(raw[last:], "")
+	raw = raw[first : last+1]
+
 	width = max(1, width)
-	raw := strings.Split(rendered, "\n")
 	lines := make([]string, 0, len(raw))
 	for _, line := range raw {
 		line = strings.TrimRight(line, " ")
