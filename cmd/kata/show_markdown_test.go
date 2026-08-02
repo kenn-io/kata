@@ -93,10 +93,10 @@ func TestExternalShowMarkdownRendererSanitizesStdin(t *testing.T) {
 
 	got, err := renderer.Render(
 		context.Background(), markdownComment,
-		"before\x1b[2Jafter\x1b]8;;https://evil.example/\x1b\\link\x1b]8;;\x1b\\\u202espoof\tok\nnext", 80,
+		"before\x1b[2Jafter\x1b]8;;https://evil.example/\x1b\\link\x1b]8;;\x1b\\\u202espoof&#27;[8mvisible\tok\nnext", 80,
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "arg=argument env= input=beforeafterlinkspoof\tok\nnext", got)
+	assert.Equal(t, "arg=argument env= input=beforeafterlinkspoofvisible\tok\nnext", got)
 }
 
 func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *testing.T) {

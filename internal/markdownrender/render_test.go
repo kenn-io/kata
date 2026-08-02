@@ -38,6 +38,19 @@ func TestRenderLinesSanitizesDecodedControlEntities(t *testing.T) {
 	assert.Contains(t, got, "spoof")
 }
 
+func TestRenderLinesRejectsDecodedConceal(t *testing.T) {
+	lines, err := RenderLines(
+		"before&#27;[8mvisible&#27;[31mred",
+		Options{Width: 80},
+	)
+	require.NoError(t, err)
+	got := strings.Join(lines, "\n")
+
+	assert.Equal(t, "beforevisiblered", textsafe.StripANSI(got))
+	assert.NotContains(t, got, "\x1b[8m")
+	assert.NotContains(t, got, "\x1b[31m")
+}
+
 func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
 	rendered := "\x1b[31mカタabcdef\x1b[0m"
 	lines := ANSIWrappedLines(rendered, 4)
@@ -61,6 +74,10 @@ func TestANSIWrappedLinesAllowsOnlySGRControls(t *testing.T) {
 	got := strings.Join(ANSIWrappedLines(rendered, 80), "\n")
 
 	assert.Equal(t, "\x1b[31mred\x1b[0mcleared2J", got)
+}
+
+func TestANSIWrappedLinesTerminatesUnclosedStyle(t *testing.T) {
+	assert.Equal(t, []string{"\x1b[31mred\x1b[0m"}, ANSIWrappedLines("\x1b[31mred", 80))
 }
 
 func TestANSIWrappedLinesNormalizesOnlyOuterLineEndings(t *testing.T) {

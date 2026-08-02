@@ -12,7 +12,6 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/markdownrender"
 	"go.kenn.io/kata/internal/processtree"
-	"go.kenn.io/kata/internal/textsafe"
 )
 
 const (
@@ -81,7 +80,7 @@ func (r *externalShowMarkdownRenderer) Render(
 
 	//nolint:gosec // G204: argv is the explicit local user-configured Markdown renderer command.
 	cmd := exec.CommandContext(renderCtx, r.argv[0], r.argv[1:]...)
-	cmd.Stdin = bytes.NewBufferString(textsafe.Block(markdown))
+	cmd.Stdin = bytes.NewBufferString(markdownrender.SanitizeInput(markdown))
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard

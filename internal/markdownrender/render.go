@@ -3,6 +3,8 @@ package markdownrender
 
 import (
 	"fmt"
+	"html"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -16,6 +18,23 @@ import (
 type Options struct {
 	Width               int
 	CodeBlockBackground *string
+}
+
+var terminalControlEntityPattern = regexp.MustCompile(
+	`&(?:#[xX][0-9A-Fa-f]{1,8}|#[0-9]{1,10}|[A-Za-z][A-Za-z0-9]{0,31});`,
+)
+
+// SanitizeInput removes terminal controls from Markdown before either a
+// built-in or external renderer can decode character references into them.
+func SanitizeInput(markdown string) string {
+	markdown = terminalControlEntityPattern.ReplaceAllStringFunc(markdown, func(entity string) string {
+		decoded := html.UnescapeString(entity)
+		if decoded != entity && strings.ContainsFunc(decoded, textsafe.IsUnsafeTerminalRune) {
+			return decoded
+		}
+		return entity
+	})
+	return textsafe.Block(markdown)
 }
 
 // Render converts Markdown into ANSI terminal output. Callers must pass the
@@ -37,7 +56,7 @@ func Render(markdown string, opts Options) (out string, err error) {
 	if err != nil {
 		return "", err
 	}
-	return renderer.Render(textsafe.Block(markdown))
+	return renderer.Render(SanitizeInput(markdown))
 }
 
 // RenderLines converts Markdown into display-width-bounded terminal lines.
@@ -90,6 +109,7 @@ func sanitizeRenderedOutput(rendered string) string {
 	rendered = strings.ReplaceAll(rendered, "\r", "\n")
 
 	var out strings.Builder
+	styleActive := false
 	parser := ansi.NewParser()
 	parser.SetHandler(ansi.Handler{
 		Print: func(r rune) {
@@ -106,28 +126,117 @@ func sanitizeRenderedOutput(rendered string) string {
 			if command.Prefix() != 0 || command.Intermediate() != 0 || command.Final() != 'm' {
 				return
 			}
+			effect, ok := safeSGREffect(params)
+			if !ok {
+				return
+			}
 			out.WriteString("\x1b[")
 			separator := byte(';')
-			params.ForEach(-1, func(i, param int, hasMore bool) {
-				if i > 0 {
-					out.WriteByte(separator)
-				}
-				if param >= 0 {
+			if len(params) == 0 {
+				out.WriteByte('0')
+			} else {
+				params.ForEach(0, func(i, param int, hasMore bool) {
+					if i > 0 {
+						out.WriteByte(separator)
+					}
 					out.WriteString(strconv.Itoa(param))
-				}
-				if hasMore {
-					separator = ':'
-				} else {
-					separator = ';'
-				}
-			})
+					if hasMore {
+						separator = ':'
+					} else {
+						separator = ';'
+					}
+				})
+			}
 			out.WriteByte('m')
+			switch effect {
+			case sgrReset:
+				styleActive = false
+			case sgrSet:
+				styleActive = true
+			}
 		},
 	})
 	for i := range len(rendered) {
 		parser.Advance(rendered[i])
 	}
+	if styleActive {
+		out.WriteString("\x1b[0m")
+	}
 	return out.String()
+}
+
+type sgrEffect uint8
+
+const (
+	sgrUnchanged sgrEffect = iota
+	sgrReset
+	sgrSet
+)
+
+// safeSGREffect accepts only text styling and color operations used by the
+// built-in and external Markdown renderers. Modes that can conceal, blink, or
+// reverse content are rejected with the whole sequence.
+func safeSGREffect(params ansi.Params) (sgrEffect, bool) {
+	if len(params) == 0 {
+		return sgrReset, true
+	}
+
+	values := make([]int, 0, len(params))
+	valid := true
+	params.ForEach(0, func(_ int, param int, hasMore bool) {
+		if hasMore {
+			valid = false
+		}
+		values = append(values, param)
+	})
+	if !valid {
+		return sgrUnchanged, false
+	}
+
+	effect := sgrUnchanged
+	for i := 0; i < len(values); {
+		code := values[i]
+		switch {
+		case code == 0:
+			effect = sgrReset
+			i++
+		case code == 1 || code == 2 || code == 3 || code == 4 || code == 9,
+			code >= 30 && code <= 37,
+			code >= 40 && code <= 47,
+			code >= 90 && code <= 97,
+			code >= 100 && code <= 107:
+			effect = sgrSet
+			i++
+		case code == 22 || code == 23 || code == 24 || code == 29 ||
+			code == 39 || code == 49:
+			i++
+		case code == 38 || code == 48:
+			consumed, ok := safeExtendedColor(values[i:])
+			if !ok {
+				return sgrUnchanged, false
+			}
+			effect = sgrSet
+			i += consumed
+		default:
+			return sgrUnchanged, false
+		}
+	}
+	return effect, true
+}
+
+func safeExtendedColor(values []int) (int, bool) {
+	if len(values) >= 3 && values[1] == 5 && values[2] >= 0 && values[2] <= 255 {
+		return 3, true
+	}
+	if len(values) >= 5 && values[1] == 2 {
+		for _, component := range values[2:5] {
+			if component < 0 || component > 255 {
+				return 0, false
+			}
+		}
+		return 5, true
+	}
+	return 0, false
 }
 
 func styleConfig(codeBackground *string) glamansi.StyleConfig {
