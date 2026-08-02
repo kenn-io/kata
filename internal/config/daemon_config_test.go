@@ -11,6 +11,59 @@ import (
 	"go.kenn.io/kata/internal/config"
 )
 
+func TestReadDisplayConfigPreservesRendererArgv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[display]
+markdown_renderer = ["renderer", "--style", "dark theme", "-"]
+`), 0o600))
+
+	got, err := config.ReadDisplayConfig()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"renderer", "--style", "dark theme", "-"}, got.MarkdownRenderer)
+}
+
+func TestReadDisplayConfigRejectsEmptyExecutable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[display]
+markdown_renderer = [""]
+`), 0o600))
+
+	_, err := config.ReadDisplayConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "display.markdown_renderer executable must not be empty")
+}
+
+func TestReadDisplayConfigRejectsUnknownDisplayKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[display]
+markdown_renderer = ["renderer"]
+future_option = true
+`), 0o600))
+
+	_, err := config.ReadDisplayConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "display.future_option")
+}
+
+func TestReadDaemonConfigTreatsDisplayAsOpaque(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[display]
+markdown_renderer = "not-an-array"
+future_option = true
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+}
+
 func TestReadDaemonConfig_Missing(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	cfg, err := config.ReadDaemonConfig()
