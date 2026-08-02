@@ -167,7 +167,7 @@ func TestShowRenderBuiltinFormatsMarkdownFields(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	output, err := os.CreateTemp(t.TempDir(), "show-output-*")
 	require.NoError(t, err)
-	defer output.Close()
+	t.Cleanup(func() { require.NoError(t, output.Close()) })
 
 	cmd := newRootCmd()
 	cmd.SetOut(output)

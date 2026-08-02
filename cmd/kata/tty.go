@@ -18,6 +18,8 @@ func outputTerminal(w io.Writer) (*os.File, bool) {
 }
 
 func terminalWidth(f *os.File) int {
+	//nolint:gosec // G115: file descriptors fit in int on every platform Go targets;
+	// this is the canonical term.GetSize call shape.
 	width, _, err := term.GetSize(int(f.Fd()))
 	if err != nil || width < 1 {
 		return fallbackTerminalWidth

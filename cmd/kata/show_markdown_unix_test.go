@@ -89,6 +89,7 @@ func waitForHelperPID(t *testing.T, readyPath string) int {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
+		//nolint:gosec // G304: readyPath is a test-owned path created under t.TempDir.
 		data, err := os.ReadFile(readyPath)
 		if err == nil {
 			pid, err := strconv.Atoi(string(data))

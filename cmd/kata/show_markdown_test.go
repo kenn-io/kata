@@ -21,7 +21,7 @@ import (
 	"go.kenn.io/kata/internal/textsafe"
 )
 
-func TestShowMarkdownRendererHelperProcess(t *testing.T) {
+func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
 	if os.Getenv("GO_WANT_SHOW_MARKDOWN_HELPER") != "1" {
 		return
 	}
@@ -48,6 +48,7 @@ func TestShowMarkdownRendererHelperProcess(t *testing.T) {
 		select {}
 	case "spawn-descendant":
 		readyPath := os.Args[marker+2]
+		//nolint:gosec // G204: this test starts its own fixed test binary helper with fixed arguments.
 		child := exec.Command(
 			os.Args[0], "-test.run=TestShowMarkdownRendererHelperProcess", "--", "wait",
 		)
@@ -57,6 +58,7 @@ func TestShowMarkdownRendererHelperProcess(t *testing.T) {
 		if err := child.Start(); err != nil {
 			os.Exit(23)
 		}
+		//nolint:gosec // G703: readyPath is a test-owned path created under t.TempDir.
 		if err := os.WriteFile(readyPath, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			os.Exit(24)
 		}

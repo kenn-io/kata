@@ -79,6 +79,7 @@ func (r *externalShowMarkdownRenderer) Render(
 	renderCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 
+	//nolint:gosec // G204: argv is the explicit local user-configured Markdown renderer command.
 	cmd := exec.CommandContext(renderCtx, r.argv[0], r.argv[1:]...)
 	cmd.Stdin = bytes.NewBufferString(textsafe.Block(markdown))
 	var stdout bytes.Buffer

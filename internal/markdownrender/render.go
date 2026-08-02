@@ -11,11 +11,13 @@ import (
 	"go.kenn.io/kata/internal/textsafe"
 )
 
+// Options configures terminal Markdown rendering.
 type Options struct {
 	Width               int
 	CodeBlockBackground *string
 }
 
+// Render converts Markdown into sanitized ANSI terminal output.
 func Render(markdown string, opts Options) (out string, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -36,6 +38,7 @@ func Render(markdown string, opts Options) (out string, err error) {
 	return renderer.Render(textsafe.Block(markdown))
 }
 
+// RenderLines converts Markdown into display-width-bounded terminal lines.
 func RenderLines(markdown string, opts Options) ([]string, error) {
 	if strings.TrimSpace(markdown) == "" {
 		return nil, nil
@@ -47,6 +50,7 @@ func RenderLines(markdown string, opts Options) ([]string, error) {
 	return ANSIWrappedLines(rendered, opts.Width), nil
 }
 
+// ANSIWrappedLines normalizes and hard-wraps rendered ANSI terminal output.
 func ANSIWrappedLines(rendered string, width int) []string {
 	rendered = strings.ReplaceAll(rendered, "\r\n", "\n")
 	rendered = strings.ReplaceAll(rendered, "\r", "\n")
