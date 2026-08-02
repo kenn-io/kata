@@ -75,26 +75,6 @@ func applyClaudeHooks(dir string) (bool, error) {
 	return ensureClaudeSettingsHooks(root)
 }
 
-// refuseSymlinkComponents rejects any existing symlink among the given
-// root-relative paths (each successive entry one component deeper). Paths
-// that do not exist yet are fine — they will be created as real entries.
-// Root.Lstat is fd-relative, so the check itself cannot be redirected by a
-// concurrent rename outside the root.
-func refuseSymlinkComponents(root *os.Root, rels ...string) error {
-	for _, rel := range rels {
-		fi, err := root.Lstat(rel)
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			return nil
-		case err != nil:
-			return err
-		case fi.Mode()&os.ModeSymlink != 0:
-			return fmt.Errorf("refusing to manage symlinked %s", filepath.Join(root.Name(), rel))
-		}
-	}
-	return nil
-}
-
 // ensureClaudeSettingsHooks merges the hook wiring into settings.json (all
 // I/O relative to the workspace root). The file is user-owned, so the merge
 // is additive: unknown keys and existing hook entries are preserved verbatim

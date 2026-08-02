@@ -54,10 +54,52 @@ func writeCodexConfig(t *testing.T, dir, content string) {
 // json.Number under UseNumber, matching how the writer stores it.
 func expectedCodexHandler() map[string]any {
 	return map[string]any{
-		"type":    "command",
-		"command": "kata attention-hook start",
-		"timeout": json.Number("10"),
+		"type":           "command",
+		"command":        "kata attention-hook start",
+		"commandWindows": "kata attention-hook start",
+		"timeout":        json.Number("10"),
 	}
+}
+
+func TestApplyCodexHooks_ReplacesOwnedCommandAfterExecutablePathChanges(t *testing.T) {
+	dir := t.TempDir()
+	unrelated := map[string]any{
+		"type":    "command",
+		"command": "notify attention-hook start",
+	}
+	writeCodexHooks(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"matcher": codexSessionStartMatcher,
+				"hooks": []any{
+					map[string]any{
+						"type":           "command",
+						"command":        "/opt/example/bin/kata attention-hook start",
+						"commandWindows": `C:\example\kata.exe attention-hook start`,
+						"timeout":        json.Number("10"),
+					},
+					unrelated,
+				},
+			}},
+		},
+	})
+
+	changed, warnings, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Empty(t, warnings)
+
+	hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
+	assert.Equal(t, []any{
+		map[string]any{
+			"matcher": codexSessionStartMatcher,
+			"hooks":   []any{unrelated},
+		},
+		map[string]any{
+			"matcher": codexSessionStartMatcher,
+			"hooks":   []any{expectedCodexHandler()},
+		},
+	}, hooks["SessionStart"])
 }
 
 func TestApplyCodexHooks_FreshWorkspace(t *testing.T) {
