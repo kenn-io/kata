@@ -12,8 +12,9 @@ func Prepare(cmd *exec.Cmd) {
 	prepare(cmd)
 }
 
-// TerminateWithGrace requests graceful termination, then escalates after grace
-// for the process scope supported by the platform.
+// TerminateWithGrace sends a graceful signal to cmd's process group on Unix,
+// then force-kills the group if it survives grace. On Windows, it waits for
+// grace and then force-kills only cmd's process if it is still running.
 func TerminateWithGrace(cmd *exec.Cmd, grace time.Duration) error {
 	if cmd.Process == nil {
 		return nil
