@@ -34,13 +34,40 @@ func TestKillExitedProcessBeforeWait(t *testing.T) {
 	})
 
 	var waitResult uint32
-	var waitErr error
+	var handleWaitErr error
 	require.NoError(t, cmd.Process.WithHandle(func(handle uintptr) {
-		waitResult, waitErr = windows.WaitForSingleObject(windows.Handle(handle), windows.INFINITE)
+		waitResult, handleWaitErr = windows.WaitForSingleObject(windows.Handle(handle), windows.INFINITE)
 	}))
-	require.NoError(t, waitErr)
+	require.NoError(t, handleWaitErr)
 	require.Equal(t, uint32(windows.WAIT_OBJECT_0), waitResult)
 
 	require.NoError(t, kill(cmd))
 	require.NoError(t, cmd.Wait())
+}
+
+func TestKillProcessExitedWithStillActiveCode(t *testing.T) {
+	cmd := exec.Command("cmd", "/c", "exit", "259")
+	require.NoError(t, cmd.Start())
+	waited := false
+	t.Cleanup(func() {
+		if !waited {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
+
+	var waitResult uint32
+	var handleWaitErr error
+	require.NoError(t, cmd.Process.WithHandle(func(handle uintptr) {
+		waitResult, handleWaitErr = windows.WaitForSingleObject(windows.Handle(handle), windows.INFINITE)
+	}))
+	require.NoError(t, handleWaitErr)
+	require.Equal(t, uint32(windows.WAIT_OBJECT_0), waitResult)
+
+	require.NoError(t, kill(cmd))
+	waitErr := cmd.Wait()
+	waited = true
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, waitErr, &exitErr)
+	require.Equal(t, 259, exitErr.ExitCode())
 }

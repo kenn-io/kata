@@ -10,8 +10,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const stillActiveExitCode = 259
-
 func prepare(_ *exec.Cmd) {}
 
 func terminate(_ *exec.Cmd) error { return nil }
@@ -40,17 +38,17 @@ func killResult(err error, exited bool, statusErr error) error {
 }
 
 func processExited(cmd *exec.Cmd) (bool, error) {
-	var exitCode uint32
+	var waitResult uint32
 	var statusErr error
 	if err := cmd.Process.WithHandle(func(handle uintptr) {
-		statusErr = windows.GetExitCodeProcess(windows.Handle(handle), &exitCode)
+		waitResult, statusErr = windows.WaitForSingleObject(windows.Handle(handle), 0)
 	}); err != nil {
 		return false, err
 	}
 	if statusErr != nil {
 		return false, statusErr
 	}
-	return exitCode != stillActiveExitCode, nil
+	return waitResult == windows.WAIT_OBJECT_0, nil
 }
 
 func alive(cmd *exec.Cmd) bool {

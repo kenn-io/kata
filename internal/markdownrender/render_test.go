@@ -23,6 +23,21 @@ func TestRenderLinesSanitizesStoredControlSequences(t *testing.T) {
 	assert.NotContains(t, got, "## Steps")
 }
 
+func TestRenderLinesSanitizesDecodedControlEntities(t *testing.T) {
+	lines, err := RenderLines(
+		"**safe**&#27;]52;c;clipboard&#7;&#x202E;spoof",
+		Options{Width: 40},
+	)
+	require.NoError(t, err)
+	got := strings.Join(lines, "\n")
+	assert.Contains(t, got, "\x1b[1m")
+	assert.NotContains(t, got, "\x1b]52;")
+	assert.NotContains(t, got, "\x07")
+	assert.NotContains(t, got, "clipboard")
+	assert.NotContains(t, got, "\u202e")
+	assert.Contains(t, got, "spoof")
+}
+
 func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
 	rendered := "\x1b[31mカタabcdef\x1b[0m"
 	lines := ANSIWrappedLines(rendered, 4)
@@ -31,6 +46,21 @@ func TestANSIWrappedLinesPreservesVisibleContent(t *testing.T) {
 		assert.LessOrEqual(t, ansi.StringWidth(line), 4)
 	}
 	assert.Equal(t, "カタabcdef", textsafe.StripANSI(strings.Join(lines, "")))
+}
+
+func TestANSIWrappedLinesAllowsOnlySGRControls(t *testing.T) {
+	rendered := "\x1b[31mred\x1b[0m" +
+		"\x1b]52;c;clipboard\x07" +
+		"\x1b[2Jcleared" +
+		"\x1bP1;2|dcs\x1b\\" +
+		"\x1b_apc\x1b\\" +
+		"\x07" +
+		"\u009b2J" +
+		"\u202e"
+
+	got := strings.Join(ANSIWrappedLines(rendered, 80), "\n")
+
+	assert.Equal(t, "\x1b[31mred\x1b[0mcleared2J", got)
 }
 
 func TestANSIWrappedLinesNormalizesOnlyOuterLineEndings(t *testing.T) {

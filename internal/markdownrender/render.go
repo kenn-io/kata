@@ -3,6 +3,7 @@ package markdownrender
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"charm.land/glamour/v2"
@@ -17,7 +18,8 @@ type Options struct {
 	CodeBlockBackground *string
 }
 
-// Render converts Markdown into sanitized ANSI terminal output.
+// Render converts Markdown into ANSI terminal output. Callers must pass the
+// result through ANSIWrappedLines before writing it to a terminal.
 func Render(markdown string, opts Options) (out string, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -50,10 +52,9 @@ func RenderLines(markdown string, opts Options) ([]string, error) {
 	return ANSIWrappedLines(rendered, opts.Width), nil
 }
 
-// ANSIWrappedLines normalizes and hard-wraps rendered ANSI terminal output.
+// ANSIWrappedLines sanitizes, normalizes, and hard-wraps rendered ANSI output.
 func ANSIWrappedLines(rendered string, width int) []string {
-	rendered = strings.ReplaceAll(rendered, "\r\n", "\n")
-	rendered = strings.ReplaceAll(rendered, "\r", "\n")
+	rendered = sanitizeRenderedOutput(rendered)
 	raw := strings.Split(rendered, "\n")
 	first := 0
 	for first < len(raw) && ansi.Strip(raw[first]) == "" {
@@ -82,6 +83,51 @@ func ANSIWrappedLines(rendered string, width int) []string {
 		lines = append(lines, strings.Split(ansi.Hardwrap(line, width, true), "\n")...)
 	}
 	return lines
+}
+
+func sanitizeRenderedOutput(rendered string) string {
+	rendered = strings.ReplaceAll(rendered, "\r\n", "\n")
+	rendered = strings.ReplaceAll(rendered, "\r", "\n")
+
+	var out strings.Builder
+	parser := ansi.NewParser()
+	parser.SetHandler(ansi.Handler{
+		Print: func(r rune) {
+			if !textsafe.IsUnsafeTerminalRune(r) {
+				out.WriteRune(r)
+			}
+		},
+		Execute: func(control byte) {
+			if control == '\n' || control == '\t' {
+				out.WriteByte(control)
+			}
+		},
+		HandleCsi: func(command ansi.Cmd, params ansi.Params) {
+			if command.Prefix() != 0 || command.Intermediate() != 0 || command.Final() != 'm' {
+				return
+			}
+			out.WriteString("\x1b[")
+			separator := byte(';')
+			params.ForEach(-1, func(i, param int, hasMore bool) {
+				if i > 0 {
+					out.WriteByte(separator)
+				}
+				if param >= 0 {
+					out.WriteString(strconv.Itoa(param))
+				}
+				if hasMore {
+					separator = ':'
+				} else {
+					separator = ';'
+				}
+			})
+			out.WriteByte('m')
+		},
+	})
+	for i := range len(rendered) {
+		parser.Advance(rendered[i])
+	}
+	return out.String()
 }
 
 func styleConfig(codeBackground *string) glamansi.StyleConfig {

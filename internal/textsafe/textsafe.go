@@ -65,13 +65,13 @@ func Block(s string) string {
 		return s
 	}
 	s = ansiEscapePattern.ReplaceAllString(s, "")
-	if !strings.ContainsFunc(s, isStripControl) {
+	if !strings.ContainsFunc(s, IsUnsafeTerminalRune) {
 		return s
 	}
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
-		if !isStripControl(r) {
+		if !IsUnsafeTerminalRune(r) {
 			b.WriteRune(r)
 		}
 	}
@@ -102,11 +102,11 @@ func Line(s string) string {
 	return s
 }
 
-// isStripControl reports whether r is a control character or
+// IsUnsafeTerminalRune reports whether r is a control character or
 // invisible Unicode format rune that should be stripped. Newline
 // and tab survive (the caller decides per-context — Line replaces
 // them, Block keeps them); everything else is removed.
-func isStripControl(r rune) bool {
+func IsUnsafeTerminalRune(r rune) bool {
 	if r == '\n' || r == '\t' {
 		return false
 	}
