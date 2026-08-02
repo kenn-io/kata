@@ -129,7 +129,7 @@ func TestExternalShowMarkdownRendererNamesMissingExecutable(t *testing.T) {
 
 	_, err := renderer.Render(context.Background(), markdownDescription, "private body", 80)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), executable)
+	assert.Contains(t, err.Error(), strconv.Quote(executable))
 	assert.Contains(t, err.Error(), "description")
 	assert.NotContains(t, err.Error(), "private body")
 }
