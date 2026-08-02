@@ -99,7 +99,7 @@ func migrateLegacyClaudeHooks(settings map[string]any) (bool, error) {
 
 // atomicReplaceSettings stages a complete config in the workspace directory,
 // preserves its mode, and atomically renames it over the existing file.
-func atomicReplaceSettings(root *os.Root, rel string, encoded []byte) error {
+func atomicReplaceSettings(root *os.Root, rel string, encoded, original []byte) error {
 	perm := os.FileMode(0o644)
 	if fi, err := root.Stat(rel); err == nil {
 		perm = fi.Mode().Perm()
@@ -129,7 +129,7 @@ func atomicReplaceSettings(root *os.Root, rel string, encoded []byte) error {
 	if writeErr != nil {
 		return writeErr
 	}
-	if err := root.Rename(tmp, rel); err != nil {
+	if err := publishExistingAgentHookConfig(root, tmp, rel, original); err != nil {
 		return err
 	}
 	renamed = true

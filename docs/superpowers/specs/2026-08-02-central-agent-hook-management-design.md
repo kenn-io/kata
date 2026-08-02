@@ -82,10 +82,11 @@ workspace file byte-for-byte unchanged. Empty legacy groups carrying no other
 metadata are pruned in staging; groups with unrelated handlers or fields remain.
 Fresh configs are published from a fully written sibling file with an atomic
 no-overwrite link, so a concurrent creator wins without exposing a partial
-document. For existing configs, kata compares the live bytes with the snapshot
-it staged immediately before the atomic replacement and aborts if an editor or
-another installer changed them. Callers still must serialize their own
-concurrent installs, matching kit's contract.
+document. For existing configs, kata fully prepares the replacement sibling,
+then compares the live bytes with the snapshot it staged immediately before
+the atomic rename. It aborts when an editor or another installer changed the
+file before that final publication check. Callers still must serialize their
+own concurrent installs, matching kit's contract.
 
 ## Tests
 
@@ -103,6 +104,7 @@ than retest kit's parser and writer internals. Coverage will verify:
 - unchanged live configuration when a later staged install fails;
 - an absent target remaining absent when fresh publication fails;
 - a concurrent edit remaining intact when optimistic publication aborts;
+- an edit injected at the final publication boundary remaining intact;
 - refusal of symlinked managed paths;
 - non-destructive failure for malformed configuration; and
 - preservation of the Codex `[hooks]` advisory.

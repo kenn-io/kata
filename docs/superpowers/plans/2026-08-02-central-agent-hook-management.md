@@ -95,7 +95,7 @@ Added failing coverage for:
 
 - [x] **Step 5: Stage and atomically publish complete configs**
 
-`installAttentionHooks` writes the original bytes to a private temporary file, applies exact migration callbacks there, invokes `agenthook.Install` for every registration there, and reads the complete final bytes. Any migration or install error returns before the live config changes. A fresh target is fully written and synced in a sibling file before a no-overwrite hard link publishes it. An existing target is compared with the original snapshot immediately before `atomicReplaceSettings`; a mismatch aborts without overwriting the concurrent edit.
+`installAttentionHooks` writes the original bytes to a private temporary file, applies exact migration callbacks there, invokes `agenthook.Install` for every registration there, and reads the complete final bytes. Any migration or install error returns before the live config changes. A fresh target is fully written and synced in a sibling file before a no-overwrite hard link publishes it. For an existing target, `atomicReplaceSettings` fully prepares and syncs its replacement sibling before the final live-byte comparison and atomic rename; a mismatch aborts without overwriting the concurrent edit.
 
 - [x] **Step 6: Verify focused Codex behavior**
 
@@ -134,7 +134,8 @@ The RED suite covered:
 - malformed unrelated events leaving the original bytes unchanged;
 - injected failure on the second staged install leaving the original bytes unchanged;
 - injected fresh-publication failure leaving the destination absent; and
-- a concurrent edit surviving optimistic publication abort unchanged.
+- concurrent edits before and at the final publication boundary surviving
+  optimistic publication abort unchanged.
 
 - [x] **Step 2: Implement exact migration in staging**
 

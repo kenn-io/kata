@@ -265,6 +265,31 @@ func TestApplyClaudeHooks_ConcurrentEditAbortsPublication(t *testing.T) {
 	assert.Equal(t, concurrent, after)
 }
 
+func TestApplyClaudeHooks_ConcurrentEditAtPublicationAborts(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := writeSettings(t, dir, map[string]any{
+		"permissions": map[string]any{"allow": []any{"Read"}},
+	})
+	concurrent := []byte("{\n  \"permissions\": {\"allow\": [\"Read\", \"Write\"]}\n}\n")
+
+	originalPublish := publishExistingAgentHookConfig
+	publishExistingAgentHookConfig = func(
+		root *os.Root,
+		staging, rel string,
+		original []byte,
+	) error {
+		require.NoError(t, os.WriteFile(settingsPath, concurrent, 0o644)) //nolint:gosec // test fixture under TempDir
+		return originalPublish(root, staging, rel, original)
+	}
+	t.Cleanup(func() { publishExistingAgentHookConfig = originalPublish })
+
+	_, err := applyClaudeHooks(dir)
+	require.ErrorContains(t, err, "changed during hook installation")
+	after, readErr := os.ReadFile(settingsPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, concurrent, after)
+}
+
 func TestApplyClaudeHooks_ReplacesOwnedCommandAfterExecutablePathChanges(t *testing.T) {
 	dir := t.TempDir()
 	unrelated := map[string]any{

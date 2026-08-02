@@ -24,6 +24,20 @@ var installAgentHookConfig = agenthook.Install
 var publishNewAgentHookConfig = func(root *os.Root, staging, rel string) error {
 	return root.Link(staging, rel)
 }
+var publishExistingAgentHookConfig = func(
+	root *os.Root,
+	staging, rel string,
+	original []byte,
+) error {
+	current, err := root.ReadFile(rel)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, original) {
+		return fmt.Errorf("%s changed during hook installation", filepath.Join(root.Name(), rel))
+	}
+	return root.Rename(staging, rel)
+}
 
 // installAttentionHooks builds the complete final config in a private staging
 // file using kit, then publishes it to the workspace in one atomic write. This
@@ -123,14 +137,7 @@ func writeAgentHookConfig(
 		return err
 	}
 	if exists {
-		current, err := root.ReadFile(rel)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(current, original) {
-			return fmt.Errorf("%s changed during hook installation", filepath.Join(root.Name(), rel))
-		}
-		return atomicReplaceSettings(root, rel, data)
+		return atomicReplaceSettings(root, rel, data, original)
 	}
 	return atomicCreateSettings(root, rel, data)
 }
