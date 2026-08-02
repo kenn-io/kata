@@ -62,13 +62,15 @@ to a raw string length, or split an escape sequence while adding a comment
 prefix.
 
 Before ANSI-aware wrapping, kata normalizes renderer line endings: CRLF and
-lone CR become LF. It then removes only outer rows whose _visible_ content is
-empty, even when those rows contain ANSI styles or resets. The removed leading
-ANSI bytes are prepended to the first visible row; removed trailing ANSI bytes
-are appended to the last visible row. That preserves the renderer's style
-state while keeping kata's record spacing under kata's control. Spaces and
-internal blank rows remain unchanged, and output with or without a final
-newline reinserts identically.
+lone CR become LF. It then removes only outer rows whose ANSI-stripped content
+is exactly empty, without `TrimSpace`, even when those rows contain ANSI styles
+or resets. The removed leading ANSI bytes are prepended to the first visible
+row; removed trailing ANSI bytes are appended to the last visible row. That
+preserves the renderer's style state while keeping kata's record spacing under
+kata's control. A space-only row is visible to this outer-row detection, and
+internal blank rows remain. Existing per-line trailing ASCII-space trimming
+continues after normalization, so literal trailing spaces are not a preserved
+output contract. Output with or without a final newline reinserts identically.
 
 ## Terminal And Color Behavior
 

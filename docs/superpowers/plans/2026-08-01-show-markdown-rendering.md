@@ -58,10 +58,12 @@ remain separate units with narrow interfaces.
 - Renderer output is ANSI-bearing trusted presentation. Use
   `github.com/charmbracelet/x/ansi` for display width and hard wrapping; never
   byte-slice, rune-slice, or raw-length-trim it.
-- Normalize CRLF and lone CR to LF, then remove only outer rows whose visible
-  content is empty. Fold their ANSI state into the first or last visible row;
-  preserve spaces and internal blank rows so renderer output with and without a
-  final newline reinserts identically.
+- Normalize CRLF and lone CR to LF, then remove only outer rows for which
+  `ansi.Strip(row) == ""`, without `TrimSpace`. Fold their ANSI state into the
+  first or last visible row; a space-only row remains visible to that detection,
+  and internal blank rows remain. Keep the inherited per-line
+  `strings.TrimRight(line, " ")` behavior, so literal trailing ASCII spaces are
+  not preserved. Output with and without a final newline reinserts identically.
 - `[display]` is read from the invoking client's `<KATA_HOME>/config.toml` and
   never crosses the API boundary. No daemon, HTTP, generated-client, database,
   migration, or persisted-schema change is allowed.
@@ -298,6 +300,12 @@ func ANSIWrappedLines(rendered string, width int) []string {
     return lines
 }
 ```
+
+The outer-row scan intentionally uses `ansi.Strip(row) == ""` rather than
+`TrimSpace`: a row containing a literal space is visible for normalization.
+Only outer ANSI-only rows fold state into visible content; internal blank rows
+remain. The subsequent `strings.TrimRight(line, " ")` is existing TUI behavior,
+so tests must not promise literal trailing ASCII spaces survive.
 
 Move the current `markdownStyleConfig` body into an unexported
 `styleConfig(codeBackground *string) glamansi.StyleConfig`. Keep every current
@@ -993,7 +1001,21 @@ fast cancellation cannot pass without ever creating a descendant:
 ```go
 //go:build !windows
 
-package kata
+package main
+
+import (
+    "context"
+    "errors"
+    "io/fs"
+    "os"
+    "path/filepath"
+    "strconv"
+    "syscall"
+    "testing"
+    "time"
+
+    "github.com/stretchr/testify/require"
+)
 
 func TestExternalShowMarkdownRendererTimeoutKillsDescendant(t *testing.T) {
     t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
@@ -1063,10 +1085,8 @@ func requireProcessGone(t *testing.T, pid int) {
 }
 ```
 
-Import `errors`, `io/fs`, `os`, `path/filepath`, `strconv`, `syscall`,
-`testing`, and `time` in the Unix test file. The short timeout and grace values
-are test seams only; production keeps the exact 10-second per-invocation
-timeout and two-second grace contract.
+The short timeout and grace values are test seams only; production keeps the
+exact 10-second per-invocation timeout and two-second grace contract.
 
 - [ ] **Step 3: Run the focused tests and confirm the missing API failure**
 
@@ -1215,7 +1235,7 @@ readiness and then observe that descendant exit.
 Invoke the commit and privacy-scrub skills, then run:
 
 ```sh
-git add cmd/kata/show_markdown.go cmd/kata/show_markdown_test.go cmd/kata/render.go
+git add cmd/kata/show_markdown.go cmd/kata/show_markdown_test.go cmd/kata/show_markdown_unix_test.go cmd/kata/render.go
 git commit -m "Add Markdown field renderer backends"
 ```
 
@@ -1896,7 +1916,8 @@ Run:
 ```sh
 git diff --stat origin/main...HEAD
 git diff origin/main...HEAD -- \
-  cmd/kata/show.go cmd/kata/show_markdown.go cmd/kata/tty.go cmd/kata/render.go \
+  cmd/kata/show.go cmd/kata/show_markdown.go cmd/kata/show_markdown_test.go \
+  cmd/kata/show_markdown_unix_test.go cmd/kata/tty.go cmd/kata/render.go \
   internal/markdownrender internal/config/daemon_config.go internal/processtree \
   internal/hooks/runner.go docs/reference/cli.md docs/reference/configuration.md
 git status --short
