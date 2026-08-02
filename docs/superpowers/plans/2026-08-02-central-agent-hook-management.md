@@ -176,9 +176,9 @@ go test ./cmd/kata -run '^(TestApplyClaudeHooks_|TestE2E_InitWithHooks_|TestE2E_
 
 Expected and observed: PASS.
 
-- [ ] **Step 5: Commit the complete review correction and Claude adapter**
+- [x] **Step 5: Commit the complete review correction and Claude adapter**
 
-After full verification, use the mandatory commit skill with subject:
+Committed after full verification with subject:
 
 ```text
 Atomically migrate shared agent hooks
@@ -202,11 +202,11 @@ The body must explain the unique source marker, exact v0.13 adoption for both ag
 - Consumes: unchanged public flags and lifecycle behavior.
 - Produces: accurate command-hook documentation without internal migration detail in user workflows.
 
-- [ ] **Step 1: Update user-facing descriptions**
+- [x] **Step 1: Update user-facing descriptions**
 
 Replace Claude “exec-form” claims with command-hook wording. Preserve lifecycle matchers, Codex start-only limitation, launcher wrapper, idempotency, config preservation, and symlink refusal. Add an unreleased changelog bullet for shared management.
 
-- [ ] **Step 2: Check documentation consistency**
+- [x] **Step 2: Check documentation consistency**
 
 Run:
 
@@ -218,7 +218,7 @@ rg -n "exec-form|with-hooks|with-codex-hooks|attention-hook" \
 
 Expected: no claim that newly installed Claude handlers separate `command` and `args`; public flags and lifecycle descriptions remain.
 
-- [ ] **Step 3: Run complete isolated verification**
+- [x] **Step 3: Run complete isolated verification**
 
 Run with scratch `HOME`, `KATA_HOME`, `GOMODCACHE`, and `GOCACHE`:
 
@@ -232,11 +232,11 @@ git diff --check 9856a95
 
 Expected: all commands exit zero. Existing macOS sqlite-vector deprecation warnings are non-failing baseline output.
 
-- [ ] **Step 4: Commit docs and any final cleanup**
+- [x] **Step 4: Commit docs and any final cleanup**
 
 Use the mandatory commit skill with a rationale-focused body and required attribution. Do not bypass hooks.
 
-- [ ] **Step 5: Verify the complete committed tree**
+- [x] **Step 5: Verify the complete committed tree**
 
 Run:
 
@@ -249,6 +249,6 @@ rg -n "ensureCodexHooksFile|upsertCodexHook|upsertClaudeHook" cmd/kata
 
 Expected: the complete committed diff has no whitespace errors, the working tree is clean, and the removed local upsert symbols have no matches.
 
-- [ ] **Step 6: Record and close work**
+- [x] **Step 6: Record and close work**
 
 Comment on and close RoboRev jobs `9338`, `9343`, `9344`, and `9345` only after their fixes and tests are committed. Then close kata issue `7y6d` with the final implementation commit and leave cleanup issue `m7d5` open.
