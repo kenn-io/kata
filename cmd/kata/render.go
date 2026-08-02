@@ -81,6 +81,10 @@ func newRowRendererFor(p colorprofile.Profile) *rowRenderer {
 	}
 }
 
+func (r *rowRenderer) markdownRenderer() showMarkdownRenderer {
+	return newBuiltinShowMarkdownRenderer(r.profile)
+}
+
 // downsample wraps w so every styled line degrades to r.profile on
 // write (colors drop to the nearest representable value; NoTTY strips
 // ANSI entirely).
