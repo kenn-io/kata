@@ -62,10 +62,13 @@ to a raw string length, or split an escape sequence while adding a comment
 prefix.
 
 Before ANSI-aware wrapping, kata normalizes renderer line endings: CRLF and
-lone CR become LF, then leading and trailing LF characters are removed. This
-keeps kata's record spacing under kata's control and makes renderer output with
-or without a final newline equivalent. Spaces and internal blank lines remain
-unchanged.
+lone CR become LF. It then removes only outer rows whose _visible_ content is
+empty, even when those rows contain ANSI styles or resets. The removed leading
+ANSI bytes are prepended to the first visible row; removed trailing ANSI bytes
+are appended to the last visible row. That preserves the renderer's style
+state while keeping kata's record spacing under kata's control. Spaces and
+internal blank rows remain unchanged, and output with or without a final
+newline reinserts identically.
 
 ## Terminal And Color Behavior
 
@@ -175,13 +178,17 @@ captured ANSI is written to the terminal.
 client's own `<KATA_HOME>/config.toml` only after confirming that `--render` is
 active in human mode on a terminal.
 
-The common daemon-config decoder recognizes the `[display]` subtree only as an
-opaque client section. It does not decode or validate `markdown_renderer` while
-resolving a daemon. After the human-output and terminal gates pass, a separate
-display reader decodes and validates that subtree. A renderer value with the
-wrong TOML type or an unknown display key therefore cannot break plain,
-redirected, or daemon-serving commands, but does fail an active render request.
-Malformed TOML syntax still fails normal config parsing.
+Every shared config reader that otherwise rejects unknown keys—currently
+`ReadDaemonConfig` and `ReadAuthConfig`—recognizes the `[display]` subtree only
+as an opaque client section. Neither reader decodes or validates
+`markdown_renderer`: daemon resolution and auth-only clients must remain able
+to start or authenticate even when a client-only renderer preference is
+semantically invalid. After the human-output and terminal gates pass, a
+separate display reader decodes and validates that subtree. A renderer value
+with the wrong TOML type or an unknown display key therefore cannot break
+plain, redirected, daemon-serving, or auth-only commands, but does fail an
+active render request. Malformed TOML syntax and unknown non-display keys still
+fail normal config parsing.
 
 No display setting, renderer argv, rendered text, terminal width, or color
 profile is sent in the HTTP request. A remote daemon returns the same raw issue
@@ -196,7 +203,8 @@ Tests will cover behavior rather than configuration-file text:
 - built-in rendering changes Markdown fields while leaving record chrome
   literal;
 - multiple comments render as independent documents and retain their prefixes;
-- ANSI-bearing results wrap and indent without corrupting escape sequences;
+- ANSI-bearing results wrap and indent without corrupting escape sequences,
+  while ANSI-only outer rows fold their state into visible rows;
 - `--json` and `--agent` combinations fail as usage errors;
 - a non-TTY ignores both built-in rendering and an external override, including
   no child invocation;
@@ -207,7 +215,8 @@ Tests will cover behavior rather than configuration-file text:
   preserving internal blank lines;
 - external failure produces no partial stdout and does not expose child stderr
   or field content; and
-- timeout/cancellation terminates the renderer process group on Unix.
+- after a helper has started a descendant, timeout and cancellation both
+  terminate that descendant with the renderer process group on Unix.
 
 The CLI reference and `show --help` will document the flag, field-scoped
 behavior, local configuration, external renderer examples, and non-TTY

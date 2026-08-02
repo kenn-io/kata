@@ -58,9 +58,10 @@ remain separate units with narrow interfaces.
 - Renderer output is ANSI-bearing trusted presentation. Use
   `github.com/charmbracelet/x/ansi` for display width and hard wrapping; never
   byte-slice, rune-slice, or raw-length-trim it.
-- Normalize CRLF and lone CR to LF, then remove leading and trailing LF before
-  wrapping. Preserve spaces and internal blank lines so renderer output with
-  and without a final newline reinserts identically.
+- Normalize CRLF and lone CR to LF, then remove only outer rows whose visible
+  content is empty. Fold their ANSI state into the first or last visible row;
+  preserve spaces and internal blank rows so renderer output with and without a
+  final newline reinserts identically.
 - `[display]` is read from the invoking client's `<KATA_HOME>/config.toml` and
   never crosses the API boundary. No daemon, HTTP, generated-client, database,
   migration, or persisted-schema change is allowed.
@@ -85,9 +86,11 @@ remain separate units with narrow interfaces.
 - `internal/processtree/tree_windows.go` — Windows leader-process fallback.
 - `internal/processtree/tree_test.go` — platform-neutral no-process behavior.
 - `cmd/kata/show_markdown.go` — built-in and external field renderer backends,
-  timeout handling, diagnostic bounds, and backend selection.
+  timeout handling, stderr discard, and backend selection.
 - `cmd/kata/show_markdown_test.go` — renderer-backend contract tests and shared
   helper-process modes.
+- `cmd/kata/show_markdown_unix_test.go` — Unix-only external-renderer
+  process-group cleanup tests.
 
 ### Modified files
 
@@ -155,7 +158,6 @@ sanitization and wrapping boundaries:
 package markdownrender
 
 import (
-    "fmt"
     "strings"
     "testing"
 
@@ -193,6 +195,12 @@ func TestANSIWrappedLinesNormalizesOnlyOuterLineEndings(t *testing.T) {
     assert.Equal(t, want, ANSIWrappedLines("\nfirst\r\n\r\nsecond\r\n", 80))
     assert.Equal(t, want, ANSIWrappedLines("first\n\nsecond", 80))
 }
+
+func TestANSIWrappedLinesFoldsANSIOnlyOuterRowsIntoVisibleRows(t *testing.T) {
+    got := ANSIWrappedLines("\x1b[31m\nfirst\r\n\r\nsecond\n\x1b[0m\n", 80)
+
+    assert.Equal(t, []string{"\x1b[31mfirst", "", "second\x1b[0m"}, got)
+}
 ```
 
 - [ ] **Step 2: Run the tests and confirm the missing package/API failure**
@@ -214,6 +222,7 @@ Create `internal/markdownrender/render.go` with this public shape:
 package markdownrender
 
 import (
+    "fmt"
     "strings"
 
     "charm.land/glamour/v2"
@@ -261,15 +270,29 @@ func RenderLines(markdown string, opts Options) ([]string, error) {
 func ANSIWrappedLines(rendered string, width int) []string {
     rendered = strings.ReplaceAll(rendered, "\r\n", "\n")
     rendered = strings.ReplaceAll(rendered, "\r", "\n")
-    rendered = strings.Trim(rendered, "\n")
-    if rendered == "" {
+    raw := strings.Split(rendered, "\n")
+    first := 0
+    for first < len(raw) && ansi.Strip(raw[first]) == "" {
+        first++
+    }
+    if first == len(raw) {
         return nil
     }
+    last := len(raw) - 1
+    for last > first && ansi.Strip(raw[last]) == "" {
+        last--
+    }
+    raw[first] = strings.Join(raw[:first+1], "")
+    raw[last] = strings.Join(raw[last:], "")
+    raw = raw[first : last+1]
+
     width = max(1, width)
-    raw := strings.Split(rendered, "\n")
     lines := make([]string, 0, len(raw))
     for _, line := range raw {
         line = strings.TrimRight(line, " ")
+        // Glamour word-wraps prose to width but leaves preformatted content
+        // (code blocks, long URLs, table cells, and stack traces) at its natural
+        // width. Hardwrap preserves all content across display rows.
         lines = append(lines, strings.Split(ansi.Hardwrap(line, width, true), "\n")...)
     }
     return lines
@@ -354,8 +377,9 @@ existing style and ANSI wrapping without maintaining a second implementation.
   `config.DisplayConfig{MarkdownRenderer []string}`.
 - Produces:
   `config.ReadDisplayConfig() (DisplayConfig, error)`.
-- `ReadDaemonConfig` recognizes `[display]` as an opaque client subtree but
-  does not decode or validate its values during daemon resolution.
+- Both strict shared config readers, `ReadDaemonConfig` and `ReadAuthConfig`,
+  recognize `[display]` as an opaque client subtree but do not decode or
+  validate its values.
 - `ReadDisplayConfig` separately decodes and validates only `[display]` after
   the command's human-output and terminal gates pass.
 
@@ -416,29 +440,87 @@ future_option = true
     _, err := config.ReadDaemonConfig()
     require.NoError(t, err)
 }
+
+func TestReadAuthConfigTreatsDisplayAsOpaque(t *testing.T) {
+    tests := []struct {
+        name    string
+        display string
+    }{
+        {
+            name: "valid renderer argv",
+            display: `
+[display]
+markdown_renderer = ["renderer", "--style", "dark theme", "-"]
+`,
+        },
+        {
+            name: "malformed renderer and unknown display key",
+            display: `
+[display]
+markdown_renderer = "not-an-array"
+future_option = true
+`,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            home := t.TempDir()
+            t.Setenv("KATA_HOME", home)
+            require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[auth]
+token = "client-token"
+trust_private_network = true
+`+tt.display), 0o600))
+
+            got, err := config.ReadAuthConfig()
+            require.NoError(t, err)
+            assert.Equal(t, "client-token", got.Token)
+            assert.True(t, got.TrustPrivateNetwork)
+        })
+    }
+}
+
+func TestReadAuthConfigRejectsUnknownNonDisplayKey(t *testing.T) {
+    home := t.TempDir()
+    t.Setenv("KATA_HOME", home)
+    require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[auth]
+token = "client-token"
+
+[display_typo]
+markdown_renderer = ["renderer"]
+`), 0o600))
+
+    _, err := config.ReadAuthConfig()
+    require.Error(t, err)
+    assert.Contains(t, err.Error(), "display_typo.markdown_renderer")
+}
 ```
 
-The last two tests protect both halves of the client-only ownership boundary:
-the focused reader reports a display typo when the client asks to render, while
-common daemon resolution leaves the entire display subtree opaque.
+The display-reader tests keep active rendering strict. The daemon and auth
+tests protect the other half of the client-only boundary: valid and
+semantically malformed display content must not stop daemon resolution or an
+auth-only client from reading its auth settings, while an unknown non-display
+key still fails.
 
 - [ ] **Step 2: Run the focused tests and confirm the missing API failure**
 
 Run:
 
 ```sh
-go test ./internal/config -run 'TestRead(DisplayConfig|DaemonConfigTreatsDisplayAsOpaque)' -count=1
+go test ./internal/config -run 'TestRead(DisplayConfig|DaemonConfigTreatsDisplayAsOpaque|AuthConfig(TreatsDisplayAsOpaque|RejectsUnknownNonDisplayKey))' -count=1
 ```
 
-Expected: FAIL because `DisplayConfig`, the opaque-display exception, and
-`ReadDisplayConfig` do not exist.
+Expected: FAIL because `DisplayConfig`, `ReadDisplayConfig`, and the
+opaque-display exception in both shared readers do not exist.
 
 - [ ] **Step 3: Make the common decoder recognize an opaque client section**
 
 Keep `[display]` out of `DaemonConfig`: the daemon must not gain a renderer
-setting. In `ReadDaemonConfig`, retain strict unknown-key rejection for every
-other section but exclude keys whose first TOML path segment is exactly
-`display`:
+setting. In both `ReadDaemonConfig` and `ReadAuthConfig`, retain strict
+unknown-key rejection for every other section but exclude keys whose first TOML
+path segment is exactly `display`:
 
 ```go
 func isDisplayConfigKey(key toml.Key) bool {
@@ -446,9 +528,28 @@ func isDisplayConfigKey(key toml.Key) bool {
 }
 ```
 
-Apply this predicate only when filtering `meta.Undecoded()`. The file still has
-to be syntactically valid TOML. Do not ignore similarly named sections such as
-`[display_typo]`.
+Apply this predicate only when filtering `meta.Undecoded()` in each reader:
+
+```go
+if u := meta.Undecoded(); len(u) > 0 {
+    keys := make([]string, 0, len(u))
+    for _, k := range u {
+        if !isDisplayConfigKey(k) {
+            keys = append(keys, k.String())
+        }
+    }
+    if len(keys) > 0 {
+        return nil, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+    }
+}
+```
+
+Use each reader's own zero-value return in place of `nil` where required. The
+file still has to be syntactically valid TOML. Do not ignore similarly named
+sections such as `[display_typo]`. This duplicate filter is deliberate:
+auth-only commands call `ReadAuthConfig` without `ReadDaemonConfig`, so leaving
+the former strict on `[display]` would let a client-only preference block
+authentication.
 
 - [ ] **Step 4: Add the separate focused display reader**
 
@@ -688,6 +789,7 @@ no-orphan timeout behavior already proven by hooks.
 
 - Create: `cmd/kata/show_markdown.go`
 - Create: `cmd/kata/show_markdown_test.go`
+- Create: `cmd/kata/show_markdown_unix_test.go`
 - Modify: `cmd/kata/render.go`
 
 **Interfaces:**
@@ -740,6 +842,19 @@ func TestShowMarkdownRendererHelperProcess(t *testing.T) {
         os.Exit(9)
     case "wait":
         select {}
+    case "spawn-descendant":
+        readyPath := os.Args[marker+2]
+        child := exec.Command(
+            os.Args[0], "-test.run=TestShowMarkdownRendererHelperProcess", "--", "wait",
+        )
+        child.Env = os.Environ()
+        if err := child.Start(); err != nil {
+            os.Exit(23)
+        }
+        if err := os.WriteFile(readyPath, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+            os.Exit(24)
+        }
+        select {}
     default:
         os.Exit(22)
     }
@@ -755,8 +870,8 @@ func helperRenderer(mode string, extra ...string) *externalShowMarkdownRenderer 
 }
 ```
 
-This helper is justified by three tests; do not add a one-off helper for any
-single assertion.
+This helper is justified by the shared backend tests and the Unix process-group
+tests; do not add a one-off helper for any single assertion.
 
 - [ ] **Step 2: Write failing renderer-backend tests**
 
@@ -868,6 +983,91 @@ func TestConfiguredShowMarkdownRendererSelectsOverride(t *testing.T) {
 }
 ```
 
+Add `cmd/kata/show_markdown_unix_test.go` with `//go:build !windows`. It tests
+the external renderer's process-group wiring directly, rather than treating the
+hook runner's existing coverage as a proxy. The helper starts a `wait`
+descendant and writes its PID to a readiness file only after `child.Start`
+succeeds. The tests wait for that signal before exercising cancellation, so a
+fast cancellation cannot pass without ever creating a descendant:
+
+```go
+//go:build !windows
+
+package kata
+
+func TestExternalShowMarkdownRendererTimeoutKillsDescendant(t *testing.T) {
+    t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
+    renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))
+    renderer.timeout = 100 * time.Millisecond
+    renderer.grace = 50 * time.Millisecond
+
+    errCh := make(chan error, 1)
+    go func() {
+        _, err := renderer.Render(context.Background(), markdownDescription, "body", 80)
+        errCh <- err
+    }()
+
+    pid := waitForHelperPID(t, renderer.argv[len(renderer.argv)-1])
+    err := <-errCh
+    require.ErrorIs(t, err, context.DeadlineExceeded)
+    requireProcessGone(t, pid)
+}
+
+func TestExternalShowMarkdownRendererCancellationKillsDescendant(t *testing.T) {
+    t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
+    renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))
+    renderer.grace = 50 * time.Millisecond
+    ctx, cancel := context.WithCancel(context.Background())
+    t.Cleanup(cancel)
+
+    errCh := make(chan error, 1)
+    go func() {
+        _, err := renderer.Render(ctx, markdownDescription, "body", 80)
+        errCh <- err
+    }()
+
+    pid := waitForHelperPID(t, renderer.argv[len(renderer.argv)-1])
+    cancel()
+    err := <-errCh
+    require.ErrorIs(t, err, context.Canceled)
+    requireProcessGone(t, pid)
+}
+
+func waitForHelperPID(t *testing.T, readyPath string) int {
+    t.Helper()
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        data, err := os.ReadFile(readyPath)
+        if err == nil {
+            pid, err := strconv.Atoi(string(data))
+            require.NoError(t, err)
+            return pid
+        }
+        require.ErrorIs(t, err, fs.ErrNotExist)
+        time.Sleep(10 * time.Millisecond)
+    }
+    t.Fatalf("renderer helper did not signal readiness")
+    return 0
+}
+
+func requireProcessGone(t *testing.T, pid int) {
+    t.Helper()
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+            return
+        }
+        time.Sleep(10 * time.Millisecond)
+    }
+    t.Fatalf("renderer descendant %d survived cancellation", pid)
+}
+```
+
+Import `errors`, `io/fs`, `os`, `path/filepath`, `strconv`, `syscall`,
+`testing`, and `time` in the Unix test file. The short timeout and grace values
+are test seams only; production keeps the exact 10-second per-invocation
+timeout and two-second grace contract.
+
 - [ ] **Step 3: Run the focused tests and confirm the missing API failure**
 
 Run:
@@ -877,7 +1077,8 @@ go test ./cmd/kata -run 'Test(External|Builtin|Configured)ShowMarkdownRenderer' 
 ```
 
 Expected: FAIL because the renderer types, constants, and constructors do not
-exist.
+exist. On Unix, the descendant tests also fail until the external backend wires
+its command into the shared process-group lifecycle.
 
 - [ ] **Step 4: Implement the renderer interface and built-in backend**
 
@@ -1006,6 +1207,8 @@ go test ./cmd/kata -run 'Test(External|Builtin|Configured)ShowMarkdownRenderer' 
 ```
 
 Expected: PASS. The timeout test must finish in under one second.
+On Unix, both the timeout and cancellation cases must first observe helper
+readiness and then observe that descendant exit.
 
 - [ ] **Step 8: Commit renderer backends**
 
