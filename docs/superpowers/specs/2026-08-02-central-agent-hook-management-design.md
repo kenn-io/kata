@@ -18,10 +18,12 @@ profiles, or move kata's runtime hook handling to `agenthook.Handle`.
 
 ## Architecture
 
-Kata will replace its local JSON hook merge and atomic-write implementations
-with thin installers that call `agenthook.Install` using workspace-local config
-paths. Each installer supplies the existing event, matcher, timeout, command,
-and ownership marker explicitly:
+Kata will replace its local JSON hook merge implementation with thin adapters
+that call `agenthook.Install` against a private staging file. Each installed
+command carries a hidden, mode-specific `--source kata-agent-hook-<mode>` token;
+that token is kit's ownership marker and cannot collide with an unrelated
+command that merely mentions `kata attention-hook start`. Each adapter supplies
+the existing event, matcher, timeout, and command explicitly:
 
 - Claude Code receives `SessionStart` for `startup|resume|clear` and
   `SessionEnd` for
@@ -41,13 +43,17 @@ dependency changes are accepted only when required by that upgrade.
 
 ## Existing Configuration Migration
 
-Kata v0.13.0 installed Claude commands in command-plus-arguments form, while
-kit v0.14.0 writes a single command string. Before the shared installer runs,
-kata will remove only exact v0.13.0-owned Claude handlers:
+Kata v0.13.0 installed unmarked Claude and Codex commands. Before the shared
+installer runs in the staging file, kata will remove only exact v0.13.0-owned
+handlers. For Claude these are:
 
 - executable `kata`;
 - arguments `attention-hook start` or `attention-hook end`;
 - the corresponding managed event and matcher.
+
+For Codex, the exact adopted handler is the `SessionStart` command
+`kata attention-hook start` with the `startup|resume|clear` matcher and
+ten-second timeout.
 
 No fuzzy command matching, alias handling, dual reading, or unrelated hook
 cleanup is permitted. The shared installer then writes marker-owned command
@@ -68,10 +74,12 @@ human-readable warning class it uses today. Machine-readable output continues
 to suppress those warnings. Re-running either flag after a successful install
 is a no-op.
 
-Claude start and end registrations require separate commands. The adapter will
-install them in a deterministic order and report failure immediately. Each kit
-write is atomic; a later write failure may leave the earlier registration
-installed, and re-running the same init command safely converges the file.
+Claude start and end registrations require separate commands. The adapter
+copies the original config to a private staging file, performs exact legacy
+adoption and every kit installation there, then atomically publishes the
+complete final config once. Any migration or install failure leaves the live
+workspace file byte-for-byte unchanged. Empty legacy groups carrying no other
+metadata are pruned in staging; groups with unrelated handlers or fields remain.
 
 ## Tests
 
@@ -83,6 +91,10 @@ than retest kit's parser and writer internals. Coverage will verify:
 - preservation of unrelated configuration;
 - idempotent reinstallation;
 - migration of exact v0.13.0 Claude handlers without duplication;
+- adoption of the exact v0.13.0 Codex handler without duplication;
+- preservation of commands that mention the lifecycle command but lack kata's
+  unique source marker;
+- unchanged live configuration when a later staged install fails;
 - refusal of symlinked managed paths;
 - non-destructive failure for malformed configuration; and
 - preservation of the Codex `[hooks]` advisory.

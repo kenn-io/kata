@@ -55,8 +55,8 @@ func writeCodexConfig(t *testing.T, dir, content string) {
 func expectedCodexHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
-		"command":        "kata attention-hook start",
-		"commandWindows": "kata attention-hook start",
+		"command":        "kata attention-hook start --source kata-agent-hook-start",
+		"commandWindows": "kata attention-hook start --source kata-agent-hook-start",
 		"timeout":        json.Number("10"),
 	}
 }
@@ -65,7 +65,7 @@ func TestApplyCodexHooks_ReplacesOwnedCommandAfterExecutablePathChanges(t *testi
 	dir := t.TempDir()
 	unrelated := map[string]any{
 		"type":    "command",
-		"command": "notify attention-hook start",
+		"command": `notify "kata attention-hook start failed"`,
 	}
 	writeCodexHooks(t, dir, map[string]any{
 		"hooks": map[string]any{
@@ -74,8 +74,8 @@ func TestApplyCodexHooks_ReplacesOwnedCommandAfterExecutablePathChanges(t *testi
 				"hooks": []any{
 					map[string]any{
 						"type":           "command",
-						"command":        "/opt/example/bin/kata attention-hook start",
-						"commandWindows": `C:\example\kata.exe attention-hook start`,
+						"command":        "/opt/example/bin/kata attention-hook start --source kata-agent-hook-start",
+						"commandWindows": `C:\example\kata.exe attention-hook start --source kata-agent-hook-start`,
 						"timeout":        json.Number("10"),
 					},
 					unrelated,
@@ -100,6 +100,37 @@ func TestApplyCodexHooks_ReplacesOwnedCommandAfterExecutablePathChanges(t *testi
 			"hooks":   []any{expectedCodexHandler()},
 		},
 	}, hooks["SessionStart"])
+}
+
+func TestApplyCodexHooks_AdoptsExactV013Handler(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexHooks(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"matcher": codexSessionStartMatcher,
+				"hooks": []any{map[string]any{
+					"type":    "command",
+					"command": "kata attention-hook start",
+					"timeout": json.Number("10"),
+				}},
+			}},
+		},
+	})
+
+	changed, warnings, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Empty(t, warnings)
+
+	file := readCodexHooks(t, dir)
+	assert.Equal(t, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"matcher": codexSessionStartMatcher,
+				"hooks":   []any{expectedCodexHandler()},
+			}},
+		},
+	}, file)
 }
 
 func TestApplyCodexHooks_FreshWorkspace(t *testing.T) {
@@ -299,4 +330,18 @@ func TestApplyCodexHooks_WarnsOnConfigTomlHooks(t *testing.T) {
 		assert.True(t, changed)
 		assert.Empty(t, warnings)
 	})
+}
+
+func TestApplyCodexHooks_InstallFailureDoesNotClaimInstallation(t *testing.T) {
+	dir := t.TempDir()
+	writeCodexConfig(t, dir, "[hooks]\nSessionStart = []\n")
+	writeCodexHooks(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"PostToolUse": map[string]any{"unexpected": true},
+		},
+	})
+
+	_, warnings, err := applyCodexHooks(dir)
+	require.Error(t, err)
+	assert.Empty(t, warnings)
 }

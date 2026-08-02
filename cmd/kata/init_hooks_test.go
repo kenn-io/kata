@@ -3,13 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/agenthook"
 )
 
 // Unit tests for `kata init --with-hooks`: merging the work.attention
@@ -46,9 +49,216 @@ func writeRawSettings(t *testing.T, dir, content string) string {
 func expectedHookHandler(mode string) map[string]any {
 	return map[string]any{
 		"type":    "command",
+		"command": "kata attention-hook " + mode + " --source kata-agent-hook-" + mode,
+	}
+}
+
+func legacyClaudeHookHandler(mode string) map[string]any {
+	return map[string]any{
+		"type":    "command",
 		"command": "kata",
 		"args":    []any{"attention-hook", mode},
 	}
+}
+
+func TestApplyClaudeHooks_MigratesExactV013Handlers(t *testing.T) {
+	dir := t.TempDir()
+	unrelated := map[string]any{"type": "command", "command": "notify-session"}
+	writeSettings(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"matcher": "startup|resume|clear",
+				"hooks":   []any{legacyClaudeHookHandler("start"), unrelated},
+			}},
+			"SessionEnd": []any{map[string]any{
+				"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
+				"hooks":   []any{legacyClaudeHookHandler("end")},
+			}},
+		},
+	})
+
+	changed, err := applyClaudeHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	hooks := readSettings(t, dir)["hooks"].(map[string]any)
+	assert.Equal(t, []any{
+		map[string]any{
+			"matcher": "startup|resume|clear",
+			"hooks":   []any{unrelated},
+		},
+		map[string]any{
+			"matcher": "startup|resume|clear",
+			"hooks":   []any{expectedHookHandler("start")},
+		},
+	}, hooks["SessionStart"])
+	assert.Equal(t, []any{map[string]any{
+		"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
+		"hooks":   []any{expectedHookHandler("end")},
+	}}, hooks["SessionEnd"])
+}
+
+func TestApplyClaudeHooks_PreservesNonExactLegacyHandlers(t *testing.T) {
+	tests := map[string]struct {
+		matcher string
+		mutate  func(map[string]any)
+	}{
+		"alternate matcher": {
+			matcher: "startup",
+			mutate:  func(map[string]any) {},
+		},
+		"other command": {
+			matcher: "startup|resume|clear",
+			mutate: func(handler map[string]any) {
+				handler["command"] = "other"
+			},
+		},
+		"extra argument": {
+			matcher: "startup|resume|clear",
+			mutate: func(handler map[string]any) {
+				handler["args"] = []any{"attention-hook", "start", "extra"}
+			},
+		},
+		"extra field": {
+			matcher: "startup|resume|clear",
+			mutate: func(handler map[string]any) {
+				handler["timeout"] = json.Number("5")
+			},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			handler := legacyClaudeHookHandler("start")
+			tt.mutate(handler)
+			writeSettings(t, dir, map[string]any{
+				"hooks": map[string]any{
+					"SessionStart": []any{map[string]any{
+						"matcher": tt.matcher,
+						"hooks":   []any{handler},
+					}},
+				},
+			})
+
+			changed, err := applyClaudeHooks(dir)
+			require.NoError(t, err)
+			assert.True(t, changed)
+
+			groups := readSettings(t, dir)["hooks"].(map[string]any)["SessionStart"].([]any)
+			found := false
+			for _, rawGroup := range groups {
+				group, ok := rawGroup.(map[string]any)
+				if !ok || group["matcher"] != tt.matcher {
+					continue
+				}
+				for _, installed := range group["hooks"].([]any) {
+					if reflect.DeepEqual(installed, handler) {
+						found = true
+					}
+				}
+			}
+			assert.True(t, found, "non-exact legacy handler must remain installed")
+		})
+	}
+}
+
+func TestApplyClaudeHooks_MalformedUnrelatedEventDoesNotPartiallyMigrate(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := writeSettings(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"matcher": "startup|resume|clear",
+				"hooks":   []any{legacyClaudeHookHandler("start")},
+			}},
+			"PostToolUse": map[string]any{"unexpected": true},
+		},
+	})
+	before, err := os.ReadFile(settingsPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+
+	_, err = applyClaudeHooks(dir)
+	require.Error(t, err)
+
+	after, readErr := os.ReadFile(settingsPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, before, after)
+}
+
+func TestApplyClaudeHooks_SecondSharedInstallFailureLeavesOriginal(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := writeSettings(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"matcher": "startup|resume|clear",
+				"hooks":   []any{legacyClaudeHookHandler("start")},
+			}},
+			"SessionEnd": []any{map[string]any{
+				"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
+				"hooks":   []any{legacyClaudeHookHandler("end")},
+			}},
+		},
+	})
+	before, err := os.ReadFile(settingsPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+
+	originalInstall := installAgentHookConfig
+	calls := 0
+	installAgentHookConfig = func(
+		agent agenthook.Agent,
+		opts agenthook.InstallOptions,
+	) (agenthook.Result, error) {
+		calls++
+		if calls == 2 {
+			return agenthook.Result{}, errors.New("injected second install failure")
+		}
+		return originalInstall(agent, opts)
+	}
+	t.Cleanup(func() { installAgentHookConfig = originalInstall })
+
+	_, err = applyClaudeHooks(dir)
+	require.ErrorContains(t, err, "injected second install failure")
+
+	after, readErr := os.ReadFile(settingsPath) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, readErr)
+	assert.Equal(t, before, after)
+}
+
+func TestApplyClaudeHooks_ReplacesOwnedCommandAfterExecutablePathChanges(t *testing.T) {
+	dir := t.TempDir()
+	unrelated := map[string]any{
+		"type":    "command",
+		"command": `notify "kata attention-hook start failed"`,
+	}
+	writeSettings(t, dir, map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{map[string]any{
+				"matcher": "startup|resume|clear",
+				"hooks": []any{
+					map[string]any{
+						"type":    "command",
+						"command": "/opt/example/bin/kata attention-hook start --source kata-agent-hook-start",
+					},
+					unrelated,
+				},
+			}},
+		},
+	})
+
+	changed, err := applyClaudeHooks(dir)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	hooks := readSettings(t, dir)["hooks"].(map[string]any)
+	assert.Equal(t, []any{
+		map[string]any{
+			"matcher": "startup|resume|clear",
+			"hooks":   []any{unrelated},
+		},
+		map[string]any{
+			"matcher": "startup|resume|clear",
+			"hooks":   []any{expectedHookHandler("start")},
+		},
+	}, hooks["SessionStart"])
 }
 
 func TestApplyClaudeHooks_FreshWorkspace(t *testing.T) {
@@ -58,26 +268,17 @@ func TestApplyClaudeHooks_FreshWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, changed)
 
-	// settings.json contains exactly the two managed lifecycle hooks. Claude
-	// Code's exec form keeps the binary and arguments separate, with no shell
-	// command string and no PostToolUse wiring.
+	// settings.json contains exactly the two managed lifecycle hooks and no
+	// unrelated event wiring.
 	assert.Equal(t, map[string]any{
 		"hooks": map[string]any{
 			"SessionStart": []any{map[string]any{
 				"matcher": "startup|resume|clear",
-				"hooks": []any{map[string]any{
-					"type":    "command",
-					"command": "kata",
-					"args":    []any{"attention-hook", "start"},
-				}},
+				"hooks":   []any{expectedHookHandler("start")},
 			}},
 			"SessionEnd": []any{map[string]any{
 				"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
-				"hooks": []any{map[string]any{
-					"type":    "command",
-					"command": "kata",
-					"args":    []any{"attention-hook", "end"},
-				}},
+				"hooks":   []any{expectedHookHandler("end")},
 			}},
 		},
 	}, readSettings(t, dir))
@@ -132,14 +333,23 @@ func TestApplyClaudeHooks_PreservesSettingsAndIsIdempotent(t *testing.T) {
 	// Unscoped lifecycle handlers do not cover the exact managed matchers.
 	// Preserve their shared groups and add the two managed scoped groups.
 	assert.Equal(t, []any{
-		unscopedStartGroup,
+		map[string]any{
+			"custom": "keep",
+			"hooks": []any{
+				map[string]any{"type": "command", "command": "notify-start"},
+			},
+		},
 		map[string]any{
 			"matcher": "startup|resume|clear",
 			"hooks":   []any{expectedHookHandler("start")},
 		},
 	}, hooks["SessionStart"])
 	assert.Equal(t, []any{
-		unscopedEndGroup,
+		map[string]any{
+			"hooks": []any{
+				map[string]any{"type": "command", "command": "notify-end"},
+			},
+		},
 		map[string]any{
 			"matcher": "logout|prompt_input_exit|bypass_permissions_disabled|other",
 			"hooks":   []any{expectedHookHandler("end")},

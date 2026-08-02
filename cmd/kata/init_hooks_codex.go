@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,18 +39,39 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	if err := validateManagedHookJSON(configPath, agenthook.EventSessionStart); err != nil {
 		return false, nil, err
 	}
-	warnings := codexConfigHooksWarnings(root)
-	changed, err := installAttentionHook(
+	changed, err := installAttentionHooks(
+		root,
+		".codex/hooks.json",
 		agenthook.AgentCodex,
-		configPath,
-		"start",
-		agenthook.Hook{
-			Event:   agenthook.EventSessionStart,
-			Matcher: codexSessionStartMatcher,
-			Timeout: 10 * time.Second,
+		migrateLegacyCodexHooks,
+		attentionHookRegistration{
+			mode: "start",
+			hook: agenthook.Hook{
+				Event:   agenthook.EventSessionStart,
+				Matcher: codexSessionStartMatcher,
+				Timeout: 10 * time.Second,
+			},
 		},
 	)
-	return changed, warnings, err
+	if err != nil {
+		return false, nil, err
+	}
+	return changed, codexConfigHooksWarnings(root), nil
+}
+
+// migrateLegacyCodexHooks adopts the exact unmarked SessionStart handler
+// shipped in kata v0.13.0 before kit installs the source-marked command.
+func migrateLegacyCodexHooks(settings map[string]any) (bool, error) {
+	return removeExactAgentHook(
+		settings,
+		agenthook.EventSessionStart,
+		codexSessionStartMatcher,
+		map[string]any{
+			"type":    "command",
+			"command": "kata attention-hook start",
+			"timeout": json.Number("10"),
+		},
+	)
 }
 
 // codexConfigHooksWarnings returns a best-effort warning when
