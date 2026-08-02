@@ -156,18 +156,23 @@ flags, width injection, or environment changes. For example:
 markdown_renderer = ["glow", "-", "-s", "dark", "-w", "80"]
 ```
 
-kata starts the configured program once per non-empty Markdown field. Because
-the child's stdout is captured, users are responsible for renderer-specific
-color and width flags or inherited environment variables such as
-`CLICOLOR_FORCE`. kata treats output with or without a final newline the same,
-while preserving internal blank lines. Renderer stderr is discarded because a
-program may echo the Markdown input there; run the configured argv directly to
-diagnose renderer-specific failures.
+kata starts the configured program once per non-empty Markdown field. Each
+invocation has a 10-second timeout; cancellation or timeout allows up to a
+further 2 seconds for process cleanup. Because the child's stdout is captured,
+users are responsible for renderer-specific color and width flags or inherited
+environment variables such as `CLICOLOR_FORCE`. After capture, kata normalizes
+the output and ANSI-safely hard-wraps it to the terminal width for a description
+or the remaining field width for a comment. kata treats output with or without a
+final newline the same, while preserving internal blank lines. Renderer stderr
+is discarded because a program may echo the Markdown input there; run the
+configured argv directly to diagnose renderer-specific failures.
 
-The common daemon-config path recognizes `[display]` without decoding it. kata
-validates this client section only when `show --render` is active on a terminal,
-so a display-only typo cannot break daemon startup, plain output, or redirected
-output.
+The common daemon-config path recognizes `[display]` without decoding or
+semantically validating it, so unknown display keys and invalid display values
+do not break daemon startup. A TOML syntax error anywhere in `config.toml` still
+prevents common config parsing. kata validates this client section only when
+`show --render` is active on a terminal, so display-only semantic mistakes do
+not break plain output or redirected output.
 
 ## Daemon config
 
