@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,21 +10,11 @@ import (
 	"go.kenn.io/kit/agenthook"
 )
 
-// `kata init --with-codex-hooks` wires the work.attention harness into a Codex
-// CLI workspace by writing .codex/hooks.json. It installs a SessionStart
-// command hook for startup, resume, and clear transitions that runs
-// `kata attention-hook start`. Context compaction is excluded so it cannot
-// reset live attention state.
-//
-// Codex executes command hooks through a login shell. The bare `kata` command
-// is deliberate: an absolute install path would make workspace configuration
-// machine-specific, while a hostile PATH is already able to impersonate every
-// developer command and is outside this installer's threat model.
+// `kata init --with-codex-hooks` wires the work.attention lifecycle into a
+// Codex CLI workspace. Kit owns config parsing, hook ownership, and updates.
 
 const codexSessionStartMatcher = "startup|resume|clear"
 
-// applyCodexHooks keeps kata's workspace symlink boundary and warning policy,
-// then delegates normal hook ownership and config mutation to kit.
 func applyCodexHooks(dir string) (bool, []string, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -35,49 +24,25 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	if err := refuseSymlinkComponents(root, ".codex", ".codex/hooks.json"); err != nil {
 		return false, nil, err
 	}
-	configPath := filepath.Join(root.Name(), ".codex", "hooks.json")
-	if err := validateManagedHookJSON(configPath, agenthook.EventSessionStart); err != nil {
-		return false, nil, err
-	}
-	changed, err := installAttentionHooks(
-		root,
-		".codex/hooks.json",
-		agenthook.AgentCodex,
-		migrateLegacyCodexHooks,
-		attentionHookRegistration{
-			mode: "start",
-			hook: agenthook.Hook{
-				Event:   agenthook.EventSessionStart,
-				Matcher: codexSessionStartMatcher,
-				Timeout: 10 * time.Second,
-			},
-		},
-	)
+
+	result, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
+		ConfigPath: filepath.Join(root.Name(), ".codex", "hooks.json"),
+		Executable: "kata",
+		Arguments:  []string{"attention-hook", "start"},
+		Marker:     "kata attention-hook start",
+		Hooks: []agenthook.Hook{{
+			Event:   agenthook.EventSessionStart,
+			Matcher: codexSessionStartMatcher,
+			Timeout: 10 * time.Second,
+		}},
+	})
 	if err != nil {
 		return false, nil, err
 	}
-	return changed, codexConfigHooksWarnings(root), nil
+	return result.Changed, codexConfigHooksWarnings(root), nil
 }
 
-// migrateLegacyCodexHooks adopts the exact unmarked SessionStart handler
-// shipped in kata v0.13.0 before kit installs the source-marked command.
-func migrateLegacyCodexHooks(settings map[string]any) (bool, error) {
-	return removeExactAgentHook(
-		settings,
-		agenthook.EventSessionStart,
-		codexSessionStartMatcher,
-		map[string]any{
-			"type":    "command",
-			"command": "kata attention-hook start",
-			"timeout": json.Number("10"),
-		},
-	)
-}
-
-// codexConfigHooksWarnings returns a best-effort warning when
-// .codex/config.toml already defines a [hooks] table. Codex loads hooks from
-// both config.toml and hooks.json, so an operator with pre-existing TOML hooks
-// should know kata's hooks.json runs alongside them.
+// codexConfigHooksWarnings warns when Codex also has TOML-managed hooks.
 func codexConfigHooksWarnings(root *os.Root) []string {
 	const rel = ".codex/config.toml"
 	content, err := root.ReadFile(rel)

@@ -24,7 +24,6 @@ const (
 	attnValueNeedsHuman = "needs-human"
 	attnHandoffMsg      = "session ended without hand-off"
 	attnWriteAttempts   = 2
-	attentionHookSource = "kata-agent-hook-"
 )
 
 func newAttentionHookCmd() *cobra.Command {
@@ -36,28 +35,13 @@ func newAttentionHookCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Treat every malformed invocation as a silent no-op. In particular,
 			// dash-leading args must not reach Cobra's non-zero flag-error path.
-			mode, ok := parseAttentionHookArgs(args)
-			if !ok {
+			if len(args) != 1 {
 				return nil
 			}
-			runAttentionHook(cmd, mode)
+			runAttentionHook(cmd, args[0])
 			return nil
 		},
 	}
-}
-
-func parseAttentionHookArgs(args []string) (string, bool) {
-	if len(args) == 1 {
-		return args[0], true
-	}
-	if len(args) != 3 || args[1] != "--source" {
-		return "", false
-	}
-	mode := args[0]
-	if (mode != "start" && mode != "end") || args[2] != attentionHookSource+mode {
-		return "", false
-	}
-	return mode, true
 }
 
 func runAttentionHook(cmd *cobra.Command, mode string) {
