@@ -43,3 +43,7 @@ func TestANSIWrappedLinesRemovesANSIOnlyOuterRowsWithoutLosingState(t *testing.T
 	want := []string{"\x1b[31mfirst", "", "second\x1b[0m"}
 	assert.Equal(t, want, ANSIWrappedLines("\x1b[31m\nfirst\n\nsecond\n\x1b[0m", 80))
 }
+
+func TestANSIWrappedLinesTrimsLastVisibleRowBeforeTrailingANSIState(t *testing.T) {
+	assert.Equal(t, []string{"text\x1b[0m"}, ANSIWrappedLines("text   \n\x1b[0m", 80))
+}

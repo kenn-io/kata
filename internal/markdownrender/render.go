@@ -63,7 +63,9 @@ func ANSIWrappedLines(rendered string, width int) []string {
 		last--
 	}
 	raw[first] = strings.Join(raw[:first+1], "")
-	raw[last] = strings.Join(raw[last:], "")
+	// Preserve the existing trailing-space policy before trailing ANSI-only
+	// rows make the state sequence the line's suffix.
+	raw[last] = strings.TrimRight(raw[last], " ") + strings.Join(raw[last+1:], "")
 	raw = raw[first : last+1]
 
 	width = max(1, width)

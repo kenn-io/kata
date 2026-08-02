@@ -203,6 +203,10 @@ func TestANSIWrappedLinesFoldsANSIOnlyOuterRowsIntoVisibleRows(t *testing.T) {
 
     assert.Equal(t, []string{"\x1b[31mfirst", "", "second\x1b[0m"}, got)
 }
+
+func TestANSIWrappedLinesTrimsLastVisibleRowBeforeTrailingANSIState(t *testing.T) {
+    assert.Equal(t, []string{"text\x1b[0m"}, ANSIWrappedLines("text   \n\x1b[0m", 80))
+}
 ```
 
 - [ ] **Step 2: Run the tests and confirm the missing package/API failure**
@@ -285,7 +289,7 @@ func ANSIWrappedLines(rendered string, width int) []string {
         last--
     }
     raw[first] = strings.Join(raw[:first+1], "")
-    raw[last] = strings.Join(raw[last:], "")
+    raw[last] = strings.TrimRight(raw[last], " ") + strings.Join(raw[last+1:], "")
     raw = raw[first : last+1]
 
     width = max(1, width)
@@ -304,8 +308,9 @@ func ANSIWrappedLines(rendered string, width int) []string {
 The outer-row scan intentionally uses `ansi.Strip(row) == ""` rather than
 `TrimSpace`: a row containing a literal space is visible for normalization.
 Only outer ANSI-only rows fold state into visible content; internal blank rows
-remain. The subsequent `strings.TrimRight(line, " ")` is existing TUI behavior,
-so tests must not promise literal trailing ASCII spaces survive.
+remain. Trim the final visible row before appending trailing ANSI-only state so
+the inherited `strings.TrimRight(line, " ")` policy still removes its trailing
+ASCII spaces. Tests must not promise literal trailing ASCII spaces survive.
 
 Move the current `markdownStyleConfig` body into an unexported
 `styleConfig(codeBackground *string) glamansi.StyleConfig`. Keep every current
@@ -1915,11 +1920,7 @@ Run:
 
 ```sh
 git diff --stat origin/main...HEAD
-git diff origin/main...HEAD -- \
-  cmd/kata/show.go cmd/kata/show_markdown.go cmd/kata/show_markdown_test.go \
-  cmd/kata/show_markdown_unix_test.go cmd/kata/tty.go cmd/kata/render.go \
-  internal/markdownrender internal/config/daemon_config.go internal/processtree \
-  internal/hooks/runner.go docs/reference/cli.md docs/reference/configuration.md
+git diff origin/main...HEAD
 git status --short
 ```
 

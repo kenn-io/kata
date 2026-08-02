@@ -68,9 +68,10 @@ or resets. The removed leading ANSI bytes are prepended to the first visible
 row; removed trailing ANSI bytes are appended to the last visible row. That
 preserves the renderer's style state while keeping kata's record spacing under
 kata's control. A space-only row is visible to this outer-row detection, and
-internal blank rows remain. Existing per-line trailing ASCII-space trimming
-continues after normalization, so literal trailing spaces are not a preserved
-output contract. Output with or without a final newline reinserts identically.
+internal blank rows remain. The final visible row is trimmed before trailing
+ANSI-only state is appended, so existing per-line trailing ASCII-space trimming
+still applies; literal trailing spaces are not a preserved output contract.
+Output with or without a final newline reinserts identically.
 
 ## Terminal And Color Behavior
 
