@@ -13,9 +13,10 @@ import (
 )
 
 type legacyAgentHook struct {
-	event    agenthook.Event
-	matcher  string
-	handlers []map[string]any
+	event         agenthook.Event
+	matcher       string
+	matcherAbsent bool
+	handlers      []map[string]any
 }
 
 // migrateLegacyAgentHooks removes only complete handler shapes kata installed
@@ -87,8 +88,7 @@ func removeExactLegacyAgentHook(root map[string]any, legacy legacyAgentHook) (bo
 	keptGroups := make([]any, 0, len(groups))
 	for _, rawGroup := range groups {
 		group, ok := rawGroup.(map[string]any)
-		groupMatcher, _ := group["matcher"].(string)
-		if !ok || groupMatcher != legacy.matcher {
+		if !ok || !legacyMatcherMatches(group, legacy) {
 			keptGroups = append(keptGroups, rawGroup)
 			continue
 		}
@@ -125,6 +125,15 @@ func removeExactLegacyAgentHook(root map[string]any, legacy legacyAgentHook) (bo
 		hooks[string(legacy.event)] = keptGroups
 	}
 	return true, nil
+}
+
+func legacyMatcherMatches(group map[string]any, legacy legacyAgentHook) bool {
+	rawMatcher, exists := group["matcher"]
+	if legacy.matcherAbsent {
+		return !exists
+	}
+	matcher, ok := rawMatcher.(string)
+	return exists && ok && matcher == legacy.matcher
 }
 
 func exactLegacyHandler(handler any, candidates []map[string]any) bool {

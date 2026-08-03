@@ -42,9 +42,9 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	}
 	migrated, err := migrateLegacyAgentHooks(configPath, []legacyAgentHook{
 		{
-			event:    agenthook.EventSessionStart,
-			matcher:  "",
-			handlers: legacyHandlers,
+			event:         agenthook.EventSessionStart,
+			matcherAbsent: true,
+			handlers:      legacyHandlers,
 		},
 		{
 			event:    agenthook.EventSessionStart,

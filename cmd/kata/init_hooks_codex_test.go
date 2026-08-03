@@ -52,6 +52,45 @@ func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 	}, readCodexHooks(t, dir))
 }
 
+func TestApplyCodexHooks_PreservesLegacyCommandWithExplicitNonScopedMatcher(t *testing.T) {
+	tests := []struct {
+		name    string
+		matcher any
+	}{
+		{name: "empty string", matcher: ""},
+		{name: "non-string", matcher: json.Number("7")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			codexDir := filepath.Join(dir, ".codex")
+			require.NoError(t, os.MkdirAll(codexDir, 0o750))
+			legacyHandler := map[string]any{
+				"type":    "command",
+				"command": "kata attention-hook start",
+				"timeout": json.Number("10"),
+			}
+			config := map[string]any{"hooks": map[string]any{
+				"SessionStart": []any{map[string]any{
+					"matcher": tt.matcher,
+					"hooks":   []any{legacyHandler},
+				}},
+			}}
+			encoded, err := json.Marshal(config)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), encoded, 0o644)) //nolint:gosec // test fixture under TempDir
+
+			_, _, err = applyCodexHooks(dir)
+			require.NoError(t, err)
+			hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
+			groups := hooks["SessionStart"].([]any)
+			require.Len(t, groups, 2)
+			assert.Equal(t, tt.matcher, groups[0].(map[string]any)["matcher"])
+			assert.Equal(t, []any{legacyHandler}, groups[0].(map[string]any)["hooks"])
+		})
+	}
+}
+
 func TestApplyCodexHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
