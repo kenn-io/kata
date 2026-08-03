@@ -2006,8 +2006,9 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 // not soft-deleted, and not blocked by an open `blocks` predecessor in an
 // active project. Issues from archived projects (projects.deleted_at IS NOT
 // NULL) are excluded, and an open blocker in an archived project does not
-// gate readiness. Ordering matches ReadyIssues so behavior is consistent.
-func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int) ([]db.ReadyGlobalIssue, error) {
+// gate readiness. Ordering and filter semantics match ReadyIssues so
+// behavior is consistent.
+func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
 	// issueSelect ends with "FROM issues i JOIN projects p ON p.id = i.project_id"
 	// We need to add p.name before FROM, so we build the SELECT from scratch.
 	q := `SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name AS project_name FROM issues i JOIN projects p ON p.id = i.project_id
@@ -2020,12 +2021,34 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int) ([]db.ReadyGlo
 		    WHERE l.type = 'blocks' AND l.to_issue_id = i.id
 		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
 		      AND bp.deleted_at IS NULL
-		  )
-		ORDER BY i.updated_at DESC, i.id DESC`
+		  )`
+	var args []any
+
+	// Apply owner filters (same semantics as ReadyIssues)
+	if filter.Unowned {
+		q += ` AND i.owner IS NULL`
+	} else if filter.Owner != "" {
+		q += ` AND i.owner = ?`
+		args = append(args, filter.Owner)
+	}
+
+	// Apply label filters (must have ALL these labels)
+	for _, label := range filter.Labels {
+		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		args = append(args, strings.ToLower(label))
+	}
+
+	// Apply exclude label filters (must NOT have any of these labels)
+	for _, label := range filter.ExcludeLabels {
+		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		args = append(args, strings.ToLower(label))
+	}
+
+	q += ` ORDER BY i.updated_at DESC, i.id DESC`
 	if limit > 0 {
 		q += fmt.Sprintf(` LIMIT %d`, limit)
 	}
-	rows, err := d.QueryContext(ctx, q)
+	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", err)
 	}

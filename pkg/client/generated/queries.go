@@ -229,5 +229,9 @@ func (s SearchIssuesQuery) Validate() error {
 }
 
 type ReadyIssuesGlobalQuery struct {
-	Limit *int64 `json:"limit,omitempty"`
+	Limit        *int64   `json:"limit,omitempty"`
+	Unowned      *bool    `json:"unowned,omitempty"`
+	Owner        *string  `json:"owner,omitempty"`
+	Label        []string `json:"label,omitempty"`
+	ExcludeLabel []string `json:"exclude_label,omitempty"`
 }

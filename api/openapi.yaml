@@ -6307,6 +6307,34 @@ paths:
           schema:
             format: int64
             type: integer
+        - explode: false
+          in: query
+          name: unowned
+          schema:
+            type: boolean
+        - explode: false
+          in: query
+          name: owner
+          schema:
+            type: string
+        - explode: true
+          in: query
+          name: label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: true
+          in: query
+          name: exclude_label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
       responses:
         "200":
           content:

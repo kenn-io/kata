@@ -50,13 +50,6 @@ func (o readyOptions) validate() error {
 			ExitCode: ExitUsage,
 		}
 	}
-	if o.All && (o.Unowned || o.Owner != "" || len(o.Labels) > 0 || len(o.NoLabels) > 0) {
-		return &cliError{
-			Message:  "--all does not support --unowned, --owner, --label, or --no-label",
-			Kind:     kindUsage,
-			ExitCode: ExitUsage,
-		}
-	}
 	return nil
 }
 

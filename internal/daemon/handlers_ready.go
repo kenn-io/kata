@@ -47,7 +47,18 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "GET",
 		Path:        "/api/v1/ready",
 	}, func(ctx context.Context, in *api.ReadyGlobalRequest) (*api.ReadyGlobalResponse, error) {
-		issues, err := cfg.DB.ReadyIssuesGlobal(ctx, in.Limit)
+		// Validate mutual exclusion (mirrors the per-project endpoint)
+		if in.Unowned && in.Owner != "" {
+			return nil, api.NewError(400, "validation",
+				"--unowned and --owner are mutually exclusive", "", nil)
+		}
+		filter := db.ReadyIssuesFilter{
+			Unowned:       in.Unowned,
+			Owner:         in.Owner,
+			Labels:        in.Labels,
+			ExcludeLabels: in.ExcludeLabels,
+		}
+		issues, err := cfg.DB.ReadyIssuesGlobal(ctx, in.Limit, filter)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}

@@ -5418,7 +5418,9 @@ func (c *Client) ReadyIssuesGlobal(ctx context.Context, options *ReadyIssuesGlob
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"limit": {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":   {Style: "form", Explode: &[]bool{false}[0]},
+		"owner":   {Style: "form", Explode: &[]bool{false}[0]},
+		"unowned": {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/ready",
