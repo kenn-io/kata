@@ -25,8 +25,8 @@ func readCodexHooks(t *testing.T, dir string) map[string]any {
 func expectedCodexHandler() map[string]any {
 	return map[string]any{
 		"type":           "command",
-		"command":        "kata attention-hook start",
-		"commandWindows": "kata attention-hook start",
+		"command":        "kata attention-hook start --source kata-agent-hook-start",
+		"commandWindows": "kata attention-hook start --source kata-agent-hook-start",
 		"timeout":        json.Number("10"),
 	}
 }
@@ -35,7 +35,7 @@ func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 	dir := t.TempDir()
 	codexDir := filepath.Join(dir, ".codex")
 	require.NoError(t, os.MkdirAll(codexDir, 0o750))
-	legacy := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10}]}]}}`
+	legacy := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"kata attention-hook start","timeout":10},{"type":"command","command":"kata attention-hook start","commandWindows":"kata attention-hook start","timeout":10}]}]}}`
 	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(legacy), 0o644)) //nolint:gosec // test fixture under TempDir
 
 	changed, warnings, err := applyCodexHooks(dir)
@@ -50,6 +50,24 @@ func TestApplyCodexHooks_AdoptsPreviousCommand(t *testing.T) {
 			}},
 		},
 	}, readCodexHooks(t, dir))
+}
+
+func TestApplyCodexHooks_PreservesCommandsContainingOldMarker(t *testing.T) {
+	dir := t.TempDir()
+	codexDir := filepath.Join(dir, ".codex")
+	require.NoError(t, os.MkdirAll(codexDir, 0o750))
+	userCommand := "notify-wrapper kata attention-hook start"
+	settings := `{"hooks":{"SessionStart":[{"matcher":"startup|resume|clear","hooks":[{"type":"command","command":"` + userCommand + `"},{"type":"command","command":"kata attention-hook start","timeout":11}]}]}}`
+	require.NoError(t, os.WriteFile(filepath.Join(codexDir, "hooks.json"), []byte(settings), 0o644)) //nolint:gosec // test fixture under TempDir
+
+	_, _, err := applyCodexHooks(dir)
+	require.NoError(t, err)
+	hooks := readCodexHooks(t, dir)["hooks"].(map[string]any)
+	groups := hooks["SessionStart"].([]any)
+	assert.Equal(t, []any{
+		map[string]any{"type": "command", "command": userCommand},
+		map[string]any{"type": "command", "command": "kata attention-hook start", "timeout": json.Number("11")},
+	}, groups[0].(map[string]any)["hooks"])
 }
 
 func TestApplyCodexHooks_RefusesSymlinks(t *testing.T) {

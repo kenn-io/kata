@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,11 +26,40 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 		return false, nil, err
 	}
 
+	configPath := filepath.Join(root.Name(), ".codex", "hooks.json")
+	legacyHandlers := []map[string]any{
+		{
+			"type":    "command",
+			"command": "kata attention-hook start",
+			"timeout": json.Number("10"),
+		},
+		{
+			"type":           "command",
+			"command":        "kata attention-hook start",
+			"commandWindows": "kata attention-hook start",
+			"timeout":        json.Number("10"),
+		},
+	}
+	migrated, err := migrateLegacyAgentHooks(configPath, []legacyAgentHook{
+		{
+			event:    agenthook.EventSessionStart,
+			matcher:  "",
+			handlers: legacyHandlers,
+		},
+		{
+			event:    agenthook.EventSessionStart,
+			matcher:  codexSessionStartMatcher,
+			handlers: legacyHandlers,
+		},
+	})
+	if err != nil {
+		return false, nil, err
+	}
 	result, err := agenthook.Install(agenthook.AgentCodex, agenthook.InstallOptions{
-		ConfigPath: filepath.Join(root.Name(), ".codex", "hooks.json"),
+		ConfigPath: configPath,
 		Executable: "kata",
-		Arguments:  []string{"attention-hook", "start"},
-		Marker:     "kata attention-hook start",
+		Arguments:  []string{"attention-hook", "start", "--source", attentionHookSource + "start"},
+		Marker:     "--source " + attentionHookSource + "start",
 		Hooks: []agenthook.Hook{{
 			Event:   agenthook.EventSessionStart,
 			Matcher: codexSessionStartMatcher,
@@ -39,7 +69,7 @@ func applyCodexHooks(dir string) (bool, []string, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	return result.Changed, codexConfigHooksWarnings(root), nil
+	return migrated || result.Changed, codexConfigHooksWarnings(root), nil
 }
 
 // codexConfigHooksWarnings warns when Codex also has TOML-managed hooks.

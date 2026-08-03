@@ -44,13 +44,36 @@ func applyClaudeHooks(dir string) (bool, error) {
 	}
 
 	configPath := filepath.Join(root.Name(), ".claude", "settings.json")
-	changed := false
+	legacy := make([]legacyAgentHook, 0, len(claudeHookSpecs()))
+	for _, spec := range claudeHookSpecs() {
+		legacy = append(legacy, legacyAgentHook{
+			event:   spec.event,
+			matcher: spec.matcher,
+			handlers: []map[string]any{
+				{
+					"type":    "command",
+					"command": "kata",
+					"args":    []any{"attention-hook", spec.mode},
+				},
+				{
+					"type":    "command",
+					"command": "kata attention-hook " + spec.mode,
+				},
+			},
+		})
+	}
+	changed, err := migrateLegacyAgentHooks(configPath, legacy)
+	if err != nil {
+		return false, err
+	}
 	for _, spec := range claudeHookSpecs() {
 		result, err := agenthook.Install(agenthook.AgentClaude, agenthook.InstallOptions{
 			ConfigPath: configPath,
 			Executable: "kata",
-			Arguments:  []string{"attention-hook", spec.mode},
-			Marker:     "kata attention-hook " + spec.mode,
+			Arguments: []string{
+				"attention-hook", spec.mode, "--source", attentionHookSource + spec.mode,
+			},
+			Marker: "--source " + attentionHookSource + spec.mode,
 			Hooks: []agenthook.Hook{{
 				Event:   spec.event,
 				Matcher: spec.matcher,
