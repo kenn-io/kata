@@ -1,7 +1,3 @@
----
-last_edited: "2026-08-02"
----
-
 <p align="center">
   <img src=".github/assets/kata-mark.svg" width="160" height="160" alt="kata logo">
 </p>
