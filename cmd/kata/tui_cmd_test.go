@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/tui"
 )
 
 // kata tui needs a TTY, so we exercise the registration via --help;
@@ -29,6 +30,9 @@ func TestTUI_CommandRegistered(t *testing.T) {
 	}
 	if !strings.Contains(out, "--mouse") {
 		t.Fatalf("--mouse missing from help: %s", out)
+	}
+	if !strings.Contains(out, "kata tui [issue-ref]") {
+		t.Fatalf("optional issue ref missing from help: %s", out)
 	}
 	for _, banned := range []string{"--all-projects", "--include-deleted"} {
 		if strings.Contains(out, banned) {
@@ -66,18 +70,53 @@ func TestTUI_RejectsAgentOutputBeforeLaunch(t *testing.T) {
 	}
 }
 
-// TestTUI_RejectsExtraArgs guards the cobra.NoArgs constraint: a typo'd
-// positional must error out before RunE so the user sees a usage
-// failure (and the TTY check in tui.Run is never reached, which would
-// be inappropriate for an arg-parse failure).
-func TestTUI_RejectsExtraArgs(t *testing.T) {
-	_, err := runCmdOutput(t, nil, "tui", "extra-positional")
+func TestTUI_AcceptsOptionalIssueRef(t *testing.T) {
+	var got tui.Options
+	old := runTUI
+	runTUI = func(_ context.Context, opts tui.Options) error {
+		got = opts
+		return nil
+	}
+	t.Cleanup(func() { runTUI = old })
+
+	_, err := runCmdOutput(t, nil, "tui", "abc4")
+	require.NoError(t, err)
+	assert.Equal(t, "abc4", got.InitialIssueRef)
+}
+
+func TestTUI_ThreadsProjectAndWorkspaceSelectors(t *testing.T) {
+	var got tui.Options
+	old := runTUI
+	runTUI = func(_ context.Context, opts tui.Options) error {
+		got = opts
+		return nil
+	}
+	t.Cleanup(func() { runTUI = old })
+	workspace := t.TempDir()
+
+	_, err := runCmdOutput(
+		t, nil,
+		"--project", "project-b",
+		"--workspace", workspace,
+		"tui", "abc4",
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "project-b", got.ProjectName)
+	assert.Equal(t, workspace, got.Workspace)
+	assert.Equal(t, "abc4", got.InitialIssueRef)
+}
+
+// TestTUI_RejectsMoreThanOneIssueRef guards the one-ref CLI contract:
+// accepting two refs would make the direct-open target ambiguous.
+func TestTUI_RejectsMoreThanOneIssueRef(t *testing.T) {
+	_, err := runCmdOutput(t, nil, "tui", "abc4", "def5")
 	if err == nil {
-		t.Fatal("expected error for extra positional arg")
+		t.Fatal("expected error for more than one issue ref")
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "unknown command") &&
-		!strings.Contains(msg, "accepts no args") {
+		!strings.Contains(msg, "accepts at most 1 arg") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

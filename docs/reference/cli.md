@@ -424,7 +424,7 @@ kata health
 kata whoami
 kata quickstart
 kata version [--json]
-kata tui
+kata tui [issue-ref]
 ```
 
 `kata version --json` is a local-only machine-readable version check. It does
@@ -466,13 +466,17 @@ For TCP listener auth modes, including trusted private-network bearer auth,
 read-only experiments, and explicit tokenless private-network writes, see
 [Remote daemon](../operations/remote-daemon.md).
 
-`kata tui` opens the interactive issue browser. In the issue list, `v` toggles
-between nested and flat views: nested groups children under parents, while flat
-shows matching issues as peers in list order. Returning from flat to nested
-starts with parents collapsed. In nested view, `space` or right arrow expands
-the selected parent, left arrow collapses it, and `E` toggles every parent in
-the current list. `E` expands all when any parent is collapsed, then collapses
-all when every parent is already expanded.
+`kata tui` opens the interactive issue browser. Pass an optional issue ref,
+such as `kata tui abc4`, to open that issue's detail view directly. The ref
+accepts the same bare short ID, qualified short ID, and full UID forms as
+`kata show`.
+
+In the issue list, `v` toggles between nested and flat views: nested groups
+children under parents, while flat shows matching issues as peers in list
+order. Returning from flat to nested starts with parents collapsed. In nested
+view, `space` or right arrow expands the selected parent, left arrow collapses
+it, and `E` toggles every parent in the current list. `E` expands all when any
+parent is collapsed, then collapses all when every parent is already expanded.
 
 `PgUp` and `PgDn` page by the visible issue-list window. When a page lands on
 the first or final page, the cursor keeps its screen row; pressing the same page

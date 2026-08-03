@@ -78,7 +78,7 @@ func TestConnectDaemonTargetLocalUsesLocalOnlyEnsurePath(t *testing.T) {
 	})
 
 	var ensured bool
-	ensureRunningForTUI = func(context.Context) (clientpkg.RunningDaemon, error) {
+	ensureRunningForTUI = func(context.Context, string) (clientpkg.RunningDaemon, error) {
 		t.Fatal("explicit local target must not honor remote-aware EnsureRunning")
 		return clientpkg.RunningDaemon{}, nil
 	}
@@ -217,7 +217,7 @@ func TestConnectImplicitConfiguredLoopbackUsesPathFreeBoot(t *testing.T) {
 				bootResolveScopePathFreeForTUI = oldPathFreeBootScope
 			})
 
-			ensureRunningForTUI = clientpkg.EnsureRunningTarget
+			ensureRunningForTUI = clientpkg.EnsureRunningTargetInWorkspace
 			newHTTPClientForTUI = func(
 				context.Context,
 				string,
@@ -236,7 +236,7 @@ func TestConnectImplicitConfiguredLoopbackUsesPathFreeBoot(t *testing.T) {
 				return bootInit{view: viewProjects}, nil
 			}
 
-			conn, err := connectImplicitDaemonTarget(t.Context())
+			conn, err := connectImplicitDaemonTarget(t.Context(), "", false)
 
 			require.NoError(t, err)
 			assert.True(t, called)
@@ -244,6 +244,53 @@ func TestConnectImplicitConfiguredLoopbackUsesPathFreeBoot(t *testing.T) {
 			assert.Equal(t, viewProjects, conn.init.view)
 		})
 	}
+}
+
+func TestConnectImplicitWorkspaceRemoteThreadsPlaintextAuthOptions(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_SERVER", "")
+	t.Setenv("KATA_AUTH_TOKEN", "workspace-token")
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	workspace := t.TempDir()
+	require.NoError(t, config.WriteProjectConfig(workspace, "spoke-project"))
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, ".kata.local.toml"),
+		[]byte(`version = 1
+
+[server]
+url = "http://daemon.internal:7777"
+allow_insecure = true
+`), 0o600))
+
+	oldEnsure := ensureRunningForTUI
+	oldBootScope := bootResolveScopeForTUI
+	oldPathFreeBootScope := bootResolveScopePathFreeForTUI
+	t.Cleanup(func() {
+		ensureRunningForTUI = oldEnsure
+		bootResolveScopeForTUI = oldBootScope
+		bootResolveScopePathFreeForTUI = oldPathFreeBootScope
+	})
+	ensureRunningForTUI = func(_ context.Context, gotWorkspace string) (clientpkg.RunningDaemon, error) {
+		assert.Equal(t, workspace, gotWorkspace)
+		return clientpkg.RunningDaemon{
+			BaseURL:          "http://daemon.internal:7777",
+			ConfiguredRemote: true,
+		}, nil
+	}
+	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		t.Fatal("workspace-configured remote must use path-free boot")
+		return bootInit{}, nil
+	}
+	bootResolveScopePathFreeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		return bootInit{view: viewProjects}, nil
+	}
+
+	conn, err := connectImplicitDaemonTarget(t.Context(), workspace, false)
+
+	require.NoError(t, err)
+	assert.True(t, conn.target.AllowInsecure)
+	require.NotNil(t, conn.api)
+	require.NotNil(t, conn.sseHC)
 }
 
 func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *testing.T) {
@@ -263,9 +310,11 @@ func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *t
 	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
 		return &config.DaemonConfig{}, nil
 	}
-	var ensured bool
-	ensureRunningForTUI = func(context.Context) (clientpkg.RunningDaemon, error) {
-		ensured = true
+	t.Chdir(t.TempDir())
+	workspace := t.TempDir()
+	var ensuredWorkspace string
+	ensureRunningForTUI = func(_ context.Context, workspace string) (clientpkg.RunningDaemon, error) {
+		ensuredWorkspace = workspace
 		return clientpkg.RunningDaemon{BaseURL: "http://kata.invalid"}, nil
 	}
 	ensureLocalRunningForTUI = func(context.Context) (string, error) {
@@ -275,17 +324,57 @@ func TestBootDaemonConnectionWithoutActiveKeepsRemoteAwareEnsureRunningPath(t *t
 	newHTTPClientForTUI = func(_ context.Context, _ string, _ daemonTarget, _ clientOptsKind) (*http.Client, error) {
 		return &http.Client{}, nil
 	}
-	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+	var resolvedWorkspace string
+	bootResolveScopeForTUI = func(_ context.Context, _ *Client, start string) (bootInit, error) {
+		resolvedWorkspace = start
 		return bootInit{view: viewEmpty, scope: scope{empty: true}}, nil
 	}
 
-	conn, err := bootDaemonConnection(context.Background(), Options{})
+	conn, err := bootDaemonConnection(
+		context.Background(), Options{Workspace: workspace},
+	)
 
 	require.NoError(t, err)
-	assert.True(t, ensured, "implicit daemon must use existing EnsureRunning path")
+	assert.Equal(t, workspace, ensuredWorkspace)
+	assert.Equal(t, workspace, resolvedWorkspace)
 	assert.Equal(t, "http://kata.invalid", conn.endpoint)
 	assert.Equal(t, "local", daemonTargetDisplay(conn.target))
 	assert.Equal(t, viewEmpty, conn.init.view)
+}
+
+func TestBootDaemonConnectionDefinitiveTargetSkipsCWDResolution(t *testing.T) {
+	oldRead := readDaemonConfigForTUI
+	oldEnsure := ensureRunningForTUI
+	oldNewClient := newHTTPClientForTUI
+	oldBootScope := bootResolveScopeForTUI
+	t.Cleanup(func() {
+		readDaemonConfigForTUI = oldRead
+		ensureRunningForTUI = oldEnsure
+		newHTTPClientForTUI = oldNewClient
+		bootResolveScopeForTUI = oldBootScope
+	})
+	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
+		return &config.DaemonConfig{}, nil
+	}
+	ensureRunningForTUI = func(context.Context, string) (clientpkg.RunningDaemon, error) {
+		return clientpkg.RunningDaemon{BaseURL: clientpkg.UnixBase}, nil
+	}
+	newHTTPClientForTUI = func(_ context.Context, _ string, _ daemonTarget, _ clientOptsKind) (*http.Client, error) {
+		return &http.Client{}, nil
+	}
+	bootResolveScopeForTUI = func(context.Context, *Client, string) (bootInit, error) {
+		return bootInit{}, errors.New("malformed cwd binding")
+	}
+
+	for name, opts := range map[string]Options{
+		"qualified ref":    {InitialIssueRef: "other-project#abc4"},
+		"explicit project": {ProjectName: "other-project"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := bootDaemonConnection(t.Context(), opts)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestBootDaemonConnectionOptionsDaemonNameOverridesActiveDaemon(t *testing.T) {
@@ -310,13 +399,24 @@ func TestBootDaemonConnectionOptionsDaemonNameOverridesActiveDaemon(t *testing.T
 		got = target
 		return daemonConnection{target: target}, nil
 	}
+	workspace := t.TempDir()
 
-	conn, err := bootDaemonConnection(context.Background(), Options{DaemonName: "selected"})
+	conn, err := bootDaemonConnection(context.Background(), Options{
+		DaemonName:  "selected",
+		ProjectName: "project-b",
+		Workspace:   workspace,
+	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "selected", got.Name)
+	assert.Equal(t, workspace, got.workspaceStart)
+	assert.True(t, got.skipInitialScope)
 	assert.Equal(t, "selected", conn.target.Name)
 	require.Len(t, conn.catalog, 2)
+	for _, target := range conn.catalog {
+		assert.Equal(t, workspace, target.workspaceStart)
+		assert.True(t, target.skipInitialScope)
+	}
 }
 
 func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testing.T) {
@@ -336,7 +436,7 @@ func TestBootDaemonConnectionWithoutActiveLabelsImplicitRemoteEndpoint(t *testin
 	readDaemonConfigForTUI = func() (*config.DaemonConfig, error) {
 		return &config.DaemonConfig{}, nil
 	}
-	ensureRunningForTUI = func(context.Context) (clientpkg.RunningDaemon, error) {
+	ensureRunningForTUI = func(context.Context, string) (clientpkg.RunningDaemon, error) {
 		return clientpkg.RunningDaemon{
 			BaseURL:          "https://daemon.example:7777",
 			ConfiguredRemote: true,

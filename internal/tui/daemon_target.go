@@ -23,6 +23,8 @@ type daemonTarget struct {
 	Implicit             bool
 	ConfiguredRemote     bool
 	UseAuthTokenOverride bool
+	workspaceStart       string
+	skipInitialScope     bool
 }
 
 type daemonConnection struct {
@@ -43,7 +45,7 @@ const (
 
 var (
 	readDaemonConfigForTUI   = config.ReadDaemonConfig
-	ensureRunningForTUI      = client.EnsureRunningTarget
+	ensureRunningForTUI      = client.EnsureRunningTargetInWorkspace
 	ensureLocalRunningForTUI = client.EnsureLocalRunning
 	normalizeRemoteURLForTUI = func(v string, allowInsecure bool) (string, error) {
 		return client.NormalizeRemoteURL(v, allowInsecure)
@@ -58,10 +60,11 @@ var (
 		kind clientOptsKind,
 	) (*http.Client, error) {
 		opts := optsForKind(kind)
+		opts.WorkspaceStart = target.workspaceStart
 		if target.Local || target.Implicit {
 			if target.Implicit {
 				opts.AllowInsecure = target.AllowInsecure ||
-					client.RemoteAllowInsecureForBaseURL(endpoint, "")
+					client.RemoteAllowInsecureForBaseURL(endpoint, target.workspaceStart)
 			}
 			if target.Token != "" {
 				return client.NewHTTPClientWithBearer(ctx, endpoint, target.Token, opts)
@@ -119,11 +122,17 @@ func activeDaemonTarget(targets []daemonTarget, active string) (daemonTarget, bo
 }
 
 func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, error) {
+	workspaceStart, skipInitialScope, err := initialScopeDirective(opts)
+	if err != nil {
+		return daemonConnection{}, err
+	}
 	cfg, err := readDaemonConfigForTUI()
 	if err != nil {
 		return daemonConnection{}, err
 	}
-	catalog := daemonTargetsFromConfig(cfg.Daemons)
+	catalog := daemonTargetsWithLaunchSelectors(
+		daemonTargetsFromConfig(cfg.Daemons), opts,
+	)
 	targetName := cfg.ActiveDaemon
 	if strings.TrimSpace(opts.DaemonName) != "" {
 		targetName = strings.TrimSpace(opts.DaemonName)
@@ -133,13 +142,15 @@ func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, 
 		if targetName != "" {
 			return daemonConnection{}, fmt.Errorf("daemon %q is not in daemon catalog", targetName)
 		}
-		conn, err := connectImplicitDaemonTarget(ctx)
+		conn, err := connectImplicitDaemonTarget(ctx, workspaceStart, skipInitialScope)
 		if err != nil {
 			return daemonConnection{}, err
 		}
 		conn.catalog = catalog
 		return conn, nil
 	}
+	target.workspaceStart = workspaceStart
+	target.skipInitialScope = skipInitialScope
 	conn, err := connectDaemonTargetForTUI(ctx, target)
 	if err != nil {
 		return daemonConnection{}, err
@@ -148,14 +159,43 @@ func bootDaemonConnection(ctx context.Context, opts Options) (daemonConnection, 
 	return conn, nil
 }
 
-func connectImplicitDaemonTarget(ctx context.Context) (daemonConnection, error) {
-	running, err := ensureRunningForTUI(ctx)
+func daemonTargetsWithLaunchSelectors(
+	targets []daemonTarget, opts Options,
+) []daemonTarget {
+	out := make([]daemonTarget, 0, len(targets))
+	for _, target := range targets {
+		out = append(out, daemonTargetWithLaunchSelectors(target, opts))
+	}
+	return out
+}
+
+func daemonTargetWithLaunchSelectors(target daemonTarget, opts Options) daemonTarget {
+	target.workspaceStart = strings.TrimSpace(opts.Workspace)
+	target.skipInitialScope = strings.TrimSpace(opts.ProjectName) != ""
+	return target
+}
+
+func connectImplicitDaemonTarget(
+	ctx context.Context, workspaceStart string, skipInitialScope bool,
+) (daemonConnection, error) {
+	running, err := ensureRunningForTUI(ctx, workspaceStart)
 	if err != nil {
 		return daemonConnection{}, err
 	}
 	target := implicitDaemonTarget(running.BaseURL)
 	target.ConfiguredRemote = running.ConfiguredRemote
+	target.workspaceStart = workspaceStart
+	target.skipInitialScope = skipInitialScope
 	return connectResolvedDaemonTarget(ctx, target, running.BaseURL)
+}
+
+func initialScopeDirective(opts Options) (string, bool, error) {
+	qualified, err := initialIssueRefIsQualified(opts.InitialIssueRef)
+	if err != nil {
+		return "", false, err
+	}
+	skipInitialScope := qualified || strings.TrimSpace(opts.ProjectName) != ""
+	return strings.TrimSpace(opts.Workspace), skipInitialScope, nil
 }
 
 func connectDaemonTarget(ctx context.Context, target daemonTarget) (daemonConnection, error) {
@@ -206,14 +246,20 @@ func connectResolvedDaemonTarget(ctx context.Context, target daemonTarget, endpo
 	if endpoint == client.UnixBase {
 		c.setLocalHTTPClientRefresh(localHTTPClientRefreshForTarget(endpoint, target))
 	}
-	cwd, _ := os.Getwd()
-	resolveScope := bootResolveScopeForTUI
-	if daemonTargetUsesRemoteFilesystem(target, endpoint) {
-		resolveScope = bootResolveScopePathFreeForTUI
-	}
-	bi, err := resolveScope(ctx, c, cwd)
-	if err != nil {
-		return daemonConnection{}, err
+	var bi bootInit
+	if !target.skipInitialScope {
+		startPath := target.workspaceStart
+		if startPath == "" {
+			startPath, _ = os.Getwd()
+		}
+		resolveScope := bootResolveScopeForTUI
+		if daemonTargetUsesRemoteFilesystem(target, endpoint) {
+			resolveScope = bootResolveScopePathFreeForTUI
+		}
+		bi, err = resolveScope(ctx, c, startPath)
+		if err != nil {
+			return daemonConnection{}, err
+		}
 	}
 	return daemonConnection{
 		api:      c,
@@ -278,7 +324,9 @@ func resolvedDaemonTarget(target daemonTarget, endpoint string) daemonTarget {
 	if target.Local {
 		target.URL = ""
 	} else if target.Implicit {
-		target.AllowInsecure = client.RemoteAllowInsecureForBaseURL(endpoint, "")
+		target.AllowInsecure = client.RemoteAllowInsecureForBaseURL(
+			endpoint, target.workspaceStart,
+		)
 	}
 	if (target.Local || target.Implicit) && target.Token == "" {
 		target.Token = effectiveGlobalAuthTokenForTUI()

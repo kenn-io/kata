@@ -283,6 +283,9 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, m.fetchProjects())
 	default:
 		cmds = append(cmds, m.fetchInitial(), m.fetchProjects())
+		if m.view == viewDetail && m.detail.issue != nil {
+			cmds = append(cmds, m.fetchOpenDetail())
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -2600,7 +2603,14 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 // model so detail-side mutations carry the resolved identity rather
 // than the empty string.
 func (m Model) handleOpenDetail(msg openDetailMsg) (tea.Model, tea.Cmd) {
-	iss := msg.issue
+	m = m.seedOpenDetail(msg.issue)
+	if m.api == nil {
+		return m, nil
+	}
+	return m, m.fetchOpenDetail()
+}
+
+func (m Model) seedOpenDetail(iss Issue) Model {
 	pid := detailProjectID(iss, m.scope)
 	m.nextGen++
 	// Reset on open is the spec — no per-issue scroll memory.
@@ -2626,17 +2636,22 @@ func (m Model) handleOpenDetail(msg openDetailMsg) (tea.Model, tea.Cmd) {
 	if m.layout == layoutSplit {
 		m.focus = focusDetail
 	}
-	if m.api == nil {
-		return m, nil
+	return m
+}
+
+func (m Model) fetchOpenDetail() tea.Cmd {
+	if m.api == nil || m.detail.issue == nil {
+		return nil
 	}
+	iss := *m.detail.issue
+	pid := m.detail.scopePID
 	gen := m.detail.gen
-	cmds := []tea.Cmd{
+	return tea.Batch(
 		fetchIssue(m.api, pid, iss.ShortID, gen),
 		fetchComments(m.api, pid, iss.ShortID, gen),
 		fetchEvents(m.api, pid, iss.ShortID, gen),
 		fetchLinks(m.api, pid, iss.ShortID, gen),
-	}
-	return m, tea.Batch(cmds...)
+	)
 }
 
 // handleJumpDetail performs an Enter-jump from the detail view to a

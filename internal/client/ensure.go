@@ -64,6 +64,15 @@ func EnsureRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	return ensureRunningTargetInWorkspace(ctx, "")
 }
 
+// EnsureRunningTargetInWorkspace is the workspace-aware form of
+// EnsureRunningTarget. It preserves endpoint-source metadata while anchoring
+// .kata.local.toml discovery to workspaceStart.
+func EnsureRunningTargetInWorkspace(
+	ctx context.Context, workspaceStart string,
+) (RunningDaemon, error) {
+	return ensureRunningTargetInWorkspace(ctx, workspaceStart)
+}
+
 // EnsureRunningInWorkspace is the workspace-aware variant of
 // EnsureRunning. workspaceStart is the absolute path to begin the
 // .kata.local.toml walk from; pass "" to fall back to CWD. Empty is
