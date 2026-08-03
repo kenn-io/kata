@@ -77,8 +77,9 @@ func (s *Store) ReadyIssues(
 }
 
 // ReadyIssuesGlobal returns ready issues from all active projects along with
-// the project name needed to render a qualified reference.
-func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int) ([]db.ReadyGlobalIssue, error) {
+// the project name needed to render a qualified reference. Filter semantics
+// match ReadyIssues.
+func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
 	query := `SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
        i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
        i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name
@@ -97,12 +98,30 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int) ([]db.ReadyGlo
         AND blocker.status = 'open'
         AND blocker.deleted_at IS NULL
         AND blocker_project.deleted_at IS NULL
-   )
- ORDER BY i.updated_at DESC, i.id DESC`
+   )`
 	args := []any{}
+	addArg := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if filter.Unowned {
+		query += ` AND i.owner IS NULL`
+	} else if filter.Owner != "" {
+		query += ` AND i.owner = ` + addArg(filter.Owner)
+	}
+	for _, label := range filter.Labels {
+		query += ` AND EXISTS (
+          SELECT 1 FROM issue_labels il
+           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`
+	}
+	for _, label := range filter.ExcludeLabels {
+		query += ` AND NOT EXISTS (
+          SELECT 1 FROM issue_labels il
+           WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`
+	}
+	query += ` ORDER BY i.updated_at DESC, i.id DESC`
 	if limit > 0 {
-		query += ` LIMIT $1`
-		args = append(args, limit)
+		query += ` LIMIT ` + addArg(limit)
 	}
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {

@@ -63,7 +63,7 @@ type Storage interface {
 	ListIssues(ctx context.Context, p ListIssuesParams) ([]Issue, error)
 	ListAllIssues(ctx context.Context, p ListAllIssuesParams) ([]Issue, error)
 	ReadyIssues(ctx context.Context, projectID int64, limit int, filter ReadyIssuesFilter) ([]Issue, error)
-	ReadyIssuesGlobal(ctx context.Context, limit int) ([]ReadyGlobalIssue, error)
+	ReadyIssuesGlobal(ctx context.Context, limit int, filter ReadyIssuesFilter) ([]ReadyGlobalIssue, error)
 	ChildrenOfIssue(ctx context.Context, parentIssueID int64) ([]Issue, error)
 	OpenChildrenOf(ctx context.Context, parentIssueID int64, limit int) ([]Issue, int, error)
 	EditIssue(ctx context.Context, p EditIssueParams) (Issue, *Event, bool, error)

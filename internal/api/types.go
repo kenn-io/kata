@@ -999,7 +999,11 @@ type ReadyResponse struct {
 // ReadyGlobalRequest is GET /api/v1/ready (no project_id; spans every
 // non-archived project).
 type ReadyGlobalRequest struct {
-	Limit int `query:"limit,omitempty"`
+	Limit         int      `query:"limit,omitempty"`
+	Unowned       bool     `query:"unowned,omitempty"`
+	Owner         string   `query:"owner,omitempty"`
+	Labels        []string `query:"label,explode"`
+	ExcludeLabels []string `query:"exclude_label,explode"`
 }
 
 // ReadyGlobalIssueOut is one cross-project ready row: a hydrated IssueOut

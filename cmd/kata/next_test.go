@@ -237,10 +237,6 @@ func TestNext_AllValidationMirrorsReady(t *testing.T) {
 		want string
 	}{
 		{name: "project", args: []string{"--project", "anything", "next", "--all"}, want: "mutually exclusive"},
-		{name: "unowned", args: []string{"next", "--all", "--unowned"}, want: "--all does not support"},
-		{name: "owner", args: []string{"next", "--all", "--owner", "alice"}, want: "--all does not support"},
-		{name: "label", args: []string{"next", "--all", "--label", "bug"}, want: "--all does not support"},
-		{name: "no-label", args: []string{"next", "--all", "--no-label", "wip"}, want: "--all does not support"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -250,6 +246,17 @@ func TestNext_AllValidationMirrorsReady(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
+}
+
+func TestNext_AllAcceptsFilterFlags(t *testing.T) {
+	// next shares ready's option validation: the scoped filters compose with
+	// --all so an agent can pick, e.g., the next unowned issue anywhere.
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "alpha")
+
+	out, err := runCLICapture(t, env, dir, "next", "--all", "--unowned")
+	require.NoError(t, err)
+	assert.Contains(t, out, "alpha")
 }
 
 func TestNext_UnownedAndOwnerAreMutuallyExclusive(t *testing.T) {

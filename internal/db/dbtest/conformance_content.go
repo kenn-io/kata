@@ -742,7 +742,7 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, limited, 1)
 
-	global, err := store.ReadyIssuesGlobal(ctx, 0)
+	global, err := store.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{})
 	if err != nil {
 		return fmt.Errorf("global ready issues: %w", err)
 	}
@@ -755,6 +755,38 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 			assert.Equal(t, other.Project.Name, row.ProjectName)
 		}
 	}
+	globalByLabel, err := store.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{Labels: []string{"BUG"}})
+	if err != nil {
+		return fmt.Errorf("global ready issues by label: %w", err)
+	}
+	require.Len(t, globalByLabel, 1)
+	assert.Equal(t, primary.Issue.ID, globalByLabel[0].ID)
+	globalUnowned, err := store.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{Unowned: true})
+	if err != nil {
+		return fmt.Errorf("global ready unowned issues: %w", err)
+	}
+	globalUnownedIDs := readyGlobalIssueIDs(globalUnowned)
+	assert.Contains(t, globalUnownedIDs, blocker.ID)
+	assert.Contains(t, globalUnownedIDs, other.Issue.ID)
+	assert.NotContains(t, globalUnownedIDs, primary.Issue.ID)
+	globalByOwner, err := store.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{Owner: "alice"})
+	if err != nil {
+		return fmt.Errorf("global ready issues by owner: %w", err)
+	}
+	require.Len(t, globalByOwner, 1)
+	assert.Equal(t, primary.Issue.ID, globalByOwner[0].ID)
+	globalWithoutBug, err := store.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{ExcludeLabels: []string{"bug"}})
+	if err != nil {
+		return fmt.Errorf("global ready issues excluding label: %w", err)
+	}
+	globalWithoutBugIDs := readyGlobalIssueIDs(globalWithoutBug)
+	assert.NotContains(t, globalWithoutBugIDs, primary.Issue.ID)
+	assert.Contains(t, globalWithoutBugIDs, other.Issue.ID)
+	globalLimited, err := store.ReadyIssuesGlobal(ctx, 1, db.ReadyIssuesFilter{Unowned: true})
+	if err != nil {
+		return fmt.Errorf("global ready issues limited: %w", err)
+	}
+	require.Len(t, globalLimited, 1)
 	_, _, _, err = store.CloseIssue(ctx, blocker.ID, "done", "discovery-author", "", nil)
 	if err != nil {
 		return fmt.Errorf("close readiness blocker: %w", err)

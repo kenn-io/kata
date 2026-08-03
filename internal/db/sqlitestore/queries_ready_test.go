@@ -235,7 +235,7 @@ func TestReadyIssuesGlobal_ReturnsIssuesAcrossProjects(t *testing.T) {
 	a := makeIssue(t, ctx, d, p1.ID, "in p1", "tester")
 	b := makeIssue(t, ctx, d, p2.ID, "in p2", "tester")
 
-	rows, err := d.ReadyIssuesGlobal(ctx, 0)
+	rows, err := d.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{})
 	require.NoError(t, err)
 
 	got := map[string]string{}
@@ -261,7 +261,7 @@ func TestReadyIssuesGlobal_ExcludesArchivedProjects(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	rows, err := d.ReadyIssuesGlobal(ctx, 0)
+	rows, err := d.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{})
 	require.NoError(t, err)
 
 	got := map[string]bool{}
@@ -278,7 +278,7 @@ func TestReadyIssuesGlobal_ExcludesBlockedIssues(t *testing.T) {
 	blocked := makeIssue(t, ctx, d, p.ID, "blocked", "tester")
 	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
 
-	rows, err := d.ReadyIssuesGlobal(ctx, 0)
+	rows, err := d.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{})
 	require.NoError(t, err)
 	got := map[string]bool{}
 	for _, r := range rows {
@@ -318,7 +318,7 @@ func TestReadyIssuesGlobal_IgnoresBlockerInArchivedProject(t *testing.T) {
 	makeLink(ctx, t, d, blocker.ID, blocked.ID, "blocks")
 	archiveProjectByID(ctx, t, d, p2.ID)
 
-	rows, err := d.ReadyIssuesGlobal(ctx, 0)
+	rows, err := d.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{})
 	require.NoError(t, err)
 	got := map[string]bool{}
 	for _, r := range rows {

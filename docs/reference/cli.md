@@ -292,7 +292,10 @@ kata next [--all] [--full]
 
 `ready` returns open issues that do not have an open blocking predecessor.
 Filters combine with AND logic. `--all` lists ready issues across every
-non-archived project and cannot be combined with those filters or `--project`.
+non-archived project; the scoped filters (`--unowned`, `--owner`, `--label`,
+`--no-label`) compose with it, so a cross-project queue view such as "every
+unowned ready issue labeled `handoff-to:example-host`" is a single query.
+`--all` cannot be combined with `--project`.
 
 `next` selects one issue from the same ready candidates. Selection is
 deterministic: any explicitly prioritized candidate beats every unprioritized
@@ -303,8 +306,8 @@ priorities retain the ready API's order. If no candidate has a priority,
 
 The scoped `--unowned`, `--owner`, `--label`, and `--no-label` filters have the
 same meaning for `next` as for `ready`; `--unowned` and `--owner` are mutually
-exclusive. `next --all` searches all non-archived projects and, like
-`ready --all`, cannot be combined with `--project` or any scoped filter.
+exclusive. `next --all` searches all non-archived projects; like `ready --all`
+it composes with the scoped filters but cannot be combined with `--project`.
 `next` has no `--limit` flag because its result cardinality is always zero or
 one. Because there is no summary or footer to suppress, `--quiet` does not
 change either the selected record or the empty result.

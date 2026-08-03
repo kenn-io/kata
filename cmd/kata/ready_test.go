@@ -384,23 +384,25 @@ func TestReady_AllHumanFooterShowsSummaryAndLegend(t *testing.T) {
 	assert.Contains(t, out, "Status: ○ open")
 }
 
-func TestReady_AllRejectsFilterFlags(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-	}{
-		{"unowned", []string{"ready", "--all", "--unowned"}},
-		{"owner", []string{"ready", "--all", "--owner", "alice"}},
-		{"label", []string{"ready", "--all", "--label", "bug"}},
-		{"no-label", []string{"ready", "--all", "--no-label", "wip"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			env, dir, _ := setupCLIWorkspace(t)
-			args := append([]string{"--workspace", dir}, tc.args...)
-			_, err := runCmdOutput(t, env, args...)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "--all does not support")
-		})
-	}
+func TestReady_AllAcceptsFilterFlags(t *testing.T) {
+	// --all composes with the scoped filters: cross-project queue views like
+	// "every unowned issue labeled X anywhere" are the point of the flag.
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "alpha")
+
+	out, err := runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--unowned")
+	require.NoError(t, err)
+	assert.Contains(t, out, "alpha")
+
+	out, err = runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--label", "no-such-label")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "alpha")
+
+	out, err = runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--no-label", "no-such-label")
+	require.NoError(t, err)
+	assert.Contains(t, out, "alpha")
+
+	out, err = runCmdOutput(t, env, "--workspace", dir, "ready", "--all", "--owner", "somebody-else")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "alpha")
 }
