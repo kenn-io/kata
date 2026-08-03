@@ -1,6 +1,14 @@
-# kata カタ
+---
+last_edited: "2026-08-02"
+---
 
-The issue tracker built for coding agents and the humans steering them.
+<p align="center">
+  <img src=".github/assets/kata-mark.svg" width="160" height="160" alt="kata logo">
+</p>
+
+<h1 align="center">kata カタ</h1>
+
+<p align="center">The issue tracker built for coding agents and the humans steering them.</p>
 
 Coding agents need somewhere durable to track work: not a chat thread, not a
 markdown to-do list. kata gives them a local task ledger they can drive from the
