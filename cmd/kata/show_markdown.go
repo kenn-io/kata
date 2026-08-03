@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/colorprofile"
+	"go.kenn.io/kata/internal/colormode"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/markdownrender"
 	"go.kenn.io/kata/internal/processtree"
@@ -34,12 +35,23 @@ type builtinShowMarkdownRenderer struct {
 	codeBlockBackground *string
 }
 
-func newBuiltinShowMarkdownRenderer(profile colorprofile.Profile) showMarkdownRenderer {
+func newBuiltinShowMarkdownRenderer(
+	profile colorprofile.Profile,
+	mode colormode.Mode,
+) showMarkdownRenderer {
 	var background *string
 	switch profile {
 	case colorprofile.ANSI, colorprofile.ANSI256, colorprofile.TrueColor:
-		value := "236"
-		background = &value
+		var value string
+		switch mode {
+		case colormode.Light:
+			value = markdownrender.CodeBlockBackground(false)
+		case colormode.Dark:
+			value = markdownrender.CodeBlockBackground(true)
+		}
+		if value != "" {
+			background = &value
+		}
 	}
 	return &builtinShowMarkdownRenderer{codeBlockBackground: background}
 }

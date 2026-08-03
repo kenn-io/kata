@@ -104,7 +104,11 @@ kata search <query> [--lexical | --hybrid | --semantic]
 `kata show --render` renders Markdown only in issue descriptions and comment
 bodies. Headers, status, claims, labels, links, and metadata remain literal so
 the surrounding issue record stays predictable. The built-in renderer is
-Glamour.
+Glamour. Set `KATA_COLOR_MODE=light` or `KATA_COLOR_MODE=dark` to give code
+blocks a background suited to the terminal theme. In the default `auto` mode,
+the one-shot CLI cannot safely determine background brightness, so it leaves
+the code-block background unset instead of guessing. `NO_COLOR` still removes
+rendered color through kata's normal output profile.
 
 `--render` is incompatible with `--json` and `--agent`. Redirected output and
 pipelines, including `kata show <issue-ref> --render | less -R`, intentionally

@@ -183,6 +183,38 @@ func TestBuiltinShowMarkdownRendererUsesSharedStyle(t *testing.T) {
 	assert.Equal(t, textsafe.StripANSI(styled.String()), noColor.String())
 }
 
+func TestBuiltinShowMarkdownRendererCodeBlockBackgroundFollowsColorMode(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	tests := []struct {
+		name           string
+		mode           string
+		wantBackground string
+	}{
+		{name: "light", mode: "light", wantBackground: "252"},
+		{name: "dark", mode: "dark", wantBackground: "236"},
+		{name: "unknown", mode: "auto"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KATA_COLOR_MODE", tt.mode)
+			rows := newRowRendererFor(colorprofile.ANSI256)
+			rendered, err := rows.markdownRenderer().Render(
+				context.Background(), markdownDescription, "```text\ncode\n```", 80,
+			)
+			require.NoError(t, err)
+
+			var out bytes.Buffer
+			_, err = fmt.Fprint(rows.downsample(&out), rendered)
+			require.NoError(t, err)
+			if tt.wantBackground == "" {
+				assert.NotContains(t, out.String(), "\x1b[48;5;")
+				return
+			}
+			assert.Contains(t, out.String(), "\x1b[48;5;"+tt.wantBackground+"m")
+		})
+	}
+}
+
 func TestConfiguredShowMarkdownRendererSelectsOverride(t *testing.T) {
 	rows := newRowRendererFor(colorprofile.ANSI256)
 	got := configuredShowMarkdownRenderer(config.DisplayConfig{
