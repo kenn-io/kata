@@ -46,14 +46,15 @@ file before using `--with-agents`.
 
 Pass `--with-hooks` to install the `work.attention` lifecycle hooks from the
 [agent orchestration recipe](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
-into the workspace's Claude Code config. It additively installs two exec-form
+into the workspace's Claude Code config. It additively installs two command-hook
 entries in `.claude/settings.json`: `SessionStart` runs `kata attention-hook
 start` for new, resumed, and cleared sessions (but not context compaction), and
 `SessionEnd` runs `kata attention-hook end` only for terminal exits rather
 than clear/resume transitions. Both use the
 launcher-provided `KATA_REF` and intentionally do nothing when it is absent.
 Everything else in `settings.json` is preserved, re-running is a no-op, and a
-symlinked `settings.json` or `.claude` directory is refused.
+symlinked `settings.json` or `.claude` directory is refused. Hook ownership and
+config mutation use kit's shared agent-hook manager.
 
 Pass `--with-codex-hooks` to install the start half of the same
 [attention harness hooks](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)

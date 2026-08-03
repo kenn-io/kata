@@ -51,6 +51,7 @@ type fakeEmbedder struct {
 	dims      int
 	err       error
 	failAfter int
+	batchSize int
 	blockAt   int
 	blocked   chan struct{}
 	release   chan struct{}
@@ -62,7 +63,12 @@ type fakeEmbedder struct {
 func (f *fakeEmbedder) Generation() kitvec.Generation {
 	return kitvec.Generation{Model: f.model, Dimensions: f.dims, Params: map[string]string{"recipe": "2"}}
 }
-func (f *fakeEmbedder) BatchSize() int { return 64 }
+func (f *fakeEmbedder) BatchSize() int {
+	if f.batchSize > 0 {
+		return f.batchSize
+	}
+	return 64
+}
 func (f *fakeEmbedder) EncodeFunc() kitvec.EncodeFunc {
 	return func(_ context.Context, texts []string) ([][]float32, error) {
 		f.calls++
@@ -375,7 +381,10 @@ func TestReconcileFillErrorRefreshesPartialBacklog(t *testing.T) {
 	idx := openTestVectorIndex(t)
 	// First encode call (first document) succeeds and stamps; the second
 	// fails, aborting the fill with one document embedded and one pending.
-	emb := &fakeEmbedder{model: "m1", dims: 2, failAfter: 1, err: &embedding.APIError{StatusCode: 500, Body: "down"}}
+	emb := &fakeEmbedder{
+		model: "m1", dims: 2, batchSize: 1, failAfter: 1,
+		err: &embedding.APIError{StatusCode: 500, Body: "down"},
+	}
 	r := NewReconciler(store, idx, emb, ReconcilerConfig{BatchSize: 64})
 
 	if err := r.reconcileOnce(ctx); err == nil {

@@ -6,6 +6,15 @@ description: Release history for kata
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
+## Unreleased
+
+**Improvements**
+
+- Centralized Claude Code and Codex hook configuration on kit's shared
+  agent-hook manager while preserving the existing init flags, lifecycle
+  matchers, attention behavior, unrelated configuration, and workspace
+  symlink boundary.
+
 ## 0.13.0
 <small>2026-07-31</small>
 
