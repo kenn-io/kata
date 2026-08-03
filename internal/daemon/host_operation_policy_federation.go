@@ -15,7 +15,7 @@ func registerFederationOperationPolicies(policies map[string]HostOperationPolicy
 	}, "enableProjectFederation", "skipFederationQuarantine", "retryFederationQuarantine",
 		"createFederationEnrollment", "rotateFederationEnrollment",
 		"revokeFederationEnrollment", "createFederationReplica",
-		"leaveFederationReplica")
+		"leaveFederationReplica", "rebindFederationReplica")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationFederationTransport, Capability: hostCapabilityFederate,

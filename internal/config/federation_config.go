@@ -72,7 +72,7 @@ func validateFederationConfig(cfg *DaemonConfig) error {
 		if catalog.Local || catalog.URL == "" {
 			return fmt.Errorf("%s.hub %q must reference a remote daemon with url", prefix, mapping.Hub)
 		}
-		origin, err := CanonicalHTTPOrigin(catalog.URL)
+		baseURL, err := CanonicalHTTPBaseURL(catalog.URL)
 		if err != nil {
 			return fmt.Errorf("%s.hub %q url: %w", prefix, mapping.Hub, err)
 		}
@@ -82,9 +82,9 @@ func validateFederationConfig(cfg *DaemonConfig) error {
 		}
 		spokeProjects[mapping.SpokeProject] = struct{}{}
 
-		targetKey := origin + "\x00" + mapping.HubProject
+		targetKey := baseURL + "\x00" + mapping.HubProject
 		if _, ok := hubTargets[targetKey]; ok {
-			return fmt.Errorf("%s: duplicate hub target %q/%q", prefix, origin, mapping.HubProject)
+			return fmt.Errorf("%s: duplicate hub target %q/%q", prefix, baseURL, mapping.HubProject)
 		}
 		hubTargets[targetKey] = struct{}{}
 	}

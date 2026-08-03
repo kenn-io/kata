@@ -215,6 +215,7 @@ type Storage interface {
 	// federation: bindings + sync status + quarantines
 	ListFederationBindings(ctx context.Context) ([]FederationBinding, error)
 	FederationBindingByProject(ctx context.Context, projectID int64) (FederationBinding, error)
+	RebindFederationBinding(ctx context.Context, p RebindFederationBindingParams) (FederationBinding, error)
 	FederationSyncStatusByProject(ctx context.Context, projectID int64) (FederationSyncStatus, error)
 	RecordFederationSyncPullStarted(ctx context.Context, projectID int64, at time.Time) error
 	RecordFederationSyncPullSuccess(ctx context.Context, projectID int64, at time.Time) error

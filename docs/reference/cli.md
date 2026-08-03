@@ -541,6 +541,8 @@ kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> \
   --hub-project-id <id> --token <token> --actor <actor> --push --adopt-existing
+kata federation rebind <spoke-project> --hub <catalog-name>
+kata federation rebind --all --hub <catalog-name>
 kata federation status
 kata federation enrollments list
 kata federation revoke <enrollment-id>
@@ -572,6 +574,14 @@ issue author, issue owner, comment author, and link author fields. It is
 project-scoped, idempotent, and intended for current-state identity hygiene
 before federation snapshots are emitted; it is not a historical event redaction
 tool.
+
+After changing a hub's named `[[daemon]]` entry to a new HTTPS address, use
+`kata federation rebind` to move an existing spoke without reenrollment or
+cursor reset. `--daemon` continues to select the spoke daemon receiving the
+mutation; `--hub` names the replacement hub catalog entry owned by that spoke
+daemon. `--all` processes every local spoke in project-ID order, reports every
+result, and returns nonzero if any spoke failed. Plaintext replacement targets
+are rejected.
 
 Federation is an operator workflow. Most users never need these commands.
 Issue edits on push-enabled federated spokes remain local-first; use

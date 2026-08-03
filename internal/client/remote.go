@@ -91,6 +91,26 @@ func NormalizeRemoteURL(v string, allowInsecure bool) (string, error) {
 	return normalizeRemoteURL(v, allowInsecure)
 }
 
+// NormalizeRemoteBaseURL applies remote transport policy while preserving a
+// configured reverse-proxy path prefix.
+func NormalizeRemoteBaseURL(v string, allowInsecure bool) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(v))
+	if err != nil {
+		return "", fmt.Errorf("parse url: %w", err)
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
+	}
+	if u.Host == "" {
+		return "", errors.New("url must include host")
+	}
+	if err := requireSecureOrPrivate(u, allowInsecure); err != nil {
+		return "", err
+	}
+	return config.CanonicalHTTPBaseURL(u.String())
+}
+
 // RemoteAllowInsecureForBaseURL reports whether the configured remote source
 // for workspaceStart explicitly opted baseURL into plaintext HTTP.
 func RemoteAllowInsecureForBaseURL(baseURL, workspaceStart string) bool {

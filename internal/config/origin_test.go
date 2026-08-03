@@ -55,3 +55,31 @@ func TestCanonicalHTTPOriginPreservesIPv6ZoneCaseAndEscaping(t *testing.T) {
 	assert.Equal(t, "fe80::abcd%EnABC", reparsed.Hostname())
 	assert.Empty(t, reparsed.Port())
 }
+
+func TestCanonicalHTTPBaseURLRejectsAnyQueryOrFragmentDelimiter(t *testing.T) {
+	for _, input := range []string{
+		"https://daemon.example?",
+		"https://daemon.example?name=value",
+		"https://daemon.example#",
+		"https://daemon.example#section",
+	} {
+		t.Run(input, func(t *testing.T) {
+			_, err := CanonicalHTTPBaseURL(input)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestAppendHTTPBaseURLPathPreservesConfiguredPrefix(t *testing.T) {
+	got, err := AppendHTTPBaseURLPath(
+		"HTTPS://Daemon.Example:443/proxy//segment/../mount/",
+		"/api/v1/projects/41/federation/metadata",
+	)
+
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		"https://daemon.example/proxy//segment/../mount/api/v1/projects/41/federation/metadata",
+		got,
+	)
+}

@@ -23,11 +23,13 @@ import (
 // deployments. Future phases may expose these through DSN params or
 // [storage] config.
 const (
-	defaultMaxOpenConns     = 25
-	defaultMaxIdleConns     = 5
-	idempotencyMaxOpenConns = 4
-	idempotencyMaxIdleConns = 1
-	defaultConnMaxIdleTime  = 5 * time.Minute
+	defaultMaxOpenConns        = 25
+	defaultMaxIdleConns        = 5
+	idempotencyMaxOpenConns    = 4
+	idempotencyMaxIdleConns    = 1
+	federationLockMaxOpenConns = 25
+	federationLockMaxIdleConns = 1
+	defaultConnMaxIdleTime     = 5 * time.Minute
 )
 
 // Open opens a PG connection pool against dsn using pgx's database/sql
@@ -163,6 +165,13 @@ func openInternal(
 	if err := s.idempotencyDB.PingContext(ctx); err != nil {
 		_ = s.Close()
 		return nil, fmt.Errorf("ping postgres idempotency coordinator: %w", err)
+	}
+	s.federationLockDB = newPostgresPool(
+		*connConfig, federationLockMaxOpenConns, federationLockMaxIdleConns,
+	)
+	if err := s.federationLockDB.PingContext(ctx); err != nil {
+		_ = s.Close()
+		return nil, fmt.Errorf("ping postgres federation lock coordinator: %w", err)
 	}
 	if serving {
 		if err := s.acquireServingLease(ctx); err != nil {

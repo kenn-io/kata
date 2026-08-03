@@ -45,6 +45,10 @@ type LeaveFederationReplicaResponse = LeaveFederationReplicaResultBody
 
 type LeaveFederationReplicaErrorResponse = ErrorEnvelope
 
+type RebindFederationReplicaResponse = RebindFederationReplicaResponseBody
+
+type RebindFederationReplicaErrorResponse = ErrorEnvelope
+
 type GetFederationStatusResponse = FederationStatusBody
 
 type GetFederationStatusErrorResponse = ErrorEnvelope
@@ -398,6 +402,13 @@ type LeaveFederationReplicaResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *LeaveFederationReplicaResponse
+}
+
+type RebindFederationReplicaResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RebindFederationReplicaResponse
 }
 
 type GetFederationStatusResp struct {

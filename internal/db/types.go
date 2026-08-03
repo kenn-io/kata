@@ -99,6 +99,17 @@ type FederationBinding struct {
 	LastSyncAt    *time.Time
 }
 
+// RebindFederationBindingParams conditionally moves one spoke binding to a
+// replacement endpoint without changing its hub identity or sync state.
+type RebindFederationBindingParams struct {
+	ProjectID             int64
+	ExpectedHubURL        string
+	ExpectedAllowInsecure bool
+	HubProjectID          int64
+	HubProjectUID         string
+	TargetHubURL          string
+}
+
 // FederationQuarantineDirection identifies which federation stream is blocked.
 type FederationQuarantineDirection string
 

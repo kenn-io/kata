@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/hooks"
 )
 
@@ -63,6 +64,32 @@ func TestServerConfig_NilHooks_FillsNoop(t *testing.T) {
 	}
 	if _, ok := srv.cfg.Hooks.(*hooks.Dispatcher); ok {
 		t.Fatal("default Hooks should be Noop, not Dispatcher")
+	}
+}
+
+func TestNewServerClonesFederationCatalog(t *testing.T) {
+	catalog := []config.CatalogDaemonConfig{{Name: "primary-hub", URL: "https://hub.example"}}
+	srv := NewServer(ServerConfig{FederationCatalog: catalog})
+	t.Cleanup(func() { _ = srv.Close() })
+
+	catalog[0].URL = "https://changed.example"
+	catalog = append(catalog, config.CatalogDaemonConfig{Name: "another-hub"})
+	if len(catalog) != 2 {
+		t.Fatalf("caller-owned catalog append failed: %+v", catalog)
+	}
+
+	if got := srv.cfg.FederationCatalog; len(got) != 1 || got[0].URL != "https://hub.example" {
+		t.Fatalf("server catalog changed through caller-owned slice: %+v", got)
+	}
+}
+
+func TestFederationRebindHostPolicyIsRestrictedMutation(t *testing.T) {
+	policy, ok := hostOperationPolicy("rebindFederationReplica")
+	if !ok {
+		t.Fatal("rebindFederationReplica has no host operation policy")
+	}
+	if !policy.Mutation || !policy.restricted || policy.Kind != hostOperationFederationAdministration {
+		t.Fatalf("unexpected rebind host policy: %+v", policy)
 	}
 }
 

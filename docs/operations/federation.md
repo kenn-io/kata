@@ -143,6 +143,44 @@ See [Configuration](../reference/configuration.md#declarative-federation-mapping
 for validation rules and [HTTP API schema](../reference/http-api.md#federation-enrollment-and-health-endpoints)
 for the health and credential-rotation contract.
 
+## Move an existing spoke to a new HTTPS endpoint
+
+Catalog edits are intentionally not applied to existing bindings. After
+changing the named `[[daemon]]` entry and restarting the spoke daemon so it has
+loaded the new catalog, migrate one spoke explicitly:
+
+```sh
+kata federation rebind spoke-project --hub primary-hub
+```
+
+Or attempt every local spoke independently:
+
+```sh
+kata federation rebind --all --hub primary-hub
+```
+
+`--daemon` selects the spoke daemon that owns the binding and credential;
+`--hub` selects a catalog entry in that daemon's config. The request carries
+only the catalog name. The spoke daemon requires the entry to be remote HTTPS,
+then deliberately sends the existing enrollment token to that configured
+origin and fetches the same hub project's federation metadata. It updates
+local state only if both the numeric project ID and stable project UID match.
+The catalog administration token and `token_env` are not used.
+
+For a config-managed spoke, reconciliation reports `binding_conflict` and
+changes nothing between the catalog edit and successful rebind, including
+across a restart. Rebind is the designed resolution for this state. It does not
+reenroll, rotate the enrollment token, reset cursors, alter capabilities or
+actors, or require a database migration. If the two local stores were updated
+only partially, rerunning the same command resumes safely; a fully migrated
+retry returns `unchanged`. Plain HTTP targets are rejected even when the old
+binding allowed insecure transport.
+
+The daemon drains any project sync already using the old endpoint before it
+changes either local store and holds new sync work until both stores converge.
+This prevents an old-origin response from applying events or advancing a cursor
+after cutover; the next sync rereads the new binding and credential.
+
 ## TUI enrollment workflow
 
 The TUI federation view is scoped to the active daemon. Press `F` from the
@@ -701,6 +739,8 @@ kata federation join --project <existing-project> --hub-url <url> \
 kata federation enrollments list
 kata federation revoke <enrollment-id>
 kata federation leave <project> [--delete [--force]] [--local-only] [--hub <name>]
+kata federation rebind <project> --hub <name>
+kata federation rebind --all --hub <name>
 kata federation status
 kata federation status --json
 kata federation lease acquire <issue-ref> [--ttl 30m]

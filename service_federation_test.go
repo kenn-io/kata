@@ -89,6 +89,11 @@ func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 		return statusErr == nil && status.LastError != nil
 	}, 2*time.Second, 10*time.Millisecond)
 
+	binding, err := spokeService.store.FederationBindingByProject(ctx, spokeProject.ID)
+	require.NoError(t, err)
+	binding.HubURL = hubServer.URL
+	_, err = spokeService.store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
 	require.NoError(t, credentials.StoreFederationCredential(ctx, spokeProject.UID, FederationCredential{
 		HubURL: hubServer.URL, HubProjectID: hubProject.ID,
 		Token: enrollment.Token, AllowInsecure: true,
@@ -105,6 +110,27 @@ func TestServiceRunWakesFederationOnCommittedEvent(t *testing.T) {
 		_, issueErr := hubService.store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 		return issueErr == nil
 	}, 2*time.Second, 10*time.Millisecond, "federation push should be event-driven, not wait for the 30-second poll")
+}
+
+func TestMountedServiceOmitsUnsupportedFederationRebindRoute(t *testing.T) {
+	service, err := New(context.Background(), Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+	server := httptest.NewServer(service.Handler())
+	t.Cleanup(server.Close)
+
+	response, err := server.Client().Post(
+		server.URL+"/api/v1/federation/replicas/1/actions/rebind",
+		"application/json",
+		bytes.NewBufferString(`{"hub_catalog":"primary-hub"}`),
+	)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+
+	assert.Equal(t, http.StatusNotFound, response.StatusCode)
 }
 
 func TestServicesIsolateFederationCredentialsForSharedProjectUID(t *testing.T) {

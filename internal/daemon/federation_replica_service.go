@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
 
@@ -780,14 +779,6 @@ func normalizeFederationReplicaParams(
 		)
 	}
 	p.HubURL = hubBaseURL
-	hubOrigin, err := config.CanonicalHTTPOrigin(hubBaseURL)
-	if err != nil {
-		return EnsureFederationReplicaParams{}, federationReplicaError(
-			ErrFederationReplicaInvalidInput,
-			"hub_url must be a valid HTTP(S) base URL",
-			"",
-		)
-	}
 	if !katauid.Valid(p.HubProjectUID) {
 		return EnsureFederationReplicaParams{}, federationReplicaError(
 			ErrFederationReplicaInvalidInput, "hub_project_uid must be a valid UID", "",
@@ -854,15 +845,7 @@ func normalizeFederationReplicaParams(
 				"",
 			)
 		}
-		credentialOrigin, err := config.CanonicalHTTPOrigin(credentialBaseURL)
-		if err != nil {
-			return EnsureFederationReplicaParams{}, federationReplicaError(
-				ErrFederationReplicaInvalidInput,
-				"hub_url must be a valid HTTP(S) base URL",
-				"",
-			)
-		}
-		if credentialOrigin != hubOrigin || p.Credential.HubProjectID != p.HubProjectID {
+		if credentialBaseURL != hubBaseURL || p.Credential.HubProjectID != p.HubProjectID {
 			return EnsureFederationReplicaParams{}, federationReplicaError(
 				ErrFederationReplicaInvalidInput,
 				"credential hub target must match the requested federation hub",
@@ -871,31 +854,28 @@ func normalizeFederationReplicaParams(
 		}
 		p.Credential.HubURL = credentialBaseURL
 	}
+	effectiveAllowInsecure, err := config.EffectiveHTTPAllowInsecure(
+		p.HubURL, p.Credential.AllowInsecure,
+	)
+	if err != nil {
+		return EnsureFederationReplicaParams{}, federationReplicaError(
+			ErrFederationReplicaInvalidInput,
+			"hub_url must be a valid HTTP(S) base URL",
+			"",
+		)
+	}
+	p.Credential.AllowInsecure = effectiveAllowInsecure
 	return p, nil
 }
 
 func normalizeFederationHubBaseURL(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
-		u.Host == "" || u.Hostname() == "" || u.User != nil ||
-		u.ForceQuery || u.RawQuery != "" || strings.Contains(raw, "#") {
+	baseURL, err := config.CanonicalHTTPBaseURL(raw)
+	if err != nil {
 		return "", errors.New(
 			"hub_url must be an HTTP(S) base URL without user info, query, or fragment",
 		)
 	}
-	if _, err := config.CanonicalHTTPOrigin(raw); err != nil {
-		return "", errors.New("hub_url must be a valid HTTP(S) base URL")
-	}
-	if u.RawPath == "" {
-		u.Path = strings.TrimRight(u.Path, "/")
-	} else {
-		for strings.HasSuffix(u.RawPath, "/") {
-			u.RawPath = strings.TrimSuffix(u.RawPath, "/")
-			u.Path = strings.TrimSuffix(u.Path, "/")
-		}
-	}
-	return u.String(), nil
+	return baseURL, nil
 }
 
 func normalizedReplicaCapabilities(raw string) (string, error) {
@@ -924,10 +904,10 @@ func ensureFederationReplicaCredentialTarget(
 	credentials config.FederationCredentialStore,
 	p EnsureFederationReplicaParams,
 ) error {
-	if p.Credential.Token == "" {
-		return nil
-	}
 	if credentials == nil {
+		if p.Credential.Token == "" {
+			return nil
+		}
 		return credentialIOError("read federation replica credential")
 	}
 	existing, ok, err := credentials.FederationCredential(ctx, p.HubProjectUID)
@@ -940,22 +920,29 @@ func ensureFederationReplicaCredentialTarget(
 	if !ok {
 		return nil
 	}
-	existingOrigin, err := config.CanonicalHTTPOrigin(existing.HubURL)
+	existingBaseURL, err := config.CanonicalHTTPBaseURL(existing.HubURL)
 	if err != nil {
 		return federationReplicaCredentialTargetConflict(
 			ctx, store, p,
 			"existing federation credential has an invalid hub_url",
 		)
 	}
-	requestedOrigin, _ := config.CanonicalHTTPOrigin(p.Credential.HubURL)
-	if existingOrigin != requestedOrigin {
+	requestedBaseURL, _ := config.CanonicalHTTPBaseURL(p.Credential.HubURL)
+	existingAllowInsecure, existingPolicyErr := config.EffectiveHTTPAllowInsecure(
+		existing.HubURL, existing.AllowInsecure,
+	)
+	requestedAllowInsecure, requestedPolicyErr := config.EffectiveHTTPAllowInsecure(
+		p.Credential.HubURL, p.Credential.AllowInsecure,
+	)
+	if existingBaseURL != requestedBaseURL || existingPolicyErr != nil || requestedPolicyErr != nil ||
+		existingAllowInsecure != requestedAllowInsecure {
 		return federationReplicaCredentialTargetConflict(
 			ctx, store, p,
-			"existing federation credential targets another hub origin",
+			"existing federation credential targets another hub endpoint",
 		)
 	}
 	if existing.HubProjectID != p.Credential.HubProjectID ||
-		(existing.ManagedByConfig && existing.Token != p.Credential.Token) {
+		(p.Credential.Token != "" && existing.ManagedByConfig && existing.Token != p.Credential.Token) {
 		return federationReplicaCredentialTargetConflict(
 			ctx, store, p,
 			"existing federation credential differs from the requested hub",
@@ -1407,16 +1394,29 @@ func replicaBindingConflictDetails(
 			"role existing=%s requested=%s", existing.Role, db.FederationRoleSpoke,
 		))
 	}
-	existingOrigin, existingOriginErr := config.CanonicalHTTPOrigin(existing.HubURL)
-	requestedOrigin, requestedOriginErr := config.CanonicalHTTPOrigin(p.HubURL)
+	existingBaseURL, existingBaseURLErr := config.CanonicalHTTPBaseURL(existing.HubURL)
+	requestedBaseURL, requestedBaseURLErr := config.CanonicalHTTPBaseURL(p.HubURL)
 	switch {
-	case existingOriginErr != nil:
-		details = append(details, fmt.Sprintf("hub_url existing=%s invalid=%v", existing.HubURL, existingOriginErr))
-	case requestedOriginErr != nil:
-		details = append(details, fmt.Sprintf("hub_url requested=%s invalid=%v", p.HubURL, requestedOriginErr))
-	case existingOrigin != requestedOrigin:
+	case existingBaseURLErr != nil:
+		details = append(details, fmt.Sprintf("hub_url existing=%s invalid=%v", existing.HubURL, existingBaseURLErr))
+	case requestedBaseURLErr != nil:
+		details = append(details, fmt.Sprintf("hub_url requested=%s invalid=%v", p.HubURL, requestedBaseURLErr))
+	case existingBaseURL != requestedBaseURL:
 		details = append(details, fmt.Sprintf(
 			"hub_url existing=%s requested=%s", existing.HubURL, p.HubURL,
+		))
+	}
+	existingAllowInsecure, existingPolicyErr := config.EffectiveHTTPAllowInsecure(
+		existing.HubURL, existing.AllowInsecure,
+	)
+	requestedAllowInsecure, requestedPolicyErr := config.EffectiveHTTPAllowInsecure(
+		p.HubURL, p.Credential.AllowInsecure,
+	)
+	if existingPolicyErr == nil && requestedPolicyErr == nil &&
+		existingAllowInsecure != requestedAllowInsecure {
+		details = append(details, fmt.Sprintf(
+			"allow_insecure existing=%t requested=%t",
+			existingAllowInsecure, requestedAllowInsecure,
 		))
 	}
 	if existing.HubProjectID != p.HubProjectID {

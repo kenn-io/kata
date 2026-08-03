@@ -38,6 +38,29 @@ type FederationCredential struct {
 	PendingEnrollmentID int64  `toml:"pending_enrollment_id,omitempty"`
 }
 
+// FederationTransportCredential combines secret-bearing credential metadata
+// with the durable binding target used for outbound transport. A legacy
+// credential-only plaintext opt-in is retained only when that credential
+// already identifies the same endpoint and hub project as the binding.
+func FederationTransportCredential(
+	hubURL string,
+	hubProjectID int64,
+	allowInsecure bool,
+	credential FederationCredential,
+) FederationCredential {
+	credentialBaseURL, credentialURLErr := CanonicalHTTPBaseURL(credential.HubURL)
+	bindingBaseURL, bindingURLErr := CanonicalHTTPBaseURL(hubURL)
+	legacyAllowInsecure := credential.AllowInsecure &&
+		credential.HubProjectID == hubProjectID &&
+		credentialURLErr == nil && bindingURLErr == nil &&
+		credentialBaseURL == bindingBaseURL
+
+	credential.HubURL = hubURL
+	credential.HubProjectID = hubProjectID
+	credential.AllowInsecure = allowInsecure || legacyAllowInsecure
+	return credential
+}
+
 // FederationCredentialMetadata is the redacted credential information safe
 // to expose in daemon status responses.
 type FederationCredentialMetadata struct {
@@ -87,6 +110,21 @@ type FederationCredentialStore interface {
 	FederationCredential(context.Context, string) (FederationCredential, bool, error)
 	StoreFederationCredential(context.Context, string, FederationCredential) error
 	DeleteFederationCredential(context.Context, string) error
+}
+
+// FederationCredentialReplacement describes one exact in-place credential
+// transition under an unchanged project UID.
+type FederationCredentialReplacement struct {
+	ProjectUID  string
+	Expected    FederationCredential
+	Replacement FederationCredential
+}
+
+// FederationCredentialReplacer is the optional exact-replacement boundary
+// used by local operations that must not overwrite concurrent credential
+// changes.
+type FederationCredentialReplacer interface {
+	ReplaceFederationCredential(context.Context, FederationCredentialReplacement) error
 }
 
 // FederationManagedCredentialStore is the managed credential boundary used by
@@ -167,6 +205,13 @@ func (homeFederationCredentialStore) ReplaceManagedFederationCredential(
 	replacement FederationManagedCredentialReservation,
 ) error {
 	return ReplaceManagedFederationCredential(expected, replacement)
+}
+
+func (homeFederationCredentialStore) ReplaceFederationCredential(
+	_ context.Context,
+	replacement FederationCredentialReplacement,
+) error {
+	return ReplaceFederationCredential(replacement)
 }
 
 // DefaultFederationCredentialStore returns the standalone daemon credential
@@ -426,6 +471,36 @@ func DeleteManagedFederationCredential(
 		delete(creds.Projects, match.ProjectUID)
 		return nil
 	})
+}
+
+// ReplaceFederationCredential replaces one exact credential under an
+// unchanged project UID. Exact target replay is a no-op that avoids touching
+// the credential file.
+func ReplaceFederationCredential(replacement FederationCredentialReplacement) error {
+	projectUID := strings.TrimSpace(replacement.ProjectUID)
+	if projectUID == "" {
+		return fmt.Errorf("%w: project UID is required", ErrFederationCredentialConflict)
+	}
+
+	federationCredentialsMu.Lock()
+	defer federationCredentialsMu.Unlock()
+
+	creds, err := readFederationCredentials()
+	if err != nil {
+		return err
+	}
+	current, found := creds.Projects[projectUID]
+	if found && current == replacement.Replacement {
+		return nil
+	}
+	if !found || current != replacement.Expected {
+		return fmt.Errorf(
+			"%w: credential changed before replacement",
+			ErrFederationCredentialConflict,
+		)
+	}
+	creds.Projects[projectUID] = replacement.Replacement
+	return writeFederationCredentials(creds)
 }
 
 // ReplaceManagedFederationCredential replaces one exact managed reservation
