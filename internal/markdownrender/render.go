@@ -131,20 +131,16 @@ func sanitizeRenderedOutput(rendered string) string {
 				return
 			}
 			out.WriteString("\x1b[")
-			separator := byte(';')
 			if len(params) == 0 {
 				out.WriteByte('0')
 			} else {
-				params.ForEach(0, func(i, param int, hasMore bool) {
+				// safeSGREffect rejects colon subparameters, so every
+				// surviving param is ';'-separated.
+				params.ForEach(0, func(i, param int, _ bool) {
 					if i > 0 {
-						out.WriteByte(separator)
+						out.WriteByte(';')
 					}
 					out.WriteString(strconv.Itoa(param))
-					if hasMore {
-						separator = ':'
-					} else {
-						separator = ';'
-					}
 				})
 			}
 			out.WriteByte('m')

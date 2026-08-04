@@ -102,11 +102,12 @@ func (r *externalShowMarkdownRenderer) Render(
 		return processtree.TerminateWithGrace(cmd, r.grace)
 	}
 
-	err := cmd.Run()
-	if cause := renderCtx.Err(); cause != nil {
-		return "", rendererError(r.argv[0], kind, cause)
-	}
-	if err != nil {
+	if err := cmd.Run(); err != nil {
+		// Prefer the context cause: a killed renderer reports the timeout or
+		// cancellation rather than its incidental exit status.
+		if cause := renderCtx.Err(); cause != nil {
+			return "", rendererError(r.argv[0], kind, cause)
+		}
 		return "", rendererError(r.argv[0], kind, err)
 	}
 	return stdout.String(), nil

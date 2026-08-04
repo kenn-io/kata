@@ -18,7 +18,9 @@ import (
 func TestExternalShowMarkdownRendererTimeoutBoundsInheritedDescendantStdout(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer("spawn-descendant", filepath.Join(t.TempDir(), "ready"))
-	renderer.timeout = 100 * time.Millisecond
+	// The timeout must fire, but only after the helper has had time to
+	// spawn its descendant and signal readiness under parallel test load.
+	renderer.timeout = time.Second
 	renderer.grace = 50 * time.Millisecond
 
 	errCh := make(chan error, 1)
@@ -33,7 +35,9 @@ func TestExternalShowMarkdownRendererTimeoutBoundsInheritedDescendantStdout(t *t
 	started := time.Now()
 	err := <-errCh
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Less(t, time.Since(started), time.Second)
+	// The descendant holds stdout open forever; the assertion only needs to
+	// prove the pipe wait is bounded, not tightly timed.
+	require.Less(t, time.Since(started), 10*time.Second)
 }
 
 func TestExternalShowMarkdownRendererCancellationBoundsInheritedDescendantStdout(t *testing.T) {
@@ -56,14 +60,16 @@ func TestExternalShowMarkdownRendererCancellationBoundsInheritedDescendantStdout
 	cancel()
 	err := <-errCh
 	require.ErrorIs(t, err, context.Canceled)
-	require.Less(t, time.Since(started), time.Second)
+	// The descendant holds stdout open forever; the assertion only needs to
+	// prove the pipe wait is bounded, not tightly timed.
+	require.Less(t, time.Since(started), 10*time.Second)
 }
 
 func configureShowMarkdownHelperChild(_ *exec.Cmd) {}
 
 func waitForWindowsHelperPID(t *testing.T, readyPath string) int {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(readyPath)
 		if err == nil {

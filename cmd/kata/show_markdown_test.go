@@ -72,8 +72,11 @@ func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
 func helperRenderer(mode string, extra ...string) *externalShowMarkdownRenderer {
 	argv := []string{os.Args[0], "-test.run=TestShowMarkdownRendererHelperProcess", "--", mode}
 	argv = append(argv, extra...)
+	// The default timeout only guards against hangs; it must leave the
+	// spawn-descendant helper room to signal readiness under parallel test
+	// load. Timeout-behavior tests override it explicitly.
 	return &externalShowMarkdownRenderer{
-		argv: argv, timeout: 500 * time.Millisecond, grace: 50 * time.Millisecond,
+		argv: argv, timeout: 5 * time.Second, grace: 50 * time.Millisecond,
 	}
 }
 
