@@ -213,6 +213,7 @@ func hostAccessResolvedByHandler(operationID string) bool {
 	case "mergeProject",
 		"moveIssue",
 		"listAllIssues",
+		"patchProjectMetadata",
 		"createFederationEnrollment",
 		"rotateFederationEnrollment":
 		return true

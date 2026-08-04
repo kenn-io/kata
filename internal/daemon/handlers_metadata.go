@@ -111,10 +111,19 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 		if err != nil {
 			return nil, err
 		}
+		designateInbox := inboxDesignationPatch(in.Body.Patch)
+		if designateInbox && len(in.Body.Patch) != 1 {
+			return nil, api.NewError(400, "invalid_inbox_designation",
+				"Inbox designation cannot be combined with other metadata changes", "", nil)
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, designateInbox)
+		if err != nil {
+			return nil, err
+		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		if inboxDesignationPatch(in.Body.Patch) {
+		if designateInbox {
 			res, err := cfg.DB.DesignateInboxProject(ctx, db.DesignateInboxProjectIn{
 				ProjectID: in.ProjectID, IfMatchRev: rev, Actor: actor,
 			})
@@ -182,9 +191,6 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 }
 
 func inboxDesignationPatch(patch map[string]json.RawMessage) bool {
-	if len(patch) != 1 {
-		return false
-	}
 	role, ok := patch["role"]
 	if !ok {
 		return false

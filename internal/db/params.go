@@ -511,6 +511,20 @@ type CreateRecurrenceIn struct {
 	Template  RecurrenceTemplate
 }
 
+// CreateRecurrenceForIssueIn creates a recurrence and attaches an existing
+// issue as its first occurrence in the same transaction.
+type CreateRecurrenceForIssueIn struct {
+	IssueID    int64
+	Recurrence CreateRecurrenceIn
+}
+
+// CreateRecurrenceForIssueOut carries the recurrence and its committed
+// creation/materialization events.
+type CreateRecurrenceForIssueOut struct {
+	Recurrence Recurrence
+	Events     []Event
+}
+
 // RecurrenceUpdate holds the optional fields for PatchRecurrence. A nil field
 // means "leave unchanged"; nullable scalar fields have explicit clear flags.
 type RecurrenceUpdate struct {

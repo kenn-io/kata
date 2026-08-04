@@ -662,11 +662,12 @@ func (c CreateLinkResponseBody) Validate() error {
 }
 
 type CreateRecurrenceRequestBody struct {
-	Actor    *string                 `json:"actor,omitempty"`
-	Dtstart  string                  `json:"dtstart" validate:"required"`
-	Rrule    string                  `json:"rrule" validate:"required"`
-	Template RecurrenceTemplateInput `json:"template"`
-	Timezone string                  `json:"timezone" validate:"required"`
+	Actor           *string                 `json:"actor,omitempty"`
+	Dtstart         string                  `json:"dtstart" validate:"required"`
+	InitialIssueRef *string                 `json:"initial_issue_ref,omitempty"`
+	Rrule           string                  `json:"rrule" validate:"required"`
+	Template        RecurrenceTemplateInput `json:"template"`
+	Timezone        string                  `json:"timezone" validate:"required"`
 }
 
 func (c CreateRecurrenceRequestBody) Validate() error {

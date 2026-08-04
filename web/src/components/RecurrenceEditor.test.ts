@@ -9,7 +9,7 @@ import type { KataRecurrence } from '../lib/kata/types'
 
 afterEach(cleanup)
 
-const createMode = { kind: 'create', projectID: 1 } as const
+const createMode = { kind: 'create', projectID: 1, initialIssueRef: 'abc4' } as const
 
 const sample: KataRecurrence = {
   id: 7,
@@ -345,6 +345,7 @@ describe('RecurrenceEditor (via dialog) — submit create', () => {
     expect(onCreate).toHaveBeenCalledTimes(1)
     const [projectID, payload] = onCreate.mock.calls[0]!
     expect(projectID).toBe(1)
+    expect(payload.initialIssueRef).toBe('abc4')
     expect(payload.actor).toBe('user-a')
     expect(payload.rrule).toMatch(/^FREQ=WEEKLY;INTERVAL=1;BYDAY=/)
     expect(payload.template.title).toBe('Weekly review')

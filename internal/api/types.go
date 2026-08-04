@@ -1313,11 +1313,12 @@ type RecurrenceTemplateInput struct {
 type CreateRecurrenceRequest struct {
 	ProjectID int64 `path:"project_id" required:"true"`
 	Body      struct {
-		Actor    string                  `json:"actor,omitempty"`
-		RRule    string                  `json:"rrule" required:"true"`
-		DTStart  string                  `json:"dtstart" required:"true"`
-		Timezone string                  `json:"timezone" required:"true"`
-		Template RecurrenceTemplateInput `json:"template"`
+		Actor           string                  `json:"actor,omitempty"`
+		InitialIssueRef string                  `json:"initial_issue_ref,omitempty"`
+		RRule           string                  `json:"rrule" required:"true"`
+		DTStart         string                  `json:"dtstart" required:"true"`
+		Timezone        string                  `json:"timezone" required:"true"`
+		Template        RecurrenceTemplateInput `json:"template"`
 	}
 }
 

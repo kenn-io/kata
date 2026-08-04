@@ -8,7 +8,7 @@
   } from '../lib/kata/types'
 
   type Mode =
-    | { kind: 'create'; projectID: number }
+    | { kind: 'create'; projectID: number; initialIssueRef: string }
     | { kind: 'edit'; recurrence: KataRecurrence; etag: string }
 
   interface Props {

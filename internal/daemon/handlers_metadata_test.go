@@ -414,3 +414,28 @@ func TestPatchProjectMetadata_DesignatesInboxAtomically(t *testing.T) {
 	assert.JSONEq(t, `{}`, string(previous.Metadata))
 	assert.JSONEq(t, `{"role":"inbox"}`, string(target.Metadata))
 }
+
+func TestPatchProjectMetadata_RejectsCombinedInboxDesignation(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	previous := seedProject(t, env, "previous-inbox")
+	target := seedProject(t, env, "example-project")
+	_, err := env.DB.PatchProjectMetadata(t.Context(), db.PatchProjectMetadataIn{
+		ProjectID: previous.ID,
+		Actor:     "user-a",
+		Patch:     map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+	})
+	require.NoError(t, err)
+
+	url := fmt.Sprintf("%s/api/v1/projects/%d/metadata", env.URL, target.ID)
+	resp := doPostWithIfMatch(t, env, url,
+		`{"actor":"user-a","patch":{"role":"inbox","area":"Work"}}`,
+		fmt.Sprintf(`"rev-%d"`, target.Revision))
+	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", readClose(t, resp))
+
+	previous, err = env.DB.ProjectByID(t.Context(), previous.ID)
+	require.NoError(t, err)
+	target, err = env.DB.ProjectByID(t.Context(), target.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"role":"inbox"}`, string(previous.Metadata))
+	assert.JSONEq(t, `{}`, string(target.Metadata))
+}

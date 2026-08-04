@@ -111,7 +111,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		rec, event, err := cfg.DB.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+		createInput := db.CreateRecurrenceIn{
 			ProjectID: in.ProjectID,
 			Actor:     actor,
 			Rule:      in.Body.RRule,
@@ -125,7 +125,26 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 				Labels:   in.Body.Template.Labels,
 				Metadata: in.Body.Template.Metadata,
 			},
-		})
+		}
+		var rec db.Recurrence
+		var events []db.Event
+		if in.Body.InitialIssueRef != "" {
+			issue, resolveErr := activeIssueByRef(
+				ctx, cfg.DB, in.ProjectID, in.Body.InitialIssueRef, db.IncludeDeletedNo)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			created, createErr := cfg.DB.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
+				IssueID: issue.ID, Recurrence: createInput,
+			})
+			rec, events, err = created.Recurrence, created.Events, createErr
+		} else {
+			var event db.Event
+			rec, event, err = cfg.DB.CreateRecurrence(ctx, createInput)
+			if err == nil {
+				events = []db.Event{event}
+			}
+		}
 		if errors.Is(err, db.ErrLabelInvalid) || errors.Is(err, db.ErrInvalidRecurrence) {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
@@ -135,8 +154,11 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
-		cfg.Hooks.Enqueue(event)
+		for _, event := range events {
+			event := event
+			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
+			cfg.Hooks.Enqueue(event)
+		}
 		out := &api.CreateRecurrenceResponse{}
 		out.Body.Recurrence = rec
 		return out, nil

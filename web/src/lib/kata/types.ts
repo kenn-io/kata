@@ -230,6 +230,7 @@ export interface KataRecurrenceTemplateInput {
 
 export interface KataCreateRecurrenceInput {
   actor: string
+  initialIssueRef: string
   rrule: string
   dtstart: string
   timezone: string

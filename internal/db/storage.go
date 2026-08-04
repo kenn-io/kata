@@ -130,6 +130,7 @@ type Storage interface {
 
 	// recurrences
 	CreateRecurrence(ctx context.Context, in CreateRecurrenceIn) (Recurrence, Event, error)
+	CreateRecurrenceForIssue(ctx context.Context, in CreateRecurrenceForIssueIn) (CreateRecurrenceForIssueOut, error)
 	GetRecurrenceByID(ctx context.Context, id int64) (Recurrence, error)
 	GetRecurrenceByUID(ctx context.Context, recUID string) (Recurrence, error)
 	ListRecurrencesByProject(ctx context.Context, projectID int64) ([]Recurrence, error)

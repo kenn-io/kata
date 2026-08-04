@@ -22,7 +22,7 @@
   } from '../lib/recurrence/rrule'
 
   type Mode =
-    | { kind: 'create'; projectID: number }
+    | { kind: 'create'; projectID: number; initialIssueRef: string }
     | { kind: 'edit'; recurrence: KataRecurrence; etag: string }
 
   interface Props {
@@ -306,6 +306,7 @@
       try {
         await onCreate(mode.projectID, {
           actor,
+          initialIssueRef: mode.initialIssueRef,
           rrule: activeRrule,
           dtstart,
           timezone: resolvedTimezone(),

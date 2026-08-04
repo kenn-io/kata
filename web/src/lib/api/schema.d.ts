@@ -1454,6 +1454,7 @@ export interface components {
     CreateRecurrenceRequestBody: {
       actor?: string
       dtstart: string
+      initial_issue_ref?: string
       rrule: string
       template: components['schemas']['RecurrenceTemplateInput']
       timezone: string

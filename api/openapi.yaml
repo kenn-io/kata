@@ -500,6 +500,8 @@ components:
           type: string
         dtstart:
           type: string
+        initial_issue_ref:
+          type: string
         rrule:
           type: string
         template:

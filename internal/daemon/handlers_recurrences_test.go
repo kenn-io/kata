@@ -50,6 +50,46 @@ func TestPostRecurrence_HappyPath(t *testing.T) {
 	assert.Len(t, out.Recurrence.UID, 26)
 }
 
+func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Weekly review", Author: "user-a",
+	})
+	require.NoError(t, err)
+
+	body := fmt.Sprintf(`{
+		"actor":"user-a",
+		"initial_issue_ref":%q,
+		"rrule":"FREQ=WEEKLY",
+		"dtstart":"2026-08-03",
+		"timezone":"UTC",
+		"template":{"title":"Weekly review"}
+	}`, issue.ShortID)
+	resp := doPost(t, env,
+		fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, project.ID), body)
+	raw := readClose(t, resp)
+	require.Equalf(t, http.StatusCreated, resp.StatusCode, "body: %s", raw)
+
+	attached, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.NotNil(t, attached.RecurrenceID)
+	require.NotNil(t, attached.OccurrenceKey)
+	assert.Equal(t, "2026-08-03", *attached.OccurrenceKey)
+
+	_, events, changed, err := env.DB.CloseIssueWithEvents(
+		t.Context(), issue.ID, "done", "user-a", "Completed the scheduled review.", nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.GreaterOrEqual(t, len(events), 3)
+	assert.Equal(t, "issue.created", events[len(events)-2].Type)
+	assert.Equal(t, "recurrence.materialized", events[len(events)-1].Type)
+	created, err := env.DB.IssueByID(t.Context(), *events[len(events)-2].IssueID)
+	require.NoError(t, err)
+	require.NotNil(t, created.OccurrenceKey)
+	assert.Equal(t, "2026-08-10", *created.OccurrenceKey)
+}
+
 func TestPatchRecurrence_RequiresIfMatch(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "src")

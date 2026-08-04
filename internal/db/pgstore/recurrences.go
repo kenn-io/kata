@@ -109,6 +109,161 @@ func (s *Store) CreateRecurrence(ctx context.Context, input db.CreateRecurrenceI
 	return result, event, err
 }
 
+// CreateRecurrenceForIssue creates a recurrence and attaches the selected
+// open issue as its first occurrence in the same serializable transaction.
+func (s *Store) CreateRecurrenceForIssue(
+	ctx context.Context, input db.CreateRecurrenceForIssueIn,
+) (db.CreateRecurrenceForIssueOut, error) {
+	create := input.Recurrence
+	labels, err := db.NormalizeRecurrenceLabels(create.Template.Labels)
+	if err != nil {
+		return db.CreateRecurrenceForIssueOut{}, fmt.Errorf("validate template_labels: %w", err)
+	}
+	if err := db.ValidateRecurrenceTemplate(create.Template.Title, create.Template.Metadata); err != nil {
+		return db.CreateRecurrenceForIssueOut{}, err
+	}
+	firstOccurrence, err := db.ValidateRecurrenceCore(create.Rule, create.DTStart, create.Timezone)
+	if err != nil {
+		return db.CreateRecurrenceForIssueOut{}, err
+	}
+	if firstOccurrence == nil {
+		return db.CreateRecurrenceForIssueOut{}, fmt.Errorf(
+			"%w: recurrence has no first occurrence", db.ErrInvalidRecurrence)
+	}
+	labelsJSON, err := json.Marshal(labels)
+	if err != nil {
+		return db.CreateRecurrenceForIssueOut{}, fmt.Errorf("marshal recurrence labels: %w", err)
+	}
+	metadataJSON := json.RawMessage(`{}`)
+	if len(create.Template.Metadata) > 0 {
+		metadataJSON = create.Template.Metadata
+	}
+	recurrenceUID, err := katauid.New()
+	if err != nil {
+		return db.CreateRecurrenceForIssueOut{}, fmt.Errorf("generate recurrence uid: %w", err)
+	}
+
+	var output db.CreateRecurrenceForIssueOut
+	err = s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		project, err := scanProject(tx.QueryRowContext(ctx,
+			projectSelect+` WHERE id = $1 AND deleted_at IS NULL FOR SHARE`, create.ProjectID))
+		if err != nil {
+			return err
+		}
+		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, project.ID); err != nil {
+			return err
+		}
+		issue, err := scanIssue(tx.QueryRowContext(ctx,
+			issueSelect+` WHERE i.id = $1 AND i.project_id = $2 AND i.deleted_at IS NULL FOR UPDATE OF i`,
+			input.IssueID, create.ProjectID))
+		if err != nil {
+			return err
+		}
+		if issue.Status != "open" {
+			return fmt.Errorf("%w: initial recurrence issue must be open", db.ErrInvalidRecurrence)
+		}
+		if issue.RecurrenceID != nil {
+			return fmt.Errorf("%w: issue is already part of a recurrence", db.ErrInvalidRecurrence)
+		}
+
+		var recurrenceID int64
+		err = tx.QueryRowContext(ctx, `INSERT INTO recurrences(
+  uid, project_id, rrule, dtstart, timezone, template_title, template_body,
+  template_owner, template_priority, template_labels, template_metadata,
+  next_occurrence_key, author
+) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+			recurrenceUID, create.ProjectID, create.Rule, create.DTStart, create.Timezone,
+			create.Template.Title, create.Template.Body, create.Template.Owner, create.Template.Priority,
+			string(labelsJSON), string(metadataJSON), firstOccurrence, create.Actor,
+		).Scan(&recurrenceID)
+		if err != nil {
+			return mapSQLError(err, nil)
+		}
+		createdPayload, err := json.Marshal(struct {
+			RecurrenceUID     string          `json:"recurrence_uid"`
+			RRule             string          `json:"rrule"`
+			DTStart           string          `json:"dtstart"`
+			Timezone          string          `json:"timezone"`
+			TemplateTitle     string          `json:"template_title"`
+			TemplateBody      string          `json:"template_body"`
+			TemplateOwner     *string         `json:"template_owner"`
+			TemplatePriority  *int64          `json:"template_priority"`
+			TemplateLabels    []string        `json:"template_labels"`
+			TemplateMetadata  json.RawMessage `json:"template_metadata"`
+			NextOccurrenceKey *string         `json:"next_occurrence_key"`
+		}{
+			RecurrenceUID: recurrenceUID, RRule: create.Rule, DTStart: create.DTStart,
+			Timezone: create.Timezone, TemplateTitle: create.Template.Title,
+			TemplateBody: create.Template.Body, TemplateOwner: create.Template.Owner,
+			TemplatePriority: create.Template.Priority, TemplateLabels: labels,
+			TemplateMetadata: metadataJSON, NextOccurrenceKey: firstOccurrence,
+		})
+		if err != nil {
+			return fmt.Errorf("marshal recurrence.created payload: %w", err)
+		}
+		created, err := s.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+			Type: "recurrence.created", Actor: create.Actor, Payload: string(createdPayload),
+		})
+		if err != nil {
+			return err
+		}
+
+		next, err := recurrence.Walk(create.Rule, create.DTStart, create.Timezone, *firstOccurrence)
+		if err != nil {
+			return fmt.Errorf("walk after initial occurrence: %w", err)
+		}
+		var issueMetadata map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(issue.Metadata), &issueMetadata); err != nil {
+			return fmt.Errorf("parse issue metadata: %w", err)
+		}
+		if issueMetadata == nil {
+			issueMetadata = make(map[string]json.RawMessage)
+		}
+		scheduledOn, _ := json.Marshal(*firstOccurrence)
+		issueMetadata["scheduled_on"] = scheduledOn
+		updatedMetadata, err := json.Marshal(issueMetadata)
+		if err != nil {
+			return fmt.Errorf("marshal issue metadata: %w", err)
+		}
+		updatedAt := nowStoredTimestamp()
+		if _, err := tx.ExecContext(ctx, `UPDATE issues SET recurrence_id=$1, occurrence_key=$2,
+metadata=$3, revision=revision+1, updated_at=$4 WHERE id=$5`, recurrenceID,
+			*firstOccurrence, string(updatedMetadata), updatedAt, issue.ID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE recurrences SET next_occurrence_key=$1,
+last_materialized_uid=$2, revision=revision+1, updated_at=$3 WHERE id=$4`,
+			next, issue.UID, updatedAt, recurrenceID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		materializedPayload, err := json.Marshal(map[string]string{
+			"recurrence_uid": recurrenceUID, "occurrence_key": *firstOccurrence, "issue_uid": issue.UID,
+		})
+		if err != nil {
+			return fmt.Errorf("marshal recurrence.materialized payload: %w", err)
+		}
+		materialized, err := s.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+			IssueID: &issue.ID, IssueUID: &issue.UID, Type: "recurrence.materialized",
+			Actor: create.Actor, Payload: string(materializedPayload),
+		})
+		if err != nil {
+			return err
+		}
+		result, err := scanRecurrence(tx.QueryRowContext(ctx,
+			recurrenceSelect+` WHERE r.id = $1`, recurrenceID))
+		if err != nil {
+			return err
+		}
+		output = db.CreateRecurrenceForIssueOut{
+			Recurrence: result, Events: []db.Event{created, materialized},
+		}
+		return nil
+	})
+	return output, err
+}
+
 // GetRecurrenceByID returns a recurrence, including a soft-deleted row.
 func (s *Store) GetRecurrenceByID(ctx context.Context, id int64) (db.Recurrence, error) {
 	return scanRecurrence(s.QueryRowContext(ctx, recurrenceSelect+` WHERE r.id = $1`, id))

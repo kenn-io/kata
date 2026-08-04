@@ -111,7 +111,11 @@
   <RecurrenceEditorDialog
     open={recurrenceDialog.open}
     mode={recurrenceDialog.mode === 'create'
-      ? { kind: 'create', projectID: selectedIssue.issue.project_id }
+      ? {
+          kind: 'create',
+          projectID: selectedIssue.issue.project_id,
+          initialIssueRef: selectedIssue.issue.short_id,
+        }
       : { kind: 'edit', recurrence: recurrenceDialog.recurrence, etag: recurrenceDialog.etag }}
     {actor}
     {disabled}

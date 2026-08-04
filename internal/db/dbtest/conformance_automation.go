@@ -178,6 +178,38 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create recurrence project: %w", err)
 	}
+	attachmentProject, err := store.CreateProject(ctx, "attached-recurrence-project")
+	if err != nil {
+		return fmt.Errorf("create attached recurrence project: %w", err)
+	}
+	initialIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: attachmentProject.ID, Title: "Initial review", Author: "scheduler",
+	})
+	if err != nil {
+		return fmt.Errorf("create initial recurrence issue: %w", err)
+	}
+	attached, err := store.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
+		IssueID: initialIssue.ID,
+		Recurrence: db.CreateRecurrenceIn{
+			ProjectID: attachmentProject.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY",
+			DTStart: "2026-08-03", Timezone: "UTC",
+			Template: db.RecurrenceTemplate{Title: "Initial review"},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("attach initial recurrence issue: %w", err)
+	}
+	assert.Equal(t, []string{"recurrence.created", "recurrence.materialized"}, eventTypeNames(attached.Events))
+	linkedIssue, err := store.IssueByID(ctx, initialIssue.ID)
+	if err != nil {
+		return fmt.Errorf("load attached recurrence issue: %w", err)
+	}
+	require.NotNil(t, linkedIssue.RecurrenceID)
+	assert.Equal(t, attached.Recurrence.ID, *linkedIssue.RecurrenceID)
+	require.NotNil(t, linkedIssue.OccurrenceKey)
+	assert.Equal(t, "2026-08-03", *linkedIssue.OccurrenceKey)
+	require.NotNil(t, attached.Recurrence.NextOccurrenceKey)
+	assert.Equal(t, "2026-08-10", *attached.Recurrence.NextOccurrenceKey)
 	owner := "alice"
 	priority := int64(2)
 	rec, createdEvent, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{

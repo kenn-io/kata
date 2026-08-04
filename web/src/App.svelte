@@ -344,6 +344,7 @@
     input: KataCreateRecurrenceInput,
   ): Promise<void> {
     const body: components['schemas']['CreateRecurrenceRequestBody'] = {
+      initial_issue_ref: input.initialIssueRef,
       rrule: input.rrule,
       dtstart: input.dtstart,
       timezone: input.timezone,

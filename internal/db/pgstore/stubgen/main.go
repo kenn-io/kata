@@ -120,6 +120,8 @@ var alreadyImplemented = map[string]bool{
 	"CreateProjectWithUID":                 true, // projects.go
 	"CreateProjectWithUIDAndEvent":         true, // projects.go
 	"CreateRecurrence":                     true, // recurrences.go
+	"CreateRecurrenceForIssue":             true, // recurrences.go
+	"DesignateInboxProject":                true, // metadata.go
 	"DetachProjectAlias":                   true, // project_lifecycle.go
 	"DeleteLinkAndEvent":                   true, // links.go
 	"DeleteLinkByID":                       true, // links.go

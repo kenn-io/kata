@@ -25,13 +25,26 @@ func (d *Store) CreateRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 }
 
 func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) (db.Recurrence, db.Event, error) {
-	var rec db.Recurrence
-	var event db.Event
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return rec, event, err
+		return db.Recurrence{}, db.Event{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	rec, event, err := d.createRecurrenceTx(ctx, tx, in)
+	if err != nil {
+		return db.Recurrence{}, db.Event{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.Recurrence{}, db.Event{}, err
+	}
+	return rec, event, nil
+}
+
+func (d *Store) createRecurrenceTx(
+	ctx context.Context, tx *sql.Tx, in db.CreateRecurrenceIn,
+) (db.Recurrence, db.Event, error) {
+	var rec db.Recurrence
+	var event db.Event
 
 	// events.project_name is NOT NULL — load it before inserting the event.
 	var projectName string
@@ -142,10 +155,112 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 	if err != nil {
 		return db.Recurrence{}, db.Event{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return db.Recurrence{}, db.Event{}, err
-	}
 	return rec, event, nil
+}
+
+// CreateRecurrenceForIssue creates a recurrence and attaches the selected
+// open issue as its first occurrence in one transaction.
+func (d *Store) CreateRecurrenceForIssue(
+	ctx context.Context, in db.CreateRecurrenceForIssueIn,
+) (db.CreateRecurrenceForIssueOut, error) {
+	return retryWrite1(ctx, d, func() (db.CreateRecurrenceForIssueOut, error) {
+		return d.createRecurrenceForIssue(ctx, in)
+	})
+}
+
+func (d *Store) createRecurrenceForIssue(
+	ctx context.Context, in db.CreateRecurrenceForIssueIn,
+) (db.CreateRecurrenceForIssueOut, error) {
+	var out db.CreateRecurrenceForIssueOut
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return out, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var issueUID, status, metadataJSON, projectName string
+	var recurrenceID *int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT i.uid, i.status, i.metadata, i.recurrence_id, p.name
+		  FROM issues i JOIN projects p ON p.id = i.project_id
+		 WHERE i.id = ? AND i.project_id = ? AND i.deleted_at IS NULL`,
+		in.IssueID, in.Recurrence.ProjectID,
+	).Scan(&issueUID, &status, &metadataJSON, &recurrenceID, &projectName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, db.ErrNotFound
+	}
+	if err != nil {
+		return out, err
+	}
+	if status != "open" {
+		return out, fmt.Errorf("%w: initial recurrence issue must be open", db.ErrInvalidRecurrence)
+	}
+	if recurrenceID != nil {
+		return out, fmt.Errorf("%w: issue is already part of a recurrence", db.ErrInvalidRecurrence)
+	}
+
+	rec, created, err := d.createRecurrenceTx(ctx, tx, in.Recurrence)
+	if err != nil {
+		return out, err
+	}
+	requireFirst := rec.NextOccurrenceKey
+	if requireFirst == nil {
+		return out, fmt.Errorf("%w: recurrence has no first occurrence", db.ErrInvalidRecurrence)
+	}
+	next, err := recurrence.Walk(rec.RRule, rec.DTStart, rec.Timezone, *requireFirst)
+	if err != nil {
+		return out, fmt.Errorf("walk after initial occurrence: %w", err)
+	}
+	var issueMetadata map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(metadataJSON), &issueMetadata); err != nil {
+		return out, fmt.Errorf("parse issue metadata: %w", err)
+	}
+	if issueMetadata == nil {
+		issueMetadata = map[string]json.RawMessage{}
+	}
+	scheduledOn, _ := json.Marshal(*requireFirst)
+	issueMetadata["scheduled_on"] = scheduledOn
+	updatedMetadata, err := json.Marshal(issueMetadata)
+	if err != nil {
+		return out, fmt.Errorf("marshal issue metadata: %w", err)
+	}
+	updatedAt := nowTimestamp()
+	if _, err := tx.ExecContext(ctx, `UPDATE issues
+		SET recurrence_id = ?, occurrence_key = ?, metadata = ?,
+		    revision = revision + 1, updated_at = ?
+		WHERE id = ?`, rec.ID, *requireFirst, string(updatedMetadata), updatedAt, in.IssueID); err != nil {
+		return out, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE recurrences
+		SET next_occurrence_key = ?, last_materialized_uid = ?,
+		    revision = revision + 1, updated_at = ?
+		WHERE id = ?`, next, issueUID, updatedAt, rec.ID); err != nil {
+		return out, err
+	}
+	payload, err := json.Marshal(map[string]string{
+		"recurrence_uid": rec.UID, "occurrence_key": *requireFirst, "issue_uid": issueUID,
+	})
+	if err != nil {
+		return out, fmt.Errorf("marshal recurrence.materialized payload: %w", err)
+	}
+	materialized, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID: in.Recurrence.ProjectID, ProjectName: projectName,
+		IssueID: &in.IssueID, IssueUID: &issueUID, Type: "recurrence.materialized",
+		Actor: in.Recurrence.Actor, Payload: string(payload),
+	})
+	if err != nil {
+		return out, err
+	}
+	rec, err = d.getRecurrenceTx(ctx, tx, rec.ID)
+	if err != nil {
+		return out, err
+	}
+	if err := tx.Commit(); err != nil {
+		return out, err
+	}
+	out.Recurrence = rec
+	out.Events = []db.Event{created, materialized}
+	return out, nil
 }
 
 // PatchRecurrence runs an If-Match-guarded UPDATE comparing each supplied

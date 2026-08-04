@@ -175,7 +175,7 @@ var storageScenarios = []scenario{
 	{
 		name: "recurrences",
 		methods: []string{
-			"CloseIssueWithEvents", "CreateProject", "CreateRecurrence", "EventsAfter", "GetRecurrenceByID",
+			"CloseIssueWithEvents", "CreateIssue", "CreateProject", "CreateRecurrence", "CreateRecurrenceForIssue", "EventsAfter", "GetRecurrenceByID",
 			"GetRecurrenceByUID", "IssueByID", "LabelsForIssue", "ListIssues", "ListRecurrencesByProject",
 			"MaterializeNext", "PatchRecurrence", "SoftDeleteRecurrence",
 		},
