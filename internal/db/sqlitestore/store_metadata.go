@@ -331,17 +331,16 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 		return out, err
 	}
 
-	targetIndex := -1
-	for index, project := range projects {
-		if project.id == in.ProjectID {
-			targetIndex = index
+	var target *projectState
+	for index := range projects {
+		if projects[index].id == in.ProjectID {
+			target = &projects[index]
 			break
 		}
 	}
-	if targetIndex < 0 {
+	if target == nil {
 		return out, fmt.Errorf("project %d not found", in.ProjectID)
 	}
-	target := projects[targetIndex]
 	if in.IfMatchRev != nil && *in.IfMatchRev != target.revision {
 		return out, &db.RevisionConflictError{CurrentRevision: target.revision}
 	}
