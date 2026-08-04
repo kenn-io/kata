@@ -200,6 +200,10 @@ dsn = "/var/lib/kata/kata.db"
 token = "change-me"
 trust_private_network = true
 
+[web]
+listen = "127.0.0.1:27777"
+public_origin = "https://daemon.example"
+
 [github_sync]
 token_env = "KATA_GITHUB_TOKEN"
 token_host = "github.com"
@@ -219,6 +223,44 @@ and hosted deployments. Auto-started daemons also read the config-file listener
 value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
+
+`[web].listen` selects the browser listener when the normal daemon transport
+cannot also serve HTTP. If omitted, Kata binds `127.0.0.1:0`, lets the operating
+system assign an available port, and publishes the resolved URL through
+`kata daemon status`. Configuring `[web].listen` with port `0` has the same
+behavior; set a nonzero port when a fixed browser origin is required. The
+top-level `listen` remains the daemon API listener and is shared with the
+browser when it is TCP (including Windows and hosted mode).
+
+On a keyless direct-loopback origin, a fresh browser tab transparently receives
+a local-web session. Kata disables this local convenience when the listener or
+public origin is non-loopback, a forwarding header is present, or daemon token,
+identity, or trusted-proxy authentication is configured. Authenticated browser
+requests still require both the HttpOnly cookie and tab-local session header.
+
+`[web].public_origin` declares the exact HTTP or HTTPS origin visible to the
+browser when a same-origin TLS terminator or development proxy sits in front of
+Kata. It must contain only scheme and authority: no credentials, path, query,
+or fragment. Kata never derives this security boundary from forwarded request
+headers. The proxy must preserve streaming for `/api/v1/events/stream` and
+route the SPA, assets, session endpoints, and data API to the same daemon.
+
+`[web].allowed_hosts` is an exact allowlist of additional HTTP `Host`
+authorities accepted by a shared TCP listener. Use it when a daemon bound to a
+wildcard address is intentionally reached through a container alias or another
+backend-only name that is neither the bind authority nor `public_origin`:
+
+```toml
+[web]
+allowed_hosts = ["daemon.example:7777"]
+```
+
+Entries contain only `host` or `host:port`, with no scheme, path, credentials,
+query, or fragment. `KATA_WEB_ALLOWED_HOSTS` supplies a comma-separated
+environment override for ephemeral deployments. Unlisted Host values are
+rejected before API or browser route handling, even when a request presents a
+bearer header; this prevents credentials from turning DNS rebinding into an
+authority bypass.
 
 `[github_sync]` controls daemon-side GitHub credentials. The recommended shared
 daemon path is `[[github_sync.app]]`, matched exactly by normalized `(host,

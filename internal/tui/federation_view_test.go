@@ -1541,7 +1541,7 @@ func (h *recordingFederationHubAdmin) ListProjects(_ context.Context) ([]Project
 
 func (h *recordingFederationHubAdmin) EnsureProject(
 	_ context.Context,
-	name string,
+	name, _ string,
 ) (ProjectSummary, error) {
 	h.ensureProjectCalls++
 	return ProjectSummary{ID: 99, Name: name}, nil

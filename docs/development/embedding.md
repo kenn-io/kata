@@ -16,6 +16,22 @@ handling, and HTTP server shutdown. A `kata.Service` owns its storage handle and
 the federation, GitHub sync, and timed-claim background workers associated with
 that handle.
 
+## Browser host boundary
+
+The first-party browser application is an ordinary top-level, same-origin page;
+a trusted desktop webview may navigate to a standalone daemon origin without a
+special embedded layout or private host bridge. It still uses the daemon's
+normal loopback/login, paired session, CSRF, snapshot, and event-stream
+contracts.
+
+The ported issue editor retains an optional neutral workspace-action component
+property, but Kata's root application does not wire it and renders no external
+workspace controls. Supplying such an action or adding cross-service deep links
+is outside this milestone. The listener-free `kata.Service` API likewise does
+not turn host authentication into a browser-session transfer mechanism; hosts
+that mount it continue to own their HTTP authentication boundary as documented
+below.
+
 ## Minimal lifecycle
 
 Construct the service, start its workers with `Run`, and use its `Handler` in a

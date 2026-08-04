@@ -329,6 +329,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				},
 				PushEnabled:   in.Body.PushEnabled,
 				AdoptExisting: in.Body.AdoptExisting,
+				ProjectEventSink: func(event db.Event) {
+					deliverProjectMutation(cfg, &event)
+				},
 			},
 		)
 		if err != nil {

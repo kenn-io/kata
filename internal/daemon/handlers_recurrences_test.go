@@ -16,7 +16,7 @@ import (
 
 func seedRecurrence(t *testing.T, env *testenv.Env, projectID int64, rule, dtstart, tz, title string) db.Recurrence {
 	t.Helper()
-	rec, err := env.DB.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{
+	rec, _, err := env.DB.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{
 		ProjectID: projectID, Actor: "tester",
 		Rule: rule, DTStart: dtstart, Timezone: tz,
 		Template: db.RecurrenceTemplate{Title: title},
@@ -76,6 +76,32 @@ func TestPatchRecurrence_HappyPathReturnsNewETag(t *testing.T) {
 	assert.Equal(t, `"rev-2"`, resp.Header.Get("ETag"))
 }
 
+func TestPatchRecurrence_ClearsTemplateOwnerAndPriority(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	owner := "user-a"
+	priority := int64(2)
+	recurrence, _, err := env.DB.CreateRecurrence(t.Context(), db.CreateRecurrenceIn{
+		ProjectID: project.ID, Actor: "tester",
+		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
+		Template: db.RecurrenceTemplate{
+			Title: "Weekly review", Owner: &owner, Priority: &priority,
+		},
+	})
+	require.NoError(t, err)
+
+	response := doPatch(t, env,
+		fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, project.ID, recurrence.UID),
+		`{"actor":"tester","template":{"clear_owner":true,"clear_priority":true}}`, `"rev-1"`)
+	defer func() { _ = response.Body.Close() }()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	updated, err := env.DB.GetRecurrenceByID(t.Context(), recurrence.ID)
+	require.NoError(t, err)
+	assert.Nil(t, updated.TemplateOwner)
+	assert.Nil(t, updated.TemplatePriority)
+}
+
 func TestDeleteRecurrence_SoftDeletes(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "src")
@@ -85,6 +111,7 @@ func TestDeleteRecurrence_SoftDeletes(t *testing.T) {
 		fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s?actor=tester", env.URL, p.ID, rec.UID), nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set("If-Match", `"rev-1"`)
 
 	resp, err := env.HTTP.Do(req) //nolint:gosec // G704: test server URL, not user-controlled
 	require.NoError(t, err)
@@ -97,6 +124,27 @@ func TestDeleteRecurrence_SoftDeletes(t *testing.T) {
 	assert.Empty(t, list)
 }
 
+func TestDeleteRecurrence_StaleIfMatchReturns412(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	recurrence := seedRecurrence(t, env, project.ID, "FREQ=WEEKLY", "2026-05-15", "UTC", "old")
+	recurrenceURL := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, project.ID, recurrence.UID)
+
+	patched := doPatch(t, env, recurrenceURL,
+		`{"actor":"user-a","template":{"title":"new"}}`, `"rev-1"`)
+	require.Equal(t, http.StatusOK, patched.StatusCode)
+	require.NoError(t, patched.Body.Close())
+
+	response := doReqEnv(t, env, http.MethodDelete, recurrenceURL+"?actor=user-a", "", `"rev-1"`)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusPreconditionFailed, response.StatusCode)
+
+	active, err := env.DB.GetRecurrenceByID(t.Context(), recurrence.ID)
+	require.NoError(t, err)
+	assert.Nil(t, active.DeletedAt)
+	assert.Equal(t, int64(2), active.Revision)
+}
+
 func TestShowRecurrence_AfterDeleteReturns404(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	p := seedProject(t, env, "p")
@@ -104,7 +152,7 @@ func TestShowRecurrence_AfterDeleteReturns404(t *testing.T) {
 	recURL := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID)
 
 	// Delete the recurrence.
-	resp := doDelete(t, env, recURL+"?actor=tester")
+	resp := doDeleteWithIfMatch(t, env, recURL+"?actor=tester", `"rev-1"`)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 
@@ -121,7 +169,7 @@ func TestPatchRecurrence_AfterDeleteReturns404(t *testing.T) {
 	recURL := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID)
 
 	// Delete the recurrence.
-	resp := doDelete(t, env, recURL+"?actor=tester")
+	resp := doDeleteWithIfMatch(t, env, recURL+"?actor=tester", `"rev-1"`)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 
@@ -138,12 +186,12 @@ func TestDeleteRecurrence_AfterDeleteReturns404(t *testing.T) {
 	recURL := fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s", env.URL, p.ID, rec.UID)
 
 	// First delete.
-	resp := doDelete(t, env, recURL+"?actor=tester")
+	resp := doDeleteWithIfMatch(t, env, recURL+"?actor=tester", `"rev-1"`)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 
 	// Second delete must return 404, not 500.
-	resp2 := doDelete(t, env, recURL+"?actor=tester")
+	resp2 := doDeleteWithIfMatch(t, env, recURL+"?actor=tester", `"rev-1"`)
 	defer func() { _ = resp2.Body.Close() }()
 	assert.Equal(t, http.StatusNotFound, resp2.StatusCode)
 }

@@ -25,6 +25,7 @@ type initOptions struct {
 	WithAgents     bool
 	WithHooks      bool
 	WithCodexHooks bool
+	Actor          string
 }
 
 // callInitOpts is the parameter bag passed to callInit.
@@ -35,6 +36,7 @@ type callInitOpts struct {
 	WithAgents     bool
 	WithHooks      bool
 	WithCodexHooks bool
+	Actor          string
 }
 
 // cliError is a structured error that carries an exit code for main().
@@ -131,7 +133,9 @@ get committed.`,
 			if err != nil {
 				return fmt.Errorf("resolve workspace: %w", err)
 			}
-			out, err := callInit(cmd.Context(), baseURL, startPath, callInitOpts(opts))
+			callOpts := callInitOpts(opts)
+			callOpts.Actor, _ = resolveActor(cmd.Context(), flags.As, nil)
+			out, err := callInit(cmd.Context(), baseURL, startPath, callOpts)
 			if err != nil {
 				return err
 			}
@@ -160,6 +164,9 @@ get committed.`,
 // the path-based request only when local derivation can't produce an
 // name, so the daemon (or its absence) emits the validation error.
 func callInit(ctx context.Context, baseURL, startPath string, opts callInitOpts) (string, error) {
+	if strings.TrimSpace(opts.Actor) == "" {
+		opts.Actor, _ = resolveActor(ctx, "", nil)
+	}
 	if opts.Project == "" {
 		opts.Project = flags.Project
 	}
@@ -266,6 +273,9 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	reqBody := map[string]any{
 		"name": in.Choice.Name,
 	}
+	if opts.Actor != "" {
+		reqBody["actor"] = opts.Actor
+	}
 	if opts.Replace {
 		reqBody["replace"] = true
 	}
@@ -338,6 +348,9 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 // places .gitignore beside it.
 func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callInitOpts) (string, error) {
 	reqBody := map[string]any{"start_path": startPath}
+	if opts.Actor != "" {
+		reqBody["actor"] = opts.Actor
+	}
 	if opts.Project != "" {
 		reqBody["name"] = opts.Project
 	}

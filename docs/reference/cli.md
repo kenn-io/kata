@@ -429,6 +429,55 @@ sharing, or enrolling a project in federation; it is not a historical event
 redaction tool. If `<project>` is omitted, kata resolves the project from
 `--project` or the current workspace.
 
+## Web UI
+
+```sh
+kata ui
+kata ui <issue-ref>
+```
+
+`kata ui` opens the Inbox in the daemon-served browser application. With an
+issue ref, it accepts the same bare short ID, project-qualified short ID, and
+full ULID forms as `kata show`:
+
+```sh
+kata ui abc4
+kata ui example-project#abc4
+kata ui 01HZNQ7VFPK1XGD8R5MABCD4EX
+```
+
+Kata resolves the ref before launching and opens the stable
+`/kata?scope=<project-uid>&issue=<issue-uid>` route. A default keyless loopback
+daemon opens directly; the browser transparently creates its local-web session
+on that origin.
+
+The remaining browser-session authority is split between an HttpOnly cookie
+and same-tab session storage. Reloading that tab preserves the session. A fresh
+tab on the default keyless loopback UI transparently creates its own local-web
+session, so the URL reported by `kata daemon status` can be opened directly.
+Authenticated, proxied, and non-loopback origins require token login.
+Daemon restart invalidates the process-scoped session. Presentation
+preferences survive only when the browser origin remains the same.
+
+The canonical browser route is `/kata`. Its independent query state uses
+`view=<name>`, `scope=<project-uid>`, `issue=<issue-uid>`, and `graph=1`, so an
+issue selection preserves the active collection and project context. `/`
+redirects visibly to `/kata`. Collection filters also stay in the query string.
+Project and issue references use their full 26-character UIDs so renames,
+moves, and status changes do not break bookmarks.
+
+Local Unix-socket daemons bind an available loopback browser port by default.
+An explicit `[web].listen` wins; port `0` also asks the operating system to
+assign an available port, while a nonzero port keeps the browser origin fixed.
+`kata daemon status` reports the resolved web UI URL. With an assigned port,
+bookmarks and origin-local preferences belong to that origin for the current
+daemon run.
+
+When `--daemon`, `KATA_SERVER`, `.kata.local.toml`, or `active_daemon` selects
+a configured remote, `kata ui` opens that daemon's login screen and returns to
+the requested path after login. It never puts the remote token or another
+credential in the URL.
+
 ## Daemon and diagnostics
 
 ```sh

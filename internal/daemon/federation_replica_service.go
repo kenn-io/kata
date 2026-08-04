@@ -103,6 +103,7 @@ type EnsureFederationReplicaParams struct {
 	Credential                         config.FederationCredential
 	CredentialRekey                    *FederationReplicaCredentialRekeySource
 	ManagedReservation                 *FederationReplicaManagedReservation
+	ProjectEventSink                   func(db.Event)
 	PushEnabled, AdoptExisting         bool
 }
 
@@ -468,6 +469,7 @@ func leaveFederationReplicaState(
 type EnsureFederationReplicaResult struct {
 	Project               db.Project
 	Binding               db.FederationBinding
+	CreatedEvent          *db.Event
 	Adopted               bool
 	AdoptionSnapshotCount int64
 }
@@ -491,7 +493,7 @@ func EnsureFederationReplica(
 
 	result, err := ensureFederationReplicaState(ctx, store, credentials, p)
 	if err != nil {
-		return EnsureFederationReplicaResult{}, err
+		return result, err
 	}
 	if wake != nil {
 		wake()
@@ -638,20 +640,23 @@ func ensureFederationReplicaState(
 	}
 
 	result, err := ensureReplicaBindingOrAdopt(ctx, store, p)
+	if result.CreatedEvent != nil && p.ProjectEventSink != nil {
+		p.ProjectEventSink(*result.CreatedEvent)
+	}
 	if err != nil {
-		return EnsureFederationReplicaResult{}, err
+		return result, err
 	}
 	if p.Credential.Token != "" {
 		if credentials == nil {
-			return EnsureFederationReplicaResult{}, credentialIOError(
+			return result, credentialIOError(
 				"store federation replica credential",
 			)
 		}
 		if err := credentials.StoreFederationCredential(ctx, result.Project.UID, p.Credential); err != nil {
 			if errors.Is(err, config.ErrFederationCredentialConflict) {
-				return EnsureFederationReplicaResult{}, err
+				return result, err
 			}
-			return EnsureFederationReplicaResult{}, credentialIOError(
+			return result, credentialIOError(
 				"store federation replica credential",
 			)
 		}
@@ -659,7 +664,7 @@ func ensureFederationReplicaState(
 	if p.PushEnabled && !result.Binding.PushEnabled {
 		result.Binding, err = enableReplicaPush(ctx, store, result.Project.ID)
 		if err != nil {
-			return EnsureFederationReplicaResult{}, err
+			return result, err
 		}
 	}
 	key := federationReplicaTransitionKey(store, p.ProjectName)
@@ -1100,11 +1105,15 @@ func ensureReplicaBindingOrAdopt(
 			}, nil
 		}
 	}
-	project, binding, err := ensureReplicaBinding(ctx, store, p)
+	ensured, err := ensureReplicaBinding(ctx, store, p)
 	if err != nil {
-		return EnsureFederationReplicaResult{}, err
+		return EnsureFederationReplicaResult{
+			Project: ensured.Project, Binding: ensured.Binding, CreatedEvent: ensured.CreatedEvent,
+		}, err
 	}
-	return EnsureFederationReplicaResult{Project: project, Binding: binding}, nil
+	return EnsureFederationReplicaResult{
+		Project: ensured.Project, Binding: ensured.Binding, CreatedEvent: ensured.CreatedEvent,
+	}, nil
 }
 
 func adoptExistingReplica(
@@ -1242,38 +1251,49 @@ func adoptExistingReplica(
 	return result, true, nil
 }
 
+type ensuredReplicaBinding struct {
+	Project      db.Project
+	Binding      db.FederationBinding
+	CreatedEvent *db.Event
+}
+
 func ensureReplicaBinding(
 	ctx context.Context,
 	store db.Storage,
 	p EnsureFederationReplicaParams,
-) (db.Project, db.FederationBinding, error) {
+) (ensuredReplicaBinding, error) {
 	projectName := p.ProjectName
 	project, err := store.ProjectByUID(ctx, p.HubProjectUID)
 	createdProject := false
+	var createdEvent *db.Event
 	if errors.Is(err, db.ErrNotFound) {
 		if existing, lookupErr := store.ProjectByNameIncludingArchived(ctx, projectName); lookupErr == nil {
 			if existing.UID != p.HubProjectUID {
-				return db.Project{}, db.FederationBinding{}, federationReplicaError(
+				return ensuredReplicaBinding{}, federationReplicaError(
 					errFederationReplicaProjectCollision,
 					"a project with this name already has a different UID; rerun with --adopt-existing --push to adopt it into federation",
 					"",
 				)
 			}
 		} else if !errors.Is(lookupErr, db.ErrNotFound) {
-			return db.Project{}, db.FederationBinding{},
+			return ensuredReplicaBinding{},
 				fmt.Errorf("lookup federation project name: %w", lookupErr)
 		}
-		project, err = store.CreateProjectWithUID(ctx, projectName, p.HubProjectUID)
+		var event db.Event
+		project, event, err = store.CreateProjectWithUIDAndEvent(
+			ctx, projectName, p.HubProjectUID, p.Credential.Actor,
+		)
 		if err != nil {
-			return db.Project{}, db.FederationBinding{},
+			return ensuredReplicaBinding{},
 				fmt.Errorf("create federation replica project: %w", err)
 		}
+		createdEvent = &event
 		createdProject = true
 	} else if err != nil {
-		return db.Project{}, db.FederationBinding{},
+		return ensuredReplicaBinding{},
 			fmt.Errorf("lookup federation project UID: %w", err)
 	} else if project.DeletedAt != nil {
-		return db.Project{}, db.FederationBinding{}, federationReplicaError(
+		return ensuredReplicaBinding{}, federationReplicaError(
 			errFederationReplicaProjectCollision,
 			fmt.Sprintf(
 				"an archived local project %q already has the hub project UID; restore it with `kata projects restore` first",
@@ -1282,6 +1302,7 @@ func ensureReplicaBinding(
 			"",
 		)
 	}
+	partial := ensuredReplicaBinding{Project: project, CreatedEvent: createdEvent}
 
 	replayHorizon := p.ReplayHorizonEventID
 	cursor := replayHorizon - 1
@@ -1293,21 +1314,21 @@ func ensureReplicaBinding(
 	existing, err := store.FederationBindingByProject(ctx, project.ID)
 	if err == nil {
 		if details := replicaBindingConflictDetails(existing, p); len(details) > 0 {
-			return db.Project{}, db.FederationBinding{}, federationReplicaError(
+			return ensuredReplicaBinding{}, federationReplicaError(
 				ErrFederationReplicaBindingConflict,
 				"existing federation binding differs from the requested hub: "+strings.Join(details, ", "),
 				"",
 			)
 		}
 		if err := validateExistingReplicaCredentialCapabilities(existing, p); err != nil {
-			return db.Project{}, db.FederationBinding{}, err
+			return ensuredReplicaBinding{}, err
 		}
 		replayHorizon = existing.ReplayHorizonEventID
 		cursor = existing.PullCursorEventID
 		pushEnabled = existing.PushEnabled
 		pushCursor = existing.PushCursorEventID
 	} else if !errors.Is(err, db.ErrNotFound) {
-		return db.Project{}, db.FederationBinding{},
+		return partial,
 			fmt.Errorf("read federation replica binding: %w", err)
 	} else if !createdProject {
 		// An unbound local project holding the hub project UID is the normal
@@ -1326,7 +1347,7 @@ func ensureReplicaBinding(
 		// UID to capture local data (out of scope). The operator-facing rejoin
 		// preview (CLI/TUI) is the confirmation surface.
 		if project.Name != projectName {
-			return db.Project{}, db.FederationBinding{}, federationReplicaError(
+			return ensuredReplicaBinding{}, federationReplicaError(
 				errFederationReplicaRejoinNameMismatch,
 				fmt.Sprintf(
 					"hub project UID is held by local project %q, which previously left this federation; rerun join with --project %q to rejoin it",
@@ -1356,16 +1377,16 @@ func ensureReplicaBinding(
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrIssueSyncFederationBinding) {
-			return db.Project{}, db.FederationBinding{}, federationReplicaError(
+			return partial, federationReplicaError(
 				errFederationReplicaIssueSyncConflict,
 				"project has issue sync enabled; run GitHub sync on the federation hub, or disable issue sync before joining this project as a spoke",
 				"",
 			)
 		}
-		return db.Project{}, db.FederationBinding{},
+		return partial,
 			fmt.Errorf("upsert federation replica binding: %w", err)
 	}
-	return project, binding, nil
+	return ensuredReplicaBinding{Project: project, Binding: binding, CreatedEvent: createdEvent}, nil
 }
 
 func enableReplicaPush(

@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker release-scripts-test lint vet clean fmt nilaway openapi api-generate api-check tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch
+.PHONY: build install test test-short test-stress test-federation-docker release-scripts-test lint vet clean fmt nilaway openapi api-generate api-check tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -9,11 +9,13 @@ BUILD_DATE := $(shell v=$$(git show -s --format=%cI HEAD 2>/dev/null || printf u
 LDFLAGS := -X go.kenn.io/kata/internal/version.Version=$(VERSION) -X go.kenn.io/kata/internal/version.Commit=$(COMMIT) -X go.kenn.io/kata/internal/version.BuildDate=$(BUILD_DATE)
 export GOBIN
 
-build:
-	go build -ldflags="$(LDFLAGS)" -o kata ./cmd/kata
+build: web-embed
+	@set -e; trap 'cd web && bun run scripts/embed-assets.ts --restore-stub' EXIT; \
+		go build -ldflags="$(LDFLAGS)" -o kata ./cmd/kata
 
-install:
-	go install -ldflags="$(LDFLAGS)" ./cmd/kata
+install: web-embed
+	@set -e; trap 'cd web && bun run scripts/embed-assets.ts --restore-stub' EXIT; \
+		go install -ldflags="$(LDFLAGS)" ./cmd/kata
 
 test:
 	env -u KATA_AUTH_TOKEN go test $(GOFLAGS_TEST) ./...
@@ -27,6 +29,42 @@ api-generate:
 
 api-check:
 	go test ./internal/daemon -run 'TestOpenAPI(ArtifactUpToDate|ClientSpecArtifactUpToDate|ClientArtifactUpToDate)$$'
+
+web-install:
+	cd web && bun install --frozen-lockfile
+
+web-generate:
+	cd web && bun run generate
+
+web-check:
+	cd web && bun run check
+
+web-audit:
+	cd web && bun run audit
+
+web-test:
+	cd web && bun run test
+
+web-test-browser:
+	cd web && bun run test:e2e -- tests/dev-proxy.spec.ts $(if $(WEB_TEST_GREP),--grep "$(WEB_TEST_GREP)",)
+
+web-e2e:
+	cd web && bun run test:e2e
+
+web-build:
+	cd web && bun run build
+
+web-dev:
+	cd web && bun run scripts/dev.ts
+
+web-assets-check:
+	cd web && bun run scripts/validate-assets.ts dist
+
+web-embed: web-build web-assets-check
+	cd web && bun run scripts/embed-assets.ts dist
+
+web-release-check: web-embed
+	env -u KATA_AUTH_TOKEN KATA_RUN_WEB_RELEASE_CHECK=1 go test ./e2e -run '^TestReleaseBinaryContainsValidatedWebUI$$' -count=1
 
 openapi: api-generate
 
@@ -104,4 +142,5 @@ tui-demo:
 
 clean:
 	rm -f kata kata.exe coverage.out
-	rm -rf dist site docs/site
+	rm -rf dist site docs/site web/dist
+	cd web && bun run scripts/embed-assets.ts --restore-stub

@@ -72,10 +72,12 @@ func TestHubClientLiteralTokenResolvesCreatesEnablesAndEnrolls(t *testing.T) {
 			http.Error(w, "not found", http.StatusNotFound)
 		case "POST /api/v1/projects":
 			var body struct {
-				Name string `json:"name"`
+				Name  string `json:"name"`
+				Actor string `json:"actor"`
 			}
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			assert.Equal(t, "hub-project", body.Name)
+			assert.Equal(t, "user-a", body.Actor)
 			writeJSON(t, w, http.StatusOK, map[string]any{
 				"project": map[string]any{
 					"id": 42, "uid": "01HZNQ7VFPK1XGD8R5MABCD4EX", "name": "hub-project",

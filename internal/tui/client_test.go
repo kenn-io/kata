@@ -60,7 +60,7 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 	ctx := context.Background()
 	var spokeInstanceAuth, spokeStatusAuth, spokeJoinAuth string
-	var hubListAuth, hubEnsureAuth, hubEnableAuth, hubEnrollmentAuth, hubMetadataAuth string
+	var hubListAuth, hubEnsureAuth, hubEnsureActor, hubEnableAuth, hubEnrollmentAuth, hubMetadataAuth string
 	var joinBody CreateFederationReplicaInput
 	hubProjectID := int64(42)
 
@@ -93,6 +93,11 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 			respondJSON(t, w, map[string]any{"projects": []map[string]any{{"id": hubProjectID, "name": "spoke-project"}}})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects":
 			hubEnsureAuth = r.Header.Get("Authorization")
+			var body struct {
+				Actor string `json:"actor"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			hubEnsureActor = body.Actor
 			respondJSON(t, w, map[string]any{"project": map[string]any{"id": hubProjectID, "name": "spoke-project"}})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/42/federation/enable":
 			hubEnableAuth = r.Header.Get("Authorization")
@@ -145,7 +150,7 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 	require.NoError(t, err)
 	_, err = hubAdmin.ListProjects(ctx)
 	require.NoError(t, err)
-	_, err = hubAdmin.EnsureProject(ctx, "spoke-project")
+	_, err = hubAdmin.EnsureProject(ctx, "spoke-project", "user-a")
 	require.NoError(t, err)
 	_, err = hubAdmin.EnableFederation(ctx, hubProjectID, "requested")
 	require.NoError(t, err)
@@ -180,6 +185,7 @@ func TestTUIFederationClientsKeepAuthRolesSeparate(t *testing.T) {
 	assert.Equal(t, "Bearer spoke-token", spokeJoinAuth)
 	assert.Equal(t, "Bearer hub-admin-token", hubListAuth)
 	assert.Equal(t, "Bearer hub-admin-token", hubEnsureAuth)
+	assert.Equal(t, "user-a", hubEnsureActor)
 	assert.Equal(t, "Bearer hub-admin-token", hubEnableAuth)
 	assert.Equal(t, "Bearer hub-admin-token", hubEnrollmentAuth)
 	assert.Equal(t, "Bearer enrollment-token", hubMetadataAuth)

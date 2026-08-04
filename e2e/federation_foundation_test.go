@@ -40,7 +40,7 @@ func TestSmoke_FederationFoundationV3(t *testing.T) {
 
 	// 2. Init project; resolve project id.
 	requireOK(t, postJSON(t, env.HTTP, env.URL+"/api/v1/projects",
-		map[string]any{"start_path": dir}))
+		map[string]any{"start_path": dir, "actor": "user-a"}))
 	pid := resolvePID(t, env.HTTP, env.URL, dir)
 	pidStr := strconv.FormatInt(pid, 10)
 

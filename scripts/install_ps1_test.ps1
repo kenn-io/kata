@@ -124,10 +124,26 @@ function Test-VerifyChecksumRejectsMismatch {
     }
 }
 
+function Test-AssertReleaseBinaryRejectsMissingWebAssets {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "kata-install-ps1-web-test-$(Get-Random)"
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        $fakeBinary = Join-Path $tmp 'invalid-release.ps1'
+        Set-Content -LiteralPath $fakeBinary -Value "throw 'invalid binary'"
+
+        Assert-Throws 'validated Kata web UI' {
+            Assert-ReleaseBinary -BinaryPath $fakeBinary
+        } "release web asset validation"
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Test-DotSourceLoadsHelpersWithoutInstalling
 Test-ResolveReleaseArchUsesDetectedWindowsArm64Asset
 Test-ResolveReleaseArchDoesNotFallbackFromArm64ToAmd64
 Test-VerifyChecksumAcceptsMatchingHash
 Test-VerifyChecksumRejectsMismatch
+Test-AssertReleaseBinaryRejectsMissingWebAssets
 
 Write-Host "PowerShell installer tests passed"

@@ -154,7 +154,7 @@ func (c *HubClient) EnsureProject(
 		if !errors.As(err, &hubErr) || hubErr == nil || hubErr.StatusCode != http.StatusNotFound {
 			return HubProject{}, err
 		}
-		project, err = c.createProject(ctx, name)
+		project, err = c.createProject(ctx, name, actor)
 		if err != nil {
 			// A concurrent creator can win between resolve and create. One
 			// strict re-resolve makes that race idempotent without hiding other
@@ -233,14 +233,15 @@ func (c *HubClient) resolveProject(ctx context.Context, name string) (projectRes
 	return response.Project, nil
 }
 
-func (c *HubClient) createProject(ctx context.Context, name string) (projectResponse, error) {
+func (c *HubClient) createProject(ctx context.Context, name, actor string) (projectResponse, error) {
 	var response struct {
 		Project projectResponse `json:"project"`
 	}
 	err := c.doJSON(ctx, http.MethodPost, "/api/v1/projects",
 		struct {
-			Name string `json:"name"`
-		}{Name: name},
+			Name  string `json:"name"`
+			Actor string `json:"actor"`
+		}{Name: name, Actor: actor},
 		&response,
 		"create project",
 	)

@@ -44,6 +44,28 @@ type HealthResponse struct {
 	}
 }
 
+// UILocalSessionRequest starts a browser session on a direct loopback listener.
+type UILocalSessionRequest struct {
+	ReturnPath string `json:"return_path"`
+}
+
+// UILoginRequest exchanges an existing daemon token for a browser session.
+type UILoginRequest struct {
+	Token      string `json:"token"`
+	ReturnPath string `json:"return_path"`
+}
+
+// UISessionResponse contains the non-cookie half of browser authority plus
+// the effective capabilities the SPA must honor.
+type UISessionResponse struct {
+	Session     string `json:"session"`
+	CSRF        string `json:"csrf"`
+	ReturnPath  string `json:"return_path"`
+	Writable    bool   `json:"writable"`
+	Updates     string `json:"updates"`
+	ActorPolicy string `json:"actor_policy"`
+}
+
 // EmbeddingsHealth is the semantic-search reconciler's operator-visible state
 // on the wire. It is present only when the daemon has embeddings configured;
 // an absent block means semantic search is disabled. It mirrors
@@ -265,6 +287,7 @@ type InitProjectRequest struct {
 		Replace   bool        `json:"replace,omitempty"`
 		Reassign  bool        `json:"reassign,omitempty"`
 		Alias     *AliasInput `json:"alias,omitempty" doc:"client-derived alias metadata; only honored when start_path is empty"`
+		Actor     string      `json:"actor,omitempty"`
 	}
 }
 
@@ -295,7 +318,8 @@ type ShowProjectResponse struct {
 type RenameProjectRequest struct {
 	ProjectID int64 `path:"project_id" required:"true"`
 	Body      struct {
-		Name string `json:"name" required:"true"`
+		Name  string `json:"name" required:"true"`
+		Actor string `json:"actor,omitempty"`
 	}
 }
 
@@ -305,6 +329,7 @@ type MergeProjectRequest struct {
 	Body      struct {
 		SourceProjectID int64  `json:"source_project_id" required:"true"`
 		TargetName      string `json:"target_name,omitempty"`
+		Actor           string `json:"actor,omitempty"`
 	}
 }
 
@@ -351,7 +376,7 @@ type CreateIssueRequest struct {
 	ProjectID      int64  `path:"project_id" required:"true"`
 	IdempotencyKey string `header:"Idempotency-Key"`
 	Body           struct {
-		Actor    string                  `json:"actor" required:"true"`
+		Actor    string                  `json:"actor,omitempty"`
 		Title    string                  `json:"title" required:"true"`
 		Body     string                  `json:"body,omitempty"`
 		Owner    *string                 `json:"owner,omitempty"`
@@ -641,7 +666,7 @@ type EditIssueRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor         string      `json:"actor" required:"true"`
+		Actor         string      `json:"actor,omitempty"`
 		Title         *string     `json:"title,omitempty"`
 		Body          *string     `json:"body,omitempty"`
 		Owner         *string     `json:"owner,omitempty"`
@@ -713,7 +738,7 @@ type CommentRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor string `json:"actor" required:"true"`
+		Actor string `json:"actor,omitempty"`
 		Body  string `json:"body" required:"true"`
 	}
 }
@@ -748,7 +773,7 @@ type ActionRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor   string `json:"actor" required:"true"`
+		Actor   string `json:"actor,omitempty"`
 		Reason  string `json:"reason,omitempty" enum:"done,wontfix,duplicate,superseded,audit-no-change,"`
 		Message string `json:"message,omitempty"`
 		// Source signals the caller's UI surface. "tui" relaxes the
@@ -769,7 +794,7 @@ type CreateLinkRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor   string `json:"actor" required:"true"`
+		Actor   string `json:"actor,omitempty"`
 		Type    string `json:"type" required:"true" enum:"parent,blocks,related"`
 		ToRef   string `json:"to_ref" required:"true"`
 		Replace bool   `json:"replace,omitempty"` // type=parent only
@@ -900,7 +925,7 @@ type AddLabelRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor string `json:"actor" required:"true"`
+		Actor string `json:"actor,omitempty"`
 		Label string `json:"label" required:"true"`
 	}
 }
@@ -920,7 +945,7 @@ type RemoveLabelRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Label     string `path:"label" required:"true"`
-	Actor     string `query:"actor" required:"true"`
+	Actor     string `query:"actor"`
 }
 
 // AssignRequest is POST /api/v1/projects/{id}/issues/{ref}/actions/assign.
@@ -928,7 +953,7 @@ type AssignRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor string `json:"actor" required:"true"`
+		Actor string `json:"actor,omitempty"`
 		Owner string `json:"owner" required:"true"`
 	}
 }
@@ -942,7 +967,7 @@ type PriorityRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor    string `json:"actor" required:"true"`
+		Actor    string `json:"actor,omitempty"`
 		Priority *int64 `json:"priority,omitempty"`
 	}
 }
@@ -953,7 +978,7 @@ type UnassignRequest struct {
 	ProjectID int64  `path:"project_id" required:"true"`
 	Ref       string `path:"ref" required:"true"`
 	Body      struct {
-		Actor string `json:"actor" required:"true"`
+		Actor string `json:"actor,omitempty"`
 	}
 }
 
@@ -1288,7 +1313,7 @@ type RecurrenceTemplateInput struct {
 type CreateRecurrenceRequest struct {
 	ProjectID int64 `path:"project_id" required:"true"`
 	Body      struct {
-		Actor    string                  `json:"actor" required:"true"`
+		Actor    string                  `json:"actor,omitempty"`
 		RRule    string                  `json:"rrule" required:"true"`
 		DTStart  string                  `json:"dtstart" required:"true"`
 		Timezone string                  `json:"timezone" required:"true"`
@@ -1329,14 +1354,17 @@ type ShowRecurrenceResponse struct {
 }
 
 // RecurrenceTemplateUpdateInput carries the partial-update shape for the
-// recurrence template. All fields are optional pointers; nil means "no change".
+// recurrence template. Pointer fields use nil for "no change"; nullable scalar
+// fields have explicit clear operations because JSON null also decodes to nil.
 type RecurrenceTemplateUpdateInput struct {
-	Title    *string          `json:"title,omitempty"`
-	Body     *string          `json:"body,omitempty"`
-	Owner    *string          `json:"owner,omitempty"`
-	Priority *int64           `json:"priority,omitempty"`
-	Labels   *[]string        `json:"labels,omitempty"`
-	Metadata *json.RawMessage `json:"metadata,omitempty"`
+	Title         *string          `json:"title,omitempty"`
+	Body          *string          `json:"body,omitempty"`
+	Owner         *string          `json:"owner,omitempty"`
+	ClearOwner    bool             `json:"clear_owner,omitempty"`
+	Priority      *int64           `json:"priority,omitempty"`
+	ClearPriority bool             `json:"clear_priority,omitempty"`
+	Labels        *[]string        `json:"labels,omitempty"`
+	Metadata      *json.RawMessage `json:"metadata,omitempty"`
 }
 
 // PatchRecurrenceRequest is PATCH /api/v1/projects/{project_id}/recurrences/{recurrence_uid}.
@@ -1346,7 +1374,7 @@ type PatchRecurrenceRequest struct {
 	RecurrenceUID string `path:"recurrence_uid" required:"true"`
 	IfMatch       string `header:"If-Match"`
 	Body          struct {
-		Actor    string                         `json:"actor" required:"true"`
+		Actor    string                         `json:"actor,omitempty"`
 		RRule    *string                        `json:"rrule,omitempty"`
 		DTStart  *string                        `json:"dtstart,omitempty"`
 		Timezone *string                        `json:"timezone,omitempty"`
@@ -1364,10 +1392,12 @@ type PatchRecurrenceResponse struct {
 }
 
 // DeleteRecurrenceRequest is DELETE /api/v1/projects/{project_id}/recurrences/{recurrence_uid}.
+// If-Match is required and carries the current "rev-N" ETag for optimistic concurrency.
 type DeleteRecurrenceRequest struct {
 	ProjectID     int64  `path:"project_id" required:"true"`
 	RecurrenceUID string `path:"recurrence_uid" required:"true"`
-	Actor         string `query:"actor" required:"true"`
+	IfMatch       string `header:"If-Match" required:"true"`
+	Actor         string `query:"actor"`
 }
 
 // DeleteRecurrenceResponse is the 204 No Content envelope for soft-delete.
@@ -1382,7 +1412,7 @@ type PatchIssueMetadataRequest struct {
 	Ref       string `path:"ref" required:"true"`
 	IfMatch   string `header:"If-Match"`
 	Body      struct {
-		Actor string                     `json:"actor" required:"true"`
+		Actor string                     `json:"actor,omitempty"`
 		Patch map[string]json.RawMessage `json:"patch"`
 	}
 }
@@ -1427,7 +1457,7 @@ type MoveIssueRequest struct {
 	Ref       string `path:"ref" required:"true"`
 	IfMatch   string `header:"If-Match"`
 	Body      struct {
-		Actor        string `json:"actor" required:"true"`
+		Actor        string `json:"actor,omitempty"`
 		ToProjectUID string `json:"to_project_uid" required:"true"`
 	}
 }

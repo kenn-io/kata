@@ -406,11 +406,13 @@ func (c *Client) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 }
 
 // EnsureProject creates or returns a project by name on the target daemon.
-func (c *Client) EnsureProject(ctx context.Context, name string) (ProjectSummary, error) {
+func (c *Client) EnsureProject(ctx context.Context, name, actor string) (ProjectSummary, error) {
 	var resp struct {
 		Project ProjectSummary `json:"project"`
 	}
-	err := c.do(ctx, http.MethodPost, "/api/v1/projects", map[string]string{"name": name}, &resp)
+	err := c.do(ctx, http.MethodPost, "/api/v1/projects", map[string]string{
+		"name": name, "actor": actor,
+	}, &resp)
 	return resp.Project, err
 }
 

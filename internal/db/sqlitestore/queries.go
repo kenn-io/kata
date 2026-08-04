@@ -42,55 +42,88 @@ func composeCreateMetadata(in map[string]json.RawMessage) (json.RawMessage, erro
 
 // CreateProject inserts a new projects row.
 func (d *Store) CreateProject(ctx context.Context, name string) (db.Project, error) {
+	project, _, err := d.CreateProjectAndEvent(ctx, name, db.SystemActor)
+	return project, err
+}
+
+// CreateProjectAndEvent inserts a project and returns its committed event.
+func (d *Store) CreateProjectAndEvent(ctx context.Context, name, actor string) (db.Project, db.Event, error) {
+	if actor == "" {
+		actor = db.SystemActor
+	}
 	if name == db.SystemProjectName {
-		return db.Project{}, fmt.Errorf("create project: reserved project name %q", name)
+		return db.Project{}, db.Event{}, fmt.Errorf("create project: reserved project name %q", name)
 	}
 	projectUID, err := katauid.New()
 	if err != nil {
-		return db.Project{}, fmt.Errorf("generate project uid: %w", err)
+		return db.Project{}, db.Event{}, fmt.Errorf("generate project uid: %w", err)
 	}
-	return d.CreateProjectWithUID(ctx, name, projectUID)
+	return retryWrite2(ctx, d, func() (db.Project, db.Event, error) {
+		return d.createProjectWithUID(ctx, name, projectUID, actor)
+	})
 }
 
 // CreateProjectWithUID inserts a project with a caller-supplied stable UID.
 // Live local callers should use CreateProject; federation replica setup uses
 // this to make the local spoke project carry the hub project UID.
 func (d *Store) CreateProjectWithUID(ctx context.Context, name, projectUID string) (db.Project, error) {
-	return retryWrite1(ctx, d, func() (db.Project, error) {
-		return d.createProjectWithUID(ctx, name, projectUID)
+	project, _, err := d.CreateProjectWithUIDAndEvent(ctx, name, projectUID, db.SystemActor)
+	return project, err
+}
+
+// CreateProjectWithUIDAndEvent inserts a stable-UID project and returns its committed event.
+func (d *Store) CreateProjectWithUIDAndEvent(ctx context.Context, name, projectUID, actor string) (db.Project, db.Event, error) {
+	if actor == "" {
+		actor = db.SystemActor
+	}
+	return retryWrite2(ctx, d, func() (db.Project, db.Event, error) {
+		return d.createProjectWithUID(ctx, name, projectUID, actor)
 	})
 }
 
-func (d *Store) createProjectWithUID(ctx context.Context, name, projectUID string) (db.Project, error) {
+func (d *Store) createProjectWithUID(ctx context.Context, name, projectUID, actor string) (db.Project, db.Event, error) {
 	if projectUID == db.SystemProjectUID {
-		return db.Project{}, fmt.Errorf("create project: reserved project uid %q", projectUID)
+		return db.Project{}, db.Event{}, fmt.Errorf("create project: reserved project uid %q", projectUID)
 	}
 	if !katauid.Valid(projectUID) {
-		return db.Project{}, fmt.Errorf("invalid project uid %q", projectUID)
+		return db.Project{}, db.Event{}, fmt.Errorf("invalid project uid %q", projectUID)
 	}
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return db.Project{}, err
+		return db.Project{}, db.Event{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO projects(uid, name) VALUES(?, ?)`, projectUID, name)
 	if err != nil {
-		return db.Project{}, fmt.Errorf("insert project: %w", err)
+		return db.Project{}, db.Event{}, fmt.Errorf("insert project: %w", err)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return db.Project{}, fmt.Errorf("last id: %w", err)
+		return db.Project{}, db.Event{}, fmt.Errorf("last id: %w", err)
 	}
 	project, err := projectByIDTx(ctx, tx, id)
 	if err != nil {
-		return db.Project{}, err
+		return db.Project{}, db.Event{}, err
+	}
+	payload, err := json.Marshal(struct {
+		Name string `json:"name"`
+	}{Name: project.Name})
+	if err != nil {
+		return db.Project{}, db.Event{}, fmt.Errorf("marshal project created event: %w", err)
+	}
+	event, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+		Type: "project.created", Actor: actor, Payload: string(payload),
+	})
+	if err != nil {
+		return db.Project{}, db.Event{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return db.Project{}, err
+		return db.Project{}, db.Event{}, err
 	}
-	return project, nil
+	return project, event, nil
 }
 
 // ProjectByID fetches one project by its rowid. Archived (deleted_at != NULL)
@@ -134,50 +167,87 @@ func (d *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error
 	return hideSystemProject(scanProject(row))
 }
 
-// HardDeleteProject permanently removes a project row by id. It exists for the
+// HardDeleteProject permanently removes a project row by id and returns the
+// reset cursor reserved for its deleted lifecycle events. It exists for the
 // init-race orphan-cleanup path (a freshly created project whose alias attach
 // then failed); it is NOT the user-facing archival path (see RemoveProject).
-func (d *Store) HardDeleteProject(ctx context.Context, id int64) error {
-	return d.RetryTransient(ctx, func() error {
-		_, err := d.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+func (d *Store) HardDeleteProject(ctx context.Context, id int64) (int64, error) {
+	var resetID int64
+	err := d.RetryTransient(ctx, func() error {
+		var err error
+		resetID, err = d.hardDeleteProject(ctx, id)
 		return err
 	})
+	return resetID, err
 }
 
 // RenameProject updates a project's canonical name without changing aliases or
 // issue numbering.
 func (d *Store) RenameProject(ctx context.Context, id int64, name string) (db.Project, error) {
-	return retryWrite1(ctx, d, func() (db.Project, error) {
-		return d.renameProject(ctx, id, name)
+	project, _, _, err := d.RenameProjectAndEvent(ctx, id, name, db.SystemActor)
+	return project, err
+}
+
+// RenameProjectAndEvent renames a project and returns its committed event.
+func (d *Store) RenameProjectAndEvent(ctx context.Context, id int64, name, actor string) (db.Project, *db.Event, bool, error) {
+	if actor == "" {
+		actor = db.SystemActor
+	}
+	return retryWrite3(ctx, d, func() (db.Project, *db.Event, bool, error) {
+		return d.renameProject(ctx, id, name, actor)
 	})
 }
 
-func (d *Store) renameProject(ctx context.Context, id int64, name string) (db.Project, error) {
+func (d *Store) renameProject(ctx context.Context, id int64, name, actor string) (db.Project, *db.Event, bool, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return db.Project{}, err
+		return db.Project{}, nil, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	current, err := projectByIDTx(ctx, tx, id)
+	if err != nil {
+		return db.Project{}, nil, false, err
+	}
+	if current.Name == name {
+		if err := tx.Commit(); err != nil {
+			return db.Project{}, nil, false, err
+		}
+		return current, nil, false, nil
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE projects SET name = ? WHERE id = ?`, name, id)
 	if err != nil {
-		return db.Project{}, fmt.Errorf("rename project: %w", err)
+		return db.Project{}, nil, false, fmt.Errorf("rename project: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return db.Project{}, fmt.Errorf("rename project rows affected: %w", err)
+		return db.Project{}, nil, false, fmt.Errorf("rename project rows affected: %w", err)
 	}
 	if n == 0 {
-		return db.Project{}, db.ErrNotFound
+		return db.Project{}, nil, false, db.ErrNotFound
 	}
 	project, err := projectByIDTx(ctx, tx, id)
 	if err != nil {
-		return db.Project{}, err
+		return db.Project{}, nil, false, err
+	}
+	payload, err := json.Marshal(struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}{From: current.Name, To: project.Name})
+	if err != nil {
+		return db.Project{}, nil, false, fmt.Errorf("marshal project renamed event: %w", err)
+	}
+	event, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+		Type: "project.renamed", Actor: actor, Payload: string(payload),
+	})
+	if err != nil {
+		return db.Project{}, nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return db.Project{}, err
+		return db.Project{}, nil, false, err
 	}
-	return project, nil
+	return project, &event, true, nil
 }
 
 // ListProjects returns every active project ordered by id ASC. Archived

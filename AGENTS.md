@@ -148,6 +148,123 @@ Triage security findings against that model:
   strand state (archive-before-detach; leave's idempotent resume still
   runs daemon-side credential cleanup).
 
+## Web UI trust/threat model
+
+The web UI is another client of the Kata daemon, not a separate proxy or
+authorization service. Review browser changes against these boundaries:
+
+- **Direct local browser authority trusts the loopback host.** On Unix, the daemon normally
+  keeps its API on the owner-only socket and binds a separate ephemeral
+  loopback browser listener. A direct tab on that listener creates its own
+  local-web session only when the request arrives directly from loopback, the
+  exact Host and Origin match, no forwarding headers are present, and daemon
+  token/identity/proxy authentication is unconfigured. This matches the
+  established keyless local-web convention; processes and
+  users able to connect from the same host are inside this browser boundary.
+  `kata ui` and the URL advertised by `kata daemon status` both open this
+  origin directly; no launch credential or CLI authorization ceremony exists.
+  The local-session path grants ordinary UI authority, never token
+  administration, and is disabled for non-loopback, proxied, and authenticated
+  deployments.
+- **A browser session is split authority.** Every browser data request requires
+  both the HttpOnly instance cookie and `X-Kata-Web-Session`. Neither credential
+  is sufficient alone. The cookie is ambient and shared by tabs for one daemon
+  instance; the session header and matching `X-Kata-CSRF` value are tab-local.
+  Issuing or logging out one tab must not rotate/delete the ambient cookie or
+  invalidate another tab. Mutations additionally require the tab's CSRF value
+  and same-origin request validation. Database-token-backed
+  sessions must stop working when that token is revoked, and all browser
+  sessions have a bounded lifetime. SSE streams revalidate that authority before
+  every event, reset, and heartbeat so logout, expiry, and token revocation also
+  terminate already-open streams. Authenticated responses are private and
+  non-cacheable, and vary on both session credentials so a reverse proxy cannot
+  replay one browser principal's data to another.
+  Browser authentication and credentialed API fetches reject redirects so
+  daemon tokens and session credentials cannot cross origins.
+- **Capabilities follow the browser principal.** An owner-local direct session
+  becomes a local-web principal that may perform ordinary attributed UI writes
+  but may not administer tokens. Configured logins retain their token principal;
+  in identity mode the bootstrap principal remains non-writable. A browser 401
+  clears tab-local credentials, fences accepted snapshots and drafts from
+  further writes. A keyless loopback tab attempts one transparent local-session
+  renewal; authenticated deployments return to their explicit token-login
+  mechanism. An explicit login waits for token exchange before reading
+  authority. Every mutation path, including project creation, uses that
+  rejection path. Mutation controls remain disabled when authority is stale or
+  read-only and while another mutation is pending; project creation is not an
+  exception.
+- **Host validation is the DNS-rebinding boundary.** Dedicated browser
+  listeners validate the exact configured browser authority before session or
+  route handling. A shared TCP listener validates every request Host against
+  its configured public authority, concrete backend authority, and exact
+  `[web].allowed_hosts` entries before classifying the request; this includes
+  ordinary API reads with no browser markers. `allowed_hosts` is for explicit
+  container/proxy/backend aliases, contains authorities rather than origins,
+  and is never inferred from request headers. Browser routes and
+  browser-bearing mutations require the exact configured Origin even when the
+  header would otherwise be absent, while ordinary CLI, health, and federation
+  requests continue through daemon
+  bearer/private-network authentication. A bearer header never bypasses Host
+  validation. Bearer CLI event streams remain CLI traffic. Do not weaken one
+  boundary to make the other client class work.
+- **Plain HTTP is local or explicit private-network trust.** Loopback browser
+  origins may use HTTP. A non-loopback HTTP public origin requires the same
+  explicit `[auth].trust_private_network` opt-in used for plaintext private
+  network daemon access and is intended only for an operator-trusted overlay.
+  Otherwise use HTTPS termination. Public internet and hostile shared networks
+  are out of scope, but accidental unauthenticated/public exposure is a defect.
+  Configured-remote UI login applies the same bearer-target validation before
+  opening a page that can submit a daemon token; plaintext non-loopback targets
+  require the applicable private-network trust or `allow_insecure` opt-in.
+- **Proxy authority is configured, never inferred.** `web.public_origin` is the
+  exact canonical browser origin, with default HTTP/HTTPS ports removed to
+  match browser `Host` and `Origin` serialization. Forwarded headers do not
+  change it, and path-prefixed deployments are unsupported. Proxies must
+  preserve that origin, streaming, the authenticated-response cache policy,
+  and the root-relative SPA/API routes.
+- **Development runs are isolated production processes.** Web tooling must
+  launch the branch daemon with a temporary Kata home, workspace, and database.
+  It must construct child environments from an explicit OS/toolchain allowlist
+  before applying those temporary paths; daemon/database/server/config targets,
+  credentials, proxies, and hosted `PORT` settings are not inherited.
+  On Windows it must explicitly bind the daemon's shared TCP listener to the
+  selected temporary backend port because the separate web listener is unused.
+- **Anonymous mode is strictly read-only.** `--insecure-readonly` may serve the
+  shell and read snapshots without a browser session, but it must not mint
+  writable authority, accept mutations, or expose session/token administration.
+  `kata ui` opens that validated origin directly. Cookie-only ambient state is ignored; a session header still
+  opts into the cookie-plus-header authentication path.
+- **CSP keeps code strict while allowing required layout state.** Production
+  scripts remain same-origin-only. Dynamic component positioning and CSS custom
+  properties require the narrow `style-src-attr 'unsafe-inline'` allowance;
+  never extend that exception to scripts.
+- **Snapshot consistency is a security and correctness boundary.** Matching
+  snapshot ETags perform no projection reads, and a built snapshot captures its
+  cursor inside the same consistent backend read. SQLite and PostgreSQL must
+  preserve identical scoping, filtering, and project isolation. A
+  `sync.reset_required` frame latches unconditional refresh until a `200`
+  snapshot succeeds; failed resets retry and cannot fall through to ETag-based
+  `304` acceptance or writable stale authority. Every visible mutation,
+  including project merge, durably advances the cursor. Project catalog
+  mutations, including config-reconciled federation replica creation and
+  host-service project creation and recurrence CRUD, return their exact
+  transaction event, broadcast it to live clients, and enqueue it for mutation
+  hooks without post-commit rediscovery. Deliver the event immediately after
+  commit, before response-only reads or credential persistence can fail. If
+  project initialization fails after commit, it still delivers the retained
+  event; successful orphan cleanup instead broadcasts the reset cursor reserved
+  by that cleanup transaction. Recurrence deletion requires `If-Match` and
+  checks the visible revision atomically in the deletion transaction.
+  User-initiated project events retain the attributed actor; `system` is
+  reserved for internal project creation/rename/merge. Project and recurrence
+  events remain hook-eligible; exact and `*` subscriptions recognize them.
+  Relationship and link projections exclude endpoints in archived projects.
+
+- **Release publishers provision the web build.** Every GoReleaser entry point
+  runs the web release check, so it must install the pinned Node and Bun
+  toolchain plus frozen web dependencies before it can create or upload a
+  release.
+
 ## Remote-client mode (private network)
 
 A daemon can serve clients on other hosts over a private network:

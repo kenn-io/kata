@@ -111,7 +111,7 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		rec, err := cfg.DB.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+		rec, event, err := cfg.DB.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 			ProjectID: in.ProjectID,
 			Actor:     actor,
 			Rule:      in.Body.RRule,
@@ -135,6 +135,8 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
+		cfg.Hooks.Enqueue(event)
 		out := &api.CreateRecurrenceResponse{}
 		out.Body.Recurrence = rec
 		return out, nil
@@ -194,7 +196,9 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 			update.TemplateTitle = in.Body.Template.Title
 			update.TemplateBody = in.Body.Template.Body
 			update.TemplateOwner = in.Body.Template.Owner
+			update.ClearTemplateOwner = in.Body.Template.ClearOwner
 			update.TemplatePriority = in.Body.Template.Priority
+			update.ClearTemplatePriority = in.Body.Template.ClearPriority
 			update.TemplateLabels = in.Body.Template.Labels
 			update.TemplateMetadata = in.Body.Template.Metadata
 		}
@@ -222,6 +226,11 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 		out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)
 		out.Body.Recurrence = res.Recurrence
 		out.Body.Changed = res.Changed
+		if res.Changed {
+			event := res.Event
+			cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
+			cfg.Hooks.Enqueue(event)
+		}
 		return out, nil
 	}
 }
@@ -232,16 +241,30 @@ func deleteRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Delete
 		if err != nil {
 			return nil, err
 		}
+		rev, err := parseIfMatchRevision(in.IfMatch)
+		if err != nil {
+			return nil, err
+		}
 		rec, err := activeRecurrenceByUID(ctx, cfg.DB, in.ProjectID, in.RecurrenceUID)
 		if err != nil {
 			return nil, err
 		}
-		if err := cfg.DB.SoftDeleteRecurrence(ctx, rec.ID, actor); err != nil {
+		event, err := cfg.DB.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
+			RecurrenceID: rec.ID, IfMatchRev: rev, Actor: actor,
+		})
+		var rce *db.RevisionConflictError
+		if errors.As(err, &rce) {
+			return nil, api.NewError(412, "revision_conflict",
+				fmt.Sprintf("recurrence revision is %d", rce.CurrentRevision), "", nil)
+		}
+		if err != nil {
 			if apiErr := federationReadOnlyError(err); apiErr != nil {
 				return nil, apiErr
 			}
 			return nil, internalAPIError(err)
 		}
+		cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: &event, ProjectID: in.ProjectID})
+		cfg.Hooks.Enqueue(event)
 		return &api.DeleteRecurrenceResponse{}, nil
 	}
 }

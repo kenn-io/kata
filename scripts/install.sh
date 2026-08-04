@@ -141,6 +141,13 @@ install_binary() {
   fi
 }
 
+verify_release_binary() {
+  local binary_path="$1"
+  if ! "$binary_path" _web-assets-check >/dev/null 2>&1; then
+    error "Downloaded release does not contain the validated Kata web UI"
+  fi
+}
+
 install_from_release() {
   local os="$1"
   local arch="$2"
@@ -182,6 +189,7 @@ install_from_release() {
   extract_archive "$os" "$archive_path" "$tmpdir"
 
   [[ -f "$tmpdir/$binary" ]] || error "Downloaded release did not contain $binary"
+  verify_release_binary "$tmpdir/$binary"
   install_binary "$tmpdir/$binary" "$install_dir" "$binary"
 }
 

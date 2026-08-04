@@ -24,7 +24,7 @@ func TestMaxEventID_AfterInserts(t *testing.T) {
 	createTesterIssues(ctx, t, d, p.ID, 3)
 	got, err := d.MaxEventID(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, int64(3), got, "three issue.created events → highest event id is 3")
+	assert.Equal(t, int64(4), got, "project.created plus three issue.created events")
 }
 
 func TestEventsAfter_CrossProject(t *testing.T) {
@@ -37,9 +37,13 @@ func TestEventsAfter_CrossProject(t *testing.T) {
 
 	all, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 0, Limit: 100})
 	require.NoError(t, err)
-	assert.Len(t, all, 2)
+	assert.Len(t, all, 4)
 	assert.Equal(t, int64(1), all[0].ID)
 	assert.Equal(t, int64(2), all[1].ID)
+	assert.Equal(t, "project.created", all[0].Type)
+	assert.Equal(t, "project.created", all[1].Type)
+	assert.Equal(t, "issue.created", all[2].Type)
+	assert.Equal(t, "issue.created", all[3].Type)
 }
 
 func TestEventsAfter_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) {
@@ -58,9 +62,10 @@ func TestEventsAfter_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) {
 
 	all, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 0, Limit: 100})
 	require.NoError(t, err)
-	require.Len(t, all, 1)
-	assert.Equal(t, normal.ID, all[0].ID)
-	assert.Equal(t, "issue.created", all[0].Type)
+	require.Len(t, all, 2)
+	assert.Equal(t, "project.created", all[0].Type)
+	assert.Equal(t, normal.ID, all[1].ID)
+	assert.Equal(t, "issue.created", all[1].Type)
 
 	systemRows, err := d.EventsAfter(ctx, db.EventsAfterParams{
 		AfterID: 0, ProjectID: sys.ID, Limit: 100,
@@ -79,8 +84,9 @@ func TestEventsAfter_PerProjectFilter(t *testing.T) {
 
 	onlyA, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 0, ProjectID: pa.ID, Limit: 100})
 	require.NoError(t, err)
-	require.Len(t, onlyA, 1)
+	require.Len(t, onlyA, 2)
 	assert.Equal(t, pa.ID, onlyA[0].ProjectID)
+	assert.Equal(t, pa.ID, onlyA[1].ProjectID)
 }
 
 func TestEventsAfter_RespectsThroughID(t *testing.T) {
@@ -109,15 +115,16 @@ func TestEventsAfter_StrictlyAfterNonZeroID(t *testing.T) {
 	ctx := context.Background()
 	p := createProject(ctx, t, d, "a")
 	createTesterIssues(ctx, t, d, p.ID, 5)
-	// Five issue.created events with ids 1..5. AfterID=3 must return ids 4, 5
-	// (strict >); AfterID=5 must return zero rows.
+	// One project.created plus five issue.created events have ids 1..6.
+	// AfterID=3 must return ids 4, 5, 6 (strict >).
 	got, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 3, Limit: 100})
 	require.NoError(t, err)
-	require.Len(t, got, 2)
+	require.Len(t, got, 3)
 	assert.Equal(t, int64(4), got[0].ID)
 	assert.Equal(t, int64(5), got[1].ID)
+	assert.Equal(t, int64(6), got[2].ID)
 
-	none, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 5, Limit: 100})
+	none, err := d.EventsAfter(ctx, db.EventsAfterParams{AfterID: 6, Limit: 100})
 	require.NoError(t, err)
 	assert.Len(t, none, 0, "AfterID at the highest event id must return no rows (strict >)")
 }
@@ -139,9 +146,10 @@ func TestEventsInWindow_ExcludesSystemProjectFromCrossProjectFeed(t *testing.T) 
 		Until: "2999-01-01T00:00:00.000Z",
 	})
 	require.NoError(t, err)
-	require.Len(t, all, 1)
-	assert.Equal(t, normal.ID, all[0].ID)
-	assert.Equal(t, "issue.created", all[0].Type)
+	require.Len(t, all, 2)
+	assert.Equal(t, "project.created", all[0].Type)
+	assert.Equal(t, normal.ID, all[1].ID)
+	assert.Equal(t, "issue.created", all[1].Type)
 }
 
 func TestPurgeResetCheck_NoPurges(t *testing.T) {
@@ -177,7 +185,7 @@ func TestMaxLocalOriginEventID(t *testing.T) {
 
 	got, err := d.MaxLocalOriginEventID(ctx, p.ID)
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), got, "no events yet → MAX over empty set surfaces as 0")
+	assert.Equal(t, int64(0), got, "project creation is a local UI invalidation, not a federation push event")
 
 	createTesterIssue(ctx, t, d, p.ID, "t")
 

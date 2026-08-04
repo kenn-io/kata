@@ -176,6 +176,8 @@ func TestFederationMetadataRecoversBaselineAfterPurgeReset(t *testing.T) {
 
 func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	env := testenv.New(t)
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer sub.Unsub()
 
 	var out api.CreateFederationReplicaBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", map[string]any{
@@ -188,6 +190,11 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 		"token":                   "hub-token",
 	}, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+	msg := receiveMsg(t, sub.Ch, time.Second, "federation replica project broadcast")
+	require.Equal(t, "event", msg.Kind)
+	require.NotNil(t, msg.Event)
+	assert.Equal(t, "project.created", msg.Event.Type)
+	assert.Equal(t, out.Project.ID, msg.ProjectID)
 
 	assert.Equal(t, "hub", out.Project.Name)
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", out.Project.UID)

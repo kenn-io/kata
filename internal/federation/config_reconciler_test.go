@@ -2188,6 +2188,51 @@ func TestFederationConfigReconcilerProcessesDueMappingsInConfigOrder(t *testing.
 	require.ErrorIs(t, <-done, context.Canceled)
 }
 
+func TestFederationConfigReconcilerDeliversExactCreatedProjectEvent(t *testing.T) {
+	store := openReconcileStore(t)
+	type delivery struct {
+		event     db.Event
+		persisted []db.Event
+		err       error
+	}
+	events := make(chan delivery, 1)
+	reconciler := federation.NewReconciler(federation.ReconcilerConfig{
+		Store:       store,
+		Credentials: newFakeCredentialStore(),
+		Targets:     []federation.Target{{Catalog: testCatalog(), Mapping: testMapping()}},
+		HubFactory: func(context.Context, config.CatalogDaemonConfig) (federation.Hub, error) {
+			return newFakeHub(), nil
+		},
+		ProjectEventSink: func(event db.Event) {
+			persisted, err := store.EventsAfter(context.Background(), db.EventsAfterParams{
+				ProjectID: event.ProjectID, Limit: 10,
+			})
+			events <- delivery{event: event, persisted: persisted, err: err}
+		},
+		Logger: ioDiscardLogger(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := runReconciler(ctx, t, reconciler)
+
+	select {
+	case delivered := <-events:
+		event := delivered.event
+		assert.Positive(t, event.ID)
+		assert.NotEmpty(t, event.UID)
+		assert.Equal(t, "project.created", event.Type)
+		assert.Equal(t, db.SystemActor, event.Actor)
+		assert.Equal(t, "spoke-project", event.ProjectName)
+		require.NoError(t, delivered.err)
+		require.Len(t, delivered.persisted, 1)
+		assert.Equal(t, event, delivered.persisted[0])
+	case <-time.After(time.Second):
+		t.Fatal("project creation event was not delivered")
+	}
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
 func TestFederationConfigReconcilerMaintainsIndependentBackoffAndQuietsSuccess(t *testing.T) {
 	clock := newManualClock(time.Date(2026, 7, 23, 1, 30, 0, 0, time.UTC))
 	factory := newScriptedHubFactory(clock, map[string][]error{

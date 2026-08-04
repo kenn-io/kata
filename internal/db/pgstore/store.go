@@ -42,6 +42,8 @@ type Store struct {
 	idempotencyDB        *sql.DB
 	exportQ              exportQueryer
 	rotationStage        func(context.Context) error
+	uiReadStage          func(context.Context) error
+	uiProjectStatsRead   func()
 }
 
 // Close releases a process-lifetime serving lease before closing the pool.

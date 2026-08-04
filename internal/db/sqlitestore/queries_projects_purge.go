@@ -171,6 +171,13 @@ func purgeProjectCascade(ctx context.Context, c connExec, project db.Project,
 	if err != nil {
 		return 0, err
 	}
+	return insertProjectPurgeLog(ctx, c, project, counts, reservedCursor, actor, reason, originInstanceUID)
+}
+
+func insertProjectPurgeLog(ctx context.Context, c connExec, project db.Project,
+	counts projectPurgeCounts, reservedCursor sql.NullInt64, actor string, reason *string,
+	originInstanceUID string,
+) (int64, error) {
 	purgeUID, err := katauid.New()
 	if err != nil {
 		return 0, fmt.Errorf("generate project purge uid: %w", err)
@@ -192,6 +199,59 @@ func purgeProjectCascade(ctx context.Context, c connExec, project db.Project,
 		return 0, fmt.Errorf("insert project_purge_log: %w", err)
 	}
 	return res.LastInsertId()
+}
+
+// hardDeleteProject removes only a project that the database still considers
+// an initialization orphan. Its existing foreign-key refusal behavior is
+// preserved, while any lifecycle events are deleted and represented by the
+// same durable reset cursor used by normal project purges.
+func (d *Store) hardDeleteProject(ctx context.Context, projectID int64) (int64, error) {
+	conn, err := d.Conn(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("acquire hard-delete conn: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := d.beginImmediateTransaction(ctx, conn); err != nil {
+		return 0, fmt.Errorf("begin hard-delete: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		}
+	}()
+
+	project, err := scanProject(conn.QueryRowContext(ctx, projectSelect+` WHERE id = ?`, projectID))
+	if err != nil {
+		return 0, err
+	}
+	if isSystemProject(project) {
+		return 0, db.ErrNotFound
+	}
+	counts, err := countProjectPurge(ctx, conn, project.ID)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, project.ID); err != nil {
+		return 0, fmt.Errorf("delete orphan project events: %w", err)
+	}
+	reservedCursor, err := reserveEventSequence(ctx, conn, counts.minEventID.Valid)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, project.ID); err != nil {
+		return 0, fmt.Errorf("delete orphan project: %w", err)
+	}
+	reason := "initialization orphan cleanup"
+	if _, err := insertProjectPurgeLog(ctx, conn, project, counts, reservedCursor,
+		"system", &reason, d.instanceUID); err != nil {
+		return 0, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return 0, fmt.Errorf("commit hard-delete: %w", err)
+	}
+	committed = true
+	return reservedCursor.Int64, nil
 }
 
 func scanProjectPurgeLog(ctx context.Context, r sqlReader, id int64) (db.ProjectPurgeLog, error) {

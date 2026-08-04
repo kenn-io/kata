@@ -85,8 +85,14 @@ func (s *Service) EnsureProject(ctx context.Context, spec ProjectSpec) (EnsurePr
 		return EnsureProjectResult{}, projectConflict(spec)
 	}
 
-	created, createErr := s.store.CreateProjectWithUID(callCtx, spec.Name, spec.UID)
+	created, event, createErr := s.store.CreateProjectWithUIDAndEvent(
+		callCtx, spec.Name, spec.UID, db.SystemActor,
+	)
 	if createErr == nil {
+		s.broadcaster.Broadcast(daemon.StreamMsg{
+			Kind: "event", Event: &event, ProjectID: created.ID,
+		})
+		s.hookSink.Enqueue(event)
 		return EnsureProjectResult{Project: publicProject(created), Created: true}, nil
 	}
 

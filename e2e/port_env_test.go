@@ -33,6 +33,9 @@ func TestPortEnvBind_ServesAndShutsDownCleanly(t *testing.T) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	home := t.TempDir()
 	const token = "e2e-token"
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(fmt.Sprintf(
+		"[web]\npublic_origin = %q\n", "http://"+addr,
+	)), 0o600))
 
 	stderr := &safeBuffer{}
 	//nolint:gosec // G204: bin is buildKataBinary's output

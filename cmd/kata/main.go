@@ -117,9 +117,11 @@ func newRootCmd() *cobra.Command {
 		newOpenAPICmd(),
 		newProjectsCmd(),
 		newTokensCmd(),
+		newUICmd(),
 		newTUICmd(),
 		newUpdateCmd(),
 		newVersionCmd(),
+		newWebAssetsCheckCmd(),
 	}
 	cmd.AddCommand(subs...)
 	return cmd

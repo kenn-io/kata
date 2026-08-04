@@ -3,6 +3,8 @@
 package generated
 
 import (
+	"fmt"
+
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
 
@@ -164,11 +166,7 @@ type ReachableIssueGraphQuery struct {
 }
 
 type RemoveLabelQuery struct {
-	Actor string `json:"actor" validate:"required"`
-}
-
-func (r RemoveLabelQuery) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+	Actor *string `json:"actor,omitempty"`
 }
 
 type DeleteLinkQuery struct {
@@ -188,11 +186,7 @@ type ReadyIssuesQuery struct {
 }
 
 type DeleteRecurrenceQuery struct {
-	Actor string `json:"actor" validate:"required"`
-}
-
-func (d DeleteRecurrenceQuery) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+	Actor *string `json:"actor,omitempty"`
 }
 
 type RestoreProjectQuery struct {
@@ -234,4 +228,41 @@ type ReadyIssuesGlobalQuery struct {
 	Owner        *string  `json:"owner,omitempty"`
 	Label        []string `json:"label,omitempty"`
 	ExcludeLabel []string `json:"exclude_label,omitempty"`
+}
+
+type ReadUIReferencesQuery struct {
+	Q          *string `json:"q,omitempty"`
+	ProjectUID *string `json:"project_uid,omitempty"`
+	Limit      *int64  `json:"limit,omitempty"`
+}
+
+type ReadUISnapshotQuery struct {
+	View             *string                           `json:"view,omitempty"`
+	ProjectUID       *string                           `json:"project_uid,omitempty"`
+	Status           []string                          `json:"status,omitempty"`
+	Owner            []string                          `json:"owner,omitempty"`
+	Label            []string                          `json:"label,omitempty"`
+	Relationship     []ReadUISnapshotQueryRelationship `json:"relationship,omitempty"`
+	Text             *string                           `json:"text,omitempty"`
+	SelectedIssueUID *string                           `json:"selected_issue_uid,omitempty"`
+	IncludeGraph     *bool                             `json:"include_graph,omitempty"`
+	IncludeHistory   *bool                             `json:"include_history,omitempty"`
+	LocalDate        *string                           `json:"local_date,omitempty"`
+	TimeZone         *string                           `json:"time_zone,omitempty"`
+	Limit            *int64                            `json:"limit,omitempty"`
+}
+
+func (r ReadUISnapshotQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range r.Relationship {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Relationship[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }

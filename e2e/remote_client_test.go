@@ -150,7 +150,10 @@ func TestRemoteInit_PathFreeWireShape(t *testing.T) {
 	// while capturing POST /api/v1/projects bodies for inspection.
 	target, err := url.Parse("http://" + addr)
 	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) {
+		request.SetURL(target)
+		request.Out.Host = target.Host
+	}}
 	var (
 		mu     sync.Mutex
 		bodies []string
@@ -229,7 +232,10 @@ func TestRemoteResolve_PathFreeWireShape(t *testing.T) {
 
 	target, err := url.Parse("http://" + addr)
 	require.NoError(t, err)
-	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) {
+		request.SetURL(target)
+		request.Out.Host = target.Host
+	}}
 	var (
 		mu            sync.Mutex
 		resolveBodies []string

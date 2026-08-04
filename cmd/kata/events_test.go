@@ -23,6 +23,7 @@ func TestEvents_OneShotPlainOutput(t *testing.T) {
 	require.NoError(t, f.execute("events"))
 
 	out := f.buf.String()
+	assert.Contains(t, out, "project.created")
 	assert.Contains(t, out, "issue.created")
 	lines := 0
 	for _, l := range strings.Split(out, "\n") {
@@ -30,7 +31,7 @@ func TestEvents_OneShotPlainOutput(t *testing.T) {
 			lines++
 		}
 	}
-	assert.Equal(t, 2, lines)
+	assert.Equal(t, 3, lines)
 }
 
 func TestEventsHumanOutputDoesNotExposeReplayInternals(t *testing.T) {
@@ -67,27 +68,30 @@ func TestEvents_OneShotJSON(t *testing.T) {
 	assert.Contains(t, f.buf.String(), `"content_hash"`)
 	require.NoError(t, json.Unmarshal(f.buf.Bytes(), &b))
 	assert.Equal(t, 1, b.KataAPIVersion)
-	require.Len(t, b.Events, 1)
-	assert.Equal(t, "issue.created", b.Events[0].Type)
+	require.Len(t, b.Events, 2)
+	assert.Equal(t, "project.created", b.Events[0].Type)
 	assert.NotEmpty(t, b.Events[0].ProjectUID)
-	require.NotNil(t, b.Events[0].IssueUID)
-	assert.NotEmpty(t, *b.Events[0].IssueUID)
+	assert.Nil(t, b.Events[0].IssueUID)
 	assert.Regexp(t, `^[a-f0-9]{64}$`, b.Events[0].ContentHash)
-	assert.Equal(t, int64(1), b.NextAfterID)
+	assert.Equal(t, "issue.created", b.Events[1].Type)
+	require.NotNil(t, b.Events[1].IssueUID)
+	assert.NotEmpty(t, *b.Events[1].IssueUID)
+	assert.Equal(t, int64(2), b.NextAfterID)
 }
 
 func TestEvents_OneShotAgentOutput(t *testing.T) {
 	env, dir := setupCLIEnv(t)
-	first := runCLI(t, env, dir, "--quiet", "--as", "wesm", "create", "first")
-	second := runCLI(t, env, dir, "--quiet", "--as", "wesm", "create", "second")
+	first := runCLI(t, env, dir, "--quiet", "--as", "user-a", "create", "first")
+	second := runCLI(t, env, dir, "--quiet", "--as", "user-a", "create", "second")
 
 	out := runCLI(t, env, dir, "--agent", "events")
 
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	require.Len(t, lines, 3, "agent output should be header plus one row per event: %q", out)
-	assert.Equal(t, "OK events count=2 next_after_id=2", lines[0])
-	assert.Equal(t, "- id=1 type=issue.created project=kata issue="+first+" actor=wesm", lines[1])
-	assert.Equal(t, "- id=2 type=issue.created project=kata issue="+second+" actor=wesm", lines[2])
+	require.Len(t, lines, 4, "agent output should be header plus one row per event: %q", out)
+	assert.Equal(t, "OK events count=3 next_after_id=3", lines[0])
+	assert.Equal(t, "- id=1 type=project.created project=kata actor=system", lines[1])
+	assert.Equal(t, "- id=2 type=issue.created project=kata issue="+first+" actor=user-a", lines[2])
+	assert.Equal(t, "- id=3 type=issue.created project=kata issue="+second+" actor=user-a", lines[3])
 }
 
 func TestEvents_OneShotAgentResetRequired(t *testing.T) {
@@ -116,7 +120,7 @@ func TestEvents_OneShotAllProjectsHitsCrossProject(t *testing.T) {
 		} `json:"events"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &b))
-	assert.Len(t, b.Events, 2, "all-projects must include both projects")
+	assert.Len(t, b.Events, 4, "all-projects must include creation and issue events for both projects")
 }
 
 func TestEvents_OneShotAllProjectsAgentIncludesProject(t *testing.T) {
@@ -138,7 +142,7 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(contextWithBaseURL(context.Background(), env.URL), 5*time.Second)
 	defer cancel()
-	a := startAsyncCLI(t, ctx, "--workspace", dir, "--agent", "events", "--tail")
+	a := startAsyncCLI(t, ctx, "--workspace", dir, "--agent", "events", "--tail", "--last-event-id=1")
 	defer a.stop()
 
 	time.Sleep(200 * time.Millisecond)
@@ -205,7 +209,7 @@ func TestEvents_TailEmitsNDJSON(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(contextWithBaseURL(context.Background(), env.URL), 5*time.Second)
 	defer cancel()
-	a := startAsyncCLI(t, ctx, "--workspace", dir, "events", "--tail", "--json")
+	a := startAsyncCLI(t, ctx, "--workspace", dir, "events", "--tail", "--json", "--last-event-id=1")
 	defer a.stop()
 
 	time.Sleep(200 * time.Millisecond)
@@ -336,7 +340,14 @@ func TestEvents_PayloadShape(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(f.buf.Bytes(), &got))
 	require.NotEmpty(t, got.Events)
-	ev := got.Events[0]
+	var ev map[string]any
+	for _, candidate := range got.Events {
+		if candidate["type"] == "issue.created" {
+			ev = candidate
+			break
+		}
+	}
+	require.NotNil(t, ev)
 	_, hasShort := ev["issue_short_id"]
 	_, hasUID := ev["issue_uid"]
 	_, hasNumber := ev["issue_number"]

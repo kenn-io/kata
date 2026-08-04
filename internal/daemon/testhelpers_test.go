@@ -528,8 +528,8 @@ func doPatch(t *testing.T, env *testenv.Env, url, body, ifMatch string) *http.Re
 	return doReqEnv(t, env, http.MethodPatch, url, body, ifMatch)
 }
 
-func doDelete(t *testing.T, env *testenv.Env, url string) *http.Response {
-	return doReqEnv(t, env, http.MethodDelete, url, "", "")
+func doDeleteWithIfMatch(t *testing.T, env *testenv.Env, url, ifMatch string) *http.Response {
+	return doReqEnv(t, env, http.MethodDelete, url, "", ifMatch)
 }
 
 // readClose drains and closes resp.Body, returning the bytes. Use it in tests

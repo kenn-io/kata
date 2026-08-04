@@ -65,13 +65,14 @@ type HubFactory func(context.Context, config.CatalogDaemonConfig) (Hub, error)
 
 // ReconcilerConfig contains the process-local controller dependencies.
 type ReconcilerConfig struct {
-	Store       db.Storage
-	Credentials config.FederationCredentialStore
-	Targets     []Target
-	HubFactory  HubFactory
-	Clock       Clock
-	Wake        func()
-	Logger      *log.Logger
+	Store            db.Storage
+	Credentials      config.FederationCredentialStore
+	Targets          []Target
+	HubFactory       HubFactory
+	Clock            Clock
+	Wake             func()
+	ProjectEventSink func(db.Event)
+	Logger           *log.Logger
 }
 
 // Health is the sanitized aggregate state of configured federation mappings.
@@ -99,13 +100,14 @@ type reconciliationState struct {
 // Reconciler serially reconciles due mappings while maintaining independent
 // retry state for each mapping.
 type Reconciler struct {
-	store       db.Storage
-	credentials config.FederationCredentialStore
-	targets     []Target
-	hubFactory  HubFactory
-	clock       Clock
-	wake        func()
-	logger      *log.Logger
+	store            db.Storage
+	credentials      config.FederationCredentialStore
+	targets          []Target
+	hubFactory       HubFactory
+	clock            Clock
+	wake             func()
+	projectEventSink func(db.Event)
+	logger           *log.Logger
 
 	mu     sync.Mutex
 	states []reconciliationState
@@ -120,14 +122,15 @@ func NewReconciler(cfg ReconcilerConfig) *Reconciler {
 	}
 	targets := append([]Target(nil), cfg.Targets...)
 	return &Reconciler{
-		store:       cfg.Store,
-		credentials: cfg.Credentials,
-		targets:     targets,
-		hubFactory:  cfg.HubFactory,
-		clock:       clock,
-		wake:        cfg.Wake,
-		logger:      cfg.Logger,
-		states:      make([]reconciliationState, len(targets)),
+		store:            cfg.Store,
+		credentials:      cfg.Credentials,
+		targets:          targets,
+		hubFactory:       cfg.HubFactory,
+		clock:            clock,
+		wake:             cfg.Wake,
+		projectEventSink: cfg.ProjectEventSink,
+		logger:           cfg.Logger,
+		states:           make([]reconciliationState, len(targets)),
 	}
 }
 
@@ -213,8 +216,9 @@ func (r *Reconciler) reconcile(ctx context.Context, target Target) error {
 	if err != nil {
 		return err
 	}
-	return ReconcileMapping(
+	return reconcileMapping(
 		ctx, r.store, r.credentials, hub, target.Catalog, target.Mapping, r.wake,
+		r.projectEventSink,
 	)
 }
 
@@ -370,6 +374,19 @@ func ReconcileMapping(
 	mapping config.FederationProjectConfig,
 	wake func(),
 ) error {
+	return reconcileMapping(ctx, store, credentials, hub, catalog, mapping, wake, nil)
+}
+
+func reconcileMapping(
+	ctx context.Context,
+	store db.Storage,
+	credentials config.FederationCredentialStore,
+	hub Hub,
+	catalog config.CatalogDaemonConfig,
+	mapping config.FederationProjectConfig,
+	wake func(),
+	projectEventSink func(db.Event),
+) error {
 	managed, ok := credentials.(config.FederationManagedCredentialStore)
 	if !ok {
 		return reconcileError(
@@ -386,7 +403,7 @@ func ReconcileMapping(
 		return err
 	}
 	preflight, err := preflightMapping(
-		ctx, store, credentials, managed, hub, catalog, mapping,
+		ctx, store, credentials, managed, hub, catalog, mapping, projectEventSink,
 	)
 	if err != nil {
 		return err
@@ -444,6 +461,7 @@ func ReconcileMapping(
 	}
 	reservationChanged, err := convergeLocalMapping(
 		ctx, store, credentials, wake, mapping, preflight, enrollment.credential,
+		projectEventSink,
 	)
 	if err == nil || enrollment.id == 0 || !reservationChanged {
 		return err
@@ -694,6 +712,7 @@ func preflightMapping(
 	hub Hub,
 	catalog config.CatalogDaemonConfig,
 	mapping config.FederationProjectConfig,
+	projectEventSink func(db.Event),
 ) (mappingPreflight, error) {
 	var preflight mappingPreflight
 	if store == nil || credentials == nil || hub == nil ||
@@ -723,9 +742,12 @@ func preflightMapping(
 	preflight.allowInsecure = allowInsecure
 	preflight.capabilities = capabilities
 
-	localProject, err := resolveOrCreateLocalProject(ctx, store, mapping.SpokeProject)
+	localProject, createdEvent, err := resolveOrCreateLocalProject(ctx, store, mapping.SpokeProject)
 	if err != nil {
 		return preflight, err
+	}
+	if createdEvent != nil && projectEventSink != nil {
+		projectEventSink(*createdEvent)
 	}
 	preflight.localProject = localProject
 	binding, hasBinding, err := readCompatibleBindingBaseURL(
@@ -996,6 +1018,7 @@ func convergeLocalMapping(
 	mapping config.FederationProjectConfig,
 	preflight mappingPreflight,
 	credential config.FederationCredential,
+	projectEventSink func(db.Event),
 ) (bool, error) {
 	if preflight.hasBinding &&
 		preflight.credential.credential.ManagedByConfig &&
@@ -1012,6 +1035,7 @@ func convergeLocalMapping(
 		Credential:           credential,
 		PushEnabled:          true,
 		AdoptExisting:        true,
+		ProjectEventSink:     projectEventSink,
 	}
 	if preflight.credential.key != "" &&
 		preflight.credential.key != preflight.hubProject.UID {
@@ -1053,7 +1077,6 @@ func convergeLocalMapping(
 			return false, reconcileError(ErrLocalStorage, "ensure local federation replica")
 		}
 	}
-
 	return false, nil
 }
 
@@ -1120,24 +1143,24 @@ func reserveManagedFederationCredential(
 
 func resolveOrCreateLocalProject(
 	ctx context.Context, store db.Storage, name string,
-) (db.Project, error) {
+) (db.Project, *db.Event, error) {
 	project, err := store.ProjectByName(ctx, name)
 	if err == nil {
-		return project, nil
+		return project, nil, nil
 	}
 	if !errors.Is(err, db.ErrNotFound) {
-		return db.Project{}, reconcileError(ErrLocalStorage, "resolve local federation project")
+		return db.Project{}, nil, reconcileError(ErrLocalStorage, "resolve local federation project")
 	}
-	project, err = store.CreateProject(ctx, name)
+	project, event, err := store.CreateProjectAndEvent(ctx, name, db.SystemActor)
 	if err == nil {
-		return project, nil
+		return project, &event, nil
 	}
 	// A concurrent local creator can win the name after the first read.
 	project, retryErr := store.ProjectByName(ctx, name)
 	if retryErr == nil {
-		return project, nil
+		return project, nil, nil
 	}
-	return db.Project{}, reconcileError(ErrLocalStorage, "create local federation project")
+	return db.Project{}, nil, reconcileError(ErrLocalStorage, "create local federation project")
 }
 
 func readCompatibleBindingBaseURL(

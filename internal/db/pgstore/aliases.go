@@ -81,12 +81,10 @@ func (s *Store) LatestAliasForProject(ctx context.Context, projectID int64) (db.
 	return alias, true, nil
 }
 
-// HardDeleteProject removes a project row for failed initialization cleanup.
-func (s *Store) HardDeleteProject(ctx context.Context, id int64) error {
-	return s.RetryTransient(ctx, func() error {
-		_, err := s.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, id)
-		return mapSQLError(err, nil)
-	})
+// HardDeleteProject removes a project row for failed initialization cleanup
+// and returns the reset cursor reserved for its deleted lifecycle events.
+func (s *Store) HardDeleteProject(ctx context.Context, id int64) (int64, error) {
+	return s.hardDeleteProject(ctx, id)
 }
 
 func scanAlias(row rowScanner) (db.ProjectAlias, error) {

@@ -150,7 +150,8 @@ func (s *Store) EventsInWindow(ctx context.Context, params db.EventsInWindowPara
 func (s *Store) MaxLocalOriginEventID(ctx context.Context, projectID int64) (int64, error) {
 	var value sql.NullInt64
 	if err := s.QueryRowContext(ctx, `SELECT MAX(id) FROM events
-      WHERE project_id = $1 AND origin_instance_uid = $2`, projectID, s.instanceUID).Scan(&value); err != nil {
+      WHERE project_id = $1 AND origin_instance_uid = $2 AND `+
+		pgFederationPushEventTypeCondition("type"), projectID, s.instanceUID).Scan(&value); err != nil {
 		return 0, mapSQLError(err, nil)
 	}
 	return value.Int64, nil

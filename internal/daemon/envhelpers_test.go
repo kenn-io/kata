@@ -152,7 +152,9 @@ func initWorkspaceViaHTTP(t *testing.T, env *testenv.Env, origin string) int64 {
 	mustRun(t, dir, "git", "init", "--quiet")
 	mustRun(t, dir, "git", "remote", "add", "origin", origin)
 
-	envPostJSON(t, env, "/api/v1/projects", map[string]string{"start_path": dir}, nil)
+	envPostJSON(t, env, "/api/v1/projects", map[string]string{
+		"start_path": dir, "actor": "user-a",
+	}, nil)
 	var out struct {
 		Project struct {
 			ID int64 `json:"id"`

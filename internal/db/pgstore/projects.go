@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -20,37 +21,75 @@ type rowScanner interface {
 
 // CreateProject inserts a project with a new stable UID.
 func (s *Store) CreateProject(ctx context.Context, name string) (db.Project, error) {
+	project, _, err := s.CreateProjectAndEvent(ctx, name, db.SystemActor)
+	return project, err
+}
+
+// CreateProjectAndEvent inserts a project and returns its committed event.
+func (s *Store) CreateProjectAndEvent(ctx context.Context, name, actor string) (db.Project, db.Event, error) {
+	if actor == "" {
+		actor = db.SystemActor
+	}
 	if name == db.SystemProjectName {
-		return db.Project{}, fmt.Errorf("create project: reserved project name %q", name)
+		return db.Project{}, db.Event{}, fmt.Errorf("create project: reserved project name %q", name)
 	}
 	projectUID, err := katauid.New()
 	if err != nil {
-		return db.Project{}, fmt.Errorf("generate project uid: %w", err)
+		return db.Project{}, db.Event{}, fmt.Errorf("generate project uid: %w", err)
 	}
-	return s.CreateProjectWithUID(ctx, name, projectUID)
+	return s.createProjectWithUID(ctx, name, projectUID, actor)
 }
 
 // CreateProjectWithUID inserts a project with a caller-supplied stable UID.
 func (s *Store) CreateProjectWithUID(ctx context.Context, name, projectUID string) (db.Project, error) {
+	project, _, err := s.CreateProjectWithUIDAndEvent(ctx, name, projectUID, db.SystemActor)
+	return project, err
+}
+
+// CreateProjectWithUIDAndEvent inserts a stable-UID project and returns its committed event.
+func (s *Store) CreateProjectWithUIDAndEvent(ctx context.Context, name, projectUID, actor string) (db.Project, db.Event, error) {
+	if actor == "" {
+		actor = db.SystemActor
+	}
+	return s.createProjectWithUID(ctx, name, projectUID, actor)
+}
+
+func (s *Store) createProjectWithUID(ctx context.Context, name, projectUID, actor string) (db.Project, db.Event, error) {
 	if name == db.SystemProjectName {
-		return db.Project{}, fmt.Errorf("create project: reserved project name %q", name)
+		return db.Project{}, db.Event{}, fmt.Errorf("create project: reserved project name %q", name)
 	}
 	if projectUID == db.SystemProjectUID {
-		return db.Project{}, fmt.Errorf("create project: reserved project uid %q", projectUID)
+		return db.Project{}, db.Event{}, fmt.Errorf("create project: reserved project uid %q", projectUID)
 	}
 	if !katauid.Valid(projectUID) {
-		return db.Project{}, fmt.Errorf("invalid project uid %q", projectUID)
+		return db.Project{}, db.Event{}, fmt.Errorf("invalid project uid %q", projectUID)
 	}
-	var project db.Project
-	err := s.RetryTransient(ctx, func() error {
+	var (
+		project db.Project
+		event   db.Event
+	)
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		project, err = fencedQueryRow(ctx, s, scanProject,
+		project, err = scanProject(tx.QueryRowContext(ctx,
 			`INSERT INTO projects(uid, name) VALUES($1, $2) `+
 				`RETURNING id, uid, name, metadata, revision, created_at, deleted_at`,
-			projectUID, name)
-		return mapSQLError(err, nil)
+			projectUID, name))
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(struct {
+			Name string `json:"name"`
+		}{Name: project.Name})
+		if err != nil {
+			return fmt.Errorf("marshal project created event: %w", err)
+		}
+		event, err = s.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+			Type: "project.created", Actor: actor, Payload: string(payload),
+		})
+		return err
 	})
-	return project, err
+	return project, event, err
 }
 
 // ProjectByID returns active or archived projects while hiding the system row.
@@ -76,19 +115,61 @@ func (s *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error
 
 // RenameProject changes only the canonical name.
 func (s *Store) RenameProject(ctx context.Context, id int64, name string) (db.Project, error) {
-	if name == db.SystemProjectName {
-		return db.Project{}, fmt.Errorf("rename project: reserved project name %q", name)
+	project, _, _, err := s.RenameProjectAndEvent(ctx, id, name, db.SystemActor)
+	return project, err
+}
+
+// RenameProjectAndEvent renames a project and returns its committed event.
+func (s *Store) RenameProjectAndEvent(ctx context.Context, id int64, name, actor string) (db.Project, *db.Event, bool, error) {
+	if actor == "" {
+		actor = db.SystemActor
 	}
-	var project db.Project
-	err := s.RetryTransient(ctx, func() error {
-		var err error
-		project, err = fencedQueryRow(ctx, s, scanProject,
-			`UPDATE projects SET name = $1 WHERE id = $2 AND name <> $3 AND uid <> $4 `+
-				`RETURNING id, uid, name, metadata, revision, created_at, deleted_at`,
-			name, id, db.SystemProjectName, db.SystemProjectUID)
-		return mapSQLError(err, nil)
+	if name == db.SystemProjectName {
+		return db.Project{}, nil, false, fmt.Errorf("rename project: reserved project name %q", name)
+	}
+	var (
+		project db.Project
+		event   *db.Event
+		changed bool
+	)
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		current, err := scanProject(tx.QueryRowContext(ctx,
+			projectSelect+` WHERE id = $1 FOR UPDATE`, id))
+		if err != nil {
+			return err
+		}
+		if current.Name == db.SystemProjectName || current.UID == db.SystemProjectUID {
+			return db.ErrNotFound
+		}
+		if current.Name == name {
+			project = current
+			return nil
+		}
+		project, err = scanProject(tx.QueryRowContext(ctx,
+			`UPDATE projects SET name = $1 WHERE id = $2 `+
+				`RETURNING id, uid, name, metadata, revision, created_at, deleted_at`, name, id))
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		}{From: current.Name, To: project.Name})
+		if err != nil {
+			return fmt.Errorf("marshal project renamed event: %w", err)
+		}
+		inserted, err := s.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+			Type: "project.renamed", Actor: actor, Payload: string(payload),
+		})
+		if err == nil {
+			event = &inserted
+			changed = true
+		}
+		return err
 	})
-	return visibleProject(project, err)
+	project, err = visibleProject(project, err)
+	return project, event, changed, err
 }
 
 // ListProjects returns active projects in row identity order.

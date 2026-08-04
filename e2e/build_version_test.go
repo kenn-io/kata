@@ -21,6 +21,7 @@ func TestMakeBuildBakesGitDescribeVersion(t *testing.T) {
 	}
 	requireCommand(t, "git")
 	requireCommand(t, "make")
+	requireCommand(t, "bun")
 
 	root := repoRoot(t)
 	expected := strings.TrimSpace(commandOutput(t, root, "git", "describe", "--tags", "--always", "--dirty"))
@@ -53,6 +54,7 @@ func TestMakeInstallBakesGitDescribeVersion(t *testing.T) {
 	}
 	requireCommand(t, "git")
 	requireCommand(t, "make")
+	requireCommand(t, "bun")
 
 	root := repoRoot(t)
 	expected := strings.TrimSpace(commandOutput(t, root, "git", "describe", "--tags", "--always", "--dirty"))

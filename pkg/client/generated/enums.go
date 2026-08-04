@@ -191,6 +191,23 @@ func (r ReachableGraphUnresolvedRefSide) Validate() error {
 	}
 }
 
+type UICapabilitiesUpdates string
+
+const (
+	Poll UICapabilitiesUpdates = "poll"
+	Sse  UICapabilitiesUpdates = "sse"
+)
+
+// Validate checks if the UICapabilitiesUpdates value is valid
+func (u UICapabilitiesUpdates) Validate() error {
+	switch u {
+	case Poll, Sse:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid UICapabilitiesUpdates value, got: %v", u))
+	}
+}
+
 type ListAllIssuesQueryStatus string
 
 const (
@@ -243,5 +260,25 @@ func (s SearchIssuesQueryMode) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid SearchIssuesQueryMode value, got: %v", s))
+	}
+}
+
+type ReadUISnapshotQueryRelationship string
+
+const (
+	BlockedBy                              ReadUISnapshotQueryRelationship = "blocked_by"
+	Child                                  ReadUISnapshotQueryRelationship = "child"
+	ReadUISnapshotQueryRelationshipBlocks  ReadUISnapshotQueryRelationship = "blocks"
+	ReadUISnapshotQueryRelationshipParent  ReadUISnapshotQueryRelationship = "parent"
+	ReadUISnapshotQueryRelationshipRelated ReadUISnapshotQueryRelationship = "related"
+)
+
+// Validate checks if the ReadUISnapshotQueryRelationship value is valid
+func (r ReadUISnapshotQueryRelationship) Validate() error {
+	switch r {
+	case BlockedBy, Child, ReadUISnapshotQueryRelationshipBlocks, ReadUISnapshotQueryRelationshipParent, ReadUISnapshotQueryRelationshipRelated:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid ReadUISnapshotQueryRelationship value, got: %v", r))
 	}
 }

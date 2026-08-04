@@ -180,7 +180,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	}
 	owner := "alice"
 	priority := int64(2)
-	rec, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	rec, createdEvent, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: project.ID,
 		Actor:     "scheduler",
 		Rule:      "FREQ=WEEKLY;BYDAY=MO",
@@ -194,6 +194,9 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create recurrence: %w", err)
 	}
+	assert.Equal(t, "recurrence.created", createdEvent.Type)
+	assert.Equal(t, project.ID, createdEvent.ProjectID)
+	assert.NotZero(t, createdEvent.ID)
 	if !uid.Valid(rec.UID) {
 		return fmt.Errorf("invalid recurrence UID %q", rec.UID)
 	}
@@ -229,6 +232,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("no-op recurrence patch: %w", err)
 	}
 	assert.False(t, noChange.Changed)
+	assert.Zero(t, noChange.Event.ID)
 	assert.Equal(t, rec.Revision, noChange.NewRevision)
 	newTitle := "Weekly retrospective"
 	newLabels := []string{"planning", "Planning", "p2"}
@@ -240,9 +244,24 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("patch recurrence: %w", err)
 	}
 	assert.True(t, patched.Changed)
+	assert.Equal(t, "recurrence.updated", patched.Event.Type)
+	assert.NotZero(t, patched.Event.ID)
 	assert.Equal(t, int64(2), patched.NewRevision)
 	assert.Equal(t, newTitle, patched.Recurrence.TemplateTitle)
 	assert.JSONEq(t, `["p2","planning"]`, string(patched.Recurrence.TemplateLabels))
+	cleared, err := store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: rec.ID, IfMatchRev: patched.NewRevision, Actor: "scheduler",
+		Update: db.RecurrenceUpdate{ClearTemplateOwner: true, ClearTemplatePriority: true},
+	})
+	if err != nil {
+		return fmt.Errorf("clear recurrence template owner and priority: %w", err)
+	}
+	assert.True(t, cleared.Changed)
+	assert.Equal(t, "recurrence.updated", cleared.Event.Type)
+	assert.NotZero(t, cleared.Event.ID)
+	assert.Equal(t, int64(3), cleared.NewRevision)
+	assert.Nil(t, cleared.Recurrence.TemplateOwner)
+	assert.Nil(t, cleared.Recurrence.TemplatePriority)
 	_, err = store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 		RecurrenceID: rec.ID, IfMatchRev: 1, Actor: "scheduler",
 		Update: db.RecurrenceUpdate{TemplateTitle: &rec.TemplateTitle},
@@ -250,7 +269,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	var conflict *db.RevisionConflictError
 	assert.ErrorAs(t, err, &conflict)
 	if conflict != nil {
-		assert.Equal(t, int64(2), conflict.CurrentRevision)
+		assert.Equal(t, int64(3), conflict.CurrentRevision)
 	}
 
 	materialized, err := store.MaterializeNext(ctx, rec.ID, "2026-05-11", "scheduler")
@@ -268,9 +287,9 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("get materialized issue: %w", err)
 	}
 	assert.Equal(t, newTitle, issue.Title)
+	assert.Nil(t, issue.Owner)
+	assert.Nil(t, issue.Priority)
 	assert.Equal(t, "What got done?", issue.Body)
-	assert.Equal(t, &owner, issue.Owner)
-	assert.Equal(t, &priority, issue.Priority)
 	assert.Equal(t, &rec.ID, issue.RecurrenceID)
 	assert.Equal(t, &materialized.OccurrenceKey, issue.OccurrenceKey)
 	var issueMetadata map[string]any
@@ -315,9 +334,26 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	require.NotNil(t, nextIssue, "closing a done occurrence must materialize the next occurrence")
 	assert.Equal(t, "open", nextIssue.Status)
 
-	if err := store.SoftDeleteRecurrence(ctx, rec.ID, "scheduler"); err != nil {
+	currentRecurrence, err := store.GetRecurrenceByID(ctx, rec.ID)
+	if err != nil {
+		return fmt.Errorf("get recurrence before delete: %w", err)
+	}
+	_, err = store.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
+		RecurrenceID: rec.ID, IfMatchRev: currentRecurrence.Revision - 1, Actor: "scheduler",
+	})
+	var revisionConflict *db.RevisionConflictError
+	if !errors.As(err, &revisionConflict) {
+		return fmt.Errorf("stale recurrence delete error = %v, want revision conflict", err)
+	}
+	assert.Equal(t, currentRecurrence.Revision, revisionConflict.CurrentRevision)
+	deletedEvent, err := store.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
+		RecurrenceID: rec.ID, IfMatchRev: currentRecurrence.Revision, Actor: "scheduler",
+	})
+	if err != nil {
 		return fmt.Errorf("soft-delete recurrence: %w", err)
 	}
+	assert.Equal(t, "recurrence.deleted", deletedEvent.Type)
+	assert.NotZero(t, deletedEvent.ID)
 	listed, err = store.ListRecurrencesByProject(ctx, project.ID)
 	if err != nil {
 		return fmt.Errorf("list after recurrence delete: %w", err)
@@ -328,8 +364,10 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("get deleted recurrence: %w", err)
 	}
 	require.NotNil(t, deleted.DeletedAt)
-	assert.Equal(t, int64(6), deleted.Revision)
-	if err := store.SoftDeleteRecurrence(ctx, rec.ID, "scheduler"); err == nil {
+	assert.Equal(t, int64(7), deleted.Revision)
+	if _, err := store.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
+		RecurrenceID: rec.ID, IfMatchRev: currentRecurrence.Revision, Actor: "scheduler",
+	}); err == nil {
 		return errors.New("deleting recurrence twice unexpectedly succeeded")
 	}
 
@@ -348,12 +386,12 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	assert.Contains(t, eventTypes, "recurrence.materialization_skipped")
 	assert.Contains(t, eventTypes, "recurrence.deleted")
 
-	_, err = store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	_, _, err = store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: project.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY", DTStart: "2026-05-11",
 		Timezone: "Mars/Phobos", Template: db.RecurrenceTemplate{Title: "invalid timezone"},
 	})
 	assert.ErrorIs(t, err, db.ErrInvalidRecurrence)
-	_, err = store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	_, _, err = store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: project.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY", DTStart: "2026-05-11",
 		Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "invalid label", Labels: []string{"two words"}},
 	})

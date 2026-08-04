@@ -590,8 +590,9 @@ func TestResetFederatedProjectIfNoPendingPushRejectsPendingLocalEvents(t *testin
 	require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
 	events, listErr := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
 	require.NoError(t, listErr)
-	require.Len(t, events, 1)
-	assert.Equal(t, evt.ID, events[0].ID)
+	require.Len(t, events, 2)
+	assert.Equal(t, "project.created", events[0].Type)
+	assert.Equal(t, evt.ID, events[1].ID)
 }
 
 func TestResetFederatedProjectIfNoPendingPushIgnoresUnsupportedLocalEvents(t *testing.T) {
@@ -1571,8 +1572,9 @@ func TestInsertRemoteEventPreservesPortableFieldsAndDedupe(t *testing.T) {
 
 	events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, events, 1)
-	got := events[0]
+	require.Len(t, events, 2)
+	assert.Equal(t, "project.created", events[0].Type)
+	got := events[1]
 	assert.NotZero(t, got.ID)
 	assert.Equal(t, ev.EventUID, got.UID)
 	assert.Equal(t, ev.OriginInstanceUID, got.OriginInstanceUID)
@@ -1629,7 +1631,8 @@ func TestInsertRemoteEventRejectsContentHashMismatch(t *testing.T) {
 	assert.ErrorIs(t, err, db.ErrRemoteEventHashMismatch)
 	events, listErr := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
 	require.NoError(t, listErr)
-	assert.Empty(t, events)
+	require.Len(t, events, 1)
+	assert.Equal(t, "project.created", events[0].Type)
 }
 
 func TestIngestFederationEvents(t *testing.T) {
@@ -1667,8 +1670,8 @@ func TestIngestFederationEvents(t *testing.T) {
 
 		events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, Limit: 10})
 		require.NoError(t, err)
-		require.Len(t, events, 2, "project.federation_enabled + ingested event")
-		inserted := events[1]
+		require.Len(t, events, 3, "project.created + project.federation_enabled + ingested event")
+		inserted := events[2]
 		assert.NotEqual(t, int64(12), inserted.ID, "hub must assign its own local row id")
 		assert.Equal(t, ev.EventUID, inserted.UID)
 		assert.Equal(t, spokeUID, inserted.OriginInstanceUID)
@@ -4806,7 +4809,7 @@ func TestFederatedSpokeWriteGatePushDisabledRejectsAndPushEnabledPermits(t *test
 func TestFederatedSpokeRejectsRecurrence(t *testing.T) {
 	cases := map[string]func(context.Context, *sqlitestore.Store, db.Project, db.Recurrence) error{
 		"create recurrence": func(ctx context.Context, d *sqlitestore.Store, p db.Project, _ db.Recurrence) error {
-			_, err := d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+			_, _, err := d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 				ProjectID: p.ID,
 				Actor:     "tester",
 				Rule:      "FREQ=DAILY;COUNT=1",
@@ -4829,7 +4832,10 @@ func TestFederatedSpokeRejectsRecurrence(t *testing.T) {
 			return err
 		},
 		"delete recurrence": func(ctx context.Context, d *sqlitestore.Store, _ db.Project, rec db.Recurrence) error {
-			return d.SoftDeleteRecurrence(ctx, rec.ID, "tester")
+			_, err := d.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
+				RecurrenceID: rec.ID, IfMatchRev: rec.Revision, Actor: "tester",
+			})
+			return err
 		},
 		"materialize recurrence": func(ctx context.Context, d *sqlitestore.Store, _ db.Project, rec db.Recurrence) error {
 			_, err := d.MaterializeNext(ctx, rec.ID, "", "tester")
@@ -4843,7 +4849,7 @@ func TestFederatedSpokeRejectsRecurrence(t *testing.T) {
 			var rec db.Recurrence
 			var err error
 			if name != "create recurrence" {
-				rec, err = d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+				rec, _, err = d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 					ProjectID: p.ID,
 					Actor:     "tester",
 					Rule:      "FREQ=DAILY;COUNT=1",
@@ -5230,7 +5236,7 @@ func assertIngestedEventCount(ctx context.Context, t *testing.T, d *sqlitestore.
 		SELECT COUNT(*)
 		  FROM events
 		 WHERE project_id = ?
-		   AND type != 'project.federation_enabled'`, projectID).Scan(&got))
+		   AND type NOT IN ('project.created', 'project.federation_enabled')`, projectID).Scan(&got))
 	assert.Equal(t, want, got)
 }
 

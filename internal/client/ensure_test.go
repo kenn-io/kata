@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -113,6 +114,23 @@ func TestEnsureRunningTargetMarksLocalDiscovery(t *testing.T) {
 	assert.Equal(t, 1, restore.startCalls)
 }
 
+func TestDiscoverWebRuntime(t *testing.T) {
+	record := kitdaemon.RuntimeRecord{
+		PID: 4242,
+		Metadata: map[string]string{
+			"web_origin":        "http://127.0.0.1:27123",
+			"web_origin_stable": "true",
+			"web_capabilities":  "loopback,sse",
+		},
+	}
+
+	discovered, err := DiscoverWebRuntime(record)
+	require.NoError(t, err)
+	assert.Equal(t, "http://127.0.0.1:27123", discovered.Origin)
+	assert.True(t, discovered.OriginStable)
+	assert.Equal(t, []string{"loopback", "sse"}, discovered.Capabilities)
+}
+
 func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	setupKataEnv(t)
 	ns, err := daemon.NewNamespace()
@@ -154,6 +172,34 @@ func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(logData), "daemon stdout")
 	assert.Contains(t, string(logData), "daemon stderr")
+}
+
+func TestAutoStartAllowsDaemonStartupBeyondFiveSeconds(t *testing.T) {
+	dataDir := setupKataEnv(t)
+	originalStart := startDetachedDaemonForEnsure
+	originalDiscover := discoverDaemonForAutoStart
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
+		return nil
+	}
+	t.Cleanup(func() {
+		startDetachedDaemonForEnsure = originalStart
+		discoverDaemonForAutoStart = originalDiscover
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		startedAt := time.Now()
+		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool) {
+			if time.Since(startedAt) < 6*time.Second {
+				return "", false, false
+			}
+			return "http://127.0.0.1:27123", true, true
+		}
+
+		url, err := autoStart(t.Context(), dataDir)
+
+		require.NoError(t, err)
+		assert.Equal(t, "http://127.0.0.1:27123", url)
+	})
 }
 
 func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {

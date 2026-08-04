@@ -131,6 +131,9 @@ func aggregateDigest(rows []db.Event) (api.DigestTotals, []api.DigestActorEntry)
 	var grand api.DigestTotals
 
 	for _, e := range rows {
+		if e.Type == "project.created" || e.Type == "project.renamed" {
+			continue
+		}
 		st, ok := byActor[e.Actor]
 		if !ok {
 			st = &actorState{issues: map[issueKey]*issueAccum{}}

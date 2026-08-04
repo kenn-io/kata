@@ -61,12 +61,14 @@ func TestDaemonStatus_HumanReportsLifecycleDetails(t *testing.T) {
 		Address:   "127.0.0.1:7777",
 		Version:   "v-test-status",
 		StartedAt: started,
+		Metadata:  map[string]string{"web_origin": "http://127.0.0.1:28888"},
 	})
 	require.NoError(t, err)
 
 	out := string(executeRoot(t, newRootCmd(), "daemon", "status"))
 
 	assert.Contains(t, out, "kata running at http://127.0.0.1:7777\n")
+	assert.Contains(t, out, "  web UI:  http://127.0.0.1:28888\n")
 	assert.Contains(t, out, "  pid:     "+strconv.Itoa(os.Getpid())+"\n")
 	assert.Contains(t, out, "  version: v-test-status\n")
 	assert.Regexp(t, `(?m)^  uptime:  52m3[3-4]s$`, out)
@@ -81,10 +83,13 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	require.NoError(t, ns.EnsureDirs())
 	started := time.Date(2026, 5, 4, 1, 2, 3, 0, time.UTC)
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID:       os.Getpid(),
-		Network:   "unix",
-		Address:   "/tmp/kata-test.sock",
-		Metadata:  map[string]string{"db_path": filepath.Join(tmp, "kata.db")},
+		PID:     os.Getpid(),
+		Network: "unix",
+		Address: "/tmp/kata-test.sock",
+		Metadata: map[string]string{
+			"db_path":    filepath.Join(tmp, "kata.db"),
+			"web_origin": "http://127.0.0.1:28888",
+		},
 		Version:   "v-test-status",
 		StartedAt: started,
 	})
@@ -98,6 +103,7 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 			PID       int    `json:"pid"`
 			Version   string `json:"version"`
 			Address   string `json:"address"`
+			WebURL    string `json:"web_url"`
 			DBPath    string `json:"db_path"`
 			StartedAt string `json:"started_at"`
 		} `json:"daemons"`
@@ -108,6 +114,7 @@ func TestDaemonStatus_JSONReportsDaemonsWithVersion(t *testing.T) {
 	assert.Equal(t, os.Getpid(), got.Daemons[0].PID)
 	assert.Equal(t, "v-test-status", got.Daemons[0].Version)
 	assert.Equal(t, "unix:///tmp/kata-test.sock", got.Daemons[0].Address)
+	assert.Equal(t, "http://127.0.0.1:28888", got.Daemons[0].WebURL)
 	assert.Equal(t, filepath.Join(tmp, "kata.db"), got.Daemons[0].DBPath)
 	assert.Equal(t, started.Format(time.RFC3339), got.Daemons[0].StartedAt)
 }
@@ -166,6 +173,23 @@ func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
 	assert.Equal(t, "OK daemon status=stopped\n", string(out))
+}
+
+func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
+		Metadata: map[string]string{"web_origin": "http://127.0.0.1:28888"},
+	})
+	require.NoError(t, err)
+
+	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
+	assert.Equal(t, "OK daemon status=running web_url=http://127.0.0.1:28888\n", string(out))
 }
 
 func TestRuntimeRecordRedactsPostgresDSN(t *testing.T) {
@@ -245,7 +269,7 @@ func TestDaemonServesHealthFromPostgres(t *testing.T) {
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"http://"+runtimeRecord.Address+"/api/v1/projects",
-		bytes.NewBufferString(`{"name":"postgres-daemon"}`))
+		bytes.NewBufferString(`{"name":"postgres-daemon","actor":"user-a"}`))
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/json")
 	createdResponse, err := client.Do(request)
@@ -1726,6 +1750,112 @@ func TestDefaultEndpointForOS(t *testing.T) {
 		assert.Equal(t, "unix", ep.Network)
 		assert.Equal(t, "unix://"+filepath.Join(ns.SocketDir, "daemon.sock"), ep.ConfigAddress())
 	})
+}
+
+func TestPreflightDaemonStartupWebConfig(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("KATA_HOME", tmp)
+	t.Setenv("KATA_DB", filepath.Join(tmp, "kata.db"))
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "config.toml"), []byte(`
+[web]
+listen = "127.0.0.1:27123"
+public_origin = "https://daemon.example"
+`), 0o600))
+
+	startup, err := preflightDaemonStartup(context.Background(), "", false)
+	require.NoError(t, err)
+	assert.Equal(t, config.WebConfig{
+		Listen:       "127.0.0.1:27123",
+		PublicOrigin: "https://daemon.example",
+	}, startup.Web)
+}
+
+func TestDaemonRuntimeWebMetadata(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false) }()
+
+	namespace, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	var record kitdaemon.RuntimeRecord
+	require.Eventually(t, func() bool {
+		body, readErr := os.ReadFile(runtimePath) //nolint:gosec // test-owned KATA_HOME
+		return readErr == nil && json.Unmarshal(body, &record) == nil &&
+			record.Metadata["web_origin"] != ""
+	}, 3*time.Second, 10*time.Millisecond)
+
+	assert.NotEmpty(t, record.Metadata["web_origin"])
+	assert.Equal(t, "true", record.Metadata["web_origin_stable"])
+	assert.Equal(t, "loopback,sse", record.Metadata["web_capabilities"])
+	if runtime.GOOS != "windows" {
+		runtimeStat, statErr := os.Stat(runtimePath)
+		require.NoError(t, statErr)
+		assert.Equal(t, os.FileMode(0o644), runtimeStat.Mode().Perm())
+	}
+
+	cancel()
+	select {
+	case runErr := <-done:
+		if runErr != nil && !errors.Is(runErr, context.Canceled) {
+			t.Fatalf("daemon did not stop cleanly: %v", runErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not stop after context cancellation")
+	}
+}
+
+func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyRequiresLogin(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv("KATA_AUTH_TOKEN", "example-token")
+	t.Setenv(daemon.AutoStartMarkerEnv, "1")
+
+	originalTelemetry := newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client {
+		return &fakeTelemetryReporter{}
+	}
+	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", true) }()
+
+	namespace, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: namespace.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	var record kitdaemon.RuntimeRecord
+	require.Eventually(t, func() bool {
+		body, readErr := os.ReadFile(runtimePath) //nolint:gosec // test-owned KATA_HOME
+		return readErr == nil && json.Unmarshal(body, &record) == nil &&
+			record.Metadata["web_origin"] != ""
+	}, 3*time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, "login,poll", record.Metadata["web_capabilities"])
+
+	cancel()
+	select {
+	case runErr := <-done:
+		if runErr != nil && !errors.Is(runErr, context.Canceled) {
+			t.Fatalf("daemon did not stop cleanly: %v", runErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not stop after context cancellation")
+	}
 }
 
 type fakeTelemetryReporter struct {

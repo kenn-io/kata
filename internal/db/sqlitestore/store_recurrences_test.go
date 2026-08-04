@@ -130,7 +130,10 @@ func TestSoftDeleteRecurrence(t *testing.T) {
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "X"},
 	})
-	require.NoError(t, d.SoftDeleteRecurrence(ctx, rec.ID, "tester"))
+	_, err := d.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
+		RecurrenceID: rec.ID, IfMatchRev: rec.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
 
 	list, err := d.ListRecurrencesByProject(ctx, p.ID)
 	require.NoError(t, err)
@@ -168,7 +171,7 @@ func TestListRecurrencesByProject_ExcludesArchivedProject(t *testing.T) {
 	p, err := d.CreateProject(ctx, "archived-p")
 	require.NoError(t, err)
 
-	_, err = d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	_, _, err = d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: p.ID, Actor: "tester",
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "should disappear"},
@@ -207,7 +210,7 @@ func TestCreateRecurrence_RejectsInvalidLabel(t *testing.T) {
 
 	// "hello world" contains a space (after trimming the full label, spaces
 	// inside the label are disallowed by the schema CHECK pattern).
-	_, err := d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	_, _, err := d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: p.ID, Actor: "tester",
 		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{
@@ -265,7 +268,7 @@ func TestCreateRecurrence_RejectsBadRecurrenceInputs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := d.CreateRecurrence(ctx, c.in)
+			_, _, err := d.CreateRecurrence(ctx, c.in)
 			require.Error(t, err)
 		})
 	}

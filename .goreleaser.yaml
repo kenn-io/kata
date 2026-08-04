@@ -8,6 +8,10 @@ changelog:
 release:
   mode: append
 
+before:
+  hooks:
+    - make web-release-check
+
 builds:
   - id: kata
     main: ./cmd/kata

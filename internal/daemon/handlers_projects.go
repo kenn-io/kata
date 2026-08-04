@@ -89,10 +89,15 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects",
 	}, func(ctx context.Context, in *api.InitProjectRequest) (*api.InitProjectResponse, error) {
-		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+		if err := ensureWebLocalProjectInitAllowed(ctx, in); err != nil {
 			return nil, err
 		}
-		out, created, err := initProject(ctx, cfg.DB, in)
+		actor, err := projectMutationActor(ctx, in.Body.Actor)
+		if err != nil {
+			return nil, err
+		}
+		out, mutation, created, err := initProject(ctx, cfg.DB, in, actor)
+		deliverProjectInitMutation(cfg, mutation)
 		if err != nil {
 			return nil, err
 		}
@@ -174,13 +179,13 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "POST",
 		Path:        "/api/v1/projects/{project_id}/merge",
 	}, func(ctx context.Context, in *api.MergeProjectRequest) (*api.MergeProjectResponse, error) {
-		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+		actor, err := projectMutationActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		if in.Body.SourceProjectID == 0 {
 			return nil, api.NewError(400, "validation", "source_project_id required", "", nil)
 		}
-		var err error
 		ctx, err = authorizeHostProjectScope(ctx, []int64{in.Body.SourceProjectID}, nil, false)
 		if err != nil {
 			return nil, err
@@ -194,6 +199,7 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			SourceProjectID: in.Body.SourceProjectID,
 			TargetProjectID: in.ProjectID,
 			TargetName:      namePtr,
+			Actor:           actor,
 		})
 		if errors.Is(err, db.ErrProjectMergeSameProject) {
 			return nil, api.NewError(400, "validation", "cannot merge a project into itself", "", nil)
@@ -228,6 +234,10 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		deliverProjectMutation(cfg, &merged.Event)
+		cfg.Broadcaster.Broadcast(StreamMsg{
+			Kind: "reset", ResetID: merged.Event.ID, ProjectID: in.Body.SourceProjectID,
+		})
 		extensions := make([]api.MergeShortIDExtension, 0, len(merged.ShortIDExtensions))
 		for _, ext := range merged.ShortIDExtensions {
 			extensions = append(extensions, api.MergeShortIDExtension{
@@ -412,7 +422,8 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		Method:      "PATCH",
 		Path:        "/api/v1/projects/{project_id}",
 	}, func(ctx context.Context, in *api.RenameProjectRequest) (*api.ShowProjectResponse, error) {
-		if err := ensureAttributedWriteAllowed(ctx); err != nil {
+		actor, err := projectMutationActor(ctx, in.Body.Actor)
+		if err != nil {
 			return nil, err
 		}
 		name := strings.TrimSpace(in.Body.Name)
@@ -422,12 +433,15 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		p, err := cfg.DB.RenameProject(ctx, in.ProjectID, name)
+		p, event, _, err := cfg.DB.RenameProjectAndEvent(ctx, in.ProjectID, name, actor)
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "project_not_found", "project not found", "", nil)
 		}
 		if err != nil {
 			return nil, internalAPIError(err)
+		}
+		if event != nil {
+			deliverProjectMutation(cfg, event)
 		}
 		aliases, err := cfg.DB.ProjectAliases(ctx, p.ID)
 		if err != nil {
@@ -438,6 +452,45 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Aliases = aliases
 		return out, nil
 	})
+}
+
+func ensureWebLocalProjectInitAllowed(ctx context.Context, in *api.InitProjectRequest) error {
+	principal, ok := PrincipalFromContext(ctx)
+	if !ok || principal.Kind != PrincipalWebLocal {
+		return nil
+	}
+	if strings.TrimSpace(in.Body.StartPath) == "" && !in.Body.Replace && !in.Body.Reassign && in.Body.Alias == nil {
+		return nil
+	}
+	return api.NewError(http.StatusForbidden, "web_local_operation_forbidden",
+		"local web sessions cannot initialize projects from daemon filesystem paths or aliases", "", nil)
+}
+
+func deliverProjectMutation(cfg ServerConfig, event *db.Event) {
+	cfg.Broadcaster.Broadcast(StreamMsg{Kind: "event", Event: event, ProjectID: event.ProjectID})
+	cfg.Hooks.Enqueue(*event)
+}
+
+type projectInitMutation struct {
+	Event     *db.Event
+	ResetID   int64
+	ProjectID int64
+}
+
+func deliverProjectInitMutation(cfg ServerConfig, mutation projectInitMutation) {
+	if mutation.ResetID != 0 {
+		cfg.Broadcaster.Broadcast(StreamMsg{
+			Kind: "reset", ResetID: mutation.ResetID, ProjectID: mutation.ProjectID,
+		})
+		return
+	}
+	if mutation.Event != nil {
+		deliverProjectMutation(cfg, mutation.Event)
+	}
+}
+
+func projectMutationActor(ctx context.Context, actor string) (string, error) {
+	return attributedActor(ctx, actor)
 }
 
 func resolveProjectRequestCanMutate(in *api.ResolveProjectRequest) bool {
@@ -683,31 +736,33 @@ func aliasWorkspaceRoot(disc config.DiscoveredPaths) string {
 	return disc.WorkspaceRoot
 }
 
-func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequest) (*api.ProjectResolveBody, bool, error) {
+func initProject(
+	ctx context.Context, store db.Storage, req *api.InitProjectRequest, actor string,
+) (*api.ProjectResolveBody, projectInitMutation, bool, error) {
 	if req.Body.StartPath == "" {
 		if req.Body.Name == "" {
-			return nil, false, api.NewError(400, "validation",
+			return nil, projectInitMutation{}, false, api.NewError(400, "validation",
 				"either name or start_path is required", "", nil)
 		}
-		return initByName(ctx, store, req)
+		return initByName(ctx, store, req, actor)
 	}
 	abs, err := filepath.Abs(req.Body.StartPath)
 	if err != nil {
-		return nil, false, api.NewError(400, "validation", err.Error(), "", nil)
+		return nil, projectInitMutation{}, false, api.NewError(400, "validation", err.Error(), "", nil)
 	}
 	disc, err := config.DiscoverPaths(abs)
 	if err != nil {
-		return nil, false, api.NewError(400, "validation", err.Error(), "", nil)
+		return nil, projectInitMutation{}, false, api.NewError(400, "validation", err.Error(), "", nil)
 	}
 
 	tomlCfg, err := readWorkspaceConfig(disc)
 	if err != nil {
-		return nil, false, err
+		return nil, projectInitMutation{}, false, err
 	}
 
 	name, err := pickInitName(ctx, req, disc, tomlCfg)
 	if err != nil {
-		return nil, false, err
+		return nil, projectInitMutation{}, false, err
 	}
 
 	// When --project was supplied outside any git/workspace ancestor, synthesize
@@ -719,7 +774,7 @@ func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequ
 
 	aliasInfo, err := config.ComputeAliasIdentity(ctx, disc)
 	if err != nil {
-		return nil, false, api.NewError(400, "validation", err.Error(), "", nil)
+		return nil, projectInitMutation{}, false, api.NewError(400, "validation", err.Error(), "", nil)
 	}
 	explicitName := strings.TrimSpace(req.Body.Name) != ""
 	existingAlias, err := store.AliasByIdentity(ctx, aliasInfo.Identity)
@@ -730,18 +785,19 @@ func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequ
 			}
 		}
 	} else if !errors.Is(err, db.ErrNotFound) {
-		return nil, false, internalAPIError(err)
+		return nil, projectInitMutation{}, false, internalAPIError(err)
 	}
 	// Preflight alias conflict before mutating anything: without this, a fresh
 	// project row would be created and then orphaned when alias attach fails.
 	if err := preflightAliasConflict(ctx, store, aliasInfo, name, req.Body.Reassign); err != nil {
-		return nil, false, err
+		return nil, projectInitMutation{}, false, err
 	}
 
-	project, created, err := upsertProject(ctx, store, name)
+	project, event, created, err := upsertProject(ctx, store, name, actor)
 	if err != nil {
-		return nil, false, err
+		return nil, projectInitMutation{}, false, err
 	}
+	mutation := projectInitMutation{Event: event, ProjectID: project.ID}
 
 	alias, err := attachAlias(ctx, store, project.ID, aliasInfo, req.Body.Reassign)
 	if err != nil {
@@ -751,15 +807,18 @@ func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequ
 		// project row so retries observe consistent state regardless of which
 		// failure we hit.
 		if created {
-			_ = store.HardDeleteProject(ctx, project.ID)
+			if resetID, cleanupErr := store.HardDeleteProject(ctx, project.ID); cleanupErr == nil {
+				mutation.Event = nil
+				mutation.ResetID = resetID
+			}
 		}
-		return nil, false, err
+		return nil, mutation, false, err
 	}
 
 	dest := config.WriteDestination(disc, abs)
 	if tomlCfg == nil || tomlCfg.Project.Name != project.Name {
 		if err := config.WriteProjectConfig(dest, project.Name); err != nil {
-			return nil, false, internalAPIError(err)
+			return nil, mutation, false, internalAPIError(err)
 		}
 	}
 
@@ -767,16 +826,18 @@ func initProject(ctx context.Context, store db.Storage, req *api.InitProjectRequ
 		Project:       dbProjectToOut(project),
 		Alias:         alias,
 		WorkspaceRoot: dest,
-	}, created, nil
+	}, mutation, created, nil
 }
 
-func initByName(ctx context.Context, store db.Storage, req *api.InitProjectRequest) (*api.ProjectResolveBody, bool, error) {
+func initByName(
+	ctx context.Context, store db.Storage, req *api.InitProjectRequest, actor string,
+) (*api.ProjectResolveBody, projectInitMutation, bool, error) {
 	name := strings.TrimSpace(req.Body.Name)
 	if err := config.ValidateProjectName(name); err != nil {
-		return nil, false, api.NewError(400, "validation", err.Error(), "", nil)
+		return nil, projectInitMutation{}, false, api.NewError(400, "validation", err.Error(), "", nil)
 	}
 	if req.Body.Reassign && req.Body.Alias == nil {
-		return nil, false, api.NewError(400, "validation",
+		return nil, projectInitMutation{}, false, api.NewError(400, "validation",
 			"reassign requires alias metadata in path-free init",
 			"omit --reassign or run from a workspace where the client can derive an alias", nil)
 	}
@@ -792,21 +853,22 @@ func initByName(ctx context.Context, store db.Storage, req *api.InitProjectReque
 		// already normalized local:// identities and can contain
 		// filesystem path characters.
 		if err := config.ValidateAliasInfo(info); err != nil {
-			return nil, false, api.NewError(400, "validation", err.Error(), "", nil)
+			return nil, projectInitMutation{}, false, api.NewError(400, "validation", err.Error(), "", nil)
 		}
 		// Preflight before any project mutation, mirroring path-based
 		// init: avoids creating an orphan project row when the alias
 		// would conflict.
 		if err := preflightAliasConflict(ctx, store, info, name, req.Body.Reassign); err != nil {
-			return nil, false, err
+			return nil, projectInitMutation{}, false, err
 		}
 		aliasInfo = &info
 	}
 
-	project, created, err := upsertProject(ctx, store, name)
+	project, event, created, err := upsertProject(ctx, store, name, actor)
 	if err != nil {
-		return nil, false, err
+		return nil, projectInitMutation{}, false, err
 	}
+	mutation := projectInitMutation{Event: event, ProjectID: project.ID}
 
 	body := &api.ProjectResolveBody{Project: dbProjectToOut(project)}
 	if aliasInfo != nil {
@@ -817,13 +879,16 @@ func initByName(ctx context.Context, store db.Storage, req *api.InitProjectReque
 			// the orphan project row so retries observe consistent
 			// state, matching the path-based recovery.
 			if created {
-				_ = store.HardDeleteProject(ctx, project.ID)
+				if resetID, cleanupErr := store.HardDeleteProject(ctx, project.ID); cleanupErr == nil {
+					mutation.Event = nil
+					mutation.ResetID = resetID
+				}
 			}
-			return nil, false, err
+			return nil, mutation, false, err
 		}
 		body.Alias = alias
 	}
-	return body, created, nil
+	return body, mutation, created, nil
 }
 
 // readWorkspaceConfig reads .kata.toml only when a workspace root was actually
@@ -861,25 +926,25 @@ func pickInitName(ctx context.Context, req *api.InitProjectRequest, disc config.
 	return choice.Name, nil
 }
 
-func upsertProject(ctx context.Context, store db.Storage, name string) (db.Project, bool, error) {
+func upsertProject(ctx context.Context, store db.Storage, name, actor string) (db.Project, *db.Event, bool, error) {
 	got, err := store.ProjectByName(ctx, name)
 	if err == nil {
-		return got, false, nil
+		return got, nil, false, nil
 	}
 	if !errors.Is(err, db.ErrNotFound) {
-		return db.Project{}, false, internalAPIError(err)
+		return db.Project{}, nil, false, internalAPIError(err)
 	}
 	if archived, archErr := store.ProjectByNameIncludingArchived(ctx, name); archErr == nil && archived.DeletedAt != nil {
-		return db.Project{}, false, api.NewError(409, "project_archived",
+		return db.Project{}, nil, false, api.NewError(409, "project_archived",
 			"project with this name was archived via `kata projects remove`",
 			`run "kata projects restore `+name+`" or pick a different name`,
 			map[string]any{"name": name, "deleted_at": archived.DeletedAt})
 	}
-	created, err := store.CreateProject(ctx, name)
+	created, event, err := store.CreateProjectAndEvent(ctx, name, actor)
 	if err != nil {
-		return db.Project{}, false, internalAPIError(err)
+		return db.Project{}, nil, false, internalAPIError(err)
 	}
-	return created, true, nil
+	return created, &event, true, nil
 }
 
 // upsertAliasFor is the disc-flavored entry point used during resolve, where

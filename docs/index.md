@@ -69,8 +69,8 @@ Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
 
 -   __Made for humans too__
 
-    `kata tui` browses, triages, and supervises agent-written work over the same
-    data. No raw JSON required.
+    `kata tui` and `kata ui` browse, triage, and supervise agent-written work
+    over the same data. The daemon serves the browser app directly.
 
 -   __Local-first, repo-clean__
 
@@ -98,6 +98,7 @@ kata close abc4 --done \
   --message "Fixed the login race; tests pass." --commit <sha>
 
 kata tui                               # browse and triage interactively
+kata ui                                # open the browser application
 ```
 
 `kata create` prints each issue's short id; use it in later commands. Working

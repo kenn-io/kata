@@ -230,6 +230,7 @@ func (fx *federationStressFixture) assertEventOrderValid(t *testing.T, store *sq
 		SELECT id, hlc_physical_ms, hlc_counter
 		  FROM events
 		 WHERE project_id = ?
+		   AND type NOT IN ('project.created', 'project.federation_enabled')
 		 ORDER BY id`, projectID)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()

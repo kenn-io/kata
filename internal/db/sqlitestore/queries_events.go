@@ -294,7 +294,8 @@ func (d *Store) MaxLocalOriginEventID(ctx context.Context, projectID int64) (int
 		SELECT MAX(id)
 		  FROM events
 		 WHERE project_id = ?
-		   AND origin_instance_uid = ?`,
+		   AND origin_instance_uid = ?
+		   AND `+federationPushEventTypeCondition("type"),
 		projectID, d.InstanceUID()).Scan(&n); err != nil {
 		return 0, fmt.Errorf("max local-origin event id: %w", err)
 	}

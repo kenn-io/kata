@@ -26,6 +26,7 @@ func startFederationConfigReconciler(
 	daemonConfig *config.DaemonConfig,
 	store db.Storage,
 	federationWake func(),
+	projectEventSink func(db.Event),
 	daemonLog *log.Logger,
 ) func() api.FederationConfigHealth {
 	if len(daemonConfig.Federation.Projects) == 0 {
@@ -49,8 +50,9 @@ func startFederationConfigReconciler(
 		) (federation.Hub, error) {
 			return federation.NewHubClient(ctx, catalog)
 		},
-		Wake:   federationWake,
-		Logger: daemonLog,
+		Wake:             federationWake,
+		ProjectEventSink: projectEventSink,
+		Logger:           daemonLog,
 	})
 	go func() {
 		_ = reconciler.Run(ctx)

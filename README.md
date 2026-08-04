@@ -51,6 +51,10 @@ kata needs **Go 1.26 or later**:
 go install go.kenn.io/kata/cmd/kata@latest
 ```
 
+Module-source installs include the CLI, daemon, and TUI but not the compiled
+browser bundle. Install a release binary, or build from a clone with
+`make install`, to use `kata ui`.
+
 Go installs to `$(go env GOBIN)`, falling back to `$(go env GOPATH)/bin` (often
 `~/go/bin`); put that directory on your `PATH`. See
 [Install](docs/get-started/install.md) for package downloads, manual release
@@ -66,6 +70,7 @@ kata list                              # see open work
 kata show abc4                         # inspect by short id
 kata tui                               # browse and triage interactively
 kata tui abc4                          # open an issue directly in the TUI
+kata ui                                # open the same ledger in a browser
 ```
 
 `kata create` prints each issue's short id; use it in later commands. Close only
@@ -87,8 +92,9 @@ overwriting the rest of either file.
 - **Built for agents.** Stable short refs, `--json` and `--agent` output,
   idempotent creates, semantic-aware search, a claim flow, and predictable
   failure modes agents can script against.
-- **Made for humans too.** `kata tui` browses, triages, and supervises
-  agent-written work over the same data. No raw JSON required.
+- **Made for humans too.** `kata tui` and `kata ui` browse, triage, and
+  supervise agent-written work over the same data. The browser app is served
+  by the daemon and needs no separate backend.
 - **Local-first, repo-clean.** One Go binary, no runtime dependencies. Issue
   state lives in SQLite under `KATA_HOME`; your repo commits only a small,
   secret-free `.kata.toml`.

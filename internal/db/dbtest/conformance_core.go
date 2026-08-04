@@ -71,9 +71,11 @@ func checkProjectAliases(t *testing.T, store db.Storage) error {
 
 	_, err = store.AliasByID(ctx, alias.ID+100000)
 	assert.ErrorIs(t, err, db.ErrNotFound)
-	if err := store.HardDeleteProject(ctx, first.ID); err != nil {
+	resetID, err := store.HardDeleteProject(ctx, first.ID)
+	if err != nil {
 		return fmt.Errorf("hard delete empty project: %w", err)
 	}
+	assert.Positive(t, resetID)
 	_, err = store.ProjectByID(ctx, first.ID)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	return nil
@@ -136,10 +138,13 @@ func checkProjects(t *testing.T, store db.Storage) error {
 	assert.Equal(t, "alpha-project", alpha.Name)
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EX", alpha.UID)
 
-	beta, err := store.CreateProject(ctx, "beta-project")
+	beta, createdEvent, err := store.CreateProjectAndEvent(ctx, "beta-project", "user-a")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
 	}
+	assert.Equal(t, "project.created", createdEvent.Type)
+	assert.Equal(t, "user-a", createdEvent.Actor)
+	assert.Equal(t, beta.ID, createdEvent.ProjectID)
 	if !uid.Valid(beta.UID) {
 		return fmt.Errorf("invalid generated project UID %q", beta.UID)
 	}
@@ -162,12 +167,22 @@ func checkProjects(t *testing.T, store db.Storage) error {
 		assert.Equal(t, alpha.UID, got.UID)
 	}
 
-	renamed, err := store.RenameProject(ctx, beta.ID, "renamed-project")
+	renamed, renamedEvent, changed, err := store.RenameProjectAndEvent(ctx, beta.ID, "renamed-project", "user-a")
 	if err != nil {
 		return fmt.Errorf("rename project: %w", err)
 	}
+	require.True(t, changed)
+	require.NotNil(t, renamedEvent)
+	assert.Equal(t, "project.renamed", renamedEvent.Type)
+	assert.Equal(t, "user-a", renamedEvent.Actor)
 	assert.Equal(t, beta.ID, renamed.ID)
 	assert.Equal(t, "renamed-project", renamed.Name)
+	_, renamedEvent, changed, err = store.RenameProjectAndEvent(ctx, beta.ID, "renamed-project", "user-a")
+	if err != nil {
+		return fmt.Errorf("repeat project rename: %w", err)
+	}
+	assert.False(t, changed)
+	assert.Nil(t, renamedEvent)
 
 	includingArchived, err := store.ProjectByNameIncludingArchived(ctx, alpha.Name)
 	if err != nil {
@@ -740,7 +755,9 @@ func checkEventQueries(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("events in window: %w", err)
 	}
-	require.Len(t, window, 1)
+	require.Len(t, window, 2)
+	assert.Equal(t, "project.created", window[0].Type)
+	assert.Equal(t, event.ID, window[1].ID)
 	localMax, err := store.MaxLocalOriginEventID(ctx, project.ID)
 	if err != nil {
 		return fmt.Errorf("max local event id: %w", err)

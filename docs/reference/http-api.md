@@ -110,6 +110,45 @@ If you build against this schema and hit a gap, please open an issue — the
 contract is meant to be useful to external clients, and feedback shapes how far
 the compatibility guarantees are taken.
 
+## Browser UI endpoints
+
+The daemon serves the production browser application and its canonical routes
+from the same origin as the API. Browser reads use two native projection
+endpoints published in OpenAPI:
+
+- `GET /api/v1/ui/snapshot` returns one coherent catalog, collection, optional
+  selected detail/history/graph projection, capability envelope, durable event
+  cursor, and strong ETag.
+- `GET /api/v1/ui/references` returns bounded projects, owners, labels, and
+  qualified issue references for pickers and typeahead.
+
+A matching snapshot `If-None-Match` returns `304` without rebuilding the
+projection. The response cursor is captured in the same consistent storage
+read as a newly built projection. Browser events are invalidations; the SPA
+refreshes the snapshot instead of constructing a second authority from event
+payloads.
+
+The browser-session routes are deliberately outside the generated client
+contract. A fresh tab on a keyless direct-loopback origin uses
+`POST /api/v1/ui/session/local`; Host, Origin, peer address, forwarding-header,
+and daemon-auth policy gate that endpoint before it issues a local-web session.
+The URL reported by `kata daemon status` and local `kata ui` both open that
+loopback origin directly. Configured origins exchange a bearer or identity
+token at `POST /api/v1/ui/session/login`. Logout is
+`DELETE /api/v1/ui/session`; there is no browser-session refresh endpoint.
+Session-authentication errors advertise the canonical browser origin in
+`X-Kata-Web-Origin` and its `loopback` or `login` mode in
+`X-Kata-Web-Authentication`, allowing `kata ui` to distinguish a configured
+keyless loopback URL from an authenticated deployment without carrying a
+launch credential.
+
+Every browser data request requires both the instance cookie and
+`X-Kata-Web-Session`. Mutations additionally require the exact `Origin` and
+`X-Kata-CSRF`; the protected event stream carries the session header and
+`Last-Event-ID` through `fetch`. In unauthenticated `--insecure-readonly` mode,
+the UI advertises read-only authority and polls snapshots because the event
+stream remains protected.
+
 ## Federation Enrollment and Health Endpoints
 
 `POST /api/v1/federation/enrollments` accepts an optional `token`. Omitting it

@@ -44,8 +44,9 @@ var storageScenarios = []scenario{
 	{
 		name: "projects",
 		methods: []string{
-			"CreateProject", "CreateProjectWithUID", "ListProjects", "ListProjectsIncludingArchived",
-			"ProjectByID", "ProjectByName", "ProjectByNameIncludingArchived", "ProjectByUID", "RenameProject",
+			"CreateProject", "CreateProjectAndEvent", "CreateProjectWithUID", "CreateProjectWithUIDAndEvent",
+			"ListProjects", "ListProjectsIncludingArchived", "ProjectByID", "ProjectByName",
+			"ProjectByNameIncludingArchived", "ProjectByUID", "RenameProject", "RenameProjectAndEvent",
 		},
 		run: checkProjects,
 	},

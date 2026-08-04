@@ -46,6 +46,88 @@ func TestCreateIssue_IdentityModeOverridesBodyActor(t *testing.T) {
 	assert.Equal(t, "alice", issue.Author)
 }
 
+func TestIssueMutation_IdentityModeUsesPrincipalWhenActorIsOmitted(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	projectID := mkProject(t, env, "https://daemon.example/example-project", "example-project")
+	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		PlaintextToken: "user-a-token",
+		Actor:          "user-a",
+		AdminActor:     db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	headers := map[string]string{"Authorization": "Bearer user-a-token"}
+
+	resp, raw := envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues",
+		map[string]string{"title": "Example issue"}, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "create body: %s", string(raw))
+	var created struct {
+		Issue struct {
+			UID    string `json:"uid"`
+			Author string `json:"author"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &created))
+	assert.Equal(t, "user-a", created.Issue.Author)
+
+	resp, raw = envDoRaw(t, env, http.MethodPatch,
+		projectPath(projectID)+"/issues/"+created.Issue.UID,
+		map[string]string{"title": "Updated example issue"}, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "edit body: %s", string(raw))
+	var edited struct {
+		Event struct {
+			Actor string `json:"actor"`
+		} `json:"event"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &edited))
+	assert.Equal(t, "user-a", edited.Event.Actor)
+
+	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues",
+		map[string]string{"title": "Related example issue"}, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "related create body: %s", string(raw))
+	var related struct {
+		Issue struct {
+			UID string `json:"uid"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &related))
+
+	resp, raw = envDoRaw(t, env, http.MethodPost,
+		projectPath(projectID)+"/issues/"+created.Issue.UID+"/links",
+		map[string]string{"type": "related", "to_ref": related.Issue.UID}, headers)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "link body: %s", string(raw))
+
+	resp, raw = envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/recurrences",
+		map[string]any{
+			"rrule": "FREQ=WEEKLY;COUNT=2", "dtstart": "2026-08-01", "timezone": "UTC",
+			"template": map[string]string{"title": "Weekly example"},
+		}, headers)
+	require.Equalf(t, http.StatusCreated, resp.StatusCode, "recurrence body: %s", string(raw))
+	var recurrence struct {
+		Recurrence struct {
+			UID      string `json:"uid"`
+			Revision int64  `json:"revision"`
+		} `json:"recurrence"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &recurrence))
+
+	patchHeaders := map[string]string{
+		"Authorization": "Bearer user-a-token",
+		"If-Match":      fmt.Sprintf("\"rev-%d\"", recurrence.Recurrence.Revision),
+	}
+	resp, raw = envDoRaw(t, env, http.MethodPatch,
+		projectPath(projectID)+"/recurrences/"+recurrence.Recurrence.UID,
+		map[string]string{"timezone": "America/Chicago"}, patchHeaders)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "recurrence patch body: %s", string(raw))
+
+	deleteHeaders := map[string]string{
+		"Authorization": "Bearer user-a-token",
+		"If-Match":      fmt.Sprintf("\"rev-%d\"", recurrence.Recurrence.Revision+1),
+	}
+	resp, raw = envDoRaw(t, env, http.MethodDelete,
+		projectPath(projectID)+"/recurrences/"+recurrence.Recurrence.UID, nil, deleteHeaders)
+	require.Equalf(t, http.StatusNoContent, resp.StatusCode, "recurrence delete body: %s", string(raw))
+}
+
 func TestCreateIssue_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	projectID := mkProject(t, env, "github.com/test/a", "a")

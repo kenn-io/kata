@@ -59,6 +59,11 @@ and building from a clone is still useful for development builds.
 go install go.kenn.io/kata/cmd/kata@latest
 ```
 
+This module-source install includes the CLI, daemon, and TUI, but Go does not
+run the browser asset toolchain. To use `kata ui`, install a release binary or
+build from a clone with `make install` so the compiled browser bundle is
+embedded.
+
 Go writes the binary to `$(go env GOBIN)` when set, otherwise to
 `$(go env GOPATH)/bin`. Common defaults are `~/go/bin` on Unix and
 `%USERPROFILE%\go\bin` on Windows. Put that directory on `PATH`.

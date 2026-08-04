@@ -16,19 +16,20 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// CreateRecurrence inserts a new recurrence row, emits a recurrence.created
-// event, and returns the freshly-read row.
-func (d *Store) CreateRecurrence(ctx context.Context, in db.CreateRecurrenceIn) (db.Recurrence, error) {
-	return retryWrite1(ctx, d, func() (db.Recurrence, error) {
+// CreateRecurrence inserts a new recurrence row and returns it with the
+// recurrence.created event committed by the same transaction.
+func (d *Store) CreateRecurrence(ctx context.Context, in db.CreateRecurrenceIn) (db.Recurrence, db.Event, error) {
+	return retryWrite2(ctx, d, func() (db.Recurrence, db.Event, error) {
 		return d.createRecurrence(ctx, in)
 	})
 }
 
-func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) (db.Recurrence, error) {
+func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) (db.Recurrence, db.Event, error) {
 	var rec db.Recurrence
+	var event db.Event
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return rec, err
+		return rec, event, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -39,31 +40,31 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 		in.ProjectID,
 	).Scan(&projectName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return rec, fmt.Errorf("project %d not found", in.ProjectID)
+			return rec, event, fmt.Errorf("project %d not found", in.ProjectID)
 		}
-		return rec, err
+		return rec, event, err
 	}
 	if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, in.ProjectID); err != nil {
-		return rec, err
+		return rec, event, err
 	}
 	if err := ensureProjectWritableTx(ctx, tx, in.ProjectID); err != nil {
-		return rec, err
+		return rec, event, err
 	}
 
 	recUID, err := katauid.New()
 	if err != nil {
-		return rec, fmt.Errorf("generate recurrence uid: %w", err)
+		return rec, event, fmt.Errorf("generate recurrence uid: %w", err)
 	}
 
 	normalizedLabels, err := db.NormalizeRecurrenceLabels(in.Template.Labels)
 	if err != nil {
-		return rec, fmt.Errorf("validate template_labels: %w", err)
+		return rec, event, fmt.Errorf("validate template_labels: %w", err)
 	}
 	labelsJSON := "[]"
 	if len(normalizedLabels) > 0 {
 		b, merr := json.Marshal(normalizedLabels)
 		if merr != nil {
-			return rec, fmt.Errorf("marshal labels: %w", merr)
+			return rec, event, fmt.Errorf("marshal labels: %w", merr)
 		}
 		labelsJSON = string(b)
 	}
@@ -73,7 +74,7 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 	}
 
 	if err := db.ValidateRecurrenceTemplate(in.Template.Title, in.Template.Metadata); err != nil {
-		return rec, err
+		return rec, event, err
 	}
 
 	// Compute the first occurrence on or after dtstart. This both validates
@@ -84,7 +85,7 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 	// relies on).
 	firstNext, err := db.ValidateRecurrenceCore(in.Rule, in.DTStart, in.Timezone)
 	if err != nil {
-		return rec, err
+		return rec, event, err
 	}
 
 	res, err := tx.ExecContext(ctx, `
@@ -99,11 +100,11 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 		in.Template.Owner, in.Template.Priority,
 		labelsJSON, metaJSON, firstNext, in.Actor)
 	if err != nil {
-		return rec, err
+		return rec, event, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return rec, err
+		return rec, event, err
 	}
 
 	templateLabels := normalizedLabels
@@ -124,26 +125,27 @@ func (d *Store) createRecurrence(ctx context.Context, in db.CreateRecurrenceIn) 
 		"next_occurrence_key": firstNext,
 	})
 	if err != nil {
-		return rec, fmt.Errorf("marshal event payload: %w", err)
+		return rec, event, fmt.Errorf("marshal event payload: %w", err)
 	}
-	if _, err := d.insertEventTx(ctx, tx, eventInsert{
+	event, err = d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   in.ProjectID,
 		ProjectName: projectName,
 		Type:        "recurrence.created",
 		Actor:       in.Actor,
 		Payload:     string(payload),
-	}); err != nil {
-		return rec, err
+	})
+	if err != nil {
+		return rec, event, err
 	}
 
 	rec, err = d.getRecurrenceTx(ctx, tx, id)
 	if err != nil {
-		return db.Recurrence{}, err
+		return db.Recurrence{}, db.Event{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return db.Recurrence{}, err
+		return db.Recurrence{}, db.Event{}, err
 	}
-	return rec, nil
+	return rec, event, nil
 }
 
 // PatchRecurrence runs an If-Match-guarded UPDATE comparing each supplied
@@ -265,7 +267,12 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		sets = append(sets, "template_body = ?")
 		args = append(args, *in.Update.TemplateBody)
 	}
-	if in.Update.TemplateOwner != nil {
+	if in.Update.ClearTemplateOwner {
+		if cur.TemplateOwner != nil {
+			addDiff("template_owner", cur.TemplateOwner, nil)
+			sets = append(sets, "template_owner = NULL")
+		}
+	} else if in.Update.TemplateOwner != nil {
 		var curOwner string
 		if cur.TemplateOwner != nil {
 			curOwner = *cur.TemplateOwner
@@ -276,7 +283,12 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 			args = append(args, *in.Update.TemplateOwner)
 		}
 	}
-	if in.Update.TemplatePriority != nil {
+	if in.Update.ClearTemplatePriority {
+		if cur.TemplatePriority != nil {
+			addDiff("template_priority", cur.TemplatePriority, nil)
+			sets = append(sets, "template_priority = NULL")
+		}
+	} else if in.Update.TemplatePriority != nil {
 		if cur.TemplatePriority == nil || *cur.TemplatePriority != *in.Update.TemplatePriority {
 			addDiff("template_priority", cur.TemplatePriority, *in.Update.TemplatePriority)
 			sets = append(sets, "template_priority = ?")
@@ -345,13 +357,14 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		return out, fmt.Errorf("marshal event payload: %w", merr)
 	}
 
-	if _, err := d.insertEventTx(ctx, tx, eventInsert{
+	event, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   cur.ProjectID,
 		ProjectName: projectName,
 		Type:        "recurrence.updated",
 		Actor:       in.Actor,
 		Payload:     string(eventPayload),
-	}); err != nil {
+	})
+	if err != nil {
 		return out, err
 	}
 
@@ -363,6 +376,7 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		return out, err
 	}
 	out.Recurrence = next
+	out.Event = event
 	out.NewRevision = newRev
 	out.Changed = true
 	return out, nil
@@ -371,62 +385,69 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 // SoftDeleteRecurrence sets deleted_at on the recurrence row and emits a
 // recurrence.deleted event. Returns an error if the row is already deleted
 // or does not exist.
-func (d *Store) SoftDeleteRecurrence(ctx context.Context, id int64, actor string) error {
-	return d.RetryTransient(ctx, func() error {
-		return d.softDeleteRecurrence(ctx, id, actor)
+func (d *Store) SoftDeleteRecurrence(ctx context.Context, in db.SoftDeleteRecurrenceIn) (db.Event, error) {
+	return retryWrite1(ctx, d, func() (db.Event, error) {
+		return d.softDeleteRecurrence(ctx, in)
 	})
 }
 
-func (d *Store) softDeleteRecurrence(ctx context.Context, id int64, actor string) error {
+func (d *Store) softDeleteRecurrence(ctx context.Context, in db.SoftDeleteRecurrenceIn) (db.Event, error) {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return db.Event{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var pid int64
+	var pid, revision int64
 	var recUID, projectName string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT r.project_id, r.uid, p.name
+		SELECT r.project_id, r.uid, p.name, r.revision
 		  FROM recurrences r JOIN projects p ON p.id = r.project_id
 		 WHERE r.id = ? AND r.deleted_at IS NULL`,
-		id,
-	).Scan(&pid, &recUID, &projectName); err != nil {
+		in.RecurrenceID,
+	).Scan(&pid, &recUID, &projectName, &revision); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("recurrence %d not found or already deleted", id)
+			return db.Event{}, fmt.Errorf("recurrence %d not found or already deleted", in.RecurrenceID)
 		}
-		return err
+		return db.Event{}, err
 	}
 	if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, pid); err != nil {
-		return err
+		return db.Event{}, err
 	}
 	if err := ensureProjectWritableTx(ctx, tx, pid); err != nil {
-		return err
+		return db.Event{}, err
+	}
+	if in.IfMatchRev != revision {
+		return db.Event{}, &db.RevisionConflictError{CurrentRevision: revision}
 	}
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE recurrences
 		   SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 		       revision   = revision + 1
-		 WHERE id = ?`, id,
+		 WHERE id = ?`, in.RecurrenceID,
 	); err != nil {
-		return err
+		return db.Event{}, err
 	}
 
 	payload, merr := json.Marshal(map[string]string{"recurrence_uid": recUID})
 	if merr != nil {
-		return fmt.Errorf("marshal event payload: %w", merr)
+		return db.Event{}, fmt.Errorf("marshal event payload: %w", merr)
 	}
-	if _, err := d.insertEventTx(ctx, tx, eventInsert{
+	event, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   pid,
 		ProjectName: projectName,
 		Type:        "recurrence.deleted",
-		Actor:       actor,
+		Actor:       in.Actor,
 		Payload:     string(payload),
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return db.Event{}, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return db.Event{}, err
+	}
+	return event, nil
 }
 
 // recurrenceSelectFields is the canonical SELECT column list for recurrences.

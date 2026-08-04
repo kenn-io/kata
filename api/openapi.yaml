@@ -29,8 +29,6 @@ components:
             - tui
             - ""
           type: string
-      required:
-        - actor
       type: object
     AddLabelRequestBody:
       additionalProperties: false
@@ -40,7 +38,6 @@ components:
         label:
           type: string
       required:
-        - actor
         - label
       type: object
     AddLabelResponseBody:
@@ -81,7 +78,6 @@ components:
         owner:
           type: string
       required:
-        - actor
         - owner
       type: object
     AuditCloseRow:
@@ -315,7 +311,6 @@ components:
         body:
           type: string
       required:
-        - actor
         - body
       type: object
     CommentResponseBody:
@@ -460,7 +455,6 @@ components:
         title:
           type: string
       required:
-        - actor
         - title
       type: object
     CreateLinkRequestBody:
@@ -479,7 +473,6 @@ components:
             - related
           type: string
       required:
-        - actor
         - type
         - to_ref
       type: object
@@ -514,7 +507,6 @@ components:
         timezone:
           type: string
       required:
-        - actor
         - rrule
         - dtstart
         - timezone
@@ -749,8 +741,6 @@ components:
           type: integer
         title:
           type: string
-      required:
-        - actor
       type: object
     EditIssueResponseBody:
       additionalProperties: true
@@ -1633,6 +1623,8 @@ components:
     InitProjectRequestBody:
       additionalProperties: false
       properties:
+        actor:
+          type: string
         alias:
           $ref: "#/components/schemas/AliasInput"
           description: client-derived alias metadata; only honored when start_path is empty
@@ -2297,6 +2289,8 @@ components:
     MergeProjectRequestBody:
       additionalProperties: false
       properties:
+        actor:
+          type: string
         source_project_id:
           format: int64
           type: integer
@@ -2360,7 +2354,6 @@ components:
         to_project_uid:
           type: string
       required:
-        - actor
         - to_project_uid
       type: object
     MoveIssueResponseBody:
@@ -2408,7 +2401,6 @@ components:
           additionalProperties: true
           type: object
       required:
-        - actor
         - patch
       type: object
     PatchIssueMetadataResponseBody:
@@ -2462,8 +2454,6 @@ components:
           $ref: "#/components/schemas/RecurrenceTemplateUpdateInput"
         timezone:
           type: string
-      required:
-        - actor
       type: object
     PatchRecurrenceResponseBody:
       additionalProperties: true
@@ -2574,8 +2564,6 @@ components:
         priority:
           format: int64
           type: integer
-      required:
-        - actor
       type: object
     Project:
       additionalProperties: true
@@ -2789,6 +2777,25 @@ components:
       required:
         - project
         - alias
+      type: object
+    ProjectStats:
+      additionalProperties: true
+      properties:
+        Closed:
+          format: int64
+          type: integer
+        LastEventAt:
+          format: date-time
+          type:
+            - string
+            - "null"
+        Open:
+          format: int64
+          type: integer
+      required:
+        - Open
+        - Closed
+        - LastEventAt
       type: object
     ProjectStatsOut:
       additionalProperties: true
@@ -3287,6 +3294,10 @@ components:
       properties:
         body:
           type: string
+        clear_owner:
+          type: boolean
+        clear_priority:
+          type: boolean
         labels:
           items:
             type: string
@@ -3318,6 +3329,8 @@ components:
     RenameProjectRequestBody:
       additionalProperties: false
       properties:
+        actor:
+          type: string
         name:
           type: string
       required:
@@ -3658,13 +3671,397 @@ components:
         - last_used_at
         - revoked_at
       type: object
+    UICapabilities:
+      additionalProperties: true
+      properties:
+        actor_policy:
+          type: string
+        updates:
+          enum:
+            - sse
+            - poll
+          type: string
+        writable:
+          type: boolean
+      required:
+        - writable
+        - updates
+        - actor_policy
+      type: object
+    UIGraph:
+      additionalProperties: true
+      properties:
+        edges:
+          items:
+            $ref: "#/components/schemas/UIGraphEdge"
+          type:
+            - array
+            - "null"
+        issues:
+          items:
+            $ref: "#/components/schemas/UIIssue"
+          type:
+            - array
+            - "null"
+        links:
+          items:
+            $ref: "#/components/schemas/UILink"
+          type:
+            - array
+            - "null"
+        unresolved_refs:
+          items:
+            $ref: "#/components/schemas/UIGraphUnresolvedRef"
+          type:
+            - array
+            - "null"
+      required:
+        - issues
+        - links
+        - edges
+        - unresolved_refs
+      type: object
+    UIGraphEdge:
+      additionalProperties: true
+      properties:
+        from_uid:
+          type: string
+        kind:
+          type: string
+        layout:
+          type: boolean
+        to_uid:
+          type: string
+      required:
+        - from_uid
+        - to_uid
+        - kind
+        - layout
+      type: object
+    UIGraphUnresolvedRef:
+      additionalProperties: true
+      properties:
+        kind:
+          type: string
+        other_uid:
+          type: string
+        side:
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - side
+        - kind
+        - other_uid
+      type: object
+    UIIssue:
+      additionalProperties: true
+      properties:
+        author:
+          type: string
+        body:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        closed_reason:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        labels:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        metadata:
+          additionalProperties: true
+          type: object
+        occurrence_key:
+          type: string
+        owner:
+          type: string
+        priority:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        qualified_id:
+          type: string
+        recurrence_id:
+          format: int64
+          type: integer
+        revision:
+          format: int64
+          type: integer
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - project_name
+        - qualified_id
+        - labels
+        - id
+        - uid
+        - project_id
+        - short_id
+        - title
+        - body
+        - status
+        - author
+        - metadata
+        - revision
+        - created_at
+        - updated_at
+      type: object
+    UIIssueReference:
+      additionalProperties: true
+      properties:
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        qualified_id:
+          type: string
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - project_uid
+        - project_name
+        - short_id
+        - qualified_id
+        - title
+        - status
+      type: object
+    UILink:
+      additionalProperties: true
+      properties:
+        author:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        from_issue_id:
+          format: int64
+          type: integer
+        from_issue_uid:
+          type: string
+        from_qualified_id:
+          type: string
+        from_status:
+          type: string
+        id:
+          format: int64
+          type: integer
+        to_issue_id:
+          format: int64
+          type: integer
+        to_issue_uid:
+          type: string
+        to_qualified_id:
+          type: string
+        to_status:
+          type: string
+        type:
+          type: string
+      required:
+        - from_qualified_id
+        - from_status
+        - to_qualified_id
+        - to_status
+        - id
+        - from_issue_id
+        - from_issue_uid
+        - to_issue_id
+        - to_issue_uid
+        - type
+        - author
+        - created_at
+      type: object
+    UIProject:
+      additionalProperties: true
+      properties:
+        project:
+          $ref: "#/components/schemas/Project"
+        stats:
+          $ref: "#/components/schemas/ProjectStats"
+      required:
+        - project
+        - stats
+      type: object
+    UIReferencesResponseBody:
+      additionalProperties: true
+      properties:
+        capabilities:
+          $ref: "#/components/schemas/UICapabilities"
+        contract_version:
+          type: string
+        cursor:
+          format: int64
+          type: integer
+        issues:
+          items:
+            $ref: "#/components/schemas/UIIssueReference"
+          type:
+            - array
+            - "null"
+        labels:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        origin:
+          type: string
+        origin_stable:
+          type: boolean
+        owners:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        projects:
+          items:
+            $ref: "#/components/schemas/Project"
+          type:
+            - array
+            - "null"
+      required:
+        - contract_version
+        - cursor
+        - capabilities
+        - origin
+        - origin_stable
+        - projects
+        - issues
+        - owners
+        - labels
+      type: object
+    UISelectedAuthority:
+      additionalProperties: true
+      properties:
+        comments:
+          items:
+            $ref: "#/components/schemas/Comment"
+          type:
+            - array
+            - "null"
+        history:
+          items:
+            $ref: "#/components/schemas/Event"
+          type:
+            - array
+            - "null"
+        issue:
+          $ref: "#/components/schemas/UIIssue"
+        labels:
+          items:
+            $ref: "#/components/schemas/IssueLabel"
+          type:
+            - array
+            - "null"
+        links:
+          items:
+            $ref: "#/components/schemas/UILink"
+          type:
+            - array
+            - "null"
+        recurrences:
+          items:
+            $ref: "#/components/schemas/Recurrence"
+          type:
+            - array
+            - "null"
+        state:
+          type: string
+      required:
+        - state
+        - comments
+        - labels
+        - links
+        - recurrences
+        - history
+      type: object
+    UISnapshotResponseBody:
+      additionalProperties: true
+      properties:
+        capabilities:
+          $ref: "#/components/schemas/UICapabilities"
+        catalog:
+          items:
+            $ref: "#/components/schemas/UIProject"
+          type:
+            - array
+            - "null"
+        collection:
+          items:
+            $ref: "#/components/schemas/UIIssue"
+          type:
+            - array
+            - "null"
+        collection_links:
+          items:
+            $ref: "#/components/schemas/UILink"
+          type:
+            - array
+            - "null"
+        contract_version:
+          type: string
+        cursor:
+          format: int64
+          type: integer
+        graph:
+          $ref: "#/components/schemas/UIGraph"
+        origin:
+          type: string
+        origin_stable:
+          type: boolean
+        selected:
+          $ref: "#/components/schemas/UISelectedAuthority"
+      required:
+        - contract_version
+        - cursor
+        - capabilities
+        - origin
+        - origin_stable
+        - catalog
+        - collection
+        - collection_links
+      type: object
     UnassignRequestBody:
       additionalProperties: false
       properties:
         actor:
           type: string
-      required:
-        - actor
       type: object
 info:
   title: kata
@@ -5607,7 +6004,6 @@ paths:
         - explode: false
           in: query
           name: actor
-          required: true
           schema:
             type: string
       responses:
@@ -6135,10 +6531,14 @@ paths:
           required: true
           schema:
             type: string
+        - in: header
+          name: If-Match
+          required: true
+          schema:
+            type: string
         - explode: false
           in: query
           name: actor
-          required: true
           schema:
             type: string
       responses:
@@ -6408,3 +6808,152 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/ui/references:
+    get:
+      operationId: readUIReferences
+      parameters:
+        - in: header
+          name: If-None-Match
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: q
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: project_uid
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UIReferencesResponseBody"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        "304":
+          description: References unchanged
+      summary: Read bounded browser reference choices
+  /api/v1/ui/snapshot:
+    get:
+      description: Returns 304 without projection reads when If-None-Match matches the current durable cursor, normalized intent, and effective capabilities.
+      operationId: readUISnapshot
+      parameters:
+        - in: header
+          name: If-None-Match
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: view
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: project_uid
+          schema:
+            type: string
+        - explode: true
+          in: query
+          name: status
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: true
+          in: query
+          name: owner
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: true
+          in: query
+          name: label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: true
+          in: query
+          name: relationship
+          schema:
+            items:
+              enum:
+                - parent
+                - child
+                - blocks
+                - blocked_by
+                - related
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: false
+          in: query
+          name: text
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: selected_issue_uid
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: include_graph
+          schema:
+            type: boolean
+        - explode: false
+          in: query
+          name: include_history
+          schema:
+            type: boolean
+        - explode: false
+          in: query
+          name: local_date
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: time_zone
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UISnapshotResponseBody"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        "304":
+          description: Snapshot unchanged
+      summary: Read a coherent browser snapshot

@@ -942,7 +942,7 @@ func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *tes
 		}, nil
 	})}
 
-	project, err := resolveFederationProject(context.Background(), client, baseURL, nil, false)
+	project, err := resolveFederationProject(context.Background(), client, baseURL, nil, false, "")
 
 	require.NoError(t, err)
 	assert.True(t, called)
@@ -1117,9 +1117,13 @@ func TestFederationEnrollCLIUsesResolvedActorWhenAutoEnabling(t *testing.T) {
 		Limit:     100,
 	})
 	require.NoError(t, err)
-	require.NotEmpty(t, events)
-	assert.Equal(t, "project.federation_enabled", events[0].Type)
-	assert.Equal(t, "alice", events[0].Actor)
+	for _, event := range events {
+		if event.Type == "project.federation_enabled" {
+			assert.Equal(t, "alice", event.Actor)
+			return
+		}
+	}
+	t.Fatal("project.federation_enabled event not found")
 }
 
 func TestFederationJoinCLIRequiresPullCapability(t *testing.T) {
