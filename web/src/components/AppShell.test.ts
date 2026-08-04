@@ -473,6 +473,7 @@ function mutationProps(overrides: Record<string, unknown> = {}) {
     onReopenIssue: vi.fn(),
     onDeleteIssue: vi.fn(async () => true),
     onCreateIssue: vi.fn(async () => {}),
+    onDesignateInbox: vi.fn(async () => {}),
     onCreateRecurrence: vi.fn(async () => {}),
     onPatchRecurrence: vi.fn(async () => {}),
     onDeleteRecurrence: vi.fn(async () => true),

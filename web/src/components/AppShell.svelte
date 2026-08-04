@@ -48,6 +48,7 @@
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
+    onDesignateInbox: (projectUID: string) => Promise<void>
     onCreateIssue: (title: string) => void | Promise<void>
     searchReferences: (query: string) => Promise<components['schemas']['UIIssueReference'][]>
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
@@ -87,6 +88,7 @@
     onPreferencesChange = () => {},
     onNavigate,
     onCreateProject,
+    onDesignateInbox,
     onCreateIssue,
     searchReferences,
     onMoveIssue,
@@ -113,7 +115,10 @@
   )
 
   let projection = $derived(normalizeKataUISnapshot(snapshot))
-  let hasInbox = $derived(projection.projects.some((project) => project.metadata.role === 'inbox'))
+  let inboxProject = $derived(
+    projection.projects.find((project) => project.metadata.role === 'inbox'),
+  )
+  let hasInbox = $derived(inboxProject !== undefined)
   let viewName = $derived(viewNameForRoute(route))
   let searchFilters = $derived(searchFiltersForRoute(route, viewName))
   let currentView = $derived(
@@ -330,9 +335,12 @@
       }}
       {searchFilters}
       projectCreationDisabled={!canMutate || mutationPending}
+      inboxProjectUID={inboxProject?.uid}
+      inboxDesignationDisabled={!canMutate || mutationPending}
       onOpenView={openView}
       onOpenProject={openProject}
       {onCreateProject}
+      {onDesignateInbox}
     />
 
     <div class="kata-main">

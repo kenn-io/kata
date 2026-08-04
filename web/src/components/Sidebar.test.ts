@@ -59,9 +59,12 @@ function renderSidebar(overrides: Partial<SidebarProps> = {}) {
       currentView,
       searchFilters: allScopeFilters,
       projectCreationDisabled: false,
+      inboxProjectUID: 'project-inbox',
+      inboxDesignationDisabled: false,
       onOpenView: vi.fn(),
       onOpenProject: vi.fn(),
       onCreateProject: vi.fn(),
+      onDesignateInbox: vi.fn(),
       ...overrides,
     },
   })
@@ -77,7 +80,7 @@ describe('Sidebar', () => {
     renderSidebar()
 
     const navigation = screen.getByRole('region', { name: 'Kata navigation' })
-    const inbox = within(navigation).getByRole('button', { name: /^Inbox\b/ })
+    const inbox = within(navigation).getByRole('button', { name: 'Inbox 2' })
     const personal = within(navigation).getByRole('button', { name: /^Personal\s+1$/ })
     const work = within(navigation).getByRole('button', { name: /^Work\s+1$/ })
     const create = within(navigation).getByRole('button', { name: 'New project' })
@@ -118,7 +121,7 @@ describe('Sidebar', () => {
 
     renderSidebar({ onOpenView, onOpenProject })
 
-    await fireEvent.click(screen.getByRole('button', { name: /^Inbox\b/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Inbox 2' }))
     expect(onOpenView).toHaveBeenCalledWith('inbox')
 
     await fireEvent.click(screen.getByRole('button', { name: /^example-project\b/ }))

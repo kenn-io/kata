@@ -6,7 +6,7 @@
   import LayersIcon from '@lucide/svelte/icons/layers'
   import PlusIcon from '@lucide/svelte/icons/plus'
   import StarIcon from '@lucide/svelte/icons/star'
-  import { ScrollBox, showFlash } from '@kenn-io/kit-ui'
+  import { ScrollBox, showFlash, Typeahead, type TypeaheadOption } from '@kenn-io/kit-ui'
 
   import GroupedSidebarSection from './GroupedSidebarSection.svelte'
 
@@ -24,9 +24,12 @@
     currentView: KataCurrentView
     searchFilters: KataTaskSearchFilters
     projectCreationDisabled: boolean
+    inboxProjectUID?: string | undefined
+    inboxDesignationDisabled: boolean
     onOpenView: (name: KataTaskViewName) => void | Promise<void>
     onOpenProject: (projectUID: string) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
+    onDesignateInbox: (projectUID: string) => Promise<void>
   }
 
   let {
@@ -35,9 +38,12 @@
     currentView,
     searchFilters,
     projectCreationDisabled,
+    inboxProjectUID,
+    inboxDesignationDisabled,
     onOpenView,
     onOpenProject,
     onCreateProject,
+    onDesignateInbox,
   }: Props = $props()
 
   const systemViews: Array<{
@@ -58,6 +64,12 @@
   let createSaving = $state(false)
   let createInput: HTMLInputElement | null = $state(null)
   let collapsedAreas = $state<string[]>([])
+  let inboxError = $state('')
+  const inboxOptions = $derived.by<TypeaheadOption[]>(() =>
+    projects
+      .map((project) => ({ name: project.uid, label: project.name }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
+  )
 
   function toggleArea(name: string): void {
     collapsedAreas = collapsedAreas.includes(name)
@@ -106,6 +118,17 @@
       createSaving = false
     }
   }
+
+  async function designateInbox(projectUID: string): Promise<boolean> {
+    inboxError = ''
+    try {
+      await onDesignateInbox(projectUID)
+      return true
+    } catch (err) {
+      inboxError = err instanceof Error ? err.message : 'Could not designate the Inbox project.'
+      return false
+    }
+  }
 </script>
 
 <div class="kata-sidebar" aria-label="Kata navigation">
@@ -130,6 +153,20 @@
         </button>
       {/each}
     </nav>
+
+    <div class="inbox-project-control">
+      <Typeahead
+        options={inboxOptions}
+        value={inboxProjectUID ?? ''}
+        fallbackLabel="Choose a project"
+        placeholder="Inbox project"
+        triggerPrefix="Inbox project:"
+        emptyLabel="No projects available"
+        disabled={inboxDesignationDisabled || projects.length === 0}
+        error={inboxError}
+        onselect={designateInbox}
+      />
+    </div>
 
     {#each areas as area (area.name)}
       <GroupedSidebarSection
@@ -212,6 +249,14 @@
     display: grid;
     gap: 4px;
     padding: 12px;
+  }
+
+  .inbox-project-control {
+    padding: 0 12px 12px;
+  }
+
+  .inbox-project-control :global(.kit-typeahead) {
+    width: 100%;
   }
 
   .kata-nav button,
