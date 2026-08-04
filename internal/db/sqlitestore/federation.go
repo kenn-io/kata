@@ -1034,7 +1034,7 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := d.materializeFederatedProjectTx(ctx, tx, projectID); err != nil {
+	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1043,7 +1043,16 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 	return nil
 }
 
-func (d *Store) materializeFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+// materializeFederatedProjectTx rebuilds the project's projection from its
+// event log. reconcileLinks controls the binding-group link pass, whose cost
+// scales with every federated project in the group rather than with this
+// project; callers that know their events cannot affect link state pass false.
+func (d *Store) materializeFederatedProjectTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	reconcileLinks bool,
+) error {
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err != nil {
@@ -1065,8 +1074,10 @@ func (d *Store) materializeFederatedProjectTx(ctx context.Context, tx *sql.Tx, p
 	if err := reconcileFederatedLabels(ctx, tx, projectID, issueIDs, projection); err != nil {
 		return err
 	}
-	if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs); err != nil {
-		return err
+	if reconcileLinks {
+		if err := reconcileFederatedLinks(ctx, tx, binding, projectID, issueIDs); err != nil {
+			return err
+		}
 	}
 	if err := pruneFederatedIssues(ctx, tx, projectID, issueIDs); err != nil {
 		return err

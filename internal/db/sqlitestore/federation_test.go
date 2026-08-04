@@ -5540,3 +5540,52 @@ func TestSyncStatusWritersNoOpWithoutBinding(t *testing.T) {
 		t.Fatalf("expected no sync_status row without a binding, got %d", n)
 	}
 }
+
+// A batch with no link-affecting event skips the binding-group link fold. The
+// materialized link state must be left exactly as it was, and the rest of the
+// projection must still be rebuilt.
+func TestIngestWithoutLinkAffectingEventsPreservesMaterializedLinks(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	project := createProject(ctx, t, d, "spoke-project")
+	firstIssue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "first",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	secondIssue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID,
+		Title:     "second",
+		Author:    "tester",
+	})
+	require.NoError(t, err)
+	_, err = d.EnableProjectFederation(ctx, project.ID, "tester")
+	require.NoError(t, err)
+
+	const linkCount = `SELECT count(*) FROM links
+		  WHERE from_issue_uid = ? AND to_issue_uid = ? AND type = 'blocks'`
+
+	spokeUID := newTestUID(t)
+	link := ingestEventWithPayload(t, project.UID, project.Name, spokeUID,
+		&firstIssue.UID, &secondIssue.UID, "issue.linked", 100,
+		`{"issue_uid":"`+firstIssue.UID+`","from_uid":"`+firstIssue.UID+
+			`","to_uid":"`+secondIssue.UID+`","type":"blocks"}`)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(project.ID, spokeUID, link))
+	require.NoError(t, err)
+	assertRowCount(ctx, t, d, 1, "link-affecting event materializes the link",
+		linkCount, firstIssue.UID, secondIssue.UID)
+
+	comment := ingestEventWithPayload(t, project.UID, project.Name, spokeUID,
+		&firstIssue.UID, nil, "issue.commented", 101,
+		`{"issue_uid":"`+firstIssue.UID+`","comment_uid":"`+newTestUID(t)+
+			`","author":"tester","body":"follow-up","created_at":"2026-05-23T12:00:00.000Z"}`)
+	_, err = d.IngestFederationEvents(ctx, ingestParams(project.ID, spokeUID, comment))
+	require.NoError(t, err)
+
+	assertRowCount(ctx, t, d, 1, "comment-only ingest leaves materialized links intact",
+		linkCount, firstIssue.UID, secondIssue.UID)
+	assertRowCount(ctx, t, d, 1, "comment-only ingest still rebuilds the rest of the projection",
+		`SELECT count(*) FROM comments WHERE issue_id = ? AND body = 'follow-up'`,
+		firstIssue.ID)
+}

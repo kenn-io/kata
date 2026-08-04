@@ -116,7 +116,7 @@ func TestClientOptsForCredentialPreservesAllowInsecureOptIn(t *testing.T) {
 	})
 
 	assert.True(t, opts.AllowInsecure)
-	assert.Equal(t, defaultClientTimeout, opts.Timeout)
+	assert.Equal(t, defaultFederationClientTimeout, opts.Timeout)
 }
 
 func TestFederationRunnerUsesBindingEndpointWithStaleCredentialMetadata(t *testing.T) {
@@ -4306,4 +4306,36 @@ func openDaemonclientTestDB(t *testing.T) (*sqlitestore.Store, string) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, path
+}
+
+func TestClientOptsWithDefaultUsesFederationTimeout(t *testing.T) {
+	opts := clientOptsWithDefault(clientpkg.Opts{})
+
+	assert.Equal(t, defaultFederationClientTimeout, opts.Timeout)
+	assert.Greater(t, defaultFederationClientTimeout, clientpkg.DefaultHTTPTimeout,
+		"federation pushes and polls are bulk operations and need a larger budget than interactive calls")
+}
+
+func TestClientOptsWithDefaultHonorsHTTPTimeoutEnv(t *testing.T) {
+	t.Setenv(clientpkg.HTTPTimeoutEnvVar, "90s")
+
+	opts := clientOptsWithDefault(clientpkg.Opts{})
+
+	assert.Equal(t, 90*time.Second, opts.Timeout)
+}
+
+func TestClientOptsWithDefaultIgnoresUnparseableHTTPTimeoutEnv(t *testing.T) {
+	t.Setenv(clientpkg.HTTPTimeoutEnvVar, "30")
+
+	opts := clientOptsWithDefault(clientpkg.Opts{})
+
+	assert.Equal(t, defaultFederationClientTimeout, opts.Timeout)
+}
+
+func TestClientOptsWithDefaultKeepsExplicitTimeout(t *testing.T) {
+	t.Setenv(clientpkg.HTTPTimeoutEnvVar, "90s")
+
+	opts := clientOptsWithDefault(clientpkg.Opts{Timeout: 7 * time.Second})
+
+	assert.Equal(t, 7*time.Second, opts.Timeout)
 }
