@@ -26,6 +26,19 @@ export class InvalidationController {
     this.#schedule()
   }
 
+  async resume(): Promise<boolean> {
+    this.#stopped = false
+    const full = this.#full
+    let accepted = false
+    try {
+      accepted = await this.#refresh(full)
+    } catch {
+      // The visible recovery action can retry without losing a reset latch.
+    }
+    if (full && accepted) this.#full = false
+    return accepted
+  }
+
   #schedule(delay = 0): void {
     if (this.#pending !== undefined || this.#running) return
     this.#pending = setTimeout(() => {
@@ -66,12 +79,16 @@ export class InvalidationController {
     }
   }
 
-  stop(): void {
+  pause(): void {
     if (this.#pending !== undefined) clearTimeout(this.#pending)
     this.#pending = undefined
-    this.#full = false
     this.#dirty = false
     this.#stopped = true
+  }
+
+  stop(): void {
+    this.pause()
+    this.#full = false
   }
 }
 

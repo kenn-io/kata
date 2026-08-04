@@ -624,7 +624,7 @@
     clearSessionCredentials()
     scheduler.stop()
     stream.stop()
-    invalidations.stop()
+    invalidations.pause()
     if (!snapshots.state.authenticationRequired) snapshots.markAuthenticationRequired()
     returnPath = window.location.pathname + window.location.search
     if (
@@ -656,7 +656,7 @@
   async function startAuthority(): Promise<void> {
     scheduler.stop()
     stream.stop()
-    await refreshSnapshot(false)
+    await invalidations.resume()
     if (authority?.authenticationRequired) return
     if (authority?.snapshot) localSessionAttempted = false
     if (authority?.snapshot) void loadReferences()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -310,6 +311,21 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 	defer sub.Unsub()
 
 	ctx := hctx.Context()
+	if projectID > 0 {
+		project, projectErr := cfg.DB.ProjectByID(ctx, projectID)
+		if errors.Is(projectErr, db.ErrNotFound) || (projectErr == nil && project.DeletedAt != nil) {
+			resetID, resetErr := cfg.DB.MaxEventID(ctx)
+			if resetErr != nil || revalidateSSEAuthority(ctx) != nil {
+				return
+			}
+			writeResetFrame(w, resetID)
+			flusher.Flush()
+			return
+		}
+		if projectErr != nil {
+			return
+		}
+	}
 	hwm, err := cfg.DB.MaxEventID(ctx)
 	if err != nil {
 		return

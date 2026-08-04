@@ -548,6 +548,84 @@ describe('App', () => {
     expect(await screen.findByRole('status', { name: 'Kata live updates' })).not.toBeNull()
   })
 
+  it('keeps a reset refresh unconditional across 401 and transparent reauthentication', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const initial = snapshot()
+    initial.capabilities.updates = 'sse'
+    const refreshed = snapshot()
+    const snapshotRequests: Request[] = []
+    let streamRequests = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/events/stream') {
+          streamRequests += 1
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                if (streamRequests === 1) {
+                  controller.enqueue(
+                    new TextEncoder().encode(
+                      'id: 13\nevent: sync.reset_required\ndata: {"reset_required":true}\n\n',
+                    ),
+                  )
+                }
+                controller.close()
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+          )
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata',
+            writable: true,
+            updates: 'sse',
+            actor_policy: 'request',
+          })
+        }
+        if (target.pathname === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          if (snapshotRequests.length === 1) {
+            return Response.json(initial, { headers: { ETag: '"snapshot-1"' } })
+          }
+          if (snapshotRequests.length === 2) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          if (request.headers.has('If-None-Match')) {
+            return new Response(null, { status: 304 })
+          }
+          return Response.json(refreshed, { headers: { ETag: '"snapshot-2"' } })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    await waitFor(() => expect(snapshotRequests).toHaveLength(3))
+    expect(snapshotRequests[2]?.headers.has('If-None-Match')).toBe(false)
+    await waitFor(() =>
+      expect(screen.queryByRole('status', { name: 'Stale Kata data' })).toBeNull(),
+    )
+  })
+
   it('replaces the shell with a visible version mismatch after guarded recovery fails', async () => {
     render(App)
 

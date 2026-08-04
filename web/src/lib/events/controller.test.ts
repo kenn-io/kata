@@ -51,6 +51,29 @@ describe('event invalidation control', () => {
     expect(refresh).toHaveBeenNthCalledWith(3, false)
   })
 
+  it('keeps a reset latched across an authentication pause and reauthentication', async () => {
+    const refresh = vi
+      .fn<(full: boolean) => Promise<boolean>>()
+      .mockImplementationOnce(async () => {
+        controller.pause()
+        return false
+      })
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+    const controller = new InvalidationController(refresh)
+
+    controller.frame({ id: '3', event: 'sync.reset_required', data: '{}' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(refresh).toHaveBeenNthCalledWith(1, true)
+
+    await controller.resume()
+    expect(refresh).toHaveBeenNthCalledWith(2, true)
+
+    controller.refresh()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(refresh).toHaveBeenNthCalledWith(3, false)
+  })
+
   it('backs off 1/2/4 seconds through a 30-second cap and resets only after work', () => {
     const backoff = new ReconnectBackoff()
     expect([

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,22 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type projectLookupGateStorage struct {
+	db.Storage
+	projectID int64
+	lookups   atomic.Int64
+	entered   chan struct{}
+	release   chan struct{}
+}
+
+func (s *projectLookupGateStorage) ProjectByID(ctx context.Context, projectID int64) (db.Project, error) {
+	if projectID == s.projectID && s.lookups.Add(1) == 2 {
+		close(s.entered)
+		<-s.release
+	}
+	return s.Storage.ProjectByID(ctx, projectID)
+}
 
 func mkProject(t *testing.T, env *testenv.Env, _ string, name string) int64 {
 	t.Helper()
@@ -761,6 +778,47 @@ func TestProjectMergeBroadcastsLiveEvent(t *testing.T) {
 	assert.Equal(t, "reset", reset.Kind)
 	assert.Equal(t, message.Event.ID, reset.ResetID)
 	assert.Equal(t, sourceID, reset.ProjectID)
+}
+
+func TestSSE_ProjectMergeBetweenValidationAndSubscriptionResetsAndCloses(t *testing.T) {
+	var gated *projectLookupGateStorage
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		gated = &projectLookupGateStorage{
+			Storage: cfg.DB,
+			entered: make(chan struct{}),
+			release: make(chan struct{}),
+		}
+		cfg.DB = gated
+	})
+	targetID := mkProject(t, env, "", "example-project")
+	sourceID := mkProject(t, env, "", "example-workspace")
+	gated.projectID = sourceID
+	maxID, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+
+	response := openSSE(t, env,
+		"project_id="+strconv.FormatInt(sourceID, 10)+"&after_id="+strconv.FormatInt(maxID, 10), nil)
+	defer func() { _ = response.Body.Close() }()
+	select {
+	case <-gated.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not reach its second project existence check")
+	}
+
+	envPostJSON(t, env, projectPath(targetID)+"/merge", map[string]any{
+		"source_project_id": sourceID, "actor": "user-a",
+	}, nil)
+	close(gated.release)
+
+	framer := newSSEFramer(response.Body)
+	reset, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "source stream should receive a terminal reset")
+	assert.Equal(t, "sync.reset_required", reset.event)
+	select {
+	case <-framer.doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("source stream remained open after its project merged")
+	}
 }
 
 func TestSSE_LivePhaseOmitsTokenEvents(t *testing.T) {
