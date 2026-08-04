@@ -6,6 +6,7 @@ import {
   exchangeLoginToken,
   loadSessionCredentials,
   openLocalSession,
+  openTrustedProxySession,
   selectAuthenticationMode,
 } from './session'
 
@@ -52,6 +53,31 @@ describe('browser session bootstrap', () => {
 
     expect(result).toBeUndefined()
     expect(loadSessionCredentials(sessionStorage)).toBeUndefined()
+  })
+
+  it('exchanges a trusted proxy principal for a browser session', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('/api/v1/ui/session/proxy')
+      expect(init?.credentials).toBe('same-origin')
+      expect(init?.redirect).toBe('error')
+      return new Response(
+        JSON.stringify({
+          session: 'proxy-session',
+          csrf: 'proxy-csrf',
+          return_path: '/kata',
+          writable: true,
+          updates: 'sse',
+          actor_policy: 'identity',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    })
+
+    const result = await openTrustedProxySession('/kata', fetcher, sessionStorage)
+
+    expect(result.kind).toBe('authenticated')
+    expect(result.capabilities.actorPolicy).toBe('identity')
+    expect(loadSessionCredentials(sessionStorage)?.session).toBe('proxy-session')
   })
 
   it('never persists a bearer used for interactive login', async () => {

@@ -221,7 +221,10 @@ authorization service. Review browser changes against these boundaries:
   match browser `Host` and `Origin` serialization. Forwarded headers do not
   change it, and path-prefixed deployments are unsupported. Proxies must
   preserve that origin, streaming, the authenticated-response cache policy,
-  and the root-relative SPA/API routes.
+  and the root-relative SPA/API routes. When the browser listener itself is in
+  `trusted_proxy_listeners`, its asserted actor is exchanged for a tab-scoped
+  browser session; Kata must not advertise token login unless a daemon token
+  can actually satisfy it.
 - **Development runs are isolated production processes.** Web tooling must
   launch the branch daemon with a temporary Kata home, workspace, and database.
   It must construct child environments from an explicit OS/toolchain allowlist

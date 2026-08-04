@@ -67,6 +67,9 @@ For an HTTPS reverse proxy, set `[web].public_origin` to the exact browser
 origin and route the UI, assets, `/api/v1/ui/*`, ordinary `/api/v1/*`, and the
 event stream to the same daemon. Do not rewrite the browser application to a
 different API origin or infer the public origin from forwarded headers.
+When that browser listener is also a configured trusted-proxy listener, Kata
+exchanges the proxy-asserted actor for a browser session automatically; it does
+not ask the user for a daemon token.
 
 When the shared TCP listener binds a wildcard address but clients use an
 intentional backend hostname (for example, a container-network alias), add

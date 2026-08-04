@@ -237,6 +237,9 @@ a local-web session. Kata disables this local convenience when the listener or
 public origin is non-loopback, a forwarding header is present, or daemon token,
 identity, or trusted-proxy authentication is configured. Authenticated browser
 requests still require both the HttpOnly cookie and tab-local session header.
+If the browser listener is itself named in
+`[auth.proxy].trusted_proxy_listeners`, the browser transparently exchanges the
+proxy-asserted actor for that tab-scoped session instead of showing token login.
 
 `[web].public_origin` declares the exact HTTP or HTTPS origin visible to the
 browser when a same-origin TLS terminator or development proxy sits in front of

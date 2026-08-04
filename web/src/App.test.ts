@@ -66,6 +66,45 @@ describe('App', () => {
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('local-session')
   })
 
+  it('opens a trusted-proxy tab without presenting token login', async () => {
+    const paths: string[] = []
+    let authorized = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        paths.push(target.pathname)
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return new Response('', { status: 404 })
+        }
+        if (target.pathname === '/api/v1/ui/session/proxy') {
+          authorized = true
+          return Response.json({
+            session: 'proxy-session',
+            csrf: 'proxy-csrf',
+            return_path: '/kata',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'identity',
+          })
+        }
+        if (!authorized) {
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'proxy' },
+          })
+        }
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(paths).toContain('/api/v1/ui/session/proxy')
+    expect(screen.queryByRole('heading', { name: 'Connect to Kata' })).toBeNull()
+  })
+
   it('tells a local tab to use the CLI when transparent authorization is unavailable', async () => {
     vi.stubGlobal(
       'fetch',

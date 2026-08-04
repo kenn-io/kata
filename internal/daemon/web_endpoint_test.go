@@ -110,3 +110,18 @@ func TestWebEndpointAllowsLocalSessionOnlyForKeylessDirectLoopback(t *testing.T)
 	privateNetwork.Origin = "http://100.64.0.5:27123"
 	assert.False(t, privateNetwork.AllowsLocalSession(config.AuthConfig{}))
 }
+
+func TestWebEndpointAllowsTrustedProxySessionOnlyOnNamedListener(t *testing.T) {
+	endpoint := WebEndpoint{
+		Endpoint: kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: "127.0.0.1:27123"},
+		Origin:   "https://daemon.example",
+	}
+	assert.True(t, endpoint.AllowsTrustedProxySession(config.AuthConfig{Proxy: config.ProxyConfig{
+		TrustedActorHeader:    "X-Kata-Actor",
+		TrustedProxyListeners: []string{"127.0.0.1:27123"},
+	}}))
+	assert.False(t, endpoint.AllowsTrustedProxySession(config.AuthConfig{Proxy: config.ProxyConfig{
+		TrustedActorHeader:    "X-Kata-Actor",
+		TrustedProxyListeners: []string{"127.0.0.1:27124"},
+	}}))
+}

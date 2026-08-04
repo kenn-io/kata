@@ -15,6 +15,7 @@
     exchangeLoginToken,
     loadSessionCredentials,
     openLocalSession,
+    openTrustedProxySession,
     selectAuthenticationMode,
     type AuthenticationMode,
     type LaunchState,
@@ -70,15 +71,20 @@
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let pendingCreate: { title: string; key: string } | undefined
-  let localSessionAttempted = false
-  let advertisedAuthentication: 'loopback' | 'login' | undefined
+  let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
+  let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
   let preferences = $state(loadPreferences())
   let versionMismatch = $state(false)
   let liveUpdatesReconnecting = $state(false)
   const browserFetch = createCredentialedFetch(undefined, async (input, init) => {
     const response = await fetch(input, init)
     const authentication = response.headers.get('X-Kata-Web-Authentication')
-    if (authentication === 'loopback' || authentication === 'login') {
+    if (
+      authentication === 'loopback' ||
+      authentication === 'login' ||
+      authentication === 'proxy' ||
+      authentication === 'unavailable'
+    ) {
       advertisedAuthentication = authentication
     }
     return response
@@ -165,7 +171,7 @@
       if (loadSessionCredentials() !== undefined) {
         void startAuthority()
       } else if (selectedAuthentication === undefined) {
-        void startLocalSession(launch.returnPath)
+        void startAutomaticSession(launch.returnPath, 'loopback')
       }
     }
     return () => {
@@ -617,7 +623,7 @@
 
   function authenticationView(authentication: AuthenticationMode | undefined): ShellMode {
     if (authentication === 'login') return 'login'
-    return advertisedAuthentication === 'loopback' ? 'launch' : 'login'
+    return advertisedAuthentication === 'login' ? 'login' : 'launch'
   }
 
   function requireAuthentication(): void {
@@ -628,21 +634,27 @@
     if (!snapshots.state.authenticationRequired) snapshots.markAuthenticationRequired()
     returnPath = window.location.pathname + window.location.search
     if (
-      advertisedAuthentication === 'loopback' &&
+      (advertisedAuthentication === 'loopback' || advertisedAuthentication === 'proxy') &&
       selectedAuthentication === undefined &&
-      !localSessionAttempted
+      automaticSessionAttempted !== advertisedAuthentication
     ) {
       mode = 'loading'
-      void startLocalSession(returnPath)
+      void startAutomaticSession(returnPath, advertisedAuthentication)
       return
     }
     mode = authenticationView(selectedAuthentication)
   }
 
-  async function startLocalSession(requestedPath: string): Promise<void> {
-    localSessionAttempted = true
+  async function startAutomaticSession(
+    requestedPath: string,
+    authentication: 'loopback' | 'proxy',
+  ): Promise<void> {
+    automaticSessionAttempted = authentication
     try {
-      const session = await openLocalSession(requestedPath)
+      const session =
+        authentication === 'proxy'
+          ? await openTrustedProxySession(requestedPath)
+          : await openLocalSession(requestedPath)
       if (session) {
         navigateAfterAuthentication(session.returnPath)
         return
@@ -658,7 +670,7 @@
     stream.stop()
     await invalidations.resume()
     if (authority?.authenticationRequired) return
-    if (authority?.snapshot) localSessionAttempted = false
+    if (authority?.snapshot) automaticSessionAttempted = undefined
     if (authority?.snapshot) void loadReferences()
     if (authority?.snapshot) scheduler.start(authority.snapshot.capabilities.updates)
   }

@@ -288,6 +288,12 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("seed previous Inbox role: %w", err)
 	}
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: previousInbox.ID, Actor: "metadata-editor",
+	})
+	if err != nil {
+		return fmt.Errorf("archive previous Inbox project: %w", err)
+	}
 	targetInbox, err := store.CreateProject(ctx, "example-inbox")
 	if err != nil {
 		return fmt.Errorf("create target Inbox project: %w", err)
@@ -308,6 +314,12 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	}
 	assert.JSONEq(t, `{}`, string(previousInbox.Metadata))
 	assert.JSONEq(t, `{"role":"inbox"}`, string(designated.Project.Metadata))
+	restoredInbox, _, changed, err := store.RestoreProject(ctx, previousInbox.ID, "metadata-editor")
+	if err != nil {
+		return fmt.Errorf("restore previous Inbox project: %w", err)
+	}
+	assert.True(t, changed)
+	assert.JSONEq(t, `{}`, string(restoredInbox.Metadata))
 
 	blocked, err := createFixtureIssue(ctx, store, fixture.Project.ID, "blocked", "author", nil)
 	if err != nil {

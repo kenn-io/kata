@@ -285,8 +285,8 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 	return out, nil
 }
 
-// DesignateInboxProject assigns the Inbox role to one project and clears it
-// from every other active project in the same transaction.
+// DesignateInboxProject assigns the Inbox role to one active project and clears
+// it from every other project in the same transaction, including archived ones.
 func (d *Store) DesignateInboxProject(ctx context.Context, in db.DesignateInboxProjectIn) (db.DesignateInboxProjectOut, error) {
 	return retryWrite1(ctx, d, func() (db.DesignateInboxProjectOut, error) {
 		return d.designateInboxProject(ctx, in)
@@ -306,11 +306,11 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 		name     string
 		metadata string
 		revision int64
+		deleted  sql.NullString
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, name, metadata, revision
+		SELECT id, name, metadata, revision, deleted_at
 		  FROM projects
-		 WHERE deleted_at IS NULL
 		 ORDER BY id`)
 	if err != nil {
 		return out, err
@@ -318,7 +318,9 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 	var projects []projectState
 	for rows.Next() {
 		var project projectState
-		if err := rows.Scan(&project.id, &project.name, &project.metadata, &project.revision); err != nil {
+		if err := rows.Scan(
+			&project.id, &project.name, &project.metadata, &project.revision, &project.deleted,
+		); err != nil {
 			_ = rows.Close()
 			return out, err
 		}
@@ -338,7 +340,7 @@ func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxP
 			break
 		}
 	}
-	if target == nil {
+	if target == nil || target.deleted.Valid {
 		return out, fmt.Errorf("project %d not found", in.ProjectID)
 	}
 	if in.IfMatchRev != nil && *in.IfMatchRev != target.revision {

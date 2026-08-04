@@ -379,27 +379,27 @@ func requireBrowserSession(manager *WebSessionManager, policy ListenerPolicy, ne
 		}
 		cookie, err := r.Cookie(manager.CookieName())
 		if err != nil {
-			writeWebSessionError(w, http.StatusUnauthorized, "web_session_required", manager.Origin(), policy.AllowLocalSession)
+			writeWebSessionError(w, http.StatusUnauthorized, "web_session_required", manager.Origin(), policy)
 			return
 		}
 		sessionValue := r.Header.Get(webSessionHeader)
 		principal, err := manager.Authenticate(r.Context(), cookie.Value, sessionValue)
 		if err != nil {
-			writeWebSessionError(w, http.StatusUnauthorized, "web_session_required", manager.Origin(), policy.AllowLocalSession)
+			writeWebSessionError(w, http.StatusUnauthorized, "web_session_required", manager.Origin(), policy)
 			return
 		}
 		if principal.Kind == PrincipalWebLocal && !webLocalSPARequestAllowed(r) {
-			writeWebSessionError(w, http.StatusForbidden, "web_local_operation_forbidden", manager.Origin(), policy.AllowLocalSession)
+			writeWebSessionError(w, http.StatusForbidden, "web_local_operation_forbidden", manager.Origin(), policy)
 			return
 		}
 		if isMutation(r.Method) {
 			isLogout := r.Method == http.MethodDelete && r.URL.Path == "/api/v1/ui/session"
 			if !isLogout && !manager.CanWrite(principal) {
-				writeWebSessionError(w, http.StatusForbidden, "read_only", manager.Origin(), policy.AllowLocalSession)
+				writeWebSessionError(w, http.StatusForbidden, "read_only", manager.Origin(), policy)
 				return
 			}
 			if err := manager.CheckCSRF(sessionValue, r.Header.Get(webCSRFHeader)); err != nil {
-				writeWebSessionError(w, http.StatusForbidden, "csrf_invalid", manager.Origin(), policy.AllowLocalSession)
+				writeWebSessionError(w, http.StatusForbidden, "csrf_invalid", manager.Origin(), policy)
 				return
 			}
 		}
@@ -480,9 +480,7 @@ func browserSessionRequired(r *http.Request, policy ListenerPolicy, manager *Web
 	if !policy.RequireBrowserSession || !strings.HasPrefix(r.URL.Path, "/api/v1/") {
 		return false
 	}
-	if r.URL.Path == pathPing || r.URL.Path == pathHealth ||
-		(r.Method == http.MethodPost && (r.URL.Path == "/api/v1/ui/session/login" ||
-			r.URL.Path == "/api/v1/ui/session/local")) {
+	if r.URL.Path == pathPing || r.URL.Path == pathHealth || isWebSessionBootstrapRequest(r) {
 		return false
 	}
 	if !manager.Writable() && r.Method == http.MethodGet && r.URL.Path != pathEventsStreamPath {
@@ -503,6 +501,18 @@ func browserSessionRequired(r *http.Request, policy ListenerPolicy, manager *Web
 			manager.auth.AllowUnauthenticatedPrivateNetworkWrites)
 	}
 	return true
+}
+
+func isWebSessionBootstrapRequest(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case "/api/v1/ui/session/login", "/api/v1/ui/session/local", "/api/v1/ui/session/proxy":
+		return true
+	default:
+		return false
+	}
 }
 
 func directBackendRequest(r *http.Request, policy ListenerPolicy, allowPrivateNetwork bool) bool {
@@ -529,14 +539,16 @@ func directBackendRequest(r *http.Request, policy ListenerPolicy, allowPrivateNe
 	return ip != nil && ip.IsLoopback()
 }
 
-func writeWebSessionError(w http.ResponseWriter, status int, code, origin string, allowLocalSession bool) {
+func writeWebSessionError(w http.ResponseWriter, status int, code, origin string, policy ListenerPolicy) {
 	if origin != "" {
 		w.Header().Set(WebOriginHeader, origin)
 	}
-	authentication := "login"
-	if allowLocalSession {
+	authentication := policy.WebAuthentication
+	if authentication == "" && policy.AllowLocalSession {
 		authentication = "loopback"
 	}
-	w.Header().Set(WebAuthenticationHeader, authentication)
+	if authentication != "" {
+		w.Header().Set(WebAuthenticationHeader, authentication)
+	}
 	api.WriteEnvelope(w, status, code, "browser session authorization failed")
 }

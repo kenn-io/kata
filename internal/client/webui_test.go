@@ -29,6 +29,21 @@ func TestOpenWebUILocalLoopbackOpensDirectly(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:27123/kata?view=today", opened.PublicURL)
 }
 
+func TestOpenWebUILocalTrustedProxyOpensDirectly(t *testing.T) {
+	var opened WebUILaunch
+	err := OpenWebUI(t.Context(), PreparedWebUI{
+		Runtime: DiscoveredWebRuntime{
+			Origin: "https://daemon.example", Capabilities: []string{"proxy", "sse"},
+		},
+	}, "/kata?view=today", func(_ context.Context, target WebUILaunch) error {
+		opened = target
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://daemon.example/kata?view=today", opened.PublicURL)
+}
+
 func TestOpenWebUIRemoteLoginRejectsPathPrefix(t *testing.T) {
 	opened := false
 	err := OpenWebUI(t.Context(), PreparedWebUI{
@@ -114,6 +129,7 @@ func TestOpenWebUIRemoteLoginRejectsUntrustedPlaintext(t *testing.T) {
 func TestOpenWebUIRemoteAuthenticationOpensCanonicalLoginOrigin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Kata-Web-Origin", "https://daemon.example")
+		w.Header().Set("X-Kata-Web-Authentication", "login")
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	t.Cleanup(server.Close)
@@ -172,6 +188,26 @@ func TestOpenWebUIConfiguredLoopbackOpensDirectly(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, server.URL+"/kata?view=today", opened.PublicURL)
+}
+
+func TestOpenWebUIConfiguredTrustedProxyOpensDirectly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Kata-Web-Origin", "https://daemon.example")
+		w.Header().Set("X-Kata-Web-Authentication", "proxy")
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	var opened WebUILaunch
+	err := OpenWebUI(t.Context(), PreparedWebUI{
+		BaseURL: server.URL, ConfiguredRemote: true, AnonymousClient: server.Client(),
+	}, "/kata?view=today", func(_ context.Context, target WebUILaunch) error {
+		opened = target
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://daemon.example/kata?view=today", opened.PublicURL)
 }
 
 func TestOpenWebUILocalReadonlyOpensDirectly(t *testing.T) {

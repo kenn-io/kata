@@ -134,6 +134,9 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 			if resolveErr != nil {
 				return nil, resolveErr
 			}
+			if claimErr := requireFederatedIssueClaim(ctx, cfg, in.ProjectID, issue, actor); claimErr != nil {
+				return nil, claimErr
+			}
 			created, createErr := cfg.DB.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
 				IssueID: issue.ID, Recurrence: createInput,
 			})

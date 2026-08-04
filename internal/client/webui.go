@@ -189,7 +189,8 @@ func OpenWebUI(
 		return err
 	}
 	if runtimeHasCapability(prepared.Runtime, "loopback") ||
-		runtimeHasCapability(prepared.Runtime, "readonly") {
+		runtimeHasCapability(prepared.Runtime, "readonly") ||
+		runtimeHasCapability(prepared.Runtime, "proxy") {
 		return opener(ctx, WebUILaunch{PublicURL: webLaunchURLAt(base, normalized)})
 	}
 	target := webLaunchURL(base)
@@ -239,13 +240,19 @@ func probeAnonymousReadonlyWebUI(
 		if err != nil {
 			return nil, err
 		}
-		if response.Header.Get(daemon.WebAuthenticationHeader) == "loopback" {
+		switch response.Header.Get(daemon.WebAuthenticationHeader) {
+		case "loopback":
 			if !isLoopbackWebOrigin(origin) {
 				return nil, errors.New("remote daemon advertised loopback authentication on a non-loopback origin")
 			}
 			return origin, nil
+		case "proxy":
+			return origin, nil
+		case "login":
+			return origin, errRemoteWebUILoginRequired
+		default:
+			return nil, errors.New("remote daemon did not advertise a usable browser authentication mode")
 		}
-		return origin, errRemoteWebUILoginRequired
 	}
 	if response.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
@@ -305,6 +312,7 @@ func validateLocalWebRuntime(runtimeInfo DiscoveredWebRuntime) error {
 	}
 	if runtimeHasCapability(runtimeInfo, "loopback") ||
 		runtimeHasCapability(runtimeInfo, "readonly") ||
+		runtimeHasCapability(runtimeInfo, "proxy") ||
 		runtimeHasCapability(runtimeInfo, "login") {
 		return nil
 	}

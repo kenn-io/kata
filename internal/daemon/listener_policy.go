@@ -32,6 +32,7 @@ type ListenerPolicy struct {
 	AllowedHosts          []string
 	RequireBrowserSession bool
 	AllowLocalSession     bool
+	WebAuthentication     string
 }
 
 // ApplyListenerPolicy wraps a shared handler for one listener.

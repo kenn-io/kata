@@ -807,16 +807,15 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		defer func() { _ = webEndpoint.Listener.Close() }()
 	}
 	allowLocalSession := webEndpoint.AllowsLocalSession(dcfg.Auth)
-	webCapabilities := []string{"login", "sse"}
-	if allowLocalSession {
-		webCapabilities = []string{"loopback", "sse"}
-	}
+	allowTrustedProxySession := webEndpoint.AllowsTrustedProxySession(dcfg.Auth)
+	updates := "sse"
 	if insecureReadonly {
-		webCapabilities = []string{"login", "poll"}
-		if strings.TrimSpace(dcfg.Auth.Token) == "" {
-			webCapabilities = []string{"readonly", "poll"}
-		}
+		updates = "poll"
 	}
+	webAuthentication := webAuthenticationMode(
+		insecureReadonly, allowLocalSession, allowTrustedProxySession, dcfg.Auth.Token,
+	)
+	webCapabilities := []string{webAuthentication, updates}
 	webRuntime, err := daemon.NewWebRuntime(daemon.WebRuntimeOptions{
 		Origin:       webEndpoint.Origin,
 		OriginStable: webEndpoint.OriginStable,
@@ -824,10 +823,6 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	})
 	if err != nil {
 		return err
-	}
-	updates := "sse"
-	if insecureReadonly {
-		updates = "poll"
 	}
 	webSessions, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{
 		Origin:       webEndpoint.Origin,
@@ -891,6 +886,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 			AllowedHosts:          append([]string(nil), dcfg.Web.AllowedHosts...),
 			RequireBrowserSession: true,
 			AllowLocalSession:     allowLocalSession,
+			WebAuthentication:     webAuthentication,
 		}
 	} else {
 		bindings = append(bindings, daemon.ListenerBinding{
@@ -900,10 +896,31 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 				Origin:                webEndpoint.Origin,
 				RequireBrowserSession: true,
 				AllowLocalSession:     allowLocalSession,
+				WebAuthentication:     webAuthentication,
 			},
 		})
 	}
 	return srv.ServeListeners(ctx, bindings...)
+}
+
+func webAuthenticationMode(
+	insecureReadonly bool,
+	allowLocalSession bool,
+	allowTrustedProxySession bool,
+	token string,
+) string {
+	switch {
+	case insecureReadonly && strings.TrimSpace(token) == "":
+		return "readonly"
+	case allowLocalSession:
+		return "loopback"
+	case allowTrustedProxySession:
+		return "proxy"
+	case strings.TrimSpace(token) != "":
+		return "login"
+	default:
+		return "unavailable"
+	}
 }
 
 func newDaemonTelemetryReporter(store db.Storage) telemetry.Client {

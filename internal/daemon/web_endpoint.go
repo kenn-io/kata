@@ -49,6 +49,21 @@ func (e WebEndpoint) AllowsLocalSession(auth config.AuthConfig) bool {
 	return (origin.Scheme == "http" || origin.Scheme == "https") && isLoopbackHost(originHost)
 }
 
+// AllowsTrustedProxySession reports whether the browser listener itself is a
+// configured trusted-proxy listener and can exchange its attributed principal
+// for a tab-scoped browser session.
+func (e WebEndpoint) AllowsTrustedProxySession(auth config.AuthConfig) bool {
+	if strings.TrimSpace(auth.Proxy.TrustedActorHeader) == "" {
+		return false
+	}
+	for _, listener := range auth.Proxy.TrustedProxyListeners {
+		if normalizeListenerEntry(listener) == e.Endpoint.Address {
+			return true
+		}
+	}
+	return false
+}
+
 func isLoopbackHost(host string) bool {
 	if strings.EqualFold(host, "localhost") {
 		return true

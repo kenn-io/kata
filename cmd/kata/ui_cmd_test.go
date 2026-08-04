@@ -136,6 +136,7 @@ func stubUICommandLaunch(t *testing.T, prepared client.PreparedWebUI) {
 		prepared.AnonymousClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			header := make(http.Header)
 			header.Set("X-Kata-Web-Origin", prepared.BaseURL)
+			header.Set("X-Kata-Web-Authentication", "login")
 			return &http.Response{
 				StatusCode: http.StatusUnauthorized,
 				Body:       http.NoBody,

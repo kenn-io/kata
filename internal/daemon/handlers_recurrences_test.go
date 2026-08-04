@@ -1,11 +1,13 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -88,6 +90,55 @@ func TestPostRecurrence_AttachesInitialIssueAndAdvancesOnClose(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, created.OccurrenceKey)
 	assert.Equal(t, "2026-08-10", *created.OccurrenceKey)
+}
+
+func TestPostRecurrence_InitialIssueRequiresFederatedClaim(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		claimHolder string
+		wantStatus  int
+	}{
+		{name: "other actor", claimHolder: "user-b", wantStatus: http.StatusConflict},
+		{name: "current actor", claimHolder: "user-a", wantStatus: http.StatusCreated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testenv.New(t, testenv.WithAuthToken("tok"))
+			project := createFederatedHubProject(t, env, "example-project")
+			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Weekly review", Author: "user-a",
+			})
+			require.NoError(t, err)
+			_, err = env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+				ProjectID: project.ID,
+				IssueRef:  issue.ShortID,
+				Principal: db.ClaimPrincipal{
+					HolderInstanceUID: env.DB.InstanceUID(),
+					Holder:            tc.claimHolder,
+				},
+				ClaimKind: "hard",
+				Purpose:   "edit recurring task",
+				Now:       time.Now().UTC(),
+			})
+			require.NoError(t, err)
+
+			body := fmt.Sprintf(`{
+				"actor":"user-a",
+				"initial_issue_ref":%q,
+				"rrule":"FREQ=WEEKLY",
+				"dtstart":"2026-08-03",
+				"timezone":"UTC",
+				"template":{"title":"Weekly review"}
+			}`, issue.ShortID)
+			resp := doPost(t, env,
+				fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, project.ID), body)
+			raw := readClose(t, resp)
+			if tc.wantStatus == http.StatusConflict {
+				assertAPIError(t, resp.StatusCode, raw, tc.wantStatus, "claim_denied")
+			} else {
+				assert.Equal(t, tc.wantStatus, resp.StatusCode, string(raw))
+			}
+		})
+	}
 }
 
 func TestPatchRecurrence_RequiresIfMatch(t *testing.T) {

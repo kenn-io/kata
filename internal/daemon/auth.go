@@ -63,9 +63,7 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 				next.ServeHTTP(w, r)
 				return
 			}
-			if r.URL.Path == pathPing || r.URL.Path == pathHealth ||
-				(r.Method == http.MethodPost && (r.URL.Path == "/api/v1/ui/session/login" ||
-					r.URL.Path == "/api/v1/ui/session/local")) {
+			if r.URL.Path == pathPing || r.URL.Path == pathHealth || isWebSessionBootstrapRequest(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

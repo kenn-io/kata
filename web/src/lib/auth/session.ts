@@ -94,6 +94,21 @@ export async function openLocalSession(
   return acceptSessionResponse(response, storage, 'Local authorization failed')
 }
 
+export async function openTrustedProxySession(
+  returnPath: string,
+  fetcher: typeof fetch = fetch,
+  storage: Storage = sessionStorage,
+): Promise<AuthenticatedSession> {
+  const response = await fetcher('/api/v1/ui/session/proxy', {
+    method: 'POST',
+    credentials: 'same-origin',
+    redirect: 'error',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ return_path: normalizeReturnPath(returnPath, '/kata') }),
+  })
+  return acceptSessionResponse(response, storage, 'Trusted proxy authorization failed')
+}
+
 export async function exchangeLoginToken(
   token: string,
   returnPath: string,

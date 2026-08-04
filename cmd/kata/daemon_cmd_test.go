@@ -1858,6 +1858,29 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyRequiresLogin(t *testing
 	}
 }
 
+func TestWebAuthenticationModeAdvertisesOnlyUsableSessionIssuers(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		insecureReadonly bool
+		allowLocal       bool
+		allowProxy       bool
+		token            string
+		want             string
+	}{
+		{name: "direct loopback", allowLocal: true, want: "loopback"},
+		{name: "trusted proxy", allowProxy: true, want: "proxy"},
+		{name: "daemon token", token: "example-token", want: "login"},
+		{name: "anonymous readonly", insecureReadonly: true, want: "readonly"},
+		{name: "no session issuer", want: "unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, webAuthenticationMode(
+				tc.insecureReadonly, tc.allowLocal, tc.allowProxy, tc.token,
+			))
+		})
+	}
+}
+
 type fakeTelemetryReporter struct {
 	mu     sync.Mutex
 	events []fakeTelemetryEvent

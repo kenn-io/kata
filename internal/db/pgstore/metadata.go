@@ -150,14 +150,13 @@ func (s *Store) patchProjectMetadata(
 	return output, err
 }
 
-// DesignateInboxProject assigns the Inbox role to one project and clears it
-// from every other active project in one serializable transaction.
+// DesignateInboxProject assigns the Inbox role to one active project and clears
+// it from every other project in one serializable transaction, including archived ones.
 func (s *Store) DesignateInboxProject(ctx context.Context, input db.DesignateInboxProjectIn) (db.DesignateInboxProjectOut, error) {
 	var output db.DesignateInboxProjectOut
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
 		output = db.DesignateInboxProjectOut{}
-		rows, err := tx.QueryContext(ctx,
-			projectSelect+` WHERE deleted_at IS NULL ORDER BY id FOR UPDATE`)
+		rows, err := tx.QueryContext(ctx, projectSelect+` ORDER BY id FOR UPDATE`)
 		if err != nil {
 			return err
 		}
@@ -184,7 +183,7 @@ func (s *Store) DesignateInboxProject(ctx context.Context, input db.DesignateInb
 				break
 			}
 		}
-		if target == nil {
+		if target == nil || target.DeletedAt != nil {
 			return db.ErrNotFound
 		}
 		if input.IfMatchRev != nil && *input.IfMatchRev != target.Revision {

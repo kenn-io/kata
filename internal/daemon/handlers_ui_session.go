@@ -42,6 +42,25 @@ func registerUISessionHandlers(mux *http.ServeMux, manager *WebSessionManager) {
 		issueHTTPSession(w, manager, issued)
 	})
 
+	mux.HandleFunc(http.MethodPost+" /api/v1/ui/session/proxy", func(w http.ResponseWriter, r *http.Request) {
+		var input uiLocalSessionRequest
+		if err := decodeUIJSON(r, &input); err != nil {
+			api.WriteEnvelope(w, http.StatusBadRequest, "validation", "invalid proxy session request")
+			return
+		}
+		principal, ok := PrincipalFromContext(r.Context())
+		if !ok || principal.Kind != PrincipalTrustedProxy {
+			api.WriteEnvelope(w, http.StatusUnauthorized, "proxy_auth_required", "trusted proxy principal required")
+			return
+		}
+		issued, err := manager.IssueSession(principal, input.ReturnPath)
+		if err != nil {
+			api.WriteEnvelope(w, http.StatusBadRequest, "validation", "invalid proxy session request")
+			return
+		}
+		issueHTTPSession(w, manager, issued)
+	})
+
 	mux.HandleFunc(http.MethodDelete+" /api/v1/ui/session", func(w http.ResponseWriter, r *http.Request) {
 		manager.Logout(r.Header.Get(webSessionHeader))
 		w.WriteHeader(http.StatusNoContent)
