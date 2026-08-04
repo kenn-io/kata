@@ -1,3 +1,5 @@
+// @vitest-environment-options { "url": "http://127.0.0.2/kata" }
+
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -69,8 +71,12 @@ describe('App', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return new Response('', { status: 404 })
+        }
         return new Response('', {
-          status: target.pathname === '/api/v1/ui/session/local' ? 404 : 401,
+          status: 401,
+          headers: { 'X-Kata-Web-Authentication': 'loopback' },
         })
       }),
     )
@@ -87,7 +93,13 @@ describe('App', () => {
     )
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('', { status: 401 })),
+      vi.fn(
+        async () =>
+          new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'loopback' },
+          }),
+      ),
     )
 
     render(App)
@@ -97,7 +109,7 @@ describe('App', () => {
     expect(screen.queryByText('Loading Kata…')).toBeNull()
   })
 
-  it('renews an expired loopback session transparently', async () => {
+  it('renews an expired session on a server-advertised custom loopback origin', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
@@ -121,7 +133,11 @@ describe('App', () => {
           )
         }
         snapshotReads += 1
-        if (snapshotReads === 1) return new Response('', { status: 401 })
+        if (snapshotReads === 1)
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'loopback' },
+          })
         return new Response(JSON.stringify(snapshot()), {
           status: 200,
           headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
@@ -186,13 +202,19 @@ describe('App', () => {
       )
       if (method === 'POST' && target.pathname === '/api/v1/projects') {
         revoked = true
-        return new Response('', { status: 401 })
+        return new Response('', {
+          status: 401,
+          headers: { 'X-Kata-Web-Authentication': 'loopback' },
+        })
       }
       if (method === 'POST' && target.pathname === '/api/v1/ui/session/local') {
         return new Response('', { status: 404 })
       }
       if (revoked && target.pathname === '/api/v1/ui/snapshot') {
-        return new Response('', { status: 401 })
+        return new Response('', {
+          status: 401,
+          headers: { 'X-Kata-Web-Authentication': 'loopback' },
+        })
       }
       return new Response(JSON.stringify(snapshot()), {
         status: 200,

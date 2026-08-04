@@ -71,10 +71,18 @@
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let pendingCreate: { title: string; key: string } | undefined
   let localSessionAttempted = false
+  let advertisedAuthentication: 'loopback' | 'login' | undefined
   let preferences = $state(loadPreferences())
   let versionMismatch = $state(false)
   let liveUpdatesReconnecting = $state(false)
-  const browserFetch = createCredentialedFetch()
+  const browserFetch = createCredentialedFetch(undefined, async (input, init) => {
+    const response = await fetch(input, init)
+    const authentication = response.headers.get('X-Kata-Web-Authentication')
+    if (authentication === 'loopback' || authentication === 'login') {
+      advertisedAuthentication = authentication
+    }
+    return response
+  })
   const client = createKataClient(undefined, browserFetch)
   const snapshots = new SnapshotController(
     createUISnapshotRequest(browserFetch),
@@ -584,13 +592,9 @@
     return authenticationView(authentication)
   }
 
-  function isLocalOrigin(): boolean {
-    return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(window.location.hostname)
-  }
-
   function authenticationView(authentication: AuthenticationMode | undefined): ShellMode {
     if (authentication === 'login') return 'login'
-    return isLocalOrigin() ? 'launch' : 'login'
+    return advertisedAuthentication === 'loopback' ? 'launch' : 'login'
   }
 
   function requireAuthentication(): void {
@@ -600,7 +604,11 @@
     invalidations.stop()
     if (!snapshots.state.authenticationRequired) snapshots.markAuthenticationRequired()
     returnPath = window.location.pathname + window.location.search
-    if (isLocalOrigin() && selectedAuthentication === undefined && !localSessionAttempted) {
+    if (
+      advertisedAuthentication === 'loopback' &&
+      selectedAuthentication === undefined &&
+      !localSessionAttempted
+    ) {
       mode = 'loading'
       void startLocalSession(returnPath)
       return

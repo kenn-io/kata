@@ -5859,6 +5859,10 @@ export interface operations {
     parameters: {
       query?: {
         limit?: number
+        unowned?: boolean
+        owner?: string
+        label?: string[] | null
+        exclude_label?: string[] | null
       }
       header?: never
       path?: never

@@ -157,7 +157,9 @@
       void onNavigate({ ...route, projectUID: filters.scope.project_uid, filters: shareable })
       return
     }
-    void onNavigate({ ...route, filters: shareable })
+    const next = { ...route, filters: shareable }
+    delete next.projectUID
+    void onNavigate(next)
   }
 
   function selectIssue(issueUID: string): void {

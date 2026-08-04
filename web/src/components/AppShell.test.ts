@@ -124,6 +124,36 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: /Other issue/ })).toBeNull()
   })
 
+  test('clears project scope when All projects is selected', async () => {
+    const onNavigate = vi.fn()
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          projectUID: '01J00000000000000000000002',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Project scope: example-project/i }))
+    await fireEvent.mouseDown(screen.getByRole('option', { name: 'All projects' }))
+
+    await waitFor(() =>
+      expect(onNavigate).toHaveBeenCalledWith({
+        kind: 'kata',
+        graph: false,
+        filters: { status: [], owner: [], label: [], relationship: [] },
+      }),
+    )
+  })
+
   test('renders the routed source graph and returns to the same selected list context', async () => {
     vi.stubGlobal(
       'ResizeObserver',
