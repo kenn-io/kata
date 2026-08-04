@@ -3,6 +3,7 @@ package sqlitestore_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -170,6 +171,42 @@ func TestPatchProjectMetadata_EmptyDiffNoEvent(t *testing.T) {
 	assert.False(t, res2.Changed)
 	assert.Zero(t, res2.Event.ID)
 	assert.Equal(t, res1.NewRevision, res2.NewRevision)
+}
+
+func TestDesignateInboxProject_RollsBackWhenAssignmentFails(t *testing.T) {
+	d := openTestDB(t)
+	ctx := context.Background()
+	previous, err := d.CreateProject(ctx, "previous-inbox")
+	require.NoError(t, err)
+	target, err := d.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	_, err = d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+		ProjectID: previous.ID,
+		Actor:     "user-a",
+		Patch:     map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+	})
+	require.NoError(t, err)
+	_, err = d.ExecContext(ctx, `
+		CREATE TRIGGER fail_inbox_assignment
+		BEFORE UPDATE OF metadata ON projects
+		WHEN NEW.id = `+fmt.Sprint(target.ID)+` AND json_extract(NEW.metadata, '$.role') = 'inbox'
+		BEGIN
+			SELECT RAISE(FAIL, 'injected inbox assignment failure');
+		END`)
+	require.NoError(t, err)
+
+	_, err = d.DesignateInboxProject(ctx, db.DesignateInboxProjectIn{
+		ProjectID: target.ID,
+		Actor:     "user-a",
+	})
+	require.ErrorContains(t, err, "injected inbox assignment failure")
+
+	previous, err = d.ProjectByID(ctx, previous.ID)
+	require.NoError(t, err)
+	target, err = d.ProjectByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"role":"inbox"}`, string(previous.Metadata))
+	assert.JSONEq(t, `{}`, string(target.Metadata))
 }
 
 func TestPatchIssueMetadata_ClearKeyWithNull(t *testing.T) {

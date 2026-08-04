@@ -150,6 +150,106 @@ func (s *Store) patchProjectMetadata(
 	return output, err
 }
 
+// DesignateInboxProject assigns the Inbox role to one project and clears it
+// from every other active project in one serializable transaction.
+func (s *Store) DesignateInboxProject(ctx context.Context, input db.DesignateInboxProjectIn) (db.DesignateInboxProjectOut, error) {
+	var output db.DesignateInboxProjectOut
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		output = db.DesignateInboxProjectOut{}
+		rows, err := tx.QueryContext(ctx,
+			projectSelect+` WHERE deleted_at IS NULL ORDER BY id FOR UPDATE`)
+		if err != nil {
+			return err
+		}
+		var projects []db.Project
+		for rows.Next() {
+			project, err := scanProject(rows)
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			projects = append(projects, project)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		var target *db.Project
+		for index := range projects {
+			if projects[index].ID == input.ProjectID {
+				target = &projects[index]
+				break
+			}
+		}
+		if target == nil {
+			return db.ErrNotFound
+		}
+		if input.IfMatchRev != nil && *input.IfMatchRev != target.Revision {
+			return &db.RevisionConflictError{CurrentRevision: target.Revision}
+		}
+
+		for _, project := range projects {
+			role := json.RawMessage(`null`)
+			if project.ID == input.ProjectID {
+				role = json.RawMessage(`"inbox"`)
+			} else {
+				var current map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(project.Metadata), &current); err != nil {
+					return fmt.Errorf("decode project %d metadata: %w", project.ID, err)
+				}
+				if string(current["role"]) != `"inbox"` {
+					continue
+				}
+			}
+			if err := ensureProjectWritableTx(ctx, tx, project.ID); err != nil {
+				return err
+			}
+			updated, diff, err := patchedMetadata(project.Metadata,
+				map[string]json.RawMessage{"role": role})
+			if err != nil {
+				return err
+			}
+			if len(diff) == 0 {
+				continue
+			}
+			newRevision := project.Revision + 1
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE projects SET metadata = $1, revision = $2 WHERE id = $3`,
+				string(updated), newRevision, project.ID); err != nil {
+				return mapSQLError(err, nil)
+			}
+			payload, err := json.Marshal(struct {
+				Diff        map[string]metadataKeyDiffPayload `json:"diff"`
+				RevisionNew int64                             `json:"revision_new"`
+			}{Diff: diff, RevisionNew: newRevision})
+			if err != nil {
+				return err
+			}
+			event, err := s.insertEventTx(ctx, tx, eventInsert{
+				ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
+				Type: "project.metadata_updated", Actor: input.Actor, Payload: string(payload),
+			})
+			if err != nil {
+				return err
+			}
+			output.Events = append(output.Events, event)
+		}
+
+		output.Project, err = scanProject(tx.QueryRowContext(ctx,
+			projectSelect+` WHERE id = $1`, input.ProjectID))
+		if err != nil {
+			return err
+		}
+		output.NewRevision = output.Project.Revision
+		output.Changed = len(output.Events) > 0
+		return nil
+	})
+	return output, err
+}
+
 func patchedMetadata(
 	current db.JSONBlob,
 	patch map[string]json.RawMessage,

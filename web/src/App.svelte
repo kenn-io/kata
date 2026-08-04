@@ -235,34 +235,19 @@
     const projects = authority?.snapshot?.catalog?.map(({ project }) => project) ?? []
     const target = projects.find((project) => project.uid === projectUID)
     if (!target) throw new Error('Inbox project is not available.')
-    const previous = projects.filter(
-      (project) => project.uid !== target.uid && project.metadata.role === 'inbox',
-    )
-    if (previous.length === 0 && target.metadata.role === 'inbox') return
+    if (target.metadata.role === 'inbox') return
 
-    const accepted = await runMutation({ draft: projectUID }, async () => {
-      let lastResult: MutationResult<components['schemas']['PatchProjectMetadataResponseBody']>
-      for (const project of previous) {
-        lastResult = await client.POST('/api/v1/projects/{project_id}/metadata', {
+    const accepted = await runMutation(
+      { draft: projectUID, revision: `"rev-${target.revision}"` },
+      (context) =>
+        client.POST('/api/v1/projects/{project_id}/metadata', {
           params: {
-            path: { project_id: project.id },
-            header: { 'If-Match': `"rev-${project.revision}"` },
+            path: { project_id: target.id },
+            header: { 'If-Match': context.headers.get('If-Match')! },
           },
-          body: { actor: requestActor, patch: { role: null } },
-        })
-        if (!lastResult.response.ok || lastResult.error !== undefined || !lastResult.data) {
-          return lastResult
-        }
-      }
-      if (target.metadata.role === 'inbox') return lastResult!
-      return client.POST('/api/v1/projects/{project_id}/metadata', {
-        params: {
-          path: { project_id: target.id },
-          header: { 'If-Match': `"rev-${target.revision}"` },
-        },
-        body: { actor: requestActor, patch: { role: 'inbox' } },
-      })
-    })
+          body: { actor: requestActor, patch: { role: 'inbox' } },
+        }),
+    )
     if (!accepted) {
       throw new Error(mutationMessage(mutationState) ?? 'Could not designate the Inbox project.')
     }

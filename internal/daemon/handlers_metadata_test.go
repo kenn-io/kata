@@ -380,3 +380,37 @@ func TestPatchProjectMetadata_Broadcasts(t *testing.T) {
 	assert.Contains(t, string(raw), `"changed":false`, "no-op patch must report changed=false")
 	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op project metadata patch must not broadcast")
 }
+
+func TestPatchProjectMetadata_DesignatesInboxAtomically(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	previous := seedProject(t, env, "previous-inbox")
+	target := seedProject(t, env, "example-project")
+	_, err := env.DB.PatchProjectMetadata(t.Context(), db.PatchProjectMetadataIn{
+		ProjectID: previous.ID,
+		Actor:     "user-a",
+		Patch:     map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+	})
+	require.NoError(t, err)
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer sub.Unsub()
+
+	url := fmt.Sprintf("%s/api/v1/projects/%d/metadata", env.URL, target.ID)
+	resp := doPostWithIfMatch(t, env, url,
+		`{"actor":"user-a","patch":{"role":"inbox"}}`,
+		fmt.Sprintf(`"rev-%d"`, target.Revision))
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", readClose(t, resp))
+
+	projectIDs := map[int64]bool{}
+	for range 2 {
+		msg := receiveMsg(t, sub.Ch, time.Second, "Inbox designation broadcast")
+		require.NotNil(t, msg.Event)
+		projectIDs[msg.ProjectID] = true
+	}
+	assert.Equal(t, map[int64]bool{previous.ID: true, target.ID: true}, projectIDs)
+	previous, err = env.DB.ProjectByID(t.Context(), previous.ID)
+	require.NoError(t, err)
+	target, err = env.DB.ProjectByID(t.Context(), target.ID)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{}`, string(previous.Metadata))
+	assert.JSONEq(t, `{"role":"inbox"}`, string(target.Metadata))
+}

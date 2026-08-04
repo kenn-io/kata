@@ -353,7 +353,7 @@ describe('App', () => {
     expect(await mutation.json()).toEqual({ actor: 'kata-web', patch: { role: 'inbox' } })
   })
 
-  it('clears the existing Inbox before designating another project', async () => {
+  it('reassigns Inbox through one atomic designation request', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -385,11 +385,10 @@ describe('App', () => {
           const body = await request.json()
           patches.push({ projectID, body })
           const project = accepted.catalog.find((entry) => entry.project.id === projectID)!.project
-          if ((body as { patch: { role?: unknown } }).patch.role === null) {
-            delete project.metadata.role
-          } else {
-            project.metadata.role = 'inbox'
+          for (const entry of accepted.catalog) {
+            delete entry.project.metadata.role
           }
+          project.metadata.role = 'inbox'
           return new Response(JSON.stringify({ changed: true, project }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -409,9 +408,8 @@ describe('App', () => {
     )
     await fireEvent.mouseDown(screen.getByRole('option', { name: /example-workspace/ }))
 
-    await waitFor(() => expect(patches).toHaveLength(2))
+    await waitFor(() => expect(patches).toHaveLength(1))
     expect(patches).toEqual([
-      { projectID: 7, body: { actor: 'kata-web', patch: { role: null } } },
       { projectID: 8, body: { actor: 'kata-web', patch: { role: 'inbox' } } },
     ])
   })

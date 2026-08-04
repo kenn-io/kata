@@ -201,8 +201,8 @@ var storageScenarios = []scenario{
 	{
 		name: "metadata and atomic edit",
 		methods: []string{
-			"CreateIssue", "CreateProject", "EditIssueAtomic", "EventsAfter", "IssueByID", "LinkByEndpoints",
-			"ListIssueContent", "PatchIssueMetadata", "PatchProjectMetadata", "ProjectByID",
+			"CreateIssue", "CreateProject", "DesignateInboxProject", "EditIssueAtomic", "EventsAfter", "IssueByID",
+			"LinkByEndpoints", "ListIssueContent", "PatchIssueMetadata", "PatchProjectMetadata", "ProjectByID",
 		},
 		run: checkMetadataAndAtomicEdit,
 	},

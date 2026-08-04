@@ -50,6 +50,7 @@ type Storage interface {
 	MergeProjects(ctx context.Context, p MergeProjectsParams) (ProjectMergeResult, error)
 	MoveIssueProject(ctx context.Context, in MoveIssueProjectIn) (MoveIssueProjectOut, error)
 	PatchProjectMetadata(ctx context.Context, in PatchProjectMetadataIn) (PatchProjectMetadataOut, error)
+	DesignateInboxProject(ctx context.Context, in DesignateInboxProjectIn) (DesignateInboxProjectOut, error)
 	BatchProjectStats(ctx context.Context) (map[int64]ProjectStats, error)
 	AliasByID(ctx context.Context, id int64) (ProjectAlias, error)
 	AliasByIdentity(ctx context.Context, identity string) (ProjectAlias, error)

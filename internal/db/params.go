@@ -472,6 +472,23 @@ type PatchProjectMetadataOut struct {
 	NewRevision int64
 }
 
+// DesignateInboxProjectIn identifies the sole project that should carry the
+// Inbox role. IfMatchRev gates the target project revision when non-nil.
+type DesignateInboxProjectIn struct {
+	ProjectID  int64
+	IfMatchRev *int64
+	Actor      string
+}
+
+// DesignateInboxProjectOut contains the target project and every metadata
+// event committed by the atomic role reassignment.
+type DesignateInboxProjectOut struct {
+	Project     Project
+	Events      []Event
+	Changed     bool
+	NewRevision int64
+}
+
 // RecurrenceTemplate carries the issue-template fields for a recurrence row.
 // Owner and Priority are optional; Labels and Metadata default to empty
 // collections when nil.
