@@ -2,37 +2,25 @@ package tui
 
 import (
 	"image/color"
-	"os"
-	"strings"
 
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kata/internal/colormode"
+	"go.kenn.io/kata/internal/markdownrender"
 )
 
-type colorMode int
+type colorMode = colormode.Mode
 
 const (
-	colorAuto colorMode = iota
-	colorDark
-	colorLight
-	colorNone
+	colorAuto  = colormode.Auto
+	colorDark  = colormode.Dark
+	colorLight = colormode.Light
+	colorNone  = colormode.None
 )
 
 // resolveColorMode honors NO_COLOR (any non-empty value) over
 // KATA_COLOR_MODE. Unrecognized values fall back to auto.
 func resolveColorMode() colorMode {
-	if v := os.Getenv("NO_COLOR"); v != "" {
-		return colorNone
-	}
-	switch strings.ToLower(os.Getenv("KATA_COLOR_MODE")) {
-	case "dark":
-		return colorDark
-	case "light":
-		return colorLight
-	case "none":
-		return colorNone
-	default:
-		return colorAuto
-	}
+	return colormode.Resolve()
 }
 
 // Style vars are package-level so View() functions don't reach into
@@ -216,12 +204,8 @@ func applyColorMode(m colorMode, isDark bool) {
 	// the label half and plain text for the value half.
 	detailMetaStyle = lipgloss.NewStyle()
 	detailSectionHeaderStyle = lipgloss.NewStyle().Bold(true)
-	markdownCodeBlockStyle = lipgloss.NewStyle().Background(pick("252", "236"))
-	if activeHasDarkBackground {
-		markdownCodeBlockBg = "236"
-	} else {
-		markdownCodeBlockBg = "252"
-	}
+	markdownCodeBlockBg = markdownrender.CodeBlockBackground(activeHasDarkBackground)
+	markdownCodeBlockStyle = lipgloss.NewStyle().Background(lipgloss.Color(markdownCodeBlockBg))
 	panelActiveBorder = pick("125", "205")
 	panelInactiveBorder = pick("242", "246")
 	// M3.5 chrome — adaptive bgs lifted from msgvault. titleBar uses a

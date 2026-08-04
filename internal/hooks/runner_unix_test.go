@@ -3,7 +3,6 @@
 package hooks
 
 import (
-	"os/exec"
 	"testing"
 	"time"
 )
@@ -33,15 +32,5 @@ func TestRunner_KillTree_OrphanedChildrenDieToo(t *testing.T) {
 	// SIGKILL regressed, this would block until the 30s child exits.
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("runJob took %s, suggests orphan not killed", elapsed)
-	}
-}
-
-// TestGroupAlive_NoProcess verifies that groupAlive returns false when
-// Process is nil so waitGroupGone exits promptly without polling.
-func TestGroupAlive_NoProcess(t *testing.T) {
-	cmd := exec.Command("true")
-	// Don't Start: cmd.Process is nil.
-	if groupAlive(cmd) {
-		t.Fatal("groupAlive should be false when Process is nil")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/processtree"
 )
 
 // runRecord is the JSONL line shape for runs.jsonl. The dispatcher's
@@ -286,7 +287,7 @@ func runJob(ctx context.Context, shutdown <-chan struct{}, job HookJob, deps run
 	cmd.Stdin = bytes.NewReader(stdinPayload)
 	cmd.Stdout = rc.outFile
 	cmd.Stderr = rc.errFile
-	applyProcessGroupAttrs(cmd)
+	processtree.Prepare(cmd)
 
 	if err := cmd.Start(); err != nil {
 		rc.finalize("spawn_failed", err.Error(), -1, payloadTruncated)
@@ -335,38 +336,8 @@ func buildEnv(userEnv []string, evt db.Event, asnap AliasSnapshot, hasAlias bool
 	return env
 }
 
-// killTreeWithGrace asks the leader's process group to terminate
-// (SIGTERM on Unix; Process.Kill on Windows where there is no group).
-// After the grace window it unconditionally escalates to SIGKILL on
-// the group: children that ignored SIGTERM, or orphans whose leader
-// already exited, still need to be torn down. Errors are logged via
-// daemonLog and never surface — the runner has already classified
-// the result by the time we get here.
 func killTreeWithGrace(cmd *exec.Cmd, grace time.Duration, daemonLog *log.Logger) {
-	if cmd.Process == nil {
-		return
+	if err := processtree.TerminateWithGrace(cmd, grace); err != nil {
+		daemonLog.Printf("hooks: terminate process tree: %v", err)
 	}
-	if err := terminateGroup(cmd); err != nil {
-		daemonLog.Printf("hooks: terminate: %v", err)
-	}
-	if !waitGroupGone(cmd, grace) {
-		if err := killGroup(cmd); err != nil {
-			daemonLog.Printf("hooks: kill: %v", err)
-		}
-	}
-}
-
-// waitGroupGone returns true once the leader's process group has no
-// remaining members, or false on grace expiry. On platforms where
-// liveness can't be observed (Windows), it returns false after grace
-// so the caller escalates to a force kill.
-func waitGroupGone(cmd *exec.Cmd, grace time.Duration) bool {
-	deadline := time.Now().Add(grace)
-	for time.Now().Before(deadline) {
-		if !groupAlive(cmd) {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return !groupAlive(cmd)
 }

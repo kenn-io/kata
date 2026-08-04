@@ -212,6 +212,11 @@ type TUIConfig struct {
 	Mouse bool `toml:"mouse"`
 }
 
+// DisplayConfig holds client-only display preferences from <KATA_HOME>/config.toml.
+type DisplayConfig struct {
+	MarkdownRenderer []string `toml:"markdown_renderer"`
+}
+
 // CatalogDaemonConfig is a single named entry in the daemon catalog
 // (top-level [[daemon]] in <KATA_HOME>/config.toml).
 type CatalogDaemonConfig struct {
@@ -290,11 +295,15 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 			return nil, fmt.Errorf("parse %s: %w", path, err)
 		}
 		if u := meta.Undecoded(); len(u) > 0 {
-			keys := make([]string, len(u))
-			for i, k := range u {
-				keys[i] = k.String()
+			keys := make([]string, 0, len(u))
+			for _, k := range u {
+				if !isDisplayConfigKey(k) {
+					keys = append(keys, k.String())
+				}
 			}
-			return nil, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+			if len(keys) > 0 {
+				return nil, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+			}
 		}
 		cfg.Listen = strings.TrimSpace(cfg.Listen)
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
@@ -336,6 +345,50 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 	return &cfg, nil
 }
 
+// ReadDisplayConfig parses client-only display preferences from
+// <KATA_HOME>/config.toml. It validates only the [display] section so
+// unrelated daemon and client settings do not affect renderer selection.
+func ReadDisplayConfig() (DisplayConfig, error) {
+	path, err := DaemonConfigPath()
+	if err != nil {
+		return DisplayConfig{}, err
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME, not user input
+	if errors.Is(err, os.ErrNotExist) {
+		return DisplayConfig{}, nil
+	}
+	if err != nil {
+		return DisplayConfig{}, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	var file struct {
+		Display DisplayConfig `toml:"display"`
+	}
+	meta, err := toml.Decode(string(data), &file)
+	if err != nil {
+		return DisplayConfig{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var unknown []string
+	for _, key := range meta.Undecoded() {
+		if isDisplayConfigKey(key) {
+			unknown = append(unknown, key.String())
+		}
+	}
+	if len(unknown) > 0 {
+		return DisplayConfig{}, fmt.Errorf(
+			"parse %s: unknown display key(s): %s", path, strings.Join(unknown, ", "),
+		)
+	}
+	if len(file.Display.MarkdownRenderer) > 0 && file.Display.MarkdownRenderer[0] == "" {
+		return DisplayConfig{}, fmt.Errorf("display.markdown_renderer executable must not be empty")
+	}
+	return file.Display, nil
+}
+
+func isDisplayConfigKey(key toml.Key) bool {
+	return len(key) > 0 && key[0] == "display"
+}
+
 // ReadAuthConfig parses only the daemon auth settings from <KATA_HOME>/config.toml.
 // It intentionally skips daemon-catalog normalization so auth-only clients do not
 // lose [auth] settings because an unrelated catalog entry is unavailable.
@@ -353,11 +406,15 @@ func ReadAuthConfig() (AuthConfig, error) {
 			return AuthConfig{}, fmt.Errorf("parse %s: %w", path, err)
 		}
 		if u := meta.Undecoded(); len(u) > 0 {
-			keys := make([]string, len(u))
-			for i, k := range u {
-				keys[i] = k.String()
+			keys := make([]string, 0, len(u))
+			for _, k := range u {
+				if !isDisplayConfigKey(k) {
+					keys = append(keys, k.String())
+				}
 			}
-			return AuthConfig{}, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+			if len(keys) > 0 {
+				return AuthConfig{}, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
+			}
 		}
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)

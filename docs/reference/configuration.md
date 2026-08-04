@@ -135,6 +135,50 @@ url = "http://hub.internal:7777"
 allow_insecure = true
 ```
 
+## Client display preferences
+
+`[display]` belongs to the client reading `<KATA_HOME>/config.toml`. It is not
+sent to a remote daemon and does not change daemon rendering or API responses.
+
+`kata show --render` uses built-in Glamour rendering when no override is set.
+To use an external stdin/stdout renderer instead:
+
+```toml
+[display]
+markdown_renderer = ["leaf"]
+```
+
+The value is an argv array. kata passes it verbatim without a shell, appended
+flags, width injection, or environment changes. For example:
+
+```toml
+[display]
+markdown_renderer = ["glow", "-", "-s", "dark", "-w", "80"]
+```
+
+kata starts the configured program once per non-empty Markdown field. Each
+invocation has a 10-second timeout. After it expires, kata spends up to 2
+seconds on platform-specific termination: Unix signals and then force-kills the
+renderer process group, while Windows waits through the grace period and then
+force-kills only the renderer process. kata then bounds any remaining process
+or captured-pipe wait by a separate 2-second interval. A timed-out call can
+therefore take about 14 seconds to return. Because the child's stdout is
+captured, users are responsible for renderer-specific color and width flags or
+inherited environment variables such as `CLICOLOR_FORCE`. After capture, kata
+normalizes the output and ANSI-safely hard-wraps it to the terminal width for a
+description or the remaining field width for a comment. kata treats output
+with or without a final newline the same, while preserving internal blank
+lines. Renderer stderr is discarded because a program may echo the Markdown
+input there; run the configured argv directly to diagnose renderer-specific
+failures.
+
+The common daemon-config path recognizes `[display]` without decoding or
+semantically validating it, so unknown display keys and invalid display values
+do not break daemon startup. A TOML syntax error anywhere in `config.toml` still
+prevents common config parsing. kata validates this client section only when
+`show --render` is active on a terminal, so display-only semantic mistakes do
+not break plain output or redirected output.
+
 ## Daemon config
 
 `<KATA_HOME>/config.toml` can configure storage, listener, auth behavior, and

@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"go.kenn.io/kata/internal/colormode"
 	"go.kenn.io/kata/internal/textsafe"
 )
 
@@ -39,6 +40,7 @@ const footerRuleWidth = 50
 // fidelity and the profile-aware writer downsamples on write.
 type rowRenderer struct {
 	profile           colorprofile.Profile
+	colorMode         colormode.Mode
 	idStyle           lipgloss.Style
 	blockedGlyphStyle lipgloss.Style
 	closedGlyphStyle  lipgloss.Style
@@ -66,6 +68,7 @@ func newRowRenderer(w io.Writer) *rowRenderer {
 func newRowRendererFor(p colorprofile.Profile) *rowRenderer {
 	return &rowRenderer{
 		profile:           p,
+		colorMode:         colormode.Resolve(),
 		idStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 		blockedGlyphStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 		closedGlyphStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
@@ -79,6 +82,10 @@ func newRowRendererFor(p colorprofile.Profile) *rowRenderer {
 		ruleStyle:         lipgloss.NewStyle().Faint(true),
 		legendStyle:       lipgloss.NewStyle().Faint(true),
 	}
+}
+
+func (r *rowRenderer) markdownRenderer() showMarkdownRenderer {
+	return newBuiltinShowMarkdownRenderer(r.profile, r.colorMode)
 }
 
 // downsample wraps w so every styled line degrades to r.profile on
