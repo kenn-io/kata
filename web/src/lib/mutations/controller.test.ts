@@ -101,6 +101,36 @@ describe('MutationController', () => {
     expect(controller.state).toMatchObject({ kind: 'uncertain', draft: 'Comment draft' })
   })
 
+  it('treats a server failure as an uncertain write outcome', async () => {
+    const refresh = vi.fn(async () => true)
+    const controller = new MutationController({
+      authority: () => writableIdentity,
+      refresh,
+    })
+
+    await controller.execute({ draft: 'Comment draft' }, async () =>
+      failure(502, 'upstream_failure', 'The upstream response failed.'),
+    )
+
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(controller.state).toMatchObject({ kind: 'uncertain', draft: 'Comment draft' })
+  })
+
+  it('treats a malformed successful response as an uncertain write outcome', async () => {
+    const refresh = vi.fn(async () => true)
+    const controller = new MutationController({
+      authority: () => writableIdentity,
+      refresh,
+    })
+
+    await controller.execute({ draft: 'Comment draft' }, async () => ({
+      response: new Response('{', { status: 200 }),
+    }))
+
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(controller.state).toMatchObject({ kind: 'uncertain', draft: 'Comment draft' })
+  })
+
   it('suppresses a duplicate create after the server committed it', async () => {
     const mutate = vi.fn(async () => ok({ changed: true }))
     const controller = new MutationController({

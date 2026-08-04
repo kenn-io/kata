@@ -210,6 +210,53 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	assert.Equal(t, "2026-08-03", *linkedIssue.OccurrenceKey)
 	require.NotNil(t, attached.Recurrence.NextOccurrenceKey)
 	assert.Equal(t, "2026-08-10", *attached.Recurrence.NextOccurrenceKey)
+	exhaustedRule := "FREQ=DAILY;COUNT=1"
+	exhausted, err := store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: attached.Recurrence.ID, IfMatchRev: attached.Recurrence.Revision, Actor: "scheduler",
+		Update: db.RecurrenceUpdate{Rule: &exhaustedRule},
+	})
+	if err != nil {
+		return fmt.Errorf("exhaust attached recurrence: %w", err)
+	}
+	assert.Nil(t, exhausted.Recurrence.NextOccurrenceKey)
+	extendedRule := "FREQ=DAILY;COUNT=2"
+	revived, err := store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: attached.Recurrence.ID, IfMatchRev: exhausted.NewRevision, Actor: "scheduler",
+		Update: db.RecurrenceUpdate{Rule: &extendedRule},
+	})
+	if err != nil {
+		return fmt.Errorf("revive attached recurrence: %w", err)
+	}
+	require.NotNil(t, revived.Recurrence.NextOccurrenceKey)
+	assert.Equal(t, "2026-08-04", *revived.Recurrence.NextOccurrenceKey)
+	nextStart := "2026-08-10"
+	rescheduled, err := store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: attached.Recurrence.ID, IfMatchRev: revived.NewRevision, Actor: "scheduler",
+		Update: db.RecurrenceUpdate{DTStart: &nextStart},
+	})
+	if err != nil {
+		return fmt.Errorf("reschedule attached recurrence: %w", err)
+	}
+	require.NotNil(t, rescheduled.Recurrence.NextOccurrenceKey)
+	assert.Equal(t, "2026-08-10", *rescheduled.Recurrence.NextOccurrenceKey)
+	untilRule := "FREQ=DAILY;UNTIL=20260810T000000Z"
+	utcSchedule, err := store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: attached.Recurrence.ID, IfMatchRev: rescheduled.NewRevision, Actor: "scheduler",
+		Update: db.RecurrenceUpdate{Rule: &untilRule},
+	})
+	if err != nil {
+		return fmt.Errorf("bound attached recurrence: %w", err)
+	}
+	require.NotNil(t, utcSchedule.Recurrence.NextOccurrenceKey)
+	newTimezone := "America/New_York"
+	localSchedule, err := store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: attached.Recurrence.ID, IfMatchRev: utcSchedule.NewRevision, Actor: "scheduler",
+		Update: db.RecurrenceUpdate{Timezone: &newTimezone},
+	})
+	if err != nil {
+		return fmt.Errorf("retime attached recurrence: %w", err)
+	}
+	assert.Nil(t, localSchedule.Recurrence.NextOccurrenceKey)
 	owner := "alice"
 	priority := int64(2)
 	rec, createdEvent, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
@@ -386,6 +433,63 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	}
 	assert.Equal(t, "recurrence.deleted", deletedEvent.Type)
 	assert.NotZero(t, deletedEvent.ID)
+
+	archivedPatchProject, err := store.CreateProject(ctx, "archived-recurrence-patch")
+	if err != nil {
+		return fmt.Errorf("create archived recurrence patch project: %w", err)
+	}
+	archivedPatchRecurrence, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+		ProjectID: archivedPatchProject.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY",
+		DTStart: "2026-08-03", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "Weekly review"},
+	})
+	if err != nil {
+		return fmt.Errorf("create archived patch recurrence: %w", err)
+	}
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: archivedPatchProject.ID, Actor: "scheduler",
+	})
+	if err != nil {
+		return fmt.Errorf("archive recurrence patch project: %w", err)
+	}
+	archivedTitle := "Hidden update"
+	_, err = store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: archivedPatchRecurrence.ID, IfMatchRev: archivedPatchRecurrence.Revision,
+		Actor: "scheduler", Update: db.RecurrenceUpdate{TemplateTitle: &archivedTitle},
+	})
+	assert.Error(t, err)
+	unchangedArchivedRecurrence, err := store.GetRecurrenceByID(ctx, archivedPatchRecurrence.ID)
+	if err != nil {
+		return fmt.Errorf("reload archived patch recurrence: %w", err)
+	}
+	assert.Equal(t, archivedPatchRecurrence.TemplateTitle, unchangedArchivedRecurrence.TemplateTitle)
+
+	archivedDeleteProject, err := store.CreateProject(ctx, "archived-recurrence-delete")
+	if err != nil {
+		return fmt.Errorf("create archived recurrence delete project: %w", err)
+	}
+	archivedDeleteRecurrence, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+		ProjectID: archivedDeleteProject.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY",
+		DTStart: "2026-08-03", Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "Weekly review"},
+	})
+	if err != nil {
+		return fmt.Errorf("create archived delete recurrence: %w", err)
+	}
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: archivedDeleteProject.ID, Actor: "scheduler",
+	})
+	if err != nil {
+		return fmt.Errorf("archive recurrence delete project: %w", err)
+	}
+	_, err = store.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
+		RecurrenceID: archivedDeleteRecurrence.ID, IfMatchRev: archivedDeleteRecurrence.Revision,
+		Actor: "scheduler",
+	})
+	assert.Error(t, err)
+	undeletedArchivedRecurrence, err := store.GetRecurrenceByID(ctx, archivedDeleteRecurrence.ID)
+	if err != nil {
+		return fmt.Errorf("reload archived delete recurrence: %w", err)
+	}
+	assert.Nil(t, undeletedArchivedRecurrence.DeletedAt)
 	listed, err = store.ListRecurrencesByProject(ctx, project.ID)
 	if err != nil {
 		return fmt.Errorf("list after recurrence delete: %w", err)

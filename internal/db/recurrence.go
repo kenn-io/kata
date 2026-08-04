@@ -19,6 +19,20 @@ func ValidateRecurrenceCore(rule, dtstart, timezone string) (*string, error) {
 	return first, nil
 }
 
+// RecomputeRecurrenceCursor returns the next occurrence for an effective
+// schedule. Existing recurrences advance from their last materialized issue;
+// recurrences without one start at the schedule's first occurrence.
+func RecomputeRecurrenceCursor(rule, dtstart, timezone string, lastOccurrenceKey *string) (*string, error) {
+	if lastOccurrenceKey == nil {
+		return ValidateRecurrenceCore(rule, dtstart, timezone)
+	}
+	next, err := recurrence.Walk(rule, dtstart, timezone, *lastOccurrenceKey)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidRecurrence, err)
+	}
+	return next, nil
+}
+
 // ValidateRecurrenceTemplate enforces the invariants required when a template
 // is materialized into an issue.
 func ValidateRecurrenceTemplate(title string, metadata json.RawMessage) error {

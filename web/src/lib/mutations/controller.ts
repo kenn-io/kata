@@ -108,11 +108,14 @@ export class MutationController {
           { kind: 'revision-conflict', code: error.code, detail: error.detail },
           options.draft,
         )
-      } else {
+      } else if (result.response.status >= 400 && result.response.status < 500) {
         this.state = withDraft(
           { kind: 'domain-error', code: error.code, detail: error.detail },
           options.draft,
         )
+      } else {
+        await this.#refreshAfterUncertainWrite()
+        this.state = withDraft({ kind: 'uncertain' }, options.draft)
       }
       return false
     }

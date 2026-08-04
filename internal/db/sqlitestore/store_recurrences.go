@@ -292,6 +292,15 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 	if cur.DeletedAt != nil {
 		return out, fmt.Errorf("recurrence %d soft-deleted", in.RecurrenceID)
 	}
+	var projectName string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT name FROM projects WHERE id = ? AND deleted_at IS NULL`, cur.ProjectID,
+	).Scan(&projectName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return out, fmt.Errorf("project %d not found", cur.ProjectID)
+		}
+		return out, err
+	}
 	if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, cur.ProjectID); err != nil {
 		return out, err
 	}
@@ -435,6 +444,43 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 		}
 	}
 
+	_, ruleChanged := diff["rrule"]
+	_, dtstartChanged := diff["dtstart"]
+	_, timezoneChanged := diff["timezone"]
+	if ruleChanged || dtstartChanged || timezoneChanged {
+		nextRule := cur.RRule
+		if in.Update.Rule != nil {
+			nextRule = *in.Update.Rule
+		}
+		nextDTStart := cur.DTStart
+		if in.Update.DTStart != nil {
+			nextDTStart = *in.Update.DTStart
+		}
+		nextTimezone := cur.Timezone
+		if in.Update.Timezone != nil {
+			nextTimezone = *in.Update.Timezone
+		}
+		var lastOccurrenceKey *string
+		if cur.LastMaterializedUID != nil {
+			var key string
+			if err := tx.QueryRowContext(ctx,
+				`SELECT occurrence_key FROM issues WHERE uid = ? AND recurrence_id = ?`,
+				*cur.LastMaterializedUID, cur.ID,
+			).Scan(&key); err != nil {
+				return out, fmt.Errorf("load last materialized recurrence issue: %w", err)
+			}
+			lastOccurrenceKey = &key
+		}
+		nextCursor, err := db.RecomputeRecurrenceCursor(
+			nextRule, nextDTStart, nextTimezone, lastOccurrenceKey,
+		)
+		if err != nil {
+			return out, err
+		}
+		sets = append(sets, "next_occurrence_key = ?")
+		args = append(args, nextCursor)
+	}
+
 	if len(diff) == 0 {
 		// No-op: no changed fields — commit (nothing to write) and return unchanged.
 		if err := tx.Commit(); err != nil {
@@ -453,13 +499,6 @@ func (d *Store) patchRecurrence(ctx context.Context, in db.PatchRecurrenceIn) (d
 	// parameterized via args. Safe to concatenate.
 	q := "UPDATE recurrences SET " + strings.Join(sets, ", ") + " WHERE id = ?" // #nosec G202
 	if _, err := tx.ExecContext(ctx, q, args...); err != nil {
-		return out, err
-	}
-
-	var projectName string
-	if err := tx.QueryRowContext(ctx,
-		`SELECT name FROM projects WHERE id = ?`, cur.ProjectID,
-	).Scan(&projectName); err != nil {
 		return out, err
 	}
 
@@ -518,7 +557,7 @@ func (d *Store) softDeleteRecurrence(ctx context.Context, in db.SoftDeleteRecurr
 	if err := tx.QueryRowContext(ctx, `
 		SELECT r.project_id, r.uid, p.name, r.revision
 		  FROM recurrences r JOIN projects p ON p.id = r.project_id
-		 WHERE r.id = ? AND r.deleted_at IS NULL`,
+		 WHERE r.id = ? AND r.deleted_at IS NULL AND p.deleted_at IS NULL`,
 		in.RecurrenceID,
 	).Scan(&pid, &recUID, &projectName, &revision); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

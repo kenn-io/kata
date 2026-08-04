@@ -310,6 +310,11 @@ func (s *Store) PatchRecurrence(ctx context.Context, input db.PatchRecurrenceIn)
 		if current.DeletedAt != nil {
 			return fmt.Errorf("recurrence %d soft-deleted", input.RecurrenceID)
 		}
+		project, err := scanProject(tx.QueryRowContext(ctx,
+			projectSelect+` WHERE id = $1 AND deleted_at IS NULL FOR SHARE`, current.ProjectID))
+		if err != nil {
+			return err
+		}
 		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, current.ProjectID); err != nil {
 			return err
 		}
@@ -398,22 +403,42 @@ func (s *Store) PatchRecurrence(ctx context.Context, input db.PatchRecurrenceIn)
 			return nil
 		}
 
+		_, ruleChanged := diff["rrule"]
+		_, dtstartChanged := diff["dtstart"]
+		_, timezoneChanged := diff["timezone"]
+		if ruleChanged || dtstartChanged || timezoneChanged {
+			var lastOccurrenceKey *string
+			if current.LastMaterializedUID != nil {
+				var key string
+				if err := tx.QueryRowContext(ctx,
+					`SELECT occurrence_key FROM issues WHERE uid = $1 AND recurrence_id = $2`,
+					*current.LastMaterializedUID, current.ID,
+				).Scan(&key); err != nil {
+					return fmt.Errorf("load last materialized recurrence issue: %w", err)
+				}
+				lastOccurrenceKey = &key
+			}
+			nextCursor, err := db.RecomputeRecurrenceCursor(
+				next.RRule, next.DTStart, next.Timezone, lastOccurrenceKey,
+			)
+			if err != nil {
+				return err
+			}
+			next.NextOccurrenceKey = nextCursor
+		}
+
 		updatedAt := nowStoredTimestamp()
 		newRevision := current.Revision + 1
 		_, err = tx.ExecContext(ctx, `UPDATE recurrences SET
   rrule=$1, dtstart=$2, timezone=$3, template_title=$4, template_body=$5,
   template_owner=$6, template_priority=$7, template_labels=$8, template_metadata=$9,
-  revision=$10, updated_at=$11 WHERE id=$12`,
+  next_occurrence_key=$10, revision=$11, updated_at=$12 WHERE id=$13`,
 			next.RRule, next.DTStart, next.Timezone, next.TemplateTitle, next.TemplateBody,
 			next.TemplateOwner, next.TemplatePriority, string(next.TemplateLabels), string(next.TemplateMetadata),
-			newRevision, updatedAt, current.ID,
+			next.NextOccurrenceKey, newRevision, updatedAt, current.ID,
 		)
 		if err != nil {
 			return mapSQLError(err, nil)
-		}
-		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1`, current.ProjectID))
-		if err != nil {
-			return err
 		}
 		payload, err := json.Marshal(struct {
 			RecurrenceUID string                         `json:"recurrence_uid"`
@@ -455,15 +480,16 @@ func (s *Store) SoftDeleteRecurrence(ctx context.Context, input db.SoftDeleteRec
 		if recurrence.DeletedAt != nil {
 			return fmt.Errorf("recurrence %d not found or already deleted", input.RecurrenceID)
 		}
+		project, err := scanProject(tx.QueryRowContext(ctx,
+			projectSelect+` WHERE id = $1 AND deleted_at IS NULL FOR SHARE`, recurrence.ProjectID))
+		if err != nil {
+			return err
+		}
 		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, recurrence.ProjectID); err != nil {
 			return err
 		}
 		if input.IfMatchRev != recurrence.Revision {
 			return &db.RevisionConflictError{CurrentRevision: recurrence.Revision}
-		}
-		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1`, recurrence.ProjectID))
-		if err != nil {
-			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE recurrences
 SET deleted_at=$1, revision=revision+1, updated_at=$1 WHERE id=$2`, nowStoredTimestamp(), input.RecurrenceID); err != nil {
