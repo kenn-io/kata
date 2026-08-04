@@ -435,6 +435,8 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 	}
 
 	switch parts[1] {
+	case "metadata":
+		return len(parts) == 2 && r.Method == http.MethodPost
 	case "recurrences":
 		return (len(parts) == 2 && r.Method == http.MethodPost) ||
 			(len(parts) == 3 && (r.Method == http.MethodPatch || r.Method == http.MethodDelete))
