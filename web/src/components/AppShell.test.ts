@@ -8,6 +8,7 @@ describe('AppShell', () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   test('connects the ported navigation, filters, and collection to canonical routes', async () => {
@@ -67,6 +68,50 @@ describe('AppShell', () => {
       kind: 'kata',
       view: 'all-open',
       issueUID: '01J00000000000000000000001',
+      graph: false,
+      filters: { status: [], owner: [], label: [], relationship: [] },
+    })
+  })
+
+  test('drops held keyboard selection when sidebar navigation begins', async () => {
+    vi.useFakeTimers()
+    const onNavigate = vi.fn()
+    const authority = snapshot()
+    authority.collection!.push({
+      ...authority.collection![0]!,
+      id: 2,
+      uid: '01J00000000000000000000003',
+      short_id: 'b2',
+      qualified_id: 'example-project#b2',
+      title: 'Second issue',
+    })
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: authority,
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    const issue = screen.getByRole('button', { name: /Example issue/ })
+    issue.focus()
+    await fireEvent.keyDown(issue, { key: 'j', code: 'KeyJ' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+    await fireEvent.keyUp(window, { key: 'j', code: 'KeyJ' })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(onNavigate).toHaveBeenCalledTimes(1)
+    expect(onNavigate).toHaveBeenCalledWith({
+      kind: 'kata',
+      view: 'today',
       graph: false,
       filters: { status: [], owner: [], label: [], relationship: [] },
     })

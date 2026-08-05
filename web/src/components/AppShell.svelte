@@ -110,6 +110,7 @@
 
   let captureOpen = $state(false)
   let linkFilters = $state(createKataLinkFilters('all'))
+  let navigationGeneration = $state(0)
   let graphSelectedUID = $derived<string | null>(
     route.issueUID && route.graph ? route.issueUID : null,
   )
@@ -138,8 +139,13 @@
   })
   let selectedIssueUID = $derived(route.issueUID ?? null)
 
+  function navigate(next: AppRoute): void {
+    navigationGeneration += 1
+    void onNavigate(next)
+  }
+
   function openView(name: KataTaskViewName): void {
-    void onNavigate({
+    navigate({
       kind: 'kata',
       view: systemViewName(name),
       graph: false,
@@ -148,7 +154,7 @@
   }
 
   function openProject(projectUID: string): void {
-    void onNavigate({
+    navigate({
       kind: 'kata',
       projectUID,
       graph: false,
@@ -162,16 +168,16 @@
   ): void {
     const shareable = shareableFilters(filters, viewName, changed)
     if (filters.scope.kind === 'project') {
-      void onNavigate({ ...route, projectUID: filters.scope.project_uid, filters: shareable })
+      navigate({ ...route, projectUID: filters.scope.project_uid, filters: shareable })
       return
     }
     const next = { ...route, filters: shareable }
     delete next.projectUID
-    void onNavigate(next)
+    navigate(next)
   }
 
   function selectIssue(issueUID: string): void {
-    void onNavigate({
+    navigate({
       ...route,
       issueUID,
       graph: false,
@@ -180,7 +186,7 @@
   }
 
   function openGraph(issueUID: string): void {
-    void onNavigate({
+    navigate({
       ...route,
       issueUID,
       graph: true,
@@ -190,7 +196,7 @@
 
   function closeGraph(): void {
     if (!route.issueUID) return
-    void onNavigate({ ...route, graph: false })
+    navigate({ ...route, graph: false })
   }
 
   function toggleSplitDirection(): void {
@@ -411,6 +417,7 @@
         onChange={updateFilters}
       />
       <IssueCollection
+        {navigationGeneration}
         currentView={{
           name: currentView.view,
           groups: currentView.groups,
