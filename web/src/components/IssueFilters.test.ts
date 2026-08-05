@@ -66,7 +66,7 @@ describe('IssueFilters', () => {
     await fireEvent.click(screen.getByRole('combobox', { name: 'Status: Open' }))
     await fireEvent.click(screen.getByRole('option', { name: 'Ready' }))
 
-    expect(onChange).toHaveBeenCalledWith({ ...filters, status: 'ready' })
+    expect(onChange).toHaveBeenCalledWith({ ...filters, status: 'ready' }, 'status')
   })
 
   test('emits a relationship filter', async () => {
@@ -76,7 +76,10 @@ describe('IssueFilters', () => {
     await fireEvent.click(screen.getByRole('combobox', { name: 'Relationship: Any' }))
     await fireEvent.click(screen.getByRole('option', { name: 'Blocked by' }))
 
-    expect(onChange).toHaveBeenCalledWith({ ...filters, relationships: ['blocked_by'] })
+    expect(onChange).toHaveBeenCalledWith(
+      { ...filters, relationships: ['blocked_by'] },
+      'relationships',
+    )
   })
 
   test('keeps fast filter edits when parent state has not rerendered yet', async () => {

@@ -154,6 +154,47 @@ describe('AppShell', () => {
     )
   })
 
+  test('retains repeated route filters when another control changes', async () => {
+    const onNavigate = vi.fn()
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: {
+            status: ['open', 'ready'],
+            owner: ['user-a', 'user-b'],
+            label: ['backend', 'frontend'],
+            relationship: ['blocks'],
+          },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps(),
+        onNavigate,
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    await fireEvent.input(screen.getByLabelText('Search tasks'), { target: { value: 'example' } })
+
+    await waitFor(() =>
+      expect(onNavigate).toHaveBeenCalledWith({
+        kind: 'kata',
+        view: 'all-open',
+        graph: false,
+        filters: {
+          status: ['open', 'ready'],
+          owner: ['user-a', 'user-b'],
+          label: ['backend', 'frontend'],
+          relationship: ['blocks'],
+          text: 'example',
+        },
+      }),
+    )
+  })
+
   test('renders the routed source graph and returns to the same selected list context', async () => {
     vi.stubGlobal(
       'ResizeObserver',

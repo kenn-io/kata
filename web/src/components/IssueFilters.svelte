@@ -6,7 +6,10 @@
   interface Props {
     filters: KataTaskSearchFilters
     projects: readonly KataProjectSummary[]
-    onChange: (filters: KataTaskSearchFilters) => void | Promise<void>
+    onChange: (
+      filters: KataTaskSearchFilters,
+      changed: keyof KataTaskSearchFilters,
+    ) => void | Promise<void>
   }
 
   let { filters, projects, onChange }: Props = $props()
@@ -45,14 +48,14 @@
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
   )
 
-  function emit(next: Partial<KataTaskSearchFilters>): void {
+  function emit(changed: keyof KataTaskSearchFilters, next: Partial<KataTaskSearchFilters>): void {
     const nextFilters = {
       ...draft,
       ...next,
       scope: next.scope ?? draft.scope,
     }
     draftOverride = nextFilters
-    void onChange(nextFilters)
+    void onChange(nextFilters, changed)
   }
 
   function inputValue(event: Event): string {
@@ -72,7 +75,7 @@
         block
         placeholder="Search tasks..."
         ariaLabel="Search tasks"
-        oninput={(query) => emit({ query })}
+        oninput={(query) => emit('query', { query })}
       />
     </div>
 
@@ -88,7 +91,9 @@
         clearLabel="All projects"
         emptyLabel="No matching projects"
         onselect={(value) => {
-          emit({ scope: value === '' ? { kind: 'all' } : { kind: 'project', project_uid: value } })
+          emit('scope', {
+            scope: value === '' ? { kind: 'all' } : { kind: 'project', project_uid: value },
+          })
         }}
       />
     </div>
@@ -99,7 +104,7 @@
         title="Status"
         value={draft.status}
         options={statusOptions}
-        onchange={(value) => emit({ status: value as KataTaskSearchFilters['status'] })}
+        onchange={(value) => emit('status', { status: value as KataTaskSearchFilters['status'] })}
       />
     </div>
 
@@ -109,7 +114,7 @@
         title="Relationship"
         value={draft.relationships?.[0] ?? ''}
         options={relationshipOptions}
-        onchange={(value) => emit({ relationships: value ? [value] : [] })}
+        onchange={(value) => emit('relationships', { relationships: value ? [value] : [] })}
       />
     </div>
 
@@ -119,8 +124,8 @@
         aria-label="Owner"
         value={draft.owner}
         placeholder="Owner"
-        oninput={(event) => emit({ owner: inputValue(event) })}
-        onchange={(event) => emit({ owner: inputValue(event) })}
+        oninput={(event) => emit('owner', { owner: inputValue(event) })}
+        onchange={(event) => emit('owner', { owner: inputValue(event) })}
       />
     </label>
 
@@ -130,8 +135,8 @@
         aria-label="Label"
         value={draft.label}
         placeholder="Label"
-        oninput={(event) => emit({ label: inputValue(event) })}
-        onchange={(event) => emit({ label: inputValue(event) })}
+        oninput={(event) => emit('label', { label: inputValue(event) })}
+        onchange={(event) => emit('label', { label: inputValue(event) })}
       />
     </label>
   </div>

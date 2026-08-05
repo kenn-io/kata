@@ -156,8 +156,11 @@
     })
   }
 
-  function updateFilters(filters: KataTaskSearchFilters): void {
-    const shareable = shareableFilters(filters, viewName)
+  function updateFilters(
+    filters: KataTaskSearchFilters,
+    changed: keyof KataTaskSearchFilters,
+  ): void {
+    const shareable = shareableFilters(filters, viewName, changed)
     if (filters.scope.kind === 'project') {
       void onNavigate({ ...route, projectUID: filters.scope.project_uid, filters: shareable })
       return
@@ -251,12 +254,28 @@
   function shareableFilters(
     filters: KataTaskSearchFilters,
     currentView: KataTaskViewName,
+    changed: keyof KataTaskSearchFilters,
   ): ShareableFilters {
     const defaultStatus = defaultKataTaskSearchFilters(currentView).status
     const result: ShareableFilters = {
-      status: filters.status === defaultStatus ? [] : [filters.status],
-      owner: filters.owner.trim() ? [filters.owner.trim()] : [],
-      label: filters.label.trim() ? [filters.label.trim()] : [],
+      status:
+        changed === 'status'
+          ? filters.status === defaultStatus
+            ? []
+            : [filters.status]
+          : [...route.filters.status],
+      owner:
+        changed === 'owner'
+          ? filters.owner.trim()
+            ? [filters.owner.trim()]
+            : []
+          : [...route.filters.owner],
+      label:
+        changed === 'label'
+          ? filters.label.trim()
+            ? [filters.label.trim()]
+            : []
+          : [...route.filters.label],
       relationship: [...(filters.relationships ?? [])],
     }
     if (filters.query.trim()) result.text = filters.query.trim()
