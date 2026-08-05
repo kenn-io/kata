@@ -146,6 +146,31 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 	assert.Equal(t, int64(1), calls.Load())
 }
 
+func TestWebDaemonProxyDoesNotMisclassifyUpstreamAuthAsBrowserExpiry(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(upstream.Close)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now,
+		WebDaemons: []config.CatalogDaemonConfig{{
+			Name: "example-remote", URL: upstream.URL, Token: "invalid-token", AllowInsecure: true,
+		}},
+	})
+	request, err := http.NewRequest(http.MethodGet,
+		server.URL+"/api/v1/ui/proxy/api/v1/ui/snapshot", nil)
+	require.NoError(t, err)
+	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadGateway, response.StatusCode)
+	assert.Contains(t, string(body), "daemon_auth_required")
+}
+
 func TestWebDaemonProxyDispatchesLocalSelectionInProcess(t *testing.T) {
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{

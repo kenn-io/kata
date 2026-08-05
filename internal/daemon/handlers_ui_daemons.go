@@ -13,6 +13,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -342,6 +343,17 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 			response.Header.Del("Set-Cookie")
 			response.Header.Del(WebOriginHeader)
 			response.Header.Del(WebAuthenticationHeader)
+			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+				body := []byte(`{"error":{"code":"daemon_auth_required"}}`)
+				_ = response.Body.Close()
+				response.StatusCode = http.StatusBadGateway
+				response.Status = "502 Bad Gateway"
+				response.Body = io.NopCloser(bytes.NewReader(body))
+				response.ContentLength = int64(len(body))
+				response.Header.Del("WWW-Authenticate")
+				response.Header.Set("Content-Type", "application/json")
+				response.Header.Set("Content-Length", strconv.Itoa(len(body)))
+			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
