@@ -139,7 +139,9 @@
   } | null = $state(null)
 
   const detailInert = $derived(authorityBlocked ?? actionsDisabled)
-  const canCreateRecurrence = $derived(issue.issue.recurrence_id === undefined)
+  const canCreateRecurrence = $derived(
+    issue.issue.status === 'open' && issue.issue.recurrence_id === undefined,
+  )
   const visibleRecurrences = $derived.by(() => {
     const attachedID = issue.issue.recurrence_id
     if (attachedID !== undefined) {
@@ -477,10 +479,11 @@
       }}
     />
 
-    {#if visibleRecurrences.length > 0}
+    {#if visibleRecurrences.length > 0 || canCreateRecurrence}
       <section class="recurrence-section" aria-label="Recurrence">
         <RecurrencePanel
           recurrences={visibleRecurrences}
+          canCreate={canCreateRecurrence}
           onCreate={() => recurrenceDialogs?.openCreateRecurrence()}
           onEdit={(recurrence) => recurrenceDialogs?.openEditRecurrence(recurrence)}
           onDelete={(recurrence) => recurrenceDialogs?.openDeleteRecurrence(recurrence)}

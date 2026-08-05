@@ -150,6 +150,7 @@ type Storage interface {
 	// daemon that can write the same backend, not only goroutines in one server.
 	AcquireIdempotencyLock(ctx context.Context, projectID int64, key string) (release func() error, err error)
 	LookupIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*IdempotencyMatch, error)
+	LookupCommentIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*CommentIdempotencyMatch, error)
 	InsertCloseThrottledEvent(ctx context.Context, issueID int64, actor string, payload CloseThrottledPayload) (Event, error)
 	RecentSiblingCloses(ctx context.Context, parentIssueID, excludeIssueID int64, actor string, since time.Time) ([]Event, error)
 	RecentSameMessageClose(ctx context.Context, parentIssueID, excludeIssueID int64, actor, normalizedMessage string, since time.Time) (*Event, error)

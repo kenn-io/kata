@@ -118,9 +118,11 @@ type ListAllIssuesParams struct {
 
 // CreateCommentParams carries inputs for CreateComment.
 type CreateCommentParams struct {
-	IssueID int64
-	Author  string
-	Body    string
+	IssueID                int64
+	Author                 string
+	Body                   string
+	IdempotencyKey         string
+	IdempotencyFingerprint string
 }
 
 // EditCommentParams carries inputs for editing one existing comment body.

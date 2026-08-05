@@ -28,4 +28,18 @@ describe('Kata browser API credentials', () => {
     expect(new Headers(mutation?.headers).get('X-Kata-Web-Session')).toBe('tab-session')
     expect(new Headers(mutation?.headers).get('X-Kata-CSRF')).toBe('tab-csrf')
   })
+
+  it('fences browser authority when a credentialed request returns 401', async () => {
+    const onAuthenticationRequired = vi.fn()
+    const fetcher = createCredentialedFetch(
+      () => ({ session: 'expired-session', csrf: 'expired-csrf' }),
+      vi.fn(async () => new Response('', { status: 401 })) as typeof fetch,
+      onAuthenticationRequired,
+    )
+
+    const response = await fetcher('/api/v1/ui/references')
+
+    expect(response.status).toBe(401)
+    expect(onAuthenticationRequired).toHaveBeenCalledTimes(1)
+  })
 })

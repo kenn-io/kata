@@ -735,9 +735,10 @@ type EditIssueResponse struct {
 
 // CommentRequest is POST /api/v1/projects/{id}/issues/{ref}/comments.
 type CommentRequest struct {
-	ProjectID int64  `path:"project_id" required:"true"`
-	Ref       string `path:"ref" required:"true"`
-	Body      struct {
+	ProjectID      int64  `path:"project_id" required:"true"`
+	Ref            string `path:"ref" required:"true"`
+	IdempotencyKey string `header:"Idempotency-Key"`
+	Body           struct {
 		Actor string `json:"actor,omitempty"`
 		Body  string `json:"body" required:"true"`
 	}

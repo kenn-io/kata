@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -16,6 +17,55 @@ func TestCommentEndpoint_AppendsAndEmitsEvent(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode, string(bs))
 	assert.Contains(t, string(bs), `"body":"first comment"`)
 	assert.Contains(t, string(bs), `"type":"issue.commented"`)
+}
+
+func TestCommentEndpoint_IdempotencyReusesCommittedComment(t *testing.T) {
+	h, ts, pid, issueID := bootstrapProjectWithIssue(t)
+	path := issueURL(pid, issueID, "comments")
+	body := map[string]any{"actor": "agent", "body": "first comment"}
+	headers := map[string]string{"Idempotency-Key": "comment-request-1"}
+
+	first := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, first)
+	var created struct {
+		Comment struct {
+			UID string `json:"uid"`
+		} `json:"comment"`
+	}
+	require.NoError(t, json.Unmarshal(first.body, &created))
+	require.NotEmpty(t, created.Comment.UID)
+
+	second := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, second)
+	var reused struct {
+		Comment struct {
+			UID string `json:"uid"`
+		} `json:"comment"`
+		Event   *struct{} `json:"event"`
+		Changed bool      `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(second.body, &reused))
+	assert.Equal(t, created.Comment.UID, reused.Comment.UID)
+	assert.Nil(t, reused.Event)
+	assert.False(t, reused.Changed)
+
+	comments, err := h.DB().CommentsByIssue(context.Background(), issueID)
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+}
+
+func TestCommentEndpoint_IdempotencyRejectsDifferentBody(t *testing.T) {
+	_, ts, pid, issueID := bootstrapProjectWithIssue(t)
+	path := issueURL(pid, issueID, "comments")
+	headers := map[string]string{"Idempotency-Key": "comment-request-1"}
+
+	first := postWithHeader(t, ts, path, headers,
+		map[string]any{"actor": "agent", "body": "first comment"})
+	requireOK(t, first)
+	second := postWithHeader(t, ts, path, headers,
+		map[string]any{"actor": "agent", "body": "different comment"})
+
+	assertAPIError(t, second.status, second.body, 409, "idempotency_mismatch")
 }
 
 func TestCommentEndpoint_EditsCommentAndEmitsEvent(t *testing.T) {

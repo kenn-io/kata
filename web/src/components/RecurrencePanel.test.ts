@@ -29,7 +29,13 @@ const base: KataRecurrence = {
 describe('RecurrencePanel', () => {
   test('uses formatRRule for the summary (Weekly, 2 times)', () => {
     render(RecurrencePanel, {
-      props: { recurrences: [base], onCreate: vi.fn(), onEdit: vi.fn(), onDelete: vi.fn() },
+      props: {
+        recurrences: [base],
+        canCreate: false,
+        onCreate: vi.fn(),
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+      },
     })
     expect(screen.getByText('Weekly, 2 times')).toBeTruthy()
   })
@@ -37,7 +43,13 @@ describe('RecurrencePanel', () => {
   test("empty state still shows '+ New' button", () => {
     const onCreate = vi.fn()
     render(RecurrencePanel, {
-      props: { recurrences: [], onCreate, onEdit: vi.fn(), onDelete: vi.fn() },
+      props: {
+        recurrences: [],
+        canCreate: true,
+        onCreate,
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+      },
     })
     expect(screen.getByText('No recurring tasks')).toBeTruthy()
     expect(screen.getByRole('button', { name: /\+ New/i })).toBeTruthy()
@@ -46,16 +58,44 @@ describe('RecurrencePanel', () => {
   test("clicking '+ New' fires onCreate", async () => {
     const onCreate = vi.fn()
     render(RecurrencePanel, {
-      props: { recurrences: [base], onCreate, onEdit: vi.fn(), onDelete: vi.fn() },
+      props: {
+        recurrences: [base],
+        canCreate: true,
+        onCreate,
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+      },
     })
     await fireEvent.click(screen.getByRole('button', { name: /\+ New/i }))
     expect(onCreate).toHaveBeenCalledTimes(1)
   })
 
+  test("disables '+ New' when the selected issue cannot create a recurrence", () => {
+    render(RecurrencePanel, {
+      props: {
+        recurrences: [base],
+        canCreate: false,
+        onCreate: vi.fn(),
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+      },
+    })
+
+    expect((screen.getByRole('button', { name: /\+ New/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+  })
+
   test('clicking a row fires onEdit with the recurrence', async () => {
     const onEdit = vi.fn()
     render(RecurrencePanel, {
-      props: { recurrences: [base], onCreate: vi.fn(), onEdit, onDelete: vi.fn() },
+      props: {
+        recurrences: [base],
+        canCreate: false,
+        onCreate: vi.fn(),
+        onEdit,
+        onDelete: vi.fn(),
+      },
     })
     await fireEvent.click(screen.getByRole('button', { name: /Weekly review/ }))
     expect(onEdit).toHaveBeenCalledWith(base)
@@ -64,7 +104,13 @@ describe('RecurrencePanel', () => {
   test('clicking the delete icon fires onDelete with the recurrence', async () => {
     const onDelete = vi.fn()
     render(RecurrencePanel, {
-      props: { recurrences: [base], onCreate: vi.fn(), onEdit: vi.fn(), onDelete },
+      props: {
+        recurrences: [base],
+        canCreate: false,
+        onCreate: vi.fn(),
+        onEdit: vi.fn(),
+        onDelete,
+      },
     })
     await fireEvent.click(screen.getByRole('button', { name: /Delete recurrence/i }))
     expect(onDelete).toHaveBeenCalledWith(base)

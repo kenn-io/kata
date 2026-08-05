@@ -49,15 +49,19 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 			return mapSQLError(err, nil)
 		}
 		payload, err := json.Marshal(struct {
-			CommentUID string `json:"comment_uid"`
-			Author     string `json:"author"`
-			Body       string `json:"body"`
-			CreatedAt  string `json:"created_at"`
+			CommentUID             string `json:"comment_uid"`
+			Author                 string `json:"author"`
+			Body                   string `json:"body"`
+			CreatedAt              string `json:"created_at"`
+			IdempotencyKey         string `json:"idempotency_key,omitempty"`
+			IdempotencyFingerprint string `json:"idempotency_fingerprint,omitempty"`
 		}{
-			CommentUID: comment.UID,
-			Author:     comment.Author,
-			Body:       comment.Body,
-			CreatedAt:  createdAt,
+			CommentUID:             comment.UID,
+			Author:                 comment.Author,
+			Body:                   comment.Body,
+			CreatedAt:              createdAt,
+			IdempotencyKey:         params.IdempotencyKey,
+			IdempotencyFingerprint: params.IdempotencyFingerprint,
 		})
 		if err != nil {
 			return fmt.Errorf("marshal comment payload: %w", err)

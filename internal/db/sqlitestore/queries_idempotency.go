@@ -170,3 +170,57 @@ func (d *Store) LookupIdempotency(ctx context.Context, projectID int64, key stri
 		Event:        evt,
 	}, nil
 }
+
+// LookupCommentIdempotency finds the newest recent issue.commented event
+// carrying key and returns the comment that event created.
+func (d *Store) LookupCommentIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*db.CommentIdempotencyMatch, error) {
+	const q = `
+		SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
+		       e.issue_id, e.issue_uid,
+		       e.related_issue_id, e.related_issue_uid, e.type, e.actor, e.payload,
+		       e.hlc_physical_ms, e.hlc_counter, e.content_hash, e.created_at
+		FROM events e
+		JOIN projects p ON p.id = e.project_id
+		WHERE e.type = 'issue.commented'
+		  AND e.project_id = ?
+		  AND json_extract(e.payload, '$.idempotency_key') = ?
+		  AND e.created_at >= ?
+		ORDER BY e.id DESC
+		LIMIT 1`
+	row := d.QueryRowContext(ctx, q, projectID, key, since.UTC().Format(sqliteTimeFormat))
+
+	var evt db.Event
+	err := row.Scan(&evt.ID, &evt.UID, &evt.OriginInstanceUID, &evt.ProjectID, &evt.ProjectUID, &evt.ProjectName,
+		&evt.IssueID, &evt.IssueUID, &evt.RelatedIssueID, &evt.RelatedIssueUID, &evt.Type, &evt.Actor,
+		&evt.Payload, &evt.HLCPhysicalMS, &evt.HLCCounter, &evt.ContentHash, &evt.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lookup comment idempotency: %w", err)
+	}
+	if evt.IssueID == nil {
+		return nil, fmt.Errorf("comment idempotency match has no issue_id")
+	}
+	var payload struct {
+		CommentUID  string `json:"comment_uid"`
+		Fingerprint string `json:"idempotency_fingerprint"`
+	}
+	if err := json.Unmarshal([]byte(evt.Payload), &payload); err != nil {
+		return nil, fmt.Errorf("decode comment idempotency payload: %w", err)
+	}
+	var comment db.Comment
+	err = d.QueryRowContext(ctx,
+		`SELECT id, uid, issue_id, author, body, created_at FROM comments WHERE issue_id = ? AND uid = ?`,
+		*evt.IssueID, payload.CommentUID,
+	).Scan(&comment.ID, &comment.UID, &comment.IssueID, &comment.Author, &comment.Body, &comment.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("comment idempotency match comment: %w", db.ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("comment idempotency match comment: %w", err)
+	}
+	return &db.CommentIdempotencyMatch{
+		Comment: comment, Fingerprint: payload.Fingerprint, Event: evt,
+	}, nil
+}

@@ -71,24 +71,29 @@
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
   let pendingCreate: { title: string; key: string } | undefined
+  let pendingComment: { issueUID: string; body: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
   let advertisedAuthentication: 'loopback' | 'login' | 'proxy' | 'unavailable' | undefined
   let preferences = $state(loadPreferences())
   let versionMismatch = $state(false)
   let liveUpdatesReconnecting = $state(false)
-  const browserFetch = createCredentialedFetch(undefined, async (input, init) => {
-    const response = await fetch(input, init)
-    const authentication = response.headers.get('X-Kata-Web-Authentication')
-    if (
-      authentication === 'loopback' ||
-      authentication === 'login' ||
-      authentication === 'proxy' ||
-      authentication === 'unavailable'
-    ) {
-      advertisedAuthentication = authentication
-    }
-    return response
-  })
+  const browserFetch = createCredentialedFetch(
+    undefined,
+    async (input, init) => {
+      const response = await fetch(input, init)
+      const authentication = response.headers.get('X-Kata-Web-Authentication')
+      if (
+        authentication === 'loopback' ||
+        authentication === 'login' ||
+        authentication === 'proxy' ||
+        authentication === 'unavailable'
+      ) {
+        advertisedAuthentication = authentication
+      }
+      return response
+    },
+    requireAuthentication,
+  )
   const client = createKataClient(undefined, browserFetch)
   const snapshots = new SnapshotController(
     createUISnapshotRequest(browserFetch),
@@ -337,12 +342,19 @@
   async function addComment(uid: string, body: string): Promise<boolean> {
     const target = selectedMutationTarget(uid)
     if (!target) return false
-    return runMutation({ draft: body }, (context) =>
+    const comment =
+      pendingComment?.issueUID === uid && pendingComment.body === body
+        ? pendingComment
+        : { issueUID: uid, body, key: crypto.randomUUID() }
+    pendingComment = comment
+    const accepted = await runMutation({ draft: body }, (context) =>
       client.POST('/api/v1/projects/{project_id}/issues/{ref}/comments', {
-        params: { path: target },
+        params: { path: target, header: { 'Idempotency-Key': comment.key } },
         body: context.body({ body }, requestActor),
       }),
     )
+    if (accepted) pendingComment = undefined
+    return accepted
   }
 
   async function createRecurrence(

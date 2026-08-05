@@ -174,6 +174,20 @@ describe('IssueDetail', () => {
     expect(onMoveIssue).toHaveBeenCalledWith('project-2')
   })
 
+  it('shows recurrence creation only for an open issue without a recurrence', async () => {
+    const view = renderDetail({ issue: makeIssue({ metadata: {} }), selectedRecurrences: [] })
+
+    expect(screen.getByRole('region', { name: 'Recurrences' })).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: /\+ New recurrence/ }) as HTMLButtonElement).disabled,
+    ).toBe(false)
+
+    await view.rerender({ issue: makeIssue({ status: 'closed', metadata: {} }) })
+    expect(screen.queryByRole('region', { name: 'Recurrences' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    expect(screen.queryByRole('menuitem', { name: 'Create recurrence...' })).toBeNull()
+  })
+
   it('composes the ported checklist, recurrence, comments, links, and history sections', async () => {
     const onAddComment = vi.fn(async () => true)
     renderDetail({

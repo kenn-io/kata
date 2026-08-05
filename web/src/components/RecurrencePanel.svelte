@@ -7,12 +7,13 @@
 
   interface Props {
     recurrences: KataRecurrence[]
+    canCreate: boolean
     onCreate: () => void
     onEdit: (rec: KataRecurrence) => void
     onDelete: (rec: KataRecurrence) => void
   }
 
-  let { recurrences, onCreate, onEdit, onDelete }: Props = $props()
+  let { recurrences, canCreate, onCreate, onEdit, onDelete }: Props = $props()
 
   function status(rec: KataRecurrence): 'deleted' | 'done' | 'active' {
     if (rec.deleted_at) return 'deleted'
@@ -24,7 +25,12 @@
 <section class="recurrence-panel" aria-label="Recurrences">
   <header class="head">
     <h3>Recurring</h3>
-    <button type="button" class="add" onclick={onCreate} aria-label="+ New recurrence">+ New</button
+    <button
+      type="button"
+      class="add"
+      disabled={!canCreate}
+      onclick={onCreate}
+      aria-label="+ New recurrence">+ New</button
     >
   </header>
   {#if recurrences.length === 0}

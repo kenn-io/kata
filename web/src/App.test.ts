@@ -278,6 +278,40 @@ describe('App', () => {
     ).toBe(true)
   })
 
+  it('fences browser authority when a reference request rejects the session', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'revoked-session', csrf: 'revoked-csrf' }),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(
+          input instanceof Request ? input.url : String(input),
+          window.location.origin,
+        )
+        if (target.pathname === '/api/v1/ui/references') {
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'login' },
+          })
+        }
+        return new Response(JSON.stringify(snapshot()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
+        })
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
+    expect(
+      (screen.getByRole('button', { name: 'New project' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+  })
+
   it('shows configured-origin login without probing authority or losing the requested route', () => {
     const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
@@ -551,6 +585,70 @@ describe('App', () => {
         .find((request) => request.method === 'DELETE')
       expect(deletion?.headers.get('If-Match')).toBe('"rev-4"')
     })
+  })
+
+  it('reuses the comment idempotency key after an uncertain response', async () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const base = snapshot()
+    const accepted = {
+      ...base,
+      selected: {
+        state: 'available',
+        issue: base.collection[0],
+        comments: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    const commentRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname.endsWith('/comments') && request.method === 'POST') {
+          commentRequests.push(request)
+          if (commentRequests.length === 1) return new Response('', { status: 502 })
+          return Response.json({
+            issue: base.collection[0],
+            comment: {
+              id: 9,
+              uid: '01J00000000000000000000009',
+              issue_id: 1,
+              author: 'user-a',
+              body: 'Retry-safe comment',
+              created_at: '2026-08-01T12:00:00.000Z',
+            },
+            event: null,
+            changed: false,
+          })
+        }
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    const editor = await screen.findByRole('textbox', { name: 'Comment' })
+    await fireEvent.input(editor, { target: { value: 'Retry-safe comment' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+    await waitFor(() => expect(commentRequests).toHaveLength(1))
+    const addComment = screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement
+    await waitFor(() => expect(addComment.disabled).toBe(false))
+    await fireEvent.click(addComment)
+    await waitFor(() => expect(commentRequests).toHaveLength(2))
+
+    const keys = commentRequests.map((request) => request.headers.get('Idempotency-Key'))
+    expect(keys[0]).toBeTruthy()
+    expect(keys[1]).toBe(keys[0])
   })
 
   it('keeps accepted authority visible while live updates reconnect', async () => {

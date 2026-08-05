@@ -2659,6 +2659,7 @@ func (o *UnassignIssueRequestOptions) GetHeader() (map[string]string, error) {
 type CreateCommentRequestOptions struct {
 	PathParams *CreateCommentPath
 	Body       *CreateCommentBody
+	Header     *CreateCommentHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2678,6 +2679,14 @@ func (o *CreateCommentRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2705,7 +2714,7 @@ func (o *CreateCommentRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *CreateCommentRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // EditCommentRequestOptions is the options needed to make a request to EditComment.

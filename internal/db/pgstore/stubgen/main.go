@@ -195,6 +195,7 @@ var alreadyImplemented = map[string]bool{
 	"LinksByIssue":                         true, // links.go
 	"Path":                                 true, // store.go
 	"LookupIdempotency":                    true, // idempotency.go
+	"LookupCommentIdempotency":             true, // idempotency.go
 	"MaxEventID":                           true, // events.go
 	"MaxFederationBaselineEventID":         true, // events.go
 	"MaxLocalOriginEventID":                true, // events.go

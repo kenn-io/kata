@@ -5002,7 +5002,9 @@ export interface operations {
   createComment: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        'Idempotency-Key'?: string
+      }
       path: {
         project_id: number
         ref: string

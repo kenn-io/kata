@@ -55,6 +55,10 @@ type PurgeIssueHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
 }
 
+type CreateCommentHeaders struct {
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 type GetIssueLeaseStatusHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }

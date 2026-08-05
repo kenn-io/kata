@@ -321,6 +321,27 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 	}
 	assert.Nil(t, missing)
 
+	comment, commentEvent, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "conformance-agent", Body: "idempotent comment",
+		IdempotencyKey: "comment-request-1", IdempotencyFingerprint: "comment-fingerprint-1",
+	})
+	if err != nil {
+		return fmt.Errorf("create comment: %w", err)
+	}
+	commentMatch, err := store.LookupCommentIdempotency(ctx, project.ID, "comment-request-1", since)
+	if err != nil {
+		return fmt.Errorf("lookup comment idempotency: %w", err)
+	}
+	require.NotNil(t, commentMatch)
+	assert.Equal(t, comment.UID, commentMatch.Comment.UID)
+	assert.Equal(t, commentEvent.UID, commentMatch.Event.UID)
+	assert.Equal(t, "comment-fingerprint-1", commentMatch.Fingerprint)
+	missingComment, err := store.LookupCommentIdempotency(ctx, project.ID, "comment-request-2", since)
+	if err != nil {
+		return fmt.Errorf("lookup missing comment idempotency key: %w", err)
+	}
+	assert.Nil(t, missingComment)
+
 	releaseFirst, err := store.AcquireIdempotencyLock(ctx, project.ID, "serialized-request")
 	if err != nil {
 		return fmt.Errorf("acquire first idempotency lock: %w", err)

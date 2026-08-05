@@ -9,6 +9,7 @@ type CredentialReader = () => SessionCredentials | undefined
 export function createCredentialedFetch(
   readCredentials: CredentialReader = () => loadSessionCredentials(),
   upstream: typeof fetch = fetch,
+  onAuthenticationRequired: () => void = () => undefined,
 ): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = input instanceof Request ? input : undefined
@@ -24,7 +25,14 @@ export function createCredentialedFetch(
         headers.set('X-Kata-CSRF', credentials.csrf)
       }
     }
-    return upstream(input, { ...init, credentials: 'same-origin', redirect: 'error', headers })
+    const response = await upstream(input, {
+      ...init,
+      credentials: 'same-origin',
+      redirect: 'error',
+      headers,
+    })
+    if (response.status === 401) onAuthenticationRequired()
+    return response
   }
 }
 
