@@ -250,9 +250,14 @@ func federationGroupFoldProjection(
 	tx *sql.Tx,
 	projectIDs []int64,
 ) (db.FoldProjection, error) {
+	// Only Links is read from this projection, so the fold is restricted to the
+	// events that can affect it. Everything else in the group's history stays
+	// out of the query, which is what keeps a single ingest from reading every
+	// federated project's full event payloads.
+	linkEventTypes := db.FederationLinkAffectingEventTypes()
 	var events []db.FoldEvent
 	for _, projectID := range projectIDs {
-		projectEvents, err := federationFoldEvents(ctx, tx, projectID)
+		projectEvents, err := federationFoldEventsOfTypes(ctx, tx, projectID, linkEventTypes)
 		if err != nil {
 			return db.FoldProjection{}, err
 		}
@@ -262,9 +267,34 @@ func federationGroupFoldProjection(
 }
 
 func federationFoldEvents(ctx context.Context, tx *sql.Tx, projectID int64) ([]db.FoldEvent, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
+	return federationFoldEventsOfTypes(ctx, tx, projectID, nil)
+}
+
+// federationFoldEventsOfTypes lists a project's fold events in event order,
+// limited to eventTypes when it is non-empty. Restricting the types keeps the
+// payload of every irrelevant event out of the query and out of the fold, which
+// matters because the caller may run this across a whole binding group.
+func federationFoldEventsOfTypes(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	eventTypes []string,
+) ([]db.FoldEvent, error) {
+	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
-FROM events e JOIN projects p ON p.id=e.project_id WHERE e.project_id=$1 ORDER BY e.id ASC`, projectID)
+FROM events e JOIN projects p ON p.id=e.project_id WHERE e.project_id=$1`
+	args := []any{projectID}
+	if len(eventTypes) > 0 {
+		placeholders := make([]string, 0, len(eventTypes))
+		for i, eventType := range eventTypes {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", i+2))
+			args = append(args, eventType)
+		}
+		//nolint:gosec // G202: generated $N placeholders only; values are bound separately.
+		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	query += " ORDER BY e.id ASC"
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
