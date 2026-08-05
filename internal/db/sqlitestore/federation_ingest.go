@@ -157,6 +157,7 @@ func (d *Store) ingestFederationEventsOnce(
 		})
 	}
 
+	linksAffected := false
 	for _, in := range prepared {
 		if in.Duplicate {
 			continue
@@ -178,13 +179,19 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 		result.Accepted++
+		if db.FederationEventAffectsLinks(ev.Type) {
+			linksAffected = true
+		}
 		result.InsertedEventUIDs = append(result.InsertedEventUIDs, ev.EventUID)
 		for _, auditEvent := range auditEvents {
 			result.InsertedEventUIDs = append(result.InsertedEventUIDs, auditEvent.UID)
 		}
 	}
 	if result.Accepted > 0 {
-		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID); err != nil {
+		// The generated claim audit events are never link-bearing, so the
+		// accepted batch alone decides whether the binding-group link fold has
+		// any work to do.
+		if err := d.materializeFederatedProjectTx(ctx, tx, p.ProjectID, linksAffected); err != nil {
 			return db.FederationIngestResult{}, err
 		}
 		if !adoptionSnapshotAuthorState.shouldDeferMarker {

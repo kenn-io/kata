@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -27,7 +28,14 @@ const maxFederationPushIngestBodyBytes = 768 << 10
 // unsplittable event under the hub's configured federation ingest cap.
 const maxFederationHubIngestBodyBytes = 64 << 20
 
-const defaultClientTimeout = 5 * time.Second
+// defaultFederationClientTimeout is the per-request budget for federation sync
+// calls. These are bulk operations rather than interactive ones: a push ingests
+// a whole batch and a poll can return federationPollLimit events, and the hub's
+// per-request work grows with the size of the federated data rather than with
+// the request. A budget sized for interactive calls turns a hub that is merely
+// slow into a permanently stuck spoke, because every attempt is cancelled at the
+// same point and retried from the start. KATA_HTTP_TIMEOUT overrides this.
+const defaultFederationClientTimeout = 60 * time.Second
 
 // ErrFederationResetRequired reports a hub that still requires reset after the
 // spoke refreshed federation metadata and replayed from the new horizon.
@@ -749,7 +757,11 @@ func (r *Runner) clientOpts() clientpkg.Opts {
 
 func clientOptsWithDefault(opts clientpkg.Opts) clientpkg.Opts {
 	if opts.Timeout == 0 {
-		opts.Timeout = defaultClientTimeout
+		// An unparseable value falls back to the default; the CLI already warns
+		// about that on stderr and the sync runner has no interactive channel.
+		timeout, _ := clientpkg.ParseHTTPTimeout(
+			os.Getenv(clientpkg.HTTPTimeoutEnvVar), defaultFederationClientTimeout)
+		opts.Timeout = timeout
 	}
 	return opts
 }
