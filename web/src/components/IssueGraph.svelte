@@ -360,11 +360,20 @@
     shouldHideDone: boolean,
   ): KataReachableGraphResponse {
     const maxDepth = depth === 'full' ? Number.POSITIVE_INFINITY : Number(depth)
-    const distanceByUID = graphDistanceByUID(sourceUID, snapshot.edges)
+    const hiddenUIDs = new Set(
+      snapshot.nodes
+        .filter((node) => shouldHideDone && node.uid !== sourceUID && node.status === 'closed')
+        .map((node) => node.uid),
+    )
+    const traversableEdges = snapshot.edges.filter(
+      (edge) => !hiddenUIDs.has(edge.from_uid) && !hiddenUIDs.has(edge.to_uid),
+    )
+    const distanceByUID = graphDistanceByUID(sourceUID, traversableEdges)
     const nodes = snapshot.nodes.filter((node) => {
+      if (hiddenUIDs.has(node.uid)) return false
       const distance = distanceByUID.get(node.uid)
       if (distance === undefined || distance > maxDepth) return false
-      return !shouldHideDone || node.uid === sourceUID || node.closed_reason !== 'done'
+      return true
     })
     const visibleUIDs = new Set(nodes.map((node) => node.uid))
     return {
@@ -372,7 +381,7 @@
       depth,
       hide_done: shouldHideDone,
       nodes,
-      edges: snapshot.edges.filter(
+      edges: traversableEdges.filter(
         (edge) => visibleUIDs.has(edge.from_uid) && visibleUIDs.has(edge.to_uid),
       ),
       unresolved_refs: snapshot.unresolved_refs.filter((ref) => visibleUIDs.has(ref.other_uid)),

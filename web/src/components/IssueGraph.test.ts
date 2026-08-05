@@ -136,20 +136,20 @@ describe('IssueGraph', () => {
     ).toBeTruthy()
   })
 
-  it('applies hide-done as a presentation filter over the snapshot graph', async () => {
+  it('hides closed non-source issues regardless of closure reason', async () => {
     const root = task({ uid: 'issue-root', short_id: 'root' })
-    const done = task({
-      uid: 'issue-done',
-      short_id: 'done',
-      title: 'Done issue',
+    const closed = task({
+      uid: 'issue-closed',
+      short_id: 'closed',
+      title: 'Closed issue',
       status: 'closed',
-      closed_reason: 'done',
+      closed_reason: 'wontfix',
     })
     render(IssueGraph, {
       props: {
         graph: {
-          ...graphResponse(root, [root, done]),
-          edges: [{ from_uid: root.uid, to_uid: done.uid, kind: 'related', layout: false }],
+          ...graphResponse(root, [root, closed]),
+          edges: [{ from_uid: root.uid, to_uid: closed.uid, kind: 'related', layout: false }],
         },
         sourceIssue: root,
         selectedUID: root.uid,
@@ -158,10 +158,47 @@ describe('IssueGraph', () => {
       },
     })
 
-    await waitFor(() => expect(screen.getAllByText('Done issue').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText('Closed issue').length).toBeGreaterThan(0))
     await fireEvent.click(screen.getByRole('button', { name: /Graph filters/ }))
     await fireEvent.click(screen.getByRole('button', { name: 'Hide done' }))
-    await waitFor(() => expect(screen.queryAllByText('Done issue')).toEqual([]))
+    await waitFor(() => expect(screen.queryAllByText('Closed issue')).toEqual([]))
+  })
+
+  it('removes descendants reachable only through a hidden closed issue', async () => {
+    const root = task({ uid: 'issue-root', short_id: 'root' })
+    const closed = task({
+      uid: 'issue-closed',
+      short_id: 'closed',
+      title: 'Closed intermediate',
+      status: 'closed',
+      closed_reason: 'duplicate',
+    })
+    const descendant = task({
+      uid: 'issue-descendant',
+      short_id: 'descendant',
+      title: 'Open descendant',
+    })
+    render(IssueGraph, {
+      props: {
+        graph: {
+          ...graphResponse(root, [root, closed, descendant]),
+          edges: [
+            { from_uid: root.uid, to_uid: closed.uid, kind: 'related', layout: false },
+            { from_uid: closed.uid, to_uid: descendant.uid, kind: 'blocks', layout: true },
+          ],
+        },
+        sourceIssue: root,
+        selectedUID: root.uid,
+        onBack: () => {},
+        onSelectIssue: () => {},
+      },
+    })
+
+    await waitFor(() => expect(screen.getAllByText('Open descendant').length).toBeGreaterThan(0))
+    await fireEvent.click(screen.getByRole('button', { name: /Graph filters/ }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide done' }))
+    await waitFor(() => expect(screen.queryAllByText('Closed intermediate')).toEqual([]))
+    expect(screen.queryAllByText('Open descendant')).toEqual([])
   })
 
   it('excludes disconnected nodes at full depth', async () => {
