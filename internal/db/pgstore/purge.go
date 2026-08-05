@@ -78,6 +78,21 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 				return mapSQLError(err, nil)
 			}
 		}
+		if issue.RecurrenceID != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE recurrences
+SET last_materialized_uid = (
+      SELECT uid FROM issues
+       WHERE recurrence_id = $1 AND id <> $2 AND occurrence_key IS NOT NULL
+       ORDER BY occurrence_key DESC, id DESC LIMIT 1
+    ),
+    revision = revision + 1,
+    updated_at = $3
+WHERE id = $1 AND last_materialized_uid = $4`,
+				*issue.RecurrenceID, issue.ID, nowStoredTimestamp(), issue.UID,
+			); err != nil {
+				return mapSQLError(err, nil)
+			}
+		}
 
 		var resetCursor sql.NullInt64
 		if minEventID.Valid {

@@ -412,6 +412,24 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	}
 	require.NotNil(t, nextIssue, "closing a done occurrence must materialize the next occurrence")
 	assert.Equal(t, "open", nextIssue.Status)
+	if _, err := store.PurgeIssue(ctx, nextIssue.ID, "scheduler", nil); err != nil {
+		return fmt.Errorf("purge latest recurrence occurrence: %w", err)
+	}
+	afterPurge, err := store.GetRecurrenceByID(ctx, rec.ID)
+	if err != nil {
+		return fmt.Errorf("get recurrence after latest occurrence purge: %w", err)
+	}
+	require.NotNil(t, afterPurge.LastMaterializedUID)
+	assert.Equal(t, materialized.NewIssueUID, *afterPurge.LastMaterializedUID)
+	dailyRule := "FREQ=DAILY"
+	patchedAfterPurge, err := store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: rec.ID, IfMatchRev: afterPurge.Revision, Actor: "scheduler",
+		Update: db.RecurrenceUpdate{Rule: &dailyRule},
+	})
+	if err != nil {
+		return fmt.Errorf("patch recurrence after latest occurrence purge: %w", err)
+	}
+	assert.True(t, patchedAfterPurge.Changed)
 
 	currentRecurrence, err := store.GetRecurrenceByID(ctx, rec.ID)
 	if err != nil {
@@ -500,7 +518,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("get deleted recurrence: %w", err)
 	}
 	require.NotNil(t, deleted.DeletedAt)
-	assert.Equal(t, int64(7), deleted.Revision)
+	assert.Equal(t, currentRecurrence.Revision+1, deleted.Revision)
 	if _, err := store.SoftDeleteRecurrence(ctx, db.SoftDeleteRecurrenceIn{
 		RecurrenceID: rec.ID, IfMatchRev: currentRecurrence.Revision, Actor: "scheduler",
 	}); err == nil {

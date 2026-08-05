@@ -349,6 +349,20 @@ func purgeCascade(
 		`DELETE FROM issue_claims WHERE issue_id = ?`, issue.ID); err != nil {
 		return 0, fmt.Errorf("delete issue claims: %w", err)
 	}
+	if issue.RecurrenceID != nil {
+		if _, err := c.ExecContext(ctx, `UPDATE recurrences
+			   SET last_materialized_uid = (
+			         SELECT uid FROM issues
+			          WHERE recurrence_id = ? AND id <> ? AND occurrence_key IS NOT NULL
+			          ORDER BY occurrence_key DESC, id DESC LIMIT 1
+			       ),
+			       revision = revision + 1,
+			       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+			 WHERE id = ? AND last_materialized_uid = ?`,
+			*issue.RecurrenceID, issue.ID, *issue.RecurrenceID, issue.UID); err != nil {
+			return 0, fmt.Errorf("repair recurrence materialization cursor: %w", err)
+		}
+	}
 
 	// Step 5: reserve an SSE cursor by bumping sqlite_sequence past the
 	// max events.id we just deleted. Skip when no events were attached —
