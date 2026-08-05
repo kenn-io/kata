@@ -97,19 +97,29 @@ func TestWebLocalSessionRejectsPathBasedProjectInit(t *testing.T) {
 	require.NoError(t, err)
 	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
 	require.NoError(t, err)
-	body, err := json.Marshal(map[string]string{"start_path": t.TempDir(), "actor": "user-a"})
-	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", bytes.NewReader(body))
-	request.Host = "127.0.0.1:27123"
-	request.RemoteAddr = "127.0.0.1:40123"
-	request.Header.Set("Origin", "http://127.0.0.1:27123")
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set(webSessionHeader, issued.Session)
-	request.Header.Set(webCSRFHeader, issued.CSRF)
-	request.AddCookie(manager.Cookie(issued.Cookie))
-	response := httptest.NewRecorder()
+	for _, tc := range []struct {
+		name      string
+		startPath string
+	}{
+		{name: "filesystem path", startPath: t.TempDir()},
+		{name: "whitespace-only path", startPath: " "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"start_path": tc.startPath, "actor": "user-a"})
+			require.NoError(t, err)
+			request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", bytes.NewReader(body))
+			request.Host = "127.0.0.1:27123"
+			request.RemoteAddr = "127.0.0.1:40123"
+			request.Header.Set("Origin", "http://127.0.0.1:27123")
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set(webSessionHeader, issued.Session)
+			request.Header.Set(webCSRFHeader, issued.CSRF)
+			request.AddCookie(manager.Cookie(issued.Cookie))
+			response := httptest.NewRecorder()
 
-	handler.ServeHTTP(response, request)
+			handler.ServeHTTP(response, request)
 
-	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+			assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+		})
+	}
 }

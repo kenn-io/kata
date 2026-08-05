@@ -459,7 +459,7 @@ func ensureWebLocalProjectInitAllowed(ctx context.Context, in *api.InitProjectRe
 	if !ok || principal.Kind != PrincipalWebLocal {
 		return nil
 	}
-	if strings.TrimSpace(in.Body.StartPath) == "" && !in.Body.Replace && !in.Body.Reassign && in.Body.Alias == nil {
+	if in.Body.StartPath == "" && !in.Body.Replace && !in.Body.Reassign && in.Body.Alias == nil {
 		return nil
 	}
 	return api.NewError(http.StatusForbidden, "web_local_operation_forbidden",
