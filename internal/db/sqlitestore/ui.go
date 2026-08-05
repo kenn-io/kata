@@ -273,15 +273,15 @@ func readUIProjects(
 	if err := rows.Close(); err != nil {
 		return nil, nil, fmt.Errorf("close UI projects: %w", err)
 	}
+	if onStatsRead != nil {
+		onStatsRead()
+	}
+	stats, err := readUIProjectStats(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
 	for idx := range projects {
-		if onStatsRead != nil {
-			onStatsRead()
-		}
-		stats, err := readUIProjectStats(ctx, tx, projects[idx].Project.ID)
-		if err != nil {
-			return nil, nil, err
-		}
-		projects[idx].Stats = stats
+		projects[idx].Stats = stats[projects[idx].Project.ID]
 	}
 	return projects, projectNames, nil
 }
@@ -309,23 +309,37 @@ func readUIProjectNames(ctx context.Context, tx *sql.Tx) (map[int64]string, erro
 	return projectNames, nil
 }
 
-func readUIProjectStats(ctx context.Context, tx *sql.Tx, projectID int64) (db.ProjectStats, error) {
-	var stats db.ProjectStats
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FILTER (WHERE status = 'open'), COUNT(*) FILTER (WHERE status = 'closed')
-		FROM issues WHERE project_id = ? AND deleted_at IS NULL`, projectID).Scan(&stats.Open, &stats.Closed); err != nil {
-		return db.ProjectStats{}, fmt.Errorf("read UI project stats: %w", err)
+func readUIProjectStats(ctx context.Context, tx *sql.Tx) (map[int64]db.ProjectStats, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT p.id,
+			COUNT(i.id) FILTER (WHERE i.status = 'open'),
+			COUNT(i.id) FILTER (WHERE i.status = 'closed'),
+			(SELECT e.created_at FROM events e WHERE e.project_id = p.id ORDER BY e.id DESC LIMIT 1)
+		FROM projects p
+		LEFT JOIN issues i ON i.project_id = p.id AND i.deleted_at IS NULL
+		WHERE p.deleted_at IS NULL AND p.name <> ?
+		GROUP BY p.id`, db.SystemProjectName)
+	if err != nil {
+		return nil, fmt.Errorf("read UI project stats: %w", err)
 	}
-	var lastEventAt sql.NullTime
-	err := tx.QueryRowContext(ctx,
-		`SELECT created_at FROM events WHERE project_id = ? ORDER BY id DESC LIMIT 1`, projectID).Scan(&lastEventAt)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return db.ProjectStats{}, fmt.Errorf("read UI project last event: %w", err)
+	defer func() { _ = rows.Close() }()
+	statsByProject := make(map[int64]db.ProjectStats)
+	for rows.Next() {
+		var projectID int64
+		var stats db.ProjectStats
+		var lastEventAt sql.NullTime
+		if err := rows.Scan(&projectID, &stats.Open, &stats.Closed, &lastEventAt); err != nil {
+			return nil, fmt.Errorf("scan UI project stats: %w", err)
+		}
+		if lastEventAt.Valid {
+			stats.LastEventAt = &lastEventAt.Time
+		}
+		statsByProject[projectID] = stats
 	}
-	if lastEventAt.Valid {
-		stats.LastEventAt = &lastEventAt.Time
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate UI project stats: %w", err)
 	}
-	return stats, nil
+	return statsByProject, nil
 }
 
 func readUIIssues(

@@ -52,6 +52,30 @@ func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
 	require.Zero(t, statsReads)
 }
 
+func TestUISnapshotReadsProjectStatsInOneBatch(t *testing.T) {
+	ctx := context.Background()
+	store := openUIStore(t)
+	for _, name := range []string{"example-project", "example-workspace", "spoke-project"} {
+		project := createUIProject(t, store, name)
+		_, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Open issue", Author: "user-a",
+		})
+		require.NoError(t, err)
+	}
+
+	statsReads := 0
+	store.uiProjectStatsRead = func() { statsReads++ }
+	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{View: "all-open"})
+	require.NoError(t, err)
+	require.Equal(t, 1, statsReads)
+	require.Len(t, snapshot.Projects, 3)
+	for _, project := range snapshot.Projects {
+		assert.Equal(t, 1, project.Stats.Open)
+		assert.Zero(t, project.Stats.Closed)
+		assert.NotNil(t, project.Stats.LastEventAt)
+	}
+}
+
 func TestUISnapshotCollectionContract(t *testing.T) {
 	dbtest.RunUISnapshotCollectionContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
