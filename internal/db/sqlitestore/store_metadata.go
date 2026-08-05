@@ -284,3 +284,138 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 	out.NewRevision = newRev
 	return out, nil
 }
+
+// DesignateInboxProject assigns the Inbox role to one active project and clears
+// it from every other project in the same transaction, including archived ones.
+func (d *Store) DesignateInboxProject(ctx context.Context, in db.DesignateInboxProjectIn) (db.DesignateInboxProjectOut, error) {
+	return retryWrite1(ctx, d, func() (db.DesignateInboxProjectOut, error) {
+		return d.designateInboxProject(ctx, in)
+	})
+}
+
+func (d *Store) designateInboxProject(ctx context.Context, in db.DesignateInboxProjectIn) (db.DesignateInboxProjectOut, error) {
+	var out db.DesignateInboxProjectOut
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return out, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	type projectState struct {
+		id       int64
+		name     string
+		metadata string
+		revision int64
+		deleted  sql.NullString
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, name, metadata, revision, deleted_at
+		  FROM projects
+		 ORDER BY id`)
+	if err != nil {
+		return out, err
+	}
+	var projects []projectState
+	for rows.Next() {
+		var project projectState
+		if err := rows.Scan(
+			&project.id, &project.name, &project.metadata, &project.revision, &project.deleted,
+		); err != nil {
+			_ = rows.Close()
+			return out, err
+		}
+		projects = append(projects, project)
+	}
+	if err := rows.Close(); err != nil {
+		return out, err
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	var target *projectState
+	for index := range projects {
+		if projects[index].id == in.ProjectID {
+			target = &projects[index]
+			break
+		}
+	}
+	if target == nil || target.deleted.Valid {
+		return out, fmt.Errorf("project %d not found", in.ProjectID)
+	}
+	if in.IfMatchRev != nil && *in.IfMatchRev != target.revision {
+		return out, &db.RevisionConflictError{CurrentRevision: target.revision}
+	}
+
+	roleInbox := json.RawMessage(`"inbox"`)
+	roleClear := json.RawMessage(`null`)
+	for _, project := range projects {
+		role := roleClear
+		if project.id == in.ProjectID {
+			role = roleInbox
+		} else {
+			var current map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(project.metadata), &current); err != nil {
+				return out, fmt.Errorf("decode project %d metadata: %w", project.id, err)
+			}
+			if string(current["role"]) != `"inbox"` {
+				continue
+			}
+		}
+		if err := ensureProjectWritableTx(ctx, tx, project.id); err != nil {
+			return out, err
+		}
+		currentMetadata := json.RawMessage(project.metadata)
+		updated, err := db.ApplyMetadataPatch(currentMetadata, map[string]json.RawMessage{"role": role})
+		if err != nil {
+			return out, err
+		}
+		diff, err := metadata.Diff(currentMetadata, updated)
+		if err != nil {
+			return out, err
+		}
+		if len(diff) == 0 {
+			continue
+		}
+		newRevision := project.revision + 1
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE projects SET metadata = ?, revision = ? WHERE id = ?`,
+			string(updated), newRevision, project.id); err != nil {
+			return out, fmt.Errorf("update project metadata: %w", err)
+		}
+		type keyDiffPayload struct {
+			From json.RawMessage `json:"from"`
+			To   json.RawMessage `json:"to"`
+		}
+		diffPayload := make(map[string]keyDiffPayload, len(diff))
+		for key, value := range diff {
+			diffPayload[key] = keyDiffPayload{From: value.From, To: value.To}
+		}
+		payload, err := json.Marshal(struct {
+			Diff        map[string]keyDiffPayload `json:"diff"`
+			RevisionNew int64                     `json:"revision_new"`
+		}{Diff: diffPayload, RevisionNew: newRevision})
+		if err != nil {
+			return out, err
+		}
+		event, err := d.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: project.id, ProjectName: project.name, Type: "project.metadata_updated",
+			Actor: in.Actor, Payload: string(payload),
+		})
+		if err != nil {
+			return out, err
+		}
+		out.Events = append(out.Events, event)
+	}
+
+	out.Project, err = projectByIDTx(ctx, tx, in.ProjectID)
+	if err != nil {
+		return out, err
+	}
+	out.NewRevision = out.Project.Revision
+	out.Changed = len(out.Events) > 0
+	if err := tx.Commit(); err != nil {
+		return out, err
+	}
+	return out, nil
+}

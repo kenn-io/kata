@@ -22,6 +22,7 @@ import (
 	"go.kenn.io/kata/internal/githubsync"
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/vector"
+	kataweb "go.kenn.io/kata/internal/web"
 )
 
 // ServerConfig wires the daemon's runtime dependencies. DB and StartedAt are
@@ -30,7 +31,10 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
-	DB                            db.Storage
+	DB db.Storage
+	// UIStore supplies coherent browser projections. Nil defaults to DB when
+	// the configured storage backend implements db.UIStore.
+	UIStore                       db.UIStore
 	StartedAt                     time.Time
 	Endpoint                      *kitdaemon.Endpoint
 	Broadcaster                   *EventBroadcaster
@@ -55,6 +59,10 @@ type ServerConfig struct {
 	// Token == "" disables bearer auth (appropriate for Unix-socket and
 	// loopback-TCP deployments).
 	Auth config.AuthConfig
+
+	// WebSessions owns browser cookie+header session state. Nil keeps
+	// the browser-only routes and middleware disabled for embedded/API-only use.
+	WebSessions *WebSessionManager
 
 	// InsecureReadonly permits unauthenticated GETs on non-loopback TCP
 	// even when Auth.Token == "". DEV ONLY — not for production.
@@ -153,9 +161,16 @@ func NewDefaultGitHubSyncRunner(cfg GitHubSyncRunnerConfig) GitHubSyncRunner {
 
 // Server bundles the http handler and lifecycle.
 type Server struct {
-	cfg     ServerConfig
-	handler http.Handler
-	api     huma.API
+	cfg         ServerConfig
+	baseHandler http.Handler
+	handler     http.Handler
+	api         huma.API
+}
+
+// ListenerBinding associates an owned listener with its request policy.
+type ListenerBinding struct {
+	Listener net.Listener
+	Policy   ListenerPolicy
 }
 
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
@@ -171,6 +186,9 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg.FederationCredentials = config.DefaultFederationCredentialStore()
 	}
 	cfg.FederationCatalog = append([]config.CatalogDaemonConfig(nil), cfg.FederationCatalog...)
+	if cfg.UIStore == nil {
+		cfg.UIStore, _ = cfg.DB.(db.UIStore)
+	}
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("kata", APISchemaVersion)
@@ -188,13 +206,22 @@ func NewServer(cfg ServerConfig) *Server {
 
 	s := &Server{cfg: cfg, api: humaAPI}
 	registerRoutes(humaAPI, mux, cfg)
+	if cfg.WebSessions != nil {
+		registerUISessionHandlers(mux, cfg.WebSessions)
+	}
 	registerOpenAPIYAML(mux, cfg.HostAccess)
+	webHandler, err := kataweb.NewEmbeddedHandler()
+	if err != nil {
+		panic(fmt.Errorf("build embedded web handler: %w", err))
+	}
+	mux.Handle("/", webHandler)
 	applyErrorEnvelopeResponses(humaAPI.OpenAPI())
 	applyJSONBlobSchemaOverrides(humaAPI.OpenAPI())
 
-	s.handler = withGzip(withCSRFGuards(requireBearer(cfg.authPolicy(), cfg.DB)(
+	s.baseHandler = withGzip(requireBearer(cfg.authPolicy(), cfg.DB)(
 		withTrustedProxyActor(cfg)(withFederationIngestPreauthorization(cfg, mux)),
-	)))
+	))
+	s.handler, _ = ApplyListenerPolicy(s.baseHandler, ListenerPolicy{Kind: ListenerSocket})
 	return s
 }
 
@@ -220,6 +247,21 @@ func withGzip(next http.Handler) http.Handler {
 
 // Handler returns the http.Handler suitable for httptest.NewServer.
 func (s *Server) Handler() http.Handler { return s.handler }
+
+// HandlerFor returns the shared route stack wrapped for one listener.
+func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
+	base := s.baseHandler
+	if base == nil {
+		base = s.handler
+	}
+	if policy.RequireBrowserSession {
+		if s.cfg.WebSessions == nil {
+			return nil, errors.New("browser listener policy requires a web session manager")
+		}
+		base = requireBrowserSession(s.cfg.WebSessions, policy, base)
+	}
+	return ApplyListenerPolicy(base, policy)
+}
 
 // API returns the underlying huma.API for handler registration in tests.
 func (s *Server) API() huma.API { return s.api }
@@ -263,8 +305,12 @@ func (s *Server) Run(ctx context.Context) error {
 // Useful for tests that bind their own loopback listener (avoiding the
 // listener-close-then-reopen TOCTOU window).
 func (s *Server) Serve(ctx context.Context, l net.Listener) error {
+	return s.serve(ctx, l, s.handler)
+}
+
+func (s *Server) serve(ctx context.Context, l net.Listener, handler http.Handler) error {
 	httpSrv := &http.Server{
-		Handler:           s.handler,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		// BaseContext roots every request in the daemon ctx so long-lived
 		// SSE handlers exit on Shutdown via r.Context().Done().
@@ -282,6 +328,45 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 	return nil
 }
 
+// ServeListeners serves all listener bindings under one lifecycle. A failure
+// on either listener cancels and closes every sibling listener.
+func (s *Server) ServeListeners(ctx context.Context, bindings ...ListenerBinding) error {
+	if len(bindings) == 0 {
+		return errors.New("server: at least one listener is required")
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan error, len(bindings))
+	for _, binding := range bindings {
+		if binding.Listener == nil {
+			return errors.New("server: listener is required")
+		}
+		handler, err := s.HandlerFor(binding.Policy)
+		if err != nil {
+			return err
+		}
+		go func(binding ListenerBinding, handler http.Handler) {
+			results <- s.serve(runCtx, binding.Listener, handler)
+		}(binding, handler)
+	}
+
+	firstErr := <-results
+	cancel()
+	for _, binding := range bindings {
+		_ = binding.Listener.Close()
+	}
+	for range len(bindings) - 1 {
+		err := <-results
+		if firstErr == nil && err != nil {
+			firstErr = err
+		}
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return firstErr
+}
+
 // withCSRFGuards rejects browser-borne requests and enforces JSON content type
 // on mutation methods that carry a body. Per spec §2.9, CLI/TUI never set
 // Origin so this is transparent for our own clients. Errors are emitted as
@@ -294,6 +379,12 @@ func withCSRFGuards(next http.Handler) http.Handler {
 				"Origin header forbidden")
 			return
 		}
+		requireJSONMutation(next).ServeHTTP(w, r)
+	})
+}
+
+func requireJSONMutation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isMutation(r.Method) && r.ContentLength != 0 {
 			ct := r.Header.Get("Content-Type")
 			if !strings.HasPrefix(ct, "application/json") {
@@ -346,6 +437,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerClaimHandlers(humaAPI, cfg)
 	registerDigestHandlers(humaAPI, cfg)
 	registerAuditHandlers(humaAPI, cfg)
+	registerUIHandlers(humaAPI, cfg)
 }
 
 // registerHealth registers /api/v1/ping and /api/v1/health.

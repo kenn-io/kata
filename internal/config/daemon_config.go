@@ -3,7 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +43,8 @@ type DaemonConfig struct {
 	Close CloseConfig `toml:"close"`
 	// Auth carries the daemon's bearer-auth token, if any.
 	Auth AuthConfig `toml:"auth"`
+	// Web carries browser-listener and externally published origin settings.
+	Web WebConfig `toml:"web"`
 	// Storage carries DB selection plus backend-specific startup policy; see
 	// config.KataDSN for DSN precedence (env > file > default).
 	Storage StorageConfig `toml:"storage"`
@@ -198,6 +203,17 @@ type AuthConfig struct {
 	Proxy                                    ProxyConfig `toml:"proxy"`
 }
 
+// WebConfig is the [web] block of <KATA_HOME>/config.toml. Listen overrides
+// the default ephemeral loopback browser address; port zero asks the OS to
+// assign an available port. PublicOrigin declares the exact browser authority
+// when Kata is served through an HTTPS terminator or development proxy; it is
+// never inferred from request headers.
+type WebConfig struct {
+	Listen       string   `toml:"listen"`
+	PublicOrigin string   `toml:"public_origin"`
+	AllowedHosts []string `toml:"allowed_hosts"`
+}
+
 // ProxyConfig is the [auth.proxy] sub-table. Both keys empty/absent means
 // trusted-proxy actor mode is off; this is the default.
 type ProxyConfig struct {
@@ -308,6 +324,8 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		cfg.Listen = strings.TrimSpace(cfg.Listen)
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
+		cfg.Web.Listen = strings.TrimSpace(cfg.Web.Listen)
+		cfg.Web.PublicOrigin = strings.TrimSpace(cfg.Web.PublicOrigin)
 		cfg.Storage.DSN = strings.TrimSpace(cfg.Storage.DSN)
 		cfg.Storage.Postgres.Schema = strings.TrimSpace(cfg.Storage.Postgres.Schema)
 		cfg.Storage.Postgres.Mode = strings.TrimSpace(cfg.Storage.Postgres.Mode)
@@ -324,6 +342,9 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	applyDaemonConfigEnv(&cfg)
+	if err := normalizeWebConfig(&cfg.Web, cfg.Auth.TrustPrivateNetwork); err != nil {
+		return nil, err
+	}
 	if err := validateAuthProxy(cfg.Auth.Proxy); err != nil {
 		return nil, err
 	}
@@ -387,6 +408,70 @@ func ReadDisplayConfig() (DisplayConfig, error) {
 
 func isDisplayConfigKey(key toml.Key) bool {
 	return len(key) > 0 && key[0] == "display"
+}
+
+func normalizeWebConfig(cfg *WebConfig, trustPrivateNetwork bool) error {
+	for i, raw := range cfg.AllowedHosts {
+		authority, err := NormalizeWebHostAuthority(raw)
+		if err != nil {
+			return fmt.Errorf("web.allowed_hosts: invalid authority %q", raw)
+		}
+		cfg.AllowedHosts[i] = authority
+	}
+	if cfg.PublicOrigin == "" {
+		return nil
+	}
+	u, err := url.Parse(cfg.PublicOrigin)
+	if err != nil {
+		return fmt.Errorf("web.public_origin: %w", err)
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	if (u.Scheme != "http" && u.Scheme != "https") ||
+		u.Host == "" || u.Hostname() == "" || u.User != nil || u.Opaque != "" ||
+		u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
+		(u.Path != "" && u.Path != "/") || u.RawPath != "" {
+		return errors.New("web.public_origin must be an HTTP or HTTPS origin without credentials, path, query, or fragment")
+	}
+	u.Path = ""
+	if u.Scheme == "http" && !isLoopbackWebOrigin(u) && !trustPrivateNetwork {
+		return errors.New("web.public_origin: non-loopback HTTP requires auth.trust_private_network = true")
+	}
+	canonical, err := CanonicalHTTPOrigin(u.String())
+	if err != nil {
+		return fmt.Errorf("web.public_origin: %w", err)
+	}
+	cfg.PublicOrigin = canonical
+	return nil
+}
+
+// NormalizeWebHostAuthority validates and canonicalizes one exact HTTP Host
+// authority. It is shared by config loading and listener construction so a
+// programmatic policy cannot admit shapes config.toml would reject.
+func NormalizeWebHostAuthority(raw string) (string, error) {
+	authority := strings.ToLower(strings.TrimSpace(raw))
+	u, err := url.Parse("http://" + authority)
+	if err != nil || authority == "" || u.Host != authority || u.Hostname() == "" ||
+		u.User != nil || u.Path != "" || u.RawPath != "" || u.RawQuery != "" ||
+		u.ForceQuery || u.Fragment != "" || strings.HasSuffix(authority, ":") {
+		return "", errors.New("invalid HTTP Host authority")
+	}
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", errors.New("invalid HTTP Host port")
+		}
+	}
+	return authority, nil
+}
+
+func isLoopbackWebOrigin(origin *url.URL) bool {
+	host := origin.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // ReadAuthConfig parses only the daemon auth settings from <KATA_HOME>/config.toml.
@@ -576,6 +661,15 @@ func applyDaemonConfigEnv(cfg *DaemonConfig) {
 			}
 		}
 		cfg.Auth.Proxy.TrustedProxyListeners = out
+	}
+	if raw := os.Getenv("KATA_WEB_ALLOWED_HOSTS"); raw != "" {
+		parts := strings.Split(raw, ",")
+		cfg.Web.AllowedHosts = cfg.Web.AllowedHosts[:0]
+		for _, part := range parts {
+			if authority := strings.TrimSpace(part); authority != "" {
+				cfg.Web.AllowedHosts = append(cfg.Web.AllowedHosts, authority)
+			}
+		}
 	}
 	applyPostgresStorageEnv(&cfg.Storage.Postgres)
 }

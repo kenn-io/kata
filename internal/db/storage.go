@@ -26,7 +26,9 @@ type Storage interface {
 
 	// projects + aliases
 	CreateProject(ctx context.Context, name string) (Project, error)
+	CreateProjectAndEvent(ctx context.Context, name, actor string) (Project, Event, error)
 	CreateProjectWithUID(ctx context.Context, name, projectUID string) (Project, error)
+	CreateProjectWithUIDAndEvent(ctx context.Context, name, projectUID, actor string) (Project, Event, error)
 	ProjectByID(ctx context.Context, id int64) (Project, error)
 	ProjectByName(ctx context.Context, name string) (Project, error)
 	ProjectByNameIncludingArchived(ctx context.Context, name string) (Project, error)
@@ -34,6 +36,7 @@ type Storage interface {
 	ListProjects(ctx context.Context) ([]Project, error)
 	ListProjectsIncludingArchived(ctx context.Context) ([]Project, error)
 	RenameProject(ctx context.Context, id int64, name string) (Project, error)
+	RenameProjectAndEvent(ctx context.Context, id int64, name, actor string) (Project, *Event, bool, error)
 	RemoveProject(ctx context.Context, p RemoveProjectParams) (Project, *Event, error)
 	// CountOpenIssues returns the number of open, non-deleted issues for one
 	// project without mutating any state. It mirrors the refusal check inside
@@ -41,10 +44,13 @@ type Storage interface {
 	// which must reject an archive before detaching).
 	CountOpenIssues(ctx context.Context, projectID int64) (int64, error)
 	RestoreProject(ctx context.Context, projectID int64, actor string) (Project, *Event, bool, error)
-	HardDeleteProject(ctx context.Context, id int64) error
+	// HardDeleteProject removes an initialization orphan and returns the
+	// reserved reset cursor that invalidates its deleted lifecycle events.
+	HardDeleteProject(ctx context.Context, id int64) (resetID int64, err error)
 	MergeProjects(ctx context.Context, p MergeProjectsParams) (ProjectMergeResult, error)
 	MoveIssueProject(ctx context.Context, in MoveIssueProjectIn) (MoveIssueProjectOut, error)
 	PatchProjectMetadata(ctx context.Context, in PatchProjectMetadataIn) (PatchProjectMetadataOut, error)
+	DesignateInboxProject(ctx context.Context, in DesignateInboxProjectIn) (DesignateInboxProjectOut, error)
 	BatchProjectStats(ctx context.Context) (map[int64]ProjectStats, error)
 	AliasByID(ctx context.Context, id int64) (ProjectAlias, error)
 	AliasByIdentity(ctx context.Context, identity string) (ProjectAlias, error)
@@ -123,12 +129,13 @@ type Storage interface {
 	RelatedNumbersByIssues(ctx context.Context, issueIDs []int64) (map[int64][]int64, error)
 
 	// recurrences
-	CreateRecurrence(ctx context.Context, in CreateRecurrenceIn) (Recurrence, error)
+	CreateRecurrence(ctx context.Context, in CreateRecurrenceIn) (Recurrence, Event, error)
+	CreateRecurrenceForIssue(ctx context.Context, in CreateRecurrenceForIssueIn) (CreateRecurrenceForIssueOut, error)
 	GetRecurrenceByID(ctx context.Context, id int64) (Recurrence, error)
 	GetRecurrenceByUID(ctx context.Context, recUID string) (Recurrence, error)
 	ListRecurrencesByProject(ctx context.Context, projectID int64) ([]Recurrence, error)
 	PatchRecurrence(ctx context.Context, in PatchRecurrenceIn) (PatchRecurrenceOut, error)
-	SoftDeleteRecurrence(ctx context.Context, id int64, actor string) error
+	SoftDeleteRecurrence(ctx context.Context, in SoftDeleteRecurrenceIn) (Event, error)
 	MaterializeNext(ctx context.Context, recurrenceID int64, afterKey, actor string) (MaterializeNextOut, error)
 
 	// events / idempotency / close-throttle
@@ -143,6 +150,7 @@ type Storage interface {
 	// daemon that can write the same backend, not only goroutines in one server.
 	AcquireIdempotencyLock(ctx context.Context, projectID int64, key string) (release func() error, err error)
 	LookupIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*IdempotencyMatch, error)
+	LookupCommentIdempotency(ctx context.Context, projectID int64, key string, since time.Time) (*CommentIdempotencyMatch, error)
 	InsertCloseThrottledEvent(ctx context.Context, issueID int64, actor string, payload CloseThrottledPayload) (Event, error)
 	RecentSiblingCloses(ctx context.Context, parentIssueID, excludeIssueID int64, actor string, since time.Time) ([]Event, error)
 	RecentSameMessageClose(ctx context.Context, parentIssueID, excludeIssueID int64, actor, normalizedMessage string, since time.Time) (*Event, error)

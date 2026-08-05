@@ -144,7 +144,7 @@ func federationRebindTargets(
 		return nil, federationRebindNotSpoke(name)
 	}
 
-	project, err := resolveFederationProject(ctx, client, baseURL, nil, false)
+	project, err := resolveFederationProject(ctx, client, baseURL, nil, false, "")
 	if err != nil {
 		return nil, err
 	}

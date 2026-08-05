@@ -9,6 +9,7 @@ services:
       KATA_HOME: /data/kata
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
+      KATA_WEB_ALLOWED_HOSTS: "hub:7373"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
     command: ["daemon", "start", "--foreground", "--listen", "0.0.0.0:7373"]
     healthcheck:
@@ -27,6 +28,7 @@ services:
       KATA_HOME: /data/kata
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
+      KATA_WEB_ALLOWED_HOSTS: "spoke-a:7374"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
     command: ["daemon", "start", "--foreground", "--listen", "0.0.0.0:7374"]
     healthcheck:
@@ -45,6 +47,7 @@ services:
       KATA_HOME: /data/kata
       KATA_AUTH_TOKEN: federation-hub-token
       KATA_TRUST_PRIVATE_NETWORK: "1"
+      KATA_WEB_ALLOWED_HOSTS: "spoke-b:7375"
       KATA_FEDERATION_PULL_INTERVAL_MS: "250"
     command: ["daemon", "start", "--foreground", "--listen", "0.0.0.0:7375"]
     healthcheck:

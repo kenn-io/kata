@@ -257,7 +257,7 @@ func TestExportLinks(t *testing.T) {
 
 func TestExportRecurrences(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
-	rec, err := d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	rec, _, err := d.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: p.ID, Rule: "FREQ=WEEKLY", DTStart: "2026-05-11", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "t"},
 		Actor:    "tester",

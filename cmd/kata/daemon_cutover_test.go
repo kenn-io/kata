@@ -28,7 +28,7 @@ func TestDaemonStartUpgradesLegacyDBThroughStoreopen(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err = runDaemon(ctx)
 

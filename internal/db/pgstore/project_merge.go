@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"go.kenn.io/kata/internal/db"
@@ -14,6 +15,9 @@ import (
 func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams) (db.ProjectMergeResult, error) {
 	if params.SourceProjectID == params.TargetProjectID {
 		return db.ProjectMergeResult{}, db.ErrProjectMergeSameProject
+	}
+	if params.Actor == "" {
+		params.Actor = db.SystemActor
 	}
 	var result db.ProjectMergeResult
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
@@ -120,11 +124,24 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		if err != nil {
 			return err
 		}
+		payload, err := json.Marshal(struct {
+			SourceUID string `json:"source_uid"`
+		}{SourceUID: source.UID})
+		if err != nil {
+			return fmt.Errorf("marshal project merge event: %w", err)
+		}
+		event, err := s.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: mergedTarget.ID, ProjectUID: mergedTarget.UID, ProjectName: mergedTarget.Name,
+			Type: "project.merged", Actor: params.Actor, Payload: string(payload),
+		})
+		if err != nil {
+			return fmt.Errorf("insert project merge event: %w", err)
+		}
 		result = db.ProjectMergeResult{
 			Source: source, Target: mergedTarget,
 			IssuesMoved: issuesMoved, AliasesMoved: aliasesMoved,
 			EventsMoved: eventsMoved, PurgeLogsMoved: purgeLogsMoved,
-			ShortIDExtensions: extensions,
+			ShortIDExtensions: extensions, Event: event,
 		}
 		return nil
 	})

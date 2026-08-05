@@ -132,7 +132,7 @@ func startBearerProxyTestServer(t *testing.T, headerName string, auth bearerProx
 func trustedProxyCreateProject(t *testing.T, ts *httptest.Server, headers map[string]string) int64 {
 	t.Helper()
 	resp, raw := doReq(t, ts, "POST", "/api/v1/projects",
-		map[string]any{"name": "trusted-proxy-e2e"}, headers)
+		map[string]any{"name": "trusted-proxy-e2e", "actor": "user-a"}, headers)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "init project: %s", raw)
 	var body struct {
 		Project struct {

@@ -260,24 +260,10 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 			}
 			resetCursor = sql.NullInt64{Int64: value, Valid: true}
 		}
-		purgeUID, err := katauid.New()
+		purgeID, err := s.insertProjectPurgeLogTx(ctx, tx, project, counts, resetCursor,
+			params.Actor, params.Reason)
 		if err != nil {
 			return err
-		}
-		var purgeID int64
-		err = tx.QueryRowContext(ctx, `INSERT INTO project_purge_log(
-          uid, origin_instance_uid, project_id, project_uid, project_name,
-          issue_count, event_count, alias_count, comment_count, link_count, label_count,
-          claim_count, pending_claim_request_count, events_deleted_min_id, events_deleted_max_id,
-          purge_reset_after_event_id, actor, reason
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
-			purgeUID, s.instanceUID, project.ID, project.UID, project.Name,
-			counts.issues, counts.events, counts.aliases, counts.comments, counts.links, counts.labels,
-			counts.claims, counts.pendingClaims, counts.minEventID, counts.maxEventID, resetCursor,
-			params.Actor, params.Reason,
-		).Scan(&purgeID)
-		if err != nil {
-			return mapSQLError(err, nil)
 		}
 		result, err = scanProjectPurgeLog(tx.QueryRowContext(ctx,
 			`SELECT id, uid, origin_instance_uid, project_id, project_uid, project_name,
@@ -288,6 +274,72 @@ func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) 
 		return err
 	})
 	return result, err
+}
+
+func (s *Store) insertProjectPurgeLogTx(ctx context.Context, tx *sql.Tx, project db.Project,
+	counts projectPurgeCounts, resetCursor sql.NullInt64, actor string, reason *string,
+) (int64, error) {
+	purgeUID, err := katauid.New()
+	if err != nil {
+		return 0, err
+	}
+	var purgeID int64
+	err = tx.QueryRowContext(ctx, `INSERT INTO project_purge_log(
+      uid, origin_instance_uid, project_id, project_uid, project_name,
+      issue_count, event_count, alias_count, comment_count, link_count, label_count,
+      claim_count, pending_claim_request_count, events_deleted_min_id, events_deleted_max_id,
+      purge_reset_after_event_id, actor, reason
+    ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
+		purgeUID, s.instanceUID, project.ID, project.UID, project.Name,
+		counts.issues, counts.events, counts.aliases, counts.comments, counts.links, counts.labels,
+		counts.claims, counts.pendingClaims, counts.minEventID, counts.maxEventID, resetCursor,
+		actor, reason,
+	).Scan(&purgeID)
+	if err != nil {
+		return 0, mapSQLError(err, nil)
+	}
+	return purgeID, nil
+}
+
+func (s *Store) hardDeleteProject(ctx context.Context, projectID int64) (int64, error) {
+	var resetID int64
+	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		resetID = 0
+		project, err := scanProject(tx.QueryRowContext(ctx,
+			projectSelect+` WHERE id = $1 FOR UPDATE`, projectID))
+		if err != nil {
+			return err
+		}
+		if project.Name == db.SystemProjectName || project.UID == db.SystemProjectUID {
+			return db.ErrNotFound
+		}
+		counts, err := countProjectPurgeTx(ctx, tx, project.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = $1`, project.ID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		var resetCursor sql.NullInt64
+		if counts.minEventID.Valid {
+			if err := lockEventSequenceTx(ctx, tx); err != nil {
+				return err
+			}
+			value, err := s.reserveIdentityValue(ctx, tx, "events", "id")
+			if err != nil {
+				return err
+			}
+			resetCursor = sql.NullInt64{Int64: value, Valid: true}
+			resetID = value
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, project.ID); err != nil {
+			return mapSQLError(err, nil)
+		}
+		reason := "initialization orphan cleanup"
+		_, err = s.insertProjectPurgeLogTx(ctx, tx, project, counts, resetCursor, "system", &reason)
+		return err
+	})
+	return resetID, err
 }
 
 func countProjectPurgeTx(ctx context.Context, tx *sql.Tx, projectID int64) (projectPurgeCounts, error) {

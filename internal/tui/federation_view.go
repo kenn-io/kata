@@ -1159,7 +1159,7 @@ func resolveFederationHubProject(
 		if draft.HubProjectID != 0 {
 			return ProjectSummary{ID: draft.HubProjectID, Name: draft.HubProjectName}, nil
 		}
-		return hub.EnsureProject(ctx, draft.SpokeProjectName)
+		return hub.EnsureProject(ctx, draft.SpokeProjectName, draft.RequestedActor)
 	}
 	return ProjectSummary{ID: draft.HubProjectID, Name: draft.HubProjectName}, nil
 }

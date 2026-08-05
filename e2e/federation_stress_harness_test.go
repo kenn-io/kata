@@ -98,7 +98,7 @@ func (fx *federationStressFixture) enableProject(t federationStressTB, name stri
 		Project api.ProjectOut `json:"project"`
 	}
 	stressDecodePOST(t, fx.hub.http, fx.hub.url+"/api/v1/projects",
-		map[string]any{"name": name}, &initBody)
+		map[string]any{"name": name, "actor": "user-a"}, &initBody)
 	fx.hubProject = initBody.Project
 
 	fx.hubIssue = stressCreateIssue(t, fx.hub.http,

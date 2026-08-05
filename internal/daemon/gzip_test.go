@@ -117,3 +117,28 @@ func TestGzip_SSEStreamNotCompressedAndStillStreams(t *testing.T) {
 	require.True(t, ok, "drain frame must arrive promptly over the uncompressed stream")
 	assert.Equal(t, strconv.FormatInt(sentinelEvt.ID, 10), first.id)
 }
+
+func TestGzip_WebHandlerCompressesHTML(t *testing.T) {
+	env := testenv.New(t)
+	resp, body := envDoRaw(t, env, http.MethodGet, "/kata", nil,
+		map[string]string{"Accept": "text/html", "Accept-Encoding": "gzip"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, "gzip", resp.Header.Get("Content-Encoding"))
+	reader, err := gzip.NewReader(bytes.NewReader(body))
+	require.NoError(t, err)
+	plain, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+	assert.Contains(t, string(plain), "Kata UI assets are not built")
+}
+
+func TestGzip_WebHandlerStaticShellBypassesBearer(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("test-token"))
+	resp, body := envDoRaw(t, env, http.MethodGet, "/kata", nil,
+		map[string]string{"Accept": "text/html", "Accept-Encoding": "identity"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, string(body), "Kata UI assets are not built")
+
+	resp, _ = envDoRaw(t, env, http.MethodGet, "/api/v1/projects", nil, nil)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}

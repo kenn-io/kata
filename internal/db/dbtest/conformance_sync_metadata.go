@@ -276,6 +276,51 @@ func checkMetadataAndAtomicEdit(t *testing.T, store db.Storage) error {
 	var projectConflict *db.RevisionConflictError
 	assert.ErrorAs(t, err, &projectConflict)
 
+	previousInbox, err := store.CreateProject(ctx, "previous-inbox")
+	if err != nil {
+		return fmt.Errorf("create previous Inbox project: %w", err)
+	}
+	_, err = store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
+		ProjectID: previousInbox.ID,
+		Actor:     "metadata-editor",
+		Patch:     map[string]json.RawMessage{"role": json.RawMessage(`"inbox"`)},
+	})
+	if err != nil {
+		return fmt.Errorf("seed previous Inbox role: %w", err)
+	}
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: previousInbox.ID, Actor: "metadata-editor",
+	})
+	if err != nil {
+		return fmt.Errorf("archive previous Inbox project: %w", err)
+	}
+	targetInbox, err := store.CreateProject(ctx, "example-inbox")
+	if err != nil {
+		return fmt.Errorf("create target Inbox project: %w", err)
+	}
+	designated, err := store.DesignateInboxProject(ctx, db.DesignateInboxProjectIn{
+		ProjectID:  targetInbox.ID,
+		IfMatchRev: db.IfMatch(targetInbox.Revision),
+		Actor:      "metadata-editor",
+	})
+	if err != nil {
+		return fmt.Errorf("designate Inbox project: %w", err)
+	}
+	assert.True(t, designated.Changed)
+	assert.Len(t, designated.Events, 2)
+	previousInbox, err = store.ProjectByID(ctx, previousInbox.ID)
+	if err != nil {
+		return fmt.Errorf("reload previous Inbox project: %w", err)
+	}
+	assert.JSONEq(t, `{}`, string(previousInbox.Metadata))
+	assert.JSONEq(t, `{"role":"inbox"}`, string(designated.Project.Metadata))
+	restoredInbox, _, changed, err := store.RestoreProject(ctx, previousInbox.ID, "metadata-editor")
+	if err != nil {
+		return fmt.Errorf("restore previous Inbox project: %w", err)
+	}
+	assert.True(t, changed)
+	assert.JSONEq(t, `{}`, string(restoredInbox.Metadata))
+
 	blocked, err := createFixtureIssue(ctx, store, fixture.Project.ID, "blocked", "author", nil)
 	if err != nil {
 		return err

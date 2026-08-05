@@ -52,7 +52,18 @@ func requireBearer(p authPolicy, tokenStores ...db.Storage) func(http.Handler) h
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == pathPing || r.URL.Path == pathHealth {
+			// Non-API paths can only reach the data-free embedded web handler.
+			// Keep the static shell public; listener Host policy still wraps it.
+			if !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api" &&
+				r.URL.Path != "/openapi.yaml" && r.URL.Path != "/openapi.json" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if webSessionAuthenticated(r.Context()) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if r.URL.Path == pathPing || r.URL.Path == pathHealth || isWebSessionBootstrapRequest(r) {
 				next.ServeHTTP(w, r)
 				return
 			}

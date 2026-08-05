@@ -180,7 +180,7 @@ wait_for_issue_title "$hub" "$cli_project_id" "$cli_issue_uid" "cli enrollment p
 
 log "creating hub project and baseline issue"
 hub_project_json=$(post "$hub/api/v1/projects" 200 \
-  "$(jq -nc --arg name "$project" '{name: $name}')")
+  "$(jq -nc --arg name "$project" '{name: $name, actor: "user-a"}')")
 hub_project_id=$(jq -r '.project.id' <<<"$hub_project_json")
 hub_project_uid=$(jq -r '.project.uid' <<<"$hub_project_json")
 

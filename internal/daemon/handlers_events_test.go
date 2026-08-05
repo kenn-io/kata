@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,22 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type projectLookupGateStorage struct {
+	db.Storage
+	projectID int64
+	lookups   atomic.Int64
+	entered   chan struct{}
+	release   chan struct{}
+}
+
+func (s *projectLookupGateStorage) ProjectByID(ctx context.Context, projectID int64) (db.Project, error) {
+	if projectID == s.projectID && s.lookups.Add(1) == 2 {
+		close(s.entered)
+		<-s.release
+	}
+	return s.Storage.ProjectByID(ctx, projectID)
+}
 
 func mkProject(t *testing.T, env *testenv.Env, _ string, name string) int64 {
 	t.Helper()
@@ -100,16 +117,17 @@ func TestPollEvents_ReturnsEventsAndAdvancesCursor(t *testing.T) {
 		NextAfterID int64 `json:"next_after_id"`
 	}
 	envGetJSON(t, env, "/api/v1/events?after_id=0&limit=10", &b)
-	require.Len(t, b.Events, 2)
+	require.Len(t, b.Events, 3)
 	assert.Equal(t, int64(1), b.Events[0].EventID)
 	assert.Equal(t, int64(2), b.Events[1].EventID)
-	assert.Equal(t, "issue.created", b.Events[0].Type)
-	assert.Equal(t, project.UID, b.Events[0].ProjectUID)
-	require.NotNil(t, b.Events[0].IssueUID)
-	assert.Equal(t, first.UID, *b.Events[0].IssueUID)
-	require.NotNil(t, b.Events[0].IssueShortID, "envelope must surface joined issue_short_id")
-	assert.Equal(t, first.ShortID, *b.Events[0].IssueShortID)
-	assert.Equal(t, int64(2), b.NextAfterID, "advances to max event id")
+	assert.Equal(t, "project.created", b.Events[0].Type)
+	assert.Equal(t, "issue.created", b.Events[1].Type)
+	assert.Equal(t, project.UID, b.Events[1].ProjectUID)
+	require.NotNil(t, b.Events[1].IssueUID)
+	assert.Equal(t, first.UID, *b.Events[1].IssueUID)
+	require.NotNil(t, b.Events[1].IssueShortID, "envelope must surface joined issue_short_id")
+	assert.Equal(t, first.ShortID, *b.Events[1].IssueShortID)
+	assert.Equal(t, int64(3), b.NextAfterID, "advances to max event id")
 	assert.False(t, b.ResetRequired)
 }
 
@@ -131,8 +149,9 @@ func TestPollEvents_OmitsTokenEvents(t *testing.T) {
 		} `json:"events"`
 	}
 	envGetJSON(t, env, "/api/v1/events?after_id=0&limit=10", &b)
-	require.Len(t, b.Events, 1)
-	assert.Equal(t, "issue.created", b.Events[0].Type)
+	require.Len(t, b.Events, 2)
+	assert.Equal(t, "project.created", b.Events[0].Type)
+	assert.Equal(t, "issue.created", b.Events[1].Type)
 }
 
 // TestEvents_PayloadIncludesShortIDNotNumber pins the wire-level rename:
@@ -149,14 +168,15 @@ func TestEvents_PayloadIncludesShortIDNotNumber(t *testing.T) {
 		Events []map[string]any `json:"events"`
 	}
 	envGetJSON(t, env, "/api/v1/projects/"+strconv.FormatInt(pid, 10)+"/events?after_id=0&limit=10", &raw)
-	require.NotEmpty(t, raw.Events, "expected at least one event")
-	first := raw.Events[0]
-	assert.NotZero(t, first["hlc_physical_ms"])
-	assert.NotNil(t, first["hlc_counter"])
-	assert.Regexp(t, `^[a-f0-9]{64}$`, first["content_hash"])
-	assert.Equal(t, created.ShortID, first["issue_short_id"])
-	assert.Equal(t, created.UID, first["issue_uid"])
-	_, hasNum := first["issue_number"]
+	require.Len(t, raw.Events, 2)
+	issueEvent := raw.Events[1]
+	assert.Equal(t, "issue.created", issueEvent["type"])
+	assert.NotZero(t, issueEvent["hlc_physical_ms"])
+	assert.NotNil(t, issueEvent["hlc_counter"])
+	assert.Regexp(t, `^[a-f0-9]{64}$`, issueEvent["content_hash"])
+	assert.Equal(t, created.ShortID, issueEvent["issue_short_id"])
+	assert.Equal(t, created.UID, issueEvent["issue_uid"])
+	_, hasNum := issueEvent["issue_number"]
 	assert.False(t, hasNum, "issue_number must not appear in event envelope")
 }
 
@@ -186,7 +206,7 @@ func TestPollEvents_UIDsIncludeRelatedIssue(t *testing.T) {
 			RelatedIssueShortID *string `json:"related_issue_short_id"`
 		} `json:"events"`
 	}
-	envGetJSON(t, env, "/api/v1/events?after_id=2&limit=10", &b)
+	envGetJSON(t, env, "/api/v1/events?after_id=3&limit=10", &b)
 	require.Len(t, b.Events, 1)
 	assert.Equal(t, "issue.linked", b.Events[0].Type)
 	assert.Equal(t, project.UID, b.Events[0].ProjectUID)
@@ -307,8 +327,9 @@ func TestPollEvents_PerProjectFiltersOtherProjects(t *testing.T) {
 		} `json:"events"`
 	}
 	envGetJSON(t, env, "/api/v1/projects/"+strconv.FormatInt(pa, 10)+"/events?after_id=0&limit=10", &b)
-	require.Len(t, b.Events, 1)
+	require.Len(t, b.Events, 2)
 	assert.Equal(t, pa, b.Events[0].ProjectID)
+	assert.Equal(t, pa, b.Events[1].ProjectID)
 }
 
 func TestPollEvents_ResetRequiredAfterPurge(t *testing.T) {
@@ -378,14 +399,14 @@ func TestPollEvents_LimitAbsentUsesDefault(t *testing.T) {
 	mkIssue(t, env, pid, "first")
 	mkIssue(t, env, pid, "second")
 
-	// No limit query param at all — should default to 100 and return both rows.
+	// No limit query param at all — should default to 100 and return every row.
 	var b struct {
 		Events []struct {
 			EventID int64 `json:"event_id"`
 		} `json:"events"`
 	}
 	envGetJSON(t, env, "/api/v1/events?after_id=0", &b)
-	require.Len(t, b.Events, 2, "missing limit should default to pollLimitDefault, not reject the request")
+	require.Len(t, b.Events, 3, "missing limit should default to pollLimitDefault, not reject the request")
 }
 
 // TestPollEvents_PerProject_NonPositiveProjectIDIs400 ensures that a request
@@ -585,7 +606,7 @@ func TestSSE_HandshakeWritesConnectedComment(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, 200, resp.StatusCode)
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
-	assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
+	assert.Equal(t, "private, no-cache", resp.Header.Get("Cache-Control"))
 	assert.Equal(t, "keep-alive", resp.Header.Get("Connection"))
 	// Read first 16 bytes; should contain ": connected\n\n".
 	buf := make([]byte, 16)
@@ -605,12 +626,13 @@ func TestSSE_DrainEmitsExistingEventsInOrder(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, 200, resp.StatusCode)
 
-	frames := readSSEFramesUntilN(t, resp.Body, 3, 2*time.Second)
-	require.Len(t, frames, 3)
+	frames := readSSEFramesUntilN(t, resp.Body, 4, 2*time.Second)
+	require.Len(t, frames, 4)
 	assert.Equal(t, "1", frames[0].id)
-	assert.Equal(t, "issue.created", frames[0].event)
+	assert.Equal(t, "project.created", frames[0].event)
 	assert.Equal(t, "2", frames[1].id)
-	assert.Equal(t, "3", frames[2].id)
+	assert.Equal(t, "issue.created", frames[1].event)
+	assert.Equal(t, "4", frames[3].id)
 }
 
 func TestSSE_DrainOmitsTokenEvents(t *testing.T) {
@@ -630,8 +652,11 @@ func TestSSE_DrainOmitsTokenEvents(t *testing.T) {
 	framer := newSSEFramer(resp.Body)
 
 	first, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "project frame should arrive")
+	assert.Equal(t, "project.created", first.event)
+	second, ok := framer.Next(t, 2*time.Second)
 	require.True(t, ok, "issue frame should arrive")
-	assert.Equal(t, "issue.created", first.event)
+	assert.Equal(t, "issue.created", second.event)
 	_, ok = framer.Next(t, 150*time.Millisecond)
 	assert.False(t, ok, "token.created must not be emitted as a drain frame")
 }
@@ -645,9 +670,10 @@ func TestSSE_PerProjectFilterExcludesOtherProjects(t *testing.T) {
 
 	resp := openSSE(t, env, "project_id="+strconv.FormatInt(pa, 10)+"&after_id=0", nil)
 	defer func() { _ = resp.Body.Close() }()
-	frames := readSSEFramesUntilN(t, resp.Body, 1, 2*time.Second)
-	require.Len(t, frames, 1)
-	assert.Equal(t, "1", frames[0].id, "should see only project A's event 1, not project B's event 2")
+	frames := readSSEFramesUntilN(t, resp.Body, 2, 2*time.Second)
+	require.Len(t, frames, 2)
+	assert.Equal(t, "1", frames[0].id)
+	assert.Equal(t, "3", frames[1].id, "should see only project A events")
 }
 
 func TestSSE_ResetWhenCursorInsidePurgeGap(t *testing.T) {
@@ -681,25 +707,125 @@ func TestSSE_DrainFollowedByLiveBroadcast(t *testing.T) {
 	// EventsAfter, putting both events in the drain phase and not exercising
 	// the live broadcast path.
 	first, ok := framer.Next(t, 2*time.Second)
-	require.True(t, ok, "drain frame should arrive")
+	require.True(t, ok, "project drain frame should arrive")
 	assert.Equal(t, "1", first.id)
-	assert.Equal(t, "issue.created", first.event)
+	assert.Equal(t, "project.created", first.event)
+	second, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "issue drain frame should arrive")
+	assert.Equal(t, "2", second.id)
+	assert.Equal(t, "issue.created", second.event)
 
 	// Now create a second issue via HTTP so the handler fires a live broadcast.
 	envPostJSON(t, env, projectPath(pid)+"/issues",
 		map[string]string{"title": "second", "actor": "tester"}, nil)
 
-	second, ok := framer.Next(t, 2*time.Second)
+	third, ok := framer.Next(t, 2*time.Second)
 	require.True(t, ok, "live frame should arrive after the broadcast")
-	assert.Equal(t, "2", second.id)
-	assert.Equal(t, "issue.created", second.event)
+	assert.Equal(t, "3", third.id)
+	assert.Equal(t, "issue.created", third.event)
+}
+
+func TestProjectCreateBroadcastsLiveEvent(t *testing.T) {
+	env := testenv.New(t)
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer sub.Unsub()
+
+	envPostJSON(t, env, "/api/v1/projects", map[string]string{
+		"name": "example-project", "actor": "user-a",
+	}, nil)
+
+	message := receiveMsg(t, sub.Ch, 2*time.Second, "project create")
+	require.NotNil(t, message.Event)
+	assert.Equal(t, "project.created", message.Event.Type)
+	assert.Equal(t, "user-a", message.Event.Actor)
+}
+
+func TestProjectRenameBroadcastsLiveEvent(t *testing.T) {
+	env := testenv.New(t)
+	projectID := mkProject(t, env, "", "example-project")
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: projectID})
+	defer sub.Unsub()
+
+	resp, body := envDoRaw(t, env, http.MethodPatch,
+		projectPath(projectID), map[string]string{"name": "example-workspace", "actor": "user-a"}, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	message := receiveMsg(t, sub.Ch, 2*time.Second, "project rename")
+	require.NotNil(t, message.Event)
+	assert.Equal(t, "project.renamed", message.Event.Type)
+	assert.Equal(t, "user-a", message.Event.Actor)
+}
+
+func TestProjectMergeBroadcastsLiveEvent(t *testing.T) {
+	env := testenv.New(t)
+	targetID := mkProject(t, env, "", "example-project")
+	sourceID := mkProject(t, env, "", "example-workspace")
+	targetSub := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: targetID})
+	defer targetSub.Unsub()
+	sourceSub := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: sourceID})
+	defer sourceSub.Unsub()
+
+	envPostJSON(t, env, projectPath(targetID)+"/merge", map[string]any{
+		"source_project_id": sourceID, "actor": "user-a",
+	}, nil)
+
+	message := receiveMsg(t, targetSub.Ch, 2*time.Second, "target project merge")
+	require.NotNil(t, message.Event)
+	assert.Equal(t, "project.merged", message.Event.Type)
+	assert.Equal(t, "user-a", message.Event.Actor)
+
+	reset := receiveMsg(t, sourceSub.Ch, 2*time.Second, "source project reset")
+	assert.Equal(t, "reset", reset.Kind)
+	assert.Equal(t, message.Event.ID, reset.ResetID)
+	assert.Equal(t, sourceID, reset.ProjectID)
+}
+
+func TestSSE_ProjectMergeBetweenValidationAndSubscriptionResetsAndCloses(t *testing.T) {
+	var gated *projectLookupGateStorage
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		gated = &projectLookupGateStorage{
+			Storage: cfg.DB,
+			entered: make(chan struct{}),
+			release: make(chan struct{}),
+		}
+		cfg.DB = gated
+	})
+	targetID := mkProject(t, env, "", "example-project")
+	sourceID := mkProject(t, env, "", "example-workspace")
+	gated.projectID = sourceID
+	maxID, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+
+	response := openSSE(t, env,
+		"project_id="+strconv.FormatInt(sourceID, 10)+"&after_id="+strconv.FormatInt(maxID, 10), nil)
+	defer func() { _ = response.Body.Close() }()
+	select {
+	case <-gated.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not reach its second project existence check")
+	}
+
+	envPostJSON(t, env, projectPath(targetID)+"/merge", map[string]any{
+		"source_project_id": sourceID, "actor": "user-a",
+	}, nil)
+	close(gated.release)
+
+	framer := newSSEFramer(response.Body)
+	reset, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "source stream should receive a terminal reset")
+	assert.Equal(t, "sync.reset_required", reset.event)
+	select {
+	case <-framer.doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("source stream remained open after its project merged")
+	}
 }
 
 func TestSSE_LivePhaseOmitsTokenEvents(t *testing.T) {
 	env := testenv.New(t)
 	pid := mkProject(t, env, "github.com/test/a", "a")
 
-	resp := openSSE(t, env, "after_id=0", nil)
+	resp := openSSE(t, env, "after_id=1", nil)
 	defer func() { _ = resp.Body.Close() }()
 	framer := newSSEFramer(resp.Body)
 
@@ -736,8 +862,11 @@ func TestSSE_LiveResetClosesStream(t *testing.T) {
 	// before the drain query runs, so drain returns empty and the test only
 	// sees the reset frame instead of the documented {drain, reset} pair.
 	first, ok := framer.Next(t, 2*time.Second)
-	require.True(t, ok, "drain frame should arrive")
-	assert.Equal(t, "issue.created", first.event)
+	require.True(t, ok, "project drain frame should arrive")
+	assert.Equal(t, "project.created", first.event)
+	second, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "issue drain frame should arrive")
+	assert.Equal(t, "issue.created", second.event)
 
 	project, perr := env.DB.ProjectByID(context.Background(), pid)
 	require.NoError(t, perr)

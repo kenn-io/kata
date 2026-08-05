@@ -299,7 +299,7 @@ func newUnixTransport(path string) *http.Transport {
 // can derive a project name from the git URL.
 func initProjectE2E(t *testing.T, client *http.Client, baseURL, repoDir string) int64 {
 	t.Helper()
-	body := strings.NewReader(`{"start_path":"` + repoDir + `"}`)
+	body := strings.NewReader(`{"start_path":"` + repoDir + `","actor":"user-a"}`)
 	req, err := http.NewRequestWithContext(context.Background(),
 		http.MethodPost, baseURL+"/api/v1/projects", body)
 	require.NoError(t, err)

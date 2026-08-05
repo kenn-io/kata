@@ -26,6 +26,26 @@ refuses the non-loopback bind. Hosted platforms commonly terminate TLS
 upstream, so the operator must explicitly assert trust in the container network
 path.
 
+## Browser origin and proxying
+
+Set the exact external HTTPS origin when the platform terminates TLS:
+
+```toml
+[web]
+public_origin = "https://daemon.example"
+```
+
+The origin is a security input, not display metadata. Kata validates `Host` and
+mutation `Origin` against it and never trusts forwarded headers to discover it.
+The platform must send the SPA, hashed assets, browser-session routes, data API,
+and `/api/v1/events/stream` to the same daemon. Disable response buffering for
+the event stream so authenticated invalidations flush immediately.
+
+Opening a hosted deep link without browser authority shows token login and
+returns to that path after exchange. The browser retains only its paired
+cookie/session-header credentials and CSRF value; a fresh tab needs its own
+login because cookie-only recovery is intentionally unavailable.
+
 `KATA_HOME` must point at writable storage. Local container disk is often
 ephemeral, so data does not survive instance recycling unless `KATA_HOME` is
 backed by a mounted volume or shared storage.

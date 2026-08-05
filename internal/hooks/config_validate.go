@@ -21,6 +21,11 @@ var knownEventTypes = map[string]struct{}{
 	"issue.soft_deleted": {}, "issue.restored": {},
 	"issue.links_changed":    {},
 	"issue.metadata_updated": {},
+	"project.created":        {}, "project.renamed": {}, "project.merged": {},
+	"project.removed": {}, "project.restored": {}, "project.alias_removed": {},
+	"project.author_rewritten": {}, "project.federation_enabled": {},
+	"recurrence.created": {}, "recurrence.updated": {}, "recurrence.deleted": {},
+	"recurrence.materialized": {}, "recurrence.materialization_skipped": {},
 	// close.throttled lives outside the issue.* namespace because the
 	// audit signal is about a refused mutation, not the issue itself.
 	// Wildcard `*` hooks see it; `issue.*` does not.

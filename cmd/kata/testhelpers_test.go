@@ -186,7 +186,9 @@ func initBoundWorkspace(t *testing.T, baseURL, origin string) string {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", origin)
-	postJSONOK(t, baseURL+"/api/v1/projects", map[string]string{"start_path": dir})
+	postJSONOK(t, baseURL+"/api/v1/projects", map[string]string{
+		"start_path": dir, "actor": "user-a",
+	})
 	return dir
 }
 
@@ -223,9 +225,10 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // ULID-form refs), and the database row id (for low-level DB lookups in
 // tests that bypass the API).
 type createdIssue struct {
-	ID      int64
-	UID     string
-	ShortID string
+	ID         int64
+	UID        string
+	ProjectUID string
+	ShortID    string
 }
 
 // createIssueViaHTTP creates an issue in dir's project via the testenv daemon.
@@ -243,14 +246,17 @@ func createIssueViaHTTPFull(t *testing.T, env *testenv.Env, dir, title string) c
 	pid := resolvePIDViaHTTP(t, env.URL, dir)
 	type response struct {
 		Issue struct {
-			ID      int64  `json:"id"`
-			UID     string `json:"uid"`
-			ShortID string `json:"short_id"`
+			ID         int64  `json:"id"`
+			UID        string `json:"uid"`
+			ProjectUID string `json:"project_uid"`
+			ShortID    string `json:"short_id"`
 		} `json:"issue"`
 	}
 	b := postJSON[response](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
 		map[string]any{"actor": "tester", "title": title})
-	return createdIssue{ID: b.Issue.ID, UID: b.Issue.UID, ShortID: b.Issue.ShortID}
+	return createdIssue{
+		ID: b.Issue.ID, UID: b.Issue.UID, ProjectUID: b.Issue.ProjectUID, ShortID: b.Issue.ShortID,
+	}
 }
 
 // resetFlags restores global flag state for cobra tests. Use t.Cleanup so

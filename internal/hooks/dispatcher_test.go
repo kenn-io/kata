@@ -47,17 +47,16 @@ func mustNewDispatcher(t *testing.T, hooks []ResolvedHook, cfg Config) (*Dispatc
 }
 
 // newTestHook builds a ResolvedHook that runs the hookprobe binary with the
-// given args and a 2s timeout. event "*" matches every event; any other
-// value is matched exactly.
+// given args and the production event matcher.
 func newTestHook(t *testing.T, event string, args ...string) ResolvedHook {
 	t.Helper()
-	match := matchExact(event)
-	if event == "*" {
-		match = matchAlways()
+	canonical, match, err := compileEventMatcher(event)
+	if err != nil {
+		t.Fatalf("compile event matcher %q: %v", event, err)
 	}
 	return ResolvedHook{
 		Index:      0,
-		Event:      event,
+		Event:      canonical,
 		Match:      match,
 		Command:    hookprobePath(t),
 		Args:       args,
@@ -102,6 +101,28 @@ func TestDispatcher_Enqueue_RoutesToMatchingHooks(t *testing.T) {
 	enqueueEvents(d, "issue.updated", 101, 1)
 	if !waitForLines(t, runsPath, 2, 5*time.Second) {
 		t.Fatal("expected 2 runs after second event")
+	}
+}
+
+func TestDispatcher_Enqueue_RoutesProjectAndRecurrenceExactAndWildcardHooks(t *testing.T) {
+	projectHook := newTestHook(t, "project.created", "exit", "0")
+	recurrenceHook := newTestHook(t, "recurrence.created", "exit", "0")
+	recurrenceHook.Index = 1
+	wildcardHook := newTestHook(t, "*", "exit", "0")
+	wildcardHook.Index = 2
+	cfg := defaultConfig()
+	cfg.PoolSize = 3
+	cfg.QueueCap = 8
+	dispatcher, _, runsPath := mustNewDispatcher(t,
+		[]ResolvedHook{projectHook, recurrenceHook, wildcardHook}, cfg)
+
+	enqueueEvents(dispatcher, "project.created", 300, 1)
+	if !waitForLines(t, runsPath, 2, 5*time.Second) {
+		t.Fatal("expected exact and wildcard project hooks")
+	}
+	enqueueEvents(dispatcher, "recurrence.created", 301, 1)
+	if !waitForLines(t, runsPath, 4, 5*time.Second) {
+		t.Fatal("expected exact and wildcard recurrence hooks")
 	}
 }
 
@@ -306,9 +327,6 @@ func countJSONLLines(path string) int {
 	}
 	return strings.Count(trimmed, "\n") + 1
 }
-
-func matchExact(want string) func(string) bool { return func(s string) bool { return s == want } }
-func matchAlways() func(string) bool           { return func(string) bool { return true } }
 
 // Sentinel keepalive (matches existing hooks-package test convention)
 // so that future tests can reference errors without re-importing.

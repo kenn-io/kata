@@ -450,6 +450,28 @@ test_install_checksum_cannot_be_skipped() {
   assert_not_contains "$output" "Checksum verification skipped" "installer checksum enforcement"
 }
 
+test_installer_rejects_release_without_validated_web_ui() {
+  local dir="$tmp_root/install-web-assets"
+  mkdir -p "$dir"
+  cat >"$dir/kata" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "$dir/kata"
+
+  local output status
+  set +e
+  output="$(bash -c '
+    source "$1"
+    verify_release_binary "$2"
+  ' bash "$repo_root/scripts/install.sh" "$dir/kata" 2>&1)"
+  status=$?
+  set -e
+
+  [[ $status -ne 0 ]] || fail "installer should reject a release without validated web assets"
+  assert_contains "$output" "validated Kata web UI" "release web asset validation"
+}
+
 test_powershell_installer() {
   if ! command -v pwsh >/dev/null 2>&1; then
     printf 'skipping PowerShell installer tests: pwsh not found\n'
@@ -483,6 +505,7 @@ test_verify_release_tag_accepts_tag_on_origin_main
 test_verify_release_tag_rejects_workflow_sha_mismatch
 test_verify_release_tag_rejects_tag_moved_after_validation
 test_install_checksum_cannot_be_skipped
+test_installer_rejects_release_without_validated_web_ui
 test_powershell_installer
 
 printf 'release script tests passed\n'

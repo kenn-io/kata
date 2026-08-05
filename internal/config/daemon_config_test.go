@@ -150,6 +150,142 @@ func TestReadDaemonConfig_TrimsWhitespace(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:7777", cfg.Listen)
 }
 
+func TestReadDaemonConfigWeb(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[web]
+listen = " 127.0.0.1:27123 "
+public_origin = " HTTPS://Daemon.Example:8443/ "
+allowed_hosts = [" Spoke-A:7374 ", "DAEMON.EXAMPLE"]
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1:27123", cfg.Web.Listen)
+	assert.Equal(t, "https://daemon.example:8443", cfg.Web.PublicOrigin)
+	assert.Equal(t, []string{"spoke-a:7374", "daemon.example"}, cfg.Web.AllowedHosts)
+}
+
+func TestReadDaemonConfigWebCanonicalizesDefaultOriginPorts(t *testing.T) {
+	for _, tt := range []struct {
+		origin string
+		want   string
+	}{
+		{origin: "http://daemon.example:80", want: "http://daemon.example"},
+		{origin: "https://daemon.example:443", want: "https://daemon.example"},
+	} {
+		t.Run(tt.origin, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(
+				"[auth]\ntrust_private_network = true\n\n[web]\npublic_origin = \""+tt.origin+"\"\n",
+			), 0o600))
+
+			cfg, err := config.ReadDaemonConfig()
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.Web.PublicOrigin)
+		})
+	}
+}
+
+func TestReadDaemonConfigWebRejectsInvalidAllowedHost(t *testing.T) {
+	for _, host := range []string{
+		"https://daemon.example", "daemon.example/path", "user-a@daemon.example",
+		":7374", "daemon.example:", "daemon.example:99999", "::1",
+	} {
+		t.Run(host, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(
+				"[web]\nallowed_hosts = [\""+host+"\"]\n",
+			), 0o600))
+
+			_, err := config.ReadDaemonConfig()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "web.allowed_hosts")
+		})
+	}
+}
+
+func TestReadDaemonConfigWebAllowedHostsEnvironment(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_WEB_ALLOWED_HOSTS", " spoke-a:7374, DAEMON.EXAMPLE ")
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"spoke-a:7374", "daemon.example"}, cfg.Web.AllowedHosts)
+}
+
+func TestReadDaemonConfigWebRejectsInvalidPublicOrigin(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin string
+	}{
+		{name: "relative", origin: "daemon.example"},
+		{name: "unsupported scheme", origin: "ftp://daemon.example"},
+		{name: "credentials", origin: "https://user-a@daemon.example"},
+		{name: "path", origin: "https://daemon.example/kata"},
+		{name: "query", origin: "https://daemon.example?mode=web"},
+		{name: "fragment", origin: "https://daemon.example#session"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(
+				"[web]\npublic_origin = \""+tt.origin+"\"\n",
+			), 0o600))
+
+			_, err := config.ReadDaemonConfig()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "web.public_origin")
+		})
+	}
+}
+
+func TestReadDaemonConfigWebRejectsUntrustedHTTPPublicOrigin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[web]
+public_origin = "http://daemon.example"
+`), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "trust_private_network")
+}
+
+func TestReadDaemonConfigWebAllowsTrustedHTTPPublicOrigin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[auth]
+trust_private_network = true
+
+[web]
+public_origin = "http://daemon.example"
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "http://daemon.example", cfg.Web.PublicOrigin)
+}
+
+func TestReadDaemonConfigWebAllowsLoopbackHTTPPublicOrigin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`
+[web]
+public_origin = "http://127.0.0.1:27123"
+`), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "http://127.0.0.1:27123", cfg.Web.PublicOrigin)
+}
+
 func TestReadDaemonConfig_ReadsTUIMouse(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

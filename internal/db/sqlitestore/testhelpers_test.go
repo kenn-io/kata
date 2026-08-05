@@ -354,7 +354,7 @@ func setupRecurrence(t *testing.T, in db.CreateRecurrenceIn) (*sqlitestore.Store
 	if in.Actor == "" {
 		in.Actor = "tester"
 	}
-	rec, err := d.CreateRecurrence(ctx, in)
+	rec, _, err := d.CreateRecurrence(ctx, in)
 	require.NoError(t, err)
 	return d, ctx, p, rec
 }

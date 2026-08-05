@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -45,5 +46,45 @@ func (s *Store) LookupIdempotency(
 	return &db.IdempotencyMatch{
 		IssueID: issue.ID, IssueShortID: issue.ShortID,
 		Fingerprint: fingerprint.String, Event: event,
+	}, nil
+}
+
+// LookupCommentIdempotency finds the newest recent issue.commented event
+// carrying key and returns the comment that event created.
+func (s *Store) LookupCommentIdempotency(
+	ctx context.Context,
+	projectID int64,
+	key string,
+	since time.Time,
+) (*db.CommentIdempotencyMatch, error) {
+	query := eventSelect + ` WHERE e.type = 'issue.commented'
+      AND e.project_id = $1
+      AND e.payload::jsonb ->> 'idempotency_key' = $2
+      AND e.created_at >= $3
+      ORDER BY e.id DESC LIMIT 1`
+	event, err := scanEvent(s.QueryRowContext(ctx, query, projectID, key, formatStoredTime(since)))
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if event.IssueID == nil {
+		return nil, fmt.Errorf("comment idempotency match has no issue_id")
+	}
+	var payload struct {
+		CommentUID  string `json:"comment_uid"`
+		Fingerprint string `json:"idempotency_fingerprint"`
+	}
+	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+		return nil, fmt.Errorf("decode comment idempotency payload: %w", err)
+	}
+	comment, err := scanComment(s.QueryRowContext(ctx,
+		commentSelect+` WHERE issue_id = $1 AND uid = $2`, *event.IssueID, payload.CommentUID))
+	if err != nil {
+		return nil, fmt.Errorf("comment idempotency match comment: %w", err)
+	}
+	return &db.CommentIdempotencyMatch{
+		Comment: comment, Fingerprint: payload.Fingerprint, Event: event,
 	}, nil
 }

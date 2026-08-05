@@ -171,7 +171,7 @@ func TestMergeProjects_MovesSourceIntoSurvivingTarget(t *testing.T) {
 	assert.Equal(t, "beta", merged.Target.Name)
 	assert.Equal(t, int64(2), merged.IssuesMoved)
 	assert.Equal(t, int64(1), merged.AliasesMoved)
-	assert.Equal(t, int64(3), merged.EventsMoved)
+	assert.Equal(t, int64(4), merged.EventsMoved)
 
 	// TODO(Task 7): merge collision behavior is rewritten there; for now switch
 	// the lookups to short_id so the test compiles. The merge-collision
@@ -200,7 +200,8 @@ func TestMergeProjects_MovesSourceIntoSurvivingTarget(t *testing.T) {
 
 	events, err := d.EventsAfter(ctx, db.EventsAfterParams{ProjectID: beta.ID, Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, events, 3)
+	require.Len(t, events, 6)
+	assert.Equal(t, "project.merged", events[len(events)-1].Type)
 	for _, event := range events {
 		assert.Equal(t, beta.ID, event.ProjectID)
 		assert.Equal(t, "beta", event.ProjectName)
@@ -589,7 +590,7 @@ func TestBatchProjectStats_EmptyProjectReturnsZeroes(t *testing.T) {
 	s := stats[p.ID]
 	assert.Equal(t, 0, s.Open)
 	assert.Equal(t, 0, s.Closed)
-	assert.Nil(t, s.LastEventAt, "no events → LastEventAt is nil")
+	assert.NotNil(t, s.LastEventAt, "project creation is the first project event")
 }
 
 // TestBatchProjectStats_NoCountInflation pins the spec §6.1 contract:
@@ -765,7 +766,9 @@ func TestHardDeleteProject(t *testing.T) {
 	proj, err := d.CreateProject(ctx, "doomed")
 	require.NoError(t, err)
 
-	require.NoError(t, d.HardDeleteProject(ctx, proj.ID))
+	resetID, err := d.HardDeleteProject(ctx, proj.ID)
+	require.NoError(t, err)
+	assert.Positive(t, resetID)
 
 	_, err = d.ProjectByID(ctx, proj.ID)
 	require.ErrorIs(t, err, db.ErrNotFound)

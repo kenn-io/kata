@@ -24,7 +24,7 @@ func TestSmoke_FullLifecycle(t *testing.T) {
 
 	// 1. init via HTTP.
 	requireOK(t, postJSON(t, env.HTTP, env.URL+"/api/v1/projects",
-		map[string]any{"start_path": dir}))
+		map[string]any{"start_path": dir, "actor": "user-a"}))
 
 	// 2. resolve project id.
 	pid := resolvePID(t, env.HTTP, env.URL, dir)
@@ -75,7 +75,7 @@ func TestSmoke_Plan2Lifecycle(t *testing.T) {
 	dir := initRepo(t, "https://github.com/wesm/system.git")
 
 	requireOK(t, postJSON(t, env.HTTP, env.URL+"/api/v1/projects",
-		map[string]any{"start_path": dir}))
+		map[string]any{"start_path": dir, "actor": "user-a"}))
 	pid := resolvePID(t, env.HTTP, env.URL, dir)
 	pidStr := strconv.FormatInt(pid, 10)
 
@@ -344,7 +344,7 @@ func TestSmoke_Plan3Lifecycle(t *testing.T) {
 	env := testenv.New(t)
 	dir := initRepo(t, "https://github.com/wesm/system.git")
 	requireOK(t, postJSON(t, env.HTTP, env.URL+"/api/v1/projects",
-		map[string]any{"start_path": dir}))
+		map[string]any{"start_path": dir, "actor": "user-a"}))
 	pid := resolvePID(t, env.HTTP, env.URL, dir)
 	pidStr := strconv.FormatInt(pid, 10)
 
@@ -443,9 +443,9 @@ func TestSmoke_Plan4Events(t *testing.T) {
 
 	// 1. init both projects.
 	requireOK(t, postJSON(t, env.HTTP, env.URL+"/api/v1/projects",
-		map[string]any{"start_path": dirA}))
+		map[string]any{"start_path": dirA, "actor": "user-a"}))
 	requireOK(t, postJSON(t, env.HTTP, env.URL+"/api/v1/projects",
-		map[string]any{"start_path": dirB}))
+		map[string]any{"start_path": dirB, "actor": "user-a"}))
 
 	pidA := resolvePID(t, env.HTTP, env.URL, dirA)
 	pidB := resolvePID(t, env.HTTP, env.URL, dirB)

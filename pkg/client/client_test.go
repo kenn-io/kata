@@ -141,8 +141,9 @@ func TestGeneratedArbitraryJSONMapsRoundTrip(t *testing.T) {
 	assert.Equal(t, map[string]any{"ok": true}, envelope.ErrorData.Data["nested"])
 	assert.Equal(t, []any{float64(1), "two"}, envelope.ErrorData.Data["items"])
 
+	actor := "tester"
 	patch := generated.PatchIssueMetadataRequestBody{
-		Actor: "tester",
+		Actor: &actor,
 		Patch: map[string]any{
 			"area":   "work",
 			"remove": nil,
@@ -347,8 +348,9 @@ func TestGeneratedErrorEnvelopeIncludesDetails(t *testing.T) {
 func TestGeneratedRecurrenceTemplateUpdateMarshalsEmptyPatchValues(t *testing.T) {
 	labels := []string{}
 	metadata := map[string]any{}
+	actor := "tester"
 	body := generated.PatchRecurrenceRequestBody{
-		Actor: "tester",
+		Actor: &actor,
 		Template: &generated.RecurrenceTemplateUpdateInput{
 			Labels:   &labels,
 			Metadata: &metadata,

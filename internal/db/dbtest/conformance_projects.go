@@ -97,7 +97,7 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 		IfMatchRev: moving.Revision, Actor: "mover",
 	})
 	assert.Error(t, err)
-	recurrence, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	recurrence, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: source.ID, Actor: "mover", Rule: "FREQ=WEEKLY", DTStart: "2026-07-20", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "pinned move"},
 	})
@@ -242,7 +242,7 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	if _, err := store.PurgeIssue(ctx, purgedSource.ID, "merger", nil); err != nil {
 		return fmt.Errorf("purge source issue before merge: %w", err)
 	}
-	recurrence, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	recurrence, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: source.ID, Actor: "merger", Rule: "FREQ=WEEKLY", DTStart: "2026-07-20", Timezone: "UTC",
 		Template: db.RecurrenceTemplate{Title: "merged recurrence"},
 	})
@@ -270,7 +270,7 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 
 	mergedName := "merged-project"
 	merged, err := store.MergeProjects(ctx, db.MergeProjectsParams{
-		SourceProjectID: source.ID, TargetProjectID: target.ID, TargetName: &mergedName,
+		SourceProjectID: source.ID, TargetProjectID: target.ID, TargetName: &mergedName, Actor: "user-a",
 	})
 	if err != nil {
 		return fmt.Errorf("merge projects: %w", err)
@@ -280,8 +280,10 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	assert.Equal(t, mergedName, merged.Target.Name)
 	assert.Equal(t, int64(2), merged.IssuesMoved)
 	assert.Equal(t, int64(1), merged.AliasesMoved)
-	assert.Equal(t, int64(3), merged.EventsMoved)
+	assert.Equal(t, int64(4), merged.EventsMoved)
 	assert.Equal(t, int64(1), merged.PurgeLogsMoved)
+	assert.Equal(t, "project.merged", merged.Event.Type)
+	assert.Equal(t, "user-a", merged.Event.Actor)
 	require.Len(t, merged.ShortIDExtensions, 1)
 	assert.Equal(t, sourceIssue.UID, merged.ShortIDExtensions[0].UID)
 	assert.Equal(t, "d4ex", merged.ShortIDExtensions[0].PreMergeShortID)
@@ -327,7 +329,8 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("list events after project merge: %w", err)
 	}
-	assert.Len(t, events, 4)
+	require.Len(t, events, 7)
+	assert.Equal(t, "project.merged", events[len(events)-1].Type)
 	for _, event := range events {
 		if _, _, err := db.ValidateRemoteEventContentHash(remoteEventFromStored(event)); err != nil {
 			return fmt.Errorf("validate merged event %s for federation: %w", event.UID, err)
@@ -488,7 +491,7 @@ func checkActiveProjectionExports(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	recurrence, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+	recurrence, _, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: project.ID, Actor: "exporter", Rule: "FREQ=WEEKLY", DTStart: "2026-07-20",
 		Timezone: "UTC", Template: db.RecurrenceTemplate{Title: "export recurrence"},
 	})

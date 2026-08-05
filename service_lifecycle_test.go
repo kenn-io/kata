@@ -95,3 +95,50 @@ func TestServiceCloseTerminatesActiveEventStream(t *testing.T) {
 	defer func() { _ = postClose.Body.Close() }()
 	assert.Equal(t, http.StatusServiceUnavailable, postClose.StatusCode)
 }
+
+func TestServiceEnsureProjectBroadcastsAndEnqueuesExactCreatedEvent(t *testing.T) {
+	service, err := New(context.Background(), Config{
+		DSN:  filepath.Join(t.TempDir(), "service.db"),
+		Auth: AuthConfig{TrustCallerAuthentication: true},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, service.Close()) })
+
+	sink := &serviceRecordingSink{}
+	service.hookSink = sink
+	subscription := service.broadcaster.Subscribe(daemon.SubFilter{})
+	defer subscription.Unsub()
+
+	result, err := service.EnsureProject(context.Background(), ProjectSpec{
+		UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Name: "example-project",
+	})
+	require.NoError(t, err)
+	require.True(t, result.Created)
+
+	var msg daemon.StreamMsg
+	select {
+	case msg = <-subscription.Ch:
+	case <-time.After(time.Second):
+		t.Fatal("project creation event was not broadcast")
+	}
+	require.Equal(t, "event", msg.Kind)
+	require.NotNil(t, msg.Event)
+	assert.Equal(t, "project.created", msg.Event.Type)
+	assert.Equal(t, db.SystemActor, msg.Event.Actor)
+	require.Len(t, sink.events, 1)
+	assert.Equal(t, *msg.Event, sink.events[0])
+	persisted, err := service.store.EventsAfter(context.Background(), db.EventsAfterParams{
+		ProjectID: result.Project.ID, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	assert.Equal(t, *msg.Event, persisted[0])
+}
+
+type serviceRecordingSink struct {
+	events []db.Event
+}
+
+func (s *serviceRecordingSink) Enqueue(event db.Event) {
+	s.events = append(s.events, event)
+}

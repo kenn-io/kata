@@ -32,6 +32,10 @@ const (
 	// PrincipalHost is supplied in process by a mounted service's host access
 	// adapter. It never comes from a network header.
 	PrincipalHost PrincipalKind = "host"
+	// PrincipalWebLocal is issued through the owner-local launch proof or the
+	// direct keyless-loopback browser boundary. It permits ordinary attributed
+	// writes without granting bearer-token administration authority.
+	PrincipalWebLocal PrincipalKind = "web_local"
 )
 
 // Principal is the request-local identity derived by auth middleware.
@@ -130,7 +134,7 @@ func tuiBypassAllowed(ctx context.Context, source, reason string) bool {
 	}
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Kind {
-		case PrincipalDBToken, PrincipalTrustedProxy, PrincipalTrustedProxyAbsent:
+		case PrincipalDBToken, PrincipalTrustedProxy, PrincipalTrustedProxyAbsent, PrincipalWebLocal:
 			return false
 		}
 	}

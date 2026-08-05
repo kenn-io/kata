@@ -183,6 +183,21 @@ function Get-InstallDir {
     return Join-Path $env:USERPROFILE '.kata\bin'
 }
 
+function Assert-ReleaseBinary {
+    param([string]$BinaryPath)
+
+    $valid = $false
+    try {
+        & $BinaryPath '_web-assets-check' *> $null
+        $valid = ($LASTEXITCODE -eq 0)
+    } catch {
+        # Normalize execution and verifier failures to one installer error.
+    }
+    if (-not $valid) {
+        throw 'Downloaded release does not contain the validated Kata web UI'
+    }
+}
+
 function Add-ToPath($dir) {
     $currentPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 
@@ -282,6 +297,13 @@ function Install-Kata {
         $binaryFile = Get-ChildItem -Path $tmpDir -Recurse -Filter $binaryName | Select-Object -First 1
         if (-not $binaryFile) {
             Write-Err "Error: Could not find $binaryName in extracted archive"
+            exit 1
+        }
+
+        try {
+            Assert-ReleaseBinary -BinaryPath $binaryFile.FullName
+        } catch {
+            Write-Err "Error: $_"
             exit 1
         }
 

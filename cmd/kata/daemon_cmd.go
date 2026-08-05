@@ -288,6 +288,7 @@ func daemonStatusCmd() *cobra.Command {
 						PID:       r.PID,
 						Version:   daemonRuntimeVersion(r),
 						Address:   r.Endpoint().ConfigAddress(),
+						WebURL:    r.Metadata["web_origin"],
 						DBPath:    r.Metadata["db_path"],
 						StartedAt: r.StartedAt,
 					})
@@ -299,7 +300,11 @@ func daemonStatusCmd() *cobra.Command {
 				if len(out.Daemons) > 0 {
 					status = "running"
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s\n", status)
+				webURL := ""
+				if len(out.Daemons) == 1 && out.Daemons[0].WebURL != "" {
+					webURL = " web_url=" + out.Daemons[0].WebURL
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s\n", status, webURL)
 				return err
 			case outputJSON:
 				return emitJSON(cmd.OutOrStdout(), out)
@@ -310,6 +315,9 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			for _, d := range out.Daemons {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kata running at %s\n", daemonStatusAddress(d.Address))
+				if d.WebURL != "" {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  web UI:  %s\n", d.WebURL)
+				}
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  pid:     %d\n", d.PID)
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  version: %s\n", d.Version)
 				if !d.StartedAt.IsZero() {
@@ -337,6 +345,7 @@ type daemonStatusEntry struct {
 	PID       int       `json:"pid"`
 	Version   string    `json:"version"`
 	Address   string    `json:"address"`
+	WebURL    string    `json:"web_url,omitempty"`
 	DBPath    string    `json:"db_path"`
 	StartedAt time.Time `json:"started_at"`
 }
@@ -479,6 +488,7 @@ func daemonRestartCmd() *cobra.Command {
 
 type daemonStartupPreflight struct {
 	Config         *config.DaemonConfig
+	Web            config.WebConfig
 	Listen         string
 	Namespace      *daemon.Namespace
 	Endpoint       kitdaemon.Endpoint
@@ -510,6 +520,11 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	}
 	if err := daemon.CheckAuthStartup(listen, dcfg.Auth, insecureReadonly); err != nil {
 		return daemonStartupPreflight{}, err
+	}
+	if dcfg.Web.Listen != "" {
+		if err := daemon.CheckWebStartup(dcfg.Web.Listen, dcfg.Auth, insecureReadonly); err != nil {
+			return daemonStartupPreflight{}, err
+		}
 	}
 	dbPath, err := config.KataDSN(ctx)
 	if err != nil {
@@ -552,6 +567,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	}
 	return daemonStartupPreflight{
 		Config:         dcfg,
+		Web:            dcfg.Web,
 		Listen:         listen,
 		Namespace:      ns,
 		Endpoint:       endpoint,
@@ -744,7 +760,12 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	broadcaster := daemon.NewEventBroadcaster()
 	federationWake := startFederationRunner(ctx, store, broadcaster, disp, daemonLog)
 	federationConfigHealth := startFederationConfigReconciler(
-		ctx, dcfg, store, federationWake, daemonLog,
+		ctx, dcfg, store, federationWake, func(event db.Event) {
+			broadcaster.Broadcast(daemon.StreamMsg{
+				Kind: "event", Event: &event, ProjectID: event.ProjectID,
+			})
+			disp.Enqueue(event)
+		}, daemonLog,
 	)
 	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
 	gitHubSyncWake := startGitHubSyncRunner(ctx, store, gitHubSyncFetcher, broadcaster, disp, daemonLog)
@@ -765,6 +786,56 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		}
 	}()
 
+	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = listener.Close() }()
+
+	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
+	webEndpoint, err := daemon.ResolveWebEndpoint(daemon.WebEndpointOptions{
+		NamespaceID: ns.DBHash,
+		GOOS:        runtime.GOOS,
+		Daemon:      runtimeEndpoint,
+		Config:      startup.Web,
+	})
+	if err != nil {
+		return err
+	}
+	if webEndpoint.Listener != nil {
+		defer func() { _ = webEndpoint.Listener.Close() }()
+	}
+	allowLocalSession := webEndpoint.AllowsLocalSession(dcfg.Auth)
+	allowTrustedProxySession := webEndpoint.AllowsTrustedProxySession(dcfg.Auth)
+	updates := "sse"
+	if insecureReadonly {
+		updates = "poll"
+	}
+	webAuthentication := webAuthenticationMode(
+		insecureReadonly, allowLocalSession, allowTrustedProxySession, dcfg.Auth.Token,
+	)
+	webCapabilities := []string{webAuthentication, updates}
+	webRuntime, err := daemon.NewWebRuntime(daemon.WebRuntimeOptions{
+		Origin:       webEndpoint.Origin,
+		OriginStable: webEndpoint.OriginStable,
+		Capabilities: webCapabilities,
+	})
+	if err != nil {
+		return err
+	}
+	webSessions, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{
+		Origin:       webEndpoint.Origin,
+		OriginStable: webEndpoint.OriginStable,
+		InstanceID:   ns.DBHash,
+		Writable:     !insecureReadonly,
+		Updates:      updates,
+		Auth:         dcfg.Auth,
+		DB:           store,
+	})
+	if err != nil {
+		return err
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:                store,
 		StartedAt:         time.Now().UTC(),
@@ -781,6 +852,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 			SiblingBurstWindow:  closeThrottleWindow,
 		},
 		Auth:                   dcfg.Auth,
+		WebSessions:            webSessions,
 		InsecureReadonly:       insecureReadonly,
 		Embedder:               embedder,
 		VectorIndex:            vectorIndex,
@@ -788,18 +860,12 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		FederationConfigHealth: federationConfigHealth,
 	})
 	defer func() { _ = srv.Close() }()
-
-	runtimeStore := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-	listener, err := kitdaemon.Listen(ctx, endpoint, kitdaemon.WithRuntimeStore(runtimeStore))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = listener.Close() }()
-
-	runtimeEndpoint := runtimeEndpointForListener(endpoint, listener)
 	rec := kitdaemon.NewRuntimeRecord("kata", version.Version, runtimeEndpoint)
 	rec.Address = runtimeEndpoint.ConfigAddress()
 	rec.Metadata = map[string]string{"db_path": redactRuntimeDSN(dbPath)}
+	for key, value := range webRuntime.Metadata() {
+		rec.Metadata[key] = value
+	}
 	if _, err := runtimeStore.Write(rec); err != nil {
 		return err
 	}
@@ -810,7 +876,51 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		fmt.Fprintf(os.Stderr, "kata daemon: listening on %s\n", rec.Endpoint().ConfigAddress())
 	}
 
-	return srv.Serve(ctx, listener)
+	mainPolicy := daemon.ListenerPolicy{Kind: daemon.ListenerSocket}
+	bindings := []daemon.ListenerBinding{{Listener: listener, Policy: mainPolicy}}
+	if webEndpoint.Shared {
+		bindings[0].Policy = daemon.ListenerPolicy{
+			Kind:                  daemon.ListenerSharedTCP,
+			Origin:                webEndpoint.Origin,
+			BackendAuthority:      runtimeEndpoint.Address,
+			AllowedHosts:          append([]string(nil), dcfg.Web.AllowedHosts...),
+			RequireBrowserSession: true,
+			AllowLocalSession:     allowLocalSession,
+			WebAuthentication:     webAuthentication,
+		}
+	} else {
+		bindings = append(bindings, daemon.ListenerBinding{
+			Listener: webEndpoint.Listener,
+			Policy: daemon.ListenerPolicy{
+				Kind:                  daemon.ListenerBrowser,
+				Origin:                webEndpoint.Origin,
+				RequireBrowserSession: true,
+				AllowLocalSession:     allowLocalSession,
+				WebAuthentication:     webAuthentication,
+			},
+		})
+	}
+	return srv.ServeListeners(ctx, bindings...)
+}
+
+func webAuthenticationMode(
+	insecureReadonly bool,
+	allowLocalSession bool,
+	allowTrustedProxySession bool,
+	token string,
+) string {
+	switch {
+	case insecureReadonly && strings.TrimSpace(token) == "":
+		return "readonly"
+	case allowLocalSession:
+		return "loopback"
+	case allowTrustedProxySession:
+		return "proxy"
+	case strings.TrimSpace(token) != "":
+		return "login"
+	default:
+		return "unavailable"
+	}
 }
 
 func newDaemonTelemetryReporter(store db.Storage) telemetry.Client {

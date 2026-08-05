@@ -497,6 +497,14 @@ type IdempotencyMatch struct {
 	Event        Event
 }
 
+// CommentIdempotencyMatch is a previously committed comment creation matched
+// through its issue.commented event payload.
+type CommentIdempotencyMatch struct {
+	Comment     Comment
+	Fingerprint string
+	Event       Event
+}
+
 // Evidence is the typed-union element persisted on issue.closed event
 // payloads (anti-agent-justification spec §3.3). It mirrors api.Evidence
 // field-for-field; the daemon handler does a 1:1 conversion at the

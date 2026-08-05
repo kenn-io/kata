@@ -64,11 +64,12 @@ func projectsCreateCmd() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
+			actor, _ := resolveActor(ctx, flags.As, nil)
 			baseURL, err := ensureDaemon(ctx)
 			if err != nil {
 				return err
 			}
-			bs, err := postProjects(ctx, baseURL, map[string]string{"name": name})
+			bs, err := postProjects(ctx, baseURL, map[string]string{"name": name, "actor": actor})
 			if err != nil {
 				return err
 			}
@@ -199,6 +200,7 @@ func projectsRenameCmd() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
+			actor, _ := resolveActor(ctx, flags.As, nil)
 			baseURL, err := ensureDaemon(ctx)
 			if err != nil {
 				return err
@@ -213,7 +215,7 @@ func projectsRenameCmd() *cobra.Command {
 			}
 			status, bs, err := httpDoJSON(ctx, client, http.MethodPatch,
 				fmt.Sprintf("%s/api/v1/projects/%d", baseURL, project.ID),
-				map[string]string{"name": name})
+				map[string]string{"name": name, "actor": actor})
 			if err != nil {
 				return err
 			}
@@ -335,6 +337,7 @@ func projectsMergeCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			actor, _ := resolveActor(ctx, flags.As, nil)
 			baseURL, err := ensureDaemon(ctx)
 			if err != nil {
 				return err
@@ -358,7 +361,7 @@ func projectsMergeCmd() *cobra.Command {
 					ExitCode: ExitValidation,
 				}
 			}
-			body := map[string]any{"source_project_id": source.ID}
+			body := map[string]any{"source_project_id": source.ID, "actor": actor}
 			if strings.TrimSpace(targetName) != "" {
 				body["target_name"] = strings.TrimSpace(targetName)
 			}

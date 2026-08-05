@@ -1515,6 +1515,41 @@ func TestEnsureFederationReplicaCredentialWriteFailureRetriesBinding(t *testing.
 	assert.Len(t, projects, 1)
 }
 
+func TestEnsureFederationReplicaDeliversCreatedEventBeforeCredentialWriteCompletes(t *testing.T) {
+	store := openReplicaServiceStore(t)
+	credentials := newReplicaCredentialStoreBarrier()
+	defer credentials.releaseStore()
+	params := replicaServiceParams()
+	events := make(chan db.Event, 1)
+	params.ProjectEventSink = func(event db.Event) { events <- event }
+	type ensureResult struct {
+		result daemon.EnsureFederationReplicaResult
+		err    error
+	}
+	resultCh := make(chan ensureResult, 1)
+	go func() {
+		result, err := daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, params)
+		resultCh <- ensureResult{result: result, err: err}
+	}()
+
+	select {
+	case <-credentials.storeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("credential write did not start")
+	}
+	select {
+	case event := <-events:
+		assert.Equal(t, "project.created", event.Type)
+	case <-time.After(time.Second):
+		t.Fatal("project event was not delivered before credential persistence")
+	}
+
+	credentials.releaseStore()
+	result := <-resultCh
+	require.NoError(t, result.err)
+	assert.Equal(t, replicaHubProjectUID, result.result.Project.UID)
+}
+
 func TestEnsureFederationReplicaCredentialWriteFailureRetriesAdoption(t *testing.T) {
 	ctx := context.Background()
 	store := openReplicaServiceStore(t)
@@ -1581,12 +1616,14 @@ func TestEnsureFederationReplicaPushEnableFailureRetriesWithoutDuplication(t *te
 	require.NoError(t, err)
 	wakes := 0
 
-	_, err = daemon.EnsureFederationReplica(
+	failed, err := daemon.EnsureFederationReplica(
 		ctx, store, credentials, func() { wakes++ }, replicaServiceParams(),
 	)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "injected federation replica push failure")
+	require.NotNil(t, failed.CreatedEvent)
+	assert.Equal(t, "project.created", failed.CreatedEvent.Type)
 	project, projectErr := store.ProjectByUID(ctx, replicaHubProjectUID)
 	require.NoError(t, projectErr)
 	binding, bindErr := store.FederationBindingByProject(ctx, project.ID)
@@ -1610,6 +1647,28 @@ func TestEnsureFederationReplicaPushEnableFailureRetriesWithoutDuplication(t *te
 	projects, err := store.ListProjects(ctx)
 	require.NoError(t, err)
 	assert.Len(t, projects, 1)
+}
+
+func TestEnsureFederationReplicaBindingFailurePreservesCreatedEvent(t *testing.T) {
+	ctx := context.Background()
+	store := openReplicaServiceStore(t)
+	credentials := newReplicaCredentialStore()
+	_, err := store.ExecContext(ctx, `
+		CREATE TRIGGER fail_federation_replica_binding
+		BEFORE INSERT ON federation_bindings
+		BEGIN
+			SELECT RAISE(FAIL, 'injected federation replica binding failure');
+		END`)
+	require.NoError(t, err)
+
+	failed, err := daemon.EnsureFederationReplica(
+		ctx, store, credentials, nil, replicaServiceParams(),
+	)
+
+	require.ErrorContains(t, err, "injected federation replica binding failure")
+	require.NotNil(t, failed.CreatedEvent)
+	assert.Equal(t, "project.created", failed.CreatedEvent.Type)
+	assert.Equal(t, replicaHubProjectUID, failed.Project.UID)
 }
 
 func TestEnsureFederationReplicaRejectsBindingConflictsWithoutWaking(t *testing.T) {

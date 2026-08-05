@@ -44,8 +44,9 @@ var storageScenarios = []scenario{
 	{
 		name: "projects",
 		methods: []string{
-			"CreateProject", "CreateProjectWithUID", "ListProjects", "ListProjectsIncludingArchived",
-			"ProjectByID", "ProjectByName", "ProjectByNameIncludingArchived", "ProjectByUID", "RenameProject",
+			"CreateProject", "CreateProjectAndEvent", "CreateProjectWithUID", "CreateProjectWithUIDAndEvent",
+			"ListProjects", "ListProjectsIncludingArchived", "ProjectByID", "ProjectByName",
+			"ProjectByNameIncludingArchived", "ProjectByUID", "RenameProject", "RenameProjectAndEvent",
 		},
 		run: checkProjects,
 	},
@@ -67,7 +68,7 @@ var storageScenarios = []scenario{
 	},
 	{
 		name:    "idempotency",
-		methods: []string{"AcquireIdempotencyLock", "CreateIssue", "CreateProject", "LookupIdempotency"},
+		methods: []string{"AcquireIdempotencyLock", "CreateComment", "CreateIssue", "CreateProject", "LookupCommentIdempotency", "LookupIdempotency"},
 		run:     checkIdempotency,
 	},
 	{
@@ -174,9 +175,9 @@ var storageScenarios = []scenario{
 	{
 		name: "recurrences",
 		methods: []string{
-			"CloseIssueWithEvents", "CreateProject", "CreateRecurrence", "EventsAfter", "GetRecurrenceByID",
+			"CloseIssueWithEvents", "CreateIssue", "CreateProject", "CreateRecurrence", "CreateRecurrenceForIssue", "EventsAfter", "GetRecurrenceByID",
 			"GetRecurrenceByUID", "IssueByID", "LabelsForIssue", "ListIssues", "ListRecurrencesByProject",
-			"MaterializeNext", "PatchRecurrence", "SoftDeleteRecurrence",
+			"MaterializeNext", "PatchRecurrence", "PurgeIssue", "SoftDeleteRecurrence",
 		},
 		run: checkRecurrences,
 	},
@@ -200,8 +201,8 @@ var storageScenarios = []scenario{
 	{
 		name: "metadata and atomic edit",
 		methods: []string{
-			"CreateIssue", "CreateProject", "EditIssueAtomic", "EventsAfter", "IssueByID", "LinkByEndpoints",
-			"ListIssueContent", "PatchIssueMetadata", "PatchProjectMetadata", "ProjectByID",
+			"CreateIssue", "CreateProject", "DesignateInboxProject", "EditIssueAtomic", "EventsAfter", "IssueByID",
+			"LinkByEndpoints", "ListIssueContent", "PatchIssueMetadata", "PatchProjectMetadata", "ProjectByID",
 		},
 		run: checkMetadataAndAtomicEdit,
 	},

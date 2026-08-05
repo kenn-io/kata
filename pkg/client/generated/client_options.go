@@ -2659,6 +2659,7 @@ func (o *UnassignIssueRequestOptions) GetHeader() (map[string]string, error) {
 type CreateCommentRequestOptions struct {
 	PathParams *CreateCommentPath
 	Body       *CreateCommentBody
+	Header     *CreateCommentHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2678,6 +2679,14 @@ func (o *CreateCommentRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2705,7 +2714,7 @@ func (o *CreateCommentRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *CreateCommentRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // EditCommentRequestOptions is the options needed to make a request to EditComment.
@@ -3702,6 +3711,7 @@ func (o *CreateRecurrenceRequestOptions) GetHeader() (map[string]string, error) 
 type DeleteRecurrenceRequestOptions struct {
 	PathParams *DeleteRecurrencePath
 	Query      *DeleteRecurrenceQuery
+	Header     *DeleteRecurrenceHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -3721,6 +3731,14 @@ func (o *DeleteRecurrenceRequestOptions) Validate() error {
 		if v, ok := any(o.Query).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -3748,7 +3766,7 @@ func (o *DeleteRecurrenceRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *DeleteRecurrenceRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ShowRecurrenceRequestOptions is the options needed to make a request to ShowRecurrence.
@@ -4093,4 +4111,110 @@ func (o *RevokeTokenRequestOptions) GetBody() any {
 // GetHeader returns the headers as a map.
 func (o *RevokeTokenRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
+}
+
+// ReadUIReferencesRequestOptions is the options needed to make a request to ReadUIReferences.
+type ReadUIReferencesRequestOptions struct {
+	Query  *ReadUIReferencesQuery
+	Header *ReadUIReferencesHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ReadUIReferencesRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ReadUIReferencesRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *ReadUIReferencesRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ReadUIReferencesRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ReadUIReferencesRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
+// ReadUISnapshotRequestOptions is the options needed to make a request to ReadUISnapshot.
+type ReadUISnapshotRequestOptions struct {
+	Query  *ReadUISnapshotQuery
+	Header *ReadUISnapshotHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ReadUISnapshotRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ReadUISnapshotRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *ReadUISnapshotRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ReadUISnapshotRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ReadUISnapshotRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
 }

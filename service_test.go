@@ -130,7 +130,7 @@ type projectResponse struct {
 
 func createProject(t *testing.T, baseURL, name string) projectResponse {
 	t.Helper()
-	body, err := json.Marshal(map[string]string{"name": name})
+	body, err := json.Marshal(map[string]string{"name": name, "actor": "user-a"})
 	require.NoError(t, err)
 	resp, err := http.Post(baseURL+"/api/v1/projects", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)

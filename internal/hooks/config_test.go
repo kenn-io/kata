@@ -480,6 +480,34 @@ func TestMatch_ProjectMetadataUpdatedRecognized(t *testing.T) {
 	}
 }
 
+func TestMatch_ProjectAndRecurrenceEventsRecognized(t *testing.T) {
+	eventTypes := []string{
+		"project.created", "project.renamed", "project.merged", "project.removed",
+		"project.restored", "project.alias_removed", "project.author_rewritten",
+		"project.federation_enabled",
+		"recurrence.created", "recurrence.updated", "recurrence.deleted",
+		"recurrence.materialized", "recurrence.materialization_skipped",
+	}
+	_, allStar, err := compileEventMatcher("*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventType := range eventTypes {
+		t.Run(eventType, func(t *testing.T) {
+			_, exact, err := compileEventMatcher(eventType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !exact(eventType) {
+				t.Fatalf("exact matcher must match %s", eventType)
+			}
+			if !allStar(eventType) {
+				t.Fatalf("* must match %s", eventType)
+			}
+		})
+	}
+}
+
 // TestMatch_CloseThrottledRecognized pins that close.throttled audit
 // events are in knownEventTypes: explicit subscription must validate,
 // and the `*` wildcard must match. close.throttled deliberately lives

@@ -368,6 +368,14 @@ type ClientInterface interface {
 
 	RevokeToken(ctx context.Context, options *RevokeTokenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RevokeTokenResponse, error)
 	RevokeTokenWithResponse(ctx context.Context, options *RevokeTokenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RevokeTokenResp, error)
+
+	// ReadUIReferences Read bounded browser reference choices
+	ReadUIReferences(ctx context.Context, options *ReadUIReferencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUIReferencesResponse, error)
+	ReadUIReferencesWithResponse(ctx context.Context, options *ReadUIReferencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUIReferencesResp, error)
+
+	// ReadUISnapshot Read a coherent browser snapshot
+	ReadUISnapshot(ctx context.Context, options *ReadUISnapshotRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUISnapshotResponse, error)
+	ReadUISnapshotWithResponse(ctx context.Context, options *ReadUISnapshotRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUISnapshotResp, error)
 }
 
 func (c *Client) AuditCloses(ctx context.Context, options *AuditClosesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*AuditClosesResponse, error) {
@@ -5663,6 +5671,116 @@ func (c *Client) RevokeToken(ctx context.Context, options *RevokeTokenRequestOpt
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/tokens/{id}/actions/revoke")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// ReadUIReferences Read bounded browser reference choices
+func (c *Client) ReadUIReferences(ctx context.Context, options *ReadUIReferencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUIReferencesResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"limit":       {Style: "form", Explode: &[]bool{false}[0]},
+		"project_uid": {Style: "form", Explode: &[]bool{false}[0]},
+		"q":           {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/ui/references",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ReadUIReferencesResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			return nil, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ReadUIReferencesResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ReadUIReferencesResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/ui/references")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// ReadUISnapshot Read a coherent browser snapshot
+func (c *Client) ReadUISnapshot(ctx context.Context, options *ReadUISnapshotRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUISnapshotResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"include_graph":      {Style: "form", Explode: &[]bool{false}[0]},
+		"include_history":    {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":              {Style: "form", Explode: &[]bool{false}[0]},
+		"local_date":         {Style: "form", Explode: &[]bool{false}[0]},
+		"project_uid":        {Style: "form", Explode: &[]bool{false}[0]},
+		"selected_issue_uid": {Style: "form", Explode: &[]bool{false}[0]},
+		"text":               {Style: "form", Explode: &[]bool{false}[0]},
+		"time_zone":          {Style: "form", Explode: &[]bool{false}[0]},
+		"view":               {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/ui/snapshot",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ReadUISnapshotResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			return nil, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ReadUISnapshotResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ReadUISnapshotResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/ui/snapshot")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

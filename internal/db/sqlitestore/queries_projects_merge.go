@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"go.kenn.io/kata/internal/db"
@@ -22,6 +23,9 @@ func (d *Store) MergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db.ProjectMergeResult, error) {
 	if p.SourceProjectID == p.TargetProjectID {
 		return db.ProjectMergeResult{}, db.ErrProjectMergeSameProject
+	}
+	if p.Actor == "" {
+		p.Actor = db.SystemActor
 	}
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
@@ -147,6 +151,19 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("reload target project: %w", err)
 	}
+	payload, err := json.Marshal(struct {
+		SourceUID string `json:"source_uid"`
+	}{SourceUID: source.UID})
+	if err != nil {
+		return db.ProjectMergeResult{}, fmt.Errorf("marshal project merge event: %w", err)
+	}
+	event, err := d.insertEventTx(ctx, tx, eventInsert{
+		ProjectID: mergedTarget.ID, ProjectUID: mergedTarget.UID, ProjectName: mergedTarget.Name,
+		Type: "project.merged", Actor: p.Actor, Payload: string(payload),
+	})
+	if err != nil {
+		return db.ProjectMergeResult{}, fmt.Errorf("insert project merge event: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("commit merge projects: %w", err)
 	}
@@ -159,6 +176,7 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 		EventsMoved:       eventsMoved,
 		PurgeLogsMoved:    purgeLogsMoved,
 		ShortIDExtensions: extensions,
+		Event:             event,
 	}, nil
 }
 

@@ -188,6 +188,30 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	}
 }
 
+func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
+	doc := OpenAPIDocument()
+
+	snapshot := doc.Paths["/api/v1/ui/snapshot"]
+	require.NotNil(t, snapshot, "missing UI snapshot path")
+	require.NotNil(t, snapshot.Get, "missing GET UI snapshot operation")
+	require.Contains(t, snapshot.Get.Responses, "200")
+	require.Contains(t, snapshot.Get.Responses, "304")
+
+	references := doc.Paths["/api/v1/ui/references"]
+	require.NotNil(t, references, "missing UI references path")
+	require.NotNil(t, references.Get, "missing GET UI references operation")
+	require.Contains(t, references.Get.Responses, "200")
+
+	response := doc.Components.Schemas.Map()["UISnapshotResponseBody"]
+	require.NotNil(t, response, "missing UI snapshot response schema")
+	for _, field := range []string{
+		"contract_version", "cursor", "capabilities", "origin", "origin_stable",
+		"catalog", "collection",
+	} {
+		require.Contains(t, response.Properties, field)
+	}
+}
+
 func TestOpenAPISchemaVersionReflectsConfigDrivenFederationContract(t *testing.T) {
 	if APISchemaVersion != "0.7.0" {
 		t.Fatalf("APISchemaVersion = %q, want 0.7.0 for config-driven federation reconciliation", APISchemaVersion)

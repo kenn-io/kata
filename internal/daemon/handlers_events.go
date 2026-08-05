@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -299,7 +300,7 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 		return
 	}
 	hctx.SetHeader("Content-Type", "text/event-stream")
-	hctx.SetHeader("Cache-Control", "no-cache")
+	hctx.SetHeader("Cache-Control", "private, no-cache")
 	hctx.SetHeader("Connection", "keep-alive")
 	if _, err := io.WriteString(w, ": connected\n\n"); err != nil {
 		return
@@ -310,6 +311,21 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 	defer sub.Unsub()
 
 	ctx := hctx.Context()
+	if projectID > 0 {
+		project, projectErr := cfg.DB.ProjectByID(ctx, projectID)
+		if errors.Is(projectErr, db.ErrNotFound) || (projectErr == nil && project.DeletedAt != nil) {
+			resetID, resetErr := cfg.DB.MaxEventID(ctx)
+			if resetErr != nil || revalidateSSEAuthority(ctx) != nil {
+				return
+			}
+			writeResetFrame(w, resetID)
+			flusher.Flush()
+			return
+		}
+		if projectErr != nil {
+			return
+		}
+	}
 	hwm, err := cfg.DB.MaxEventID(ctx)
 	if err != nil {
 		return
@@ -320,7 +336,7 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 		return
 	}
 	if resetTo > 0 {
-		if revalidateHostAccess(ctx) != nil {
+		if revalidateSSEAuthority(ctx) != nil {
 			return
 		}
 		writeResetFrame(w, resetTo)
@@ -336,7 +352,7 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 	}
 
 	if len(rows) == sseDrainCap+1 {
-		if revalidateHostAccess(ctx) != nil {
+		if revalidateSSEAuthority(ctx) != nil {
 			return
 		}
 		writeResetFrame(w, hwm)
@@ -346,7 +362,7 @@ func runSSEStream(hctx huma.Context, cfg ServerConfig, cursor, projectID int64) 
 
 	lastSent := cursor
 	for _, ev := range rows {
-		if revalidateHostAccess(ctx) != nil {
+		if revalidateSSEAuthority(ctx) != nil {
 			return
 		}
 		writeEventFrame(w, ev)
@@ -442,7 +458,7 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if revalidateHostAccess(ctx) != nil {
+			if revalidateSSEAuthority(ctx) != nil {
 				return
 			}
 			if _, err := io.WriteString(deps.w, ": keepalive\n\n"); err != nil {
@@ -455,7 +471,7 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 			}
 			switch msg.Kind {
 			case "reset":
-				if revalidateHostAccess(ctx) != nil {
+				if revalidateSSEAuthority(ctx) != nil {
 					return
 				}
 				writeResetFrame(deps.w, msg.ResetID)
@@ -477,7 +493,7 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 					return
 				}
 				if resetTo > 0 {
-					if revalidateHostAccess(ctx) != nil {
+					if revalidateSSEAuthority(ctx) != nil {
 						return
 					}
 					writeResetFrame(deps.w, resetTo)
@@ -500,7 +516,7 @@ func runLivePhase(ctx context.Context, deps livePhaseDeps, projectID, lastSent i
 						return
 					}
 					for _, ev := range rows {
-						if revalidateHostAccess(ctx) != nil {
+						if revalidateSSEAuthority(ctx) != nil {
 							return
 						}
 						writeEventFrame(deps.w, ev)

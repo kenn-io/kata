@@ -72,3 +72,15 @@ func TestEnsureAttributedWriteAllowed_TrustedProxyAllowed(t *testing.T) {
 	require.NoError(t, ensureAttributedWriteAllowed(ctx),
 		"PrincipalTrustedProxy must be allowed to do attributed writes")
 }
+
+func TestPrincipalWebLocalAllowsOrdinaryWritesButNotTokenAdministration(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), Principal{Kind: PrincipalWebLocal})
+	require.NoError(t, ensureAttributedWriteAllowed(ctx))
+
+	err := ensureTokenAdminAllowed(ctx)
+	require.Error(t, err)
+	var apiErr *api.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, 403, apiErr.Status)
+	assert.Equal(t, "token_admin_forbidden", apiErr.Code)
+}

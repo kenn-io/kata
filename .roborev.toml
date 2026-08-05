@@ -24,17 +24,124 @@ with a SHA, that pin is the source of truth. Flag only concrete
 breaking changes visible in the diff. Otherwise phrase as a LOW-severity
 question, not a Medium/High "fix".
 
-## Trust model — single-user local tool
+## Trust model — local daemon plus first-class browser client
 
-Daemon binds to Unix socket or loopback TCP only (`requireLoopback` in
-`internal/daemon/endpoint.go`). Multi-user auth is out of scope per
-`docs/superpowers/specs/2026-04-29-kata-design.md`. The OS user IS the
-trust boundary.
+Kata is a single-operator tool, not a public multi-tenant service. The default
+daemon API uses an owner-local Unix socket on Unix and loopback TCP on Windows.
+The default browser listener deliberately follows the established
+keyless-loopback convention: same-host processes and users are inside its
+ordinary UI trust boundary, but it never grants token administration. Remote
+mutable access is opt-in and follows the private-network bearer model described
+in AGENTS.md.
 
-Not findings: missing API auth, `validateActor` "not authorizing"
-(it's audit metadata), DoS via large bodies / bulk endpoints / unbounded
-loops on local input, symlink-following under the kata data dir, races
-visible only to a colocated attacker.
+Not findings: missing multi-user authorization on owner-local or direct-loopback paths,
+`validateActor` "not authorizing" (it is audit metadata), DoS via large bodies
+or bulk endpoints on trusted local/private input, symlink following beneath the
+owner-only Kata data directory, or races exploitable only by another process
+already running as the same OS user.
+
+The browser is a distinct ambient-credential boundary even though it is served
+by the daemon. Reviewers MUST enforce all of these invariants:
+
+1. A direct browser tab may create a local-web session only on the keyless local
+   trust boundary: direct loopback peer, exact configured loopback Host and
+   Origin, no forwarding headers, and no daemon token, identity, or trusted
+   proxy authentication. It must be unavailable on non-loopback, proxied, or
+   authenticated deployments. The resulting data authority still requires the
+   split cookie and tab header in item 2 and never grants token administration.
+   `kata ui` opens the advertised loopback URL directly; launch credentials,
+   secret runtime siblings, credential fragments, and private browser handoffs
+   are not part of the contract. The resulting local-web principal may perform
+   ordinary attributed UI writes but must never gain token administration.
+2. Every authenticated browser data request requires both the instance-scoped
+   HttpOnly cookie and `X-Kata-Web-Session`; mutation requests additionally
+   require matching `X-Kata-CSRF` and same-origin validation. Cookie-only,
+   header-only, or CSRF-only authorization is a HIGH finding. The cookie is one
+   manager-scoped ambient value shared by tabs; session and CSRF values are
+   tab-local. Issuing or logging out one tab must not rotate/delete the ambient
+   cookie or invalidate another tab's header session.
+3. Database-token-backed sessions must fail after token revocation and all
+   sessions have a bounded lifetime. Do flag cached browser authority that can
+   outlive its backing token or the documented session lifetime. Long-lived SSE
+   streams revalidate browser authority before every event, reset, and heartbeat;
+   handshake-only authentication is insufficient. Authenticated API responses
+   are private and non-cacheable and vary on both the cookie and
+   `X-Kata-Web-Session`; do flag responses a shared proxy could replay across
+   browser principals. Browser authentication and credentialed API fetches use
+   redirect mode `error`; following redirects with tokens, cookies, or
+   session headers is a credential-boundary defect.
+4. Exact Host validation is the DNS-rebinding boundary and runs before browser
+   session or route handling. Dedicated browser listeners enforce it for every
+   request. Shared TCP listeners enforce an allowlist of the configured public
+   authority, concrete backend authority, and exact `[web].allowed_hosts`
+   authorities for every request, including unmarked ordinary API reads.
+   `allowed_hosts` exists for explicitly configured container/proxy/backend
+   aliases; it is never inferred from forwarded headers. Foreign DNS Host
+   values are never made safe by classifying traffic as CLI or presenting a
+   bearer header. Browser-bearing mutations require the exact configured
+   Origin even when the header would otherwise be absent, while ordinary
+   health, CLI, and federation requests remain governed by daemon
+   bearer/private-network auth. Bearer CLI
+   event streams remain CLI traffic.
+5. HTTP browser origins are accepted for loopback. Non-loopback HTTP requires
+   explicit `[auth].trust_private_network = true` and represents an
+   operator-trusted private overlay; otherwise the public origin must be HTTPS.
+   Do not flag trusted-overlay plaintext solely because a hostname is used. Do
+   flag non-loopback HTTP without that opt-in, public unauthenticated defaults,
+   cross-origin redirects, or secrets sent to a different origin.
+   Configured-remote UI login must apply the same bearer-target validation
+   before opening a page that accepts a daemon token.
+6. `web.public_origin` is the configured canonical browser authority, with
+   default HTTP/HTTPS ports removed to match browser `Host` and `Origin`
+   serialization, and is never derived from forwarded headers. Root-relative
+   routes are the supported deployment; path-prefixed public or daemon URLs
+   must be rejected rather than partially supported. Development launchers and
+   fixtures must construct child environments from an explicit OS/toolchain
+   allowlist before applying temporary isolated paths; database, daemon,
+   workspace, config, credential, proxy, and hosted-port targets are not
+   inherited before branch code is built, seeded, or started. On Windows the
+   launcher must bind the shared daemon listener to its selected temporary
+   backend port.
+7. `--insecure-readonly` may expose anonymous snapshots and polling, but must
+   never authorize mutations, token administration, or writable sessions.
+   `kata ui` opens its validated origin directly when the runtime advertises
+   readonly. Cookie-only ambient state is ignored
+   in this mode; a session header still opts into split browser authentication.
+8. Browser capabilities are principal-derived. In identity mode the bootstrap
+   login remains unable to perform attributed writes; a direct local session or
+   writable identity token must back a writable snapshot. A 401 clears tab-local
+   credentials and fences accepted snapshots and drafts from further writes.
+   Keyless loopback may attempt one transparent local-session renewal;
+   authenticated deployments return to token login. Explicit login does not read snapshot authority before token
+   exchange. Every mutation path, including project creation, must use this
+   rejection behavior. Mutation controls stay disabled for stale or read-only
+   authority and while any mutation is pending; do not allow project creation
+   to overlap the shared mutation state.
+9. The production CSP keeps scripts same-origin-only. Kata's dynamic layout
+   requires inline style attributes, so `style-src-attr 'unsafe-inline'` is an
+   intentional narrow allowance and must not be broadened to inline scripts.
+
+Snapshot responses are backend-consistency contracts: a matching ETag performs
+no projection reads, a built snapshot captures its cursor inside the same
+consistent read, filters apply before limits, recurrences remain project
+scoped, archived-project endpoints do not appear through relationship or link
+projections, every visible mutation (including project merge) durably advances
+the cursor, and SQLite/PostgreSQL behavior stays in parity. A
+`sync.reset_required` frame stays latched until an unconditional snapshot
+returns `200`; failure retries may not accept a conditional `304` or restore
+writable stale authority. Project catalog mutations, including
+config-reconciled federation replica creation, host-service project creation,
+and recurrence CRUD, broadcast their exact transaction event to live clients
+and enqueue it for mutation hooks; post-commit event scans are not an
+acceptable substitute. Deliver the event before response-only reads or
+credential persistence can fail. A project-init failure after commit delivers
+the event when state remains, while successful orphan cleanup broadcasts the
+reset cursor reserved by that cleanup transaction. Recurrence deletion requires
+`If-Match` and checks the visible revision atomically in the deletion
+transaction. User-initiated project events retain their attributed actor, while
+`system` is reserved for internal project mutations. Treat project and
+recurrence events as hook-eligible for both exact and `*` subscriptions. Treat
+violations as functional data-isolation defects rather than optional hardening.
 
 ## Release review posture
 
@@ -65,6 +172,11 @@ in `origin/main`, running validation from tag-controlled code before containment
 is proven, checking out a mutable ref for packaging after validation, skipping
 the immediate pre-publish tag re-check, or broadening write credentials beyond
 the release publication job.
+
+Every GoReleaser entry point runs `make web-release-check` and must provision
+the pinned Node/Bun toolchain plus frozen web dependencies before creating or
+uploading a release. Missing those prerequisites is a valid release-blocking
+finding.
 
 Stronger release provenance such as GPG tag verification, artifact signing, or
 SLSA-style attestations is future hardening work. Do not block current release

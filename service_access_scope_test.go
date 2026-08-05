@@ -91,6 +91,33 @@ func TestServiceAccessControllerScopesFederationEnrollmentBody(t *testing.T) {
 	assert.False(t, authorized.Operation.AllProjects)
 }
 
+func TestServiceAccessControllerScopesInboxDesignationGlobally(t *testing.T) {
+	controller := &recordingAccessController{}
+	_, server := newAccessTestServer(t, controller)
+	project := createProject(t, server.URL, "example-project")
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.ID == "patchProjectMetadata" && request.Operation.AllProjects {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+
+	metadataURL := server.URL + "/api/v1/projects/" +
+		strconv.FormatInt(project.Project.ID, 10) + "/metadata"
+	requestBody := bytes.NewBufferString(`{"actor":"ignored","patch":{"role":"inbox"}}`)
+	httpRequest, err := http.NewRequest(http.MethodPost, metadataURL, requestBody)
+	require.NoError(t, err)
+	httpRequest.Header.Set("Content-Type", "application/json")
+	response, err := server.Client().Do(httpRequest)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusNotFound, response.StatusCode)
+
+	request := operationRequest(t, controller.snapshot(), "patchProjectMetadata", 0)
+	assert.Equal(t, []int64{project.Project.ID}, request.Operation.ProjectIDs)
+	assert.True(t, request.Operation.AllProjects)
+}
+
 func TestServiceAccessControllerScopesLookupHydrationAndTraversal(t *testing.T) {
 	controller := &recordingAccessController{}
 	_, server := newAccessTestServer(t, controller)

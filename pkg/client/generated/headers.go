@@ -2,6 +2,10 @@
 
 package generated
 
+import (
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+)
+
 type StreamEventsHeaders struct {
 	// LastEventID Exclusive resume cursor from the last received SSE id. Mutually exclusive with after_id.
 	LastEventID *int64 `json:"Last-Event-ID,omitempty"`
@@ -51,6 +55,10 @@ type PurgeIssueHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
 }
 
+type CreateCommentHeaders struct {
+	IdempotencyKey *string `json:"Idempotency-Key,omitempty"`
+}
+
 type GetIssueLeaseStatusHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
@@ -79,6 +87,22 @@ type PatchProjectMetadataHeaders struct {
 	IfMatch *string `json:"If-Match,omitempty"`
 }
 
+type DeleteRecurrenceHeaders struct {
+	IfMatch string `json:"If-Match" validate:"required"`
+}
+
+func (d DeleteRecurrenceHeaders) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(d))
+}
+
 type PatchRecurrenceHeaders struct {
 	IfMatch *string `json:"If-Match,omitempty"`
+}
+
+type ReadUIReferencesHeaders struct {
+	IfNoneMatch *string `json:"If-None-Match,omitempty"`
+}
+
+type ReadUISnapshotHeaders struct {
+	IfNoneMatch *string `json:"If-None-Match,omitempty"`
 }

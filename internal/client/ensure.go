@@ -4,14 +4,55 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
+
+// DiscoveredWebRuntime is the validated browser launch metadata for one live
+// daemon record.
+type DiscoveredWebRuntime struct {
+	Origin       string
+	OriginStable bool
+	Capabilities []string
+}
+
+// DiscoverWebRuntime validates browser metadata from a live runtime record.
+func DiscoverWebRuntime(record kitdaemon.RuntimeRecord) (DiscoveredWebRuntime, error) {
+	origin := record.Metadata["web_origin"]
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil || (parsedOrigin.Scheme != "http" && parsedOrigin.Scheme != "https") ||
+		parsedOrigin.Host == "" || parsedOrigin.User != nil || parsedOrigin.Path != "" ||
+		parsedOrigin.RawQuery != "" || parsedOrigin.Fragment != "" {
+		return DiscoveredWebRuntime{}, errors.New("web runtime origin is invalid")
+	}
+	stable, err := strconv.ParseBool(record.Metadata["web_origin_stable"])
+	if err != nil {
+		return DiscoveredWebRuntime{}, errors.New("web runtime origin stability is invalid")
+	}
+	capabilities := strings.Split(record.Metadata["web_capabilities"], ",")
+	if len(capabilities) == 1 && capabilities[0] == "" {
+		return DiscoveredWebRuntime{}, errors.New("web runtime capabilities are missing")
+	}
+	for _, capability := range capabilities {
+		if capability == "" || strings.TrimSpace(capability) != capability {
+			return DiscoveredWebRuntime{}, errors.New("web runtime capabilities are invalid")
+		}
+	}
+
+	return DiscoveredWebRuntime{
+		Origin:       origin,
+		OriginStable: stable,
+		Capabilities: capabilities,
+	}, nil
+}
 
 // BaseURLKey is the context key for injecting a daemon base URL during
 // tests, bypassing both Discover and the auto-start path. CLI and TUI
@@ -31,6 +72,7 @@ type RunningDaemon struct {
 const (
 	daemonServiceName       = "kata"
 	skipDaemonVersionEnvVar = "KATA_SKIP_DAEMON_VERSION_CHECK"
+	daemonStartupWait       = 30 * time.Second
 )
 
 var (
@@ -39,6 +81,7 @@ var (
 	startDetachedDaemonForEnsure = kitdaemon.StartDetached
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
 	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
+	discoverDaemonForAutoStart   = discoverForEnsure
 )
 
 // EnsureRunning returns a live daemon's base URL, auto-starting the daemon
@@ -221,9 +264,9 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 	if err := startDetachedDaemonForEnsure(ctx, opts); err != nil {
 		return "", fmt.Errorf("auto-start daemon: %w", err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(daemonStartupWait)
 	for time.Now().Before(deadline) {
-		if url, compatible, ok := discoverForEnsure(ctx, dataDir); ok && compatible {
+		if url, compatible, ok := discoverDaemonForAutoStart(ctx, dataDir); ok && compatible {
 			return url, nil
 		}
 		select {
@@ -232,7 +275,7 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-	return "", errors.New("daemon failed to start within 5s")
+	return "", fmt.Errorf("daemon failed to start within %s; inspect kata daemon status and kata daemon logs", daemonStartupWait)
 }
 
 // daemonLogWriter opens <dataDir>/daemon.log for the auto-started daemon's

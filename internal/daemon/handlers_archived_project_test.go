@@ -41,7 +41,7 @@ func TestArchivedProject_SurfaceHandlersReturn404(t *testing.T) {
 	}{
 		{"showProject", http.MethodGet, "/api/v1/projects/" + pid, nil},
 		{"renameProject", http.MethodPatch, "/api/v1/projects/" + pid,
-			map[string]any{"name": "renamed"}},
+			map[string]any{"name": "renamed", "actor": "user-a"}},
 		// resetIssueCounter case removed: endpoint deleted in spec §9.5.
 		{"createIssue", http.MethodPost, "/api/v1/projects/" + pid + "/issues",
 			map[string]any{"actor": "tester", "title": "x", "body": ""}},

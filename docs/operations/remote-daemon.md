@@ -55,6 +55,33 @@ If none of those are set, clients next honor `active_daemon` in
 `<KATA_HOME>/config.toml`; otherwise they use local daemon discovery or
 auto-start.
 
+## Browser access
+
+`kata ui` follows the same daemon selection order. A configured remote opens
+the daemon's canonical browser route and shows an in-document token login; the
+token is exchanged for a browser session in memory and is never put in the URL
+or browser storage. Identity-token mode keeps the token actor authoritative.
+Static-token deployments use the daemon's normal request-actor policy.
+
+For an HTTPS reverse proxy, set `[web].public_origin` to the exact browser
+origin and route the UI, assets, `/api/v1/ui/*`, ordinary `/api/v1/*`, and the
+event stream to the same daemon. Do not rewrite the browser application to a
+different API origin or infer the public origin from forwarded headers.
+When that browser listener is also a configured trusted-proxy listener, Kata
+exchanges the proxy-asserted actor for a browser session automatically; it does
+not ask the user for a daemon token.
+
+When the shared TCP listener binds a wildcard address but clients use an
+intentional backend hostname (for example, a container-network alias), add
+that exact authority to `[web].allowed_hosts`. This is separate from
+`public_origin`: it admits a backend request `Host` without declaring a new
+browser origin. Keep the list narrow; bearer authentication does not bypass
+Host validation.
+
+An unauthenticated `--insecure-readonly` listener can display the browser UI,
+but mutations are disabled and updates use polling. A user who authenticates
+under a writable configuration receives the capabilities of that session.
+
 ## Plain HTTP guardrails
 
 Mutable non-loopback HTTP requires one of:

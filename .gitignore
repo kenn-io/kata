@@ -20,6 +20,12 @@ coverage.out
 __pycache__/
 /docs/.zensical-build.*.toml
 /docs/zensical-public-docs.*/
+/web/node_modules/
+/web/dist/
+/web/coverage/
+/web/playwright-report/
+/web/test-results/
+/.kata-web-dev/
 
 # Git worktrees
 /.worktrees/

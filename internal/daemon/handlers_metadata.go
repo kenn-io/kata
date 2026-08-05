@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -110,8 +111,48 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 		if err != nil {
 			return nil, err
 		}
+		designateInbox := inboxDesignationPatch(in.Body.Patch)
+		if designateInbox && len(in.Body.Patch) != 1 {
+			return nil, api.NewError(400, "invalid_inbox_designation",
+				"Inbox designation cannot be combined with other metadata changes", "", nil)
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, designateInbox)
+		if err != nil {
+			return nil, err
+		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
+		}
+		if designateInbox {
+			res, err := cfg.DB.DesignateInboxProject(ctx, db.DesignateInboxProjectIn{
+				ProjectID: in.ProjectID, IfMatchRev: rev, Actor: actor,
+			})
+			var conflict *db.RevisionConflictError
+			if errors.As(err, &conflict) {
+				return nil, api.NewError(412, "revision_conflict",
+					fmt.Sprintf("project revision is %d", conflict.CurrentRevision), "", nil)
+			}
+			if errors.Is(err, db.ErrFederatedReadOnly) {
+				return nil, federationReadOnlyError(err)
+			}
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			out := &api.PatchProjectMetadataResponse{}
+			out.ETag = fmt.Sprintf(`"rev-%d"`, res.NewRevision)
+			out.Body.Project = res.Project
+			out.Body.Changed = res.Changed
+			for _, event := range res.Events {
+				ev := event
+				if event.ProjectID == in.ProjectID {
+					out.Body.Event = &ev
+				}
+				cfg.Broadcaster.Broadcast(StreamMsg{
+					Kind: "event", Event: &ev, ProjectID: event.ProjectID,
+				})
+				cfg.Hooks.Enqueue(ev)
+			}
+			return out, nil
 		}
 		res, err := cfg.DB.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 			ProjectID:  in.ProjectID,
@@ -147,4 +188,13 @@ func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.Pa
 		}
 		return out, nil
 	}
+}
+
+func inboxDesignationPatch(patch map[string]json.RawMessage) bool {
+	role, ok := patch["role"]
+	if !ok {
+		return false
+	}
+	var value string
+	return json.Unmarshal(role, &value) == nil && value == "inbox"
 }

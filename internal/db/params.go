@@ -118,9 +118,11 @@ type ListAllIssuesParams struct {
 
 // CreateCommentParams carries inputs for CreateComment.
 type CreateCommentParams struct {
-	IssueID int64
-	Author  string
-	Body    string
+	IssueID                int64
+	Author                 string
+	Body                   string
+	IdempotencyKey         string
+	IdempotencyFingerprint string
 }
 
 // EditCommentParams carries inputs for editing one existing comment body.
@@ -389,6 +391,7 @@ type MergeProjectsParams struct {
 	SourceProjectID int64
 	TargetProjectID int64
 	TargetName      *string
+	Actor           string
 }
 
 // ShortIDExtension records a single source-side issue whose short_id was
@@ -411,6 +414,7 @@ type ProjectMergeResult struct {
 	EventsMoved       int64              `json:"events_moved"`
 	PurgeLogsMoved    int64              `json:"purge_logs_moved"`
 	ShortIDExtensions []ShortIDExtension `json:"short_id_extensions,omitempty"`
+	Event             Event              `json:"-"`
 }
 
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
@@ -470,6 +474,23 @@ type PatchProjectMetadataOut struct {
 	NewRevision int64
 }
 
+// DesignateInboxProjectIn identifies the sole project that should carry the
+// Inbox role. IfMatchRev gates the target project revision when non-nil.
+type DesignateInboxProjectIn struct {
+	ProjectID  int64
+	IfMatchRev *int64
+	Actor      string
+}
+
+// DesignateInboxProjectOut contains the target project and every metadata
+// event committed by the atomic role reassignment.
+type DesignateInboxProjectOut struct {
+	Project     Project
+	Events      []Event
+	Changed     bool
+	NewRevision int64
+}
+
 // RecurrenceTemplate carries the issue-template fields for a recurrence row.
 // Owner and Priority are optional; Labels and Metadata default to empty
 // collections when nil.
@@ -492,18 +513,34 @@ type CreateRecurrenceIn struct {
 	Template  RecurrenceTemplate
 }
 
+// CreateRecurrenceForIssueIn creates a recurrence and attaches an existing
+// issue as its first occurrence in the same transaction.
+type CreateRecurrenceForIssueIn struct {
+	IssueID    int64
+	Recurrence CreateRecurrenceIn
+}
+
+// CreateRecurrenceForIssueOut carries the recurrence and its committed
+// creation/materialization events.
+type CreateRecurrenceForIssueOut struct {
+	Recurrence Recurrence
+	Events     []Event
+}
+
 // RecurrenceUpdate holds the optional fields for PatchRecurrence. A nil field
-// means "leave unchanged"; a non-nil field means "set to this value".
+// means "leave unchanged"; nullable scalar fields have explicit clear flags.
 type RecurrenceUpdate struct {
-	Rule             *string
-	DTStart          *string
-	Timezone         *string
-	TemplateTitle    *string
-	TemplateBody     *string
-	TemplateOwner    *string
-	TemplatePriority *int64
-	TemplateLabels   *[]string
-	TemplateMetadata *json.RawMessage
+	Rule                  *string
+	DTStart               *string
+	Timezone              *string
+	TemplateTitle         *string
+	TemplateBody          *string
+	TemplateOwner         *string
+	TemplatePriority      *int64
+	ClearTemplateOwner    bool
+	ClearTemplatePriority bool
+	TemplateLabels        *[]string
+	TemplateMetadata      *json.RawMessage
 }
 
 // PatchRecurrenceIn holds the inputs for PatchRecurrence.
@@ -517,8 +554,16 @@ type PatchRecurrenceIn struct {
 // PatchRecurrenceOut carries results from a successful PatchRecurrence call.
 type PatchRecurrenceOut struct {
 	Recurrence  Recurrence
+	Event       Event
 	NewRevision int64
 	Changed     bool
+}
+
+// SoftDeleteRecurrenceIn holds the revision-guarded recurrence deletion input.
+type SoftDeleteRecurrenceIn struct {
+	RecurrenceID int64
+	IfMatchRev   int64
+	Actor        string
 }
 
 // MaterializeNextOut carries the results of a successful MaterializeNext call.
@@ -680,6 +725,8 @@ const (
 	SystemProjectUID = "00000000000000000000000000"
 	// BootstrapActor is the audit actor for bootstrap/admin token operations.
 	BootstrapActor = "bootstrap"
+	// SystemActor identifies internal project mutations without a user initiator.
+	SystemActor = "system"
 )
 
 // APIToken mirrors a row in the api_tokens projection table.

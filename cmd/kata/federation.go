@@ -111,7 +111,7 @@ func federationEnableCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			project, err := resolveFederationProject(ctx, client, baseURL, args, false)
+			project, err := resolveFederationProject(ctx, client, baseURL, args, false, "")
 			if err != nil {
 				return err
 			}
@@ -167,13 +167,13 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return federationEnrollHTTPClientError(err)
 			}
-			project, err := resolveFederationProject(ctx, hubClient, hubBaseURL, args, true)
-			if err != nil {
-				return err
-			}
 			requestActor := strings.TrimSpace(actor)
 			if requestActor == "" {
 				requestActor, _ = resolveActor(ctx, flags.As, nil)
+			}
+			project, err := resolveFederationProject(ctx, hubClient, hubBaseURL, args, true, requestActor)
+			if err != nil {
+				return err
 			}
 			metadata, err := enableAndReadFederationMetadata(ctx, hubClient, hubBaseURL, project.ID, requestActor)
 			if err != nil {
@@ -652,7 +652,7 @@ func resolveLeaveProject(ctx context.Context, client *http.Client, baseURL strin
 	if projectName := strings.TrimSpace(flags.Project); projectName != "" {
 		return resolveProjectSelectorIncludingArchived(ctx, client, baseURL, projectName)
 	}
-	return resolveFederationProject(ctx, client, baseURL, args, false)
+	return resolveFederationProject(ctx, client, baseURL, args, false, "")
 }
 
 // spokeLeaveTarget captures the resolved local spoke a leave will tear down.
@@ -1186,6 +1186,7 @@ func resolveFederationProject(
 	baseURL string,
 	args []string,
 	createMissing bool,
+	actor string,
 ) (projectRef, error) {
 	if len(args) > 0 {
 		return resolveProjectSelector(ctx, client, baseURL, args[0])
@@ -1194,7 +1195,7 @@ func resolveFederationProject(
 		if !createMissing {
 			return resolveFederationProjectByName(ctx, client, baseURL, projectName)
 		}
-		return ensureFederationProjectByName(ctx, client, baseURL, projectName)
+		return ensureFederationProjectByName(ctx, client, baseURL, projectName, actor)
 	}
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
@@ -1227,8 +1228,11 @@ func resolveFederationProjectByName(ctx context.Context, client *http.Client, ba
 	return projectRef{ID: resp.Project.ID, Name: resp.Project.Name}, nil
 }
 
-func ensureFederationProjectByName(ctx context.Context, client *http.Client, baseURL, name string) (projectRef, error) {
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/projects", map[string]any{"name": name})
+func ensureFederationProjectByName(
+	ctx context.Context, client *http.Client, baseURL, name, actor string,
+) (projectRef, error) {
+	status, bs, err := httpDoJSON(ctx, client, http.MethodPost, baseURL+"/api/v1/projects",
+		map[string]any{"name": name, "actor": actor})
 	if err != nil {
 		return projectRef{}, fmt.Errorf("POST /api/v1/projects: %w", err)
 	}

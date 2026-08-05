@@ -337,6 +337,9 @@ func TestExportEmitsEventPayloadAsJSONObject(t *testing.T) {
 			continue
 		}
 		data := rec["data"].(map[string]any)
+		if data["type"] != "issue.created" {
+			continue
+		}
 		payload, ok := data["payload"].(map[string]any)
 		require.True(t, ok, "payload should be a JSON object, got %T", data["payload"])
 		assert.Equal(t, "abc", payload["idempotency_key"])

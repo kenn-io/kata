@@ -116,8 +116,12 @@ var alreadyImplemented = map[string]bool{
 	"CreateLink":                           true, // links.go
 	"CreateLinkAndEvent":                   true, // links.go
 	"CreateProject":                        true, // projects.go
+	"CreateProjectAndEvent":                true, // projects.go
 	"CreateProjectWithUID":                 true, // projects.go
+	"CreateProjectWithUIDAndEvent":         true, // projects.go
 	"CreateRecurrence":                     true, // recurrences.go
+	"CreateRecurrenceForIssue":             true, // recurrences.go
+	"DesignateInboxProject":                true, // metadata.go
 	"DetachProjectAlias":                   true, // project_lifecycle.go
 	"DeleteLinkAndEvent":                   true, // links.go
 	"DeleteLinkByID":                       true, // links.go
@@ -191,6 +195,7 @@ var alreadyImplemented = map[string]bool{
 	"LinksByIssue":                         true, // links.go
 	"Path":                                 true, // store.go
 	"LookupIdempotency":                    true, // idempotency.go
+	"LookupCommentIdempotency":             true, // idempotency.go
 	"MaxEventID":                           true, // events.go
 	"MaxFederationBaselineEventID":         true, // events.go
 	"MaxLocalOriginEventID":                true, // events.go
@@ -233,6 +238,7 @@ var alreadyImplemented = map[string]bool{
 	"ReleaseClaim":                         true, // claims_core.go
 	"RenewClaim":                           true, // claims_core.go
 	"RenameProject":                        true, // projects.go
+	"RenameProjectAndEvent":                true, // projects.go
 	"RelatedNumbersByIssues":               true, // relationship_queries.go
 	"ReopenIssue":                          true, // issue_lifecycle.go
 	"ResolveAPIToken":                      true, // tokens.go
