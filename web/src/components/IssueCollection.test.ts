@@ -589,6 +589,45 @@ describe('IssueCollection', () => {
     ).toBe(true)
   })
 
+  it('uses the actual parent identity for cross-project hierarchy', async () => {
+    const parent = task({
+      uid: 'issue-cross-project-parent',
+      project_id: 2,
+      project_uid: 'project-example',
+      project_name: 'example-project',
+      short_id: 'parent',
+      qualified_id: 'example-project#parent',
+      title: 'Cross-project parent',
+      child_counts: { open: 1, total: 1 },
+    })
+    const child = task({
+      uid: 'issue-cross-project-child',
+      project_id: 3,
+      project_uid: 'project-workspace',
+      project_name: 'example-workspace',
+      short_id: 'child',
+      qualified_id: 'example-workspace#child',
+      title: 'Cross-project child',
+      parent: { uid: parent.uid, short_id: parent.short_id },
+      parent_short_id: parent.short_id,
+    })
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([parent, child]),
+        issueCatalog: [parent, child],
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    expect(screen.queryByRole('button', { name: /Cross-project child/ })).toBeNull()
+    await fireEvent.keyDown(screen.getByRole('button', { name: /Cross-project parent/ }), {
+      key: 'ArrowRight',
+    })
+    expect(await screen.findAllByRole('button', { name: /Cross-project child/ })).toHaveLength(1)
+  })
+
   it('renders a matched child as a top-level row when its parent is absent', async () => {
     // A search or filter can surface a child whose parent is not in the
     // result set. The child has a parent_short_id, but with no visible

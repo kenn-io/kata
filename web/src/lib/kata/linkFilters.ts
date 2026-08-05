@@ -12,7 +12,10 @@ export interface KataLinkFilters {
 export type KataLinkPeerResolution =
   | { kind: 'pending' }
   | { kind: 'failed' }
-  | { kind: 'resolved'; peer: KataTaskSummary }
+  | {
+      kind: 'resolved'
+      peer: { status: KataTaskSummary['status']; title?: string | undefined }
+    }
 
 function statusesForScope(scope: KataTaskStatusFilter): KataLinkFilters['statuses'] {
   return {

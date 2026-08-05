@@ -40,6 +40,11 @@ export interface KataLinkPeer {
   short_id: string
 }
 
+export interface KataTaskLinkPeer extends KataLinkPeer {
+  qualified_id: string
+  status: 'open' | 'closed'
+}
+
 export interface KataTaskSummary {
   id: number
   uid: string
@@ -141,8 +146,8 @@ export interface KataTaskLabel {
 export interface KataTaskLink {
   id: number
   project_id: number
-  from: KataLinkPeer
-  to: KataLinkPeer
+  from: KataTaskLinkPeer
+  to: KataTaskLinkPeer
   type: 'parent' | 'blocks' | 'related'
   author: string
   created_at: string

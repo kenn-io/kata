@@ -12,6 +12,7 @@
     KataTaskDetail,
     KataTaskEditPatch,
     KataTaskLink,
+    KataTaskLinkPeer,
     KataTaskSummary,
   } from '../lib/kata/types'
   import LinkFilterMenu from './LinkFilterMenu.svelte'
@@ -94,13 +95,20 @@
     return linkPeerUIDFor(link, issue.issue.uid)
   }
 
-  function linkPeerShortID(link: KataTaskLink): string {
-    return link.from.uid === issue.issue.uid ? link.to.short_id : link.from.short_id
+  function linkPeer(link: KataTaskLink): KataTaskLinkPeer {
+    return link.from.uid === issue.issue.uid ? link.to : link.from
+  }
+
+  function linkPeerLabel(link: KataTaskLink): string {
+    const peer = linkPeer(link)
+    return peer.qualified_id.startsWith(`${issue.issue.project_name}#`)
+      ? peer.short_id
+      : peer.qualified_id
   }
 
   function peerResolution(link: KataTaskLink): KataLinkPeerResolution {
     const peer = issueCatalog.find((candidate) => candidate.uid === linkPeerUID(link))
-    return peer ? { kind: 'resolved', peer } : { kind: 'failed' }
+    return { kind: 'resolved', peer: peer ?? linkPeer(link) }
   }
 
   const relationLabels: Record<KataLinkRelation, string> = {
@@ -172,14 +180,14 @@
             'link-row',
             (showStateChips || resolution.kind === 'failed') && 'link-row--with-state',
           ]}
-          aria-label={`${linkLabel(link)} ${linkPeerShortID(link)} ${peer?.title ?? ''}${showStateChips && peer ? ` ${peer.status}` : ''}${resolution.kind === 'failed' ? ' state unavailable' : ''}`.trim()}
+          aria-label={`${linkLabel(link)} ${linkPeerLabel(link)} ${peer?.title ?? ''}${showStateChips && peer ? ` ${peer.status}` : ''}${resolution.kind === 'failed' ? ' state unavailable' : ''}`.trim()}
           title={peer ? undefined : 'Task state unavailable; open to load details'}
           onclick={() => {
             void onSelectIssue({ uid: linkPeerUID(link) })
           }}
         >
           <span class="link-kind">{linkLabel(link)}</span>
-          <span class="link-peer">{linkPeerShortID(link)}</span>
+          <span class="link-peer">{linkPeerLabel(link)}</span>
           {#if peer?.title}<span class="link-title">{peer.title}</span>{/if}
           {#if showStateChips && peer}
             <Chip size="xs" tone={peer.status === 'open' ? 'success' : 'muted'}>{peer.status}</Chip>

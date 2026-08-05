@@ -359,9 +359,9 @@
   }
 
   function parentHierarchyKey(issue: KataTaskSummary): string | null {
-    if (issue.parent_short_id) return `${issue.project_uid}:${issue.parent_short_id}`
     const parent = issue.parent?.uid ? catalogByUID.get(issue.parent.uid) : undefined
     if (parent) return issueHierarchyKey(parent)
+    if (issue.parent_short_id) return `${issue.project_uid}:${issue.parent_short_id}`
     return null
   }
 

@@ -50,11 +50,35 @@ describe('IssueLinks', () => {
     renderLinks({ issueCatalog: [], onSelectIssue })
 
     const parentLink = screen.getByRole('button', {
-      name: /parent parent-1 state unavailable/,
+      name: /parent parent-1 open/,
     }) as HTMLButtonElement
     expect(parentLink.disabled).toBe(false)
     await fireEvent.click(parentLink)
     expect(onSelectIssue).toHaveBeenCalledWith({ uid: 'issue-parent' })
+  })
+
+  it('filters and qualifies linked peers from endpoint authority when the catalog omits them', async () => {
+    const selected = issue()
+    selected.links = [
+      {
+        ...selected.links[0]!,
+        to: {
+          ...selected.links[0]!.to,
+          qualified_id: 'example-workspace#parent-1',
+          status: 'closed',
+        },
+      },
+    ]
+    const view = renderLinks({
+      issue: selected,
+      issueCatalog: [],
+      linkFilters: createKataLinkFilters('closed'),
+    })
+
+    expect(screen.getByRole('button', { name: /parent example-workspace#parent-1/ })).not.toBeNull()
+
+    await view.rerender({ linkFilters: createKataLinkFilters('open') })
+    expect(screen.queryByRole('button', { name: /example-workspace#parent-1/ })).toBeNull()
   })
 })
 
@@ -134,8 +158,18 @@ function link(
   return {
     id,
     project_id: 1,
-    from: { uid: fromUID, short_id: records.get(fromUID)!.short_id },
-    to: { uid: toUID, short_id: records.get(toUID)!.short_id },
+    from: {
+      uid: fromUID,
+      short_id: records.get(fromUID)!.short_id,
+      qualified_id: records.get(fromUID)!.qualified_id,
+      status: records.get(fromUID)!.status,
+    },
+    to: {
+      uid: toUID,
+      short_id: records.get(toUID)!.short_id,
+      qualified_id: records.get(toUID)!.qualified_id,
+      status: records.get(toUID)!.status,
+    },
     type,
     author: 'user-a',
     created_at: '2026-08-01T12:00:00Z',

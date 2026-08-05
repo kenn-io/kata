@@ -258,8 +258,8 @@ function normalizeSelectedDetail(
         {
           id: link.id,
           project_id: selectedIssue.project_id,
-          from: linkPeer(link.from_issue_uid, link.from_qualified_id),
-          to: linkPeer(link.to_issue_uid, link.to_qualified_id),
+          from: linkEndpoint(link.from_issue_uid, link.from_qualified_id, link.from_status),
+          to: linkEndpoint(link.to_issue_uid, link.to_qualified_id, link.to_status),
           type,
           author: link.author,
           created_at: link.created_at,
@@ -363,6 +363,19 @@ function appendPeer(peers: KataLinkPeer[] | undefined, peer: KataLinkPeer): Kata
 function linkPeer(uid: string, qualifiedID: string): KataLinkPeer {
   const separator = qualifiedID.lastIndexOf('#')
   return { uid, short_id: separator === -1 ? qualifiedID : qualifiedID.slice(separator + 1) }
+}
+
+function linkEndpoint(uid: string, qualifiedID: string, status: string): KataTaskLink['from'] {
+  if (status !== 'open' && status !== 'closed') {
+    throw new Error(`Invalid Kata snapshot link endpoint status: ${status}`)
+  }
+  const separator = qualifiedID.lastIndexOf('#')
+  return {
+    uid,
+    short_id: separator === -1 ? qualifiedID : qualifiedID.slice(separator + 1),
+    qualified_id: qualifiedID,
+    status,
+  }
 }
 
 function projectNameFromQualifiedID(qualifiedID: string): string {

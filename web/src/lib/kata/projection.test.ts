@@ -82,8 +82,18 @@ describe('normalizeKataUISnapshot', () => {
         links: [
           expect.objectContaining({
             type: 'parent',
-            from: { uid: 'issue-child', short_id: 'c1' },
-            to: { uid: 'issue-parent', short_id: 'p1' },
+            from: {
+              uid: 'issue-child',
+              short_id: 'c1',
+              qualified_id: 'example-project#c1',
+              status: 'open',
+            },
+            to: {
+              uid: 'issue-parent',
+              short_id: 'p1',
+              qualified_id: 'example-project#p1',
+              status: 'open',
+            },
           }),
         ],
       }),
@@ -100,6 +110,26 @@ describe('normalizeKataUISnapshot', () => {
     expect(() => normalizeKataUISnapshot(invalid)).toThrow(
       'Invalid Kata snapshot collection issue status',
     )
+  })
+
+  test('preserves selected-link endpoint authority outside the filtered collection', () => {
+    const authority = snapshot()
+    authority.collection = authority.collection!.filter((issue) => issue.uid !== 'issue-parent')
+    authority.selected!.links = [
+      {
+        ...link('issue-child', 'c1', 'open', 'issue-parent', 'p1', 'closed', 'parent'),
+        to_qualified_id: 'example-workspace#p1',
+      },
+    ]
+
+    const projection = normalizeKataUISnapshot(authority)
+
+    expect(projection.selected_detail?.links[0]?.to).toEqual({
+      uid: 'issue-parent',
+      short_id: 'p1',
+      qualified_id: 'example-workspace#p1',
+      status: 'closed',
+    })
   })
 })
 

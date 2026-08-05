@@ -14,8 +14,13 @@ function link(overrides: Partial<KataTaskLink> = {}): KataTaskLink {
   return {
     id: 1,
     project_id: 1,
-    from: { uid: selectedUID, short_id: 'selected' },
-    to: { uid: 'issue-peer', short_id: 'peer' },
+    from: {
+      uid: selectedUID,
+      short_id: 'selected',
+      qualified_id: 'Inbox#selected',
+      status: 'open',
+    },
+    to: { uid: 'issue-peer', short_id: 'peer', qualified_id: 'Inbox#peer', status: 'open' },
     type: 'related',
     author: 'user-a',
     created_at: '2026-07-22T12:00:00Z',
@@ -57,8 +62,18 @@ describe('kata link filters', () => {
       relationForKataLink(
         link({
           type: 'parent',
-          from: { uid: 'issue-parent', short_id: 'parent' },
-          to: { uid: selectedUID, short_id: 'selected' },
+          from: {
+            uid: 'issue-parent',
+            short_id: 'parent',
+            qualified_id: 'Inbox#parent',
+            status: 'open',
+          },
+          to: {
+            uid: selectedUID,
+            short_id: 'selected',
+            qualified_id: 'Inbox#selected',
+            status: 'open',
+          },
         }),
         selectedUID,
       ),
@@ -68,8 +83,18 @@ describe('kata link filters', () => {
       relationForKataLink(
         link({
           type: 'blocks',
-          from: { uid: 'issue-blocker', short_id: 'blocker' },
-          to: { uid: selectedUID, short_id: 'selected' },
+          from: {
+            uid: 'issue-blocker',
+            short_id: 'blocker',
+            qualified_id: 'Inbox#blocker',
+            status: 'open',
+          },
+          to: {
+            uid: selectedUID,
+            short_id: 'selected',
+            qualified_id: 'Inbox#selected',
+            status: 'open',
+          },
         }),
         selectedUID,
       ),
