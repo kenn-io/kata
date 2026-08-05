@@ -96,9 +96,8 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		out, mutation, created, err := initProject(ctx, cfg.DB, in, actor)
-		deliverProjectInitMutation(cfg, mutation)
-		if err != nil {
+		out, mutation, created, initErr := initProject(ctx, cfg.DB, in, actor)
+		if err := finishProjectInit(cfg, mutation, initErr); err != nil {
 			return nil, err
 		}
 		resp := &api.InitProjectResponse{}
@@ -472,10 +471,13 @@ func deliverProjectMutation(cfg ServerConfig, event *db.Event) {
 }
 
 type projectInitMutation struct {
-	Event     *db.Event
-	ResetID   int64
-	ProjectID int64
+	Event       *db.Event
+	ResetID     int64
+	ProjectID   int64
+	writeConfig projectConfigWrite
 }
+
+type projectConfigWrite func() error
 
 func deliverProjectInitMutation(cfg ServerConfig, mutation projectInitMutation) {
 	if mutation.ResetID != 0 {
@@ -487,6 +489,22 @@ func deliverProjectInitMutation(cfg ServerConfig, mutation projectInitMutation) 
 	if mutation.Event != nil {
 		deliverProjectMutation(cfg, mutation.Event)
 	}
+}
+
+func finishProjectInit(
+	cfg ServerConfig, mutation projectInitMutation, initErr error,
+) error {
+	deliverProjectInitMutation(cfg, mutation)
+	if initErr != nil {
+		return initErr
+	}
+	if mutation.writeConfig == nil {
+		return nil
+	}
+	if err := mutation.writeConfig(); err != nil {
+		return internalAPIError(err)
+	}
+	return nil
 }
 
 func projectMutationActor(ctx context.Context, actor string) (string, error) {
@@ -817,8 +835,8 @@ func initProject(
 
 	dest := config.WriteDestination(disc, abs)
 	if tomlCfg == nil || tomlCfg.Project.Name != project.Name {
-		if err := config.WriteProjectConfig(dest, project.Name); err != nil {
-			return nil, mutation, false, internalAPIError(err)
+		mutation.writeConfig = func() error {
+			return config.WriteProjectConfig(dest, project.Name)
 		}
 	}
 
