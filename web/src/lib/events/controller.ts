@@ -10,6 +10,7 @@ export class InvalidationController {
   #dirty = false
   #running = false
   #stopped = false
+  #retryDelay = 1000
 
   constructor(refresh: Refresh) {
     this.#refresh = refresh
@@ -50,7 +51,7 @@ export class InvalidationController {
   async #drain(): Promise<void> {
     if (this.#running) return
     this.#running = true
-    let retryReset = false
+    let retry = false
     try {
       while (this.#dirty) {
         this.#dirty = false
@@ -59,11 +60,12 @@ export class InvalidationController {
         try {
           accepted = await this.#refresh(full)
         } catch {
-          // The next event or scheduled refresh retries a latched reset.
+          // A bounded retry preserves event authority after transient failure.
         }
+        if (accepted) this.#retryDelay = 1000
         if (full && accepted) this.#full = false
-        if (full && !accepted) {
-          retryReset = true
+        if (!accepted) {
+          retry = true
           break
         }
       }
@@ -71,9 +73,11 @@ export class InvalidationController {
       this.#running = false
       if (!this.#stopped) {
         if (this.#dirty) this.#schedule()
-        else if (retryReset) {
+        else if (retry) {
           this.#dirty = true
-          this.#schedule(1000)
+          const delay = this.#retryDelay
+          this.#retryDelay = Math.min(this.#retryDelay * 2, 30_000)
+          this.#schedule(delay)
         }
       }
     }

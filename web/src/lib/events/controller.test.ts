@@ -74,6 +74,40 @@ describe('event invalidation control', () => {
     expect(refresh).toHaveBeenNthCalledWith(3, false)
   })
 
+  it('backs off failed ordinary event refreshes and resets after success', async () => {
+    const refresh = vi
+      .fn<(full: boolean) => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+    const controller = new InvalidationController(refresh)
+
+    controller.frame({ id: '1', event: 'issue.updated', data: '{}' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(refresh).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(refresh).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(refresh).toHaveBeenCalledTimes(3)
+    expect(refresh).toHaveBeenNthCalledWith(3, false)
+
+    controller.frame({ id: '2', event: 'issue.updated', data: '{}' })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(refresh).toHaveBeenCalledTimes(4)
+    await vi.advanceTimersByTimeAsync(999)
+    expect(refresh).toHaveBeenCalledTimes(4)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(refresh).toHaveBeenCalledTimes(5)
+  })
+
   it('backs off 1/2/4 seconds through a 30-second cap and resets only after work', () => {
     const backoff = new ReconnectBackoff()
     expect([
