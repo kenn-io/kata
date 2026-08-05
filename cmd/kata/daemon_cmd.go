@@ -844,6 +844,8 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 		Broadcaster:       broadcaster,
 		FederationWake:    federationWake,
 		FederationCatalog: append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		WebDaemons:        append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),
+		ActiveWebDaemon:   dcfg.ActiveDaemon,
 		GitHubSyncFetcher: gitHubSyncFetcher,
 		GitHubSyncConfig:  dcfg.GitHubSync,
 		GitHubSyncWake:    gitHubSyncWake,

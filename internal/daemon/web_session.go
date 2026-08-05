@@ -414,12 +414,16 @@ func requireBrowserSession(manager *WebSessionManager, policy ListenerPolicy, ne
 
 func webLocalSPARequestAllowed(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/api/v1/ui/snapshot", "/api/v1/ui/references", pathEventsStreamPath:
+	case "/api/v1/ui/snapshot", "/api/v1/ui/references", "/api/v1/ui/daemons", pathEventsStreamPath:
 		return r.Method == http.MethodGet
 	case "/api/v1/ui/session":
 		return r.Method == http.MethodDelete
 	case "/api/v1/projects":
 		return r.Method == http.MethodPost
+	}
+	if strings.HasPrefix(r.URL.Path, webDaemonProxyPrefix+"/") {
+		innerPath := strings.TrimPrefix(r.URL.Path, webDaemonProxyPrefix)
+		return webDaemonProxyRequestAllowed(r.Method, innerPath)
 	}
 
 	const projectPrefix = "/api/v1/projects/"
