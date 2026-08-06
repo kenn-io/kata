@@ -156,7 +156,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Accept"))
 		w.Header().Set("Set-Cookie", "upstream=secret")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"cursor":7,"capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`)
+		_, _ = io.WriteString(w, `{"contract_version":"1","cursor":7,"capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`)
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -184,7 +184,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-	assert.JSONEq(t, `{"cursor":7,"capabilities":{"writable":true,"updates":"poll","actor_policy":"request"}}`, string(body))
+	assert.JSONEq(t, `{"contract_version":"1","cursor":7,"capabilities":{"writable":true,"updates":"poll","actor_policy":"request"}}`, string(body))
 	assert.Empty(t, response.Header.Get("Set-Cookie"))
 }
 

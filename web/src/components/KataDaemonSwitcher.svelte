@@ -28,10 +28,10 @@
     activeId ?? daemons.find((daemon) => daemon.default)?.id ?? daemons[0]?.id,
   )
 
-  function choose(id: string): void {
-    if (disabled) return
+  function choose(daemon: WebDaemonInfo): void {
+    if (disabled || daemon.health === 'upgrade_required') return
     open = false
-    if (id !== activeId) onSelect(id)
+    if (daemon.id !== activeId) onSelect(daemon.id)
   }
 
   function daemonStatusLabel(daemon: WebDaemonInfo): string {
@@ -88,8 +88,8 @@
           data-testid={`daemon-row-${daemon.id}`}
           role="menuitemradio"
           aria-checked={daemon.id === activeId}
-          {disabled}
-          onclick={() => choose(daemon.id)}
+          disabled={disabled || daemon.health === 'upgrade_required'}
+          onclick={() => choose(daemon)}
         >
           <span class={`dot dot--${daemonStatusTone(daemon)}`} aria-hidden="true"></span>
           <span class="row-name">{daemon.id}</span>

@@ -126,6 +126,17 @@ func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testi
 		{Kind: PrincipalTrustedProxyAbsent},
 	} {
 		t.Run(string(principal.Kind), func(t *testing.T) {
+			lookup := httptest.NewRequest(http.MethodPost, "/api/v1/projects/resolve",
+				bytes.NewBufferString(`{"name":"example-project"}`))
+			lookup.Header.Set(webDaemonHeaderName, "example-remote")
+			lookup.Header.Set("Content-Type", "application/json")
+			lookup = lookup.WithContext(WithPrincipal(lookup.Context(), principal))
+			lookupResponse := httptest.NewRecorder()
+
+			gateway.ServeHTTP(lookupResponse, lookup)
+
+			assert.Equal(t, http.StatusNoContent, lookupResponse.Code, lookupResponse.Body.String())
+
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/7/metadata",
 				bytes.NewBufferString(`{}`))
 			request.Header.Set(webDaemonHeaderName, "example-remote")
@@ -138,7 +149,7 @@ func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testi
 			assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 		})
 	}
-	assert.Equal(t, 0, calls)
+	assert.Equal(t, 2, calls)
 }
 
 func TestWebDaemonGatewayRejectsNestedProxyRoutesWithoutContactingTarget(t *testing.T) {
@@ -221,6 +232,28 @@ func TestWebDaemonGatewayRejectsNullSnapshotEnvelope(t *testing.T) {
 		"/api/v1/ui/snapshot", nil, "")
 
 	assert.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+}
+
+func TestWebDaemonGatewayRejectsIncompatibleUIContracts(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w,
+			`{"contract_version":"legacy","capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: upstream.URL, AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+
+	for _, path := range []string{"/api/v1/ui/snapshot", "/api/v1/ui/references"} {
+		response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet, path, nil, "")
+
+		assert.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+		assert.JSONEq(t, `{"error":{"code":"daemon_upgrade_required"}}`, response.Body.String())
+	}
 }
 
 func TestWebDaemonGatewayRejectsRemoteStreamsAndCredentialedReadonlyTargets(t *testing.T) {

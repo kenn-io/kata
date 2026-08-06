@@ -121,6 +121,54 @@ describe('App', () => {
     expect(selected[0]).toBe('example-remote')
   })
 
+  it('does not activate an incompatible configured default', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const selected: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              {
+                id: 'example-legacy',
+                url: 'https://daemon.example',
+                default: true,
+                auth: 'none',
+                health: 'upgrade_required',
+              },
+              {
+                id: 'example-local',
+                url: '',
+                default: false,
+                auth: 'none',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        selected.push(request.headers.get('X-Kata-Web-Daemon'))
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(selected[0]).toBe('example-local')
+  })
+
   it('opens a trusted-proxy tab without presenting token login', async () => {
     const paths: string[] = []
     let authorized = false

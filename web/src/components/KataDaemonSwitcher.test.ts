@@ -44,6 +44,11 @@ describe('KataDaemonSwitcher', () => {
     expect(screen.getByText('update required')).not.toBeNull()
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(onSelect).toHaveBeenCalledWith('example-remote')
+
+    onSelect.mockClear()
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-legacy/ }))
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   test('shows reconnecting status without replacing the active daemon label', () => {

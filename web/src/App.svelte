@@ -749,8 +749,11 @@
       daemonInfos = loadedDaemons
       daemonRosterLoaded = true
       activeDaemonID =
-        daemonInfos.find((daemon) => daemon.id === launchDaemonID)?.id ??
-        daemonInfos.find((daemon) => daemon.default)?.id
+        daemonInfos.find(
+          (daemon) => daemon.id === launchDaemonID && daemon.health !== 'upgrade_required',
+        )?.id ??
+        daemonInfos.find((daemon) => daemon.default && daemon.health !== 'upgrade_required')?.id ??
+        daemonInfos.find((daemon) => daemon.health !== 'upgrade_required')?.id
       daemonError = undefined
       if (activeDaemonID && window.location.pathname === '/kata' && !window.location.search) {
         const persisted = loadDaemonRoute(activeDaemonID)
@@ -772,6 +775,7 @@
 
   async function switchDaemon(id: string): Promise<void> {
     if (daemonSwitching || authenticationRecoveryPending || id === activeDaemonID) return
+    if (daemonInfos.find((daemon) => daemon.id === id)?.health === 'upgrade_required') return
     const sourceDaemon = activeDaemonID
     const sourceRoute = route.kind === 'route-error' ? acceptedRoute : route
     if (sourceDaemon && sourceRoute) saveDaemonRoute(sourceDaemon, serializeRoute(sourceRoute))

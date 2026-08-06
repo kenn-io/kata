@@ -31,6 +31,8 @@ const (
 	webDaemonProxyTimeout = 30 * time.Second
 )
 
+var errWebDaemonUpgradeRequired = errors.New("daemon UI contract upgrade required")
+
 type webDaemonResponse struct {
 	ID      string `json:"id"`
 	URL     string `json:"url"`
@@ -149,11 +151,12 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	policy := g.sourcePolicy(r.Context())
-	if isMutation(r.Method) && !policy.writable {
-		writeWebDaemonError(w, http.StatusForbidden, "read_only")
+	readOnlyProjectRequest, rejected := classifyWebDaemonProjectRequest(w, r)
+	if rejected {
 		return
 	}
-	if rejectWebDaemonProjectRequest(w, r) {
+	if isMutation(r.Method) && !readOnlyProjectRequest && !policy.writable {
+		writeWebDaemonError(w, http.StatusForbidden, "read_only")
 		return
 	}
 	d, err := g.selectDaemon(r.Header.Get(webDaemonHeaderName))
@@ -188,45 +191,45 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), webDaemonSourcePolicyKey{}, policy)))
 }
 
-func rejectWebDaemonProjectRequest(w http.ResponseWriter, r *http.Request) bool {
+func classifyWebDaemonProjectRequest(w http.ResponseWriter, r *http.Request) (readOnly, rejected bool) {
 	if r.Method != http.MethodPost || r.Body == nil ||
 		(r.URL.Path != "/api/v1/projects" && r.URL.Path != "/api/v1/projects/resolve") {
-		return false
+		return false, false
 	}
 	const maxProjectRequest = 1 << 20
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxProjectRequest+1))
 	if err != nil {
 		writeWebDaemonError(w, http.StatusBadRequest, "invalid_project_request")
-		return true
+		return false, true
 	}
 	_ = r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
 	if len(body) > maxProjectRequest {
 		writeWebDaemonError(w, http.StatusRequestEntityTooLarge, "project_request_too_large")
-		return true
+		return false, true
 	}
 	if r.URL.Path == "/api/v1/projects/resolve" {
 		var input api.ResolveProjectRequest
 		if json.Unmarshal(body, &input.Body) != nil {
-			return false
+			return false, false
 		}
 		if strings.TrimSpace(input.Body.Name) != "" && input.Body.Alias == nil &&
 			strings.TrimSpace(input.Body.StartPath) == "" {
-			return false
+			return true, false
 		}
 		writeWebDaemonError(w, http.StatusForbidden, "web_local_operation_forbidden")
-		return true
+		return false, true
 	}
 	var input api.InitProjectRequest
 	if json.Unmarshal(body, &input.Body) != nil {
-		return false
+		return false, false
 	}
 	if webProjectInitFieldsAllowed(&input) {
-		return false
+		return false, false
 	}
 	writeWebDaemonError(w, http.StatusForbidden, "web_local_operation_forbidden")
-	return true
+	return false, true
 }
 
 type webDaemonSourcePolicyKey struct{}
@@ -480,6 +483,10 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			slog.Warn("web daemon proxy failed", "daemon", d.id, "target", redactWebDaemonURL(d.baseURL), "err", err)
+			if errors.Is(err, errWebDaemonUpgradeRequired) {
+				writeWebDaemonError(w, http.StatusBadGateway, "daemon_upgrade_required")
+				return
+			}
 			writeWebDaemonError(w, http.StatusBadGateway, "daemon_unreachable")
 		},
 	}
@@ -534,6 +541,11 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	}
 	if envelope == nil {
 		return errors.New("decode daemon capability response: expected object")
+	}
+	var contractVersion string
+	if err := json.Unmarshal(envelope["contract_version"], &contractVersion); err != nil ||
+		contractVersion != api.UISnapshotContractVersion {
+		return errWebDaemonUpgradeRequired
 	}
 	var capabilities api.UICapabilities
 	if err := json.Unmarshal(envelope["capabilities"], &capabilities); err != nil {
