@@ -497,8 +497,17 @@ func browserSessionRequired(r *http.Request, policy ListenerPolicy, manager *Web
 			r.Header.Get("Cookie") == "" {
 			return false
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/v1/ui/") ||
-			r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/ui/") {
+			_, cookieErr := r.Cookie(manager.CookieName())
+			unmarked := r.Header.Get("Origin") == "" && r.Header.Get(webSessionHeader) == "" &&
+				errors.Is(cookieErr, http.ErrNoCookie)
+			if manager.auth.Token == "" && unmarked && directBackendRequest(r, policy,
+				manager.auth.AllowUnauthenticatedPrivateNetworkWrites) {
+				return false
+			}
+			return true
+		}
+		if r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" {
 			return true
 		}
 		if _, err := r.Cookie(manager.CookieName()); err == nil {

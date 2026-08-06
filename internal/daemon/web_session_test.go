@@ -145,19 +145,23 @@ func TestSharedTCPTokenlessPublicAuthorityRequiresBrowserSession(t *testing.T) {
 	handler := requireBrowserSession(manager, policy,
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 
-	publicRequest := httptest.NewRequest(http.MethodGet, "https://daemon.example/api/v1/projects", nil)
-	publicResponse := httptest.NewRecorder()
-	handler.ServeHTTP(publicResponse, publicRequest)
-	assert.Equal(t, http.StatusUnauthorized, publicResponse.Code)
-	assert.Equal(t, "https://daemon.example", publicResponse.Header().Get("X-Kata-Web-Origin"))
+	for _, path := range []string{"/api/v1/projects", "/api/v1/ui/snapshot"} {
+		publicRequest := httptest.NewRequest(http.MethodGet, "https://daemon.example"+path, nil)
+		publicResponse := httptest.NewRecorder()
+		handler.ServeHTTP(publicResponse, publicRequest)
+		assert.Equal(t, http.StatusUnauthorized, publicResponse.Code)
+		assert.Equal(t, "https://daemon.example", publicResponse.Header().Get("X-Kata-Web-Origin"))
+	}
 
 	for _, authority := range []string{"127.0.0.1:7777", "localhost:7777", "backend.example:7777"} {
 		t.Run(authority, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "http://"+authority+"/api/v1/projects", nil)
-			request.RemoteAddr = "127.0.0.1:54321"
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, request)
-			assert.Equal(t, http.StatusNoContent, response.Code)
+			for _, path := range []string{"/api/v1/projects", "/api/v1/ui/snapshot"} {
+				request := httptest.NewRequest(http.MethodGet, "http://"+authority+path, nil)
+				request.RemoteAddr = "127.0.0.1:54321"
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, request)
+				assert.Equal(t, http.StatusNoContent, response.Code)
+			}
 		})
 	}
 }
@@ -169,13 +173,21 @@ func TestSharedTCPExplicitUnauthenticatedPrivateNetworkWritesPreservesCLI(t *tes
 		Kind: ListenerSharedTCP, Origin: "https://daemon.example", BackendAuthority: "100.64.0.5:7777",
 		RequireBrowserSession: true,
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	request := httptest.NewRequest(http.MethodPost, "http://100.64.0.5:7777/api/v1/projects", nil)
-	request.RemoteAddr = "100.64.0.6:54321"
-	response := httptest.NewRecorder()
+	for _, requestCase := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/api/v1/projects"},
+		{method: http.MethodGet, path: "/api/v1/ui/snapshot"},
+	} {
+		request := httptest.NewRequest(requestCase.method, "http://100.64.0.5:7777"+requestCase.path, nil)
+		request.RemoteAddr = "100.64.0.6:54321"
+		response := httptest.NewRecorder()
 
-	handler.ServeHTTP(response, request)
+		handler.ServeHTTP(response, request)
 
-	assert.Equal(t, http.StatusNoContent, response.Code)
+		assert.Equal(t, http.StatusNoContent, response.Code)
+	}
 }
 
 func TestBrowserSessionsRemainIndependentAcrossTabs(t *testing.T) {

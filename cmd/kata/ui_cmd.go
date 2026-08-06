@@ -83,23 +83,27 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 		}
 	}
 	resolutionBaseURL := strings.TrimRight(prepared.BaseURL, "/")
+	var gatewayHeaders map[string]string
 	if !prepared.ConfiguredRemote {
 		resolutionBaseURL += "/api/v1/ui/proxy"
+		if prepared.DaemonName != "" {
+			gatewayHeaders = map[string]string{"X-Kata-Web-Daemon": prepared.DaemonName}
+		}
 	}
 	savedProject := flags.Project
 	flags.Project = parsed.ProjectName
 	projectID, _, err := func() (int64, string, error) {
 		defer func() { flags.Project = savedProject }()
-		return resolveProjectIDAndNameWithClient(
-			cmd.Context(), httpClient, resolutionBaseURL, start,
+		return resolveProjectIDAndNameWithClientHeaders(
+			cmd.Context(), httpClient, resolutionBaseURL, start, gatewayHeaders,
 		)
 	}()
 	if err != nil {
 		return "", err
 	}
-	status, body, err := httpDoJSON(cmd.Context(), httpClient, http.MethodGet,
+	status, body, err := httpDoJSONHeaders(cmd.Context(), httpClient, http.MethodGet,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s",
-			resolutionBaseURL, projectID, url.PathEscape(parsed.RefForAPI)), nil)
+			resolutionBaseURL, projectID, url.PathEscape(parsed.RefForAPI)), nil, gatewayHeaders)
 	if err != nil {
 		return "", err
 	}

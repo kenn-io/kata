@@ -129,6 +129,7 @@ func TestUICommandResolvesBeforeOpening(t *testing.T) {
 func TestUICommandResolvesRefsThroughLocalDaemonGateway(t *testing.T) {
 	var calls []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "example-selected", r.Header.Get("X-Kata-Web-Daemon"))
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ui/proxy/api/v1/projects/resolve":
@@ -150,8 +151,9 @@ func TestUICommandResolvesRefsThroughLocalDaemonGateway(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	stubUICommandLaunch(t, client.PreparedWebUI{
-		BaseURL: server.URL,
-		Client:  server.Client(),
+		BaseURL:    server.URL,
+		Client:     server.Client(),
+		DaemonName: "example-selected",
 		Runtime: client.DiscoveredWebRuntime{
 			Origin: server.URL, OriginStable: true,
 			Capabilities: []string{"loopback", "sse"},
