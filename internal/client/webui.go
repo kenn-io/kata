@@ -20,7 +20,8 @@ import (
 
 var errRemoteWebUILoginRequired = errors.New("remote web UI login required")
 
-// PrepareWebUIOptions selects the same daemon source as other CLI commands.
+// PrepareWebUIOptions selects the browser gateway or an explicitly named
+// daemon target.
 type PrepareWebUIOptions struct {
 	WorkspaceStart string
 	DaemonName     string
@@ -50,27 +51,9 @@ type WebUIOpener func(context.Context, WebUILaunch) error
 // PrepareWebUI resolves and probes the selected daemon and validates local
 // browser runtime metadata.
 func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI, error) {
-	var (
-		baseURL          string
-		configuredRemote bool
-		allowInsecure    bool
-	)
-	if opts.DaemonName != "" {
-		target, err := resolveNamedDaemonTarget(ctx, opts.DaemonName)
-		if err != nil {
-			return PreparedWebUI{}, err
-		}
-		baseURL = target.BaseURL
-		configuredRemote = !target.Local
-		allowInsecure = target.AllowInsecure
-	} else {
-		target, err := ensureRunningTargetInWorkspace(ctx, opts.WorkspaceStart)
-		if err != nil {
-			return PreparedWebUI{}, err
-		}
-		baseURL = target.BaseURL
-		configuredRemote = target.ConfiguredRemote
-		allowInsecure = remoteAllowInsecureForBaseURL(baseURL, opts.WorkspaceStart)
+	baseURL, configuredRemote, allowInsecure, err := resolveWebUIHostTarget(ctx, opts)
+	if err != nil {
+		return PreparedWebUI{}, err
 	}
 
 	httpClient, err := NewHTTPClient(ctx, baseURL, Opts{
@@ -113,6 +96,21 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 	}
 	prepared.Runtime = runtimeInfo
 	return prepared, nil
+}
+
+func resolveWebUIHostTarget(
+	ctx context.Context, opts PrepareWebUIOptions,
+) (baseURL string, configuredRemote, allowInsecure bool, err error) {
+	if opts.DaemonName != "" {
+		target, err := resolveNamedDaemonTarget(ctx, opts.DaemonName)
+		if err != nil {
+			return "", false, false, err
+		}
+		return target.BaseURL, !target.Local, target.AllowInsecure, nil
+	}
+
+	baseURL, err = EnsureLocalRunning(ctx)
+	return baseURL, false, false, err
 }
 
 func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL string) (DiscoveredWebRuntime, error) {

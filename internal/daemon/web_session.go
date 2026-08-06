@@ -491,6 +491,10 @@ func browserSessionRequired(r *http.Request, policy ListenerPolicy, manager *Web
 		return r.Header.Get(webSessionHeader) != ""
 	}
 	if policy.Kind == ListenerSharedTCP {
+		if manager.auth.Token != "" && r.Header.Get(authHeader) != "" &&
+			directBackendRequest(r, policy, true) {
+			return false
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/v1/ui/") ||
 			r.Header.Get("Origin") != "" || r.Header.Get(webSessionHeader) != "" {
 			return true

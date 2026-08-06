@@ -29,6 +29,18 @@ func TestOpenWebUILocalLoopbackOpensDirectly(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:27123/kata?view=today", opened.PublicURL)
 }
 
+func TestResolveWebUIHostTargetUsesLocalGatewayDespiteRemoteOverride(t *testing.T) {
+	t.Setenv("KATA_SERVER", "https://daemon.example")
+	ctx := context.WithValue(t.Context(), BaseURLKey{}, "http://127.0.0.1:27123")
+
+	baseURL, configuredRemote, allowInsecure, err := resolveWebUIHostTarget(ctx, PrepareWebUIOptions{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://127.0.0.1:27123", baseURL)
+	assert.False(t, configuredRemote)
+	assert.False(t, allowInsecure)
+}
+
 func TestOpenWebUILocalTrustedProxyOpensDirectly(t *testing.T) {
 	var opened WebUILaunch
 	err := OpenWebUI(t.Context(), PreparedWebUI{

@@ -119,6 +119,23 @@ func TestSharedTCPEventStreamPreservesCLIAuthentication(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, response.Code)
 }
 
+func TestSharedTCPUISnapshotPreservesCLIAuthentication(t *testing.T) {
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	manager.auth.Token = "configured-token"
+	handler := requireBrowserSession(manager, ListenerPolicy{
+		Kind: ListenerSharedTCP, Origin: "http://127.0.0.1:27123", BackendAuthority: "127.0.0.1:27123",
+		RequireBrowserSession: true,
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/ui/snapshot", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	request.Header.Set("Authorization", "Bearer configured-token")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusNoContent, response.Code)
+}
+
 func TestSharedTCPTokenlessPublicAuthorityRequiresBrowserSession(t *testing.T) {
 	manager := newDeterministicSessionManager(t, "https://daemon.example", "instance_a")
 	policy := ListenerPolicy{

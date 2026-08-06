@@ -31,7 +31,7 @@ const (
 
 type webDaemonResponse struct {
 	ID      string `json:"id"`
-	URL     string `json:"url,omitempty"`
+	URL     string `json:"url"`
 	Default bool   `json:"default"`
 	Auth    string `json:"auth"`
 	Health  string `json:"health"`
