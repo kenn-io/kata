@@ -725,8 +725,8 @@
   async function startAuthority(): Promise<boolean> {
     scheduler.stop()
     stream.stop()
-    await loadDaemonRoster()
-    if (destroyed) return false
+    const daemonAvailable = await loadDaemonRoster()
+    if (destroyed || !daemonAvailable) return false
     const accepted = await invalidations.resume()
     if (destroyed) return false
     if (authority?.authenticationRequired) return false
@@ -736,13 +736,13 @@
     return accepted
   }
 
-  async function loadDaemonRoster(): Promise<void> {
-    if (daemonRosterLoaded) return
+  async function loadDaemonRoster(): Promise<boolean> {
+    if (daemonRosterLoaded) return directDaemonTarget || activeDaemonID !== undefined
     if (directDaemonTarget) {
       daemonRosterLoaded = true
       daemonInfos = []
       activeDaemonID = undefined
-      return
+      return true
     }
     try {
       const loadedDaemons = await fetchWebDaemons(browserFetch)
@@ -754,6 +754,11 @@
         )?.id ??
         daemonInfos.find((daemon) => daemon.default && daemon.health !== 'upgrade_required')?.id ??
         daemonInfos.find((daemon) => daemon.health !== 'upgrade_required')?.id
+      if (!activeDaemonID) {
+        snapshots.clear()
+        daemonError = 'No compatible Kata daemon is available'
+        return false
+      }
       daemonError = undefined
       if (activeDaemonID && window.location.pathname === '/kata' && !window.location.search) {
         const persisted = loadDaemonRoute(activeDaemonID)
@@ -771,6 +776,7 @@
         activeDaemonID = undefined
       }
     }
+    return true
   }
 
   async function switchDaemon(id: string): Promise<void> {
@@ -855,7 +861,19 @@
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
-    {#if authority?.error && !authority.loading}
+    {#if daemonError && !activeDaemonID && daemonInfos.length > 0}
+      <section class="kata-authority-recovery" role="alert">
+        <span>{daemonError}</span>
+        <KataDaemonSwitcher
+          daemons={daemonInfos}
+          activeId={activeDaemonID}
+          activeStatusLabel={daemonError}
+          activeStatusTone="error"
+          disabled={daemonSwitching}
+          onSelect={(id) => void switchDaemon(id)}
+        />
+      </section>
+    {:else if authority?.error && !authority.loading}
       <section class="kata-authority-recovery" role="alert">
         <span>{authority.error}</span>
         <button type="button" onclick={() => void startAuthority()}>Retry Kata snapshot</button>

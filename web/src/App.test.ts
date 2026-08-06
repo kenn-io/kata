@@ -225,6 +225,50 @@ describe('App', () => {
     expect(selected[0]).toBe('example-local')
   })
 
+  it('does not fall through to local authority when every configured daemon is incompatible', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              {
+                id: 'example-legacy',
+                url: 'https://daemon.example',
+                default: true,
+                auth: 'none',
+                health: 'upgrade_required',
+              },
+            ],
+          })
+        }
+        if (path.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+
+    render(App)
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'No compatible Kata daemon is available',
+    )
+    expect(snapshotReads).toBe(0)
+    expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
+  })
+
   it('opens a trusted-proxy tab without presenting token login', async () => {
     const paths: string[] = []
     let authorized = false
