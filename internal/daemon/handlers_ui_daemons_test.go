@@ -40,7 +40,7 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 
 	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
@@ -97,7 +97,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 	request.Header.Set("X-Kata-CSRF", "browser-csrf")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
@@ -139,7 +139,7 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			response, err := http.DefaultClient.Do(request)
 			require.NoError(t, err)
-			response.Body.Close()
+			_ = response.Body.Close()
 			assert.Equal(t, test.want, response.StatusCode)
 		})
 	}
@@ -164,7 +164,7 @@ func TestWebDaemonProxyDoesNotMisclassifyUpstreamAuthAsBrowserExpiry(t *testing.
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadGateway, response.StatusCode)
@@ -183,6 +183,6 @@ func TestWebDaemonProxyDispatchesLocalSelectionInProcess(t *testing.T) {
 	request.Header.Set("X-Kata-Web-Daemon", "example-local")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 }

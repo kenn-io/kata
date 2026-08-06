@@ -305,7 +305,7 @@ func probeWebDaemon(parent context.Context, d resolvedWebDaemon) string {
 	if err != nil {
 		return "down"
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 	switch {
 	case response.StatusCode >= 200 && response.StatusCode < 300:
