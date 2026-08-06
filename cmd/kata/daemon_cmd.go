@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net"
@@ -69,6 +70,7 @@ type daemonStartOutput struct {
 	PID     int    `json:"pid"`
 	Address string `json:"address"`
 	DBPath  string `json:"db_path,omitempty"`
+	WebURL  string `json:"web_url,omitempty"`
 }
 
 var (
@@ -111,6 +113,9 @@ func daemonStartCmd() *cobra.Command {
 			default:
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "started pid=%d address=%s\n", out.PID, out.Address)
 			}
+			if err == nil {
+				err = writeDaemonWebURL(cmd.OutOrStdout(), out.WebURL)
+			}
 			return err
 		},
 	}
@@ -143,12 +148,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		if effectiveListen != "" && address != effectiveListen {
 			return daemonStartOutput{}, fmt.Errorf("daemon already running at %s; stop it before starting with listener %s", address, effectiveListen)
 		}
-		return daemonStartOutput{
-			Action:  "already_running",
-			PID:     rec.PID,
-			Address: address,
-			DBPath:  rec.Metadata["db_path"],
-		}, nil
+		return daemonStartOutputFromRecord("already_running", rec), nil
 	}
 
 	args := []string{"daemon", "start", "--foreground"}
@@ -185,12 +185,7 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 
 	for {
 		if rec, ok := liveDaemonRecord(ns.DataDir, pid); ok {
-			return daemonStartOutput{
-				Action:  "started",
-				PID:     rec.PID,
-				Address: rec.Endpoint().ConfigAddress(),
-				DBPath:  rec.Metadata["db_path"],
-			}, nil
+			return daemonStartOutputFromRecord("started", rec), nil
 		}
 		select {
 		case <-ctx.Done():
@@ -206,6 +201,24 @@ func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureRead
 		case <-tick.C:
 		}
 	}
+}
+
+func daemonStartOutputFromRecord(action string, rec kitdaemon.RuntimeRecord) daemonStartOutput {
+	return daemonStartOutput{
+		Action:  action,
+		PID:     rec.PID,
+		Address: rec.Endpoint().ConfigAddress(),
+		DBPath:  rec.Metadata["db_path"],
+		WebURL:  rec.Metadata["web_origin"],
+	}
+}
+
+func writeDaemonWebURL(w io.Writer, webURL string) error {
+	if webURL == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(w, "  web UI:  %s\n", webURL)
+	return err
 }
 
 func effectiveDaemonListen(listen string) (string, error) {
@@ -462,11 +475,15 @@ func daemonRestartCmd() *cobra.Command {
 					PID:     out.PID,
 					Address: out.Address,
 					DBPath:  out.DBPath,
+					WebURL:  out.WebURL,
 				})
 			case outputAgent:
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK daemon action=restart pid=%d stopped=%d", out.PID, len(pids))
 				if len(pids) > 0 {
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), " pids=%s", agentValue(joinInts(pids, ",")))
+				}
+				if out.WebURL != "" {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), " web_url=%s", agentValue(out.WebURL))
 				}
 				_, _ = fmt.Fprintln(cmd.OutOrStdout())
 			case outputHuman:
@@ -474,6 +491,9 @@ func daemonRestartCmd() *cobra.Command {
 					_, err = fmt.Fprintf(cmd.OutOrStdout(), "started pid=%d address=%s (was not running)\n", out.PID, out.Address)
 				} else {
 					_, err = fmt.Fprintf(cmd.OutOrStdout(), "restarted pid=%d address=%s\n", out.PID, out.Address)
+				}
+				if err == nil {
+					err = writeDaemonWebURL(cmd.OutOrStdout(), out.WebURL)
 				}
 			}
 			return err
@@ -588,6 +608,7 @@ type daemonRestartOutput struct {
 	PID     int    `json:"pid"`
 	Address string `json:"address"`
 	DBPath  string `json:"db_path,omitempty"`
+	WebURL  string `json:"web_url,omitempty"`
 }
 
 func waitForDaemonProcesses(ctx context.Context, pids []int, timeout time.Duration) error {

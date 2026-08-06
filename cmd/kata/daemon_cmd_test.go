@@ -406,6 +406,7 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 			Action:  "started",
 			PID:     1234,
 			Address: "127.0.0.1:7777",
+			WebURL:  "http://127.0.0.1:28888",
 		}, nil
 	}
 
@@ -415,8 +416,27 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "127.0.0.1:7777", gotListen)
 	assert.True(t, gotInsecureReadonly)
-	assert.Equal(t, "started pid=1234 address=127.0.0.1:7777\n", stdout)
+	assert.Equal(t, "started pid=1234 address=127.0.0.1:7777\n"+
+		"  web UI:  http://127.0.0.1:28888\n", stdout)
 	assert.Empty(t, stderr)
+}
+
+func TestDaemonStartOutputFromRecordIncludesWebURL(t *testing.T) {
+	record := kitdaemon.RuntimeRecord{
+		PID: 1234, Network: "unix", Address: "/tmp/example.sock",
+		Metadata: map[string]string{
+			"db_path":    "/tmp/example.db",
+			"web_origin": "http://127.0.0.1:28888",
+		},
+	}
+
+	out := daemonStartOutputFromRecord("started", record)
+
+	assert.Equal(t, "started", out.Action)
+	assert.Equal(t, 1234, out.PID)
+	assert.Equal(t, "unix:///tmp/example.sock", out.Address)
+	assert.Equal(t, "/tmp/example.db", out.DBPath)
+	assert.Equal(t, "http://127.0.0.1:28888", out.WebURL)
 }
 
 func TestDaemonStart_ListenConflictWithExistingDaemon(t *testing.T) {
@@ -633,12 +653,14 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 			Action:  "started",
 			PID:     4242,
 			Address: "127.0.0.1:7777",
+			WebURL:  "http://127.0.0.1:28888",
 		}, nil
 	}
 
 	out := executeRoot(t, newRootCmd(), "daemon", "restart")
 
-	assert.Equal(t, "started pid=4242 address=127.0.0.1:7777 (was not running)\n", string(out))
+	assert.Equal(t, "started pid=4242 address=127.0.0.1:7777 (was not running)\n"+
+		"  web UI:  http://127.0.0.1:28888\n", string(out))
 }
 
 func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
@@ -667,7 +689,10 @@ func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
 	startDetachedDaemon = func(context.Context, string, bool) (daemonStartOutput, error) {
 		select {
 		case <-exited:
-			return daemonStartOutput{Action: "started", PID: 4243, Address: "127.0.0.1:7777"}, nil
+			return daemonStartOutput{
+				Action: "started", PID: 4243, Address: "127.0.0.1:7777",
+				WebURL: "http://127.0.0.1:28888",
+			}, nil
 		default:
 			return daemonStartOutput{}, errors.New("new daemon started before old daemon stopped")
 		}
@@ -675,7 +700,8 @@ func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
 
 	out := executeRoot(t, newRootCmd(), "daemon", "restart")
 
-	assert.Equal(t, "restarted pid=4243 address=127.0.0.1:7777\n", string(out))
+	assert.Equal(t, "restarted pid=4243 address=127.0.0.1:7777\n"+
+		"  web UI:  http://127.0.0.1:28888\n", string(out))
 }
 
 func TestDaemonRestart_AllowsFullGracefulShutdownBudget(t *testing.T) {
@@ -726,7 +752,10 @@ func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
 	startDetachedDaemon = func(context.Context, string, bool) (daemonStartOutput, error) {
-		return daemonStartOutput{Action: "started", PID: 4242, Address: "127.0.0.1:7777"}, nil
+		return daemonStartOutput{
+			Action: "started", PID: 4242, Address: "127.0.0.1:7777",
+			WebURL: "http://127.0.0.1:28888",
+		}, nil
 	}
 
 	out := executeRoot(t, newRootCmd(), "--json", "daemon", "restart")
@@ -738,6 +767,7 @@ func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
 		PIDs           []int  `json:"pids"`
 		PID            int    `json:"pid"`
 		Address        string `json:"address"`
+		WebURL         string `json:"web_url"`
 	}
 	require.NoError(t, json.Unmarshal(out, &got))
 	assert.Equal(t, 1, got.KataAPIVersion)
@@ -746,6 +776,7 @@ func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
 	assert.Empty(t, got.PIDs)
 	assert.Equal(t, 4242, got.PID)
 	assert.Equal(t, "127.0.0.1:7777", got.Address)
+	assert.Equal(t, "http://127.0.0.1:28888", got.WebURL)
 }
 
 func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) {
@@ -755,12 +786,16 @@ func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) {
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
 	startDetachedDaemon = func(context.Context, string, bool) (daemonStartOutput, error) {
-		return daemonStartOutput{Action: "started", PID: 4242, Address: "127.0.0.1:7777"}, nil
+		return daemonStartOutput{
+			Action: "started", PID: 4242, Address: "127.0.0.1:7777",
+			WebURL: "http://127.0.0.1:28888",
+		}, nil
 	}
 
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "restart")
 
-	assert.Equal(t, "OK daemon action=restart pid=4242 stopped=0\n", string(out))
+	assert.Equal(t, "OK daemon action=restart pid=4242 stopped=0 "+
+		"web_url=http://127.0.0.1:28888\n", string(out))
 }
 
 func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
