@@ -220,7 +220,7 @@
       parsed.pathname === '/' ? `/kata${parsed.search}` : `${parsed.pathname}${parsed.search}`
     history.replaceState(null, '', canonicalTarget)
     route = parseRoute(new URL(window.location.href))
-    mode = route.kind === 'route-error' ? 'route-error' : 'loading'
+    mode = route.kind === 'route-error' ? 'route-error' : authority?.snapshot ? 'ready' : 'loading'
     if (route.kind !== 'route-error') void startAuthority()
   }
 
@@ -689,7 +689,7 @@
       automaticSessionAttempted !== advertisedAuthentication
     ) {
       authenticationRecoveryPending = true
-      mode = 'loading'
+      mode = authority?.snapshot ? 'ready' : 'loading'
       void startAutomaticSession(returnPath, advertisedAuthentication)
       return
     }

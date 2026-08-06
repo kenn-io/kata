@@ -899,6 +899,72 @@ describe('App', () => {
     expect(keys[1]).toBe(keys[0])
   })
 
+  it('preserves a comment draft during transparent session renewal', async () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    const base = snapshot()
+    const accepted = {
+      ...base,
+      selected: {
+        state: 'available',
+        issue: base.collection[0],
+        comments: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    let commentRejected = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname.endsWith('/comments') && request.method === 'POST') {
+          commentRejected = true
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'loopback' },
+          })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?issue=01J00000000000000000000001',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'identity',
+          })
+        }
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    const editor = await screen.findByRole('textbox', { name: 'Comment' })
+    await fireEvent.input(editor, { target: { value: 'Keep this draft' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+
+    await waitFor(() => expect(commentRejected).toBe(true))
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement).value).toBe(
+        'Keep this draft',
+      ),
+    )
+  })
+
   it('keeps accepted authority visible while live updates reconnect', async () => {
     history.replaceState(null, '', '/kata?view=all-open')
     sessionStorage.setItem(

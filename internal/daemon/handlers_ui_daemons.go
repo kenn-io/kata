@@ -529,6 +529,9 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 }
 
 func webDaemonProxyRequestAllowed(method, path string) bool {
+	if strings.HasPrefix(path, webDaemonProxyPrefix) {
+		return false
+	}
 	if (path == pathPing || path == pathHealth) && method == http.MethodGet {
 		return true
 	}

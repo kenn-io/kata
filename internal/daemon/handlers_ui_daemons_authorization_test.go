@@ -141,6 +141,34 @@ func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testi
 	assert.Equal(t, 0, calls)
 }
 
+func TestWebDaemonGatewayRejectsNestedProxyRoutesWithoutContactingTarget(t *testing.T) {
+	var calls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	gateway := &webDaemonGateway{
+		catalog: []config.CatalogDaemonConfig{{
+			Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+		}},
+		health: make(map[string]webDaemonHealthEntry), inflight: make(map[string]*webDaemonInflightProbe),
+		proxies: make(map[string]http.Handler),
+	}
+	mux := http.NewServeMux()
+	mux.Handle(webDaemonProxyPrefix+"/", http.StripPrefix(webDaemonProxyPrefix, gateway))
+	request := httptest.NewRequest(http.MethodGet,
+		webDaemonProxyPrefix+webDaemonProxyPrefix+pathEventsStreamPath, nil)
+	request.Header.Set(webDaemonHeaderName, "example-remote")
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	assert.Equal(t, 0, calls)
+}
+
 func TestResolveWebDaemonRequiresCanonicalRootOrigin(t *testing.T) {
 	t.Run("canonicalizes origin", func(t *testing.T) {
 		resolved := resolveWebDaemon(config.CatalogDaemonConfig{
