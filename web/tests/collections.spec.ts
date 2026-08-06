@@ -40,7 +40,9 @@ test('views, projects, filters, columns, hierarchy, and keyboard stay first-clas
   await expect(page.getByRole('button', { name: /Example child task/ })).toBeVisible()
 
   for (const view of ['Inbox', 'Today', 'Upcoming', 'Deadlines', 'All Open', 'Logbook']) {
-    await page.getByRole('button', { name: new RegExp(`^${view}\\b`) }).click()
+    await page
+      .getByRole('button', { name: view === 'Inbox' ? /^Inbox \d+$/ : view, exact: true })
+      .click()
     await expect(page.locator('[aria-label="Issues"]')).toBeVisible()
   }
   await page.getByRole('button', { name: /^example-project \d+$/ }).click()
@@ -62,4 +64,40 @@ test('project creation and quick capture use the designated inbox project', asyn
   await page.getByRole('textbox', { name: 'Quick capture' }).fill('Captured example task')
   await page.getByRole('textbox', { name: 'Quick capture' }).press('Enter')
   await expect(page.getByRole('button', { name: /Captured example task/ })).toBeVisible()
+})
+
+test('New task designates an Inbox before opening quick capture', async ({ page, kata }) => {
+  const credentials = await kata.launch(page)
+  const snapshot = (await kata.snapshot(page, credentials)) as {
+    catalog: Array<{
+      project: { id: number; name: string; metadata: Record<string, unknown> }
+    }>
+  }
+  const inbox = snapshot.catalog.find(({ project }) => project.metadata.role === 'inbox')?.project
+  expect(inbox).toBeDefined()
+  const cleared = await kata.request(
+    page,
+    credentials,
+    'POST',
+    `/api/v1/projects/${inbox!.id}/metadata`,
+    { actor: 'user-a', patch: { role: null } },
+  )
+  expect(cleared.ok()).toBe(true)
+  await page.reload()
+
+  const create = page.getByRole('button', { name: 'New task' })
+  await expect(create).toBeEnabled()
+  await create.click()
+  await expect(page.getByRole('dialog', { name: 'Choose Inbox project' })).toBeVisible()
+  await page.getByRole('button', { name: 'Use example-project as Inbox' }).click()
+
+  await expect(page.getByRole('textbox', { name: 'Quick capture' })).toBeVisible()
+  const restored = await kata.request(
+    page,
+    credentials,
+    'POST',
+    `/api/v1/projects/${inbox!.id}/metadata`,
+    { actor: 'user-a', patch: { role: 'inbox' } },
+  )
+  expect(restored.ok()).toBe(true)
 })

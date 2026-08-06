@@ -169,6 +169,16 @@ describe('snapshot refresh scheduling', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
+  it('ignores focus until authority scheduling starts', async () => {
+    const refresh = vi.fn(async () => undefined)
+    const scheduler = new RefreshScheduler({ refresh, openEvents: vi.fn() })
+
+    scheduler.focused()
+    await Promise.resolve()
+
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
   it('recomputes intent before polls and never opens SSE in polling mode', async () => {
     let intent = 'first'
     const seen: string[] = []

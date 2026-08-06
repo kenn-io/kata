@@ -473,10 +473,16 @@ assign an available port, while a nonzero port keeps the browser origin fixed.
 bookmarks and origin-local preferences belong to that origin for the current
 daemon run.
 
-When `--daemon`, `KATA_SERVER`, `.kata.local.toml`, or `active_daemon` selects
-a configured remote, `kata ui` opens that daemon's login screen and returns to
-the requested path after login. It never puts the remote token or another
-credential in the URL.
+Without `--daemon`, `kata ui` opens the local browser gateway. The daemon
+selector lists the named targets from `<KATA_HOME>/config.toml`, initially
+selects `active_daemon`, and switches targets without leaving the local browser
+origin. Configured credentials remain in the daemon and are never sent to the
+browser. The application remembers the active route separately for each
+daemon.
+
+`kata ui --daemon <name>` opens that target directly. Authenticated remote
+targets use their canonical login origin and return to the requested path
+after login. Kata never puts a remote token or another credential in the URL.
 
 ## Daemon and diagnostics
 

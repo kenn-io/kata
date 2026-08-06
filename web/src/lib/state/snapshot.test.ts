@@ -109,6 +109,25 @@ describe('SnapshotController', () => {
       authenticationRequired: true,
     })
   })
+
+  it('clears accepted authority before changing daemon ownership', async () => {
+    const controller = new SnapshotController<TestIntent, TestSnapshot>(
+      async () => ({ status: 200, etag: '"first"', snapshot: snapshot('first', 9) }),
+      (intent) => intent.key,
+    )
+    await controller.load({ key: 'example-local' })
+
+    controller.clear()
+
+    expect(controller.state).toMatchObject({
+      intent: undefined,
+      snapshot: undefined,
+      etag: undefined,
+      cursor: 0,
+      loading: false,
+      canMutate: false,
+    })
+  })
 })
 
 function snapshot(value: string, cursor: number): TestSnapshot {

@@ -147,6 +147,24 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
     this.#abort?.abort()
   }
 
+  clear(): void {
+    this.#abort?.abort()
+    this.#abort = undefined
+    this.#acceptedKey = ''
+    this.#setState({
+      generation: this.state.generation + 1,
+      intent: undefined,
+      snapshot: undefined,
+      etag: undefined,
+      cursor: 0,
+      loading: false,
+      stale: false,
+      error: undefined,
+      canMutate: false,
+      authenticationRequired: false,
+    })
+  }
+
   markAuthenticationRequired(): void {
     this.#abort?.abort()
     this.#setAuthenticationRequired(this.state.generation)
@@ -185,6 +203,7 @@ export class SnapshotController<TIntent, TSnapshot extends SnapshotAuthority> {
 export type UISnapshot = components['schemas']['UISnapshotResponseBody']
 
 export interface UISnapshotIntent {
+  daemonID?: string
   view: string
   projectUID?: string
   statuses: string[]
