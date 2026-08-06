@@ -186,7 +186,7 @@ function Get-InstallDir {
 function Test-ReleasePredatesWebUi {
     param([string]$Version)
 
-    return ($Version -match '^v0\.([0-9]|1[0-3])\.(0|[1-9][0-9]*)$')
+    return ($Version -cmatch '^v0\.([0-9]|1[0-3])\.(0|[1-9][0-9]*)\z')
 }
 
 function Assert-ReleaseBinary {

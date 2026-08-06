@@ -152,6 +152,23 @@ function Test-AssertReleaseBinaryAcceptsLegacyRelease {
     }
 }
 
+function Test-AssertReleaseBinaryRejectsNoncanonicalLegacyVersions {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "kata-install-ps1-version-test-$(Get-Random)"
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        $fakeBinary = Join-Path $tmp 'invalid-release.ps1'
+        Set-Content -LiteralPath $fakeBinary -Value "throw 'invalid binary'"
+
+        foreach ($version in @('V0.13.0', "v0.13.0`n", 'v0.013.0', 'v0.13.0-rc.1', 'v1.0.0', '')) {
+            Assert-Throws 'validated Kata web UI' {
+                Assert-ReleaseBinary -BinaryPath $fakeBinary -Version $version
+            } "noncanonical release version [$version]"
+        }
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Test-DotSourceLoadsHelpersWithoutInstalling
 Test-ResolveReleaseArchUsesDetectedWindowsArm64Asset
 Test-ResolveReleaseArchDoesNotFallbackFromArm64ToAmd64
@@ -159,5 +176,6 @@ Test-VerifyChecksumAcceptsMatchingHash
 Test-VerifyChecksumRejectsMismatch
 Test-AssertReleaseBinaryRejectsMissingWebAssets
 Test-AssertReleaseBinaryAcceptsLegacyRelease
+Test-AssertReleaseBinaryRejectsNoncanonicalLegacyVersions
 
 Write-Host "PowerShell installer tests passed"

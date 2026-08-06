@@ -493,6 +493,31 @@ EOF
   [[ $status -eq 0 ]] || fail "installer should accept a pre-web release: $output"
 }
 
+test_installer_rejects_noncanonical_legacy_versions() {
+  local dir="$tmp_root/install-noncanonical-version"
+  mkdir -p "$dir"
+  cat >"$dir/kata" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "$dir/kata"
+
+  local version output status
+  local versions=('V0.13.0' $'v0.13.0\n' 'v0.013.0' 'v0.13.0-rc.1' 'v1.0.0' '')
+  for version in "${versions[@]}"; do
+    set +e
+    output="$(bash -c '
+      source "$1"
+      verify_release_binary "$2" "$3"
+    ' bash "$repo_root/scripts/install.sh" "$dir/kata" "$version" 2>&1)"
+    status=$?
+    set -e
+
+    [[ $status -ne 0 ]] || fail "installer should reject noncanonical release version [$version]"
+    assert_contains "$output" "validated Kata web UI" "noncanonical release version [$version]"
+  done
+}
+
 test_powershell_installer() {
   if ! command -v pwsh >/dev/null 2>&1; then
     printf 'skipping PowerShell installer tests: pwsh not found\n'
@@ -528,6 +553,7 @@ test_verify_release_tag_rejects_tag_moved_after_validation
 test_install_checksum_cannot_be_skipped
 test_installer_rejects_release_without_validated_web_ui
 test_installer_accepts_legacy_release_without_web_ui
+test_installer_rejects_noncanonical_legacy_versions
 test_powershell_installer
 
 printf 'release script tests passed\n'
