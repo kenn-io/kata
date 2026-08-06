@@ -31,7 +31,10 @@ const (
 	webDaemonProxyTimeout = 30 * time.Second
 )
 
-var errWebDaemonUpgradeRequired = errors.New("daemon UI contract upgrade required")
+var (
+	errWebDaemonRedirectForbidden = errors.New("daemon redirect forbidden")
+	errWebDaemonUpgradeRequired   = errors.New("daemon UI contract upgrade required")
+)
 
 type webDaemonResponse struct {
 	ID      string `json:"id"`
@@ -455,6 +458,10 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 			response.Header.Del("Set-Cookie")
 			response.Header.Del(WebOriginHeader)
 			response.Header.Del(WebAuthenticationHeader)
+			if response.StatusCode >= http.StatusMultipleChoices &&
+				response.StatusCode < http.StatusBadRequest && response.StatusCode != http.StatusNotModified {
+				return errWebDaemonRedirectForbidden
+			}
 			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
 				body := []byte(`{"error":{"code":"daemon_auth_required"}}`)
 				_ = response.Body.Close()
@@ -483,6 +490,10 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			slog.Warn("web daemon proxy failed", "daemon", d.id, "target", redactWebDaemonURL(d.baseURL), "err", err)
+			if errors.Is(err, errWebDaemonRedirectForbidden) {
+				writeWebDaemonError(w, http.StatusBadGateway, "daemon_redirect_forbidden")
+				return
+			}
 			if errors.Is(err, errWebDaemonUpgradeRequired) {
 				writeWebDaemonError(w, http.StatusBadGateway, "daemon_upgrade_required")
 				return

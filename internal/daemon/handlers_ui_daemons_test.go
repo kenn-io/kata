@@ -279,6 +279,43 @@ func TestWebDaemonProxyDoesNotMisclassifyUpstreamAuthAsBrowserExpiry(t *testing.
 	assert.Contains(t, string(body), "daemon_auth_required")
 }
 
+func TestWebDaemonProxyRejectsUpstreamRedirects(t *testing.T) {
+	var redirectedCalls atomic.Int64
+	redirected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		redirectedCalls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(redirected.Close)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", redirected.URL)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(upstream.Close)
+
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now,
+		WebDaemons: []config.CatalogDaemonConfig{{
+			Name: "example-remote", URL: upstream.URL, AllowInsecure: true,
+		}},
+	})
+	request, err := http.NewRequest(http.MethodPost,
+		server.URL+"/api/v1/ui/proxy/api/v1/projects/resolve",
+		strings.NewReader(`{"name":"example-project"}`))
+	require.NoError(t, err)
+	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusBadGateway, response.StatusCode, string(body))
+	assert.Contains(t, string(body), "daemon_redirect_forbidden")
+	assert.Equal(t, int64(0), redirectedCalls.Load())
+}
+
 func TestWebDaemonProxyDispatchesLocalSelectionInProcess(t *testing.T) {
 	d := openTestDB(t)
 	server := startTestServer(t, daemon.ServerConfig{
