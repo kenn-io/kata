@@ -121,6 +121,62 @@ describe('App', () => {
     expect(selected[0]).toBe('example-remote')
   })
 
+  it('keeps an explicitly direct daemon pinned across reload', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let rosterReads = 0
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          rosterReads += 1
+          return Response.json({
+            daemons: [
+              {
+                id: 'example-other',
+                url: 'https://daemon.example',
+                default: true,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (path === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          return Response.json(snapshot(), {
+            headers: { ETag: `"snapshot-${snapshotRequests.length}"` },
+          })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    cleanup()
+
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(rosterReads).toBe(0)
+    expect(snapshotRequests).toHaveLength(2)
+    expect(
+      snapshotRequests.every((request) => request.headers.get('X-Kata-Web-Daemon') === null),
+    ).toBe(true)
+  })
+
   it('does not activate an incompatible configured default', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',

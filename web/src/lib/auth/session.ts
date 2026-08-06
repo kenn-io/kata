@@ -1,5 +1,6 @@
 export const sessionStorageKey = 'kata.web.session.v1'
 export const authenticationModeStorageKey = 'kata.web.authentication-mode.v1'
+const directTargetStorageKey = 'kata.web.direct-target.v1'
 
 export type AuthenticationMode = 'login'
 
@@ -66,19 +67,30 @@ interface SessionResponse {
 export function consumeLaunchFragment(
   location: Location,
   replaceState: History['replaceState'],
+  storage: Storage = sessionStorage,
 ): LaunchState {
   const currentPath = location.pathname + location.search
   if (!location.hash) {
-    return { kind: 'none', returnPath: currentPath }
+    return {
+      kind: 'none',
+      returnPath: currentPath,
+      ...(storage.getItem(directTargetStorageKey) === '1' ? { directTarget: true } : {}),
+    }
   }
 
   const fragment = new URLSearchParams(location.hash.slice(1))
   replaceState(null, '', currentPath)
   const returnPath = normalizeReturnPath(fragment.get('return_path'), currentPath)
   const daemonID = fragment.get('daemon')?.trim()
+  if (fragment.has('direct')) {
+    if (fragment.get('direct') === '1') storage.setItem(directTargetStorageKey, '1')
+    else storage.removeItem(directTargetStorageKey)
+  } else if (daemonID) {
+    storage.removeItem(directTargetStorageKey)
+  }
   const target = {
     ...(daemonID ? { daemonID } : {}),
-    ...(fragment.get('direct') === '1' ? { directTarget: true } : {}),
+    ...(storage.getItem(directTargetStorageKey) === '1' ? { directTarget: true } : {}),
   }
   if (fragment.get('login') === '1') {
     return { kind: 'login', returnPath, ...target }

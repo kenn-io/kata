@@ -145,6 +145,28 @@ describe('browser session bootstrap', () => {
       directTarget: true,
     })
     expect(window.location.hash).toBe('')
+
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata',
+      directTarget: true,
+    })
+  })
+
+  it('clears retained direct mode for an explicit gateway launch', () => {
+    history.replaceState(null, '', '/kata#direct=1')
+    consumeLaunchFragment(window.location, history.replaceState.bind(history))
+    history.replaceState(null, '', '/kata#daemon=example-remote')
+
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata',
+      daemonID: 'example-remote',
+    })
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata',
+    })
   })
 
   it('keeps the explicitly selected authentication mechanism tab-local', () => {
