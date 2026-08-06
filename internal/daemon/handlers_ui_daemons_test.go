@@ -254,6 +254,33 @@ func TestWebDaemonGatewayAllowsIssueReferenceLookup(t *testing.T) {
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
 
+func TestWebDaemonGatewayRejectsDeletedIssueLookupBeforeProxying(t *testing.T) {
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now,
+		WebDaemons: []config.CatalogDaemonConfig{{
+			Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+		}},
+	})
+
+	request, err := http.NewRequest(http.MethodGet,
+		server.URL+"/api/v1/ui/proxy/api/v1/projects/7/issues/abc4?include_deleted=true", nil)
+	require.NoError(t, err)
+	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+
+	assert.Equal(t, http.StatusForbidden, response.StatusCode)
+	assert.Equal(t, int64(0), calls.Load())
+}
+
 func TestWebDaemonProxyDoesNotMisclassifyUpstreamAuthAsBrowserExpiry(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

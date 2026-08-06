@@ -424,7 +424,7 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 	}
 	if strings.HasPrefix(r.URL.Path, webDaemonProxyPrefix+"/") {
 		innerPath := strings.TrimPrefix(r.URL.Path, webDaemonProxyPrefix)
-		return webDaemonProxyRequestAllowed(r.Method, innerPath)
+		return webDaemonProxyRequestAllowed(r, innerPath)
 	}
 
 	const projectPrefix = "/api/v1/projects/"
@@ -446,32 +446,36 @@ func webLocalSPARequestAllowed(r *http.Request) bool {
 		return (len(parts) == 2 && r.Method == http.MethodPost) ||
 			(len(parts) == 3 && (r.Method == http.MethodPatch || r.Method == http.MethodDelete))
 	case "issues":
-		return webLocalIssueRequestAllowed(r.Method, parts[2:])
+		return webLocalIssueRequestAllowed(r, parts[2:])
 	default:
 		return false
 	}
 }
 
-func webLocalIssueRequestAllowed(method string, parts []string) bool {
+func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 	if len(parts) == 0 {
-		return method == http.MethodPost
+		return r.Method == http.MethodPost
 	}
 	if len(parts) == 1 {
-		return method == http.MethodGet || method == http.MethodPatch
+		if r.Method == http.MethodGet {
+			_, includeDeleted := r.URL.Query()["include_deleted"]
+			return !includeDeleted
+		}
+		return r.Method == http.MethodPatch
 	}
 	if len(parts) == 2 {
 		switch parts[1] {
 		case "comments", "labels", "links", "metadata":
-			return method == http.MethodPost
+			return r.Method == http.MethodPost
 		case "actions":
 			return false
 		}
 	}
 	if len(parts) == 3 {
 		if parts[1] == "labels" {
-			return method == http.MethodDelete
+			return r.Method == http.MethodDelete
 		}
-		if parts[1] == "actions" && method == http.MethodPost {
+		if parts[1] == "actions" && r.Method == http.MethodPost {
 			switch parts[2] {
 			case "assign", "close", "move", "priority", "reopen", "unassign":
 				return true

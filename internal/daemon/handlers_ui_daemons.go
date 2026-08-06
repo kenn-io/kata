@@ -149,7 +149,7 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 
 func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Vary", webDaemonHeaderName)
-	if !webDaemonProxyRequestAllowed(r.Method, r.URL.Path) {
+	if !webDaemonProxyRequestAllowed(r, r.URL.Path) {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_operation_forbidden")
 		return
 	}
@@ -625,17 +625,17 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 	return out
 }
 
-func webDaemonProxyRequestAllowed(method, path string) bool {
+func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
 	if strings.HasPrefix(path, webDaemonProxyPrefix) {
 		return false
 	}
-	if (path == pathPing || path == pathHealth) && method == http.MethodGet {
+	if (path == pathPing || path == pathHealth) && r.Method == http.MethodGet {
 		return true
 	}
-	if path == "/api/v1/projects/resolve" && method == http.MethodPost {
+	if path == "/api/v1/projects/resolve" && r.Method == http.MethodPost {
 		return true
 	}
-	request := &http.Request{Method: method, URL: &url.URL{Path: path}}
+	request := &http.Request{Method: r.Method, URL: &url.URL{Path: path, RawQuery: r.URL.RawQuery}}
 	return webLocalSPARequestAllowed(request)
 }
 
