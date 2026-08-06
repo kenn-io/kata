@@ -183,8 +183,18 @@ function Get-InstallDir {
     return Join-Path $env:USERPROFILE '.kata\bin'
 }
 
+function Test-ReleasePredatesWebUi {
+    param([string]$Version)
+
+    return ($Version -cmatch '^v0\.([0-9]|1[0-3])\.(0|[1-9][0-9]*)\z')
+}
+
 function Assert-ReleaseBinary {
-    param([string]$BinaryPath)
+    param([string]$BinaryPath, [string]$Version)
+
+    if (Test-ReleasePredatesWebUi -Version $Version) {
+        return
+    }
 
     $valid = $false
     try {
@@ -301,7 +311,7 @@ function Install-Kata {
         }
 
         try {
-            Assert-ReleaseBinary -BinaryPath $binaryFile.FullName
+            Assert-ReleaseBinary -BinaryPath $binaryFile.FullName -Version $version
         } catch {
             Write-Err "Error: $_"
             exit 1

@@ -132,8 +132,38 @@ function Test-AssertReleaseBinaryRejectsMissingWebAssets {
         Set-Content -LiteralPath $fakeBinary -Value "throw 'invalid binary'"
 
         Assert-Throws 'validated Kata web UI' {
-            Assert-ReleaseBinary -BinaryPath $fakeBinary
+            Assert-ReleaseBinary -BinaryPath $fakeBinary -Version 'v0.14.0'
         } "release web asset validation"
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-AssertReleaseBinaryAcceptsLegacyRelease {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "kata-install-ps1-legacy-test-$(Get-Random)"
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        $fakeBinary = Join-Path $tmp 'legacy-release.ps1'
+        Set-Content -LiteralPath $fakeBinary -Value "throw 'legacy binary has no web check'"
+
+        Assert-ReleaseBinary -BinaryPath $fakeBinary -Version 'v0.13.0'
+    } finally {
+        Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-AssertReleaseBinaryRejectsNoncanonicalLegacyVersions {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "kata-install-ps1-version-test-$(Get-Random)"
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        $fakeBinary = Join-Path $tmp 'invalid-release.ps1'
+        Set-Content -LiteralPath $fakeBinary -Value "throw 'invalid binary'"
+
+        foreach ($version in @('V0.13.0', "v0.13.0`n", 'v0.013.0', 'v0.13.0-rc.1', 'v1.0.0', '')) {
+            Assert-Throws 'validated Kata web UI' {
+                Assert-ReleaseBinary -BinaryPath $fakeBinary -Version $version
+            } "noncanonical release version [$version]"
+        }
     } finally {
         Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -145,5 +175,7 @@ Test-ResolveReleaseArchDoesNotFallbackFromArm64ToAmd64
 Test-VerifyChecksumAcceptsMatchingHash
 Test-VerifyChecksumRejectsMismatch
 Test-AssertReleaseBinaryRejectsMissingWebAssets
+Test-AssertReleaseBinaryAcceptsLegacyRelease
+Test-AssertReleaseBinaryRejectsNoncanonicalLegacyVersions
 
 Write-Host "PowerShell installer tests passed"
