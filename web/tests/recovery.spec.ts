@@ -23,6 +23,7 @@ test('a 412 refresh preserves the current checklist draft for explicit retry', a
   page,
   kata,
 }) => {
+  await page.route('**/api/v1/events/stream*', (route) => route.abort('connectionrefused'))
   const credentials = await kata.launch(page)
   const issue = await kata.seedIssue(page, credentials, { title: 'Conflict example task' })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)

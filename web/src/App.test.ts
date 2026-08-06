@@ -123,6 +123,9 @@ describe('App', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const target = new URL(String(input), window.location.origin)
         if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
         if (target.pathname === '/api/v1/ui/session/local') {
           return new Response('', { status: 404 })
         }
@@ -201,7 +204,38 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
-    expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
+    await waitFor(() =>
+      expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
+    )
+  })
+
+  it('does not resume snapshot authority after the application unmounts', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let releaseRoster!: (response: Response) => void
+    const roster = new Promise<Response>((resolve) => {
+      releaseRoster = resolve
+    })
+    const paths: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        paths.push(target.pathname)
+        if (target.pathname === '/api/v1/ui/daemons') return roster
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    await waitFor(() => expect(paths).toEqual(['/api/v1/ui/daemons']))
+    cleanup()
+    releaseRoster(Response.json(daemonRoster()))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(paths).toEqual(['/api/v1/ui/daemons'])
   })
 
   it('recovers an initial snapshot failure through an in-app retry', async () => {
@@ -400,6 +434,7 @@ describe('App', () => {
     const remote = structuredClone(local)
     remote.collection[0]!.title = 'Remote issue'
     const snapshotRequests: Request[] = []
+    const referenceRequests: Request[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -423,6 +458,7 @@ describe('App', () => {
           })
         }
         if (path.endsWith('/api/v1/ui/references')) {
+          referenceRequests.push(request)
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
         if (path.endsWith('/api/v1/ui/snapshot')) {
@@ -444,6 +480,11 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
     expect(window.location.search).toBe('?view=all-open')
+    expect(
+      referenceRequests.find(
+        (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
+      )?.signal.aborted,
+    ).toBe(true)
 
     await fireEvent.click(
       screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
@@ -453,6 +494,60 @@ describe('App', () => {
     expect(snapshotRequests.map((request) => request.headers.get('X-Kata-Web-Daemon'))).toEqual(
       expect.arrayContaining(['example-local', 'example-remote']),
     )
+  })
+
+  it('offers daemon switching when the default snapshot is unavailable', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              {
+                id: 'example-local',
+                url: '',
+                default: true,
+                auth: 'none',
+                health: 'down',
+              },
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (path.endsWith('/api/v1/ui/snapshot')) {
+          if (request.headers.get('X-Kata-Web-Daemon') === 'example-remote') {
+            return Response.json(snapshot(), { headers: { ETag: '"remote-snapshot"' } })
+          }
+          return new Response('{"error":{"code":"daemon_unreachable"}}', { status: 502 })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+
+    render(App)
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Snapshot unavailable')
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
   it('designates an Inbox project from a fresh catalog', async () => {

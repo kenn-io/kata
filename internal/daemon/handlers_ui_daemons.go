@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 )
 
@@ -58,9 +60,11 @@ type webDaemonInflightProbe struct {
 }
 
 type webDaemonGateway struct {
-	catalog  []config.CatalogDaemonConfig
-	active   string
-	localMux *http.ServeMux
+	catalog          []config.CatalogDaemonConfig
+	active           string
+	localMux         *http.ServeMux
+	sessions         *WebSessionManager
+	insecureReadonly bool
 
 	mu       sync.Mutex
 	health   map[string]webDaemonHealthEntry
@@ -72,6 +76,7 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 	gateway := &webDaemonGateway{
 		catalog: append([]config.CatalogDaemonConfig(nil), cfg.WebDaemons...),
 		active:  strings.TrimSpace(cfg.ActiveWebDaemon), localMux: mux,
+		sessions: cfg.WebSessions, insecureReadonly: cfg.InsecureReadonly,
 		health:   make(map[string]webDaemonHealthEntry),
 		inflight: make(map[string]*webDaemonInflightProbe),
 		proxies:  make(map[string]http.Handler),
@@ -127,12 +132,21 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_operation_forbidden")
 		return
 	}
-	if rejectWebDaemonFilesystemProject(w, r) {
+	if rejectWebDaemonProjectRequest(w, r) {
 		return
 	}
 	d, err := g.selectDaemon(r.Header.Get(webDaemonHeaderName))
 	if err != nil {
 		writeWebDaemonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	policy := g.sourcePolicy(r.Context())
+	if r.URL.Path == pathEventsStreamPath && (!d.local || policy.insecureReadonly) {
+		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_stream_forbidden")
+		return
+	}
+	if !d.local && policy.insecureReadonly && d.token != "" {
+		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_readonly_target_forbidden")
 		return
 	}
 	stripWebDaemonBrowserCredentials(r.Header)
@@ -145,10 +159,16 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusBadRequest, "invalid_daemon_target")
 		return
 	}
-	proxy.ServeHTTP(w, r)
+	if upstreamETag, ok := decodeWebDaemonETag(r.Header.Get("If-None-Match"), policy); ok {
+		r.Header.Set("If-None-Match", upstreamETag)
+	}
+	if webDaemonCapabilityPath(r.URL.Path) {
+		r.Header.Del("Accept-Encoding")
+	}
+	proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), webDaemonSourcePolicyKey{}, policy)))
 }
 
-func rejectWebDaemonFilesystemProject(w http.ResponseWriter, r *http.Request) bool {
+func rejectWebDaemonProjectRequest(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodPost || r.URL.Path != "/api/v1/projects" || r.Body == nil {
 		return false
 	}
@@ -165,15 +185,35 @@ func rejectWebDaemonFilesystemProject(w http.ResponseWriter, r *http.Request) bo
 		writeWebDaemonError(w, http.StatusRequestEntityTooLarge, "project_request_too_large")
 		return true
 	}
-	var payload map[string]json.RawMessage
-	if json.Unmarshal(body, &payload) != nil {
+	var input api.InitProjectRequest
+	if json.Unmarshal(body, &input.Body) != nil {
 		return false
 	}
-	if _, present := payload["start_path"]; !present {
+	if webProjectInitFieldsAllowed(&input) {
 		return false
 	}
-	writeWebDaemonError(w, http.StatusForbidden, "web_daemon_filesystem_forbidden")
+	writeWebDaemonError(w, http.StatusForbidden, "web_local_operation_forbidden")
 	return true
+}
+
+type webDaemonSourcePolicyKey struct{}
+
+type webDaemonSourcePolicy struct {
+	writable         bool
+	insecureReadonly bool
+}
+
+func (g *webDaemonGateway) sourcePolicy(ctx context.Context) webDaemonSourcePolicy {
+	policy := webDaemonSourcePolicy{writable: !g.insecureReadonly}
+	if g.sessions != nil {
+		principal, _ := PrincipalFromContext(ctx)
+		policy.writable = g.sessions.CanWrite(principal)
+	}
+	policy.insecureReadonly = insecureReadonlyRequest(ctx)
+	if policy.insecureReadonly {
+		policy.writable = false
+	}
+	return policy
 }
 
 func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
@@ -353,6 +393,19 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 				response.Header.Del("WWW-Authenticate")
 				response.Header.Set("Content-Type", "application/json")
 				response.Header.Set("Content-Length", strconv.Itoa(len(body)))
+				return nil
+			}
+			if webDaemonCapabilityPath(response.Request.URL.Path) &&
+				(response.StatusCode == http.StatusOK || response.StatusCode == http.StatusNotModified) {
+				policy, _ := response.Request.Context().Value(webDaemonSourcePolicyKey{}).(webDaemonSourcePolicy)
+				if upstreamETag := response.Header.Get("ETag"); upstreamETag != "" {
+					response.Header.Set("ETag", encodeWebDaemonETag(upstreamETag, policy))
+				}
+				if response.StatusCode == http.StatusOK {
+					if err := restrictWebDaemonCapabilities(response, policy); err != nil {
+						return err
+					}
+				}
 			}
 			return nil
 		},
@@ -362,10 +415,6 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 		},
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == pathEventsStreamPath {
-			reverse.ServeHTTP(w, r)
-			return
-		}
 		ctx, cancel := context.WithTimeout(r.Context(), webDaemonProxyTimeout)
 		defer cancel()
 		reverse.ServeHTTP(w, r.WithContext(ctx))
@@ -378,6 +427,68 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 	g.proxies[key] = handler
 	g.mu.Unlock()
 	return handler, nil
+}
+
+func webDaemonCapabilityPath(path string) bool {
+	return path == "/api/v1/ui/snapshot" || path == "/api/v1/ui/references" ||
+		strings.HasSuffix(path, "/api/v1/ui/snapshot") ||
+		strings.HasSuffix(path, "/api/v1/ui/references")
+}
+
+func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSourcePolicy) error {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return fmt.Errorf("read daemon capability response: %w", err)
+	}
+	_ = response.Body.Close()
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return fmt.Errorf("decode daemon capability response: %w", err)
+	}
+	var capabilities api.UICapabilities
+	if err := json.Unmarshal(envelope["capabilities"], &capabilities); err != nil {
+		return fmt.Errorf("decode daemon capabilities: %w", err)
+	}
+	capabilities.Writable = capabilities.Writable && policy.writable
+	capabilities.Updates = "poll"
+	encodedCapabilities, err := json.Marshal(capabilities)
+	if err != nil {
+		return fmt.Errorf("encode daemon capabilities: %w", err)
+	}
+	envelope["capabilities"] = encodedCapabilities
+	body, err = json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("encode daemon capability response: %w", err)
+	}
+	response.Body = io.NopCloser(bytes.NewReader(body))
+	response.ContentLength = int64(len(body))
+	response.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	return nil
+}
+
+func encodeWebDaemonETag(upstream string, policy webDaemonSourcePolicy) string {
+	mode := "ro"
+	if policy.writable {
+		mode = "rw"
+	}
+	return `"kata-daemon-` + mode + `-` + base64.RawURLEncoding.EncodeToString([]byte(upstream)) + `"`
+}
+
+func decodeWebDaemonETag(value string, policy webDaemonSourcePolicy) (string, bool) {
+	mode := "ro"
+	if policy.writable {
+		mode = "rw"
+	}
+	prefix := `"kata-daemon-` + mode + `-`
+	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, `"`) {
+		return "", false
+	}
+	raw := strings.TrimSuffix(strings.TrimPrefix(value, prefix), `"`)
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil || len(decoded) == 0 {
+		return "", false
+	}
+	return string(decoded), true
 }
 
 func stripWebDaemonBrowserCredentials(headers http.Header) {

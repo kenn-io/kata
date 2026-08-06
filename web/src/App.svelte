@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
 
   import AppShell from './components/AppShell.svelte'
+  import KataDaemonSwitcher from './components/KataDaemonSwitcher.svelte'
   import LaunchHint from './components/LaunchHint.svelte'
   import LoginView from './components/LoginView.svelte'
   import RouteError from './components/RouteError.svelte'
@@ -82,6 +83,9 @@
   let daemonRosterLoaded = false
   let daemonSwitching = $state(false)
   let daemonError = $state<string | undefined>()
+  let referenceAbort: AbortController | undefined
+  let referenceGeneration = 0
+  let destroyed = false
   const observedFetch: typeof fetch = async (input, init) => {
     const response = await fetch(input, init)
     const authentication = response.headers.get('X-Kata-Web-Authentication')
@@ -183,6 +187,7 @@
       }
     }
     return () => {
+      destroyed = true
       document.removeEventListener('visibilitychange', visibility)
       window.removeEventListener('focus', focus)
       window.removeEventListener('pageshow', environment)
@@ -192,6 +197,8 @@
       stream.stop()
       invalidations.stop()
       snapshots.abort()
+      referenceGeneration += 1
+      referenceAbort?.abort()
       unsubscribe()
     }
   })
@@ -293,18 +300,43 @@
   }
 
   async function loadReferences(): Promise<void> {
-    const { data } = await client.GET('/api/v1/ui/references', {
-      params: { query: { limit: 200 } },
-    })
-    if (data) references = data
+    if (destroyed) return
+    const generation = referenceGeneration + 1
+    referenceGeneration = generation
+    referenceAbort?.abort()
+    const abort = new AbortController()
+    referenceAbort = abort
+    const daemonID = activeDaemonID
+    try {
+      const { data } = await client.GET('/api/v1/ui/references', {
+        params: { query: { limit: 200 } },
+        signal: abort.signal,
+      })
+      if (
+        data &&
+        !destroyed &&
+        !abort.signal.aborted &&
+        generation === referenceGeneration &&
+        daemonID === activeDaemonID
+      ) {
+        references = data
+      }
+    } catch {
+      // Snapshot authority remains usable when reference enrichment is canceled or unavailable.
+    } finally {
+      if (referenceAbort === abort) referenceAbort = undefined
+    }
   }
 
   async function searchReferences(
     query: string,
   ): Promise<components['schemas']['UIIssueReference'][]> {
+    const generation = referenceGeneration
+    const daemonID = activeDaemonID
     const { data } = await client.GET('/api/v1/ui/references', {
       params: { query: { q: query, limit: 20 } },
     })
+    if (destroyed || generation !== referenceGeneration || daemonID !== activeDaemonID) return []
     return data?.issues ?? []
   }
 
@@ -671,6 +703,7 @@
         authentication === 'proxy'
           ? await openTrustedProxySession(requestedPath)
           : await openLocalSession(requestedPath)
+      if (destroyed) return
       if (session) {
         navigateAfterAuthentication(session.returnPath)
         return
@@ -685,7 +718,9 @@
     scheduler.stop()
     stream.stop()
     await loadDaemonRoster()
+    if (destroyed) return false
     const accepted = await invalidations.resume()
+    if (destroyed) return false
     if (authority?.authenticationRequired) return false
     if (authority?.snapshot) automaticSessionAttempted = undefined
     if (authority?.snapshot) void loadReferences()
@@ -731,6 +766,8 @@
     stream.stop()
     invalidations.pause()
     snapshots.clear()
+    referenceGeneration += 1
+    referenceAbort?.abort()
     references = undefined
     activeDaemonID = id
     route = restored
@@ -787,6 +824,16 @@
       <section class="kata-authority-recovery" role="alert">
         <span>{authority.error}</span>
         <button type="button" onclick={() => void startAuthority()}>Retry Kata snapshot</button>
+        {#if daemonInfos.length > 0}
+          <KataDaemonSwitcher
+            daemons={daemonInfos}
+            activeId={activeDaemonID}
+            activeStatusLabel={daemonError}
+            activeStatusTone={daemonError ? 'error' : undefined}
+            disabled={daemonSwitching}
+            onSelect={(id) => void switchDaemon(id)}
+          />
+        {/if}
       </section>
     {:else}
       <p role="status">Loading Kata…</p>
@@ -798,6 +845,16 @@
       <LaunchHint issueRef={undefined} />
     {:else if mode === 'login'}
       <LoginView {returnPath} onLogin={login} />
+    {/if}
+    {#if !authority?.snapshot && daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
+      <KataDaemonSwitcher
+        daemons={daemonInfos}
+        activeId={activeDaemonID}
+        activeStatusLabel={daemonError}
+        activeStatusTone={daemonError ? 'error' : undefined}
+        disabled={daemonSwitching}
+        onSelect={(id) => void switchDaemon(id)}
+      />
     {/if}
     {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
       <AppShell
