@@ -45,8 +45,9 @@ type webDaemonRosterResponse struct {
 }
 
 type resolvedWebDaemon struct {
-	id, baseURL, token string
-	local              bool
+	id, baseURL, token   string
+	local                bool
+	credentialConfigured bool
 }
 
 type webDaemonHealthEntry struct {
@@ -87,6 +88,15 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 
 func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	catalog := g.effectiveCatalog()
+	if insecureReadonlyRequest(r.Context()) {
+		visible := make([]config.CatalogDaemonConfig, 0, len(catalog))
+		for _, configured := range catalog {
+			if !webDaemonCredentialsConfigured(configured) {
+				visible = append(visible, configured)
+			}
+		}
+		catalog = visible
+	}
 	resolved := make([]resolvedWebDaemon, len(catalog))
 	states := make([]string, len(catalog))
 	var wg sync.WaitGroup
@@ -106,12 +116,15 @@ func (g *webDaemonGateway) list(w http.ResponseWriter, r *http.Request) {
 	for i, configured := range catalog {
 		d := resolved[i]
 		auth := "none"
-		if configured.Token != "" || configured.TokenEnv != "" {
+		if d.credentialConfigured {
 			auth = "token"
 		}
 		hint := ""
-		if states[i] == "down" {
+		switch states[i] {
+		case "down":
 			hint = "daemon is not reachable"
+		case "upgrade_required":
+			hint = "daemon does not support the Kata web UI"
 		}
 		out.Daemons = append(out.Daemons, webDaemonResponse{
 			ID: configured.Name, URL: redactWebDaemonURL(d.baseURL),
@@ -149,7 +162,7 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_stream_forbidden")
 		return
 	}
-	if !d.local && policy.insecureReadonly && d.token != "" {
+	if !d.local && policy.insecureReadonly && d.credentialConfigured {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_readonly_target_forbidden")
 		return
 	}
@@ -173,7 +186,8 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func rejectWebDaemonProjectRequest(w http.ResponseWriter, r *http.Request) bool {
-	if r.Method != http.MethodPost || r.URL.Path != "/api/v1/projects" || r.Body == nil {
+	if r.Method != http.MethodPost || r.Body == nil ||
+		(r.URL.Path != "/api/v1/projects" && r.URL.Path != "/api/v1/projects/resolve") {
 		return false
 	}
 	const maxProjectRequest = 1 << 20
@@ -187,6 +201,18 @@ func rejectWebDaemonProjectRequest(w http.ResponseWriter, r *http.Request) bool 
 	r.ContentLength = int64(len(body))
 	if len(body) > maxProjectRequest {
 		writeWebDaemonError(w, http.StatusRequestEntityTooLarge, "project_request_too_large")
+		return true
+	}
+	if r.URL.Path == "/api/v1/projects/resolve" {
+		var input api.ResolveProjectRequest
+		if json.Unmarshal(body, &input.Body) != nil {
+			return false
+		}
+		if strings.TrimSpace(input.Body.Name) != "" && input.Body.Alias == nil &&
+			strings.TrimSpace(input.Body.StartPath) == "" {
+			return false
+		}
+		writeWebDaemonError(w, http.StatusForbidden, "web_local_operation_forbidden")
 		return true
 	}
 	var input api.InitProjectRequest
@@ -231,14 +257,21 @@ func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
 
 func (g *webDaemonGateway) defaultID(catalog []config.CatalogDaemonConfig) string {
 	if g.active != "" {
-		return g.active
+		for _, d := range catalog {
+			if d.Name == g.active {
+				return g.active
+			}
+		}
 	}
 	for _, d := range catalog {
 		if d.Local {
 			return d.Name
 		}
 	}
-	return catalog[0].Name
+	if len(catalog) > 0 {
+		return catalog[0].Name
+	}
+	return ""
 }
 
 func (g *webDaemonGateway) selectDaemon(requested string) (resolvedWebDaemon, error) {
@@ -260,7 +293,9 @@ func (g *webDaemonGateway) selectDaemon(requested string) (resolvedWebDaemon, er
 }
 
 func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
-	resolved := resolvedWebDaemon{id: d.Name, local: d.Local}
+	resolved := resolvedWebDaemon{
+		id: d.Name, local: d.Local, credentialConfigured: webDaemonCredentialsConfigured(d),
+	}
 	if d.Local {
 		return resolved
 	}
@@ -290,6 +325,10 @@ func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
 		resolved.token = strings.TrimSpace(os.Getenv(d.TokenEnv))
 	}
 	return resolved
+}
+
+func webDaemonCredentialsConfigured(d config.CatalogDaemonConfig) bool {
+	return strings.TrimSpace(d.Token) != "" || strings.TrimSpace(d.TokenEnv) != ""
 }
 
 func redactWebDaemonURL(raw string) string {
@@ -361,13 +400,21 @@ func probeWebDaemon(parent context.Context, d resolvedWebDaemon) string {
 		return "down"
 	}
 	defer func() { _ = response.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 	switch {
 	case response.StatusCode >= 200 && response.StatusCode < 300:
+		var instance struct {
+			WebUIContractVersion string `json:"web_ui_contract_version"`
+		}
+		if err := json.NewDecoder(io.LimitReader(response.Body, 16<<10)).Decode(&instance); err != nil ||
+			instance.WebUIContractVersion != api.UISnapshotContractVersion {
+			return "upgrade_required"
+		}
 		return "connected"
 	case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 		return "auth_required"
 	default:
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
 		return "down"
 	}
 }
@@ -533,6 +580,9 @@ func webDaemonProxyRequestAllowed(method, path string) bool {
 		return false
 	}
 	if (path == pathPing || path == pathHealth) && method == http.MethodGet {
+		return true
+	}
+	if path == "/api/v1/projects/resolve" && method == http.MethodPost {
 		return true
 	}
 	request := &http.Request{Method: method, URL: &url.URL{Path: path}}

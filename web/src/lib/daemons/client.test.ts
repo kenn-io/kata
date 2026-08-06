@@ -70,6 +70,14 @@ describe('web daemon transport', () => {
             health: 'auth_required',
             hint: 'check credentials',
           },
+          {
+            id: 'example-legacy',
+            url: 'https://daemon.example',
+            default: false,
+            auth: 'none',
+            health: 'upgrade_required',
+            hint: 'daemon does not support the Kata web UI',
+          },
         ],
       }),
     )
@@ -77,6 +85,7 @@ describe('web daemon transport', () => {
     await expect(fetchWebDaemons(fetcher)).resolves.toEqual([
       expect.objectContaining({ id: 'example-local', default: true, health: 'connected' }),
       expect.objectContaining({ id: 'example-remote', auth: 'token', health: 'auth_required' }),
+      expect.objectContaining({ id: 'example-legacy', health: 'upgrade_required' }),
     ])
   })
 })

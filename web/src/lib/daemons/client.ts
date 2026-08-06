@@ -1,4 +1,4 @@
-export type WebDaemonHealth = 'connected' | 'auth_required' | 'down'
+export type WebDaemonHealth = 'connected' | 'auth_required' | 'down' | 'upgrade_required'
 
 export interface WebDaemonInfo {
   id: string
@@ -78,7 +78,10 @@ function parseDaemon(value: unknown): WebDaemonInfo {
     typeof url !== 'string' ||
     typeof isDefault !== 'boolean' ||
     (auth !== 'none' && auth !== 'token') ||
-    (health !== 'connected' && health !== 'auth_required' && health !== 'down') ||
+    (health !== 'connected' &&
+      health !== 'auth_required' &&
+      health !== 'down' &&
+      health !== 'upgrade_required') ||
     (hint !== undefined && typeof hint !== 'string')
   ) {
     throw new Error('Configured daemons are unavailable')

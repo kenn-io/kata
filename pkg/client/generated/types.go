@@ -1559,10 +1559,11 @@ func (i InitProjectResponseBody) Validate() error {
 }
 
 type InstanceResponseBody struct {
-	Auth          AuthInfoOut `json:"auth"`
-	InstanceUID   string      `json:"instance_uid" validate:"required"`
-	SchemaVersion int64       `json:"schema_version"`
-	Version       string      `json:"version" validate:"required"`
+	Auth                 AuthInfoOut `json:"auth"`
+	InstanceUID          string      `json:"instance_uid" validate:"required"`
+	SchemaVersion        int64       `json:"schema_version"`
+	Version              string      `json:"version" validate:"required"`
+	WebUIContractVersion *string     `json:"web_ui_contract_version,omitempty"`
 }
 
 func (i InstanceResponseBody) Validate() error {

@@ -1669,6 +1669,8 @@ components:
           type: integer
         version:
           type: string
+        web_ui_contract_version:
+          type: string
       required:
         - instance_uid
         - version

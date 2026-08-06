@@ -63,7 +63,7 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
-		data.CollectionLinks, err = readUICollectionLinks(ctx, tx, data.Issues)
+		data.CollectionLinks, err = readUICollectionLinks(ctx, tx, data.Issues, s.uiLinkDetailRead)
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
@@ -800,7 +800,9 @@ func readUIGraphUnresolved(
 	return edges, refs, nil
 }
 
-func readUICollectionLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]db.UILink, error) {
+func readUICollectionLinks(
+	ctx context.Context, tx *sql.Tx, issues []db.UIIssue, onDetailRead func(),
+) ([]db.UILink, error) {
 	if len(issues) == 0 {
 		return []db.UILink{}, nil
 	}
@@ -815,20 +817,57 @@ func readUICollectionLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue)
 		args = append(args, issue.ID)
 		toPlaceholders[idx] = fmt.Sprintf("$%d", len(args))
 	}
-	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE (from_issue_id IN (`+
-		strings.Join(fromPlaceholders, ",")+`) OR to_issue_id IN (`+
+	if onDetailRead != nil {
+		onDetailRead()
+	}
+	rows, err := tx.QueryContext(ctx, uiLinkSelect+` WHERE (l.from_issue_id IN (`+
+		strings.Join(fromPlaceholders, ",")+`) OR l.to_issue_id IN (`+
 		strings.Join(toPlaceholders, ",")+`))
-		AND from_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)
-		AND to_issue_id IN (SELECT endpoint.id FROM issues endpoint JOIN projects endpoint_project ON endpoint_project.id = endpoint.project_id WHERE endpoint.deleted_at IS NULL AND endpoint_project.deleted_at IS NULL)
-		ORDER BY id`, args...)
+		AND fi.deleted_at IS NULL AND fp.deleted_at IS NULL
+		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL
+		ORDER BY l.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI collection links: %w", mapSQLError(err, nil))
 	}
-	links, err := collectUILinks(rows)
-	if err != nil {
-		return nil, err
+	return collectUIDetailedLinks(rows)
+}
+
+const uiLinkSelect = `SELECT l.id, l.from_issue_id, l.from_issue_uid,
+	l.to_issue_id, l.to_issue_uid, l.type, l.author, l.created_at,
+	fp.name, fi.short_id, fi.status, tp.name, ti.short_id, ti.status
+	FROM links l
+	JOIN issues fi ON fi.id = l.from_issue_id
+	JOIN projects fp ON fp.id = fi.project_id
+	JOIN issues ti ON ti.id = l.to_issue_id
+	JOIN projects tp ON tp.id = ti.project_id`
+
+func collectUIDetailedLinks(rows *sql.Rows) ([]db.UILink, error) {
+	defer func() { _ = rows.Close() }()
+	links := []db.UILink{}
+	for rows.Next() {
+		var link db.UILink
+		var fromProject, fromShort, toProject, toShort string
+		var createdAt string
+		if err := rows.Scan(
+			&link.ID, &link.FromIssueID, &link.FromIssueUID,
+			&link.ToIssueID, &link.ToIssueUID, &link.Type, &link.Author, &createdAt,
+			&fromProject, &fromShort, &link.FromStatus, &toProject, &toShort, &link.ToStatus,
+		); err != nil {
+			return nil, fmt.Errorf("scan detailed UI link: %w", mapSQLError(err, nil))
+		}
+		var err error
+		link.CreatedAt, err = parseStoredTime(createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse detailed UI link created_at: %w", err)
+		}
+		link.FromQualifiedID = fromProject + "#" + fromShort
+		link.ToQualifiedID = toProject + "#" + toShort
+		links = append(links, link)
 	}
-	return enrichUILinks(ctx, tx, links)
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLError(err, nil)
+	}
+	return links, mapSQLError(rows.Close(), nil)
 }
 
 func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReferencesQuery,

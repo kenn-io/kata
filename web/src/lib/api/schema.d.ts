@@ -2005,6 +2005,7 @@ export interface components {
       /** Format: int64 */
       schema_version: number
       version: string
+      web_ui_contract_version?: string
     } & {
       [key: string]: unknown
     }

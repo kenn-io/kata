@@ -44,6 +44,7 @@ type Store struct {
 	rotationStage        func(context.Context) error
 	uiReadStage          func(context.Context) error
 	uiProjectStatsRead   func()
+	uiLinkDetailRead     func()
 }
 
 // Close releases a process-lifetime serving lease before closing the pool.

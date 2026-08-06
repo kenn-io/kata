@@ -75,12 +75,6 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 	if err != nil {
 		return "", &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 	}
-	projectID, _, err := resolveProjectIDAndNameForRef(
-		cmd.Context(), prepared.BaseURL, start, parsed.ProjectName,
-	)
-	if err != nil {
-		return "", err
-	}
 	httpClient := prepared.Client
 	if httpClient == nil {
 		httpClient, err = httpClientFor(cmd.Context(), prepared.BaseURL)
@@ -88,9 +82,24 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 			return "", err
 		}
 	}
+	resolutionBaseURL := strings.TrimRight(prepared.BaseURL, "/")
+	if !prepared.ConfiguredRemote {
+		resolutionBaseURL += "/api/v1/ui/proxy"
+	}
+	savedProject := flags.Project
+	flags.Project = parsed.ProjectName
+	projectID, _, err := func() (int64, string, error) {
+		defer func() { flags.Project = savedProject }()
+		return resolveProjectIDAndNameWithClient(
+			cmd.Context(), httpClient, resolutionBaseURL, start,
+		)
+	}()
+	if err != nil {
+		return "", err
+	}
 	status, body, err := httpDoJSON(cmd.Context(), httpClient, http.MethodGet,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s",
-			strings.TrimRight(prepared.BaseURL, "/"), projectID, url.PathEscape(parsed.RefForAPI)), nil)
+			resolutionBaseURL, projectID, url.PathEscape(parsed.RefForAPI)), nil)
 	if err != nil {
 		return "", err
 	}

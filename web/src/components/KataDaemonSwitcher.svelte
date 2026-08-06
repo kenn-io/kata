@@ -38,6 +38,7 @@
     if (daemon.id === displayId && activeStatusLabel) return activeStatusLabel
     if (daemon.health === 'connected') return 'connected'
     if (daemon.health === 'auth_required') return 'needs auth'
+    if (daemon.health === 'upgrade_required') return 'update required'
     return 'unreachable'
   }
 
@@ -62,18 +63,20 @@
   >
     <ServerIcon class="chip-icon" size={13} strokeWidth={1.9} aria-hidden="true" />
     <span class="chip-label">{displayId ?? 'kata'}</span>
+    <span
+      class="status-indicator"
+      class:active={Boolean(activeStatusLabel)}
+      class:error={activeStatusTone === 'error'}
+      title={activeStatusLabel}
+      aria-hidden="true"
+    ></span>
+    {#if activeStatusLabel}
+      <span class="status-message" role="status" aria-label="Kata daemon status">
+        {activeStatusLabel}
+      </span>
+    {/if}
     <ChevronDownIcon size={12} strokeWidth={2} aria-hidden="true" />
   </button>
-  {#if activeStatusLabel}
-    <span
-      class="daemon-status"
-      class:error={activeStatusTone === 'error'}
-      role="status"
-      aria-label="Kata daemon status"
-    >
-      {activeStatusLabel}
-    </span>
-  {/if}
 
   {#if open}
     <div class="daemon-menu" role="menu" aria-label="Configured Kata daemons">
@@ -144,14 +147,33 @@
     flex: none;
   }
 
-  .daemon-status {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
-    white-space: nowrap;
+  .status-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-amber);
+    flex: none;
+    visibility: hidden;
   }
 
-  .daemon-status.error {
-    color: var(--accent-red);
+  .status-indicator.active {
+    visibility: visible;
+  }
+
+  .status-indicator.error {
+    background: var(--accent-red);
+  }
+
+  .status-message {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .dot {
@@ -171,6 +193,10 @@
 
   .dot--down {
     background: var(--text-faint);
+  }
+
+  .dot--upgrade_required {
+    background: var(--accent-amber);
   }
 
   .dot--error {

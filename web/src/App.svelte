@@ -82,6 +82,7 @@
   let activeDaemonID = $state<string | undefined>()
   let daemonRosterLoaded = false
   let authenticationRecoveryPending = false
+  let authenticationRecoveryCompletion: Promise<boolean> | undefined
   let daemonSwitching = $state(false)
   let daemonError = $state<string | undefined>()
   let referenceAbort: AbortController | undefined
@@ -211,17 +212,17 @@
 
   async function login(token: string, requestedPath: string): Promise<void> {
     const session = await exchangeLoginToken(token, requestedPath)
-    navigateAfterAuthentication(session.returnPath)
+    await navigateAfterAuthentication(session.returnPath)
   }
 
-  function navigateAfterAuthentication(target: string): void {
+  async function navigateAfterAuthentication(target: string): Promise<boolean> {
     const parsed = new URL(target, window.location.origin)
     const canonicalTarget =
       parsed.pathname === '/' ? `/kata${parsed.search}` : `${parsed.pathname}${parsed.search}`
     history.replaceState(null, '', canonicalTarget)
     route = parseRoute(new URL(window.location.href))
     mode = route.kind === 'route-error' ? 'route-error' : authority?.snapshot ? 'ready' : 'loading'
-    if (route.kind !== 'route-error') void startAuthority()
+    return route.kind !== 'route-error' && (await startAuthority())
   }
 
   function search(reference: string): void {
@@ -690,7 +691,8 @@
     ) {
       authenticationRecoveryPending = true
       mode = authority?.snapshot ? 'ready' : 'loading'
-      void startAutomaticSession(returnPath, advertisedAuthentication)
+      authenticationRecoveryCompletion = startAutomaticSession(returnPath, advertisedAuthentication)
+      void authenticationRecoveryCompletion
       return
     }
     mode = authenticationView(selectedAuthentication)
@@ -699,24 +701,23 @@
   async function startAutomaticSession(
     requestedPath: string,
     authentication: 'loopback' | 'proxy',
-  ): Promise<void> {
+  ): Promise<boolean> {
     automaticSessionAttempted = authentication
     try {
       const session =
         authentication === 'proxy'
           ? await openTrustedProxySession(requestedPath)
           : await openLocalSession(requestedPath)
-      if (destroyed) return
+      if (destroyed) return false
       if (session) {
         authenticationRecoveryPending = false
-        navigateAfterAuthentication(session.returnPath)
-        return
+        return navigateAfterAuthentication(session.returnPath)
       }
     } catch {
       // Fall through to ordinary anonymous/login authority discovery.
     }
     authenticationRecoveryPending = false
-    await startAuthority()
+    return startAuthority()
   }
 
   async function startAuthority(): Promise<boolean> {
@@ -760,7 +761,7 @@
   }
 
   async function switchDaemon(id: string): Promise<void> {
-    if (daemonSwitching || id === activeDaemonID) return
+    if (daemonSwitching || authenticationRecoveryPending || id === activeDaemonID) return
     const sourceDaemon = activeDaemonID
     const sourceRoute = route.kind === 'route-error' ? acceptedRoute : route
     if (sourceDaemon && sourceRoute) saveDaemonRoute(sourceDaemon, serializeRoute(sourceRoute))
@@ -782,10 +783,21 @@
     acceptedRoute = undefined
     history.replaceState(null, '', serializeRoute(restored))
     mode = 'loading'
+    authenticationRecoveryCompletion = undefined
     const accepted = await startAuthority()
-    if (accepted) {
+    const recovery = authenticationRecoveryCompletion
+    const recovered = !accepted && recovery ? await recovery : false
+    if ((accepted || recovered) && activeDaemonID === id) {
       saveDaemonRoute(id, serializeRoute(restored))
       daemonSwitching = false
+      if (authenticationRecoveryCompletion === recovery)
+        authenticationRecoveryCompletion = undefined
+      return
+    }
+    if (authority?.authenticationRequired) {
+      daemonSwitching = false
+      if (authenticationRecoveryCompletion === recovery)
+        authenticationRecoveryCompletion = undefined
       return
     }
 
@@ -799,6 +811,7 @@
       await startAuthority()
     }
     daemonSwitching = false
+    if (authenticationRecoveryCompletion === recovery) authenticationRecoveryCompletion = undefined
   }
 
   async function refreshSnapshot(full: boolean): Promise<boolean> {

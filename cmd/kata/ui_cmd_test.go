@@ -110,8 +110,9 @@ func TestUICommandResolvesBeforeOpening(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	stubUICommandLaunch(t, client.PreparedWebUI{
-		BaseURL: server.URL,
-		Client:  server.Client(),
+		BaseURL:          server.URL,
+		ConfiguredRemote: true,
+		Client:           server.Client(),
 		Runtime: client.DiscoveredWebRuntime{
 			Origin: server.URL, OriginStable: true,
 			Capabilities: []string{"loopback", "sse"},
@@ -123,6 +124,42 @@ func TestUICommandResolvesBeforeOpening(t *testing.T) {
 	assert.Equal(t,
 		"/kata?scope=01HZNQ7VFPK1XGD8R5MABCD4EY&issue=01HZNQ7VFPK1XGD8R5MABCD4EX",
 		openedUIReturnPath)
+}
+
+func TestUICommandResolvesRefsThroughLocalDaemonGateway(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ui/proxy/api/v1/projects/resolve":
+			calls = append(calls, "resolve")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"project": map[string]any{"id": 7, "name": "example-project"},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ui/proxy/api/v1/projects/7/issues/abc4":
+			calls = append(calls, "issue")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issue": map[string]any{
+					"uid": "01HZNQ7VFPK1XGD8R5MABCD4EX", "project_uid": "01HZNQ7VFPK1XGD8R5MABCD4EY",
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	stubUICommandLaunch(t, client.PreparedWebUI{
+		BaseURL: server.URL,
+		Client:  server.Client(),
+		Runtime: client.DiscoveredWebRuntime{
+			Origin: server.URL, OriginStable: true,
+			Capabilities: []string{"loopback", "sse"},
+		},
+	})
+	_, err := runCmdOutput(t, nil, "--project", "example-project", "ui", "abc4")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"resolve", "issue"}, calls)
 }
 
 var (

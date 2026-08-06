@@ -25,6 +25,13 @@ describe('KataDaemonSwitcher', () => {
             auth: 'token',
             health: 'auth_required',
           },
+          {
+            id: 'example-legacy',
+            url: 'https://daemon.example',
+            default: false,
+            auth: 'none',
+            health: 'upgrade_required',
+          },
         ],
         activeId: 'example-local',
         onSelect,
@@ -34,6 +41,7 @@ describe('KataDaemonSwitcher', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
     expect(screen.getByRole('menu', { name: 'Configured Kata daemons' })).not.toBeNull()
     expect(screen.getByText('needs auth')).not.toBeNull()
+    expect(screen.getByText('update required')).not.toBeNull()
     await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
     expect(onSelect).toHaveBeenCalledWith('example-remote')
   })
@@ -59,6 +67,9 @@ describe('KataDaemonSwitcher', () => {
     expect(screen.getByRole('status', { name: 'Kata daemon status' }).textContent).toContain(
       'Reconnecting…',
     )
+    expect(
+      screen.getByRole('status', { name: 'Kata daemon status' }).closest('button'),
+    ).not.toBeNull()
     expect(screen.getByText('example-local')).not.toBeNull()
   })
 })

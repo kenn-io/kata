@@ -20,7 +20,7 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 		assert.Equal(t, "/api/v1/instance", r.URL.Path)
 		assert.Equal(t, "Bearer target-token", r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"instance_uid":"01J00000000000000000000001"}`)
+		_, _ = io.WriteString(w, `{"instance_uid":"01J00000000000000000000001","web_ui_contract_version":"1"}`)
 	}))
 	t.Cleanup(connected.Close)
 	authRequired := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -62,6 +62,81 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 	assert.True(t, roster.Daemons[1].Default)
 	assert.Equal(t, "token", roster.Daemons[1].Auth)
 	assert.Equal(t, "auth_required", roster.Daemons[2].Health)
+}
+
+func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {
+	legacy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"instance_uid":"01J00000000000000000000001"}`)
+	}))
+	t.Cleanup(legacy.Close)
+
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now,
+		WebDaemons: []config.CatalogDaemonConfig{
+			{Name: "example-local", Local: true},
+			{Name: "example-remote", URL: legacy.URL, AllowInsecure: true},
+		},
+	})
+
+	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	var roster struct {
+		Daemons []struct {
+			Health string `json:"health"`
+			Hint   string `json:"hint"`
+		} `json:"daemons"`
+	}
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&roster))
+	require.Len(t, roster.Daemons, 2)
+	assert.Equal(t, "upgrade_required", roster.Daemons[1].Health)
+	assert.Equal(t, "daemon does not support the Kata web UI", roster.Daemons[1].Hint)
+}
+
+func TestAnonymousReadonlyRosterHidesConfiguredCredentialTargetsBeforeProbing(t *testing.T) {
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now, InsecureReadonly: true, ActiveWebDaemon: "example-remote",
+		WebDaemons: []config.CatalogDaemonConfig{
+			{Name: "example-local", Local: true},
+			{Name: "example-remote", URL: upstream.URL, TokenEnv: "EXAMPLE_UNSET_TOKEN", AllowInsecure: true},
+		},
+	})
+
+	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	var roster struct {
+		Daemons []struct {
+			ID      string `json:"id"`
+			Default bool   `json:"default"`
+		} `json:"daemons"`
+	}
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&roster))
+	require.Len(t, roster.Daemons, 1)
+	assert.Equal(t, "example-local", roster.Daemons[0].ID)
+	assert.True(t, roster.Daemons[0].Default)
+	assert.Equal(t, int64(0), calls.Load())
+
+	request, err := http.NewRequest(http.MethodGet,
+		server.URL+"/api/v1/ui/proxy/api/v1/ui/snapshot?view=all-open", nil)
+	require.NoError(t, err)
+	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
+	response, err = http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusForbidden, response.StatusCode)
+	assert.Equal(t, int64(0), calls.Load())
 }
 
 func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
@@ -133,6 +208,7 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 		want int
 	}{
 		{name: "ordinary metadata", path: "/api/v1/projects/7/metadata", body: `{}`, want: http.StatusNoContent},
+		{name: "project lookup", path: "/api/v1/projects/resolve", body: `{"name":"example-project"}`, want: http.StatusNoContent},
 		{name: "filesystem project", path: "/api/v1/projects", body: `{"start_path":" "}`, want: http.StatusForbidden},
 		{name: "federation", path: "/api/v1/federation/replicas", body: `{}`, want: http.StatusForbidden},
 		{name: "purge", path: "/api/v1/projects/7/actions/purge", body: `{}`, want: http.StatusForbidden},
@@ -149,7 +225,7 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 			assert.Equal(t, test.want, response.StatusCode)
 		})
 	}
-	assert.Equal(t, int64(1), calls.Load())
+	assert.Equal(t, int64(2), calls.Load())
 }
 
 func TestWebDaemonProxyDoesNotMisclassifyUpstreamAuthAsBrowserExpiry(t *testing.T) {

@@ -25,11 +25,13 @@ func TestInstance_ReturnsLocalUID(t *testing.T) {
 	ts, d := startDefaultTestServer(t)
 
 	var body struct {
-		InstanceUID string `json:"instance_uid"`
+		InstanceUID          string `json:"instance_uid"`
+		WebUIContractVersion string `json:"web_ui_contract_version"`
 	}
 	getAndUnmarshal(t, ts, "/api/v1/instance", http.StatusOK, &body)
 	assert.Equal(t, d.db.InstanceUID(), body.InstanceUID)
 	assert.True(t, uid.Valid(body.InstanceUID), "instance_uid %q invalid", body.InstanceUID)
+	assert.Equal(t, "1", body.WebUIContractVersion)
 }
 
 // TestInstance_503WhenUIDUnset covers spec §8.8 second bullet: the handler
