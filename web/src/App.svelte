@@ -712,8 +712,14 @@
           : await openLocalSession(requestedPath)
       if (destroyed) return false
       if (session) {
-        authenticationRecoveryPending = false
-        return navigateAfterAuthentication(session.returnPath)
+        let accepted = false
+        try {
+          accepted = await navigateAfterAuthentication(session.returnPath)
+        } finally {
+          authenticationRecoveryPending = false
+        }
+        if (!accepted && snapshots.state.authenticationRequired) requireAuthentication()
+        return accepted
       }
     } catch {
       // Fall through to ordinary anonymous/login authority discovery.

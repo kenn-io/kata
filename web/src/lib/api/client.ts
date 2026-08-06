@@ -31,7 +31,9 @@ export function createCredentialedFetch(
       redirect: 'error',
       headers,
     })
-    if (response.status === 401) onAuthenticationRequired()
+    if (response.status === 401 && readCredentials()?.session === credentials?.session) {
+      onAuthenticationRequired()
+    }
     return response
   }
 }

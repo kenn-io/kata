@@ -42,4 +42,25 @@ describe('Kata browser API credentials', () => {
     expect(response.status).toBe(401)
     expect(onAuthenticationRequired).toHaveBeenCalledTimes(1)
   })
+
+  it('ignores a delayed 401 from a superseded browser session', async () => {
+    let credentials = { session: 'expired-session', csrf: 'expired-csrf' }
+    let release!: (response: Response) => void
+    const response = new Promise<Response>((resolve) => {
+      release = resolve
+    })
+    const onAuthenticationRequired = vi.fn()
+    const fetcher = createCredentialedFetch(
+      () => credentials,
+      vi.fn(async () => response) as typeof fetch,
+      onAuthenticationRequired,
+    )
+
+    const pending = fetcher('/api/v1/ui/references')
+    credentials = { session: 'renewed-session', csrf: 'renewed-csrf' }
+    release(new Response('', { status: 401 }))
+
+    expect((await pending).status).toBe(401)
+    expect(onAuthenticationRequired).not.toHaveBeenCalled()
+  })
 })

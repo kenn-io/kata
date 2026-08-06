@@ -403,6 +403,82 @@ describe('App', () => {
     )
   })
 
+  it('ignores a delayed expired-session 401 while renewed authority is loading', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let referenceReads = 0
+    let snapshotReads = 0
+    let releaseExpiredReference!: (response: Response) => void
+    const expiredReference = new Promise<Response>((resolve) => {
+      releaseExpiredReference = resolve
+    })
+    let releaseRenewedSnapshot!: (response: Response) => void
+    const renewedSnapshot = new Promise<Response>((resolve) => {
+      releaseRenewedSnapshot = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?view=today',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'identity',
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          referenceReads += 1
+          if (referenceReads === 1) return expiredReference
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          if (snapshotReads === 2) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          if (snapshotReads === 3) return renewedSnapshot
+          return Response.json(snapshot(), { headers: { ETag: `"snapshot-${snapshotReads}"` } })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await waitFor(() => expect(referenceReads).toBe(1))
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+    await waitFor(() =>
+      expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
+    )
+    await waitFor(() => expect(snapshotReads).toBe(3))
+
+    releaseExpiredReference(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'loopback' },
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    releaseRenewedSnapshot(Response.json(snapshot(), { headers: { ETag: '"renewed-snapshot"' } }))
+
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
+  })
+
   it('reloads the configured daemon roster after transparent reauthentication', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
