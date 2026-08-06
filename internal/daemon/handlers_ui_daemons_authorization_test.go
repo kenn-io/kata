@@ -83,7 +83,7 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 	t.Cleanup(upstream.Close)
 
 	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
-		Name: "example-remote", URL: upstream.URL + "/gateway", Token: "target-token", AllowInsecure: true,
+		Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
 	})
 	issued, err := manager.IssueSession(Principal{Kind: PrincipalBootstrap}, "/kata")
 	require.NoError(t, err)
@@ -104,6 +104,57 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 	assert.Equal(t, http.StatusNotModified, second.Code, second.Body.String())
 	assert.Equal(t, gatewayETag, second.Header().Get("ETag"))
 	assert.Equal(t, 2, snapshotReads)
+}
+
+func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testing.T) {
+	var calls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	gateway := &webDaemonGateway{
+		catalog: []config.CatalogDaemonConfig{{
+			Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+		}},
+		health: make(map[string]webDaemonHealthEntry), inflight: make(map[string]*webDaemonInflightProbe),
+		proxies: make(map[string]http.Handler),
+	}
+	for _, principal := range []Principal{
+		{Kind: PrincipalBootstrap},
+		{Kind: PrincipalTrustedProxyAbsent},
+	} {
+		t.Run(string(principal.Kind), func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/7/metadata",
+				bytes.NewBufferString(`{}`))
+			request.Header.Set(webDaemonHeaderName, "example-remote")
+			request.Header.Set("Content-Type", "application/json")
+			request = request.WithContext(WithPrincipal(request.Context(), principal))
+			response := httptest.NewRecorder()
+
+			gateway.ServeHTTP(response, request)
+
+			assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+		})
+	}
+	assert.Equal(t, 0, calls)
+}
+
+func TestResolveWebDaemonRequiresCanonicalRootOrigin(t *testing.T) {
+	t.Run("canonicalizes origin", func(t *testing.T) {
+		resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+			Name: "example-remote", URL: "https://DAEMON.EXAMPLE:443/",
+		})
+		assert.Equal(t, "https://daemon.example", resolved.baseURL)
+	})
+
+	t.Run("rejects path prefix", func(t *testing.T) {
+		resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+			Name: "example-remote", URL: "https://daemon.example/gateway",
+		})
+		assert.Empty(t, resolved.baseURL)
+	})
 }
 
 func TestWebDaemonGatewayRejectsNullSnapshotEnvelope(t *testing.T) {

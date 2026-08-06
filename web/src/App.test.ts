@@ -188,6 +188,9 @@ describe('App', () => {
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           )
         }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
         snapshotReads += 1
         if (snapshotReads === 1)
           return new Response('', {
@@ -206,6 +209,72 @@ describe('App', () => {
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
     await waitFor(() =>
       expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
+    )
+  })
+
+  it('reloads the configured daemon roster after transparent reauthentication', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let rosterReads = 0
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') {
+          rosterReads += 1
+          if (rosterReads === 1) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          return Response.json({
+            daemons: [
+              { id: 'example-local', url: '', default: false, auth: 'none', health: 'connected' },
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: true,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'request',
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotRequests.push(request)
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await waitFor(() => expect(rosterReads).toBe(2))
+    await waitFor(() =>
+      expect(snapshotRequests.at(-1)?.headers.get('X-Kata-Web-Daemon')).toBe('example-remote'),
     )
   })
 

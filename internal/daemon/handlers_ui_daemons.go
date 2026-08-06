@@ -132,6 +132,11 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_operation_forbidden")
 		return
 	}
+	policy := g.sourcePolicy(r.Context())
+	if isMutation(r.Method) && !policy.writable {
+		writeWebDaemonError(w, http.StatusForbidden, "read_only")
+		return
+	}
 	if rejectWebDaemonProjectRequest(w, r) {
 		return
 	}
@@ -140,7 +145,6 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	policy := g.sourcePolicy(r.Context())
 	if r.URL.Path == pathEventsStreamPath && (!d.local || policy.insecureReadonly) {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_stream_forbidden")
 		return
@@ -204,10 +208,12 @@ type webDaemonSourcePolicy struct {
 }
 
 func (g *webDaemonGateway) sourcePolicy(ctx context.Context) webDaemonSourcePolicy {
-	policy := webDaemonSourcePolicy{writable: !g.insecureReadonly}
+	principal, _ := PrincipalFromContext(ctx)
+	policy := webDaemonSourcePolicy{
+		writable: !g.insecureReadonly && principalAllowsWebWrites(principal),
+	}
 	if g.sessions != nil {
-		principal, _ := PrincipalFromContext(ctx)
-		policy.writable = g.sessions.CanWrite(principal)
+		policy.writable = policy.writable && g.sessions.CanWrite(principal)
 	}
 	policy.insecureReadonly = insecureReadonlyRequest(ctx)
 	if policy.insecureReadonly {
@@ -258,9 +264,19 @@ func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
 	if d.Local {
 		return resolved
 	}
-	parsed, err := url.Parse(strings.TrimSpace(d.URL))
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
-		parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	trimmed := strings.TrimSpace(d.URL)
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Opaque != "" || parsed.User != nil ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawPath != "" ||
+		parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.Contains(trimmed, "#") {
+		return resolved
+	}
+	canonical, err := config.CanonicalHTTPOrigin(trimmed)
+	if err != nil {
+		return resolved
+	}
+	parsed, err = url.Parse(canonical)
+	if err != nil {
 		return resolved
 	}
 	if parsed.Scheme == "http" && !d.AllowInsecure {
@@ -268,8 +284,7 @@ func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
 			return resolved
 		}
 	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/")
-	resolved.baseURL = parsed.String()
+	resolved.baseURL = canonical
 	resolved.token = d.Token
 	if resolved.token == "" && d.TokenEnv != "" {
 		resolved.token = strings.TrimSpace(os.Getenv(d.TokenEnv))
@@ -374,7 +389,7 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.SetURL(target)
 			request.Out.Host = target.Host
-			stripWebDaemonBrowserCredentials(request.Out.Header)
+			request.Out.Header = webDaemonOutboundHeaders(request.In.Header)
 			if d.token != "" {
 				request.Out.Header.Set("Authorization", "Bearer "+d.token)
 			}
@@ -430,9 +445,7 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 }
 
 func webDaemonCapabilityPath(path string) bool {
-	return path == "/api/v1/ui/snapshot" || path == "/api/v1/ui/references" ||
-		strings.HasSuffix(path, "/api/v1/ui/snapshot") ||
-		strings.HasSuffix(path, "/api/v1/ui/references")
+	return path == "/api/v1/ui/snapshot" || path == "/api/v1/ui/references"
 }
 
 func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSourcePolicy) error {
@@ -501,6 +514,18 @@ func stripWebDaemonBrowserCredentials(headers http.Header) {
 	} {
 		headers.Del(name)
 	}
+}
+
+func webDaemonOutboundHeaders(in http.Header) http.Header {
+	out := make(http.Header)
+	for _, name := range []string{
+		"Accept", "Content-Type", "Idempotency-Key", "If-Match", "If-None-Match",
+	} {
+		if values := in.Values(name); len(values) > 0 {
+			out[name] = append([]string(nil), values...)
+		}
+	}
+	return out
 }
 
 func webDaemonProxyRequestAllowed(method, path string) bool {

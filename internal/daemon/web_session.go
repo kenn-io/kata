@@ -308,9 +308,10 @@ func (m *WebSessionManager) Writable() bool { return m.writable }
 // CanWrite reports whether listener policy and the authenticated browser
 // principal both permit ordinary mutations.
 func (m *WebSessionManager) CanWrite(principal Principal) bool {
-	if !m.writable {
-		return false
-	}
+	return m.writable && principalAllowsWebWrites(principal)
+}
+
+func principalAllowsWebWrites(principal Principal) bool {
 	switch principal.Kind {
 	case PrincipalBootstrap, PrincipalTrustedProxyAbsent:
 		return false

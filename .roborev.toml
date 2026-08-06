@@ -117,7 +117,25 @@ by the daemon. Reviewers MUST enforce all of these invariants:
    rejection behavior. Mutation controls stay disabled for stale or read-only
    authority and while any mutation is pending; do not allow project creation
    to overlap the shared mutation state.
-9. The production CSP keeps scripts same-origin-only. Kata's dynamic layout
+9. The configured-daemon gateway is a server-side credential broker, not an
+   authority upgrade. Catalog targets and their tokens are operator-trusted,
+   but target tokens never enter the browser and may exercise only the source
+   principal's ordinary SPA authority. Non-writable source principals cannot
+   mutate targets; advertised capabilities are intersected with source policy;
+   and anonymous read-only clients cannot use credentialed targets. The local-
+   web SPA allowlist excludes token administration, federation, integrations,
+   purge operations, and daemon-owner filesystem or alias initialization.
+   Outbound proxy headers use an explicit API allowlist and exclude browser
+   credentials, forwarding headers, and every trusted-proxy actor assertion.
+   Targets must be canonical root HTTP(S) origins, credentials remain pinned to
+   that origin, and redirects are rejected. Proxied SSE is intentionally
+   disabled until source sessions can be revalidated before every event, reset,
+   and heartbeat; remote workspaces poll instead. Valid findings include source-
+   policy escalation, target-token or actor-header misrouting, anonymous-readonly
+   bypass, cross-origin credential redirects, and streams surviving source
+   revocation. Missing multi-tenant ACLs between principals already trusted for
+   one configured daemon are not findings by themselves.
+10. The production CSP keeps scripts same-origin-only. Kata's dynamic layout
    requires inline style attributes, so `style-src-attr 'unsafe-inline'` is an
    intentional narrow allowance and must not be broadened to inline scripts.
 

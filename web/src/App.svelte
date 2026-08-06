@@ -81,6 +81,7 @@
   let daemonInfos = $state<WebDaemonInfo[]>([])
   let activeDaemonID = $state<string | undefined>()
   let daemonRosterLoaded = false
+  let authenticationRecoveryPending = false
   let daemonSwitching = $state(false)
   let daemonError = $state<string | undefined>()
   let referenceAbort: AbortController | undefined
@@ -675,6 +676,7 @@
   }
 
   function requireAuthentication(): void {
+    if (authenticationRecoveryPending) return
     clearSessionCredentials()
     scheduler.stop()
     stream.stop()
@@ -686,6 +688,7 @@
       selectedAuthentication === undefined &&
       automaticSessionAttempted !== advertisedAuthentication
     ) {
+      authenticationRecoveryPending = true
       mode = 'loading'
       void startAutomaticSession(returnPath, advertisedAuthentication)
       return
@@ -705,12 +708,14 @@
           : await openLocalSession(requestedPath)
       if (destroyed) return
       if (session) {
+        authenticationRecoveryPending = false
         navigateAfterAuthentication(session.returnPath)
         return
       }
     } catch {
       // Fall through to ordinary anonymous/login authority discovery.
     }
+    authenticationRecoveryPending = false
     await startAuthority()
   }
 
@@ -730,9 +735,10 @@
 
   async function loadDaemonRoster(): Promise<void> {
     if (daemonRosterLoaded) return
-    daemonRosterLoaded = true
     try {
-      daemonInfos = await fetchWebDaemons(browserFetch)
+      const loadedDaemons = await fetchWebDaemons(browserFetch)
+      daemonInfos = loadedDaemons
+      daemonRosterLoaded = true
       activeDaemonID = daemonInfos.find((daemon) => daemon.default)?.id
       daemonError = undefined
       if (activeDaemonID && window.location.pathname === '/kata' && !window.location.search) {
@@ -746,8 +752,10 @@
     } catch {
       // A malformed gateway response cannot own daemon selection. The direct
       // local authority path remains available so the recovery UI can render.
-      daemonInfos = []
-      activeDaemonID = undefined
+      if (!daemonRosterLoaded) {
+        daemonInfos = []
+        activeDaemonID = undefined
+      }
     }
   }
 
