@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 )
 
 func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
@@ -226,6 +228,30 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 		})
 	}
 	assert.Equal(t, int64(2), calls.Load())
+}
+
+func TestWebDaemonGatewayAllowsIssueReferenceLookup(t *testing.T) {
+	d := openTestDB(t)
+	project, err := d.db.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Example issue", Author: "user-a",
+	})
+	require.NoError(t, err)
+	server := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now,
+		WebDaemons: []config.CatalogDaemonConfig{{Name: "example-local", Local: true}},
+	})
+
+	request, err := http.NewRequest(http.MethodGet, fmt.Sprintf(
+		"%s/api/v1/ui/proxy/api/v1/projects/%d/issues/%s", server.URL, project.ID, issue.ShortID,
+	), nil)
+	require.NoError(t, err)
+	request.Header.Set("X-Kata-Web-Daemon", "example-local")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
 
 func TestWebDaemonProxyDoesNotMisclassifyUpstreamAuthAsBrowserExpiry(t *testing.T) {

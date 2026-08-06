@@ -457,7 +457,7 @@ func webLocalIssueRequestAllowed(method string, parts []string) bool {
 		return method == http.MethodPost
 	}
 	if len(parts) == 1 {
-		return method == http.MethodPatch
+		return method == http.MethodGet || method == http.MethodPatch
 	}
 	if len(parts) == 2 {
 		switch parts[1] {

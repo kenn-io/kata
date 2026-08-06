@@ -61,6 +61,8 @@
     history.replaceState(null, '', `/kata${window.location.search}${window.location.hash}`)
   }
   const launch = consumeLaunchFragment(window.location, history.replaceState.bind(history))
+  const launchDaemonID = launch.daemonID
+  const directDaemonTarget = launch.directTarget === true
   const selectedAuthentication = selectAuthenticationMode(launch)
   const initialRoute = parseRoute(new URL(window.location.href))
   let route = $state(initialRoute)
@@ -736,11 +738,19 @@
 
   async function loadDaemonRoster(): Promise<void> {
     if (daemonRosterLoaded) return
+    if (directDaemonTarget) {
+      daemonRosterLoaded = true
+      daemonInfos = []
+      activeDaemonID = undefined
+      return
+    }
     try {
       const loadedDaemons = await fetchWebDaemons(browserFetch)
       daemonInfos = loadedDaemons
       daemonRosterLoaded = true
-      activeDaemonID = daemonInfos.find((daemon) => daemon.default)?.id
+      activeDaemonID =
+        daemonInfos.find((daemon) => daemon.id === launchDaemonID)?.id ??
+        daemonInfos.find((daemon) => daemon.default)?.id
       daemonError = undefined
       if (activeDaemonID && window.location.pathname === '/kata' && !window.location.search) {
         const persisted = loadDaemonRoute(activeDaemonID)

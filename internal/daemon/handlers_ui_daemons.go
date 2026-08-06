@@ -48,6 +48,7 @@ type resolvedWebDaemon struct {
 	id, baseURL, token   string
 	local                bool
 	credentialConfigured bool
+	allowInsecure        bool
 }
 
 type webDaemonHealthEntry struct {
@@ -61,11 +62,12 @@ type webDaemonInflightProbe struct {
 }
 
 type webDaemonGateway struct {
-	catalog          []config.CatalogDaemonConfig
-	active           string
-	localMux         *http.ServeMux
-	sessions         *WebSessionManager
-	insecureReadonly bool
+	catalog             []config.CatalogDaemonConfig
+	active              string
+	localMux            *http.ServeMux
+	sessions            *WebSessionManager
+	insecureReadonly    bool
+	trustPrivateNetwork bool
 
 	mu       sync.Mutex
 	health   map[string]webDaemonHealthEntry
@@ -78,9 +80,10 @@ func registerWebDaemonHandlers(mux *http.ServeMux, cfg ServerConfig) {
 		catalog: append([]config.CatalogDaemonConfig(nil), cfg.WebDaemons...),
 		active:  strings.TrimSpace(cfg.ActiveWebDaemon), localMux: mux,
 		sessions: cfg.WebSessions, insecureReadonly: cfg.InsecureReadonly,
-		health:   make(map[string]webDaemonHealthEntry),
-		inflight: make(map[string]*webDaemonInflightProbe),
-		proxies:  make(map[string]http.Handler),
+		trustPrivateNetwork: cfg.Auth.TrustPrivateNetwork,
+		health:              make(map[string]webDaemonHealthEntry),
+		inflight:            make(map[string]*webDaemonInflightProbe),
+		proxies:             make(map[string]http.Handler),
 	}
 	mux.HandleFunc(http.MethodGet+" /api/v1/ui/daemons", gateway.list)
 	mux.Handle(webDaemonProxyPrefix+"/", http.StripPrefix(webDaemonProxyPrefix, gateway))
@@ -295,6 +298,7 @@ func (g *webDaemonGateway) selectDaemon(requested string) (resolvedWebDaemon, er
 func resolveWebDaemon(d config.CatalogDaemonConfig) resolvedWebDaemon {
 	resolved := resolvedWebDaemon{
 		id: d.Name, local: d.Local, credentialConfigured: webDaemonCredentialsConfigured(d),
+		allowInsecure: d.AllowInsecure,
 	}
 	if d.Local {
 		return resolved
@@ -368,7 +372,7 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 	g.inflight[key] = probe
 	g.mu.Unlock()
 
-	state := probeWebDaemon(ctx, d)
+	state := probeWebDaemon(ctx, d, g.trustPrivateNetwork)
 	g.mu.Lock()
 	probe.state = state
 	g.health[key] = webDaemonHealthEntry{state: state, expires: time.Now().Add(webDaemonHealthTTL)}
@@ -378,7 +382,7 @@ func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon
 	return state
 }
 
-func probeWebDaemon(parent context.Context, d resolvedWebDaemon) string {
+func probeWebDaemon(parent context.Context, d resolvedWebDaemon, trustPrivateNetwork bool) string {
 	ctx, cancel := context.WithTimeout(parent, webDaemonProbeTimeout)
 	defer cancel()
 	target, err := url.JoinPath(d.baseURL, "api/v1/instance")
@@ -389,10 +393,11 @@ func probeWebDaemon(parent context.Context, d resolvedWebDaemon) string {
 	if err != nil {
 		return "down"
 	}
-	if d.token != "" {
-		request.Header.Set("Authorization", "Bearer "+d.token)
+	transport, err := webDaemonBearerTransport(d, trustPrivateNetwork)
+	if err != nil {
+		return "down"
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
 	response, err := client.Do(request)
@@ -431,15 +436,17 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 	if err != nil || target.Host == "" {
 		return nil, errors.New("invalid daemon target")
 	}
+	transport, err := webDaemonBearerTransport(d, g.trustPrivateNetwork)
+	if err != nil {
+		return nil, err
+	}
 	reverse := &httputil.ReverseProxy{
+		Transport:     transport,
 		FlushInterval: -1,
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.SetURL(target)
 			request.Out.Host = target.Host
 			request.Out.Header = webDaemonOutboundHeaders(request.In.Header)
-			if d.token != "" {
-				request.Out.Header.Set("Authorization", "Bearer "+d.token)
-			}
 		},
 		ModifyResponse: func(response *http.Response) error {
 			response.Header.Del("Set-Cookie")
@@ -489,6 +496,26 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 	g.proxies[key] = handler
 	g.mu.Unlock()
 	return handler, nil
+}
+
+func webDaemonBearerTransport(d resolvedWebDaemon, trustPrivateNetwork bool) (http.RoundTripper, error) {
+	if d.token == "" {
+		return http.DefaultTransport, nil
+	}
+	policy := config.BearerPolicy{
+		TrustPrivateNetwork: trustPrivateNetwork, AllowInsecurePlaintext: d.allowInsecure,
+	}
+	var origin string
+	var err error
+	if d.allowInsecure {
+		origin, err = config.BearerOriginForBaseURLAllowInsecure(d.baseURL)
+	} else {
+		origin, err = config.BearerOriginForBaseURLWithTrust(d.baseURL, trustPrivateNetwork)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return config.BearerTransportWithPolicy(http.DefaultTransport, d.token, origin, policy), nil
 }
 
 func webDaemonCapabilityPath(path string) bool {

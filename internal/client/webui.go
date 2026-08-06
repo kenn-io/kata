@@ -32,6 +32,7 @@ type PrepareWebUIOptions struct {
 type PreparedWebUI struct {
 	BaseURL             string
 	ConfiguredRemote    bool
+	DaemonName          string
 	AllowInsecure       bool
 	TrustPrivateNetwork bool
 	Client              *http.Client
@@ -67,6 +68,7 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 	}
 	prepared := PreparedWebUI{
 		BaseURL: baseURL, ConfiguredRemote: configuredRemote, AllowInsecure: allowInsecure,
+		DaemonName:          strings.TrimSpace(opts.DaemonName),
 		TrustPrivateNetwork: resolveAuthConfig().TrustPrivateNetwork, Client: httpClient,
 	}
 	if configuredRemote {
@@ -168,7 +170,11 @@ func OpenWebUI(
 				return errors.New("remote daemon did not advertise a usable canonical browser origin")
 			}
 			target := webLaunchURL(anonymousOrigin)
-			target += "#" + url.Values{"login": {"1"}, "return_path": {normalized}}.Encode()
+			fragment := url.Values{"login": {"1"}, "return_path": {normalized}}
+			if prepared.DaemonName != "" {
+				fragment.Set("direct", "1")
+			}
+			target += "#" + fragment.Encode()
 			return opener(ctx, WebUILaunch{PublicURL: target})
 		}
 		if err != nil {
@@ -177,7 +183,11 @@ func OpenWebUI(
 		if anonymousOrigin == nil {
 			return errors.New("remote daemon did not advertise a usable browser origin")
 		}
-		return opener(ctx, WebUILaunch{PublicURL: webLaunchURLAt(anonymousOrigin, normalized)})
+		target := webLaunchURLAt(anonymousOrigin, normalized)
+		if prepared.DaemonName != "" {
+			target += "#direct=1"
+		}
+		return opener(ctx, WebUILaunch{PublicURL: target})
 	}
 	if err := validateLocalWebRuntime(prepared.Runtime); err != nil {
 		return err
@@ -189,10 +199,18 @@ func OpenWebUI(
 	if runtimeHasCapability(prepared.Runtime, "loopback") ||
 		runtimeHasCapability(prepared.Runtime, "readonly") ||
 		runtimeHasCapability(prepared.Runtime, "proxy") {
-		return opener(ctx, WebUILaunch{PublicURL: webLaunchURLAt(base, normalized)})
+		target := webLaunchURLAt(base, normalized)
+		if prepared.DaemonName != "" {
+			target += "#" + url.Values{"daemon": {prepared.DaemonName}}.Encode()
+		}
+		return opener(ctx, WebUILaunch{PublicURL: target})
 	}
 	target := webLaunchURL(base)
-	target += "#" + url.Values{"login": {"1"}, "return_path": {normalized}}.Encode()
+	fragment := url.Values{"login": {"1"}, "return_path": {normalized}}
+	if prepared.DaemonName != "" {
+		fragment.Set("daemon", prepared.DaemonName)
+	}
+	target += "#" + fragment.Encode()
 	return opener(ctx, WebUILaunch{PublicURL: target})
 }
 

@@ -185,6 +185,25 @@ func TestResolveWebDaemonRequiresCanonicalRootOrigin(t *testing.T) {
 	})
 }
 
+func TestWebDaemonBearerTransportRequiresExplicitPlaintextTrust(t *testing.T) {
+	resolved := resolveWebDaemon(config.CatalogDaemonConfig{
+		Name: "example-remote", URL: "http://100.64.0.5:7777", Token: "target-token",
+	})
+
+	_, err := webDaemonBearerTransport(resolved, false)
+	require.Error(t, err)
+
+	_, err = webDaemonBearerTransport(resolved, true)
+	require.NoError(t, err)
+
+	resolved = resolveWebDaemon(config.CatalogDaemonConfig{
+		Name: "example-remote", URL: "http://daemon.example", Token: "target-token",
+		AllowInsecure: true,
+	})
+	_, err = webDaemonBearerTransport(resolved, false)
+	require.NoError(t, err)
+}
+
 func TestWebDaemonGatewayRejectsNullSnapshotEnvelope(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

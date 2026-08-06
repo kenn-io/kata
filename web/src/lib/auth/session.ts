@@ -35,9 +35,12 @@ export interface AuthenticatedSession {
   returnPath: string
 }
 
-export type LaunchState =
-  | { kind: 'login'; returnPath: string }
-  | { kind: 'none'; returnPath: string }
+export type LaunchState = {
+  kind: 'login' | 'none'
+  returnPath: string
+  daemonID?: string
+  directTarget?: boolean
+}
 
 export function selectAuthenticationMode(
   launch: LaunchState,
@@ -72,10 +75,15 @@ export function consumeLaunchFragment(
   const fragment = new URLSearchParams(location.hash.slice(1))
   replaceState(null, '', currentPath)
   const returnPath = normalizeReturnPath(fragment.get('return_path'), currentPath)
-  if (fragment.get('login') === '1') {
-    return { kind: 'login', returnPath }
+  const daemonID = fragment.get('daemon')?.trim()
+  const target = {
+    ...(daemonID ? { daemonID } : {}),
+    ...(fragment.get('direct') === '1' ? { directTarget: true } : {}),
   }
-  return { kind: 'none', returnPath: currentPath }
+  if (fragment.get('login') === '1') {
+    return { kind: 'login', returnPath, ...target }
+  }
+  return { kind: 'none', returnPath: currentPath, ...target }
 }
 
 export async function openLocalSession(
