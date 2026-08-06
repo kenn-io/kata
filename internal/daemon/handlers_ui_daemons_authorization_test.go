@@ -106,6 +106,25 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 	assert.Equal(t, 2, snapshotReads)
 }
 
+func TestWebDaemonGatewayRejectsNullSnapshotEnvelope(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "null")
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: upstream.URL, AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+
+	response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet,
+		"/api/v1/ui/snapshot", nil, "")
+
+	assert.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+}
+
 func TestWebDaemonGatewayRejectsRemoteStreamsAndCredentialedReadonlyTargets(t *testing.T) {
 	var calls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

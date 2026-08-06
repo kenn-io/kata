@@ -445,6 +445,9 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return fmt.Errorf("decode daemon capability response: %w", err)
 	}
+	if envelope == nil {
+		return errors.New("decode daemon capability response: expected object")
+	}
 	var capabilities api.UICapabilities
 	if err := json.Unmarshal(envelope["capabilities"], &capabilities); err != nil {
 		return fmt.Errorf("decode daemon capabilities: %w", err)
@@ -512,5 +515,11 @@ func writeWebDaemonError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, `{"error":{"code":%q}}`, code)
+	payload := struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}{}
+	payload.Error.Code = code
+	_ = json.NewEncoder(w).Encode(payload)
 }
