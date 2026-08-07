@@ -245,7 +245,7 @@ prose — paste it essentially intact.
 ## Kata `work.*` conventions (agent orchestration)
 
 This repo's kata board uses the `work.*` metadata contract — see kata's
-`docs/operations/agent-orchestration.md` for the full recipe.
+<https://katatracker.com/operations/agent-orchestration/> for the full recipe.
 
 **When you work a kata-tracked issue:**
 
