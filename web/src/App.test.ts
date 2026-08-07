@@ -269,7 +269,37 @@ describe('App', () => {
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
   })
 
+  it('does not fall through to local authority when the initial roster is empty', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json({ daemons: [] })
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotReads += 1
+          return Response.json(snapshot(), { headers: { ETag: '"local-snapshot"' } })
+        }
+        throw new Error(`Unexpected request: ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Configured daemons are unavailable',
+    )
+    expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
+    expect(snapshotReads).toBe(0)
+    expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
+  })
+
   it('opens a trusted-proxy tab without presenting token login', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     const paths: string[] = []
     let authorized = false
     vi.stubGlobal(
@@ -726,7 +756,7 @@ describe('App', () => {
   })
 
   it('recovers an initial snapshot failure through an in-app retry', async () => {
-    history.replaceState(null, '', '/kata?view=all-open')
+    history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -763,6 +793,7 @@ describe('App', () => {
   })
 
   it('fences browser authority when project creation rejects the session', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'revoked-session', csrf: 'revoked-csrf' }),
@@ -814,6 +845,7 @@ describe('App', () => {
   })
 
   it('fences browser authority when a reference request rejects the session', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'revoked-session', csrf: 'revoked-csrf' }),
@@ -1114,6 +1146,7 @@ describe('App', () => {
   })
 
   it('designates an Inbox project from a fresh catalog', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -1169,6 +1202,7 @@ describe('App', () => {
   })
 
   it('reassigns Inbox through one atomic designation request', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -1230,6 +1264,7 @@ describe('App', () => {
   })
 
   it('loads, applies, and persists presentation preferences', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     localStorage.setItem(
       preferencesStorageKey,
       JSON.stringify({
@@ -1265,7 +1300,7 @@ describe('App', () => {
   })
 
   it('sends the visible recurrence revision when deleting', async () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -1330,7 +1365,7 @@ describe('App', () => {
   })
 
   it('reuses the comment idempotency key after an uncertain response', async () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -1460,7 +1495,7 @@ describe('App', () => {
   })
 
   it('keeps accepted authority visible while live updates reconnect', async () => {
-    history.replaceState(null, '', '/kata?view=all-open')
+    history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -1494,6 +1529,7 @@ describe('App', () => {
   })
 
   it('keeps a reset refresh unconditional across 401 and transparent reauthentication', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),

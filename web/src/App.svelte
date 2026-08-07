@@ -795,22 +795,14 @@
         }
       }
     } catch {
-      if (retainedDaemonID !== undefined) {
-        snapshots.clear()
-        referenceGeneration += 1
-        referenceAbort?.abort()
-        references = undefined
-        acceptedRoute = undefined
-        mode = 'loading'
-        daemonError = 'Configured daemons are unavailable'
-        return false
-      }
-      // An initial legacy launch has no selected gateway authority, so it can
-      // retain the direct-local behavior used before daemon catalogs existed.
-      if (!daemonRosterLoaded) {
-        daemonInfos = []
-        activeDaemonID = undefined
-      }
+      snapshots.clear()
+      referenceGeneration += 1
+      referenceAbort?.abort()
+      references = undefined
+      acceptedRoute = undefined
+      mode = 'loading'
+      daemonError = 'Configured daemons are unavailable'
+      return false
     }
     return true
   }
@@ -897,18 +889,20 @@
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
-    {#if daemonError && daemonInfos.length > 0}
+    {#if daemonError}
       <section class="kata-authority-recovery" role="alert">
         <span>{daemonError}</span>
         <button type="button" onclick={() => void startAuthority()}>Retry daemon roster</button>
-        <KataDaemonSwitcher
-          daemons={daemonInfos}
-          activeId={activeDaemonID}
-          activeStatusLabel={daemonError}
-          activeStatusTone="error"
-          disabled={daemonSwitching}
-          onSelect={(id) => void switchDaemon(id)}
-        />
+        {#if daemonInfos.length > 0}
+          <KataDaemonSwitcher
+            daemons={daemonInfos}
+            activeId={activeDaemonID}
+            activeStatusLabel={daemonError}
+            activeStatusTone="error"
+            disabled={daemonSwitching}
+            onSelect={(id) => void switchDaemon(id)}
+          />
+        {/if}
       </section>
     {:else if authority?.error && !authority.loading}
       <section class="kata-authority-recovery" role="alert">
