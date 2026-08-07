@@ -72,7 +72,7 @@ export const test = base.extend<{ kata: KataFixture }>({
         await running.stop()
       }
     },
-    { scope: 'worker' },
+    { scope: 'worker', timeout: 120_000 },
   ],
 })
 
@@ -83,8 +83,10 @@ async function startProductionFixture(): Promise<RunningFixture> {
   const root = await mkdtemp(join(tmpdir(), 'kata-web-browser-e2e-'))
   const home = join(root, 'home')
   const workspace = join(root, 'workspace')
+  const remoteHome = join(root, 'remote-home')
+  const remoteWorkspace = join(root, 'remote-workspace')
   const binary = join(root, 'kata')
-  await Promise.all([mkdir(home), mkdir(workspace)])
+  await Promise.all([mkdir(home), mkdir(workspace), mkdir(remoteHome), mkdir(remoteWorkspace)])
 
   run('make', ['web-embed'], repositoryRoot, process.env)
   run(
@@ -94,11 +96,37 @@ async function startProductionFixture(): Promise<RunningFixture> {
     process.env,
   )
 
-  const port = await freePort()
+  const [port, remotePort] = await Promise.all([freePort(), freePort()])
   const origin = `http://127.0.0.1:${port}`
-  await writeFile(join(home, 'config.toml'), `[web]\nlisten = "127.0.0.1:${port}"\n`, {
-    mode: 0o600,
-  })
+  const remoteOrigin = `http://127.0.0.1:${remotePort}`
+  await writeFile(
+    join(home, 'config.toml'),
+    `active_daemon = "example-local"
+
+[[daemon]]
+name = "example-local"
+local = true
+
+[[daemon]]
+name = "example-remote"
+url = "${remoteOrigin}"
+token = "example-remote-token"
+allow_insecure = true
+
+[web]
+listen = "127.0.0.1:${port}"
+`,
+    { mode: 0o600 },
+  )
+  await writeFile(
+    join(remoteHome, 'config.toml'),
+    `listen = "127.0.0.1:${remotePort}"
+
+[auth]
+token = "example-remote-token"
+`,
+    { mode: 0o600 },
+  )
   const environment = {
     ...createDevChildEnvironment(process.env, {
       home,
@@ -108,7 +136,30 @@ async function startProductionFixture(): Promise<RunningFixture> {
     KATA_AUTH_TOKEN: '',
     KATA_SERVER: '',
   }
+  const remoteEnvironment = {
+    ...createDevChildEnvironment(process.env, {
+      home: remoteHome,
+      workspace: remoteWorkspace,
+      database: join(remoteHome, 'kata.db'),
+    }),
+    KATA_AUTH_TOKEN: 'example-remote-token',
+    KATA_SERVER: '',
+  }
 
+  const remoteDaemon = startDaemon(binary, remoteWorkspace, remoteEnvironment)
+  await waitForPing(remoteOrigin, remoteDaemon)
+  run(binary, ['projects', 'create', 'example-remote-project'], remoteWorkspace, remoteEnvironment)
+  await writeFile(
+    join(remoteWorkspace, '.kata.toml'),
+    'version = 1\n\n[project]\nname = "example-remote-project"\n',
+  )
+  run(binary, ['create', 'Remote daemon task'], remoteWorkspace, remoteEnvironment)
+  const directRemoteSnapshot = await fetch(`${remoteOrigin}/api/v1/ui/snapshot?view=all-open`, {
+    headers: { Authorization: 'Bearer example-remote-token' },
+  })
+  if (!directRemoteSnapshot.ok) {
+    throw new Error(`direct fixture remote snapshot failed: ${directRemoteSnapshot.status}`)
+  }
   let daemon = startDaemon(binary, workspace, environment)
   await waitForPing(origin, daemon)
   run(binary, ['projects', 'create', 'example-project'], workspace, environment)
@@ -189,7 +240,7 @@ async function startProductionFixture(): Promise<RunningFixture> {
   return {
     fixture,
     async stop() {
-      await stopDaemon(daemon)
+      await Promise.all([stopDaemon(daemon), stopDaemon(remoteDaemon)])
       run(
         'bun',
         ['run', 'scripts/embed-assets.ts', '--restore-stub'],
@@ -313,6 +364,27 @@ async function discoverProject(origin: string, home: string): Promise<{ id: numb
     body: JSON.stringify({ actor: 'user-a', patch: { role: 'inbox' } }),
   })
   if (!metadata.ok) throw new Error(`failed to designate fixture Inbox: ${metadata.status}`)
+  const roster = await fetch(`${origin}/api/v1/ui/daemons`, {
+    headers: { Cookie: cookie ?? '', 'X-Kata-Web-Session': credentials.session },
+  })
+  if (!roster.ok) throw new Error(`failed to load fixture daemon roster: ${roster.status}`)
+  const daemonBody = (await roster.json()) as { daemons?: Array<{ id?: string }> }
+  if (!daemonBody.daemons?.some((daemon) => daemon.id === 'example-remote')) {
+    throw new Error('fixture remote daemon was not present in the browser roster')
+  }
+  const remoteSnapshot = await fetch(`${origin}/api/v1/ui/proxy/api/v1/ui/snapshot?view=all-open`, {
+    headers: {
+      Cookie: cookie ?? '',
+      'X-Kata-Web-Session': credentials.session,
+      'X-Kata-Web-Daemon': 'example-remote',
+    },
+  })
+  if (!remoteSnapshot.ok) {
+    const failure = (await remoteSnapshot.json()) as { error?: { code?: string } }
+    throw new Error(
+      `fixture remote snapshot failed with status ${remoteSnapshot.status}: ${failure.error?.code ?? 'unknown'}`,
+    )
+  }
   return project
 }
 

@@ -183,7 +183,9 @@ authorization service. Review browser changes against these boundaries:
   daemon tokens and session credentials cannot cross origins.
 - **Capabilities follow the browser principal.** An owner-local direct session
   becomes a local-web principal that may perform ordinary attributed UI writes
-  but may not administer tokens. Configured logins retain their token principal;
+  through the explicit SPA route allowlist, but may not administer tokens,
+  federation, integrations, purge data, or initialize projects through daemon-
+  owner filesystem paths or aliases. Configured logins retain their token principal;
   in identity mode the bootstrap principal remains non-writable. A browser 401
   clears tab-local credentials, fences accepted snapshots and drafts from
   further writes. A keyless loopback tab attempts one transparent local-session
@@ -193,6 +195,24 @@ authorization service. Review browser changes against these boundaries:
   rejection path. Mutation controls remain disabled when authority is stale or
   read-only and while another mutation is pending; project creation is not an
   exception.
+- **The daemon switcher is a credential broker, not an authority upgrade.**
+  Configured target daemons and their tokens are operator-trusted, but target
+  credentials stay server-side and may exercise only the source browser
+  principal's ordinary SPA authority. The gateway rejects source mutations
+  when that principal is non-writable, intersects advertised capabilities with
+  source policy, and does not expose credentialed targets to anonymous read-
+  only clients. It constructs outbound requests from an explicit API-header
+  allowlist so browser credentials, forwarding headers, and trusted-proxy actor
+  assertions never reach a target. Targets are canonical root HTTP(S) origins,
+  bearer credentials are pinned to that origin, and redirects are rejected.
+  Identity-bound browser principals remain read-only across a remote gateway
+  hop because Kata has no delegated-identity protocol; request-actor sources
+  remain writable only when the target advertises the same actor policy. Before
+  every remote mutation, the gateway rechecks the exact target origin and
+  credential's live writable and actor-policy capabilities without projection
+  reads.
+  Proxied SSE is disabled until the gateway can revalidate source sessions
+  before every event and heartbeat; remote workspaces use polling meanwhile.
 - **Host validation is the DNS-rebinding boundary.** Dedicated browser
   listeners validate the exact configured browser authority before session or
   route handling. A shared TCP listener validates every request Host against

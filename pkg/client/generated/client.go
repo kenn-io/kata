@@ -369,6 +369,10 @@ type ClientInterface interface {
 	RevokeToken(ctx context.Context, options *RevokeTokenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RevokeTokenResponse, error)
 	RevokeTokenWithResponse(ctx context.Context, options *RevokeTokenRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RevokeTokenResp, error)
 
+	// ResolveUIIssueReference Resolve an active issue to its browser route identity
+	ResolveUIIssueReference(ctx context.Context, options *ResolveUIIssueReferenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ResolveUIIssueReferenceResponse, error)
+	ResolveUIIssueReferenceWithResponse(ctx context.Context, options *ResolveUIIssueReferenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ResolveUIIssueReferenceResp, error)
+
 	// ReadUIReferences Read bounded browser reference choices
 	ReadUIReferences(ctx context.Context, options *ReadUIReferencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUIReferencesResponse, error)
 	ReadUIReferencesWithResponse(ctx context.Context, options *ReadUIReferencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUIReferencesResp, error)
@@ -5671,6 +5675,75 @@ func (c *Client) RevokeToken(ctx context.Context, options *RevokeTokenRequestOpt
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/tokens/{id}/actions/revoke")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// ResolveUIIssueReference Resolve an active issue to its browser route identity
+func (c *Client) ResolveUIIssueReference(ctx context.Context, options *ResolveUIIssueReferenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ResolveUIIssueReferenceResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"project_id": {Style: "form", Explode: &[]bool{false}[0]},
+		"ref":        {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/ui/issue-reference",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ResolveUIIssueReferenceResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ResolveUIIssueReferenceErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ResolveUIIssueReferenceErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ResolveUIIssueReferenceResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ResolveUIIssueReferenceResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/ui/issue-reference")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

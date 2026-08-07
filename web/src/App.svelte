@@ -2,13 +2,14 @@
   import { onMount } from 'svelte'
 
   import AppShell from './components/AppShell.svelte'
+  import KataDaemonSwitcher from './components/KataDaemonSwitcher.svelte'
   import LaunchHint from './components/LaunchHint.svelte'
   import LoginView from './components/LoginView.svelte'
-  import ReadOnlyBanner from './components/ReadOnlyBanner.svelte'
   import RouteError from './components/RouteError.svelte'
-  import StaleBanner from './components/StaleBanner.svelte'
   import VersionMismatch from './components/VersionMismatch.svelte'
   import { createCredentialedFetch, createKataClient } from './lib/api/client'
+  import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
+  import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
   import {
     clearSessionCredentials,
     consumeLaunchFragment,
@@ -60,6 +61,8 @@
     history.replaceState(null, '', `/kata${window.location.search}${window.location.hash}`)
   }
   const launch = consumeLaunchFragment(window.location, history.replaceState.bind(history))
+  const launchDaemonID = launch.daemonID
+  const directDaemonTarget = launch.directTarget === true
   const selectedAuthentication = selectAuthenticationMode(launch)
   const initialRoute = parseRoute(new URL(window.location.href))
   let route = $state(initialRoute)
@@ -77,23 +80,31 @@
   let preferences = $state(loadPreferences())
   let versionMismatch = $state(false)
   let liveUpdatesReconnecting = $state(false)
-  const browserFetch = createCredentialedFetch(
-    undefined,
-    async (input, init) => {
-      const response = await fetch(input, init)
-      const authentication = response.headers.get('X-Kata-Web-Authentication')
-      if (
-        authentication === 'loopback' ||
-        authentication === 'login' ||
-        authentication === 'proxy' ||
-        authentication === 'unavailable'
-      ) {
-        advertisedAuthentication = authentication
-      }
-      return response
-    },
-    requireAuthentication,
-  )
+  let daemonInfos = $state<WebDaemonInfo[]>([])
+  let activeDaemonID = $state<string | undefined>()
+  let daemonRosterLoaded = false
+  let authenticationRecoveryPending = false
+  let authenticationRecoveryCompletion: Promise<boolean> | undefined
+  let daemonSwitching = $state(false)
+  let daemonError = $state<string | undefined>()
+  let referenceAbort: AbortController | undefined
+  let referenceGeneration = 0
+  let destroyed = false
+  const observedFetch: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init)
+    const authentication = response.headers.get('X-Kata-Web-Authentication')
+    if (
+      authentication === 'loopback' ||
+      authentication === 'login' ||
+      authentication === 'proxy' ||
+      authentication === 'unavailable'
+    ) {
+      advertisedAuthentication = authentication
+    }
+    return response
+  }
+  const daemonFetch = createDaemonFetch(() => activeDaemonID, observedFetch)
+  const browserFetch = createCredentialedFetch(undefined, daemonFetch, requireAuthentication)
   const client = createKataClient(undefined, browserFetch)
   const snapshots = new SnapshotController(
     createUISnapshotRequest(browserFetch),
@@ -180,6 +191,7 @@
       }
     }
     return () => {
+      destroyed = true
       document.removeEventListener('visibilitychange', visibility)
       window.removeEventListener('focus', focus)
       window.removeEventListener('pageshow', environment)
@@ -189,6 +201,8 @@
       stream.stop()
       invalidations.stop()
       snapshots.abort()
+      referenceGeneration += 1
+      referenceAbort?.abort()
       unsubscribe()
     }
   })
@@ -200,17 +214,22 @@
 
   async function login(token: string, requestedPath: string): Promise<void> {
     const session = await exchangeLoginToken(token, requestedPath)
-    navigateAfterAuthentication(session.returnPath)
+    invalidateDaemonRoster()
+    await navigateAfterAuthentication(session.returnPath)
   }
 
-  function navigateAfterAuthentication(target: string): void {
+  function invalidateDaemonRoster(): void {
+    if (!directDaemonTarget) daemonRosterLoaded = false
+  }
+
+  async function navigateAfterAuthentication(target: string): Promise<boolean> {
     const parsed = new URL(target, window.location.origin)
     const canonicalTarget =
       parsed.pathname === '/' ? `/kata${parsed.search}` : `${parsed.pathname}${parsed.search}`
     history.replaceState(null, '', canonicalTarget)
     route = parseRoute(new URL(window.location.href))
-    mode = route.kind === 'route-error' ? 'route-error' : 'loading'
-    if (route.kind !== 'route-error') void startAuthority()
+    mode = route.kind === 'route-error' ? 'route-error' : authority?.snapshot ? 'ready' : 'loading'
+    return route.kind !== 'route-error' && (await startAuthority())
   }
 
   function search(reference: string): void {
@@ -225,6 +244,7 @@
   function navigate(next: AppRoute): void {
     history.pushState(null, '', serializeRoute(next))
     route = next
+    if (activeDaemonID) saveDaemonRoute(activeDaemonID, serializeRoute(next))
     mode = authority?.snapshot ? 'ready' : 'loading'
     void startAuthority()
   }
@@ -289,18 +309,43 @@
   }
 
   async function loadReferences(): Promise<void> {
-    const { data } = await client.GET('/api/v1/ui/references', {
-      params: { query: { limit: 200 } },
-    })
-    if (data) references = data
+    if (destroyed) return
+    const generation = referenceGeneration + 1
+    referenceGeneration = generation
+    referenceAbort?.abort()
+    const abort = new AbortController()
+    referenceAbort = abort
+    const daemonID = activeDaemonID
+    try {
+      const { data } = await client.GET('/api/v1/ui/references', {
+        params: { query: { limit: 200 } },
+        signal: abort.signal,
+      })
+      if (
+        data &&
+        !destroyed &&
+        !abort.signal.aborted &&
+        generation === referenceGeneration &&
+        daemonID === activeDaemonID
+      ) {
+        references = data
+      }
+    } catch {
+      // Snapshot authority remains usable when reference enrichment is canceled or unavailable.
+    } finally {
+      if (referenceAbort === abort) referenceAbort = undefined
+    }
   }
 
   async function searchReferences(
     query: string,
   ): Promise<components['schemas']['UIIssueReference'][]> {
+    const generation = referenceGeneration
+    const daemonID = activeDaemonID
     const { data } = await client.GET('/api/v1/ui/references', {
       params: { query: { q: query, limit: 20 } },
     })
+    if (destroyed || generation !== referenceGeneration || daemonID !== activeDaemonID) return []
     return data?.issues ?? []
   }
 
@@ -639,6 +684,7 @@
   }
 
   function requireAuthentication(): void {
+    if (authenticationRecoveryPending) return
     clearSessionCredentials()
     scheduler.stop()
     stream.stop()
@@ -650,8 +696,10 @@
       selectedAuthentication === undefined &&
       automaticSessionAttempted !== advertisedAuthentication
     ) {
-      mode = 'loading'
-      void startAutomaticSession(returnPath, advertisedAuthentication)
+      authenticationRecoveryPending = true
+      mode = authority?.snapshot ? 'ready' : 'loading'
+      authenticationRecoveryCompletion = startAutomaticSession(returnPath, advertisedAuthentication)
+      void authenticationRecoveryCompletion
       return
     }
     mode = authenticationView(selectedAuthentication)
@@ -660,37 +708,165 @@
   async function startAutomaticSession(
     requestedPath: string,
     authentication: 'loopback' | 'proxy',
-  ): Promise<void> {
+  ): Promise<boolean> {
     automaticSessionAttempted = authentication
     try {
       const session =
         authentication === 'proxy'
           ? await openTrustedProxySession(requestedPath)
           : await openLocalSession(requestedPath)
+      if (destroyed) return false
       if (session) {
-        navigateAfterAuthentication(session.returnPath)
-        return
+        invalidateDaemonRoster()
+        let accepted = false
+        try {
+          accepted = await navigateAfterAuthentication(session.returnPath)
+        } finally {
+          authenticationRecoveryPending = false
+        }
+        if (!accepted && snapshots.state.authenticationRequired) requireAuthentication()
+        return accepted
       }
     } catch {
       // Fall through to ordinary anonymous/login authority discovery.
     }
-    await startAuthority()
+    authenticationRecoveryPending = false
+    return startAuthority()
   }
 
-  async function startAuthority(): Promise<void> {
+  async function startAuthority(): Promise<boolean> {
     scheduler.stop()
     stream.stop()
-    await invalidations.resume()
-    if (authority?.authenticationRequired) return
+    const daemonAvailable = await loadDaemonRoster()
+    if (destroyed || !daemonAvailable) return false
+    const accepted = await invalidations.resume()
+    if (destroyed) return false
+    if (authority?.authenticationRequired) return false
     if (authority?.snapshot) automaticSessionAttempted = undefined
     if (authority?.snapshot) void loadReferences()
     if (authority?.snapshot) scheduler.start(authority.snapshot.capabilities.updates)
+    return accepted
+  }
+
+  async function loadDaemonRoster(): Promise<boolean> {
+    if (daemonRosterLoaded) return directDaemonTarget || activeDaemonID !== undefined
+    if (directDaemonTarget) {
+      daemonRosterLoaded = true
+      daemonInfos = []
+      activeDaemonID = undefined
+      return true
+    }
+    const retainedDaemonID = activeDaemonID
+    try {
+      const loadedDaemons = await fetchWebDaemons(browserFetch)
+      const nextDaemonID =
+        loadedDaemons.find(
+          (daemon) => daemon.id === retainedDaemonID && daemon.health !== 'upgrade_required',
+        )?.id ??
+        loadedDaemons.find(
+          (daemon) => daemon.id === launchDaemonID && daemon.health !== 'upgrade_required',
+        )?.id ??
+        loadedDaemons.find((daemon) => daemon.default && daemon.health !== 'upgrade_required')
+          ?.id ??
+        loadedDaemons.find((daemon) => daemon.health !== 'upgrade_required')?.id
+      if (retainedDaemonID !== undefined && nextDaemonID !== retainedDaemonID) {
+        snapshots.clear()
+        referenceGeneration += 1
+        referenceAbort?.abort()
+        references = undefined
+        acceptedRoute = undefined
+        mode = 'loading'
+      }
+      daemonInfos = loadedDaemons
+      daemonRosterLoaded = true
+      activeDaemonID = nextDaemonID
+      if (!activeDaemonID) {
+        snapshots.clear()
+        daemonError = 'No compatible Kata daemon is available'
+        return false
+      }
+      daemonError = undefined
+      if (activeDaemonID && window.location.pathname === '/kata' && !window.location.search) {
+        const persisted = loadDaemonRoute(activeDaemonID)
+        if (persisted) {
+          history.replaceState(null, '', persisted)
+          const restored = parseRoute(new URL(window.location.href))
+          if (restored.kind !== 'route-error') route = restored
+        }
+      }
+    } catch {
+      snapshots.clear()
+      referenceGeneration += 1
+      referenceAbort?.abort()
+      references = undefined
+      acceptedRoute = undefined
+      mode = 'loading'
+      daemonError = 'Configured daemons are unavailable'
+      return false
+    }
+    return true
+  }
+
+  async function switchDaemon(id: string): Promise<void> {
+    if (daemonSwitching || authenticationRecoveryPending || id === activeDaemonID) return
+    if (daemonInfos.find((daemon) => daemon.id === id)?.health === 'upgrade_required') return
+    const sourceDaemon = activeDaemonID
+    const sourceRoute = route.kind === 'route-error' ? acceptedRoute : route
+    if (sourceDaemon && sourceRoute) saveDaemonRoute(sourceDaemon, serializeRoute(sourceRoute))
+    const restoredPath = loadDaemonRoute(id) ?? '/kata?view=all-open'
+    const restored = parseRoute(new URL(restoredPath, window.location.origin))
+    if (restored.kind === 'route-error') return
+
+    daemonSwitching = true
+    daemonError = undefined
+    scheduler.stop()
+    stream.stop()
+    invalidations.pause()
+    snapshots.clear()
+    referenceGeneration += 1
+    referenceAbort?.abort()
+    references = undefined
+    activeDaemonID = id
+    route = restored
+    acceptedRoute = undefined
+    history.replaceState(null, '', serializeRoute(restored))
+    mode = 'loading'
+    authenticationRecoveryCompletion = undefined
+    const accepted = await startAuthority()
+    const recovery = authenticationRecoveryCompletion
+    const recovered = !accepted && recovery ? await recovery : false
+    if ((accepted || recovered) && activeDaemonID === id) {
+      saveDaemonRoute(id, serializeRoute(restored))
+      daemonSwitching = false
+      if (authenticationRecoveryCompletion === recovery)
+        authenticationRecoveryCompletion = undefined
+      return
+    }
+    if (authority?.authenticationRequired) {
+      daemonSwitching = false
+      if (authenticationRecoveryCompletion === recovery)
+        authenticationRecoveryCompletion = undefined
+      return
+    }
+
+    daemonError = `Could not connect to ${id}`
+    if (sourceDaemon && sourceRoute) {
+      activeDaemonID = sourceDaemon
+      route = sourceRoute
+      acceptedRoute = undefined
+      history.replaceState(null, '', serializeRoute(sourceRoute))
+      snapshots.clear()
+      await startAuthority()
+    }
+    daemonSwitching = false
+    if (authenticationRecoveryCompletion === recovery) authenticationRecoveryCompletion = undefined
   }
 
   async function refreshSnapshot(full: boolean): Promise<boolean> {
     if (route.kind === 'route-error') return false
     const requestedRoute = route
-    const intent = snapshotIntentForRoute(requestedRoute)
+    const baseIntent = snapshotIntentForRoute(requestedRoute)
+    const intent = activeDaemonID ? { ...baseIntent, daemonID: activeDaemonID } : baseIntent
     const accepted = await snapshots.load(intent, { full })
     if (snapshots.state.authenticationRequired) {
       requireAuthentication()
@@ -712,63 +888,99 @@
   <h1 id="kata-heading" class:visually-hidden={mode === 'ready'}>Kata</h1>
   {#if versionMismatch}
     <VersionMismatch />
-  {:else}
-    {#if authority?.stale}<StaleBanner />{/if}
-    {#if authority?.snapshot && !authority.snapshot.capabilities.writable}<ReadOnlyBanner />{/if}
-    {#if liveUpdatesReconnecting}
-      <aside role="status" aria-label="Kata live updates">Reconnecting live updates…</aside>
-    {/if}
-    {#if mode === 'loading'}
-      {#if authority?.error && !authority.loading}
-        <section class="kata-authority-recovery" role="alert">
-          <span>{authority.error}</span>
-          <button type="button" onclick={() => void startAuthority()}>Retry Kata snapshot</button>
-        </section>
-      {:else}
-        <p role="status">Loading Kata…</p>
-      {/if}
-    {:else if route.kind === 'route-error'}
-      <RouteError {route} onSearch={search} />
+  {:else if mode === 'loading'}
+    {#if daemonError}
+      <section class="kata-authority-recovery" role="alert">
+        <span>{daemonError}</span>
+        <button type="button" onclick={() => void startAuthority()}>Retry daemon roster</button>
+        {#if daemonInfos.length > 0}
+          <KataDaemonSwitcher
+            daemons={daemonInfos}
+            activeId={activeDaemonID}
+            activeStatusLabel={daemonError}
+            activeStatusTone="error"
+            disabled={daemonSwitching}
+            onSelect={(id) => void switchDaemon(id)}
+          />
+        {/if}
+      </section>
+    {:else if authority?.error && !authority.loading}
+      <section class="kata-authority-recovery" role="alert">
+        <span>{authority.error}</span>
+        <button type="button" onclick={() => void startAuthority()}>Retry Kata snapshot</button>
+        {#if daemonInfos.length > 0}
+          <KataDaemonSwitcher
+            daemons={daemonInfos}
+            activeId={activeDaemonID}
+            activeStatusLabel={daemonError}
+            activeStatusTone={daemonError ? 'error' : undefined}
+            disabled={daemonSwitching}
+            onSelect={(id) => void switchDaemon(id)}
+          />
+        {/if}
+      </section>
     {:else}
-      {#if mode === 'launch'}
-        <LaunchHint issueRef={undefined} />
-      {:else if mode === 'login'}
-        <LoginView {returnPath} onLogin={login} />
-      {/if}
-      {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
-        <AppShell
-          route={acceptedRoute ?? route}
-          snapshot={authority.snapshot}
-          loading={authority.loading}
-          canMutate={authority.canMutate}
-          {mutationPending}
-          mutationMessage={mutationMessage(mutationState)}
-          draftResetGeneration={authority.cursor}
-          {preferences}
-          onPreferencesChange={updatePreferences}
-          ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
-          onNavigate={navigate}
-          onCreateProject={createProject}
-          onDesignateInbox={designateInbox}
-          onCreateIssue={createIssue}
-          {searchReferences}
-          onMoveIssue={moveIssue}
-          onPatchMetadata={patchMetadata}
-          onAddComment={addComment}
-          onEditIssue={editIssue}
-          onAssignOwner={assignOwner}
-          onUnassignOwner={unassignOwner}
-          onSetPriority={setPriority}
-          onAddLabel={addLabel}
-          onRemoveLabel={removeLabel}
-          onCloseIssue={closeIssue}
-          onReopenIssue={reopenIssue}
-          onDeleteIssue={deleteIssue}
-          onCreateRecurrence={createRecurrence}
-          onPatchRecurrence={patchRecurrence}
-          onDeleteRecurrence={deleteRecurrence}
-        />
-      {/if}
+      <p role="status">Loading Kata…</p>
+    {/if}
+  {:else if route.kind === 'route-error'}
+    <RouteError {route} onSearch={search} />
+  {:else}
+    {#if mode === 'launch'}
+      <LaunchHint issueRef={undefined} />
+    {:else if mode === 'login'}
+      <LoginView {returnPath} onLogin={login} />
+    {/if}
+    {#if !authority?.snapshot && daemonInfos.length > 0 && (mode === 'launch' || mode === 'login')}
+      <KataDaemonSwitcher
+        daemons={daemonInfos}
+        activeId={activeDaemonID}
+        activeStatusLabel={daemonError}
+        activeStatusTone={daemonError ? 'error' : undefined}
+        disabled={daemonSwitching}
+        onSelect={(id) => void switchDaemon(id)}
+      />
+    {/if}
+    {#if authority?.snapshot && (mode === 'ready' || mode === 'launch' || mode === 'login')}
+      <AppShell
+        route={acceptedRoute ?? route}
+        snapshot={authority.snapshot}
+        loading={authority.loading}
+        canMutate={authority.canMutate}
+        {mutationPending}
+        mutationMessage={mutationMessage(mutationState)}
+        draftResetGeneration={authority.cursor}
+        {preferences}
+        daemons={daemonInfos}
+        {activeDaemonID}
+        {daemonSwitching}
+        reconnecting={liveUpdatesReconnecting}
+        stale={authority.stale}
+        readOnly={!authority.snapshot.capabilities.writable}
+        {daemonError}
+        onSelectDaemon={(id) => void switchDaemon(id)}
+        onPreferencesChange={updatePreferences}
+        ownerOptions={(references?.owners ?? []).map((owner) => ({ name: owner, label: owner }))}
+        onNavigate={navigate}
+        onCreateProject={createProject}
+        onDesignateInbox={designateInbox}
+        onCreateIssue={createIssue}
+        {searchReferences}
+        onMoveIssue={moveIssue}
+        onPatchMetadata={patchMetadata}
+        onAddComment={addComment}
+        onEditIssue={editIssue}
+        onAssignOwner={assignOwner}
+        onUnassignOwner={unassignOwner}
+        onSetPriority={setPriority}
+        onAddLabel={addLabel}
+        onRemoveLabel={removeLabel}
+        onCloseIssue={closeIssue}
+        onReopenIssue={reopenIssue}
+        onDeleteIssue={deleteIssue}
+        onCreateRecurrence={createRecurrence}
+        onPatchRecurrence={patchRecurrence}
+        onDeleteRecurrence={deleteRecurrence}
+      />
     {/if}
   {/if}
 </main>

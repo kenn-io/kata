@@ -224,6 +224,16 @@ value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
 
+The web UI's daemon selector lists these `[[daemon]]` entries. A plain
+`kata ui` starts or discovers the local browser gateway and initially selects
+`active_daemon`; changing the selection keeps configured tokens on the daemon
+side. Use `kata ui --daemon <name>` only when opening one named target directly
+is preferred. Identity-authenticated tabs can read remote gateway targets, but
+must open the target directly for writes because the gateway does not delegate
+browser identities. Request-actor tabs remain writable only when the target
+advertises the same request-actor policy; the gateway rechecks that target's
+authenticated capabilities immediately before every mutation.
+
 `[web].listen` selects the browser listener when the normal daemon transport
 cannot also serve HTTP. If omitted, Kata binds `127.0.0.1:0`, lets the operating
 system assign an available port, and publishes the resolved URL through

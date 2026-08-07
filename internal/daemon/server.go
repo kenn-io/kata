@@ -64,6 +64,12 @@ type ServerConfig struct {
 	// the browser-only routes and middleware disabled for embedded/API-only use.
 	WebSessions *WebSessionManager
 
+	// WebDaemons is the client daemon catalog exposed to the first-class web
+	// UI. Credentials remain server-side and are used only by the selected-
+	// daemon proxy. ActiveWebDaemon selects the initial catalog entry.
+	WebDaemons      []config.CatalogDaemonConfig
+	ActiveWebDaemon string
+
 	// InsecureReadonly permits unauthenticated GETs on non-loopback TCP
 	// even when Auth.Token == "". DEV ONLY — not for production.
 	InsecureReadonly bool
@@ -186,6 +192,7 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg.FederationCredentials = config.DefaultFederationCredentialStore()
 	}
 	cfg.FederationCatalog = append([]config.CatalogDaemonConfig(nil), cfg.FederationCatalog...)
+	cfg.WebDaemons = append([]config.CatalogDaemonConfig(nil), cfg.WebDaemons...)
 	if cfg.UIStore == nil {
 		cfg.UIStore, _ = cfg.DB.(db.UIStore)
 	}
@@ -209,6 +216,7 @@ func NewServer(cfg ServerConfig) *Server {
 	if cfg.WebSessions != nil {
 		registerUISessionHandlers(mux, cfg.WebSessions)
 	}
+	registerWebDaemonHandlers(mux, cfg)
 	registerOpenAPIYAML(mux, cfg.HostAccess)
 	webHandler, err := kataweb.NewEmbeddedHandler()
 	if err != nil {

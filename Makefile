@@ -117,7 +117,8 @@ nilaway:
 		echo "failed to determine module path" >&2; \
 		exit 1; \
 	}; \
-		nilaway -include-pkgs="$$module_path" -test=false ./...
+		nilaway -include-pkgs="$$module_path" \
+			-exclude-pkgs="$$module_path/web/node_modules" -test=false ./...
 
 fmt:
 	gofmt -w .

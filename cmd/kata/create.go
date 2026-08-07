@@ -340,12 +340,22 @@ func resolveProjectIDAndNameWithClient(
 	baseURL string,
 	startPath string,
 ) (int64, string, error) {
+	return resolveProjectIDAndNameWithClientHeaders(ctx, client, baseURL, startPath, nil)
+}
+
+func resolveProjectIDAndNameWithClientHeaders(
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+	startPath string,
+	headers map[string]string,
+) (int64, string, error) {
 	body, repair, err := buildResolveRequest(ctx, startPath)
 	if err != nil {
 		return 0, "", err
 	}
-	status, bs, err := httpDoJSON(ctx, client, http.MethodPost,
-		baseURL+"/api/v1/projects/resolve", body)
+	status, bs, err := httpDoJSONHeaders(ctx, client, http.MethodPost,
+		baseURL+"/api/v1/projects/resolve", body, headers)
 	if err != nil {
 		return 0, "", err
 	}

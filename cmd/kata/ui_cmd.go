@@ -75,12 +75,6 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 	if err != nil {
 		return "", &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 	}
-	projectID, _, err := resolveProjectIDAndNameForRef(
-		cmd.Context(), prepared.BaseURL, start, parsed.ProjectName,
-	)
-	if err != nil {
-		return "", err
-	}
 	httpClient := prepared.Client
 	if httpClient == nil {
 		httpClient, err = httpClientFor(cmd.Context(), prepared.BaseURL)
@@ -88,9 +82,30 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 			return "", err
 		}
 	}
-	status, body, err := httpDoJSON(cmd.Context(), httpClient, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s",
-			strings.TrimRight(prepared.BaseURL, "/"), projectID, url.PathEscape(parsed.RefForAPI)), nil)
+	resolutionBaseURL := strings.TrimRight(prepared.BaseURL, "/")
+	var gatewayHeaders map[string]string
+	if !prepared.ConfiguredRemote {
+		resolutionBaseURL += "/api/v1/ui/proxy"
+		if prepared.DaemonName != "" {
+			gatewayHeaders = map[string]string{"X-Kata-Web-Daemon": prepared.DaemonName}
+		}
+	}
+	savedProject := flags.Project
+	flags.Project = parsed.ProjectName
+	projectID, _, err := func() (int64, string, error) {
+		defer func() { flags.Project = savedProject }()
+		return resolveProjectIDAndNameWithClientHeaders(
+			cmd.Context(), httpClient, resolutionBaseURL, start, gatewayHeaders,
+		)
+	}()
+	if err != nil {
+		return "", err
+	}
+	status, body, err := httpDoJSONHeaders(cmd.Context(), httpClient, http.MethodGet,
+		fmt.Sprintf("%s/api/v1/ui/issue-reference?%s", resolutionBaseURL, url.Values{
+			"project_id": {fmt.Sprintf("%d", projectID)},
+			"ref":        {parsed.RefForAPI},
+		}.Encode()), nil, gatewayHeaders)
 	if err != nil {
 		return "", err
 	}

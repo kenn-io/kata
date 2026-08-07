@@ -36,7 +36,10 @@ describe('App', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const target = new URL(String(input), window.location.origin)
+        const target = new URL(
+          input instanceof Request ? input.url : String(input),
+          window.location.origin,
+        )
         paths.push(target.pathname)
         if (target.pathname === '/api/v1/ui/session/local') {
           return new Response(
@@ -51,7 +54,12 @@ describe('App', () => {
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           )
         }
-        expect(new Headers(init?.headers).get('X-Kata-Web-Session')).toBe('local-session')
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        expect(
+          input instanceof Request
+            ? input.headers.get('X-Kata-Web-Session')
+            : new Headers(init?.headers).get('X-Kata-Web-Session'),
+        ).toBe('local-session')
         return new Response(JSON.stringify(snapshot()), {
           status: 200,
           headers: { 'Content-Type': 'application/json', ETag: '"snapshot-1"' },
@@ -62,11 +70,236 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
-    expect(paths.slice(0, 2)).toEqual(['/api/v1/ui/session/local', '/api/v1/ui/snapshot'])
+    expect(paths.slice(0, 3)).toEqual([
+      '/api/v1/ui/session/local',
+      '/api/v1/ui/daemons',
+      '/api/v1/ui/proxy/api/v1/ui/snapshot',
+    ])
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('local-session')
   })
 
+  it('honors an explicitly selected gateway daemon on first authority load', async () => {
+    history.replaceState(null, '', '/kata#daemon=example-remote')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const selected: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              ...daemonRoster().daemons,
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        selected.push(request.headers.get('X-Kata-Web-Daemon'))
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(selected[0]).toBe('example-remote')
+  })
+
+  it('keeps an explicitly direct daemon pinned across reload', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let rosterReads = 0
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          rosterReads += 1
+          return Response.json({
+            daemons: [
+              {
+                id: 'example-other',
+                url: 'https://daemon.example',
+                default: true,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path === '/api/v1/ui/references') {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (path === '/api/v1/ui/snapshot') {
+          snapshotRequests.push(request)
+          return Response.json(snapshot(), {
+            headers: { ETag: `"snapshot-${snapshotRequests.length}"` },
+          })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    cleanup()
+
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(rosterReads).toBe(0)
+    expect(snapshotRequests).toHaveLength(2)
+    expect(
+      snapshotRequests.every((request) => request.headers.get('X-Kata-Web-Daemon') === null),
+    ).toBe(true)
+  })
+
+  it('does not activate an incompatible configured default', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const selected: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              {
+                id: 'example-legacy',
+                url: 'https://daemon.example',
+                default: true,
+                auth: 'none',
+                health: 'upgrade_required',
+              },
+              {
+                id: 'example-local',
+                url: '',
+                default: false,
+                auth: 'none',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        selected.push(request.headers.get('X-Kata-Web-Daemon'))
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    expect(selected[0]).toBe('example-local')
+  })
+
+  it('does not fall through to local authority when every configured daemon is incompatible', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              {
+                id: 'example-legacy',
+                url: 'https://daemon.example',
+                default: true,
+                auth: 'none',
+                health: 'upgrade_required',
+              },
+            ],
+          })
+        }
+        if (path.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+
+    render(App)
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'No compatible Kata daemon is available',
+    )
+    expect(snapshotReads).toBe(0)
+    expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
+  })
+
+  it('does not fall through to local authority when the initial roster is empty', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json({ daemons: [] })
+        if (target.pathname === '/api/v1/ui/snapshot') {
+          snapshotReads += 1
+          return Response.json(snapshot(), { headers: { ETag: '"local-snapshot"' } })
+        }
+        throw new Error(`Unexpected request: ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Configured daemons are unavailable',
+    )
+    expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
+    expect(snapshotReads).toBe(0)
+    expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
+  })
+
   it('opens a trusted-proxy tab without presenting token login', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     const paths: string[] = []
     let authorized = false
     vi.stubGlobal(
@@ -110,6 +343,10 @@ describe('App', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
         if (target.pathname === '/api/v1/ui/session/local') {
           return new Response('', { status: 404 })
         }
@@ -158,6 +395,7 @@ describe('App', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
         if (target.pathname === '/api/v1/ui/session/local') {
           return new Response(
             JSON.stringify({
@@ -170,6 +408,9 @@ describe('App', () => {
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           )
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
         snapshotReads += 1
         if (snapshotReads === 1)
@@ -187,11 +428,335 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await waitFor(() =>
+      expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
+    )
+  })
+
+  it('ignores a delayed expired-session 401 while renewed authority is loading', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let referenceReads = 0
+    let snapshotReads = 0
+    let releaseExpiredReference!: (response: Response) => void
+    const expiredReference = new Promise<Response>((resolve) => {
+      releaseExpiredReference = resolve
+    })
+    let releaseRenewedSnapshot!: (response: Response) => void
+    const renewedSnapshot = new Promise<Response>((resolve) => {
+      releaseRenewedSnapshot = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?view=today',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'identity',
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          referenceReads += 1
+          if (referenceReads === 1) return expiredReference
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          if (snapshotReads === 2) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          if (snapshotReads === 3) return renewedSnapshot
+          return Response.json(snapshot(), { headers: { ETag: `"snapshot-${snapshotReads}"` } })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await waitFor(() => expect(referenceReads).toBe(1))
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+    await waitFor(() =>
+      expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
+    )
+    await waitFor(() => expect(snapshotReads).toBe(3))
+
+    releaseExpiredReference(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'loopback' },
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    releaseRenewedSnapshot(Response.json(snapshot(), { headers: { ETag: '"renewed-snapshot"' } }))
+
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
     expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
   })
 
-  it('recovers an initial snapshot failure through an in-app retry', async () => {
+  it('reloads the configured daemon roster after transparent reauthentication', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let rosterReads = 0
+    let snapshotReads = 0
+    const snapshotRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') {
+          rosterReads += 1
+          if (rosterReads === 1) {
+            return Response.json({
+              daemons: [
+                { id: 'example-old', url: '', default: true, auth: 'none', health: 'connected' },
+              ],
+            })
+          }
+          return Response.json({
+            daemons: [
+              { id: 'example-local', url: '', default: false, auth: 'none', health: 'connected' },
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: true,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'request',
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          snapshotRequests.push(request)
+          if (snapshotReads === 2) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await waitFor(() =>
+      expect(snapshotRequests.at(-1)?.headers.get('X-Kata-Web-Daemon')).toBe('example-old'),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+    await waitFor(() => expect(rosterReads).toBe(2))
+    await waitFor(() =>
+      expect(snapshotRequests.at(-1)?.headers.get('X-Kata-Web-Daemon')).toBe('example-remote'),
+    )
+  })
+
+  it('does not fall back to local authority when roster renewal fails', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let rosterReads = 0
+    let snapshotReads = 0
+    const snapshotDaemons: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') {
+          rosterReads += 1
+          if (rosterReads === 1) {
+            return Response.json({
+              daemons: [
+                {
+                  id: 'example-remote',
+                  url: 'https://daemon.example',
+                  default: true,
+                  auth: 'token',
+                  health: 'connected',
+                },
+              ],
+            })
+          }
+          return Response.json({ error: { code: 'daemon_unavailable' } }, { status: 503 })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?view=today',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'request',
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          snapshotDaemons.push(request.headers.get('X-Kata-Web-Daemon'))
+          if (snapshotReads === 2) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          const body = snapshot()
+          if (snapshotReads > 2) {
+            body.collection = body.collection.map((issue, index) =>
+              index === 0 ? { ...issue, title: 'Wrong workspace issue' } : issue,
+            )
+          }
+          return Response.json(body, { headers: { ETag: `"snapshot-${snapshotReads}"` } })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Configured daemons are unavailable',
+    )
+    expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
+    expect(snapshotDaemons).toEqual(['example-remote', 'example-remote'])
+    expect(screen.queryByText('Wrong workspace issue')).toBeNull()
+  })
+
+  it('clears stale authority before activating a roster replacement', async () => {
     history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let rosterReads = 0
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') {
+          rosterReads += 1
+          const id = rosterReads === 1 ? 'example-old' : 'example-new'
+          return Response.json({
+            daemons: [{ id, url: '', default: true, auth: 'none', health: 'connected' }],
+          })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?view=today',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'request',
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          if (snapshotReads === 1) return Response.json(snapshot(), { headers: { ETag: '"old"' } })
+          if (snapshotReads === 2) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          return Response.json({ error: { code: 'daemon_unavailable' } }, { status: 503 })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByText('Example issue')).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+    await waitFor(() => expect(rosterReads).toBe(2))
+
+    await waitFor(() => expect(screen.queryByText('Example issue')).toBeNull())
+  })
+
+  it('does not resume snapshot authority after the application unmounts', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    let releaseRoster!: (response: Response) => void
+    const roster = new Promise<Response>((resolve) => {
+      releaseRoster = resolve
+    })
+    const paths: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        paths.push(target.pathname)
+        if (target.pathname === '/api/v1/ui/daemons') return roster
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    await waitFor(() => expect(paths).toEqual(['/api/v1/ui/daemons']))
+    cleanup()
+    releaseRoster(Response.json(daemonRoster()))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(paths).toEqual(['/api/v1/ui/daemons'])
+  })
+
+  it('recovers an initial snapshot failure through an in-app retry', async () => {
+    history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -228,6 +793,7 @@ describe('App', () => {
   })
 
   it('fences browser authority when project creation rejects the session', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'revoked-session', csrf: 'revoked-csrf' }),
@@ -279,6 +845,7 @@ describe('App', () => {
   })
 
   it('fences browser authority when a reference request rejects the session', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'revoked-session', csrf: 'revoked-csrf' }),
@@ -353,7 +920,12 @@ describe('App', () => {
     let snapshotReads = 0
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => {
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(
+          input instanceof Request ? input.url : String(input),
+          window.location.origin,
+        )
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
         snapshotReads += 1
         if (snapshotReads > 1) return new Promise<Response>(() => {})
         return new Response(JSON.stringify(snapshot()), {
@@ -371,7 +943,210 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: 'All Open' })).not.toBeNull()
   })
 
+  it('switches configured daemons in place and restores each daemon route', async () => {
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    const local = snapshot()
+    const remote = structuredClone(local)
+    remote.collection[0]!.title = 'Remote issue'
+    const snapshotRequests: Request[] = []
+    const referenceRequests: Request[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              ...daemonRoster().daemons,
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path.endsWith('/api/v1/ui/references')) {
+          referenceRequests.push(request)
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (path.endsWith('/api/v1/ui/snapshot')) {
+          snapshotRequests.push(request)
+          const daemon = request.headers.get('X-Kata-Web-Daemon')
+          return Response.json(daemon === 'example-remote' ? remote : local, {
+            headers: { ETag: `"${daemon ?? 'default'}-${snapshotRequests.length}"` },
+          })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+    await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
+    expect(window.location.search).toBe('?view=all-open')
+    expect(
+      referenceRequests.find(
+        (request) => request.headers.get('X-Kata-Web-Daemon') === 'example-local',
+      )?.signal.aborted,
+    ).toBe(true)
+
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
+    )
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-local/ }))
+    await waitFor(() => expect(window.location.search).toBe('?view=today'))
+    expect(snapshotRequests.map((request) => request.headers.get('X-Kata-Web-Daemon'))).toEqual(
+      expect.arrayContaining(['example-local', 'example-remote']),
+    )
+  })
+
+  it('keeps the requested daemon selected across transparent authentication recovery', async () => {
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    const local = snapshot()
+    const remote = structuredClone(local)
+    remote.collection[0]!.title = 'Remote issue'
+    let remoteRejected = false
+    const snapshotDaemons: Array<string | null> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              ...daemonRoster().daemons,
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?view=all-open',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'identity',
+          })
+        }
+        if (path.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (path.endsWith('/api/v1/ui/snapshot')) {
+          const daemon = request.headers.get('X-Kata-Web-Daemon')
+          snapshotDaemons.push(daemon)
+          if (daemon === 'example-remote' && !remoteRejected) {
+            remoteRejected = true
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          return Response.json(daemon === 'example-remote' ? remote : local, {
+            headers: { ETag: `"${daemon ?? 'default'}-${snapshotDaemons.length}"` },
+          })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+
+    expect(await screen.findByRole('button', { name: /Remote issue/ })).not.toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Switch Kata daemon: example-remote' }),
+    ).not.toBeNull()
+    expect(snapshotDaemons.at(-1)).toBe('example-remote')
+  })
+
+  it('offers daemon switching when the default snapshot is unavailable', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const path = new URL(request.url).pathname
+        if (path === '/api/v1/ui/daemons') {
+          return Response.json({
+            daemons: [
+              {
+                id: 'example-local',
+                url: '',
+                default: true,
+                auth: 'none',
+                health: 'down',
+              },
+              {
+                id: 'example-remote',
+                url: 'https://daemon.example',
+                default: false,
+                auth: 'token',
+                health: 'connected',
+              },
+            ],
+          })
+        }
+        if (path.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (path.endsWith('/api/v1/ui/snapshot')) {
+          if (request.headers.get('X-Kata-Web-Daemon') === 'example-remote') {
+            return Response.json(snapshot(), { headers: { ETag: '"remote-snapshot"' } })
+          }
+          return new Response('{"error":{"code":"daemon_unreachable"}}', { status: 502 })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${path}`)
+      }),
+    )
+
+    render(App)
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Snapshot unavailable')
+    await fireEvent.click(screen.getByRole('button', { name: 'Switch Kata daemon: example-local' }))
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /example-remote/ }))
+    expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+  })
+
   it('designates an Inbox project from a fresh catalog', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -427,6 +1202,7 @@ describe('App', () => {
   })
 
   it('reassigns Inbox through one atomic designation request', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -488,6 +1264,7 @@ describe('App', () => {
   })
 
   it('loads, applies, and persists presentation preferences', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     localStorage.setItem(
       preferencesStorageKey,
       JSON.stringify({
@@ -523,7 +1300,7 @@ describe('App', () => {
   })
 
   it('sends the visible recurrence revision when deleting', async () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -588,7 +1365,7 @@ describe('App', () => {
   })
 
   it('reuses the comment idempotency key after an uncertain response', async () => {
-    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -651,8 +1428,74 @@ describe('App', () => {
     expect(keys[1]).toBe(keys[0])
   })
 
+  it('preserves a comment draft during transparent session renewal', async () => {
+    history.replaceState(null, '', '/kata?issue=01J00000000000000000000001')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    const base = snapshot()
+    const accepted = {
+      ...base,
+      selected: {
+        state: 'available',
+        issue: base.collection[0],
+        comments: [],
+        labels: [],
+        links: [],
+        recurrences: [],
+        history: [],
+      },
+    }
+    let commentRejected = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname.endsWith('/comments') && request.method === 'POST') {
+          commentRejected = true
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'loopback' },
+          })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?issue=01J00000000000000000000001',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'identity',
+          })
+        }
+        if (target.pathname === '/api/v1/ui/daemons') return Response.json(daemonRoster())
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    const editor = await screen.findByRole('textbox', { name: 'Comment' })
+    await fireEvent.input(editor, { target: { value: 'Keep this draft' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+
+    await waitFor(() => expect(commentRejected).toBe(true))
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement).value).toBe(
+        'Keep this draft',
+      ),
+    )
+  })
+
   it('keeps accepted authority visible while live updates reconnect', async () => {
-    history.replaceState(null, '', '/kata?view=all-open')
+    history.replaceState(null, '', '/kata?view=all-open#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -682,10 +1525,11 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('button', { name: /Example issue/ })).not.toBeNull()
-    expect(await screen.findByRole('status', { name: 'Kata live updates' })).not.toBeNull()
+    expect(await screen.findByRole('status', { name: 'Kata daemon status' })).not.toBeNull()
   })
 
   it('keeps a reset refresh unconditional across 401 and transparent reauthentication', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'tab-session', csrf: 'tab-csrf' }),
@@ -815,5 +1659,19 @@ function snapshot() {
       },
     ],
     collection_links: [],
+  }
+}
+
+function daemonRoster() {
+  return {
+    daemons: [
+      {
+        id: 'example-local',
+        url: '',
+        default: true,
+        auth: 'none',
+        health: 'connected',
+      },
+    ],
   }
 }

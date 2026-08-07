@@ -36,6 +36,8 @@ func registerInstanceHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.InstanceUID = uid
 		out.Body.Version = version.Version
 		out.Body.SchemaVersion = sv
+		out.Body.WebUIContractVersion = api.UISnapshotContractVersion
+		out.Body.WebUICapabilities = effectiveUIPolicy(ctx, cfg).Capabilities
 		out.Body.Auth = instanceAuthInfo(ctx)
 		return out, nil
 	})

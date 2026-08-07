@@ -29,6 +29,34 @@ func TestOpenWebUILocalLoopbackOpensDirectly(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:27123/kata?view=today", opened.PublicURL)
 }
 
+func TestOpenWebUILocalExplicitDaemonPinsInitialSelection(t *testing.T) {
+	var opened WebUILaunch
+	err := OpenWebUI(t.Context(), PreparedWebUI{
+		DaemonName: "example-local",
+		Runtime: DiscoveredWebRuntime{
+			Origin: "http://127.0.0.1:27123", Capabilities: []string{"loopback", "sse"},
+		},
+	}, "/kata?view=today", func(_ context.Context, target WebUILaunch) error {
+		opened = target
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://127.0.0.1:27123/kata?view=today#daemon=example-local", opened.PublicURL)
+}
+
+func TestResolveWebUIHostTargetUsesLocalGatewayDespiteRemoteOverride(t *testing.T) {
+	t.Setenv("KATA_SERVER", "https://daemon.example")
+	ctx := context.WithValue(t.Context(), BaseURLKey{}, "http://127.0.0.1:27123")
+
+	baseURL, configuredRemote, allowInsecure, err := resolveWebUIHostTarget(ctx, PrepareWebUIOptions{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://127.0.0.1:27123", baseURL)
+	assert.False(t, configuredRemote)
+	assert.False(t, allowInsecure)
+}
+
 func TestOpenWebUILocalTrustedProxyOpensDirectly(t *testing.T) {
 	var opened WebUILaunch
 	err := OpenWebUI(t.Context(), PreparedWebUI{
@@ -86,6 +114,30 @@ func TestOpenWebUIRemoteReadonlyOpensWithoutLogin(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, server.URL+"/kata?view=today", opened.PublicURL)
+}
+
+func TestOpenWebUIExplicitRemoteDisablesGatewayReselection(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+			"capabilities": map[string]any{"writable": false, "updates": "poll"},
+			"origin":       server.URL,
+		}))
+	}))
+	t.Cleanup(server.Close)
+
+	var opened WebUILaunch
+	err := OpenWebUI(t.Context(), PreparedWebUI{
+		BaseURL: server.URL, ConfiguredRemote: true, DaemonName: "example-remote",
+		AnonymousClient: server.Client(),
+	}, "/kata?view=today", func(_ context.Context, target WebUILaunch) error {
+		opened = target
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, server.URL+"/kata?view=today#direct=1", opened.PublicURL)
 }
 
 func TestOpenWebUIRemoteReadonlyProbeRejectsRedirect(t *testing.T) {

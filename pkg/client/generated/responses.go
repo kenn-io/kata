@@ -335,6 +335,10 @@ type RevokeTokenResponse = RevokeTokenResponseBody
 
 type RevokeTokenErrorResponse = ErrorEnvelope
 
+type ResolveUIIssueReferenceResponse = UIIssueReferenceResponseBody
+
+type ResolveUIIssueReferenceErrorResponse = ErrorEnvelope
+
 type ReadUIReferencesResponse = UIReferencesResponseBody
 
 type ReadUISnapshotResponse = UISnapshotResponseBody
@@ -936,6 +940,13 @@ type RevokeTokenResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RevokeTokenResponse
+}
+
+type ResolveUIIssueReferenceResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ResolveUIIssueReferenceResponse
 }
 
 type ReadUIReferencesResp200Headers struct {

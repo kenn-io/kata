@@ -458,11 +458,15 @@ func ensureWebLocalProjectInitAllowed(ctx context.Context, in *api.InitProjectRe
 	if !ok || principal.Kind != PrincipalWebLocal {
 		return nil
 	}
-	if in.Body.StartPath == "" && !in.Body.Replace && !in.Body.Reassign && in.Body.Alias == nil {
+	if webProjectInitFieldsAllowed(in) {
 		return nil
 	}
 	return api.NewError(http.StatusForbidden, "web_local_operation_forbidden",
 		"local web sessions cannot initialize projects from daemon filesystem paths or aliases", "", nil)
+}
+
+func webProjectInitFieldsAllowed(in *api.InitProjectRequest) bool {
+	return in.Body.StartPath == "" && !in.Body.Replace && !in.Body.Reassign && in.Body.Alias == nil
 }
 
 func deliverProjectMutation(cfg ServerConfig, event *db.Event) {

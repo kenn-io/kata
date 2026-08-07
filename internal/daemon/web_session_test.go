@@ -74,8 +74,17 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		want   int
 	}{
 		{name: "snapshot", method: http.MethodGet, path: "/api/v1/ui/snapshot", want: http.StatusNoContent},
+		{name: "daemon roster", method: http.MethodGet, path: "/api/v1/ui/daemons", want: http.StatusNoContent},
+		{name: "issue reference", method: http.MethodGet, path: "/api/v1/ui/issue-reference?project_id=7&ref=abc4", want: http.StatusNoContent},
+		{name: "proxied snapshot", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/ui/snapshot", want: http.StatusNoContent},
+		{name: "proxied daemon roster", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/ui/daemons", want: http.StatusForbidden},
+		{name: "proxied project metadata", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/projects/7/metadata", want: http.StatusNoContent},
+		{name: "proxied federation", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/federation/replicas", want: http.StatusForbidden},
 		{name: "project creation", method: http.MethodPost, path: "/api/v1/projects", want: http.StatusNoContent},
 		{name: "project metadata", method: http.MethodPost, path: "/api/v1/projects/7/metadata", want: http.StatusNoContent},
+		{name: "full issue lookup", method: http.MethodGet, path: "/api/v1/projects/7/issues/abc4", want: http.StatusForbidden},
+		{name: "deleted issue lookup", method: http.MethodGet, path: "/api/v1/projects/7/issues/abc4?include_deleted=true", want: http.StatusForbidden},
+		{name: "proxied deleted issue lookup", method: http.MethodGet, path: "/api/v1/ui/proxy/api/v1/projects/7/issues/abc4?include_deleted=true", want: http.StatusForbidden},
 		{name: "issue edit", method: http.MethodPatch, path: "/api/v1/projects/7/issues/abc4", want: http.StatusNoContent},
 		{name: "recurrence deletion", method: http.MethodDelete, path: "/api/v1/projects/7/recurrences/01J00000000000000000000001", want: http.StatusNoContent},
 		{name: "federation", method: http.MethodPost, path: "/api/v1/federation/replicas", want: http.StatusForbidden},
@@ -115,6 +124,23 @@ func TestSharedTCPEventStreamPreservesCLIAuthentication(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, response.Code)
 }
 
+func TestSharedTCPUISnapshotPreservesCLIAuthentication(t *testing.T) {
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	manager.auth.Token = "configured-token"
+	handler := requireBrowserSession(manager, ListenerPolicy{
+		Kind: ListenerSharedTCP, Origin: "http://127.0.0.1:27123", BackendAuthority: "127.0.0.1:27123",
+		RequireBrowserSession: true,
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/ui/snapshot", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	request.Header.Set("Authorization", "Bearer configured-token")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusNoContent, response.Code)
+}
+
 func TestSharedTCPTokenlessPublicAuthorityRequiresBrowserSession(t *testing.T) {
 	manager := newDeterministicSessionManager(t, "https://daemon.example", "instance_a")
 	policy := ListenerPolicy{
@@ -124,19 +150,23 @@ func TestSharedTCPTokenlessPublicAuthorityRequiresBrowserSession(t *testing.T) {
 	handler := requireBrowserSession(manager, policy,
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 
-	publicRequest := httptest.NewRequest(http.MethodGet, "https://daemon.example/api/v1/projects", nil)
-	publicResponse := httptest.NewRecorder()
-	handler.ServeHTTP(publicResponse, publicRequest)
-	assert.Equal(t, http.StatusUnauthorized, publicResponse.Code)
-	assert.Equal(t, "https://daemon.example", publicResponse.Header().Get("X-Kata-Web-Origin"))
+	for _, path := range []string{"/api/v1/projects", "/api/v1/ui/snapshot"} {
+		publicRequest := httptest.NewRequest(http.MethodGet, "https://daemon.example"+path, nil)
+		publicResponse := httptest.NewRecorder()
+		handler.ServeHTTP(publicResponse, publicRequest)
+		assert.Equal(t, http.StatusUnauthorized, publicResponse.Code)
+		assert.Equal(t, "https://daemon.example", publicResponse.Header().Get("X-Kata-Web-Origin"))
+	}
 
 	for _, authority := range []string{"127.0.0.1:7777", "localhost:7777", "backend.example:7777"} {
 		t.Run(authority, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "http://"+authority+"/api/v1/projects", nil)
-			request.RemoteAddr = "127.0.0.1:54321"
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, request)
-			assert.Equal(t, http.StatusNoContent, response.Code)
+			for _, path := range []string{"/api/v1/projects", "/api/v1/ui/snapshot"} {
+				request := httptest.NewRequest(http.MethodGet, "http://"+authority+path, nil)
+				request.RemoteAddr = "127.0.0.1:54321"
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, request)
+				assert.Equal(t, http.StatusNoContent, response.Code)
+			}
 		})
 	}
 }
@@ -148,13 +178,21 @@ func TestSharedTCPExplicitUnauthenticatedPrivateNetworkWritesPreservesCLI(t *tes
 		Kind: ListenerSharedTCP, Origin: "https://daemon.example", BackendAuthority: "100.64.0.5:7777",
 		RequireBrowserSession: true,
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	request := httptest.NewRequest(http.MethodPost, "http://100.64.0.5:7777/api/v1/projects", nil)
-	request.RemoteAddr = "100.64.0.6:54321"
-	response := httptest.NewRecorder()
+	for _, requestCase := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodPost, path: "/api/v1/projects"},
+		{method: http.MethodGet, path: "/api/v1/ui/snapshot"},
+	} {
+		request := httptest.NewRequest(requestCase.method, "http://100.64.0.5:7777"+requestCase.path, nil)
+		request.RemoteAddr = "100.64.0.6:54321"
+		response := httptest.NewRecorder()
 
-	handler.ServeHTTP(response, request)
+		handler.ServeHTTP(response, request)
 
-	assert.Equal(t, http.StatusNoContent, response.Code)
+		assert.Equal(t, http.StatusNoContent, response.Code)
+	}
 }
 
 func TestBrowserSessionsRemainIndependentAcrossTabs(t *testing.T) {

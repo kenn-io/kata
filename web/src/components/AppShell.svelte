@@ -7,6 +7,7 @@
   import PlusIcon from '@lucide/svelte/icons/plus'
   import SunIcon from '@lucide/svelte/icons/sun'
   import type { components } from '../lib/api/schema'
+  import type { WebDaemonInfo } from '../lib/daemons/client'
   import type { KataRoute, ShareableFilters, SystemView } from '../lib/router'
   import {
     deriveKataAreas,
@@ -29,6 +30,8 @@
   import IssueDetail from './IssueDetail.svelte'
   import IssueFilters from './IssueFilters.svelte'
   import IssueGraph from './IssueGraph.svelte'
+  import InboxProjectChooser from './InboxProjectChooser.svelte'
+  import KataDaemonSwitcher from './KataDaemonSwitcher.svelte'
   import QuickCapture from './QuickCapture.svelte'
   import Sidebar from './Sidebar.svelte'
   import SplitLayout from './SplitLayout.svelte'
@@ -45,7 +48,15 @@
     draftResetGeneration: number
     ownerOptions: TypeaheadOption[]
     preferences?: Preferences | undefined
+    daemons?: WebDaemonInfo[] | undefined
+    activeDaemonID?: string | undefined
+    daemonSwitching?: boolean | undefined
+    reconnecting?: boolean | undefined
+    stale?: boolean | undefined
+    readOnly?: boolean | undefined
+    daemonError?: string | undefined
     onPreferencesChange?: ((preferences: Preferences) => void) | undefined
+    onSelectDaemon?: ((id: string) => void) | undefined
     onNavigate: (route: AppRoute) => void | Promise<void>
     onCreateProject: (name: string) => Promise<KataTaskMutationResponse>
     onDesignateInbox: (projectUID: string) => Promise<void>
@@ -85,7 +96,15 @@
     draftResetGeneration,
     ownerOptions,
     preferences = defaultPreferences,
+    daemons = [],
+    activeDaemonID = undefined,
+    daemonSwitching = false,
+    reconnecting = false,
+    stale = false,
+    readOnly = false,
+    daemonError = undefined,
     onPreferencesChange = () => {},
+    onSelectDaemon = () => {},
     onNavigate,
     onCreateProject,
     onDesignateInbox,
@@ -109,6 +128,7 @@
   }: Props = $props()
 
   let captureOpen = $state(false)
+  let inboxChooserOpen = $state(false)
   let linkFilters = $state(createKataLinkFilters('all'))
   let navigationGeneration = $state(0)
   let graphSelectedUID = $derived<string | null>(
@@ -216,6 +236,18 @@
     onPreferencesChange({ ...preferences, theme })
   }
 
+  function beginNewTask(): void {
+    if (!canMutate || mutationPending) return
+    if (hasInbox) captureOpen = true
+    else inboxChooserOpen = true
+  }
+
+  async function chooseInbox(projectUID: string): Promise<void> {
+    await onDesignateInbox(projectUID)
+    inboxChooserOpen = false
+    captureOpen = true
+  }
+
   function themeLabel(): string {
     return preferences.theme[0]!.toUpperCase() + preferences.theme.slice(1)
   }
@@ -309,7 +341,28 @@
 
 <section class="kata-feature" aria-label="Kata workspace">
   <header class="kata-header">
-    <h1>Kata</h1>
+    <div class="kata-header-title">
+      <h1>Kata</h1>
+      {#if daemons.length > 0}
+        <KataDaemonSwitcher
+          {daemons}
+          activeId={activeDaemonID}
+          activeStatusLabel={daemonError ?? (reconnecting ? 'Reconnecting…' : undefined)}
+          activeStatusTone={daemonError ? 'error' : undefined}
+          disabled={daemonSwitching || mutationPending}
+          onSelect={onSelectDaemon}
+        />
+      {:else if daemonError || reconnecting}
+        <span
+          class="daemon-fallback-status"
+          class:error={daemonError}
+          role="status"
+          aria-label="Kata daemon status"
+        >
+          {daemonError ?? 'Reconnecting…'}
+        </span>
+      {/if}
+    </div>
     <div class="kata-header-actions">
       <IconButton ariaLabel={`Theme: ${themeLabel()}`} title="Change theme" onclick={cycleTheme}>
         {#if preferences.theme === 'light'}
@@ -338,17 +391,26 @@
       <button
         type="button"
         class="accent-button header-action"
-        disabled={!canMutate || mutationPending || !hasInbox}
-        title={hasInbox ? 'New task' : 'A designated Inbox project is required for quick capture.'}
-        onclick={() => {
-          if (canMutate && !mutationPending && hasInbox) captureOpen = true
-        }}
+        disabled={!canMutate || mutationPending}
+        title="New task"
+        onclick={beginNewTask}
       >
         <PlusIcon size={13} strokeWidth={1.9} aria-hidden="true" />
         <span>New task</span>
       </button>
     </div>
   </header>
+  {#if stale || readOnly}
+    <aside
+      class="authority-status"
+      role="status"
+      aria-label={stale ? 'Stale Kata data' : 'Read-only Kata session'}
+    >
+      {stale
+        ? 'Snapshot may be out of date. Changes are paused.'
+        : 'This Kata session is read-only.'}
+    </aside>
+  {/if}
   <div class="kata-layout" aria-busy={loading}>
     <Sidebar
       {areas}
@@ -493,6 +555,15 @@
   onSubmit={onCreateIssue}
 />
 
+<InboxProjectChooser
+  open={inboxChooserOpen}
+  projects={projection.projects.map((project) => ({ uid: project.uid, name: project.name }))}
+  onClose={() => {
+    inboxChooserOpen = false
+  }}
+  onSelect={chooseInbox}
+/>
+
 <style>
   .kata-feature {
     height: 100%;
@@ -501,6 +572,7 @@
     color: var(--text-primary);
     display: flex;
     flex-direction: column;
+    position: relative;
   }
 
   .kata-header {
@@ -518,6 +590,39 @@
     font-size: var(--font-size-lg);
     font-weight: 650;
     line-height: 1.2;
+  }
+
+  .kata-header-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+
+  .daemon-fallback-status {
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+  }
+
+  .daemon-fallback-status.error {
+    color: var(--accent-red);
+  }
+
+  .authority-status {
+    position: absolute;
+    top: calc(56px + var(--space-3));
+    right: var(--space-3);
+    z-index: 20;
+    max-width: min(360px, calc(100% - 24px));
+    border: 1px solid var(--accent-amber);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-popover, 0 8px 24px rgb(15 23 42 / 14%));
+    color: var(--text-primary);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--font-size-sm);
+    pointer-events: none;
   }
 
   .kata-header-actions {

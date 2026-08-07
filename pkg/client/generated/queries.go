@@ -230,6 +230,15 @@ type ReadyIssuesGlobalQuery struct {
 	ExcludeLabel []string `json:"exclude_label,omitempty"`
 }
 
+type ResolveUIIssueReferenceQuery struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (r ResolveUIIssueReferenceQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type ReadUIReferencesQuery struct {
 	Q          *string `json:"q,omitempty"`
 	ProjectUID *string `json:"project_uid,omitempty"`

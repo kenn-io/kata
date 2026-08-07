@@ -125,6 +125,50 @@ describe('browser session bootstrap', () => {
     expect(window.location.hash).toBe('')
   })
 
+  it('consumes an explicit daemon launch target before routing', () => {
+    history.replaceState(null, '', '/kata#daemon=example-remote')
+
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata',
+      daemonID: 'example-remote',
+    })
+    expect(window.location.hash).toBe('')
+  })
+
+  it('consumes direct-target launch state before routing', () => {
+    history.replaceState(null, '', '/kata#direct=1')
+
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata',
+      directTarget: true,
+    })
+    expect(window.location.hash).toBe('')
+
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata',
+      directTarget: true,
+    })
+  })
+
+  it('clears retained direct mode for an explicit gateway launch', () => {
+    history.replaceState(null, '', '/kata#direct=1')
+    consumeLaunchFragment(window.location, history.replaceState.bind(history))
+    history.replaceState(null, '', '/kata#daemon=example-remote')
+
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata',
+      daemonID: 'example-remote',
+    })
+    expect(consumeLaunchFragment(window.location, history.replaceState.bind(history))).toEqual({
+      kind: 'none',
+      returnPath: '/kata',
+    })
+  })
+
   it('keeps the explicitly selected authentication mechanism tab-local', () => {
     expect(selectAuthenticationMode({ kind: 'login', returnPath: '/kata' }, sessionStorage)).toBe(
       'login',

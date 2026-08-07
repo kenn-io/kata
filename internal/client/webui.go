@@ -20,7 +20,8 @@ import (
 
 var errRemoteWebUILoginRequired = errors.New("remote web UI login required")
 
-// PrepareWebUIOptions selects the same daemon source as other CLI commands.
+// PrepareWebUIOptions selects the browser gateway or an explicitly named
+// daemon target.
 type PrepareWebUIOptions struct {
 	WorkspaceStart string
 	DaemonName     string
@@ -31,6 +32,7 @@ type PrepareWebUIOptions struct {
 type PreparedWebUI struct {
 	BaseURL             string
 	ConfiguredRemote    bool
+	DaemonName          string
 	AllowInsecure       bool
 	TrustPrivateNetwork bool
 	Client              *http.Client
@@ -50,27 +52,9 @@ type WebUIOpener func(context.Context, WebUILaunch) error
 // PrepareWebUI resolves and probes the selected daemon and validates local
 // browser runtime metadata.
 func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI, error) {
-	var (
-		baseURL          string
-		configuredRemote bool
-		allowInsecure    bool
-	)
-	if opts.DaemonName != "" {
-		target, err := resolveNamedDaemonTarget(ctx, opts.DaemonName)
-		if err != nil {
-			return PreparedWebUI{}, err
-		}
-		baseURL = target.BaseURL
-		configuredRemote = !target.Local
-		allowInsecure = target.AllowInsecure
-	} else {
-		target, err := ensureRunningTargetInWorkspace(ctx, opts.WorkspaceStart)
-		if err != nil {
-			return PreparedWebUI{}, err
-		}
-		baseURL = target.BaseURL
-		configuredRemote = target.ConfiguredRemote
-		allowInsecure = remoteAllowInsecureForBaseURL(baseURL, opts.WorkspaceStart)
+	baseURL, configuredRemote, allowInsecure, err := resolveWebUIHostTarget(ctx, opts)
+	if err != nil {
+		return PreparedWebUI{}, err
 	}
 
 	httpClient, err := NewHTTPClient(ctx, baseURL, Opts{
@@ -84,6 +68,7 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 	}
 	prepared := PreparedWebUI{
 		BaseURL: baseURL, ConfiguredRemote: configuredRemote, AllowInsecure: allowInsecure,
+		DaemonName:          strings.TrimSpace(opts.DaemonName),
 		TrustPrivateNetwork: resolveAuthConfig().TrustPrivateNetwork, Client: httpClient,
 	}
 	if configuredRemote {
@@ -113,6 +98,21 @@ func PrepareWebUI(ctx context.Context, opts PrepareWebUIOptions) (PreparedWebUI,
 	}
 	prepared.Runtime = runtimeInfo
 	return prepared, nil
+}
+
+func resolveWebUIHostTarget(
+	ctx context.Context, opts PrepareWebUIOptions,
+) (baseURL string, configuredRemote, allowInsecure bool, err error) {
+	if opts.DaemonName != "" {
+		target, err := resolveNamedDaemonTarget(ctx, opts.DaemonName)
+		if err != nil {
+			return "", false, false, err
+		}
+		return target.BaseURL, !target.Local, target.AllowInsecure, nil
+	}
+
+	baseURL, err = EnsureLocalRunning(ctx)
+	return baseURL, false, false, err
 }
 
 func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL string) (DiscoveredWebRuntime, error) {
@@ -170,7 +170,11 @@ func OpenWebUI(
 				return errors.New("remote daemon did not advertise a usable canonical browser origin")
 			}
 			target := webLaunchURL(anonymousOrigin)
-			target += "#" + url.Values{"login": {"1"}, "return_path": {normalized}}.Encode()
+			fragment := url.Values{"login": {"1"}, "return_path": {normalized}}
+			if prepared.DaemonName != "" {
+				fragment.Set("direct", "1")
+			}
+			target += "#" + fragment.Encode()
 			return opener(ctx, WebUILaunch{PublicURL: target})
 		}
 		if err != nil {
@@ -179,7 +183,11 @@ func OpenWebUI(
 		if anonymousOrigin == nil {
 			return errors.New("remote daemon did not advertise a usable browser origin")
 		}
-		return opener(ctx, WebUILaunch{PublicURL: webLaunchURLAt(anonymousOrigin, normalized)})
+		target := webLaunchURLAt(anonymousOrigin, normalized)
+		if prepared.DaemonName != "" {
+			target += "#direct=1"
+		}
+		return opener(ctx, WebUILaunch{PublicURL: target})
 	}
 	if err := validateLocalWebRuntime(prepared.Runtime); err != nil {
 		return err
@@ -191,10 +199,18 @@ func OpenWebUI(
 	if runtimeHasCapability(prepared.Runtime, "loopback") ||
 		runtimeHasCapability(prepared.Runtime, "readonly") ||
 		runtimeHasCapability(prepared.Runtime, "proxy") {
-		return opener(ctx, WebUILaunch{PublicURL: webLaunchURLAt(base, normalized)})
+		target := webLaunchURLAt(base, normalized)
+		if prepared.DaemonName != "" {
+			target += "#" + url.Values{"daemon": {prepared.DaemonName}}.Encode()
+		}
+		return opener(ctx, WebUILaunch{PublicURL: target})
 	}
 	target := webLaunchURL(base)
-	target += "#" + url.Values{"login": {"1"}, "return_path": {normalized}}.Encode()
+	fragment := url.Values{"login": {"1"}, "return_path": {normalized}}
+	if prepared.DaemonName != "" {
+		fragment.Set("daemon", prepared.DaemonName)
+	}
+	target += "#" + fragment.Encode()
 	return opener(ctx, WebUILaunch{PublicURL: target})
 }
 

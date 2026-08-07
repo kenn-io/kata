@@ -276,6 +276,7 @@ export class RefreshScheduler {
   }
 
   #refreshNow(): void {
+    if (this.#stopped) return
     void Promise.resolve(this.#refresh()).catch(() => undefined)
   }
 }

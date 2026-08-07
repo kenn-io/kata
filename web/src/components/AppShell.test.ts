@@ -441,7 +441,34 @@ describe('AppShell', () => {
     expect(onCreateIssue).toHaveBeenCalledWith('New example task')
   })
 
-  test('requires a designated inbox for quick capture', () => {
+  test('designates an Inbox from New task before opening quick capture', async () => {
+    const onDesignateInbox = vi.fn(async () => {})
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: snapshot(),
+        loading: false,
+        ...mutationProps({ onDesignateInbox }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+
+    const create = screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement
+    expect(create.disabled).toBe(false)
+    await fireEvent.click(create)
+    await fireEvent.click(screen.getByRole('button', { name: /Use example-project as Inbox/ }))
+    expect(onDesignateInbox).toHaveBeenCalledWith('01J00000000000000000000002')
+    expect(screen.getByRole('textbox', { name: 'Quick capture' })).not.toBeNull()
+  })
+
+  test('renders daemon selection and recovery status inside stable workspace chrome', async () => {
+    const onSelectDaemon = vi.fn()
     render(AppShell, {
       props: {
         route: {
@@ -453,14 +480,28 @@ describe('AppShell', () => {
         snapshot: snapshot(),
         loading: false,
         ...mutationProps(),
+        daemons: [
+          {
+            id: 'example-local',
+            url: '',
+            default: true,
+            auth: 'none',
+            health: 'connected',
+          },
+        ],
+        activeDaemonID: 'example-local',
+        reconnecting: true,
+        stale: true,
+        onSelectDaemon,
         onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
       },
     })
 
-    const create = screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement
-    expect(create.disabled).toBe(true)
-    expect(create.title).toBe('A designated Inbox project is required for quick capture.')
+    expect(screen.getByRole('status', { name: 'Kata daemon status' }).textContent).toContain(
+      'Reconnecting…',
+    )
+    expect(screen.getByRole('status', { name: 'Stale Kata data' })).not.toBeNull()
   })
 
   test('passes mutation authority to project creation controls', async () => {

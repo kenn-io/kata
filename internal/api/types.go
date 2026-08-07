@@ -104,10 +104,12 @@ type FederationConfigHealth struct {
 // further calls.
 type InstanceResponse struct {
 	Body struct {
-		InstanceUID   string      `json:"instance_uid"`
-		Version       string      `json:"version"`
-		SchemaVersion int64       `json:"schema_version"`
-		Auth          AuthInfoOut `json:"auth"`
+		InstanceUID          string         `json:"instance_uid"`
+		Version              string         `json:"version"`
+		SchemaVersion        int64          `json:"schema_version"`
+		WebUIContractVersion string         `json:"web_ui_contract_version,omitempty"`
+		WebUICapabilities    UICapabilities `json:"web_ui_capabilities"`
+		Auth                 AuthInfoOut    `json:"auth"`
 	}
 }
 

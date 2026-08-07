@@ -1,5 +1,6 @@
 export const sessionStorageKey = 'kata.web.session.v1'
 export const authenticationModeStorageKey = 'kata.web.authentication-mode.v1'
+const directTargetStorageKey = 'kata.web.direct-target.v1'
 
 export type AuthenticationMode = 'login'
 
@@ -35,9 +36,12 @@ export interface AuthenticatedSession {
   returnPath: string
 }
 
-export type LaunchState =
-  | { kind: 'login'; returnPath: string }
-  | { kind: 'none'; returnPath: string }
+export type LaunchState = {
+  kind: 'login' | 'none'
+  returnPath: string
+  daemonID?: string
+  directTarget?: boolean
+}
 
 export function selectAuthenticationMode(
   launch: LaunchState,
@@ -63,19 +67,35 @@ interface SessionResponse {
 export function consumeLaunchFragment(
   location: Location,
   replaceState: History['replaceState'],
+  storage: Storage = sessionStorage,
 ): LaunchState {
   const currentPath = location.pathname + location.search
   if (!location.hash) {
-    return { kind: 'none', returnPath: currentPath }
+    return {
+      kind: 'none',
+      returnPath: currentPath,
+      ...(storage.getItem(directTargetStorageKey) === '1' ? { directTarget: true } : {}),
+    }
   }
 
   const fragment = new URLSearchParams(location.hash.slice(1))
   replaceState(null, '', currentPath)
   const returnPath = normalizeReturnPath(fragment.get('return_path'), currentPath)
-  if (fragment.get('login') === '1') {
-    return { kind: 'login', returnPath }
+  const daemonID = fragment.get('daemon')?.trim()
+  if (fragment.has('direct')) {
+    if (fragment.get('direct') === '1') storage.setItem(directTargetStorageKey, '1')
+    else storage.removeItem(directTargetStorageKey)
+  } else if (daemonID) {
+    storage.removeItem(directTargetStorageKey)
   }
-  return { kind: 'none', returnPath: currentPath }
+  const target = {
+    ...(daemonID ? { daemonID } : {}),
+    ...(storage.getItem(directTargetStorageKey) === '1' ? { directTarget: true } : {}),
+  }
+  if (fragment.get('login') === '1') {
+    return { kind: 'login', returnPath, ...target }
+  }
+  return { kind: 'none', returnPath: currentPath, ...target }
 }
 
 export async function openLocalSession(
