@@ -70,7 +70,7 @@ func TestReleaseBinaryContainsValidatedWebUI(t *testing.T) {
 	require.NoErrorf(t, build.Run(), "stage validated web assets: %s", buildLog.String())
 
 	bin := filepath.Join(t.TempDir(), "kata")
-	compile := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", bin, "./cmd/kata") //nolint:gosec // fixed build arguments and test-owned output
+	compile := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-trimpath", "-buildvcs=false", "-o", bin, "./cmd/kata") //nolint:gosec // fixed build arguments and test-owned output
 	compile.Dir = repositoryRoot
 	compile.Env = os.Environ()
 	buildLog.Reset()
