@@ -118,8 +118,11 @@ type AliasInfo struct {
 	Kind     string // "git" | "local"
 }
 
-// DiscoverPaths walks upward from startPath looking for .kata.toml (W) and
-// .git (G). Both lookups are independent and inclusive of startPath itself.
+// DiscoverPaths walks upward from startPath looking for .git (G), then for
+// .kata.toml (W). Both lookups are inclusive of startPath itself. When a git
+// root exists, it bounds the .kata.toml lookup so configuration outside the
+// repository cannot capture paths within it. Git ancestry follows symlinks;
+// non-git workspaces retain lexical ancestor discovery.
 // startPath must point at an existing file or directory; a missing start path
 // is reported as a resolution error so a typo like `--workspace /no/such/dir`
 // fails loud instead of silently resolving an unrelated ancestor.
@@ -134,27 +137,63 @@ func DiscoverPaths(startPath string) (DiscoveredPaths, error) {
 	if err != nil {
 		return DiscoveredPaths{}, fmt.Errorf("stat %s: %w", abs, err)
 	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return DiscoveredPaths{}, fmt.Errorf("resolve symlinks %s: %w", abs, err)
+	}
 	// If the start path is a file, walk from its parent directory so we don't
 	// stat <file>/.kata.toml (which fails with ENOTDIR rather than not-found).
-	walkRoot := abs
+	lexicalWalkRoot := abs
+	physicalWalkRoot := resolved
 	if !info.IsDir() {
-		walkRoot = filepath.Dir(abs)
+		lexicalWalkRoot = filepath.Dir(abs)
+		physicalWalkRoot = filepath.Dir(resolved)
 	}
 	d := DiscoveredPaths{}
-	if d.WorkspaceRoot, err = walkUp(walkRoot, ProjectConfigFilename, false); err != nil {
-		return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
-	}
-	if d.GitRoot, err = walkUp(walkRoot, ".git", true); err != nil {
+	if d.GitRoot, err = walkUp(physicalWalkRoot, ".git", true, ""); err != nil {
 		return DiscoveredPaths{}, fmt.Errorf("discover .git: %w", err)
 	}
+	if d.GitRoot == "" {
+		if d.WorkspaceRoot, err = walkUp(lexicalWalkRoot, ProjectConfigFilename, false, ""); err != nil {
+			return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
+		}
+		return d, nil
+	}
+	if d.WorkspaceRoot, err = walkUp(physicalWalkRoot, ProjectConfigFilename, false, d.GitRoot); err != nil {
+		return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
+	}
+	d.GitRoot = matchingLexicalAncestor(lexicalWalkRoot, d.GitRoot)
+	d.WorkspaceRoot = matchingLexicalAncestor(lexicalWalkRoot, d.WorkspaceRoot)
 	return d, nil
 }
 
+// matchingLexicalAncestor preserves the caller's path spelling when one of
+// its lexical ancestors resolves to the discovered physical root. A root above
+// an explicit symlink target has no such representation and remains physical.
+func matchingLexicalAncestor(start, physicalRoot string) string {
+	if physicalRoot == "" {
+		return ""
+	}
+	dir := start
+	for {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil && resolved == physicalRoot {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return physicalRoot
+		}
+		dir = parent
+	}
+}
+
 // walkUp returns the first ancestor (inclusive) containing the named entry,
-// or "" if none. allowDir lets the entry be either a file or directory.
+// or "" if none. stop is an inclusive traversal boundary; an empty stop walks
+// to the filesystem root. allowDir lets the entry be either a file or directory.
 // os.IsNotExist failures are normal during traversal; other errors surface so
 // callers see e.g. permission-denied instead of treating it as "not found".
-func walkUp(start, entry string, allowDir bool) (string, error) {
+func walkUp(start, entry string, allowDir bool, stop string) (string, error) {
 	dir := start
 	for {
 		path := filepath.Join(dir, entry)
@@ -170,6 +209,9 @@ func walkUp(start, entry string, allowDir bool) (string, error) {
 			}
 		case !os.IsNotExist(err):
 			return "", fmt.Errorf("stat %s: %w", path, err)
+		}
+		if dir == stop {
+			return "", nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
