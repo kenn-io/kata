@@ -207,7 +207,10 @@ authorization service. Review browser changes against these boundaries:
   bearer credentials are pinned to that origin, and redirects are rejected.
   Identity-bound browser principals remain read-only across a remote gateway
   hop because Kata has no delegated-identity protocol; request-actor sources
-  remain writable only when the target advertises the same actor policy.
+  remain writable only when the target advertises the same actor policy. Before
+  every remote mutation, the gateway rechecks the exact target origin and
+  credential's live writable and actor-policy capabilities without projection
+  reads.
   Proxied SSE is disabled until the gateway can revalidate source sessions
   before every event and heartbeat; remote workspaces use polling meanwhile.
 - **Host validation is the DNS-rebinding boundary.** Dedicated browser

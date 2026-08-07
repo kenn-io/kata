@@ -759,17 +759,27 @@
     try {
       const retainedDaemonID = activeDaemonID
       const loadedDaemons = await fetchWebDaemons(browserFetch)
-      daemonInfos = loadedDaemons
-      daemonRosterLoaded = true
-      activeDaemonID =
-        daemonInfos.find(
+      const nextDaemonID =
+        loadedDaemons.find(
           (daemon) => daemon.id === retainedDaemonID && daemon.health !== 'upgrade_required',
         )?.id ??
-        daemonInfos.find(
+        loadedDaemons.find(
           (daemon) => daemon.id === launchDaemonID && daemon.health !== 'upgrade_required',
         )?.id ??
-        daemonInfos.find((daemon) => daemon.default && daemon.health !== 'upgrade_required')?.id ??
-        daemonInfos.find((daemon) => daemon.health !== 'upgrade_required')?.id
+        loadedDaemons.find((daemon) => daemon.default && daemon.health !== 'upgrade_required')
+          ?.id ??
+        loadedDaemons.find((daemon) => daemon.health !== 'upgrade_required')?.id
+      if (retainedDaemonID !== undefined && nextDaemonID !== retainedDaemonID) {
+        snapshots.clear()
+        referenceGeneration += 1
+        referenceAbort?.abort()
+        references = undefined
+        acceptedRoute = undefined
+        mode = 'loading'
+      }
+      daemonInfos = loadedDaemons
+      daemonRosterLoaded = true
+      activeDaemonID = nextDaemonID
       if (!activeDaemonID) {
         snapshots.clear()
         daemonError = 'No compatible Kata daemon is available'

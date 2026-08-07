@@ -17,7 +17,17 @@ import (
 
 func TestWebDaemonGatewayAppliesWebLocalProjectPolicyBeforeForwarding(t *testing.T) {
 	var calls int
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/instance" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"web_ui_contract_version": api.UISnapshotContractVersion,
+				"web_ui_capabilities": api.UICapabilities{
+					Writable: true, Updates: "poll", ActorPolicy: "request",
+				},
+			})
+			return
+		}
 		calls++
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -143,6 +153,69 @@ func TestWebDaemonGatewayPreservesIdentitySourceAttribution(t *testing.T) {
 		"/api/v1/projects/7/recurrences/01J00000000000000000000001", nil, "")
 	assert.Equal(t, http.StatusForbidden, mutationResponse.Code, mutationResponse.Body.String())
 	assert.Equal(t, 0, mutationCalls)
+}
+
+func TestWebDaemonGatewayChecksTargetAuthorityBeforeMutation(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		capabilities api.UICapabilities
+		want         int
+		wantMutation int
+	}{
+		{
+			name: "read only target",
+			capabilities: api.UICapabilities{
+				Writable: false, Updates: "poll", ActorPolicy: "request",
+			},
+			want: http.StatusForbidden,
+		},
+		{
+			name: "identity target",
+			capabilities: api.UICapabilities{
+				Writable: true, Updates: "poll", ActorPolicy: "identity",
+			},
+			want: http.StatusForbidden,
+		},
+		{
+			name: "compatible request actor target",
+			capabilities: api.UICapabilities{
+				Writable: true, Updates: "poll", ActorPolicy: "request",
+			},
+			want: http.StatusNoContent, wantMutation: 1,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var capabilityReads, mutationCalls int
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/instance" {
+					assert.Equal(t, "Bearer target-token", r.Header.Get("Authorization"))
+					capabilityReads++
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"web_ui_contract_version": api.UISnapshotContractVersion,
+						"web_ui_capabilities":     test.capabilities,
+					})
+					return
+				}
+				mutationCalls++
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(upstream.Close)
+
+			handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+				Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+			})
+			issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+			require.NoError(t, err)
+
+			response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodDelete,
+				"/api/v1/projects/7/recurrences/01J00000000000000000000001", nil, "")
+
+			assert.Equal(t, test.want, response.Code, response.Body.String())
+			assert.Equal(t, 1, capabilityReads)
+			assert.Equal(t, test.wantMutation, mutationCalls)
+		})
+	}
 }
 
 func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testing.T) {

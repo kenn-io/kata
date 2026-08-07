@@ -173,6 +173,17 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeWebDaemonError(w, http.StatusForbidden, "read_only")
 			return
 		}
+		if isMutation(r.Method) && !readOnlyProjectRequest {
+			allowed, err := g.targetAllowsWebDaemonMutation(r.Context(), d, policy)
+			if err != nil {
+				writeWebDaemonError(w, http.StatusBadGateway, "daemon_authority_unavailable")
+				return
+			}
+			if !allowed {
+				writeWebDaemonError(w, http.StatusForbidden, "read_only")
+				return
+			}
+		}
 	}
 	if r.URL.Path == pathEventsStreamPath && (!d.local || policy.insecureReadonly) {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_stream_forbidden")
@@ -274,6 +285,49 @@ func delegatedWebDaemonSourcePolicy(policy webDaemonSourcePolicy) webDaemonSourc
 		policy.writable = false
 	}
 	return policy
+}
+
+func (g *webDaemonGateway) targetAllowsWebDaemonMutation(
+	ctx context.Context, daemon resolvedWebDaemon, source webDaemonSourcePolicy,
+) (bool, error) {
+	target, err := url.JoinPath(daemon.baseURL, "api/v1/instance")
+	if err != nil {
+		return false, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return false, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Cache-Control", "no-cache")
+	transport, err := webDaemonBearerTransport(daemon, g.trustPrivateNetwork)
+	if err != nil {
+		return false, err
+	}
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return errWebDaemonRedirectForbidden
+	}}
+	response, err := client.Do(request)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 16<<10))
+		return false, fmt.Errorf("target capability response status %d", response.StatusCode)
+	}
+	var instance struct {
+		ContractVersion string             `json:"web_ui_contract_version"`
+		Capabilities    api.UICapabilities `json:"web_ui_capabilities"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&instance); err != nil {
+		return false, err
+	}
+	if instance.ContractVersion != api.UISnapshotContractVersion {
+		return false, errWebDaemonUpgradeRequired
+	}
+	return instance.Capabilities.Writable &&
+		instance.Capabilities.ActorPolicy == source.actorPolicy, nil
 }
 
 func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {

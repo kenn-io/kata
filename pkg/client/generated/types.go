@@ -1559,11 +1559,12 @@ func (i InitProjectResponseBody) Validate() error {
 }
 
 type InstanceResponseBody struct {
-	Auth                 AuthInfoOut `json:"auth"`
-	InstanceUID          string      `json:"instance_uid" validate:"required"`
-	SchemaVersion        int64       `json:"schema_version"`
-	Version              string      `json:"version" validate:"required"`
-	WebUIContractVersion *string     `json:"web_ui_contract_version,omitempty"`
+	Auth                 AuthInfoOut    `json:"auth"`
+	InstanceUID          string         `json:"instance_uid" validate:"required"`
+	SchemaVersion        int64          `json:"schema_version"`
+	Version              string         `json:"version" validate:"required"`
+	WebUICapabilities    UICapabilities `json:"web_ui_capabilities"`
+	WebUIContractVersion *string        `json:"web_ui_contract_version,omitempty"`
 }
 
 func (i InstanceResponseBody) Validate() error {
@@ -1578,6 +1579,11 @@ func (i InstanceResponseBody) Validate() error {
 	}
 	if err := typesValidator.Var(i.Version, "required"); err != nil {
 		errors = errors.Append("Version", err)
+	}
+	if v, ok := any(i.WebUICapabilities).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("WebUICapabilities", err)
+		}
 	}
 	if len(errors) == 0 {
 		return nil

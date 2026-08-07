@@ -133,6 +133,9 @@ by the daemon. Reviewers MUST enforce all of these invariants:
    and heartbeat. Identity-bound source principals are read-only across remote
    gateway hops because no delegated-identity protocol exists; request-actor
    sources are writable only when the target advertises the same actor policy.
+   Every remote mutation rechecks the exact target origin and credential's live
+   writable and actor-policy capabilities through the projection-free instance
+   response before forwarding.
    Remote workspaces poll instead. Valid findings include source-
    policy escalation, target-token or actor-header misrouting, anonymous-readonly
    bypass, cross-origin credential redirects, and streams surviving source

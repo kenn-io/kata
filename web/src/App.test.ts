@@ -558,6 +558,65 @@ describe('App', () => {
     )
   })
 
+  it('clears stale authority before activating a roster replacement', async () => {
+    history.replaceState(null, '', '/kata?view=all-open')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let rosterReads = 0
+    let snapshotReads = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (target.pathname === '/api/v1/ui/daemons') {
+          rosterReads += 1
+          const id = rosterReads === 1 ? 'example-old' : 'example-new'
+          return Response.json({
+            daemons: [{ id, url: '', default: true, auth: 'none', health: 'connected' }],
+          })
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return Response.json({
+            session: 'renewed-session',
+            csrf: 'renewed-csrf',
+            return_path: '/kata?view=today',
+            writable: true,
+            updates: 'poll',
+            actor_policy: 'request',
+          })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/references')) {
+          return Response.json({ issues: [], labels: [], owners: [], projects: [] })
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+          if (snapshotReads === 1) return Response.json(snapshot(), { headers: { ETag: '"old"' } })
+          if (snapshotReads === 2) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
+          return Response.json({ error: { code: 'daemon_unavailable' } }, { status: 503 })
+        }
+        throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    expect(await screen.findByText('Example issue')).not.toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
+    await waitFor(() => expect(rosterReads).toBe(2))
+
+    await waitFor(() => expect(screen.queryByText('Example issue')).toBeNull())
+  })
+
   it('does not resume snapshot authority after the application unmounts', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
