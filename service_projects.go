@@ -79,10 +79,10 @@ func (s *Service) EnsureProject(ctx context.Context, spec ProjectSpec) (EnsurePr
 	} else if found {
 		return exactProjectResult(existing, spec)
 	}
-	if _, found, err := s.projectByName(callCtx, spec.Name); err != nil {
+	if existing, found, err := s.projectByName(callCtx, spec.Name); err != nil {
 		return EnsureProjectResult{}, err
 	} else if found {
-		return EnsureProjectResult{}, projectConflict(spec)
+		return exactProjectResult(existing, spec)
 	}
 
 	created, event, createErr := s.store.CreateProjectWithUIDAndEvent(
@@ -103,10 +103,10 @@ func (s *Service) EnsureProject(ctx context.Context, spec ProjectSpec) (EnsurePr
 	} else if found {
 		return exactProjectResult(existing, spec)
 	}
-	if _, found, lookupErr := s.projectByName(callCtx, spec.Name); lookupErr != nil {
+	if existing, found, lookupErr := s.projectByName(callCtx, spec.Name); lookupErr != nil {
 		return EnsureProjectResult{}, errors.Join(createErr, lookupErr)
 	} else if found {
-		return EnsureProjectResult{}, projectConflict(spec)
+		return exactProjectResult(existing, spec)
 	}
 	return EnsureProjectResult{}, fmt.Errorf("kata: ensure project: %w", createErr)
 }
@@ -206,7 +206,7 @@ func (s *Service) projectByName(ctx context.Context, name string) (db.Project, b
 }
 
 func exactProjectResult(existing db.Project, spec ProjectSpec) (EnsureProjectResult, error) {
-	if existing.Name != spec.Name {
+	if existing.UID != spec.UID || existing.Name != spec.Name {
 		return EnsureProjectResult{}, projectConflict(spec)
 	}
 	return EnsureProjectResult{Project: publicProject(existing)}, nil

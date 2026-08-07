@@ -38,7 +38,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.7.0",
+  "api_schema_version": "0.8.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db"
@@ -70,6 +70,7 @@ response of an older daemon that predates it. Treat an **absent or empty**
 
 | Version | Change |
 | --- | --- |
+| `0.8.0` | Added repeatable `label` and `exclude_label` query parameters to project-scoped search. |
 | `0.7.0` | Added transactional federation enrollment rotation, idempotent replay semantics for caller-supplied enrollment tokens, and the optional `federation_config` health block used by startup reconciliation. |
 | `0.6.0` | Ready responses now return fully hydrated issues. Project-scoped ready rows are `IssueOut` instead of the slimmer `Issue` projection, and global ready rows (`ReadyGlobalIssueOut`, renamed from `ReadyGlobalIssue`) embed `IssueOut` plus `project_name` — so both gain `labels`, `qualified_id` (required), link peers (`parent`, `blocks`, `blocked_by`, `related`), `blocked`, and `child_counts`. Clients regenerated from the schema see the new component name; the shipped Go client keeps `ReadyGlobalIssue` as a deprecated alias. |
 | `0.5.0` | Added metadata patch endpoints for issues and projects, issue create metadata, and metadata-key filters on project issue lists. Generated clients can patch metadata with `If-Match` revisions, send initial metadata in create requests, and request selected metadata keys with the `meta` query parameter. |

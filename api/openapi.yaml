@@ -4091,7 +4091,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.7.0
+  version: 0.8.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -6714,6 +6714,24 @@ paths:
               - hybrid
               - semantic
             type: string
+        - explode: true
+          in: query
+          name: label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: true
+          in: query
+          name: exclude_label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
       responses:
         "200":
           content:

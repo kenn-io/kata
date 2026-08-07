@@ -159,6 +159,34 @@ func TestE2E_SemanticSearch_HybridAndDegraded(t *testing.T) {
 	status, body := searchStatus(t, client, baseURL, pidStr, editedParaphrase, "hybrid")
 	require.Equalf(t, http.StatusServiceUnavailable, status,
 		"explicit hybrid with a dead embedder must be 503, not a downgrade: %s", body)
+
+	// 6. Label filters end to end through the real `kata` binary. Two issues
+	// share a token that appears nowhere else in this test ("zorblatt"), so
+	// the query's result set is exactly this pair; only one is labeled,
+	// isolating the filter's contribution from lexical relevance order. This
+	// runs the actual CLI subprocess (not env.HTTP) against the daemon this
+	// test already booted, rather than adding a second daemon boot.
+	const labelToken = "zorblatt"
+	const filterLabel = "e2e-only"
+	labeledShort := createIssueWithBody(t, client, baseURL, pid,
+		"Zorblatt calibration drifts overnight",
+		"The zorblatt widget loses calibration after long idle periods.")
+	unlabeledShort := createIssueWithBody(t, client, baseURL, pid,
+		"Zorblatt firmware update fails silently",
+		"Flashing new firmware onto the zorblatt widget reports success but doesn't apply.")
+	addLabelE2E(t, client, baseURL, pid, labeledShort, filterLabel)
+
+	withLabel := runKataSearchCLI(t, bin, dirs.repoDir, env, labelToken, "--label", filterLabel)
+	require.Containsf(t, withLabel, "issue="+labeledShort,
+		"--label %s must include the labeled issue: %s", filterLabel, withLabel)
+	require.NotContainsf(t, withLabel, "issue="+unlabeledShort,
+		"--label %s must exclude the unlabeled issue: %s", filterLabel, withLabel)
+
+	withoutLabel := runKataSearchCLI(t, bin, dirs.repoDir, env, labelToken, "--no-label", filterLabel)
+	require.Containsf(t, withoutLabel, "issue="+unlabeledShort,
+		"--no-label %s must include the unlabeled issue: %s", filterLabel, withoutLabel)
+	require.NotContainsf(t, withoutLabel, "issue="+labeledShort,
+		"--no-label %s must exclude the labeled issue: %s", filterLabel, withoutLabel)
 }
 
 // TestE2E_SemanticSearch_ModelChangeCutover proves an embedding model change
@@ -437,6 +465,45 @@ func editIssueE2E(t *testing.T, client *http.Client, baseURL string, pid int64, 
 	raw, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "edit issue: %s", raw)
+}
+
+// addLabelE2E POSTs a label onto an issue and requires a 200. Used to seed
+// the label-filter e2e: one of the two token-sharing issues gets exactly one
+// label so search --label/--no-label has something to discriminate on.
+func addLabelE2E(t *testing.T, client *http.Client, baseURL string, pid int64, ref, label string) {
+	t.Helper()
+	u := baseURL + "/api/v1/projects/" + strconv.FormatInt(pid, 10) + "/issues/" + ref + "/labels"
+	payload, err := json.Marshal(map[string]string{"actor": "tester", "label": label})
+	require.NoError(t, err)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, u, bytes.NewReader(payload))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req) //nolint:gosec // G704: test-only unix socket, fixed URL
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "add label: %s", raw)
+}
+
+// runKataSearchCLI runs `kata search <query> --lexical --agent --workspace
+// <repoDir>` plus extraArgs as a real subprocess against the daemon this
+// test already booted (discovered via the same KATA_HOME runtime files
+// connectDaemon polls) and requires success. This is the one assertion in
+// the file that drives the actual `kata` binary end to end — CLI flag
+// parsing, the HTTP query params, and the store-level filter — rather than
+// talking to the daemon directly over HTTP like the rest of this test.
+// --lexical pins the search mode so the assertion doesn't depend on
+// embedder liveness (the embedder is already closed by step 5 above).
+func runKataSearchCLI(t *testing.T, bin, repoDir string, env []string, query string, extraArgs ...string) string {
+	t.Helper()
+	args := append([]string{"search", query, "--lexical", "--agent", "--workspace", repoDir}, extraArgs...)
+	//nolint:gosec // G204: bin is buildKataBinary's output
+	cmd := exec.Command(bin, args...)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "kata %s: %s", strings.Join(args, " "), out)
+	return string(out)
 }
 
 // waitForSemanticHit polls the real mode=hybrid search until the paraphrase

@@ -58,9 +58,15 @@ func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
 		if err := child.Start(); err != nil {
 			os.Exit(23)
 		}
-		//nolint:gosec // G703: readyPath is a test-owned path created under t.TempDir.
-		if err := os.WriteFile(readyPath, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+		// Publish readiness by rename so the parent cannot observe a partial PID.
+		readyTempPath := readyPath + ".tmp"
+		//nolint:gosec // G703: readyTempPath is a test-owned path created under t.TempDir.
+		if err := os.WriteFile(readyTempPath, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			os.Exit(24)
+		}
+		//nolint:gosec // G703: both paths are test-owned paths created under t.TempDir.
+		if err := os.Rename(readyTempPath, readyPath); err != nil {
+			os.Exit(25)
 		}
 		select {}
 	default:

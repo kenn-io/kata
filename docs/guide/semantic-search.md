@@ -137,6 +137,13 @@ mode:
   (HTTP 503) so a caller that asked for semantic results knows it did not get
   them. They return 400 when embeddings are not configured at all.
 
+Label-filtered vector retrieval is bounded. If filtering exhausts that
+candidate ceiling before filling the requested result limit, an auto search
+returns the reachable results with `degraded` set. Explicit `--hybrid` and
+`--semantic` searches return HTTP 503 instead, because they cannot guarantee a
+complete result page. No degraded signal is emitted when the candidates fill
+the requested limit.
+
 A persistent endpoint problem shows up as a growing `backlog` and a stale
 `last_success_at` in health; the reconciler backs off and retries. When the
 endpoint answers with an HTTP error, `last_error_status` carries that status —

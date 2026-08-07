@@ -202,6 +202,8 @@ type SearchIssuesQuery struct {
 	Limit          *int64                 `json:"limit,omitempty"`
 	IncludeDeleted *bool                  `json:"include_deleted,omitempty"`
 	Mode           *SearchIssuesQueryMode `json:"mode,omitempty"`
+	Label          []string               `json:"label,omitempty"`
+	ExcludeLabel   []string               `json:"exclude_label,omitempty"`
 }
 
 func (s SearchIssuesQuery) Validate() error {

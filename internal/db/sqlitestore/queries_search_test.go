@@ -75,7 +75,7 @@ func TestSearchFTS_RanksByBM25(t *testing.T) {
 		"login fails twice login login login")
 	createTesterIssueWithBody(ctx, t, d, p.ID, "unrelated issue", "no match here")
 
-	got, err := d.SearchFTS(ctx, p.ID, "login", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login", Limit: 20})
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 	// The doubly-mentioned issue should outrank the singly-mentioned one.
@@ -96,7 +96,7 @@ func TestSearchFTS_MatchedIn_Comments(t *testing.T) {
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "unrelated", "nothing here")
 	addTesterComment(ctx, t, d, issue.ID, "watermelon found")
 
-	got, err := d.SearchFTS(ctx, p.ID, "watermelon", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "watermelon", Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, []string{"comments"}, got[0].MatchedIn,
@@ -109,7 +109,7 @@ func TestSearchFTS_MatchedIn_AllThreeColumns(t *testing.T) {
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "watermelon title", "watermelon body")
 	addTesterComment(ctx, t, d, issue.ID, "watermelon comment")
 
-	got, err := d.SearchFTS(ctx, p.ID, "watermelon", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "watermelon", Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, []string{"title", "body", "comments"}, got[0].MatchedIn,
@@ -123,7 +123,7 @@ func TestSearchFTS_FiltersByProject(t *testing.T) {
 	createTesterIssueWithBody(ctx, t, d, p1.ID, "login bug", "")
 	createTesterIssueWithBody(ctx, t, d, p2.ID, "login bug", "")
 
-	got, err := d.SearchFTS(ctx, p1.ID, "login", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p1.ID, Query: "login", Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, p1.ID, got[0].Issue.ProjectID)
@@ -133,7 +133,7 @@ func TestSearchFTS_PopulatesIssueUIDs(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login bug", "")
 
-	got, err := d.SearchFTS(ctx, p.ID, "login", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login", Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, issue.UID, got[0].Issue.UID)
@@ -152,13 +152,13 @@ func TestSearchFTS_ExcludesDeletedByDefault(t *testing.T) {
 		gone.ID)
 	require.NoError(t, err)
 
-	got, err := d.SearchFTS(ctx, p.ID, "login", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login", Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, keep.ID, got[0].Issue.ID, "soft-deleted issue must be filtered")
 
 	// includeDeleted=true returns both.
-	got, err = d.SearchFTS(ctx, p.ID, "login", 20, true)
+	got, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login", Limit: 20, IncludeDeleted: true})
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 }
@@ -167,7 +167,7 @@ func TestSearchFTS_EmptyQueryReturnsEmpty(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, "anything", "")
 
-	got, err := d.SearchFTS(ctx, p.ID, "   ", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "   ", Limit: 20})
 	require.NoError(t, err)
 	assert.Empty(t, got, "blank query → empty result, not an error")
 }
@@ -180,7 +180,7 @@ func TestSearchFTS_LimitCappedAt200(t *testing.T) {
 	for i := 0; i < 250; i++ {
 		createTesterIssueWithBody(ctx, t, d, p.ID, "login bug", "")
 	}
-	got, err := d.SearchFTS(ctx, p.ID, "login", 1_000_000, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login", Limit: 1_000_000})
 	require.NoError(t, err)
 	assert.Len(t, got, 200, "limit must be capped at 200")
 }
@@ -195,7 +195,7 @@ func TestSearchFTS_MultiTermImplicitAND(t *testing.T) {
 	createTesterIssueWithBody(ctx, t, d, p.ID, "login bug", "")
 	createTesterIssueWithBody(ctx, t, d, p.ID, "Safari preferences", "")
 
-	got, err := d.SearchFTS(ctx, p.ID, "login Safari", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login Safari", Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, got, 1, "only the issue containing both terms must match")
 	assert.Equal(t, "fix login crash on Safari", got[0].Issue.Title)
@@ -206,7 +206,7 @@ func TestSearchFTS_QueryEscaping(t *testing.T) {
 	createTesterIssueWithBody(ctx, t, d, p.ID, `fix "login" crash`, "")
 
 	// FTS5 syntax characters must not surface as syntax errors.
-	got, err := d.SearchFTS(ctx, p.ID, `"login"`, 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: `"login"`, Limit: 20})
 	require.NoError(t, err)
 	assert.Len(t, got, 1)
 }
@@ -220,7 +220,7 @@ func TestSearchFTS_MatchedIn_CrossColumn(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, "login bug", "Safari issue")
 
-	got, err := d.SearchFTS(ctx, p.ID, "login Safari", 20, false)
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login Safari", Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.ElementsMatch(t, []string{"title", "body"}, got[0].MatchedIn)
@@ -258,7 +258,7 @@ func TestSearchFTS_OperatorWordsAsLiterals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := d.SearchFTS(ctx, p.ID, tc.query, 20, false)
+			got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.query, Limit: 20})
 			require.NoError(t, err, "query %q must parse without FTS5 syntax error", tc.query)
 			if tc.wantTitle == "" {
 				assert.Len(t, got, 0, "wildcard must not act as prefix-match")
@@ -281,14 +281,14 @@ func TestSearchFTSAny_FindsNearDuplicates(t *testing.T) {
 
 	// Implicit-AND: query has an extra token ("critical") that the row lacks
 	// — the row is filtered out before similarity scoring would see it.
-	gotAnd, err := d.SearchFTS(ctx, p.ID, "login crash Safari critical", 20, false)
+	gotAnd, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login crash Safari critical", Limit: 20})
 	require.NoError(t, err)
 	assert.Len(t, gotAnd, 0, "AND form must filter rows missing any token")
 
 	// OR variant: same query, but the row matches because it contains at
 	// least one of the tokens. similarity.Score in the handler decides
 	// whether to actually treat this as a duplicate.
-	gotOr, err := d.SearchFTSAny(ctx, p.ID, "login crash Safari critical", 20, false)
+	gotOr, err := d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login crash Safari critical", Limit: 20})
 	require.NoError(t, err)
 	require.Len(t, gotOr, 1, "OR form must retrieve near-duplicates")
 	assert.Equal(t, "login crash on Safari", gotOr[0].Issue.Title)

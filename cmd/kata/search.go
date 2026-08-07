@@ -19,6 +19,7 @@ func newSearchCmd() *cobra.Command {
 	var limit int
 	var includeDeleted bool
 	var lexical, hybrid, semantic bool
+	var labels, noLabels []string
 	cmd := &cobra.Command{
 		Use:   "search <query>...",
 		Short: "search issues by title/body/comments",
@@ -75,7 +76,16 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			searchURL := buildSearchURL(baseURL, pid, query, limit, includeDeleted, mode)
+			searchURL := buildSearchURL(searchURLParams{
+				BaseURL:        baseURL,
+				PID:            pid,
+				Query:          query,
+				Limit:          limit,
+				IncludeDeleted: includeDeleted,
+				Mode:           mode,
+				Labels:         labels,
+				NoLabels:       noLabels,
+			})
 			status, bs, err := httpDoJSON(ctx, client, http.MethodGet, searchURL, nil)
 			if err != nil {
 				return err
@@ -91,24 +101,47 @@ func newSearchCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&lexical, "lexical", false, "lexical (FTS) search only")
 	cmd.Flags().BoolVar(&hybrid, "hybrid", false, "hybrid lexical+semantic search")
 	cmd.Flags().BoolVar(&semantic, "semantic", false, "semantic (vector) search only")
+	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
+	cmd.Flags().StringSliceVar(&noLabels, "no-label", nil, "exclude issues with this label (repeatable)")
 	return cmd
 }
 
+// searchURLParams bundles buildSearchURL's inputs; the daemon URL, project ID,
+// query, and search options together push past the repo's five-positional-
+// param convention, so they're collected here instead of passed individually.
+type searchURLParams struct {
+	BaseURL        string
+	PID            int64
+	Query          string
+	Limit          int
+	IncludeDeleted bool
+	Mode           string
+	Labels         []string
+	NoLabels       []string
+}
+
 // buildSearchURL assembles the GET /search request URL with q, optional limit,
-// optional include_deleted, and optional mode query params.
-func buildSearchURL(baseURL string, pid int64, query string, limit int, includeDeleted bool, mode string) string {
+// optional include_deleted, optional mode, and repeated label/exclude_label
+// query params.
+func buildSearchURL(p searchURLParams) string {
 	q := url.Values{}
-	q.Set("q", query)
-	if limit > 0 {
-		q.Set("limit", fmt.Sprint(limit))
+	q.Set("q", p.Query)
+	if p.Limit > 0 {
+		q.Set("limit", fmt.Sprint(p.Limit))
 	}
-	if includeDeleted {
+	if p.IncludeDeleted {
 		q.Set("include_deleted", "true")
 	}
-	if mode != "" {
-		q.Set("mode", mode)
+	if p.Mode != "" {
+		q.Set("mode", p.Mode)
 	}
-	return fmt.Sprintf("%s/api/v1/projects/%d/search?%s", baseURL, pid, q.Encode())
+	for _, l := range p.Labels {
+		q.Add("label", l)
+	}
+	for _, l := range p.NoLabels {
+		q.Add("exclude_label", l)
+	}
+	return fmt.Sprintf("%s/api/v1/projects/%d/search?%s", p.BaseURL, p.PID, q.Encode())
 }
 
 // printSearchResults renders a search response in the active output mode:

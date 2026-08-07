@@ -69,7 +69,7 @@ func TestPostgresBootstrapDoesNotInstallAvailablePgvector(t *testing.T) {
 		Author:    "operator",
 	})
 	require.NoError(t, err)
-	issues, err := store.SearchFTS(ctx, project.ID, "core postgres", 10, false)
+	issues, err := store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: "core postgres", Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
 	assert.Equal(t, created.UID, issues[0].Issue.UID)
@@ -102,7 +102,7 @@ func TestPostgresBootstrapDoesNotRequirePgvector(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	issues, err := store.SearchFTS(ctx, project.ID, "plain postgres", 10, false)
+	issues, err := store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: "plain postgres", Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
 	assert.Equal(t, created.UID, issues[0].Issue.UID)
@@ -137,7 +137,7 @@ func TestPostgresBootstrapDoesNotRequireHalfvec(t *testing.T) {
 		Author:    "operator",
 	})
 	require.NoError(t, err)
-	issues, err := store.SearchFTS(ctx, project.ID, "without halfvec", 10, false)
+	issues, err := store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: "without halfvec", Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
 	assert.Equal(t, created.UID, issues[0].Issue.UID)
