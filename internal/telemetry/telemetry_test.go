@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,7 +20,11 @@ func TestKitPostHogDisabledBuildTagDisablesStandaloneBinary(t *testing.T) {
 	require.NotEmpty(t, moduleCache)
 
 	scratch := t.TempDir()
-	binary := filepath.Join(scratch, "telemetry-testprogram")
+	binaryName := "telemetry-testprogram"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binary := filepath.Join(scratch, binaryName)
 	home := filepath.Join(scratch, "home")
 	command := exec.Command("go", "build", "-tags", "kit_posthog_disabled", "-o", binary, "./testprogram") //nolint:gosec // Fixed Go tool and arguments build the test fixture.
 	command.Env = append(os.Environ(),
