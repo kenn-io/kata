@@ -167,6 +167,13 @@ func (g *webDaemonGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeWebDaemonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !d.local {
+		policy = delegatedWebDaemonSourcePolicy(policy)
+		if isMutation(r.Method) && !readOnlyProjectRequest && !policy.writable {
+			writeWebDaemonError(w, http.StatusForbidden, "read_only")
+			return
+		}
+	}
 	if r.URL.Path == pathEventsStreamPath && (!d.local || policy.insecureReadonly) {
 		writeWebDaemonError(w, http.StatusForbidden, "web_daemon_stream_forbidden")
 		return
@@ -240,18 +247,30 @@ type webDaemonSourcePolicyKey struct{}
 type webDaemonSourcePolicy struct {
 	writable         bool
 	insecureReadonly bool
+	actorPolicy      string
 }
 
 func (g *webDaemonGateway) sourcePolicy(ctx context.Context) webDaemonSourcePolicy {
 	principal, _ := PrincipalFromContext(ctx)
 	policy := webDaemonSourcePolicy{
-		writable: !g.insecureReadonly && principalAllowsWebWrites(principal),
+		writable:    !g.insecureReadonly && principalAllowsWebWrites(principal),
+		actorPolicy: "request",
+	}
+	if strings.TrimSpace(principal.Actor) != "" {
+		policy.actorPolicy = "identity"
 	}
 	if g.sessions != nil {
 		policy.writable = policy.writable && g.sessions.CanWrite(principal)
 	}
 	policy.insecureReadonly = insecureReadonlyRequest(ctx)
 	if policy.insecureReadonly {
+		policy.writable = false
+	}
+	return policy
+}
+
+func delegatedWebDaemonSourcePolicy(policy webDaemonSourcePolicy) webDaemonSourcePolicy {
+	if policy.actorPolicy == "identity" {
 		policy.writable = false
 	}
 	return policy
@@ -562,8 +581,10 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	if err := json.Unmarshal(envelope["capabilities"], &capabilities); err != nil {
 		return fmt.Errorf("decode daemon capabilities: %w", err)
 	}
-	capabilities.Writable = capabilities.Writable && policy.writable
+	capabilities.Writable = capabilities.Writable && policy.writable &&
+		capabilities.ActorPolicy == policy.actorPolicy
 	capabilities.Updates = "poll"
+	capabilities.ActorPolicy = policy.actorPolicy
 	encodedCapabilities, err := json.Marshal(capabilities)
 	if err != nil {
 		return fmt.Errorf("encode daemon capabilities: %w", err)
@@ -584,6 +605,7 @@ func encodeWebDaemonETag(upstream string, policy webDaemonSourcePolicy) string {
 	if policy.writable {
 		mode = "rw"
 	}
+	mode += "-" + policy.actorPolicy
 	return `"kata-daemon-` + mode + `-` + base64.RawURLEncoding.EncodeToString([]byte(upstream)) + `"`
 }
 
@@ -592,6 +614,7 @@ func decodeWebDaemonETag(value string, policy webDaemonSourcePolicy) (string, bo
 	if policy.writable {
 		mode = "rw"
 	}
+	mode += "-" + policy.actorPolicy
 	prefix := `"kata-daemon-` + mode + `-`
 	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, `"`) {
 		return "", false

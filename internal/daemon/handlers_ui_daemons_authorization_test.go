@@ -106,6 +106,45 @@ func TestWebDaemonGatewayIntersectsSnapshotAuthorityAndPreservesConditionalReads
 	assert.Equal(t, 2, snapshotReads)
 }
 
+func TestWebDaemonGatewayPreservesIdentitySourceAttribution(t *testing.T) {
+	var mutationCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isMutation(r.Method) {
+			mutationCalls++
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.UISnapshotResponseBody{
+			ContractVersion: api.UISnapshotContractVersion,
+			Cursor:          7,
+			Capabilities: api.UICapabilities{
+				Writable: true, Updates: "sse", ActorPolicy: "request",
+			},
+		})
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalTrustedProxy, Actor: "user-a"}, "/kata")
+	require.NoError(t, err)
+
+	snapshotResponse := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet,
+		"/api/v1/ui/snapshot", nil, "")
+	require.Equal(t, http.StatusOK, snapshotResponse.Code, snapshotResponse.Body.String())
+	var snapshot api.UISnapshotResponseBody
+	require.NoError(t, json.Unmarshal(snapshotResponse.Body.Bytes(), &snapshot))
+	assert.False(t, snapshot.Capabilities.Writable)
+	assert.Equal(t, "identity", snapshot.Capabilities.ActorPolicy)
+
+	mutationResponse := authorizedGatewayRequest(t, handler, manager, issued, http.MethodDelete,
+		"/api/v1/projects/7/recurrences/01J00000000000000000000001", nil, "")
+	assert.Equal(t, http.StatusForbidden, mutationResponse.Code, mutationResponse.Body.String())
+	assert.Equal(t, 0, mutationCalls)
+}
+
 func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testing.T) {
 	var calls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

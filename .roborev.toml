@@ -130,7 +130,10 @@ by the daemon. Reviewers MUST enforce all of these invariants:
    Targets must be canonical root HTTP(S) origins, credentials remain pinned to
    that origin, and redirects are rejected. Proxied SSE is intentionally
    disabled until source sessions can be revalidated before every event, reset,
-   and heartbeat; remote workspaces poll instead. Valid findings include source-
+   and heartbeat. Identity-bound source principals are read-only across remote
+   gateway hops because no delegated-identity protocol exists; request-actor
+   sources are writable only when the target advertises the same actor policy.
+   Remote workspaces poll instead. Valid findings include source-
    policy escalation, target-token or actor-header misrouting, anonymous-readonly
    bypass, cross-origin credential redirects, and streams surviving source
    revocation. Missing multi-tenant ACLs between principals already trusted for

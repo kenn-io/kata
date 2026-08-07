@@ -205,6 +205,9 @@ authorization service. Review browser changes against these boundaries:
   allowlist so browser credentials, forwarding headers, and trusted-proxy actor
   assertions never reach a target. Targets are canonical root HTTP(S) origins,
   bearer credentials are pinned to that origin, and redirects are rejected.
+  Identity-bound browser principals remain read-only across a remote gateway
+  hop because Kata has no delegated-identity protocol; request-actor sources
+  remain writable only when the target advertises the same actor policy.
   Proxied SSE is disabled until the gateway can revalidate source sessions
   before every event and heartbeat; remote workspaces use polling meanwhile.
 - **Host validation is the DNS-rebinding boundary.** Dedicated browser

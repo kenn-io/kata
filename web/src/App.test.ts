@@ -485,6 +485,7 @@ describe('App', () => {
       JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
     )
     let rosterReads = 0
+    let snapshotReads = 0
     const snapshotRequests: Request[] = []
     vi.stubGlobal(
       'fetch',
@@ -497,9 +498,10 @@ describe('App', () => {
         if (target.pathname === '/api/v1/ui/daemons') {
           rosterReads += 1
           if (rosterReads === 1) {
-            return new Response('', {
-              status: 401,
-              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            return Response.json({
+              daemons: [
+                { id: 'example-old', url: '', default: true, auth: 'none', health: 'connected' },
+              ],
             })
           }
           return Response.json({
@@ -529,7 +531,14 @@ describe('App', () => {
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
         if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
           snapshotRequests.push(request)
+          if (snapshotReads === 2) {
+            return new Response('', {
+              status: 401,
+              headers: { 'X-Kata-Web-Authentication': 'loopback' },
+            })
+          }
           return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
         }
         throw new Error(`Unexpected request: ${request.method} ${target.pathname}`)
@@ -539,6 +548,10 @@ describe('App', () => {
     render(App)
 
     expect(await screen.findByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+    await waitFor(() =>
+      expect(snapshotRequests.at(-1)?.headers.get('X-Kata-Web-Daemon')).toBe('example-old'),
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Today' }))
     await waitFor(() => expect(rosterReads).toBe(2))
     await waitFor(() =>
       expect(snapshotRequests.at(-1)?.headers.get('X-Kata-Web-Daemon')).toBe('example-remote'),

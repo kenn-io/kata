@@ -214,7 +214,12 @@
 
   async function login(token: string, requestedPath: string): Promise<void> {
     const session = await exchangeLoginToken(token, requestedPath)
+    invalidateDaemonRoster()
     await navigateAfterAuthentication(session.returnPath)
+  }
+
+  function invalidateDaemonRoster(): void {
+    if (!directDaemonTarget) daemonRosterLoaded = false
   }
 
   async function navigateAfterAuthentication(target: string): Promise<boolean> {
@@ -712,6 +717,7 @@
           : await openLocalSession(requestedPath)
       if (destroyed) return false
       if (session) {
+        invalidateDaemonRoster()
         let accepted = false
         try {
           accepted = await navigateAfterAuthentication(session.returnPath)
@@ -751,10 +757,14 @@
       return true
     }
     try {
+      const retainedDaemonID = activeDaemonID
       const loadedDaemons = await fetchWebDaemons(browserFetch)
       daemonInfos = loadedDaemons
       daemonRosterLoaded = true
       activeDaemonID =
+        daemonInfos.find(
+          (daemon) => daemon.id === retainedDaemonID && daemon.health !== 'upgrade_required',
+        )?.id ??
         daemonInfos.find(
           (daemon) => daemon.id === launchDaemonID && daemon.health !== 'upgrade_required',
         )?.id ??
