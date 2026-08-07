@@ -603,7 +603,8 @@ func TestInit_WithAgents_BlockIncludesWorkConventions(t *testing.T) {
 	assert.Contains(t, got, "## kata work.* conventions")
 	assert.Contains(t, got, "kata meta set <ref> work.attention ok")
 	assert.Contains(t, got, "work.attention_msg")
-	assert.Contains(t, got, "docs/operations/agent-orchestration.md")
+	assert.Contains(t, got, "https://katatracker.com/operations/agent-orchestration/")
+	assert.NotContains(t, got, "docs/operations/agent-orchestration.md")
 }
 
 // oldAgentsBlockBody is the managed-block body kata shipped before the work.*
