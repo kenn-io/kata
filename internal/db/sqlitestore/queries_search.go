@@ -9,27 +9,21 @@ import (
 )
 
 // SearchFTS runs an FTS5 BM25-ranked query against issues_fts, joins back to
-// issues, and returns the top `limit` rows scoped to the given project. When
-// includeDeleted is false, soft-deleted issues are filtered. The returned
+// issues, and returns the top `p.Limit` rows scoped to the given project. When
+// p.IncludeDeleted is false, soft-deleted issues are filtered. The returned
 // Score is the negated raw BM25 (so higher = better match); MatchedIn is
 // derived from per-column MATCH subqueries since FTS5 highlight() returns
 // NULL on contentless tables.
-func (d *Store) SearchFTS(ctx context.Context, projectID int64, q string, limit int, includeDeleted bool) ([]db.SearchCandidate, error) {
-	return d.searchFTS(ctx, searchFTSReq{
-		projectID: projectID, q: q, mode: searchAll,
-		limit: limit, includeDeleted: includeDeleted,
-	})
+func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
+	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAll})
 }
 
 // SearchFTSAny is like SearchFTS but joins query tokens with FTS5 OR rather
 // than implicit AND. The look-alike soft-block uses this so candidate
 // retrieval has high recall — similarity.Score is the actual gate, and the
 // AND form prematurely filters near-duplicates that differ by one token.
-func (d *Store) SearchFTSAny(ctx context.Context, projectID int64, q string, limit int, includeDeleted bool) ([]db.SearchCandidate, error) {
-	return d.searchFTS(ctx, searchFTSReq{
-		projectID: projectID, q: q, mode: searchAny,
-		limit: limit, includeDeleted: includeDeleted,
-	})
+func (d *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
+	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAny})
 }
 
 type searchMode int
@@ -39,22 +33,19 @@ const (
 	searchAny                   // explicit OR across query tokens
 )
 
-// searchFTSReq bundles the inputs to the shared searchFTS implementation so
-// the helper stays under the 5-positional-param limit.
+// searchFTSReq pairs the caller's params with the token-join mode the shared
+// searchFTS implementation should use.
 type searchFTSReq struct {
-	projectID      int64
-	q              string
-	mode           searchMode
-	limit          int
-	includeDeleted bool
+	params db.SearchFTSParams
+	mode   searchMode
 }
 
 func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandidate, error) {
-	q := strings.TrimSpace(r.q)
+	q := strings.TrimSpace(r.params.Query)
 	if q == "" {
 		return nil, nil
 	}
-	limit := r.limit
+	limit := r.params.Limit
 	if limit <= 0 {
 		limit = 20
 	}
@@ -96,9 +87,21 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		colPhrase = strings.Join(quoted, " OR ")
 	}
 
-	deletedFilter := "AND i.deleted_at IS NULL"
-	if r.includeDeleted {
-		deletedFilter = ""
+	rowFilter := "AND i.deleted_at IS NULL"
+	if r.params.IncludeDeleted {
+		rowFilter = ""
+	}
+	// Label predicates mirror ListIssues (AND across Labels, exclusion for
+	// ExcludeLabels) and live in the candidate row selection, so they narrow
+	// the result set before LIMIT rather than after.
+	var labelArgs []any
+	for _, label := range r.params.Labels {
+		rowFilter += "\n\t\t  AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)"
+		labelArgs = append(labelArgs, strings.ToLower(label))
+	}
+	for _, label := range r.params.ExcludeLabels {
+		rowFilter += "\n\t\t  AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)"
+		labelArgs = append(labelArgs, strings.ToLower(label))
 	}
 	// Per-column MATCH subqueries replace highlight() because issues_fts is
 	// declared content='' (contentless), and highlight() returns NULL for every
@@ -120,13 +123,14 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		  AND i.project_id = ?
 		  %s
 		ORDER BY bm25(issues_fts) ASC
-		LIMIT %d`, deletedFilter, limit)
+		LIMIT %d`, rowFilter, limit)
 
 	// Bind order: colPhrase (×3 — title MATCH, body MATCH, comments MATCH),
-	// then topPhrase (top-level MATCH), then projectID. Reordering the
-	// SELECT/WHERE clauses without updating the bind list will silently
-	// transpose binds.
-	rows, err := d.QueryContext(ctx, query, colPhrase, colPhrase, colPhrase, topPhrase, r.projectID)
+	// then topPhrase (top-level MATCH), then projectID, then one bind per
+	// label predicate in rowFilter. Reordering the SELECT/WHERE clauses
+	// without updating the bind list will silently transpose binds.
+	args := append([]any{colPhrase, colPhrase, colPhrase, topPhrase, r.params.ProjectID}, labelArgs...)
+	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -527,4 +528,569 @@ func TestVectorLegUnavailableDegradesInAutoAndFailsExplicit(t *testing.T) {
 			t.Fatalf("no active generation under explicit mode should be 503, got %d", me.Status())
 		}
 	})
+}
+
+// hitTitles summarizes candidates for failure messages: the label-filter
+// fixtures run to hundreds of issues, where dumping whole candidate structs
+// buries the one fact a reader needs.
+func hitTitles(hits []db.SearchCandidate) []string {
+	out := make([]string, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, h.Issue.Title)
+	}
+	return out
+}
+
+// TestHybridSearchLabelFilterAppliesToBothLegs pins that a label filter binds
+// the whole request rather than one leg. The unlabeled issue matches the query
+// lexically (same title terms) and semantically (same vector axis), so it can
+// only be absent from a hybrid response if the FTS predicate and the vector
+// leg's own check both applied.
+func TestHybridSearchLabelFilterAppliesToBothLegs(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	labeled, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "login race in the session handler", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddLabel(ctx, labeled.ID, "bug", "a"); err != nil {
+		t.Fatal(err)
+	}
+	unlabeled, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "login race in the cookie handler", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Labeled but off-topic: proves the filter narrows the query's matches
+	// rather than widening the response to every labeled issue.
+	offTopic, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "checkout rounding drift", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddLabel(ctx, offTopic.ID, "bug", "a"); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := openTestVectorIndex(t)
+	// Login content sits on the query axis; the off-topic issue is orthogonal
+	// to it and falls under the cosine floor.
+	emb := mappedVectorEmbedClient(t, "m", 4, func(text string) []float32 {
+		if strings.Contains(text, "login") {
+			return []float32{1, 0, 0, 0}
+		}
+		return []float32{0, 1, 0, 0}
+	})
+	fillGeneration(ctx, t, store, idx, emb)
+
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "hybrid",
+		Labels: []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch: %v", err)
+	}
+	if res.Mode != modeHybrid {
+		t.Fatalf("explicit hybrid must run as hybrid, got %q", res.Mode)
+	}
+	if res.Degraded {
+		t.Fatalf("a corpus this far inside the candidate ceiling has nothing to degrade: %q", res.DegradedReason)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != labeled.UID {
+		t.Fatalf("want only the labeled issue %q, got %q", labeled.Title, hitTitles(res.Hits))
+	}
+	// Both legs matched the surviving issue, so both legs also ran their own
+	// filter against the unlabeled one.
+	if !slices.Contains(res.Hits[0].MatchedIn, "semantic") {
+		t.Fatalf("matched_in = %v, want the vector leg to have contributed", res.Hits[0].MatchedIn)
+	}
+	if !slices.Contains(res.Hits[0].MatchedIn, "title") {
+		t.Fatalf("matched_in = %v, want the lexical leg to have contributed", res.Hits[0].MatchedIn)
+	}
+	for _, h := range res.Hits {
+		if h.Issue.UID == unlabeled.UID {
+			t.Fatalf("unlabeled issue %q leaked through a label-filtered search", unlabeled.Title)
+		}
+	}
+}
+
+// TestSemanticSearchLabelANDAndExclusion covers the vector leg's filter
+// semantics: Labels is an AND across every value, ExcludeLabels removes any
+// issue carrying one, and both compare case-insensitively against the stored
+// canonical labels. Every fixture shares one vector, so labels are the only
+// thing separating them.
+func TestSemanticSearchLabelANDAndExclusion(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(title string, labels ...string) db.Issue {
+		t.Helper()
+		iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: proj.ID, Title: title, Body: "x", Author: "a",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range labels {
+			if _, err := store.AddLabel(ctx, iss.ID, l, "a"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return iss
+	}
+	both := create("login race retry storm", "bug", "urgent")
+	bugOnly := create("login race in the session handler", "bug")
+	create("login race on the cookie path", "urgent")
+
+	idx := openTestVectorIndex(t)
+	activateFixedGeneration(ctx, t, store, idx)
+	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
+		Labels: []string{"bug", "urgent"},
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch AND: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != both.UID {
+		t.Fatalf("multiple labels must AND to the doubly-labeled issue %q, got %q", both.Title, hitTitles(res.Hits))
+	}
+
+	// Mixed case on both filters: stored labels are canonical lowercase, so
+	// the request's values are what has to be folded.
+	res, err = hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
+		Labels: []string{"Bug"}, ExcludeLabels: []string{"URGENT"},
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch exclusion: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != bugOnly.UID {
+		t.Fatalf("excluding urgent must leave only %q, got %q", bugOnly.Title, hitTitles(res.Hits))
+	}
+}
+
+type labelsByIssuesCountingStore struct {
+	db.Storage
+	calls int
+}
+
+func (s *labelsByIssuesCountingStore) LabelsByIssues(ctx context.Context, projectID int64, issueIDs []int64) (map[int64][]string, error) {
+	s.calls++
+	return s.Storage.LabelsByIssues(ctx, projectID, issueIDs)
+}
+
+func TestSemanticSearchHydratesLabelsOncePerCandidateBatch(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: proj.ID, Title: fmt.Sprintf("login race %d", i), Body: "x", Author: "a",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.AddLabel(ctx, iss.ID, "bug", "a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	idx := openTestVectorIndex(t)
+	activateFixedGeneration(ctx, t, store, idx)
+	counting := &labelsByIssuesCountingStore{Storage: store}
+	_, err = hybridSearch(ctx, counting, idx, fixedVectorEmbedClient(t, []float32{1, 0, 0, 0}), hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
+		Labels: []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch: %v", err)
+	}
+	if counting.calls != 1 {
+		t.Fatalf("LabelsByIssues calls = %d, want one bulk hydration for the candidate batch", counting.calls)
+	}
+}
+
+// TestVectorLegLabelFilterUsesDeepRetry pins that the bounded depth retry
+// serves label filters too: fetchCap unlabeled chunks can fill the entire
+// first KNN batch, and the one labeled match only surfaces because the leg
+// re-queries at knnDeepLimit. The index holds fewer chunks than that ceiling,
+// so the short result is exact and must not be flagged degraded.
+func TestVectorLegLabelFilterUsesDeepRetry(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "target login race", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddLabel(ctx, target.ID, "bug", "a"); err != nil {
+		t.Fatal(err)
+	}
+	// fetchCap+1 unlabeled issues whose vectors outscore the target, so the
+	// first batch holds only issues the label filter drops.
+	for i := 0; i < fetchCap+1; i++ {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: proj.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	idx := openTestVectorIndex(t)
+	fillGeneration(ctx, t, store, idx, labelAxisEmbedClient(t))
+
+	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
+		Labels: []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != target.UID {
+		t.Fatalf("the labeled issue must survive %d higher-scoring unlabeled chunks, got %q",
+			fetchCap+1, hitTitles(res.Hits))
+	}
+	if res.Degraded {
+		t.Fatalf("a deep batch the index could not fill means exact results, not a degrade: %q", res.DegradedReason)
+	}
+}
+
+func TestSearchLabelCeilingRequiresRelevantProbeCandidate(t *testing.T) {
+	tests := []struct {
+		name            string
+		irrelevantCount int
+		irrelevantVec   []float32
+	}{
+		{
+			name:            "exactly the deep limit",
+			irrelevantCount: knnDeepLimit - ceilingSurvivors,
+			irrelevantVec:   []float32{0.9, 0.43589, 0, 0},
+		},
+		{
+			name:            "probe falls below cosine floor",
+			irrelevantCount: knnDeepLimit + 1,
+			irrelevantVec:   []float32{0.2, 0.9799, 0, 0},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newReconcilerTestStore(t)
+			proj, err := store.CreateProject(ctx, "spoke-project")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < ceilingSurvivors; i++ {
+				iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: proj.ID, Title: fmt.Sprintf("relevant candidate %d", i), Body: "x", Author: "a",
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.AddLabel(ctx, iss.ID, "bug", "a"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := 0; i < tt.irrelevantCount; i++ {
+				if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: proj.ID, Title: fmt.Sprintf("irrelevant candidate %d", i), Body: "x", Author: "a",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			idx := openTestVectorIndex(t)
+			fillGeneration(ctx, t, store, idx, mappedVectorEmbedClient(t, "m", 4, func(text string) []float32 {
+				if strings.HasPrefix(text, "irrelevant") {
+					return tt.irrelevantVec
+				}
+				return []float32{1, 0, 0, 0}
+			}))
+
+			res, err := hybridSearch(ctx, store, idx, fixedVectorEmbedClient(t, []float32{1, 0, 0, 0}), hybridParams{
+				ProjectID: proj.ID, Query: "semantic query", Limit: 10, Requested: "semantic",
+				Labels: []string{"bug"},
+			})
+			if err != nil {
+				t.Fatalf("a deep batch with no relevant unseen candidate must be exact: %v", err)
+			}
+			if res.Degraded {
+				t.Fatalf("exact semantic results must not degrade: %q", res.DegradedReason)
+			}
+			if len(res.Hits) != ceilingSurvivors {
+				t.Fatalf("hits = %d, want %d relevant labeled candidates", len(res.Hits), ceilingSurvivors)
+			}
+		})
+	}
+}
+
+// labelAxisEmbedClient ranks issues by title prefix rather than content, in
+// three tiers of the query axis: "distractor" issues sit just below it (cosine
+// 0.9), "target" issues far below it but still above the cosine floor (0.6),
+// and everything else — the query text included — exactly on it (1.0). Fixing
+// the tiers this way keeps KNN order independent of how equal scores are
+// broken, which matters once a fixture runs to a thousand chunks.
+func labelAxisEmbedClient(t *testing.T) *embedding.Client {
+	t.Helper()
+	return mappedVectorEmbedClient(t, "m", 4, func(text string) []float32 {
+		switch {
+		case strings.HasPrefix(text, "distractor"):
+			return []float32{0.9, 0.43589, 0, 0}
+		case strings.HasPrefix(text, "target"):
+			return []float32{0.6, 0.8, 0, 0}
+		default:
+			return []float32{1, 0, 0, 0}
+		}
+	})
+}
+
+// ceilingSurvivors is how many labeled issues the ceiling corpus keeps inside
+// the candidate ceiling: enough to fill a small limit, too few for a large one.
+const ceilingSurvivors = 3
+
+// seedLabelCeilingCorpus creates the shape a label-filtered deep retry cannot
+// see past: knnDeepLimit unlabeled distractors, ceilingSurvivors labeled issues
+// ranked above them, and one labeled issue ranked below them and so pushed off
+// the end of the ceiling. It returns that unreachable issue. Filling the
+// generation is left to the caller, which may still be seeding other projects.
+func seedLabelCeilingCorpus(ctx context.Context, t *testing.T, store db.Storage, projectID int64) db.Issue {
+	t.Helper()
+	label := func(iss db.Issue) {
+		t.Helper()
+		if _, err := store.AddLabel(ctx, iss.ID, "bug", "a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create := func(title string) db.Issue {
+		t.Helper()
+		iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: projectID, Title: title, Body: "x", Author: "a",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return iss
+	}
+	for i := 0; i < ceilingSurvivors; i++ {
+		label(create(fmt.Sprintf("labeled login race %d", i)))
+	}
+	for i := 0; i < knnDeepLimit; i++ {
+		create(fmt.Sprintf("distractor %d", i))
+	}
+	beyond := create("target semantic-only candidate")
+	label(beyond)
+	return beyond
+}
+
+// TestSearchLabelCeilingHonorsModeStrictness pins the split between explicit
+// modes, which fail when the bounded semantic leg cannot prove completeness,
+// and auto mode, which may return the reachable hits with a degraded signal.
+func TestSearchLabelCeilingHonorsModeStrictness(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beyond := seedLabelCeilingCorpus(ctx, t, store, proj.ID)
+	idx := openTestVectorIndex(t)
+	fillGeneration(ctx, t, store, idx, labelAxisEmbedClient(t))
+	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+
+	for _, requested := range []string{"semantic", "hybrid"} {
+		_, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+			ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: requested,
+			Labels: []string{"bug"},
+		})
+		if err == nil {
+			t.Fatalf("explicit %s must fail when label filtering exhausts the semantic candidate ceiling", requested)
+		}
+		var me *modeError
+		if !errors.As(err, &me) {
+			t.Fatalf("explicit %s error = %T, want *modeError", requested, err)
+		}
+		if me.Status() != http.StatusServiceUnavailable {
+			t.Fatalf("explicit %s status = %d, want 503", requested, me.Status())
+		}
+	}
+
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "auto",
+		Labels: []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("auto search must report bounded incompleteness as a degraded response: %v", err)
+	}
+	if res.Mode != modeHybrid {
+		t.Fatalf("mode = %q, want auto-resolved hybrid", res.Mode)
+	}
+	if !res.Degraded {
+		t.Fatalf("auto search must report filters that consume the candidate ceiling, got %d hits and no signal", len(res.Hits))
+	}
+	const want = "label filters exhausted the semantic candidate ceiling; semantic results may be incomplete"
+	if res.DegradedReason != want {
+		t.Fatalf("degraded reason = %q, want %q", res.DegradedReason, want)
+	}
+	// The signal reports incompleteness, not emptiness: the reachable matches
+	// are returned, and the one ranked past the ceiling is what is missing.
+	if len(res.Hits) != ceilingSurvivors {
+		t.Fatalf("want the %d reachable labeled issues, got %q", ceilingSurvivors, hitTitles(res.Hits))
+	}
+	for _, h := range res.Hits {
+		if h.Issue.UID == beyond.UID {
+			t.Fatalf("fixture is wrong: %q must rank beyond the ceiling for this test to mean anything", beyond.Title)
+		}
+	}
+
+	// Same exhausted ceiling, but the survivors already fill the limit: the
+	// caller's page is complete, so there is nothing to report.
+	res, err = hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: ceilingSurvivors - 1, Requested: "semantic",
+		Labels: []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch at a filled limit: %v", err)
+	}
+	if res.Degraded {
+		t.Fatalf("a limit the survivors fill is not incomplete, got %q", res.DegradedReason)
+	}
+	if len(res.Hits) != ceilingSurvivors-1 {
+		t.Fatalf("want a full page of %d hits, got %q", ceilingSurvivors-1, hitTitles(res.Hits))
+	}
+}
+
+func TestSearchLabelCeilingProbeSurvivesStaleSQLiteVector(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedLabelCeilingCorpus(ctx, t, store, proj.ID)
+	stale, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "stale candidate", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	idx := openTestVectorIndex(t)
+	fillGeneration(ctx, t, store, idx, mappedVectorEmbedClient(t, "m", 4, func(text string) []float32 {
+		switch {
+		case strings.HasPrefix(text, "stale"):
+			return []float32{0.85, 0.52678, 0, 0}
+		case strings.HasPrefix(text, "distractor"):
+			var i int
+			if n, _ := fmt.Sscanf(text, "distractor %d", &i); n == 1 && i < fetchCap {
+				return []float32{0.9, 0.43589, 0, 0}
+			}
+			return []float32{0.8, 0.6, 0, 0}
+		case strings.HasPrefix(text, "target"):
+			return []float32{0.6, 0.8, 0, 0}
+		default:
+			return []float32{1, 0, 0, 0}
+		}
+	}))
+
+	updatedTitle := "edited candidate"
+	if _, _, changed, err := store.EditIssue(ctx, db.EditIssueParams{
+		IssueID: stale.ID, Title: &updatedTitle, Actor: "a",
+	}); err != nil {
+		t.Fatal(err)
+	} else if !changed {
+		t.Fatal("fixture edit must advance the stale issue's content revision")
+	}
+	if _, err := idx.RefreshMirror(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = hybridSearch(ctx, store, idx, fixedVectorEmbedClient(t, []float32{1, 0, 0, 0}), hybridParams{
+		ProjectID: proj.ID, Query: "semantic query", Limit: 10, Requested: "semantic",
+		Labels: []string{"bug"},
+	})
+	if err == nil {
+		t.Fatal("a stale SQLite vector must not hide a relevant raw probe beyond the candidate ceiling")
+	}
+	var me *modeError
+	if !errors.As(err, &me) || me.Status() != http.StatusServiceUnavailable {
+		t.Fatalf("bounded explicit semantic error = %T %v, want 503 modeError", err, err)
+	}
+}
+
+// TestUnfilteredSearchNeverSetsCeilingDegraded guards the unfiltered path over
+// the very corpus that degrades a filtered search. Searching the corpus project
+// fills the first batch and never retries; searching a sibling project starved
+// beyond the ceiling does take the deep retry and still comes up short — the
+// pre-existing cross-project miss, which stays silent because the signal is
+// only ever about label filters.
+func TestUnfilteredSearchNeverSetsCeilingDegraded(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := store.CreateProject(ctx, "spoke-project-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedLabelCeilingCorpus(ctx, t, store, proj.ID)
+	// Ranked below every distractor, so the corpus crowds it out of the deep
+	// batch exactly as it crowds out the labeled issue past the ceiling.
+	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: sibling.ID, Title: "target login race in the sibling project", Body: "x", Author: "a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	idx := openTestVectorIndex(t)
+	fillGeneration(ctx, t, store, idx, labelAxisEmbedClient(t))
+	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+
+	res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: proj.ID, Query: "login race", Limit: 10, Requested: "semantic",
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch: %v", err)
+	}
+	if res.Degraded || res.DegradedReason != "" {
+		t.Fatalf("an unfiltered search must never carry the ceiling signal, got %q", res.DegradedReason)
+	}
+	if len(res.Hits) != 10 {
+		t.Fatalf("unfiltered search should fill the limit, got %d hits", len(res.Hits))
+	}
+
+	res, err = hybridSearch(ctx, store, idx, emb, hybridParams{
+		ProjectID: sibling.ID, Query: "login race", Limit: 10, Requested: "semantic",
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch from the starved project: %v", err)
+	}
+	if res.Degraded || res.DegradedReason != "" {
+		t.Fatalf("cross-project starvation is not a label-filter degrade, got %q", res.DegradedReason)
+	}
+	if len(res.Hits) != 0 {
+		t.Fatalf("fixture is wrong: the sibling issue must rank beyond the ceiling, got %q", hitTitles(res.Hits))
+	}
 }

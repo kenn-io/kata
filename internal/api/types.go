@@ -1177,11 +1177,13 @@ type DigestResponse struct {
 // returns 400, and a vector-leg failure returns 503 rather than silently
 // degrading.
 type SearchRequest struct {
-	ProjectID      int64  `path:"project_id" required:"true"`
-	Query          string `query:"q" required:"true"`
-	Limit          int    `query:"limit,omitempty"`
-	IncludeDeleted bool   `query:"include_deleted,omitempty"`
-	Mode           string `query:"mode,omitempty" enum:"auto,lexical,hybrid,semantic"`
+	ProjectID      int64    `path:"project_id" required:"true"`
+	Query          string   `query:"q" required:"true"`
+	Limit          int      `query:"limit,omitempty"`
+	IncludeDeleted bool     `query:"include_deleted,omitempty"`
+	Mode           string   `query:"mode,omitempty" enum:"auto,lexical,hybrid,semantic"`
+	Labels         []string `query:"label,explode"`
+	ExcludeLabels  []string `query:"exclude_label,explode"`
 }
 
 // SearchHit is one row in SearchResponse. Score is mode-scoped — negated raw
@@ -1195,11 +1197,14 @@ type SearchHit struct {
 }
 
 // SearchResponse mirrors spec §4.10. Mode is the effective mode actually run
-// (always present). Degraded is true only when an auto/hybrid request fell back
-// to lexical because the vector leg could not run; DegradedReason carries the
-// underlying cause. Both degraded fields are omitted on the baseline path so an
-// unconfigured daemon's response is byte-identical to its pre-semantic shape
-// apart from the always-present mode echo.
+// (always present). Degraded is true either when an auto request fell back to
+// lexical because the vector leg could not run, or when an auto-resolved
+// hybrid search exhausted the label-filtered vector candidate ceiling and may
+// be incomplete. Explicit hybrid/semantic requests return 503 for either
+// condition instead. DegradedReason carries the underlying cause. Both
+// degraded fields are omitted on the baseline path so an unconfigured daemon's
+// response is byte-identical to its pre-semantic shape apart from the
+// always-present mode echo.
 type SearchResponse struct {
 	Body struct {
 		Query          string      `json:"query"`

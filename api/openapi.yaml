@@ -6714,6 +6714,24 @@ paths:
               - hybrid
               - semantic
             type: string
+        - explode: true
+          in: query
+          name: label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
+        - explode: true
+          in: query
+          name: exclude_label
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
       responses:
         "200":
           content:

@@ -530,9 +530,11 @@ while the backfill drains; the `embeddings` backlog in `/health` reports the
 remaining coverage. An ordinary reconciler backlog with an active index does
 not degrade search — fresh or edited issues simply lack semantic recall
 until they are embedded. Search degrades (labeled in `auto` mode, 503 for
-explicit `--hybrid`/`--semantic`) only when the vector leg is unavailable:
-no index has been activated yet (fresh vector storage before the first reconcile
-cycle) or the model changed and its replacement index is still backfilling.
+explicit `--hybrid`/`--semantic`) when the vector leg is unavailable or when
+bounded label filtering exhausts its candidate ceiling before filling the
+requested result limit. Unavailability includes the period before any index is
+activated (fresh vector storage before the first reconcile cycle) and model
+changes while the replacement index is still backfilling.
 
 Changing `model`, `dims`, or `fingerprint_salt` builds a new index generation
 in the background and cuts over automatically once it finishes filling.

@@ -156,8 +156,8 @@ type Storage interface {
 	RecentSameMessageClose(ctx context.Context, parentIssueID, excludeIssueID int64, actor, normalizedMessage string, since time.Time) (*Event, error)
 
 	// search
-	SearchFTS(ctx context.Context, projectID int64, q string, limit int, includeDeleted bool) ([]SearchCandidate, error)
-	SearchFTSAny(ctx context.Context, projectID int64, q string, limit int, includeDeleted bool) ([]SearchCandidate, error)
+	SearchFTS(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
+	SearchFTSAny(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
 
 	// embeddings (semantic search)
 	// ListIssueContent returns live issues in live projects (soft-deleted

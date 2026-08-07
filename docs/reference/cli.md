@@ -138,12 +138,14 @@ exclusive and force a strategy:
 
 `--hybrid` and `--semantic` require `[search.embeddings]`; against a daemon
 without it they return an error rather than silently falling back. If the
-embedding endpoint is unreachable for a given query, only the default (auto)
-search falls back to lexical results and labels the response `degraded`;
-`--json` and `--agent` output carry the effective `mode` and the degraded
-reason so the downgrade is never silent. Explicit `--hybrid` and `--semantic`
-do not degrade: they return an error (HTTP 503) when the vector leg cannot run,
-just as they return 400 when embeddings are not configured at all.
+vector leg cannot run, or bounded label filtering exhausts its candidate
+ceiling before filling the requested limit, only the default (auto) search
+returns a labeled `degraded` response. An unavailable leg falls back to lexical
+results; a bounded label search returns its reachable hybrid results. `--json`
+and `--agent` output carry the effective `mode` and the degraded reason so the
+downgrade is never silent. Explicit `--hybrid` and `--semantic` do not degrade:
+they return an error (HTTP 503) when the vector leg cannot run or complete, just
+as they return 400 when embeddings are not configured at all.
 
 Edit:
 

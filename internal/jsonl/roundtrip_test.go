@@ -400,9 +400,10 @@ func sqliteSequenceSnapshot(t *testing.T, d *sqlitestore.Store) []map[string]any
 
 func assertSearchResultsMatch(t *testing.T, src, dst *sqlitestore.Store, projectID int64, query string) {
 	t.Helper()
-	srcHits, err := src.SearchFTS(context.Background(), projectID, query, 20, true)
+	params := db.SearchFTSParams{ProjectID: projectID, Query: query, Limit: 20, IncludeDeleted: true}
+	srcHits, err := src.SearchFTS(context.Background(), params)
 	require.NoError(t, err)
-	dstHits, err := dst.SearchFTS(context.Background(), projectID, query, 20, true)
+	dstHits, err := dst.SearchFTS(context.Background(), params)
 	require.NoError(t, err)
 	assert.Equal(t, normalizeSearchHits(srcHits), normalizeSearchHits(dstHits), query)
 }

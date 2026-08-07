@@ -494,6 +494,7 @@ The CLI has three output surfaces, each handled to a precise shape:
 | Embeddings unconfigured | `auto` → lexical, `mode:"lexical"`, not degraded (it is the baseline); explicit `hybrid`/`semantic` → 400 |
 | Embedder unreachable at query | `auto` → lexical + `degraded:true` + reason; explicit `hybrid`/`semantic` → 503 |
 | Query embed dims ≠ configured dims | Treated as embed failure (degraded / 503) + health error |
+| Label-filtered candidate ceiling exhausted before filling the requested limit | `auto` → reachable hybrid results + `degraded:true` + reason; explicit `hybrid`/`semantic` → 503 |
 | Embedder unreachable in reconciler | Backoff per failure class; backlog grows; search unaffected (FTS carries) |
 | Definitive 4xx in reconciler | Max backoff immediately + health error; no hot loop |
 | Rows not yet embedded (reconciler backlog) | Invisible to vector leg (not yet stamped in the active generation), carried by FTS leg; not degradation |

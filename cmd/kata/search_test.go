@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -178,6 +179,60 @@ func TestSearchHumanOldDaemonEmptyModeRendersAsLexical(t *testing.T) {
 	if !strings.Contains(out, "1.23") {
 		t.Fatalf("empty mode must render lexical %%.2f rows:\n%s", out)
 	}
+}
+
+// TestSearch_RepeatedLabelFiltersRequireEveryLabel mirrors
+// TestList_RepeatedLabelFiltersRequireEveryLabel: repeated --label flags on
+// `kata search` must AND together, matching only issues carrying every
+// named label.
+func TestSearch_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	alphaOnly := createIssue(t, env, pid, "sprocket alpha only")
+	alphaBeta := createIssue(t, env, pid, "sprocket alpha beta")
+	runCLI(t, env, dir, "label", "add", alphaOnly, "alpha")
+	runCLI(t, env, dir, "label", "add", alphaBeta, "alpha")
+	runCLI(t, env, dir, "label", "add", alphaBeta, "beta")
+
+	out := runCLI(t, env, dir, "search", "sprocket", "--label", "alpha", "--label", "beta")
+	assert.Contains(t, out, "sprocket alpha beta")
+	assert.NotContains(t, out, "sprocket alpha only")
+}
+
+// TestSearch_RepeatedNoLabelFiltersExcludeEveryLabel mirrors
+// TestList_RepeatedNoLabelFiltersExcludeEveryLabel: repeated --no-label
+// flags on `kata search` exclude any issue carrying any named label.
+func TestSearch_RepeatedNoLabelFiltersExcludeEveryLabel(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	alpha := createIssue(t, env, pid, "widget alpha candidate")
+	beta := createIssue(t, env, pid, "widget beta candidate")
+	createIssue(t, env, pid, "widget plain candidate")
+	runCLI(t, env, dir, "label", "add", alpha, "alpha")
+	runCLI(t, env, dir, "label", "add", beta, "beta")
+
+	out := runCLI(t, env, dir, "search", "widget", "--no-label", "alpha", "--no-label", "beta")
+	assert.Contains(t, out, "widget plain candidate")
+	assert.NotContains(t, out, "widget alpha candidate")
+	assert.NotContains(t, out, "widget beta candidate")
+}
+
+// TestBuildSearchURLEncodesLabelFilters verifies buildSearchURL emits a
+// repeated "label" param per --label value and a repeated "exclude_label"
+// param per --no-label value, order-insensitive.
+func TestBuildSearchURLEncodesLabelFilters(t *testing.T) {
+	got := buildSearchURL(searchURLParams{
+		BaseURL:  "http://example.test",
+		PID:      1,
+		Query:    "q",
+		Limit:    20,
+		Labels:   []string{"bug", "urgent"},
+		NoLabels: []string{"wip"},
+	})
+	idx := strings.Index(got, "?")
+	require.NotEqual(t, -1, idx, "expected a query string: %s", got)
+	values, err := url.ParseQuery(got[idx+1:])
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"bug", "urgent"}, values["label"])
+	assert.ElementsMatch(t, []string{"wip"}, values["exclude_label"])
 }
 
 // TestSearch_RejectsNonPositiveLimit covers hammer-test #5: --limit

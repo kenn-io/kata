@@ -101,6 +101,56 @@ func TestSearchEndpoint_UnknownProjectIs404(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_found")
 }
 
+// TestSearchEndpointRepeatedLabelFiltersRequireEveryLabel pins that ?label=
+// is repeatable and ANDs (mirrors ListIssuesRequest/ReadyRequest semantics):
+// a request with two label params must return only the issue carrying both,
+// while a single label param returns every issue carrying it.
+func TestSearchEndpointRepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	both := createIssueViaHTTP(t, env, pid, "zzzlabeltoken both bug and urgent")
+	bugOnly := createIssueViaHTTP(t, env, pid, "zzzlabeltoken bug only")
+	neither := createIssueViaHTTP(t, env, pid, "zzzlabeltoken plain issue")
+	postLabel(t, env, pid, both, "bug")
+	postLabel(t, env, pid, both, "urgent")
+	postLabel(t, env, pid, bugOnly, "bug")
+	_ = neither
+
+	resp, bs := envGetRaw(t, env, projectPath(pid)+"/search?q=zzzlabeltoken&label=bug&label=urgent")
+	require.Equal(t, 200, resp.StatusCode)
+	body := string(bs)
+	assert.Contains(t, body, `"title":"zzzlabeltoken both bug and urgent"`)
+	assert.NotContains(t, body, `"title":"zzzlabeltoken bug only"`,
+		"single label=bug entry lacks the urgent label required by the AND filter")
+	assert.NotContains(t, body, `"title":"zzzlabeltoken plain issue"`)
+
+	resp, bs = envGetRaw(t, env, projectPath(pid)+"/search?q=zzzlabeltoken&label=bug")
+	require.Equal(t, 200, resp.StatusCode)
+	body = string(bs)
+	assert.Contains(t, body, `"title":"zzzlabeltoken both bug and urgent"`)
+	assert.Contains(t, body, `"title":"zzzlabeltoken bug only"`,
+		"a single label=bug filter should return every bug-labeled issue")
+	assert.NotContains(t, body, `"title":"zzzlabeltoken plain issue"`)
+}
+
+// TestSearchEndpointExcludeLabel pins ?exclude_label= passthrough: an issue
+// carrying the excluded label is omitted while an unlabeled sibling matching
+// the same query token still surfaces.
+func TestSearchEndpointExcludeLabel(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "kata")
+	urgent := createIssueViaHTTP(t, env, pid, "zzzexcludetoken urgent issue")
+	plain := createIssueViaHTTP(t, env, pid, "zzzexcludetoken plain issue")
+	postLabel(t, env, pid, urgent, "urgent")
+	_ = plain
+
+	resp, bs := envGetRaw(t, env, projectPath(pid)+"/search?q=zzzexcludetoken&exclude_label=urgent")
+	require.Equal(t, 200, resp.StatusCode)
+	body := string(bs)
+	assert.NotContains(t, body, `"title":"zzzexcludetoken urgent issue"`)
+	assert.Contains(t, body, `"title":"zzzexcludetoken plain issue"`)
+}
+
 // TestSearchEndpoint_EmptyResultsIsArrayNotNull pins the wire shape: a
 // search with no matches must return "results":[] (a JSON array, possibly
 // empty), not "results":null. CLI consumers iterate over the slice and a

@@ -212,6 +212,18 @@ type ReadyIssuesFilter struct {
 	ExcludeLabels []string // issues must NOT have any of these labels
 }
 
+// SearchFTSParams parameterizes full-text search candidate retrieval. The
+// label filters run inside the backend's SQL, before LIMIT, so a narrow
+// filter still fills the requested number of rows.
+type SearchFTSParams struct {
+	ProjectID      int64
+	Query          string
+	Limit          int
+	IncludeDeleted bool
+	Labels         []string // issues must have ALL these labels (AND logic)
+	ExcludeLabels  []string // issues must NOT have any of these labels
+}
+
 // EditIssueAtomicParams carries the full set of mutations to apply to one
 // issue in a single transaction. nil/false fields mean "no change."
 type EditIssueAtomicParams struct {

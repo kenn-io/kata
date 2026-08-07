@@ -804,20 +804,26 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("create searchable comment: %w", err)
 	}
 	assert.NotZero(t, comment.ID)
-	andMatches, err := store.SearchFTS(ctx, primary.Project.ID, "login browser", 20, false)
+	andMatches, err := store.SearchFTS(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "login browser", Limit: 20,
+	})
 	if err != nil {
 		return fmt.Errorf("search all terms: %w", err)
 	}
 	require.Len(t, andMatches, 1)
 	assert.Equal(t, primary.Issue.ID, andMatches[0].Issue.ID)
 	assert.Equal(t, []string{"title", "body"}, andMatches[0].MatchedIn)
-	commentMatches, err := store.SearchFTS(ctx, primary.Project.ID, "watermelon", 20, false)
+	commentMatches, err := store.SearchFTS(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "watermelon", Limit: 20,
+	})
 	if err != nil {
 		return fmt.Errorf("search comments: %w", err)
 	}
 	require.Len(t, commentMatches, 1)
 	assert.Equal(t, []string{"comments"}, commentMatches[0].MatchedIn)
-	anyMatches, err := store.SearchFTSAny(ctx, primary.Project.ID, "login absenttoken", 20, false)
+	anyMatches, err := store.SearchFTSAny(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "login absenttoken", Limit: 20,
+	})
 	if err != nil {
 		return fmt.Errorf("search any term: %w", err)
 	}
@@ -832,7 +838,9 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	ranked, err := store.SearchFTS(ctx, primary.Project.ID, "ranktoken", 20, false)
+	ranked, err := store.SearchFTS(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "ranktoken", Limit: 20,
+	})
 	if err != nil {
 		return fmt.Errorf("search relevance ranking: %w", err)
 	}
@@ -840,22 +848,135 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	assert.Equal(t, dense.ID, ranked[0].Issue.ID)
 	assert.Equal(t, sparse.ID, ranked[1].Issue.ID)
 	assert.GreaterOrEqual(t, ranked[0].Score, ranked[1].Score)
-	deletedMatches, err := store.SearchFTS(ctx, primary.Project.ID, "deletedtoken", 20, false)
+	deletedMatches, err := store.SearchFTS(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "deletedtoken", Limit: 20,
+	})
 	if err != nil {
 		return fmt.Errorf("search excluding deleted: %w", err)
 	}
 	assert.Empty(t, deletedMatches)
-	deletedMatches, err = store.SearchFTS(ctx, primary.Project.ID, "deletedtoken", 20, true)
+	deletedMatches, err = store.SearchFTS(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "deletedtoken", Limit: 20, IncludeDeleted: true,
+	})
 	if err != nil {
 		return fmt.Errorf("search including deleted: %w", err)
 	}
 	require.Len(t, deletedMatches, 1)
 	assert.Equal(t, deleted.ID, deletedMatches[0].Issue.ID)
-	blankMatches, err := store.SearchFTS(ctx, primary.Project.ID, "   ", 20, false)
+	blankMatches, err := store.SearchFTS(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "   ", Limit: 20,
+	})
 	if err != nil {
 		return fmt.Errorf("blank search: %w", err)
 	}
 	assert.Empty(t, blankMatches)
+
+	// Label filters narrow FTS candidates inside the SQL, before LIMIT is
+	// applied, with the same semantics as ListIssues: AND across Labels,
+	// exclusion for ExcludeLabels, case-insensitive on both.
+	alpha, err := createFixtureIssue(ctx, store, primary.Project.ID, "alpha payment gateway", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	if _, err := store.AddLabel(ctx, alpha.ID, "bug", "discovery-author"); err != nil {
+		return fmt.Errorf("label alpha bug: %w", err)
+	}
+	if _, err := store.AddLabel(ctx, alpha.ID, "urgent", "discovery-author"); err != nil {
+		return fmt.Errorf("label alpha urgent: %w", err)
+	}
+	beta, err := createFixtureIssue(ctx, store, primary.Project.ID, "beta payment gateway", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	if _, err := store.AddLabel(ctx, beta.ID, "bug", "discovery-author"); err != nil {
+		return fmt.Errorf("label beta bug: %w", err)
+	}
+	// gamma's title is the bare query so it is the shortest matching document
+	// and therefore the top-ranked hit on both backends; the limit case below
+	// depends on the unlabeled issue ranking first.
+	gamma, err := createFixtureIssue(ctx, store, primary.Project.ID, "payment gateway", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	gatewayQuery := db.SearchFTSParams{ProjectID: primary.Project.ID, Query: "payment gateway", Limit: 20}
+
+	unfiltered, err := store.SearchFTS(ctx, gatewayQuery)
+	if err != nil {
+		return fmt.Errorf("search gateways unfiltered: %w", err)
+	}
+	assert.ElementsMatch(t, []int64{alpha.ID, beta.ID, gamma.ID}, searchCandidateIDs(unfiltered))
+
+	byLabel := gatewayQuery
+	byLabel.Labels = []string{"BUG"}
+	labeled, err := store.SearchFTS(ctx, byLabel)
+	if err != nil {
+		return fmt.Errorf("search gateways by label: %w", err)
+	}
+	assert.ElementsMatch(t, []int64{alpha.ID, beta.ID}, searchCandidateIDs(labeled))
+
+	byBothLabels := gatewayQuery
+	byBothLabels.Labels = []string{"bug", "urgent"}
+	bothLabeled, err := store.SearchFTS(ctx, byBothLabels)
+	if err != nil {
+		return fmt.Errorf("search gateways by all labels: %w", err)
+	}
+	assert.ElementsMatch(t, []int64{alpha.ID}, searchCandidateIDs(bothLabeled))
+
+	withoutUrgent := gatewayQuery
+	withoutUrgent.ExcludeLabels = []string{"urgent"}
+	notUrgent, err := store.SearchFTS(ctx, withoutUrgent)
+	if err != nil {
+		return fmt.Errorf("search gateways excluding label: %w", err)
+	}
+	assert.ElementsMatch(t, []int64{beta.ID, gamma.ID}, searchCandidateIDs(notUrgent))
+
+	bugNotUrgent := gatewayQuery
+	bugNotUrgent.Labels = []string{"bug"}
+	bugNotUrgent.ExcludeLabels = []string{"urgent"}
+	included, err := store.SearchFTS(ctx, bugNotUrgent)
+	if err != nil {
+		return fmt.Errorf("search gateways including and excluding labels: %w", err)
+	}
+	assert.ElementsMatch(t, []int64{beta.ID}, searchCandidateIDs(included))
+
+	// Filtering happens before LIMIT: a limit of 1 spends its single row on a
+	// matching issue rather than dropping the match for an unlabeled one.
+	//
+	// This only bites if the unlabeled issue outranks the labeled ones, so
+	// that a filter-after-LIMIT implementation would take gamma and then
+	// filter it away to nothing. gamma's title is the bare query, making it
+	// the shortest matching document and the top hit on every backend; pin
+	// that here so a future fixture edit cannot silently defang the case.
+	topHit := gatewayQuery
+	topHit.Limit = 1
+	unlabeledFirst, err := store.SearchFTS(ctx, topHit)
+	if err != nil {
+		return fmt.Errorf("search gateways top hit: %w", err)
+	}
+	require.Len(t, unlabeledFirst, 1)
+	require.Equal(t, gamma.ID, unlabeledFirst[0].Issue.ID,
+		"unlabeled gamma must rank first, or the limit case below cannot detect filter-after-LIMIT")
+
+	limitedByLabel := gatewayQuery
+	limitedByLabel.Labels = []string{"bug"}
+	limitedByLabel.Limit = 1
+	limitedLabeled, err := store.SearchFTS(ctx, limitedByLabel)
+	if err != nil {
+		return fmt.Errorf("search gateways by label with limit: %w", err)
+	}
+	require.Len(t, limitedLabeled, 1)
+	assert.Contains(t, []int64{alpha.ID, beta.ID}, limitedLabeled[0].Issue.ID)
+
+	anyBothLabels, err := store.SearchFTSAny(ctx, byBothLabels)
+	if err != nil {
+		return fmt.Errorf("search any by all labels: %w", err)
+	}
+	assert.ElementsMatch(t, []int64{alpha.ID}, searchCandidateIDs(anyBothLabels))
+	anyWithoutUrgent, err := store.SearchFTSAny(ctx, withoutUrgent)
+	if err != nil {
+		return fmt.Errorf("search any excluding label: %w", err)
+	}
+	assert.ElementsMatch(t, []int64{beta.ID, gamma.ID}, searchCandidateIDs(anyWithoutUrgent))
 
 	qualifiers, err := store.IssueQualifiersByUIDs(ctx, []string{
 		primary.Issue.UID, other.Issue.UID, "01ARZ3NDEKTSV4RRFFQ69G5FAV",

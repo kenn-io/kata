@@ -337,6 +337,29 @@ func TestOpenAPIDocumentArrayQueryParamsExplode(t *testing.T) {
 	if actor.Explode == nil || !*actor.Explode {
 		t.Fatalf("digest actor explode = %v, want true", actor.Explode)
 	}
+
+	search := doc.Paths["/api/v1/projects/{project_id}/search"].Get
+	if search == nil {
+		t.Fatal("missing GET /api/v1/projects/{project_id}/search")
+	}
+	for _, name := range []string{"label", "exclude_label"} {
+		var param *huma.Param
+		for _, p := range search.Parameters {
+			if p.Name == name && p.In == "query" {
+				param = p
+				break
+			}
+		}
+		if param == nil {
+			t.Fatalf("missing search %s query parameter", name)
+		}
+		if param.Schema == nil || param.Schema.Type != huma.TypeArray {
+			t.Fatalf("search %s schema = %+v, want array", name, param.Schema)
+		}
+		if param.Explode == nil || !*param.Explode {
+			t.Fatalf("search %s explode = %v, want true", name, param.Explode)
+		}
+	}
 }
 
 // TestResponseBodyAllowsAdditionalProperties pins the response side of the

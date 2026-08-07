@@ -9,45 +9,26 @@ import (
 )
 
 // SearchFTS returns issues that contain all normalized query terms.
-func (s *Store) SearchFTS(
-	ctx context.Context,
-	projectID int64,
-	query string,
-	limit int,
-	includeDeleted bool,
-) ([]db.SearchCandidate, error) {
-	return s.searchFTS(ctx, searchFTSRequest{
-		projectID: projectID, query: query, limit: limit, includeDeleted: includeDeleted,
-	})
+func (s *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
+	return s.searchFTS(ctx, searchFTSRequest{params: p})
 }
 
 // SearchFTSAny returns issues that contain at least one normalized query term.
-func (s *Store) SearchFTSAny(
-	ctx context.Context,
-	projectID int64,
-	query string,
-	limit int,
-	includeDeleted bool,
-) ([]db.SearchCandidate, error) {
-	return s.searchFTS(ctx, searchFTSRequest{
-		projectID: projectID, query: query, limit: limit, includeDeleted: includeDeleted, any: true,
-	})
+func (s *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
+	return s.searchFTS(ctx, searchFTSRequest{params: p, any: true})
 }
 
 type searchFTSRequest struct {
-	projectID      int64
-	query          string
-	limit          int
-	includeDeleted bool
-	any            bool
+	params db.SearchFTSParams
+	any    bool
 }
 
 func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.SearchCandidate, error) {
-	queryText := strings.TrimSpace(request.query)
+	queryText := strings.TrimSpace(request.params.Query)
 	if queryText == "" {
 		return nil, nil
 	}
-	limit := request.limit
+	limit := request.params.Limit
 	if limit <= 0 {
 		limit = 20
 	} else if limit > 200 {
@@ -57,9 +38,23 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	if request.any {
 		matchQuery = "queries.any_query"
 	}
-	deletedFilter := `AND i.deleted_at IS NULL`
-	if request.includeDeleted {
-		deletedFilter = ""
+	args := []any{request.params.ProjectID, queryText, limit}
+	rowFilter := `AND i.deleted_at IS NULL`
+	if request.params.IncludeDeleted {
+		rowFilter = ""
+	}
+	// Label predicates mirror ListIssues (AND across Labels, exclusion for
+	// ExcludeLabels) and live in the candidate row selection, so they narrow
+	// the result set before LIMIT rather than after.
+	addLabelFilter := func(predicate, label string) {
+		args = append(args, strings.ToLower(label))
+		rowFilter += "\n   " + fmt.Sprintf(predicate, len(args))
+	}
+	for _, label := range request.params.Labels {
+		addLabelFilter("AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", label)
+	}
+	for _, label := range request.params.ExcludeLabels {
+		addLabelFilter("AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", label)
 	}
 
 	// plainto_tsquery provides the all-terms form without interpreting user
@@ -92,8 +87,8 @@ SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
    AND search.tsv @@ %[1]s
    %[2]s
  ORDER BY score DESC, i.id DESC
- LIMIT $3`, matchQuery, deletedFilter)
-	rows, err := s.QueryContext(ctx, query, request.projectID, queryText, limit)
+ LIMIT $3`, matchQuery, rowFilter)
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", mapSQLError(err, nil))
 	}
