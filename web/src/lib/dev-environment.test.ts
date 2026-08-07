@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { createDevChildEnvironment, devDaemonCommand } from './dev-environment'
+import * as devEnvironment from './dev-environment'
+
+const { createDevChildEnvironment, devDaemonCommand } = devEnvironment
 
 describe('createDevChildEnvironment', () => {
   it('replaces inherited daemon targets with isolated development paths', () => {
@@ -53,6 +55,24 @@ describe('devDaemonCommand', () => {
       '--foreground',
       '--listen',
       '127.0.0.1:43127',
+    ])
+  })
+})
+
+describe('developmentKataBuildArguments', () => {
+  it('compiles the development daemon with Kit telemetry disabled', () => {
+    const helper = (devEnvironment as Record<string, unknown>).developmentKataBuildArguments
+
+    expect(helper).toBeTypeOf('function')
+    expect((helper as (binary: string) => string[])('/tmp/kata')).toEqual([
+      'build',
+      '-tags',
+      'kit_posthog_disabled',
+      '-trimpath',
+      '-buildvcs=false',
+      '-o',
+      '/tmp/kata',
+      './cmd/kata',
     ])
   })
 })

@@ -7,7 +7,10 @@ import { tmpdir } from 'node:os'
 
 import { expect, test as base, type APIResponse, type Page } from '@playwright/test'
 
-import { createDevChildEnvironment } from '../src/lib/dev-environment'
+import {
+  createDevChildEnvironment,
+  developmentKataBuildArguments,
+} from '../src/lib/dev-environment'
 
 interface RuntimeRecord {
   metadata?: Record<string, string>
@@ -89,12 +92,7 @@ async function startProductionFixture(): Promise<RunningFixture> {
   await Promise.all([mkdir(home), mkdir(workspace), mkdir(remoteHome), mkdir(remoteWorkspace)])
 
   run('make', ['web-embed'], repositoryRoot, process.env)
-  run(
-    'go',
-    ['build', '-trimpath', '-buildvcs=false', '-o', binary, './cmd/kata'],
-    repositoryRoot,
-    process.env,
-  )
+  run('go', developmentKataBuildArguments(binary), repositoryRoot, process.env)
 
   const [port, remotePort] = await Promise.all([freePort(), freePort()])
   const origin = `http://127.0.0.1:${port}`

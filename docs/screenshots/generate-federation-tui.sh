@@ -144,7 +144,7 @@ HUB_LOG="$TMP_ROOT/hub.log"
 mkdir -p "$SPOKE_HOME" "$HUB_HOME" "$SPOKE_WS" "$HUB_WS" "$OUTPUT_DIR"
 
 if [[ ! -x "$KATA_BIN" ]]; then
-    GOFLAGS=-buildvcs=false go -C "$REPO_ROOT" build -o "$KATA_BIN" ./cmd/kata
+    GOFLAGS=-buildvcs=false go -C "$REPO_ROOT" build -tags kit_posthog_disabled -o "$KATA_BIN" ./cmd/kata
 fi
 
 cat >"$HUB_HOME/config.toml" <<EOF

@@ -4,7 +4,11 @@ import { createServer } from 'node:net'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { createDevChildEnvironment, devDaemonCommand } from '../src/lib/dev-environment'
+import {
+  createDevChildEnvironment,
+  developmentKataBuildArguments,
+  devDaemonCommand,
+} from '../src/lib/dev-environment'
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url))
 const stateRoot = join(repositoryRoot, '.kata-web-dev')
@@ -42,7 +46,7 @@ const childEnvironment = createDevChildEnvironment(process.env, {
   database: join(home, 'kata.db'),
 })
 
-await runChecked(['go', 'build', '-o', binary, './cmd/kata'], repositoryRoot, childEnvironment)
+await runChecked(['go', ...developmentKataBuildArguments(binary)], repositoryRoot, childEnvironment)
 
 const daemon = Bun.spawn({
   cmd: devDaemonCommand(binary, backendPort),

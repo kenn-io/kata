@@ -4,6 +4,19 @@ export interface DevRuntimePaths {
   database: string
 }
 
+export function developmentKataBuildArguments(binary: string): string[] {
+  return [
+    'build',
+    '-tags',
+    'kit_posthog_disabled',
+    '-trimpath',
+    '-buildvcs=false',
+    '-o',
+    binary,
+    './cmd/kata',
+  ]
+}
+
 const inheritedProcessEnvironment = [
   'PATH',
   'Path',

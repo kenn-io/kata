@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -o /out/kata ./cmd/kata
+RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -tags kit_posthog_disabled -o /out/kata ./cmd/kata
 
 FROM debian:bookworm-slim
 
