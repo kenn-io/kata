@@ -150,39 +150,48 @@ func DiscoverPaths(startPath string) (DiscoveredPaths, error) {
 		physicalWalkRoot = filepath.Dir(resolved)
 	}
 	d := DiscoveredPaths{}
-	if d.GitRoot, err = walkUp(physicalWalkRoot, ".git", true, ""); err != nil {
+	physicalGitRoot, err := walkUp(physicalWalkRoot, ".git", true, "")
+	if err != nil {
 		return DiscoveredPaths{}, fmt.Errorf("discover .git: %w", err)
 	}
-	if d.GitRoot == "" {
+	if physicalGitRoot == "" {
 		if d.WorkspaceRoot, err = walkUp(lexicalWalkRoot, ProjectConfigFilename, false, ""); err != nil {
 			return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
 		}
 		return d, nil
 	}
-	if d.WorkspaceRoot, err = walkUp(physicalWalkRoot, ProjectConfigFilename, false, d.GitRoot); err != nil {
+	if lexicalGitRoot, ok := matchingLexicalAncestor(lexicalWalkRoot, physicalGitRoot); ok {
+		d.GitRoot = lexicalGitRoot
+		if d.WorkspaceRoot, err = walkUp(lexicalWalkRoot, ProjectConfigFilename, false, lexicalGitRoot); err != nil {
+			return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
+		}
+		return d, nil
+	}
+	d.GitRoot = physicalGitRoot
+	if d.WorkspaceRoot, err = walkUp(physicalWalkRoot, ProjectConfigFilename, false, physicalGitRoot); err != nil {
 		return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
 	}
-	d.GitRoot = matchingLexicalAncestor(lexicalWalkRoot, d.GitRoot)
-	d.WorkspaceRoot = matchingLexicalAncestor(lexicalWalkRoot, d.WorkspaceRoot)
+	if lexicalWorkspaceRoot, ok := matchingLexicalAncestor(lexicalWalkRoot, d.WorkspaceRoot); ok {
+		d.WorkspaceRoot = lexicalWorkspaceRoot
+	}
 	return d, nil
 }
 
 // matchingLexicalAncestor preserves the caller's path spelling when one of
-// its lexical ancestors resolves to the discovered physical root. A root above
-// an explicit symlink target has no such representation and remains physical.
-func matchingLexicalAncestor(start, physicalRoot string) string {
+// its lexical ancestors resolves to the discovered physical root.
+func matchingLexicalAncestor(start, physicalRoot string) (string, bool) {
 	if physicalRoot == "" {
-		return ""
+		return "", false
 	}
 	dir := start
 	for {
 		resolved, err := filepath.EvalSymlinks(dir)
 		if err == nil && resolved == physicalRoot {
-			return dir
+			return dir, true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return physicalRoot
+			return "", false
 		}
 		dir = parent
 	}
