@@ -756,8 +756,8 @@
       activeDaemonID = undefined
       return true
     }
+    const retainedDaemonID = activeDaemonID
     try {
-      const retainedDaemonID = activeDaemonID
       const loadedDaemons = await fetchWebDaemons(browserFetch)
       const nextDaemonID =
         loadedDaemons.find(
@@ -795,8 +795,18 @@
         }
       }
     } catch {
-      // A malformed gateway response cannot own daemon selection. The direct
-      // local authority path remains available so the recovery UI can render.
+      if (retainedDaemonID !== undefined) {
+        snapshots.clear()
+        referenceGeneration += 1
+        referenceAbort?.abort()
+        references = undefined
+        acceptedRoute = undefined
+        mode = 'loading'
+        daemonError = 'Configured daemons are unavailable'
+        return false
+      }
+      // An initial legacy launch has no selected gateway authority, so it can
+      // retain the direct-local behavior used before daemon catalogs existed.
       if (!daemonRosterLoaded) {
         daemonInfos = []
         activeDaemonID = undefined
@@ -887,9 +897,10 @@
   {#if versionMismatch}
     <VersionMismatch />
   {:else if mode === 'loading'}
-    {#if daemonError && !activeDaemonID && daemonInfos.length > 0}
+    {#if daemonError && daemonInfos.length > 0}
       <section class="kata-authority-recovery" role="alert">
         <span>{daemonError}</span>
+        <button type="button" onclick={() => void startAuthority()}>Retry daemon roster</button>
         <KataDaemonSwitcher
           daemons={daemonInfos}
           activeId={activeDaemonID}
