@@ -150,9 +150,9 @@ func hybridSearch(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 
 // runVectorLeg embeds the query, KNN-searches the active generation, rolls
 // chunk hits up to issues, and hydrates them against live canonical rows. The
-// index is daemon-global while search is project-scoped, so the leg fetches
-// fetchCap candidates, filters by project and liveness afterwards, and
-// retries once at knnDeepLimit when a full batch filters down short;
+// index is daemon-global while search is project-scoped, so the leg fetches a
+// fetchCap raw window, filters by project and liveness afterwards, and retries
+// once at knnDeepLimit when that window has more candidates but filters short;
 // hydrating against kata.db (not the sidecar) preserves the guarantee that
 // soft-deleted or purged issues never leak, whatever the sidecar holds.
 //
@@ -186,28 +186,31 @@ func runVectorLeg(ctx context.Context, store db.Storage, idx *vector.Index, emb 
 	}
 	query := kitvec.Vector(vecs[0])
 	labels := newLabelFilter(p.Labels, p.ExcludeLabels)
-	hits, err := idx.Query(ctx, key, query, fetchCap)
+	window, err := idx.QueryWithProbe(ctx, key, query, fetchCap)
 	if err != nil {
 		return nil, false, err
 	}
+	hits := window.Hits
 	out, err := hydrateVectorHits(ctx, store, hits, p, fetch, labels)
 	if err != nil {
 		return nil, false, err
 	}
-	// Bounded depth retry: a full first batch means more chunks may exist
-	// beyond fetchCap, and coming up short after filtering means another
-	// project's higher-scoring chunks — or, under a label filter, non-matching
-	// ones — may have crowded this project's out. Re-query once at
-	// knnDeepLimit and redo the rollup + filter.
-	if len(out) < fetch && len(hits) == fetchCap {
+	// Bounded depth retry: fetchCap returned hits or a raw probe beyond that
+	// window means more chunks may exist past the initial boundary. The probe
+	// matters on SQLite, where stale vectors consume raw KNN slots before the
+	// freshness join removes them. Coming up short after filtering means stale
+	// rows, another project's higher-scoring chunks, or non-matching labels may
+	// have crowded this project's candidates out. Re-query once at knnDeepLimit
+	// and redo the rollup + filter.
+	if len(out) < fetch && (len(hits) == fetchCap || window.HasProbe) {
 		var boundedRelevant bool
 		if labels.empty() {
 			hits, err = idx.Query(ctx, key, query, knnDeepLimit)
 		} else {
-			var window vector.QueryWindow
-			window, err = idx.QueryWithProbe(ctx, key, query, knnDeepLimit)
-			hits = window.Hits
-			boundedRelevant = window.HasProbe && window.ProbeScore >= cosineFloor
+			var deepWindow vector.QueryWindow
+			deepWindow, err = idx.QueryWithProbe(ctx, key, query, knnDeepLimit)
+			hits = deepWindow.Hits
+			boundedRelevant = deepWindow.HasProbe && deepWindow.ProbeScore >= cosineFloor
 		}
 		if err != nil {
 			return nil, false, err

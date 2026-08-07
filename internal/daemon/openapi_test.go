@@ -212,9 +212,9 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsConfigDrivenFederationContract(t *testing.T) {
-	if APISchemaVersion != "0.7.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.7.0 for config-driven federation reconciliation", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsSearchLabelFilters(t *testing.T) {
+	if APISchemaVersion != "0.8.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.8.0 for search label query parameters", APISchemaVersion)
 	}
 }
 

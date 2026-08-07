@@ -5859,6 +5859,8 @@ export interface operations {
         limit?: number
         include_deleted?: boolean
         mode?: 'auto' | 'lexical' | 'hybrid' | 'semantic'
+        label?: string[] | null
+        exclude_label?: string[] | null
       }
       header?: never
       path: {

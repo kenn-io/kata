@@ -777,6 +777,79 @@ func TestVectorLegLabelFilterUsesDeepRetry(t *testing.T) {
 	}
 }
 
+// TestVectorLegLabelFilterRetriesPastStaleInitialSQLiteWindow pins the raw
+// fetchCap boundary used by SQLite vec0. A stale vector still occupies a raw
+// KNN slot even though the freshness join removes it from returned hits, so
+// the retry decision cannot rely on len(hits) alone.
+func TestVectorLegLabelFilterRetriesPastStaleInitialSQLiteWindow(t *testing.T) {
+	ctx := context.Background()
+	store := newReconcilerTestStore(t)
+	proj, err := store.CreateProject(ctx, "spoke-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "target login race", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddLabel(ctx, target.ID, "bug", "a"); err != nil {
+		t.Fatal(err)
+	}
+	stale, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: proj.ID, Title: "stale candidate", Body: "x", Author: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < fetchCap-1; i++ {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: proj.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	idx := openTestVectorIndex(t)
+	fillGeneration(ctx, t, store, idx, mappedVectorEmbedClient(t, "m", 4, func(text string) []float32 {
+		switch {
+		case strings.HasPrefix(text, "stale"):
+			return []float32{0.95, 0.31225, 0, 0}
+		case strings.HasPrefix(text, "distractor"):
+			return []float32{0.9, 0.43589, 0, 0}
+		case strings.HasPrefix(text, "target"):
+			return []float32{0.6, 0.8, 0, 0}
+		default:
+			return []float32{1, 0, 0, 0}
+		}
+	}))
+
+	updatedTitle := "edited candidate"
+	if _, _, changed, err := store.EditIssue(ctx, db.EditIssueParams{
+		IssueID: stale.ID, Title: &updatedTitle, Actor: "a",
+	}); err != nil {
+		t.Fatal(err)
+	} else if !changed {
+		t.Fatal("fixture edit must advance the stale issue's content revision")
+	}
+	if _, err := idx.RefreshMirror(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := hybridSearch(ctx, store, idx, fixedVectorEmbedClient(t, []float32{1, 0, 0, 0}), hybridParams{
+		ProjectID: proj.ID, Query: "semantic query", Limit: 10, Requested: "semantic",
+		Labels: []string{"bug"},
+	})
+	if err != nil {
+		t.Fatalf("hybridSearch: %v", err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Issue.UID != target.UID {
+		t.Fatalf("stale initial-window vector must not hide labeled issue %q beyond fetchCap, got %q",
+			target.Title, hitTitles(res.Hits))
+	}
+}
+
 func TestSearchLabelCeilingRequiresRelevantProbeCandidate(t *testing.T) {
 	tests := []struct {
 		name            string
