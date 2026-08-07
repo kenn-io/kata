@@ -30,6 +30,31 @@ set once.
 Run the daemon under a process manager such as launchd, systemd, or a container
 runtime on the host that owns the SQLite database.
 
+## Runtime profiling
+
+The daemon exposes Go's standard `net/http/pprof` handlers under
+`/debug/pprof/` on its existing listener. The same listener and authentication
+policy protect profiling requests; a token-protected TCP daemon requires its
+normal bearer token.
+
+Capture and inspect CPU and heap profiles with standard Go tools:
+
+```sh
+curl -H "Authorization: Bearer $KATA_AUTH_TOKEN" \
+  'http://100.64.0.5:7777/debug/pprof/profile?seconds=30' \
+  -o kata.cpu.pprof
+go tool pprof kata.cpu.pprof
+
+curl -H "Authorization: Bearer $KATA_AUTH_TOKEN" \
+  'http://100.64.0.5:7777/debug/pprof/heap' \
+  -o kata.heap.pprof
+go tool pprof kata.heap.pprof
+```
+
+The index also links the goroutine, allocation, mutex-contention, blocking,
+thread-creation, command-line, symbol, and execution-trace endpoints. Capture
+`/debug/pprof/trace?seconds=5` and open it with `go tool trace`.
+
 ## Client setup
 
 Point clients at the daemon:

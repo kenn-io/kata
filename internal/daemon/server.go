@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"strings"
 	"time"
 
@@ -218,6 +219,7 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 	registerWebDaemonHandlers(mux, cfg)
 	registerOpenAPIYAML(mux, cfg.HostAccess)
+	registerPprofHandlers(mux)
 	webHandler, err := kataweb.NewEmbeddedHandler()
 	if err != nil {
 		panic(fmt.Errorf("build embedded web handler: %w", err))
@@ -294,6 +296,14 @@ func registerOpenAPIYAML(mux *http.ServeMux, hostAccess HostAccessController) {
 		w.Header().Set("Content-Type", "application/openapi+yaml")
 		_, _ = w.Write(out)
 	})
+}
+
+func registerPprofHandlers(mux *http.ServeMux) {
+	mux.HandleFunc(http.MethodGet+" /debug/pprof/", pprof.Index)
+	mux.HandleFunc(http.MethodGet+" /debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc(http.MethodGet+" /debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc(http.MethodGet+" /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc(http.MethodGet+" /debug/pprof/trace", pprof.Trace)
 }
 
 // Run listens on the configured endpoint until ctx is cancelled. The caller is
