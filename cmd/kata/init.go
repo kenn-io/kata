@@ -678,7 +678,7 @@ const agentsBlockBody = "## kata issue tracker\n\n" +
 	"- Never `kata delete` or `kata purge` without explicit user authorization.\n\n" +
 	"## kata work.* conventions (agent orchestration)\n\n" +
 	"When working a kata-tracked issue, keep its `work.*` metadata truthful\n" +
-	"(see docs/operations/agent-orchestration.md for the full recipe):\n\n" +
+	"(see https://katatracker.com/operations/agent-orchestration/ for the full recipe):\n\n" +
 	"- On claim/start: `kata meta set <ref> work.attention ok`; if the work has a\n" +
 	"  dedicated branch, stamp it once with `kata meta set <ref> work.branch <branch>`.\n" +
 	"- Signal live state: `kata meta set <ref> work.attention stuck|needs-human|ok`\n" +
