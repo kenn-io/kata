@@ -64,6 +64,7 @@ func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
 		if err := os.WriteFile(readyTempPath, []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
 			os.Exit(24)
 		}
+		//nolint:gosec // G703: both paths are test-owned paths created under t.TempDir.
 		if err := os.Rename(readyTempPath, readyPath); err != nil {
 			os.Exit(25)
 		}
