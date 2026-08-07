@@ -8,7 +8,7 @@ description: Build and drive the kata CLI/TUI to verify changes at the real term
 ## Build
 
 ```bash
-go build -o /tmp/kata-verify ./cmd/kata
+go build -tags kit_posthog_disabled -o /tmp/kata-verify ./cmd/kata
 ```
 
 ## CLI surface (cmd/kata)
