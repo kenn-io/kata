@@ -1,3 +1,4 @@
+// Command testprogram reports whether the Kata telemetry wrapper is enabled.
 package main
 
 import (
@@ -11,7 +12,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer reporter.Close()
+	defer func() {
+		if err := reporter.Close(); err != nil {
+			panic(err)
+		}
+	}()
 
 	if reporter.Enabled() {
 		fmt.Println("enabled")
