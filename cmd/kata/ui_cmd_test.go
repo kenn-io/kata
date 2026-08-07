@@ -96,7 +96,8 @@ func TestUICommandResolvesBeforeOpening(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"project": map[string]any{"id": 7, "name": "example-project"},
 			})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/7/issues/abc4":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ui/issue-reference" &&
+			r.URL.Query().Get("project_id") == "7" && r.URL.Query().Get("ref") == "abc4":
 			calls = append(calls, "issue")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"issue": map[string]any{
@@ -137,7 +138,8 @@ func TestUICommandResolvesRefsThroughLocalDaemonGateway(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"project": map[string]any{"id": 7, "name": "example-project"},
 			})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ui/proxy/api/v1/projects/7/issues/abc4":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ui/proxy/api/v1/ui/issue-reference" &&
+			r.URL.Query().Get("project_id") == "7" && r.URL.Query().Get("ref") == "abc4":
 			calls = append(calls, "issue")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"issue": map[string]any{

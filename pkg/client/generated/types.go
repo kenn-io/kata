@@ -1763,6 +1763,15 @@ func (i IssueRef) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(i))
 }
 
+type IssueStruct struct {
+	ProjectUID string `json:"project_uid" validate:"required"`
+	UID        string `json:"uid" validate:"required"`
+}
+
+func (i IssueStruct) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(i))
+}
+
 type IssueSyncBindingOut struct {
 	Config          map[string]any `json:"config,omitempty"`
 	CreatedAt       time.Time      `json:"created_at" validate:"required"`
@@ -3543,6 +3552,23 @@ type UIIssueReference struct {
 
 func (u UIIssueReference) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
+type UIIssueReferenceResponseBody struct {
+	Issue IssueStruct `json:"issue"`
+}
+
+func (u UIIssueReferenceResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(u.Issue).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Issue", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type UILink struct {

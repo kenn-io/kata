@@ -255,14 +255,46 @@ func TestWebDaemonGatewayAllowsIssueReferenceLookup(t *testing.T) {
 	})
 
 	request, err := http.NewRequest(http.MethodGet, fmt.Sprintf(
-		"%s/api/v1/ui/proxy/api/v1/projects/%d/issues/%s", server.URL, project.ID, issue.ShortID,
+		"%s/api/v1/ui/proxy/api/v1/ui/issue-reference?project_id=%d&ref=%s", server.URL, project.ID, issue.ShortID,
 	), nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-local")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
-	assert.Equal(t, http.StatusOK, response.StatusCode)
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&body))
+	assert.Equal(t, map[string]any{
+		"issue": map[string]any{"uid": issue.UID, "project_uid": project.UID},
+	}, body)
+}
+
+func TestWebDaemonGatewayRejectsDownstreamRosterBeforeProxying(t *testing.T) {
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now,
+		WebDaemons: []config.CatalogDaemonConfig{{
+			Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+		}},
+	})
+
+	request, err := http.NewRequest(http.MethodGet,
+		server.URL+"/api/v1/ui/proxy/api/v1/ui/daemons", nil)
+	require.NoError(t, err)
+	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+
+	assert.Equal(t, http.StatusForbidden, response.StatusCode)
+	assert.Equal(t, int64(0), calls.Load())
 }
 
 func TestWebDaemonGatewayRejectsDeletedIssueLookupBeforeProxying(t *testing.T) {

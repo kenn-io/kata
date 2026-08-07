@@ -290,6 +290,8 @@ func delegatedWebDaemonSourcePolicy(policy webDaemonSourcePolicy) webDaemonSourc
 func (g *webDaemonGateway) targetAllowsWebDaemonMutation(
 	ctx context.Context, daemon resolvedWebDaemon, source webDaemonSourcePolicy,
 ) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, webDaemonProbeTimeout)
+	defer cancel()
 	target, err := url.JoinPath(daemon.baseURL, "api/v1/instance")
 	if err != nil {
 		return false, err
@@ -704,6 +706,9 @@ func webDaemonOutboundHeaders(in http.Header) http.Header {
 
 func webDaemonProxyRequestAllowed(r *http.Request, path string) bool {
 	if strings.HasPrefix(path, webDaemonProxyPrefix) {
+		return false
+	}
+	if path == "/api/v1/ui/daemons" {
 		return false
 	}
 	if (path == pathPing || path == pathHealth) && r.Method == http.MethodGet {

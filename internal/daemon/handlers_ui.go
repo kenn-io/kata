@@ -85,6 +85,30 @@ type uiETagBasis struct {
 func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 	authorityCache := newUISnapshotAuthorityCache()
 	enrichmentCache := newUISnapshotEnrichmentCache()
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "resolveUIIssueReference",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/ui/issue-reference",
+		Summary:     "Resolve an active issue to its browser route identity",
+	}, func(ctx context.Context, in *api.UIIssueReferenceRequest) (*api.UIIssueReferenceResponse, error) {
+		ctx, err := authorizeHostProjectScope(ctx, []int64{in.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		issue, err := resolveIssueRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		out := &api.UIIssueReferenceResponse{}
+		out.Body.Issue.UID = issue.UID
+		out.Body.Issue.ProjectUID = project.UID
+		return out, nil
+	})
+
 	snapshotOperation := huma.Operation{
 		OperationID: "readUISnapshot",
 		Method:      http.MethodGet,

@@ -1184,6 +1184,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/ui/issue-reference': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Resolve an active issue to its browser route identity */
+    get: operations['resolveUIIssueReference']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/ui/references': {
     parameters: {
       query?: never
@@ -2131,6 +2148,12 @@ export interface components {
     } & {
       [key: string]: unknown
     }
+    IssueStruct: {
+      project_uid: string
+      uid: string
+    } & {
+      [key: string]: unknown
+    }
     IssueSyncBindingOut: {
       config?: {
         [key: string]: unknown
@@ -3015,6 +3038,11 @@ export interface components {
       status: string
       title: string
       uid: string
+    } & {
+      [key: string]: unknown
+    }
+    UIIssueReferenceResponseBody: {
+      issue: components['schemas']['IssueStruct']
     } & {
       [key: string]: unknown
     }
@@ -5975,6 +6003,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['RevokeTokenResponseBody']
+        }
+      }
+      /** @description Error */
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ErrorEnvelope']
+        }
+      }
+    }
+  }
+  resolveUIIssueReference: {
+    parameters: {
+      query: {
+        project_id: number
+        ref: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UIIssueReferenceResponseBody']
         }
       }
       /** @description Error */

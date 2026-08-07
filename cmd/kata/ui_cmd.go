@@ -102,8 +102,10 @@ func resolveUIIssuePath(cmd *cobra.Command, prepared client.PreparedWebUI, rawRe
 		return "", err
 	}
 	status, body, err := httpDoJSONHeaders(cmd.Context(), httpClient, http.MethodGet,
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s",
-			resolutionBaseURL, projectID, url.PathEscape(parsed.RefForAPI)), nil, gatewayHeaders)
+		fmt.Sprintf("%s/api/v1/ui/issue-reference?%s", resolutionBaseURL, url.Values{
+			"project_id": {fmt.Sprintf("%d", projectID)},
+			"ref":        {parsed.RefForAPI},
+		}.Encode()), nil, gatewayHeaders)
 	if err != nil {
 		return "", err
 	}

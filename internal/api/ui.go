@@ -115,3 +115,20 @@ type UIReferencesResponse struct {
 	ETag   string `header:"ETag"`
 	Body   UIReferencesResponseBody
 }
+
+// UIIssueReferenceRequest resolves one active issue for browser routing
+// without exposing the issue-detail projection.
+type UIIssueReferenceRequest struct {
+	ProjectID int64  `query:"project_id" required:"true"`
+	Ref       string `query:"ref" required:"true"`
+}
+
+// UIIssueReferenceResponse contains only the canonical route identity.
+type UIIssueReferenceResponse struct {
+	Body struct {
+		Issue struct {
+			UID        string `json:"uid"`
+			ProjectUID string `json:"project_uid"`
+		} `json:"issue"`
+	}
+}

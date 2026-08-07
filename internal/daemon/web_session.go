@@ -415,7 +415,7 @@ func requireBrowserSession(manager *WebSessionManager, policy ListenerPolicy, ne
 
 func webLocalSPARequestAllowed(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/api/v1/ui/snapshot", "/api/v1/ui/references", "/api/v1/ui/daemons", pathEventsStreamPath:
+	case "/api/v1/ui/snapshot", "/api/v1/ui/references", "/api/v1/ui/issue-reference", "/api/v1/ui/daemons", pathEventsStreamPath:
 		return r.Method == http.MethodGet
 	case "/api/v1/ui/session":
 		return r.Method == http.MethodDelete
@@ -457,10 +457,6 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 		return r.Method == http.MethodPost
 	}
 	if len(parts) == 1 {
-		if r.Method == http.MethodGet {
-			_, includeDeleted := r.URL.Query()["include_deleted"]
-			return !includeDeleted
-		}
 		return r.Method == http.MethodPatch
 	}
 	if len(parts) == 2 {

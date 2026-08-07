@@ -1936,6 +1936,17 @@ components:
         - title
         - status
       type: object
+    IssueStruct:
+      additionalProperties: true
+      properties:
+        project_uid:
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - project_uid
+      type: object
     IssueSyncBindingOut:
       additionalProperties: true
       properties:
@@ -3867,6 +3878,14 @@ components:
         - qualified_id
         - title
         - status
+      type: object
+    UIIssueReferenceResponseBody:
+      additionalProperties: true
+      properties:
+        issue:
+          $ref: "#/components/schemas/IssueStruct"
+      required:
+        - issue
       type: object
     UILink:
       additionalProperties: true
@@ -6819,6 +6838,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/ui/issue-reference:
+    get:
+      operationId: resolveUIIssueReference
+      parameters:
+        - explode: false
+          in: query
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: ref
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UIIssueReferenceResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Resolve an active issue to its browser route identity
   /api/v1/ui/references:
     get:
       operationId: readUIReferences
