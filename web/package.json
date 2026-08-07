@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "packageManager": "bun@1.3.14",
+  "overrides": {
+    "js-yaml": "4.3.1"
+  },
   "scripts": {
     "generate": "bun run scripts/generate-api.ts",
     "generate:check": "bun run scripts/generate-api.ts --check",
