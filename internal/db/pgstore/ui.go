@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -375,8 +376,17 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		persistedStatuses := []string{}
 		for _, status := range statuses {
 			if status == "ready" {
-				statusPredicates = append(statusPredicates, `(
-					i.status = 'open' AND NOT EXISTS (
+				readyDate := query.ReadyDate
+				if readyDate == "" {
+					readyDate = time.Now().UTC().Format(time.DateOnly)
+				}
+				args = append(args, readyDate)
+				statusPredicates = append(statusPredicates, fmt.Sprintf(`(
+					i.status = 'open'
+					AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false
+					AND (i.metadata::jsonb ->> 'scheduled_on' IS NULL
+						OR i.metadata::jsonb ->> 'scheduled_on' <= $%d)
+					AND NOT EXISTS (
 						SELECT 1 FROM links ready_link
 						JOIN issues blocker ON blocker.id = ready_link.from_issue_id
 						JOIN projects blocker_project ON blocker_project.id = blocker.project_id
@@ -384,7 +394,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 						AND blocker.status = 'open' AND blocker.deleted_at IS NULL
 						AND blocker_project.deleted_at IS NULL
 					)
-				)`)
+				)`, len(args)))
 			} else {
 				persistedStatuses = append(persistedStatuses, status)
 			}

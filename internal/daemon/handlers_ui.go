@@ -37,6 +37,7 @@ type normalizedUISnapshotIntent struct {
 	IncludeHistory   bool     `json:"include_history"`
 	LocalDate        string   `json:"local_date,omitempty"`
 	TimeZone         string   `json:"time_zone,omitempty"`
+	ReadyDate        string   `json:"ready_date,omitempty"`
 	Limit            int      `json:"limit"`
 }
 
@@ -49,7 +50,7 @@ func (in normalizedUISnapshotIntent) storeQuery() db.UISnapshotQuery {
 		Relationships: append([]string(nil), in.Relationships...),
 		Text:          in.Text, SelectedIssueUID: in.SelectedIssueUID,
 		IncludeGraph: in.IncludeGraph, IncludeHistory: in.IncludeHistory,
-		LocalDate: in.LocalDate, TimeZone: in.TimeZone, Limit: in.Limit,
+		LocalDate: in.LocalDate, TimeZone: in.TimeZone, ReadyDate: in.ReadyDate, Limit: in.Limit,
 	}
 	if len(in.Statuses) == 1 {
 		query.Status = in.Statuses[0]
@@ -128,6 +129,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			intent.ReadyDate = effectiveUIReadyDate(intent.Statuses, cfg.UIClock)
 			policy := effectiveUIPolicy(ctx, cfg)
 			var observedCursor *int64
 			if in.IfNoneMatch != "" {
@@ -385,6 +387,25 @@ func dateSensitiveUIView(view string) bool {
 	default:
 		return false
 	}
+}
+
+func effectiveUIReadyDate(statuses []string, clock func() time.Time) string {
+	ready := false
+	for _, status := range statuses {
+		switch status {
+		case "all":
+			return ""
+		case "ready":
+			ready = true
+		}
+	}
+	if !ready {
+		return ""
+	}
+	if clock == nil {
+		clock = time.Now
+	}
+	return clock().UTC().Format(time.DateOnly)
 }
 
 func uiValidationError(field, message string, data map[string]any) error {

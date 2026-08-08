@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -368,8 +369,17 @@ func readUIIssues(
 		persistedStatuses := []string{}
 		for _, status := range statuses {
 			if status == "ready" {
+				readyDate := query.ReadyDate
+				if readyDate == "" {
+					readyDate = time.Now().UTC().Format(time.DateOnly)
+				}
+				args = append(args, readyDate)
 				statusPredicates = append(statusPredicates, `(
-					i.status = 'open' AND NOT EXISTS (
+					i.status = 'open'
+					AND COALESCE(json_extract(i.metadata, '$.someday'), 0) != 1
+					AND (json_extract(i.metadata, '$.scheduled_on') IS NULL
+						OR json_extract(i.metadata, '$.scheduled_on') <= ?)
+					AND NOT EXISTS (
 						SELECT 1 FROM links ready_link
 						JOIN issues blocker ON blocker.id = ready_link.from_issue_id
 						JOIN projects blocker_project ON blocker_project.id = blocker.project_id

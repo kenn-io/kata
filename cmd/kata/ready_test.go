@@ -43,6 +43,24 @@ func TestReady_FiltersBlocked(t *testing.T) {
 		"blocked is hidden while blocker is open")
 }
 
+func TestReady_ExcludesParkedMetadata(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	someday := createIssue(t, env, pid, "someday parked")
+	future := createIssue(t, env, pid, "future parked")
+	falseSomeday := createIssue(t, env, pid, "false someday actionable")
+	past := createIssue(t, env, pid, "past scheduled actionable")
+	runCLI(t, env, dir, "meta", "set", "--json-value", someday, "someday", "true")
+	runCLI(t, env, dir, "meta", "set", future, "scheduled_on", "2100-01-01")
+	runCLI(t, env, dir, "meta", "set", "--json-value", falseSomeday, "someday", "false")
+	runCLI(t, env, dir, "meta", "set", past, "scheduled_on", "2000-01-01")
+
+	out := runCLI(t, env, dir, "ready")
+	assert.NotContains(t, out, "someday parked")
+	assert.NotContains(t, out, "future parked")
+	assert.Contains(t, out, "false someday actionable")
+	assert.Contains(t, out, "past scheduled actionable")
+}
+
 func TestReady_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	alphaOnly := createIssue(t, env, pid, "alpha only")

@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
 
-// ReadyIssues returns open issues that have no active blocker. Optional owner
-// and label filters are composed here so the same query remains useful to the
-// CLI's different ready views.
+// ReadyIssues returns actionable open issues that have no active blocker.
+// Issues marked someday=true or scheduled after today's UTC date are parked
+// and excluded. Optional owner and label filters are composed here so the same
+// query remains useful to the CLI's different ready views.
 func (s *Store) ReadyIssues(
 	ctx context.Context,
 	projectID int64,
@@ -37,6 +39,9 @@ func (s *Store) ReadyIssues(
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
+	query += ` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`
+	query += ` AND (i.metadata::jsonb ->> 'scheduled_on' IS NULL OR i.metadata::jsonb ->> 'scheduled_on' <= ` +
+		addArg(time.Now().UTC().Format(time.DateOnly)) + `)`
 	if filter.Unowned {
 		query += ` AND i.owner IS NULL`
 	} else if filter.Owner != "" {
@@ -76,9 +81,9 @@ func (s *Store) ReadyIssues(
 	return issues, nil
 }
 
-// ReadyIssuesGlobal returns ready issues from all active projects along with
-// the project name needed to render a qualified reference. Filter semantics
-// match ReadyIssues.
+// ReadyIssuesGlobal returns actionable ready issues from all active projects
+// along with the project name needed to render a qualified reference. Filter
+// and parked-item semantics match ReadyIssues.
 func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
 	query := `SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
        i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
@@ -104,6 +109,9 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
+	query += ` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`
+	query += ` AND (i.metadata::jsonb ->> 'scheduled_on' IS NULL OR i.metadata::jsonb ->> 'scheduled_on' <= ` +
+		addArg(time.Now().UTC().Format(time.DateOnly)) + `)`
 	if filter.Unowned {
 		query += ` AND i.owner IS NULL`
 	} else if filter.Owner != "" {
