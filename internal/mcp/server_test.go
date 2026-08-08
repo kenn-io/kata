@@ -349,7 +349,7 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				require.Equal(t, tt.wantKey, request.Header.Get("Idempotency-Key"))
 			}
 			if tt.tool == "kata.set_metadata" {
-				require.Equal(t, "rev-7", request.Header.Get("If-Match"))
+				require.Equal(t, `"rev-7"`, request.Header.Get("If-Match"))
 			}
 			if tt.wantActor {
 				var body map[string]any
@@ -419,6 +419,24 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	shownIssue := shown.StructuredContent.(map[string]any)["issue"].(map[string]any)
 	require.ElementsMatch(t, []any{"bug", "urgent"}, shownIssue["labels"])
 	require.NotContains(t, shownIssue, "blocked")
+
+	revision := shownIssue["revision"]
+	patched, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_metadata", Arguments: map[string]any{
+			"ref": ref, "patch": map[string]any{"work.attention": "ok"}, "revision": revision,
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, patched.IsError, patched.Content)
+
+	conflict, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_metadata", Arguments: map[string]any{
+			"ref": ref, "patch": map[string]any{"work.attention": "stale"}, "revision": revision,
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, conflict.IsError)
+	require.Contains(t, string(mustJSON(t, conflict.Content)), "revision")
 }
 
 func assertSummaryHydration(t *testing.T, tool string, structured map[string]any) {
@@ -511,6 +529,9 @@ func TestBoundRelationshipRefCanonicalizesQualifiedRef(t *testing.T) {
 	ref, err = handlers.boundRelationshipRef("abc1")
 	require.NoError(t, err)
 	require.Equal(t, "abc1", ref)
+
+	_, err = handlers.boundRelationshipRef("spoke-project#other-project#def2")
+	require.ErrorContains(t, err, "outside bound project")
 }
 
 func TestToolValidationStopsBeforeDaemonRequest(t *testing.T) {

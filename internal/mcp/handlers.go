@@ -9,8 +9,8 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/oklog/ulid/v2"
 
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -448,7 +448,7 @@ func (h toolHandlers) setMetadata(ctx context.Context, _ *sdkmcp.CallToolRequest
 		if *input.Revision < 0 {
 			return nil, MutationOutput{}, errors.New("revision must not be negative")
 		}
-		ifMatch := "rev-" + strconv.FormatInt(*input.Revision, 10)
+		ifMatch := `"rev-` + strconv.FormatInt(*input.Revision, 10) + `"`
 		headers = &generated.PatchIssueMetadataHeaders{IfMatch: &ifMatch}
 	}
 	response, err := h.options.Client.PatchIssueMetadata(ctx, &generated.PatchIssueMetadataRequestOptions{
@@ -613,19 +613,21 @@ func (h toolHandlers) boundRef(raw string) (string, error) {
 }
 
 func (h toolHandlers) boundRelationshipRef(raw string) (string, error) {
-	ref, err := h.boundRef(raw)
+	ref := strings.TrimSpace(raw)
+	if ref == "" {
+		return "", errors.New("relationship reference must not be empty")
+	}
+	parsed, err := shortid.Parse(ref)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("relationship reference %q is invalid", ref)
 	}
-	if _, shortID, qualified := strings.Cut(ref, "#"); qualified {
-		ref = shortID
+	if parsed.ULID != "" {
+		return "", fmt.Errorf("relationship reference %q is an unscoped UID; use a bound-project short reference", ref)
 	}
-	if len(ref) == 26 {
-		if _, err := ulid.ParseStrict(strings.ToUpper(ref)); err == nil {
-			return "", fmt.Errorf("relationship reference %q is an unscoped UID; use a bound-project short reference", ref)
-		}
+	if parsed.Project != "" && parsed.Project != h.options.ProjectName {
+		return "", fmt.Errorf("relationship reference %q is outside bound project %q", ref, h.options.ProjectName)
 	}
-	return ref, nil
+	return parsed.ShortID, nil
 }
 
 func (h toolHandlers) project() ProjectIdentity {
