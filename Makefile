@@ -93,7 +93,7 @@ docs-check:
 	bash scripts/check-docs.sh
 
 docs-screenshots:
-	bash docs/screenshots/generate-federation-tui.sh
+	bash docs/screenshots/generate.sh
 
 docs-assets-branch:
 	bash docs/screenshots/update-assets-branch.sh
