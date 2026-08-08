@@ -121,7 +121,8 @@ type AliasInfo struct {
 // DiscoverPaths walks upward from startPath looking for .git (G), then for
 // .kata.toml (W). Both lookups are inclusive of startPath itself. When a git
 // root exists, it bounds the .kata.toml lookup so configuration outside the
-// repository cannot capture paths within it. Git ancestry follows symlinks;
+// repository cannot capture paths within it. Git ancestry follows symlinks,
+// with a lexical Git boundary retained when a symlink escapes the repository;
 // non-git workspaces retain lexical ancestor discovery.
 // startPath must point at an existing file or directory; a missing start path
 // is reported as a resolution error so a typo like `--workspace /no/such/dir`
@@ -155,7 +156,10 @@ func DiscoverPaths(startPath string) (DiscoveredPaths, error) {
 		return DiscoveredPaths{}, fmt.Errorf("discover .git: %w", err)
 	}
 	if physicalGitRoot == "" {
-		if d.WorkspaceRoot, err = walkUp(lexicalWalkRoot, ProjectConfigFilename, false, ""); err != nil {
+		if d.GitRoot, err = walkUp(lexicalWalkRoot, ".git", true, ""); err != nil {
+			return DiscoveredPaths{}, fmt.Errorf("discover .git: %w", err)
+		}
+		if d.WorkspaceRoot, err = walkUp(lexicalWalkRoot, ProjectConfigFilename, false, d.GitRoot); err != nil {
 			return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
 		}
 		return d, nil
