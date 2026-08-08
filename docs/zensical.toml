@@ -26,6 +26,7 @@ nav = [
   ]},
   {"Reference" = [
     {"CLI" = "reference/cli.md"},
+    {"Model Context Protocol" = "reference/mcp.md"},
     {"Configuration" = "reference/configuration.md"},
     {"Metadata" = "reference/metadata.md"},
     {"Agent output format" = "reference/agent-output.md"},

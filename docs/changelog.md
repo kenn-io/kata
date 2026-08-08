@@ -8,6 +8,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**New features**
+
+- Added a native, project-bound stdio MCP server with 13 structured issue
+  tools, protocol negotiation, fixed actor attribution, and bounded results.
+
 **Improvements**
 
 - Centralized Claude Code and Codex hook configuration on kit's shared

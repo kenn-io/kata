@@ -13,6 +13,8 @@ Production Postgres deployments can use separate schema-owner and runtime roles;
 see the [operator ceremony](docs/operations/postgres.md).
 Go applications can instead mount kata's listener-free HTTP service in-process;
 see [Embedding kata in Go](docs/development/embedding.md).
+MCP clients can start Kata's native, project-bound stdio server with `kata mcp
+serve`; see the [MCP reference](docs/reference/mcp.md).
 
 The documentation in [`docs/`](docs/) is the definitive guide, published with
 Zensical at <https://katatracker.com/>.
@@ -143,6 +145,7 @@ The [docs site](docs/) is the definitive reference:
   [Semantic search](docs/guide/semantic-search.md) ·
   [Migrating from Beads](docs/guide/migrating-from-beads.md)
 - Reference: [CLI](docs/reference/cli.md) ·
+  [Model Context Protocol](docs/reference/mcp.md) ·
   [Configuration](docs/reference/configuration.md)
 - Workflows: [Agent workflows](docs/workflows/agents.md) ·
   [Sharing models](docs/workflows/sharing.md)
