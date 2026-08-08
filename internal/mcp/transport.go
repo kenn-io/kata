@@ -55,12 +55,13 @@ func (t *StdioTransport) Connect(context.Context) (sdkmcp.Connection, error) {
 		return nil, errors.New("MCP stdio writer is required")
 	}
 	conn := &stdioConnection{
-		reader:    t.reader,
-		writer:    t.writer,
-		reads:     make(chan readResult, 1),
-		closed:    make(chan struct{}),
-		active:    make(map[requestIDKey]struct{}),
-		cancelled: make(map[requestIDKey]struct{}),
+		reader:          t.reader,
+		writer:          t.writer,
+		reads:           make(chan readResult, 1),
+		closed:          make(chan struct{}),
+		active:          make(map[requestIDKey]struct{}),
+		cancelled:       make(map[requestIDKey]struct{}),
+		maxMessageBytes: t.maxMessageBytes,
 	}
 	if closer, ok := t.writer.(io.Closer); ok && !sameResource(t.reader, closer) {
 		conn.writerCloser = closer
@@ -81,13 +82,14 @@ type stdioConnection struct {
 	reads        chan readResult
 	closed       chan struct{}
 
-	writeMu      sync.Mutex
-	writeWaiting atomic.Int64
-	stateMu      sync.Mutex
-	closeMu      sync.Mutex
-	isClosed     bool
-	active       map[requestIDKey]struct{}
-	cancelled    map[requestIDKey]struct{}
+	writeMu         sync.Mutex
+	writeWaiting    atomic.Int64
+	stateMu         sync.Mutex
+	closeMu         sync.Mutex
+	isClosed        bool
+	active          map[requestIDKey]struct{}
+	cancelled       map[requestIDKey]struct{}
+	maxMessageBytes int
 }
 
 type requestIDKey struct {
@@ -292,6 +294,25 @@ func (c *stdioConnection) Write(ctx context.Context, message jsonrpc.Message) er
 	encoded, err := jsonrpc.EncodeMessage(message)
 	if err != nil {
 		return fmt.Errorf("encode MCP message: %w", err)
+	}
+	if c.maxMessageBytes > 0 && len(encoded) > c.maxMessageBytes {
+		response, ok := message.(*jsonrpc.Response)
+		if !ok {
+			return errors.New("encoded MCP message exceeds maximum message size")
+		}
+		encoded, err = jsonrpc.EncodeMessage(&jsonrpc.Response{
+			ID: response.ID,
+			Error: &jsonrpc.Error{
+				Code:    jsonrpc.CodeInternalError,
+				Message: "response exceeds maximum message size",
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("encode oversized MCP response error: %w", err)
+		}
+		if len(encoded) > c.maxMessageBytes {
+			return errors.New("encoded MCP response error exceeds maximum message size")
+		}
 	}
 	c.writeWaiting.Add(1)
 	c.writeMu.Lock()

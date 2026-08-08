@@ -314,6 +314,27 @@ func TestStdioConnectionWritesCompactNewlineDelimitedJSON(t *testing.T) {
 	require.NotContains(t, strings.TrimSuffix(output.String(), "\n"), "\n")
 }
 
+func TestStdioConnectionReplacesOversizeResponseWithCorrelatedError(t *testing.T) {
+	const maximum = 256
+	var output bytes.Buffer
+	transport := NewStdioTransport(io.NopCloser(strings.NewReader("")), &output)
+	transport.maxMessageBytes = maximum
+	conn, err := transport.Connect(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	require.NoError(t, conn.Write(t.Context(), testResponse(t, 17, map[string]any{
+		"body": strings.Repeat("x", maximum),
+	})))
+
+	response := decodeResponse(t, output.String())
+	require.Equal(t, float64(17), response.ID)
+	require.NotNil(t, response.Error)
+	require.Equal(t, int64(jsonrpc.CodeInternalError), response.Error.Code)
+	require.Equal(t, "response exceeds maximum message size", response.Error.Message)
+	require.LessOrEqual(t, len(strings.TrimSuffix(output.String(), "\n")), maximum)
+}
+
 func TestStdioConnectionReportsShortWrites(t *testing.T) {
 	conn := connectStdio(t, "", shortWriter{})
 	response := testResponse(t, 1, map[string]any{"ok": true})
