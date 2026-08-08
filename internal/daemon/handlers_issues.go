@@ -255,7 +255,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		OperationID: "listAllIssues",
 		Method:      "GET",
 		Path:        "/api/v1/issues",
-	}, func(ctx context.Context, in *api.ListAllIssuesRequest) (*api.ListIssuesResponse, error) {
+	}, func(ctx context.Context, in *api.ListAllIssuesRequest) (*api.ListAllIssuesResponse, error) {
 		if in.DeprecatedView != "" || in.DeprecatedArea != "" ||
 			in.DeprecatedOffset != "" || in.DeprecatedClientTZ != "" {
 			return nil, api.NewError(400, "removed_param",
@@ -266,6 +266,10 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.ProjectID < 0 {
 			return nil, api.NewError(400, "validation",
 				"project_id must be a positive integer", "", nil)
+		}
+		if in.Unowned && in.Owner != "" {
+			return nil, api.NewError(400, "validation",
+				"--unowned and --owner are mutually exclusive", "", nil)
 		}
 		var projectIDs []int64
 		if in.ProjectID > 0 {
@@ -289,12 +293,21 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		metaFilters, err := parseMetaFilters(in.Meta)
+		if err != nil {
+			return nil, err
+		}
 		issues, err := cfg.DB.ListAllIssues(ctx, db.ListAllIssuesParams{
-			ProjectID:   in.ProjectID,
-			Status:      in.Status,
-			Priority:    priority,
-			MaxPriority: maxPriority,
-			Limit:       in.Limit,
+			ProjectID:     in.ProjectID,
+			Status:        in.Status,
+			Priority:      priority,
+			MaxPriority:   maxPriority,
+			Limit:         in.Limit,
+			Unowned:       in.Unowned,
+			Owner:         in.Owner,
+			Labels:        in.Labels,
+			ExcludeLabels: in.ExcludeLabels,
+			Meta:          metaFilters,
 		})
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -303,8 +316,19 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		out := &api.ListIssuesResponse{}
-		out.Body.Issues = issueOuts
+		out := &api.ListAllIssuesResponse{}
+		out.Body.Issues = make([]api.ListGlobalIssueOut, len(issueOuts))
+		names := projectNames{store: cfg.DB, byID: map[int64]string{}}
+		for i, issueOut := range issueOuts {
+			projectName, err := names.name(ctx, issueOut.ProjectID)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			out.Body.Issues[i] = api.ListGlobalIssueOut{
+				IssueOut:    issueOut,
+				ProjectName: projectName,
+			}
+		}
 		return out, nil
 	})
 

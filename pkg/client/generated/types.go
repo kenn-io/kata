@@ -2038,6 +2038,25 @@ type LinksDelta struct {
 	SetParent       *string  `json:"set_parent,omitempty"`
 }
 
+type ListAllIssuesResponseBody struct {
+	Issues []ListGlobalIssueOut `json:"issues,omitempty" validate:"required"`
+}
+
+func (l ListAllIssuesResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range l.Issues {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Issues[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type ListFederationEnrollmentsBody struct {
 	Enrollments []FederationEnrollmentOut `json:"enrollments,omitempty" validate:"required"`
 }
@@ -2050,6 +2069,111 @@ func (l ListFederationEnrollmentsBody) Validate() error {
 				errors = errors.Append(fmt.Sprintf("Enrollments[%d]", i), err)
 			}
 		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type ListGlobalIssueOut struct {
+	Author        string         `json:"author" validate:"required"`
+	Blocked       *bool          `json:"blocked,omitempty"`
+	BlockedBy     []LinkPeer     `json:"blocked_by,omitempty"`
+	Blocks        []LinkPeer     `json:"blocks,omitempty"`
+	Body          string         `json:"body" validate:"required"`
+	ChildCounts   *ChildCounts   `json:"child_counts,omitempty"`
+	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason  *string        `json:"closed_reason,omitempty"`
+	CreatedAt     time.Time      `json:"created_at" validate:"required"`
+	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
+	ID            int64          `json:"id"`
+	Labels        []string       `json:"labels,omitempty"`
+	Metadata      map[string]any `json:"metadata"`
+	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
+	Owner         *string        `json:"owner,omitempty"`
+	Parent        *LinkPeer      `json:"parent,omitempty"`
+	Priority      *int64         `json:"priority,omitempty"`
+	ProjectID     int64          `json:"project_id"`
+	ProjectName   string         `json:"project_name" validate:"required"`
+	ProjectUID    *string        `json:"project_uid,omitempty"`
+	QualifiedID   string         `json:"qualified_id" validate:"required"`
+	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
+	Related       []LinkPeer     `json:"related,omitempty"`
+	Revision      int64          `json:"revision"`
+	ShortID       string         `json:"short_id" validate:"required"`
+	Status        string         `json:"status" validate:"required"`
+	Title         string         `json:"title" validate:"required"`
+	UID           string         `json:"uid" validate:"required"`
+	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+}
+
+func (l ListGlobalIssueOut) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Author, "required"); err != nil {
+		errors = errors.Append("Author", err)
+	}
+	for i, item := range l.BlockedBy {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("BlockedBy[%d]", i), err)
+			}
+		}
+	}
+	for i, item := range l.Blocks {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Blocks[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(l.Body, "required"); err != nil {
+		errors = errors.Append("Body", err)
+	}
+	if l.ChildCounts != nil {
+		if v, ok := any(l.ChildCounts).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ChildCounts", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(l.CreatedAt, "required"); err != nil {
+		errors = errors.Append("CreatedAt", err)
+	}
+	if l.Parent != nil {
+		if v, ok := any(l.Parent).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Parent", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(l.ProjectName, "required"); err != nil {
+		errors = errors.Append("ProjectName", err)
+	}
+	if err := typesValidator.Var(l.QualifiedID, "required"); err != nil {
+		errors = errors.Append("QualifiedID", err)
+	}
+	for i, item := range l.Related {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Related[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(l.ShortID, "required"); err != nil {
+		errors = errors.Append("ShortID", err)
+	}
+	if err := typesValidator.Var(l.Status, "required"); err != nil {
+		errors = errors.Append("Status", err)
+	}
+	if err := typesValidator.Var(l.Title, "required"); err != nil {
+		errors = errors.Append("Title", err)
+	}
+	if err := typesValidator.Var(l.UID, "required"); err != nil {
+		errors = errors.Append("UID", err)
+	}
+	if err := typesValidator.Var(l.UpdatedAt, "required"); err != nil {
+		errors = errors.Append("UpdatedAt", err)
 	}
 	if len(errors) == 0 {
 		return nil

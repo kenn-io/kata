@@ -212,9 +212,9 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsSearchLabelFilters(t *testing.T) {
-	if APISchemaVersion != "0.8.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.8.0 for search label query parameters", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsGlobalListFilters(t *testing.T) {
+	if APISchemaVersion != "0.9.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.9.0 for global list query parameters", APISchemaVersion)
 	}
 }
 
@@ -358,6 +358,29 @@ func TestOpenAPIDocumentArrayQueryParamsExplode(t *testing.T) {
 		}
 		if param.Explode == nil || !*param.Explode {
 			t.Fatalf("search %s explode = %v, want true", name, param.Explode)
+		}
+	}
+
+	globalList := doc.Paths["/api/v1/issues"].Get
+	if globalList == nil {
+		t.Fatal("missing GET /api/v1/issues")
+	}
+	for _, name := range []string{"label", "exclude_label", "meta"} {
+		var param *huma.Param
+		for _, p := range globalList.Parameters {
+			if p.Name == name && p.In == "query" {
+				param = p
+				break
+			}
+		}
+		if param == nil {
+			t.Fatalf("missing global list %s query parameter", name)
+		}
+		if param.Schema == nil || param.Schema.Type != huma.TypeArray {
+			t.Fatalf("global list %s schema = %+v, want array", name, param.Schema)
+		}
+		if param.Explode == nil || !*param.Explode {
+			t.Fatalf("global list %s explode = %v, want true", name, param.Explode)
 		}
 	}
 }

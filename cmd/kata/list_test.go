@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 // TestList_OutputsShortIDNotNumber pins the JSON wire shape: each issue
@@ -42,6 +43,80 @@ func TestList_DefaultsToOpenIssuesInProject(t *testing.T) {
 	out := runCLI(t, env, dir, "list")
 	assert.Contains(t, out, "alpha")
 	assert.Contains(t, out, "beta")
+}
+
+func TestList_AllFiltersAcrossProjectsAndUsesQualifiedRefs(t *testing.T) {
+	env, dir, primaryID := setupCLIWorkspace(t)
+	secondary, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+
+	primaryMatch := createIssue(t, env, primaryID, "primary handoff")
+	secondaryMatch := createIssue(t, env, secondary.ID, "secondary handoff")
+	secondaryOther := createIssue(t, env, secondary.ID, "secondary unrelated")
+	for projectID, ref := range map[int64]string{
+		primaryID:    primaryMatch,
+		secondary.ID: secondaryMatch,
+	} {
+		postJSONOK(t,
+			env.URL+"/api/v1/projects/"+itoa(projectID)+"/issues/"+ref+"/labels",
+			map[string]any{"actor": "tester", "label": "handoff"})
+	}
+
+	out := runCLI(t, env, dir, "--agent", "list", "--all", "--label", "HANDOFF", "--limit", "0")
+	assert.Contains(t, out, "issue=kata#"+primaryMatch)
+	assert.Contains(t, out, "issue=spoke-project#"+secondaryMatch)
+	assert.NotContains(t, out, secondaryOther)
+}
+
+func TestList_AllJSONIncludesProjectName(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	createIssue(t, env, pid, "global row")
+
+	out := runCLI(t, env, dir, "--json", "list", "--all")
+	var got struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.NotEmpty(t, got.Issues)
+	assert.Equal(t, "kata", got.Issues[0]["project_name"])
+	assert.Equal(t, "kata#"+got.Issues[0]["short_id"].(string), got.Issues[0]["qualified_id"])
+}
+
+func TestList_AllDoesNotRequireWorkspaceProject(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	ref := createIssue(t, env, project.ID, "global without workspace")
+
+	out, err := runCmdOutput(t, env, "--agent", "list", "--all")
+	require.NoError(t, err)
+	assert.Contains(t, out, "issue=spoke-project#"+ref)
+}
+
+func TestList_AllAndProjectAreMutuallyExclusive(t *testing.T) {
+	env, dir, _ := setupCLIWorkspace(t)
+
+	_, err := runCmdOutput(t, env, "--workspace", dir,
+		"--project", "spoke-project", "list", "--all")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestList_LimitZeroMeansUnlimited(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	for _, title := range []string{"first", "second", "third"} {
+		createIssue(t, env, pid, title)
+	}
+
+	out := runCLI(t, env, dir, "list", "--limit", "0")
+	for _, title := range []string{"first", "second", "third"} {
+		assert.Contains(t, out, title)
+	}
+}
+
+func TestList_RejectsNegativeLimit(t *testing.T) {
+	_, err := runCmdOutput(t, nil, "list", "--limit", "-1")
+	_ = requireCLIError(t, err, ExitValidation)
 }
 
 func TestList_RepeatedLabelFiltersRequireEveryLabel(t *testing.T) {

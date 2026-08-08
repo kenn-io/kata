@@ -107,13 +107,18 @@ type MetaFilter struct {
 
 // ListAllIssuesParams filters cross-project list output. ProjectID==0 means
 // "every project"; >0 narrows to a single project. Status="" → all statuses.
-// Priority and MaxPriority work the same as ListIssuesParams.
+// All other filters use the same semantics as ListIssuesParams.
 type ListAllIssuesParams struct {
-	ProjectID   int64
-	Status      string
-	Priority    *int64
-	MaxPriority *int64
-	Limit       int
+	ProjectID     int64
+	Status        string
+	Priority      *int64
+	MaxPriority   *int64
+	Limit         int
+	Unowned       bool
+	Owner         string
+	Labels        []string
+	ExcludeLabels []string
+	Meta          []MetaFilter
 }
 
 // CreateCommentParams carries inputs for CreateComment.

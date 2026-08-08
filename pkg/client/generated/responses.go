@@ -61,7 +61,7 @@ type InstanceResponse = InstanceResponseBody
 
 type InstanceErrorResponse = ErrorEnvelope
 
-type ListAllIssuesResponse = ListIssuesResponseBody
+type ListAllIssuesResponse = ListAllIssuesResponseBody
 
 type ListAllIssuesErrorResponse = ErrorEnvelope
 

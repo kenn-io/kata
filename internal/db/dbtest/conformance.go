@@ -159,7 +159,7 @@ var storageScenarios = []scenario{
 		name: "ready queues and discovery",
 		methods: []string{
 			"AddLabel", "CloseIssue", "CreateComment", "CreateIssue", "CreateLink", "CreateProject", "EditIssue",
-			"IssueQualifiersByUIDs", "ListIssueContent", "PatchIssueMetadata", "ReadyIssues", "ReadyIssuesGlobal", "SearchFTS",
+			"IssueQualifiersByUIDs", "ListAllIssues", "ListIssueContent", "PatchIssueMetadata", "ReadyIssues", "ReadyIssuesGlobal", "SearchFTS",
 			"SearchFTSAny", "SoftDeleteIssue",
 		},
 		run: checkReadyQueuesAndDiscovery,

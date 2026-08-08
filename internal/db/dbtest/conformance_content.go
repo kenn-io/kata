@@ -667,6 +667,16 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("add priority label: %w", err)
 	}
+	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: primary.Issue.ID,
+		Actor:   "discovery-author",
+		Patch: map[string]json.RawMessage{
+			"lane": json.RawMessage(`"deploy"`),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("add discovery metadata: %w", err)
+	}
 	blocker, err := createFixtureIssue(ctx, store, primary.Project.ID, "open dependency", "discovery-author", nil)
 	if err != nil {
 		return err
@@ -848,6 +858,33 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("global ready issues limited: %w", err)
 	}
 	require.Len(t, globalLimited, 1)
+	globalListByOwnerAndLabels, err := store.ListAllIssues(ctx, db.ListAllIssuesParams{
+		Status: "open", Owner: "alice", Labels: []string{"BUG", "p0"},
+	})
+	if err != nil {
+		return fmt.Errorf("global list issues by owner and labels: %w", err)
+	}
+	require.Len(t, globalListByOwnerAndLabels, 1)
+	assert.Equal(t, primary.Issue.ID, globalListByOwnerAndLabels[0].ID)
+	globalListUnowned, err := store.ListAllIssues(ctx, db.ListAllIssuesParams{Unowned: true})
+	if err != nil {
+		return fmt.Errorf("global list unowned issues: %w", err)
+	}
+	assert.NotContains(t, issueIDs(globalListUnowned), primary.Issue.ID)
+	globalListWithoutBug, err := store.ListAllIssues(ctx, db.ListAllIssuesParams{ExcludeLabels: []string{"BUG"}})
+	if err != nil {
+		return fmt.Errorf("global list issues excluding label: %w", err)
+	}
+	assert.NotContains(t, issueIDs(globalListWithoutBug), primary.Issue.ID)
+	assert.Contains(t, issueIDs(globalListWithoutBug), other.Issue.ID)
+	globalListByMetadata, err := store.ListAllIssues(ctx, db.ListAllIssuesParams{
+		Meta: []db.MetaFilter{{Key: "lane", Value: "deploy", HasValue: true}},
+	})
+	if err != nil {
+		return fmt.Errorf("global list issues by metadata: %w", err)
+	}
+	require.Len(t, globalListByMetadata, 1)
+	assert.Equal(t, primary.Issue.ID, globalListByMetadata[0].ID)
 	_, _, _, err = store.CloseIssue(ctx, blocker.ID, "done", "discovery-author", "", nil)
 	if err != nil {
 		return fmt.Errorf("close readiness blocker: %w", err)

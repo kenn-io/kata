@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-08
+---
+
 # Agent workflows
 
 kata is designed to survive the parts of agent work that chat does not: context
@@ -98,6 +102,13 @@ issue:
 
 ```sh
 kata ready --unowned --label bug --no-label blocked --agent
+```
+
+Use the global list when waiting or blocked work must stay visible across
+projects. Unlike `ready`, `list` does not remove issues with active blockers:
+
+```bash
+kata list --all --status open --label handoff --no-label parked --agent
 ```
 
 Release ownership only when you are intentionally giving the work back:

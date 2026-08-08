@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-08
+---
+
 # HTTP API schema
 
 The daemon exposes an HTTP API (used by the CLI, TUI, and remote clients). Its
@@ -38,7 +42,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.8.0",
+  "api_schema_version": "0.9.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db"
@@ -53,12 +57,18 @@ Three distinct version fields appear here; they answer different questions:
 | `schema_version` | The database/storage schema version (`meta.schema_version`), an internal storage concern. |
 | `version` | The daemon build version. |
 
-A client can read `api_schema_version` once at startup and decide whether it
-recognizes the daemon's API before issuing further calls. Compare it for
-equality against the `info.version` of the schema the client was generated
-from: the value is semver-shaped, but no ordering semantics are defined, so
-treat any other value as "verify compatibility" rather than inferring safety
-from an unchanged major or minor component.
+A client can read `api_schema_version` before it uses a versioned request
+feature. Versions increase in semantic-version order, so a client can compare
+the daemon version with the first version that contains the feature. This
+minimum-version check proves that the request field exists; it does not prove
+that every part of a generated client matches a different schema version.
+Generated clients should still use the schema from their target release.
+
+The first-party CLI uses this check before requests where an older daemon
+could ignore a filter and return unfiltered rows. Filtered `search` and
+filtered `ready --all` require API `0.8.0`; filtered `list --all` requires API
+`0.9.0`. The CLI stops before the filtered query and tells the operator to
+upgrade when the daemon is too old.
 
 The field is **optional in the schema** even though current daemons always send
 it. That is deliberate: a version-detection field has to survive version skew,
@@ -70,7 +80,8 @@ response of an older daemon that predates it. Treat an **absent or empty**
 
 | Version | Change |
 | --- | --- |
-| `0.8.0` | Added repeatable `label` and `exclude_label` query parameters to project-scoped search. |
+| `0.9.0` | Added owner, label, exclusion, and metadata filters to the cross-project issue list. Global list rows now include `project_name`. |
+| `0.8.0` | Added repeatable `label` and `exclude_label` query parameters to project-scoped search. It also identifies daemons that support filtered global ready queries. |
 | `0.7.0` | Added transactional federation enrollment rotation, idempotent replay semantics for caller-supplied enrollment tokens, and the optional `federation_config` health block used by startup reconciliation. |
 | `0.6.0` | Ready responses now return fully hydrated issues. Project-scoped ready rows are `IssueOut` instead of the slimmer `Issue` projection, and global ready rows (`ReadyGlobalIssueOut`, renamed from `ReadyGlobalIssue`) embed `IssueOut` plus `project_name` — so both gain `labels`, `qualified_id` (required), link peers (`parent`, `blocks`, `blocked_by`, `related`), `blocked`, and `child_counts`. Clients regenerated from the schema see the new component name; the shipped Go client keeps `ReadyGlobalIssue` as a deprecated alias. |
 | `0.5.0` | Added metadata patch endpoints for issues and projects, issue create metadata, and metadata-key filters on project issue lists. Generated clients can patch metadata with `If-Match` revisions, send initial metadata in create requests, and request selected metadata keys with the `meta` query parameter. |

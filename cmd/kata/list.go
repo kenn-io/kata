@@ -22,12 +22,13 @@ func newListCmd() *cobra.Command {
 	var labels []string
 	var noLabels []string
 	var meta []string
+	var all bool
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "list issues in this project",
+		Short: "list issues",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if limit <= 0 {
-				return &cliError{Message: "--limit must be a positive integer", Kind: kindValidation, ExitCode: ExitValidation}
+			if limit < 0 {
+				return &cliError{Message: "--limit must be non-negative", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			if cmd.Flags().Changed("priority") && (priority < 0 || priority > 4) {
 				return &cliError{Message: "--priority must be between 0 and 4", Kind: kindValidation, ExitCode: ExitValidation}
@@ -38,16 +39,11 @@ func newListCmd() *cobra.Command {
 			if unowned && owner != "" {
 				return &cliError{Message: "--unowned and --owner are mutually exclusive", Kind: kindValidation, ExitCode: ExitValidation}
 			}
+			if all && strings.TrimSpace(flags.Project) != "" {
+				return &cliError{Message: "--project and --all are mutually exclusive", Kind: kindUsage, ExitCode: ExitUsage}
+			}
 			ctx := cmd.Context()
-			start, err := resolveStartPath(flags.Workspace)
-			if err != nil {
-				return err
-			}
 			baseURL, err := ensureDaemon(ctx)
-			if err != nil {
-				return err
-			}
-			pid, err := resolveProjectID(ctx, baseURL, start)
 			if err != nil {
 				return err
 			}
@@ -55,19 +51,41 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if all && (unowned || owner != "" || len(labels) > 0 || len(noLabels) > 0 || len(meta) > 0) {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL,
+					apiVersionGlobalListFilters, "filtered list --all"); err != nil {
+					return err
+				}
+			}
 			// "all" is a CLI sentinel meaning "no filter"; the server expects
 			// an empty status to return both open and closed.
 			apiStatus := status
 			if apiStatus == "all" {
 				apiStatus = ""
 			}
-			// Build base URL
-			getURL := fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, pid)
+			requestLimit := limit
+			if all && !cmd.Flags().Changed("limit") {
+				requestLimit = 0
+			}
+			getURL := baseURL + "/api/v1/issues"
+			if !all {
+				start, err := resolveStartPath(flags.Workspace)
+				if err != nil {
+					return err
+				}
+				pid, err := resolveProjectID(ctx, baseURL, start)
+				if err != nil {
+					return err
+				}
+				getURL = fmt.Sprintf("%s/api/v1/projects/%d/issues", baseURL, pid)
+			}
 
 			// Build query parameters
 			params := url.Values{}
 			params.Set("status", apiStatus)
-			params.Set("limit", fmt.Sprintf("%d", limit))
+			if requestLimit > 0 {
+				params.Set("limit", fmt.Sprintf("%d", requestLimit))
+			}
 			if cmd.Flags().Changed("priority") {
 				params.Set("priority", fmt.Sprintf("%d", priority))
 			}
@@ -114,6 +132,7 @@ func newListCmd() *cobra.Command {
 				Issues []struct {
 					ShortID     string   `json:"short_id"`
 					QualifiedID string   `json:"qualified_id"`
+					ProjectName string   `json:"project_name"`
 					Title       string   `json:"title"`
 					Status      string   `json:"status"`
 					Owner       *string  `json:"owner"`
@@ -134,8 +153,12 @@ func newListCmd() *cobra.Command {
 					return err
 				}
 				for _, i := range b.Issues {
+					ref := i.ShortID
+					if all {
+						ref = i.QualifiedID
+					}
 					if err := writeAgentKVRow(out,
-						agentRowField("issue", i.ShortID),
+						agentRowField("issue", ref),
 						agentRowField("status", i.Status),
 						agentRowIntField("priority", i.Priority),
 						agentOptionalRowField("owner", i.Owner),
@@ -172,6 +195,9 @@ func newListCmd() *cobra.Command {
 					Blocked:  i.Blocked,
 					Labels:   i.Labels,
 				}
+				if all {
+					rows[idx].ID = i.QualifiedID
+				}
 				keys[idx] = i.QualifiedID
 				if i.Parent != nil {
 					parents[idx] = i.Parent.QualifiedID
@@ -187,7 +213,7 @@ func newListCmd() *cobra.Command {
 			// project has exactly --limit issues, which we accept as a
 			// much smaller harm than silently reporting a total that
 			// isn't one.
-			truncated := len(b.Issues) == limit
+			truncated := requestLimit > 0 && len(b.Issues) == requestLimit
 			if !flags.Quiet && len(rows) > 0 {
 				if err := renderer.renderListFooter(cmd.OutOrStdout(), rows, truncated); err != nil {
 					return err
@@ -197,7 +223,7 @@ func newListCmd() *cobra.Command {
 			// (kata list | grep ...). Quiet suppresses it.
 			if !flags.Quiet && truncated {
 				if _, err := fmt.Fprintf(cmd.ErrOrStderr(),
-					"... showing %d (raise --limit to see more)\n", limit); err != nil {
+					"... showing %d (raise --limit to see more)\n", requestLimit); err != nil {
 					return err
 				}
 			}
@@ -205,7 +231,8 @@ func newListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "open", "filter by status: open|closed|all")
-	cmd.Flags().IntVar(&limit, "limit", 200, "max rows")
+	cmd.Flags().IntVar(&limit, "limit", 200, "max rows (0 = no limit; --all defaults to 0)")
+	cmd.Flags().BoolVar(&all, "all", false, "list issues across all non-archived projects")
 	cmd.Flags().IntVar(&priority, "priority", 0, "exact priority filter (0..4); 0 = highest")
 	cmd.Flags().IntVar(&maxPriority, "max-priority", 0, "include only priority <= this value (0..4)")
 	cmd.Flags().BoolVar(&unowned, "unowned", false, "only issues with no owner")

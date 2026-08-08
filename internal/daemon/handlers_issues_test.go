@@ -2404,6 +2404,58 @@ func TestListAllIssues_HydratesLabelsAcrossProjects(t *testing.T) {
 		labelsByKey[strconv.FormatInt(pidB, 10)+"/"+b1Short])
 }
 
+func TestListAllIssues_ComposesOwnerLabelAndMetadataFilters(t *testing.T) {
+	env := testenv.New(t)
+	pidA := initWorkspaceViaHTTP(t, env, "https://example.com/spoke-project.git")
+	pidB := initWorkspaceViaHTTP(t, env, "https://example.com/hub-project.git")
+
+	var wanted struct {
+		Issue struct {
+			ID      int64  `json:"id"`
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}
+	envPostJSON(t, env, projectPath(pidA)+"/issues", map[string]any{
+		"actor": "tester", "title": "wanted", "owner": "agent-a",
+		"labels":   []string{"handoff", "urgent"},
+		"metadata": map[string]string{"lane": "deploy"},
+	}, &wanted)
+	envPostJSON(t, env, projectPath(pidB)+"/issues", map[string]any{
+		"actor": "tester", "title": "wrong owner", "owner": "agent-b",
+		"labels":   []string{"handoff", "urgent"},
+		"metadata": map[string]string{"lane": "deploy"},
+	}, nil)
+	envPostJSON(t, env, projectPath(pidB)+"/issues", map[string]any{
+		"actor": "tester", "title": "excluded label", "owner": "agent-a",
+		"labels":   []string{"handoff", "urgent", "parked"},
+		"metadata": map[string]string{"lane": "deploy"},
+	}, nil)
+	envPostJSON(t, env, projectPath(pidB)+"/issues", map[string]any{
+		"actor": "tester", "title": "wrong metadata", "owner": "agent-a",
+		"labels":   []string{"handoff", "urgent"},
+		"metadata": map[string]string{"lane": "review"},
+	}, nil)
+
+	var out struct {
+		Issues []struct {
+			ShortID     string `json:"short_id"`
+			ProjectName string `json:"project_name"`
+		} `json:"issues"`
+	}
+	envGetJSON(t, env,
+		"/api/v1/issues?status=open&owner=agent-a&label=HANDOFF&label=urgent&exclude_label=parked&meta=lane%3Ddeploy&limit=1",
+		&out)
+	require.Len(t, out.Issues, 1)
+	assert.Equal(t, wanted.Issue.ShortID, out.Issues[0].ShortID)
+	assert.Equal(t, "spoke-project", out.Issues[0].ProjectName)
+}
+
+func TestListAllIssues_UnownedAndOwnerMutuallyExclusive(t *testing.T) {
+	env := testenv.New(t)
+	resp, bs := envGetRaw(t, env, "/api/v1/issues?unowned=true&owner=agent-a")
+	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
+}
+
 func TestShowIssue_IncludesLinksAndLabels(t *testing.T) {
 	env := testenv.New(t)
 	pid, parent, child := setupTwoIssues(t, env)

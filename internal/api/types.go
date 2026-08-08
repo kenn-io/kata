@@ -450,11 +450,16 @@ type ListIssuesRequest struct {
 // that want one trip through this surface; omit it for the all-projects feed.
 // Priority/MaxPriority are encoded the same way as ListIssuesRequest.
 type ListAllIssuesRequest struct {
-	ProjectID   int64  `query:"project_id,omitempty"`
-	Status      string `query:"status,omitempty" enum:"open,closed,"`
-	Priority    string `query:"priority,omitempty" doc:"exact priority filter (0..4); empty = no filter"`
-	MaxPriority string `query:"max_priority,omitempty" doc:"include only priority <= this value (0..4); empty = no filter"`
-	Limit       int    `query:"limit,omitempty"`
+	ProjectID     int64    `query:"project_id,omitempty"`
+	Status        string   `query:"status,omitempty" enum:"open,closed,"`
+	Priority      string   `query:"priority,omitempty" doc:"exact priority filter (0..4); empty = no filter"`
+	MaxPriority   string   `query:"max_priority,omitempty" doc:"include only priority <= this value (0..4); empty = no filter"`
+	Limit         int      `query:"limit,omitempty"`
+	Unowned       bool     `query:"unowned,omitempty"`
+	Owner         string   `query:"owner,omitempty"`
+	Labels        []string `query:"label,explode"`
+	ExcludeLabels []string `query:"exclude_label,explode"`
+	Meta          []string `query:"meta,explode"`
 
 	// Deprecated query params kept on the struct only to surface a 400 if a
 	// stale client still sends them — the daemon used to honor view= /
@@ -509,6 +514,20 @@ type IssueOut struct {
 type ListIssuesResponse struct {
 	Body struct {
 		Issues []IssueOut `json:"issues"`
+	}
+}
+
+// ListGlobalIssueOut is one cross-project list row. ProjectName is explicit
+// so structured clients do not need to split QualifiedID to recover scope.
+type ListGlobalIssueOut struct {
+	IssueOut
+	ProjectName string `json:"project_name"`
+}
+
+// ListAllIssuesResponse is the cross-project list response.
+type ListAllIssuesResponse struct {
+	Body struct {
+		Issues []ListGlobalIssueOut `json:"issues"`
 	}
 }
 
