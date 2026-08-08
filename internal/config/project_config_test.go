@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 func setupKataProjectDir(t *testing.T, body string) string {
@@ -192,6 +193,22 @@ name = "kata"
 	require.NoError(t, err)
 	assert.Equal(t, root, foundDir)
 	assert.Equal(t, "kata", cfg.Project.Name)
+}
+
+func TestFindProjectConfig_DoesNotCrossGitRoot(t *testing.T) {
+	outer := setupKataProjectDir(t, `version = 1
+
+[project]
+name = "example-project"
+`)
+	repo := filepath.Join(outer, "repo-a")
+	require.NoError(t, os.MkdirAll(repo, 0o755)) //nolint:gosec // test fixture under TempDir
+	testfix.MkDotGit(t, repo)
+
+	cfg, foundDir, err := config.FindProjectConfig(repo)
+	assert.Nil(t, cfg)
+	assert.Empty(t, foundDir)
+	assert.ErrorIs(t, err, config.ErrProjectConfigMissing)
 }
 
 func TestFindProjectConfig_MissingReturnsSentinel(t *testing.T) {

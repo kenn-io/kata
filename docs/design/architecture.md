@@ -88,9 +88,12 @@ workspace explicitly, never inferred from wherever a command happens to run.
 
 A **project** is the namespace for issues, numbering, links, labels, and events.
 A workspace declares its project through a committed `.kata.toml` file. Resolution
-walks up from the start path to find that file and the enclosing git root, then
-resolves the project. Outside a bound workspace, and without an explicit
-`--project`, every command except `kata init` fails with `project_not_initialized`.
+walks up from the start path to find that file and the enclosing git root. In a
+git workspace the config walk stops at that root, so a binding outside the
+repository cannot capture it; non-git workspaces walk to the filesystem root.
+Resolution then resolves the project. Outside a bound workspace, and without
+an explicit `--project`, every command except `kata init` fails with
+`project_not_initialized`.
 kata never silently namespaces issues to a random directory, and `kata init` is
 the only command that creates a project row. Auto-creation on first read or write
 is deliberately excluded — it is exactly how agents end up writing into the wrong

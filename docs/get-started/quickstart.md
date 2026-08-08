@@ -66,8 +66,10 @@ kata init
 ```
 
 `kata init` writes `.kata.toml` with a project binding. In a git workspace,
-kata derives the default project name from the git remote. For a non-git
-workspace or an explicit shared project name:
+kata derives the default project name from the git remote and keeps config
+discovery within that repository. A `.kata.toml` above the git root does not
+bind the repository. For a non-git workspace or an explicit shared project
+name:
 
 ```sh
 kata init --project product

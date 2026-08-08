@@ -38,6 +38,111 @@ func TestDiscoverPaths_KataTomlInSubdirOfGit(t *testing.T) {
 	assert.Equal(t, root, d.GitRoot)
 }
 
+func TestDiscoverPaths_KataTomlAboveGitRoot(t *testing.T) {
+	outer := t.TempDir()
+	testfix.WriteKataToml(t, outer, "example-project")
+
+	repo := filepath.Join(outer, "repo-a")
+	require.NoError(t, os.MkdirAll(repo, 0o755)) //nolint:gosec // test fixture under TempDir.
+	testfix.MkDotGit(t, repo)
+
+	d, err := config.DiscoverPaths(repo)
+	require.NoError(t, err)
+	assert.Empty(t, d.WorkspaceRoot)
+	assert.Equal(t, repo, d.GitRoot)
+	assert.Equal(t, repo, config.WriteDestination(d, repo))
+}
+
+func TestDiscoverPaths_SymlinkIntoGitIgnoresLexicalAncestorConfig(t *testing.T) {
+	repo := t.TempDir()
+	testfix.MkDotGit(t, repo)
+	nested := filepath.Join(repo, "nested")
+	require.NoError(t, os.Mkdir(nested, 0o755)) //nolint:gosec // test fixture under TempDir.
+
+	outer := t.TempDir()
+	testfix.WriteKataToml(t, outer, "example-project")
+	link := filepath.Join(outer, "linked-workspace")
+	require.NoError(t, os.Symlink(nested, link))
+
+	d, err := config.DiscoverPaths(link)
+	require.NoError(t, err)
+	physicalRepo, err := filepath.EvalSymlinks(repo)
+	require.NoError(t, err)
+	assert.Empty(t, d.WorkspaceRoot)
+	assert.Equal(t, physicalRepo, d.GitRoot)
+	assert.Equal(t, physicalRepo, config.WriteDestination(d, link))
+}
+
+func TestDiscoverPaths_SymlinkWithinGitKeepsNestedLexicalWorkspace(t *testing.T) {
+	repo := t.TempDir()
+	testfix.MkDotGit(t, repo)
+	workspace := filepath.Join(repo, "workspace")
+	require.NoError(t, os.Mkdir(workspace, 0o755)) //nolint:gosec // test fixture under TempDir.
+	testfix.WriteKataToml(t, workspace, "example-project")
+	target := filepath.Join(repo, "target")
+	require.NoError(t, os.Mkdir(target, 0o755)) //nolint:gosec // test fixture under TempDir.
+	link := filepath.Join(workspace, "link")
+	require.NoError(t, os.Symlink(target, link))
+
+	d, err := config.DiscoverPaths(link)
+	require.NoError(t, err)
+	assert.Equal(t, workspace, d.WorkspaceRoot)
+	assert.Equal(t, repo, d.GitRoot)
+	assert.Equal(t, workspace, config.WriteDestination(d, link))
+}
+
+func TestDiscoverPaths_SymlinkOutOfGitIgnoresLexicalAncestorConfig(t *testing.T) {
+	outer := t.TempDir()
+	testfix.WriteKataToml(t, outer, "example-project")
+	repo := filepath.Join(outer, "repo")
+	require.NoError(t, os.Mkdir(repo, 0o755)) //nolint:gosec // test fixture under TempDir.
+	testfix.MkDotGit(t, repo)
+	target := t.TempDir()
+	link := filepath.Join(repo, "escaped-workspace")
+	require.NoError(t, os.Symlink(target, link))
+
+	d, err := config.DiscoverPaths(link)
+	require.NoError(t, err)
+	assert.Empty(t, d.WorkspaceRoot)
+	assert.Equal(t, repo, d.GitRoot)
+	assert.Equal(t, repo, config.WriteDestination(d, link))
+}
+
+func TestDiscoverPaths_SymlinkFromNestedGitUsesPhysicalRepository(t *testing.T) {
+	parentRepo := t.TempDir()
+	testfix.MkDotGit(t, parentRepo)
+	testfix.WriteKataToml(t, parentRepo, "parent-project")
+	nestedRepo := filepath.Join(parentRepo, "nested")
+	require.NoError(t, os.Mkdir(nestedRepo, 0o755)) //nolint:gosec // test fixture under TempDir.
+	testfix.MkDotGit(t, nestedRepo)
+	testfix.WriteKataToml(t, nestedRepo, "nested-project")
+	target := filepath.Join(parentRepo, "target")
+	require.NoError(t, os.Mkdir(target, 0o755)) //nolint:gosec // test fixture under TempDir.
+	link := filepath.Join(nestedRepo, "parent-workspace")
+	require.NoError(t, os.Symlink(target, link))
+
+	d, err := config.DiscoverPaths(link)
+	require.NoError(t, err)
+	physicalParentRepo, err := filepath.EvalSymlinks(parentRepo)
+	require.NoError(t, err)
+	assert.Equal(t, physicalParentRepo, d.WorkspaceRoot)
+	assert.Equal(t, physicalParentRepo, d.GitRoot)
+	assert.Equal(t, physicalParentRepo, config.WriteDestination(d, link))
+}
+
+func TestDiscoverPaths_SymlinkedNonGitWorkspaceKeepsLexicalAncestorConfig(t *testing.T) {
+	outer := t.TempDir()
+	testfix.WriteKataToml(t, outer, "example-project")
+	target := t.TempDir()
+	link := filepath.Join(outer, "linked-workspace")
+	require.NoError(t, os.Symlink(target, link))
+
+	d, err := config.DiscoverPaths(link)
+	require.NoError(t, err)
+	assert.Equal(t, outer, d.WorkspaceRoot)
+	assert.Empty(t, d.GitRoot)
+}
+
 func TestDiscoverPaths_NeitherFound(t *testing.T) {
 	d, err := config.DiscoverPaths(t.TempDir())
 	require.NoError(t, err)
