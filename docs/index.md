@@ -22,10 +22,18 @@ federation.
 
 </div>
 
+## Two ways to supervise
+
 ![kata TUI showing a simulated issue hierarchy](/assets/screenshots/tui/hero.svg)
 
-The image above is generated from disposable simulated data by the docs
-screenshot workflow.
+`kata tui` keeps triage in the terminal. `kata ui` opens the same ledger in a
+full browser workspace:
+
+![kata Web UI showing a synthetic project and issue hierarchy](/assets/screenshots/web-ui/workspace.png)
+
+Both images are generated from disposable synthetic data by the docs screenshot
+workflow. See the [Web UI guide](guide/web-ui.md) for projects, collections,
+issue editing, relationships, recurrences, and configured-daemon switching.
 
 ## Install
 
@@ -148,6 +156,7 @@ is a local ledger for the work itself. They coexist. See
 <div class="grid cards" markdown>
 
 -   [__Concepts__](guide/concepts.md). The data model and how the pieces fit.
+-   [__Web UI__](guide/web-ui.md). Manage projects and issues in the browser.
 -   [__CLI reference__](reference/cli.md). Every command and flag.
 -   [__Model Context Protocol__](reference/mcp.md). Connect an MCP agent to one
     bound Kata project.

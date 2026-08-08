@@ -19,6 +19,7 @@ nav = [
   ]},
   {"Guide" = [
     {"Concepts" = "guide/concepts.md"},
+    {"Web UI" = "guide/web-ui.md"},
     {"Workspaces and projects" = "guide/workspaces-projects.md"},
     {"Semantic search" = "guide/semantic-search.md"},
     {"Comparisons" = "guide/comparisons.md"},

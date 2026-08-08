@@ -109,9 +109,14 @@ List and inspect:
 kata list [--status open|closed|all] [--limit N]
 kata list [--label LABEL] [--no-label LABEL] [--owner NAME] [--unowned]
 kata list [--meta key[=value]]
+kata list --all [--status open|closed|all] [--limit N]
+              [--priority N | --max-priority N]
+              [--owner NAME | --unowned]
+              [--label LABEL] [--no-label LABEL] [--meta key[=value]]
 kata show <issue-ref> [--render]
 kata search <query> [--limit N] [--include-deleted]
 kata search <query> [--lexical | --hybrid | --semantic]
+kata search <query> [--label LABEL] [--no-label LABEL]
 ```
 
 `kata show --render` renders Markdown only in issue descriptions and comment
@@ -132,6 +137,12 @@ For `kata list`, `--meta` is repeatable. A bare key filters on presence,
 while `key=value` filters on string equality. Multiple filters combine with
 AND logic.
 
+`kata list --all` applies the same filters across every non-archived project.
+Its human and agent rows use qualified refs such as
+`example-project#abc4`, and JSON rows include `project_name`. A scoped list
+defaults to 200 rows; `list --all` defaults to no limit. Passing `--limit 0`
+also means no limit. `--all` cannot be combined with `--project`.
+
 Human `kata list` output groups fetched children beneath their fetched parents
 with box-drawing connectors. When a parent is absent because it did not match
 the filters, belongs to another project, or fell outside `--limit`, its child
@@ -148,6 +159,11 @@ exclusive and force a strategy:
 - `--hybrid` — fuse the lexical and vector legs (reciprocal rank fusion).
 - `--semantic` — vector (embedding) results only.
 
+Search label matching is case-insensitive. Repeating `--label` requires every
+named label; repeating `--no-label` excludes a result with any named label.
+The filters apply before the lexical limit. Hybrid and semantic searches apply
+the same rules while hydrating vector hits.
+
 `--hybrid` and `--semantic` require `[search.embeddings]`; against a daemon
 without it they return an error rather than silently falling back. If the
 vector leg cannot run, or bounded label filtering exhausts its candidate
@@ -158,6 +174,12 @@ and `--agent` output carry the effective `mode` and the degraded reason so the
 downgrade is never silent. Explicit `--hybrid` and `--semantic` do not degrade:
 they return an error (HTTP 503) when the vector leg cannot run or complete, just
 as they return 400 when embeddings are not configured at all.
+
+Before sending filters that an older daemon could silently ignore, the CLI
+checks `api_schema_version`. Filtered search and filtered `ready --all` require
+API 0.8.0 or newer; filtered `list --all` requires API 0.9.0 or newer. An older
+daemon fails before the query with `daemon_api_too_old` and an upgrade message.
+See [HTTP API compatibility](http-api.md#detecting-the-api-version).
 
 Edit:
 
@@ -318,7 +340,12 @@ kata next [--label LABEL] [--no-label LABEL]
 kata next [--all] [--full]
 ```
 
-`ready` returns open issues that do not have an open blocking predecessor.
+`ready` returns open issues that do not have an open blocking predecessor. It
+also excludes parked issues: `someday=true` and a `scheduled_on` date after the
+current UTC date are not actionable. Today, past, unset, and `someday=false`
+values remain eligible. The browser ready collection follows the same rule and
+rolls scheduled work in at UTC midnight.
+
 Filters combine with AND logic. `--all` lists ready issues across every
 non-archived project; the scoped filters (`--unowned`, `--owner`, `--label`,
 `--no-label`) compose with it, so a cross-project queue view such as "every

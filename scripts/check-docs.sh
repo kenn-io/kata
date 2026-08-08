@@ -9,6 +9,7 @@ required_files=(
   "docs/get-started/install.md"
   "docs/changelog.md"
   "docs/guide/concepts.md"
+  "docs/guide/web-ui.md"
   "docs/guide/workspaces-projects.md"
   "docs/guide/migrating-from-beads.md"
   "docs/reference/cli.md"
