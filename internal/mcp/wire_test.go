@@ -18,14 +18,18 @@ import (
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
-func TestWireDiscoveryPublishesOnlyCurrentToolsCapability(t *testing.T) {
+func TestWireDiscoveryPublishesNegotiatedToolsCapability(t *testing.T) {
 	connection, reader := rawServerConnection(t)
 	writeWireRequest(t, connection, 1, "server/discover", map[string]any{"_meta": currentMeta()})
 
 	response := readWireMap(t, reader)
 	require.EqualValues(t, 1, response["id"])
-	result := response["result"].(map[string]any)
-	require.Equal(t, []any{ProtocolVersion}, result["supportedVersions"])
+	require.NotContains(t, response, "error")
+	result, ok := response["result"].(map[string]any)
+	require.True(t, ok)
+	supportedVersions := result["supportedVersions"].([]any)
+	require.Contains(t, supportedVersions, currentProtocolVersion)
+	require.Contains(t, supportedVersions, legacyProtocolVersion)
 	require.Equal(t, "private", result["cacheScope"])
 	require.EqualValues(t, 5*time.Minute.Milliseconds(), result["ttlMs"])
 	require.NotEmpty(t, result["resultType"])
@@ -37,52 +41,57 @@ func TestWireDiscoveryPublishesOnlyCurrentToolsCapability(t *testing.T) {
 	require.Equal(t, "test-version", serverInfo["version"])
 }
 
-func TestWireRejectsUnsupportedAndLegacyInitialization(t *testing.T) {
-	tests := []struct {
-		name     string
-		method   string
-		params   map[string]any
-		wantCode int64
-	}{
-		{
-			name: "unsupported version", method: "server/discover",
-			params: map[string]any{"_meta": map[string]any{
-				"io.modelcontextprotocol/protocolVersion":    "2025-11-25",
-				"io.modelcontextprotocol/clientCapabilities": map[string]any{},
-			}},
-			wantCode: sdkmcp.CodeUnsupportedProtocolVersion,
+func TestWireNegotiatesLegacyInitialization(t *testing.T) {
+	connection, reader := rawServerConnection(t)
+	writeWireRequest(t, connection, 1, "initialize", map[string]any{
+		"protocolVersion": legacyProtocolVersion,
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": "legacy-client", "version": "1"},
+	})
+
+	response := readWireMap(t, reader)
+	require.EqualValues(t, 1, response["id"])
+	require.NotContains(t, response, "error")
+	result, ok := response["result"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, legacyProtocolVersion, result["protocolVersion"])
+	serverInfo := result["serverInfo"].(map[string]any)
+	require.Equal(t, "kata", serverInfo["name"])
+	require.Equal(t, "test-version", serverInfo["version"])
+
+	writeWireNotification(t, connection, "notifications/initialized", map[string]any{})
+	writeWireRequest(t, connection, 2, "tools/list", map[string]any{})
+	toolsResponse := readWireMap(t, reader)
+	require.EqualValues(t, 2, toolsResponse["id"])
+	toolsResult := toolsResponse["result"].(map[string]any)
+	require.NotEmpty(t, toolsResult["tools"])
+}
+
+func TestWireRejectsUnsupportedProtocolVersion(t *testing.T) {
+	connection, reader := rawServerConnection(t)
+	writeWireRequest(t, connection, 1, "server/discover", map[string]any{
+		"_meta": map[string]any{
+			"io.modelcontextprotocol/protocolVersion":    "2027-01-01",
+			"io.modelcontextprotocol/clientCapabilities": map[string]any{},
 		},
-		{
-			name: "legacy initialize with current version", method: "initialize",
-			params: map[string]any{
-				"protocolVersion": ProtocolVersion,
-				"capabilities":    map[string]any{},
-				"clientInfo":      map[string]any{"name": "legacy-client", "version": "1"},
-			},
-			wantCode: jsonrpc.CodeMethodNotFound,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			connection, reader := rawServerConnection(t)
-			writeWireRequest(t, connection, 1, tt.method, tt.params)
-			response := readWireResponse(t, reader)
-			require.NotNil(t, response.Error)
-			require.Equal(t, tt.wantCode, response.Error.Code)
-			if tt.wantCode == sdkmcp.CodeUnsupportedProtocolVersion {
-				var data map[string]any
-				require.NoError(t, json.Unmarshal(response.Error.Data, &data))
-				require.Equal(t, []any{ProtocolVersion}, data["supported"])
-			}
-		})
-	}
+	})
+
+	response := readWireResponse(t, reader)
+	require.NotNil(t, response.Error)
+	require.Equal(t, int64(sdkmcp.CodeUnsupportedProtocolVersion), response.Error.Code)
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(response.Error.Data, &data))
+	require.Equal(t, "2027-01-01", data["requested"])
+	supported := data["supported"].([]any)
+	require.Contains(t, supported, currentProtocolVersion)
+	require.Contains(t, supported, legacyProtocolVersion)
 }
 
 func TestCurrentProtocolStillRequiresClientCapabilities(t *testing.T) {
 	connection, reader := rawServerConnection(t)
 	writeWireRequest(t, connection, 1, "server/discover", map[string]any{
 		"_meta": map[string]any{
-			"io.modelcontextprotocol/protocolVersion": ProtocolVersion,
+			"io.modelcontextprotocol/protocolVersion": currentProtocolVersion,
 		},
 	})
 
@@ -91,18 +100,18 @@ func TestCurrentProtocolStillRequiresClientCapabilities(t *testing.T) {
 	require.Equal(t, int64(jsonrpc.CodeInvalidParams), response.Error.Code)
 }
 
-func TestInitializeIsRemovedFromCurrentProtocol(t *testing.T) {
+func TestInitializeNegotiatesHandshakeCompatibleVersion(t *testing.T) {
 	connection, reader := rawServerConnection(t)
 	writeWireRequest(t, connection, 1, "initialize", map[string]any{
-		"protocolVersion": ProtocolVersion,
+		"protocolVersion": currentProtocolVersion,
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "test-client", "version": "1"},
-		"_meta":           currentMeta(),
 	})
 
-	response := readWireResponse(t, reader)
-	require.NotNil(t, response.Error)
-	require.Equal(t, int64(jsonrpc.CodeMethodNotFound), response.Error.Code)
+	response := readWireMap(t, reader)
+	require.NotContains(t, response, "error")
+	result := response["result"].(map[string]any)
+	require.Equal(t, legacyProtocolVersion, result["protocolVersion"])
 }
 
 func TestWireCancellationSuppressesLateToolResponse(t *testing.T) {

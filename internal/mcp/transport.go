@@ -16,34 +16,25 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ProtocolVersion is the only MCP revision accepted by Kata.
-const ProtocolVersion = "2026-07-28"
-
 const defaultMaxMessageBytes = 8 << 20
 
 // StdioTransport carries one compact JSON-RPC message per line. It enforces
-// the current protocol at ingress so the SDK cannot negotiate a legacy MCP
-// session.
+// Kata's input and output bounds while leaving protocol negotiation to the SDK.
 type StdioTransport struct {
 	reader          io.ReadCloser
 	writer          io.Writer
 	maxMessageBytes int
 }
 
-// NewStdioTransport creates a current-protocol-only stdio transport. A writer
-// that implements io.Closer is closed with the connection so a blocked write
-// cannot outlive the protocol stream.
+// NewStdioTransport creates a bounded stdio transport. A writer that implements
+// io.Closer is closed with the connection so a blocked write cannot outlive the
+// protocol stream.
 func NewStdioTransport(reader io.ReadCloser, writer io.Writer) *StdioTransport {
 	return &StdioTransport{
 		reader:          reader,
 		writer:          writer,
 		maxMessageBytes: defaultMaxMessageBytes,
 	}
-}
-
-// SupportsProtocolVersion limits server/discover to the current revision.
-func (*StdioTransport) SupportsProtocolVersion(version string) bool {
-	return version == ProtocolVersion
 }
 
 // Connect implements mcp.Transport.
@@ -188,102 +179,11 @@ func (c *stdioConnection) admit(line []byte) (jsonrpc.Message, bool, error) {
 			return nil, false, c.writeError(context.Background(), request.ID, jsonrpc.CodeInvalidRequest, "cancellation must be a notification", nil)
 		}
 		c.recordCancellation(request.Params)
-		return request, true, nil
-	}
-	if request.Method == "notifications/initialized" {
-		if request.IsCall() {
-			return nil, false, c.writeError(context.Background(), request.ID, jsonrpc.CodeMethodNotFound, "method not found", nil)
-		}
-		return nil, false, nil
-	}
-
-	version, state := requestProtocolVersion(request.Params)
-	if state == versionMissing && request.Method == "initialize" {
-		version, state = initializeProtocolVersion(request.Params)
-		if state == versionPresent && version == ProtocolVersion {
-			if !request.IsCall() {
-				return nil, false, nil
-			}
-			return nil, false, c.writeError(context.Background(), request.ID, jsonrpc.CodeMethodNotFound, "method not found", nil)
-		}
-	}
-	if state != versionPresent {
-		if !request.IsCall() {
-			return nil, false, nil
-		}
-		return nil, false, c.writeError(
-			context.Background(), request.ID, jsonrpc.CodeInvalidParams,
-			"missing or malformed io.modelcontextprotocol/protocolVersion", nil,
-		)
-	}
-	if version != ProtocolVersion {
-		if !request.IsCall() {
-			return nil, false, nil
-		}
-		data, err := json.Marshal(sdkmcp.UnsupportedProtocolVersionData{
-			Supported: []string{ProtocolVersion},
-			Requested: version,
-		})
-		if err != nil {
-			return nil, false, err
-		}
-		return nil, false, c.writeError(
-			context.Background(), request.ID, sdkmcp.CodeUnsupportedProtocolVersion,
-			"unsupported protocol version", data,
-		)
 	}
 	if request.IsCall() {
 		c.recordActive(request.ID)
 	}
 	return request, true, nil
-}
-
-type versionState uint8
-
-const (
-	versionMissing versionState = iota
-	versionMalformed
-	versionPresent
-)
-
-func requestProtocolVersion(params json.RawMessage) (string, versionState) {
-	var object map[string]json.RawMessage
-	if len(params) == 0 || json.Unmarshal(params, &object) != nil {
-		return "", versionMalformed
-	}
-	metaRaw, ok := object["_meta"]
-	if !ok {
-		return "", versionMissing
-	}
-	var meta map[string]json.RawMessage
-	if json.Unmarshal(metaRaw, &meta) != nil {
-		return "", versionMalformed
-	}
-	versionRaw, ok := meta["io.modelcontextprotocol/protocolVersion"]
-	if !ok {
-		return "", versionMissing
-	}
-	var version string
-	if json.Unmarshal(versionRaw, &version) != nil || version == "" {
-		return "", versionMalformed
-	}
-	return version, versionPresent
-}
-
-func initializeProtocolVersion(params json.RawMessage) (string, versionState) {
-	var object map[string]json.RawMessage
-	if len(params) == 0 || json.Unmarshal(params, &object) != nil {
-		return "", versionMalformed
-	}
-	versionRaw, ok := object["protocolVersion"]
-	if !ok {
-		return "", versionMissing
-	}
-	var version string
-	if json.Unmarshal(versionRaw, &version) != nil || version == "" {
-		return "", versionMalformed
-	}
-	return version, versionPresent
 }
 
 // Write implements mcp.Connection. Kata never sends calls to an MCP client.
@@ -451,9 +351,8 @@ func sameResource(left, right any) bool {
 	return leftType != nil && leftType == reflect.TypeOf(right) && leftType.Comparable() && left == right
 }
 
-// SessionID implements mcp.Connection. MCP 2026-07-28 stdio is stateless.
+// SessionID implements mcp.Connection. Stdio does not need a session ID.
 func (*stdioConnection) SessionID() string { return "" }
 
-var _ sdkmcp.ProtocolVersionSupporter = (*StdioTransport)(nil)
 var _ sdkmcp.Transport = (*StdioTransport)(nil)
 var _ sdkmcp.Connection = (*stdioConnection)(nil)

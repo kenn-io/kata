@@ -17,12 +17,52 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStdioTransportSupportsOnlyCurrentProtocol(t *testing.T) {
-	transport := NewStdioTransport(io.NopCloser(strings.NewReader("")), io.Discard)
+const (
+	currentProtocolVersion = "2026-07-28"
+	legacyProtocolVersion  = "2025-11-25"
+)
 
-	require.True(t, transport.SupportsProtocolVersion(ProtocolVersion))
-	require.False(t, transport.SupportsProtocolVersion("2025-11-25"))
-	require.False(t, transport.SupportsProtocolVersion("2027-01-01"))
+func TestStdioConnectionAdmitsLegacyRequests(t *testing.T) {
+	tests := []struct {
+		name   string
+		id     any
+		method string
+		params map[string]any
+	}{
+		{
+			name:   "initialize",
+			id:     1,
+			method: "initialize",
+			params: map[string]any{
+				"protocolVersion": legacyProtocolVersion,
+				"capabilities":    map[string]any{},
+				"clientInfo":      map[string]any{"name": "legacy-client", "version": "1"},
+			},
+		},
+		{
+			name:   "initialized notification",
+			method: "notifications/initialized",
+			params: map[string]any{},
+		},
+		{
+			name:   "post-handshake request",
+			id:     2,
+			method: "tools/list",
+			params: map[string]any{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			conn := connectStdio(t, requestLine(t, tt.id, tt.method, tt.params), &output)
+
+			message, err := conn.Read(t.Context())
+			require.NoError(t, err)
+			request := message.(*jsonrpc.Request)
+			require.Equal(t, tt.method, request.Method)
+			require.Empty(t, output.String())
+		})
+	}
 }
 
 func TestStdioConnectionAdmitsCurrentRequests(t *testing.T) {
@@ -73,130 +113,21 @@ func TestStdioConnectionForwardsCancellationWithoutRequestMetadata(t *testing.T)
 	require.False(t, request.IsCall())
 }
 
-func TestStdioConnectionRejectsUnsupportedAndInvalidRequests(t *testing.T) {
-	tests := []struct {
-		name          string
-		line          string
-		wantCode      int64
-		wantRequested string
-	}{
-		{
-			name: "legacy initialize",
-			line: requestLine(t, 1, "initialize", map[string]any{
-				"protocolVersion": "2025-11-25",
-				"capabilities":    map[string]any{},
-				"clientInfo":      map[string]any{"name": "legacy-client", "version": "1"},
-			}),
-			wantCode:      sdkmcp.CodeUnsupportedProtocolVersion,
-			wantRequested: "2025-11-25",
-		},
-		{
-			name: "handshake removed at current version",
-			line: requestLine(t, 6, "initialize", map[string]any{
-				"protocolVersion": ProtocolVersion,
-				"capabilities":    map[string]any{},
-				"clientInfo":      map[string]any{"name": "legacy-client", "version": "1"},
-			}),
-			wantCode: jsonrpc.CodeMethodNotFound,
-		},
-		{
-			name: "future version",
-			line: requestLine(t, 2, "tools/list", map[string]any{
-				"_meta": map[string]any{
-					"io.modelcontextprotocol/protocolVersion":    "2027-01-01",
-					"io.modelcontextprotocol/clientCapabilities": map[string]any{},
-				},
-			}),
-			wantCode:      sdkmcp.CodeUnsupportedProtocolVersion,
-			wantRequested: "2027-01-01",
-		},
-		{
-			name:     "missing metadata",
-			line:     requestLine(t, 3, "tools/list", map[string]any{}),
-			wantCode: jsonrpc.CodeInvalidParams,
-		},
-		{
-			name: "malformed version",
-			line: requestLine(t, 4, "tools/list", map[string]any{
-				"_meta": map[string]any{
-					"io.modelcontextprotocol/protocolVersion":    20260728,
-					"io.modelcontextprotocol/clientCapabilities": map[string]any{},
-				},
-			}),
-			wantCode: jsonrpc.CodeInvalidParams,
-		},
-		{
-			name:     "batch",
-			line:     `[{"jsonrpc":"2.0","id":5,"method":"tools/list","params":{}}]` + "\n",
-			wantCode: jsonrpc.CodeInvalidRequest,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var output bytes.Buffer
-			conn := connectStdio(t, tt.line, &output)
-
-			_, err := conn.Read(t.Context())
-			require.ErrorIs(t, err, io.EOF)
-
-			response := decodeResponse(t, output.String())
-			wireErr := response.Error
-			require.NotNil(t, wireErr)
-			require.Equal(t, tt.wantCode, wireErr.Code)
-			if tt.name == "batch" {
-				var envelope map[string]any
-				require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(output.String())), &envelope))
-				id, present := envelope["id"]
-				require.True(t, present, "JSON-RPC errors without a request ID must carry id:null")
-				require.Nil(t, id)
-			}
-			if tt.wantRequested == "" {
-				return
-			}
-			var data struct {
-				Supported []string `json:"supported"`
-				Requested string   `json:"requested"`
-			}
-			require.NoError(t, json.Unmarshal(wireErr.Data, &data))
-			require.Equal(t, []string{ProtocolVersion}, data.Supported)
-			require.Equal(t, tt.wantRequested, data.Requested)
-		})
-	}
-}
-
-func TestStdioConnectionDropsLegacyInitializedNotification(t *testing.T) {
-	input := requestLine(t, nil, "notifications/initialized", map[string]any{})
+func TestStdioConnectionRejectsBatches(t *testing.T) {
+	input := `[{"jsonrpc":"2.0","id":5,"method":"tools/list","params":{}}]` + "\n"
 	var output bytes.Buffer
 	conn := connectStdio(t, input, &output)
 
 	_, err := conn.Read(t.Context())
 	require.ErrorIs(t, err, io.EOF)
-	require.Empty(t, output.String())
-}
-
-func TestStdioConnectionRejectsInitializedCall(t *testing.T) {
-	input := requestLine(t, 9, "notifications/initialized", map[string]any{})
-	var output bytes.Buffer
-	conn := connectStdio(t, input, &output)
-
-	_, err := conn.Read(t.Context())
-	require.ErrorIs(t, err, io.EOF)
-	require.Equal(t, int64(jsonrpc.CodeMethodNotFound), decodeResponse(t, output.String()).Error.Code)
-}
-
-func TestStdioConnectionDropsCurrentInitializeNotification(t *testing.T) {
-	input := requestLine(t, nil, "initialize", map[string]any{
-		"protocolVersion": ProtocolVersion,
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "legacy-client", "version": "1"},
-	})
-	var output bytes.Buffer
-	conn := connectStdio(t, input, &output)
-
-	_, err := conn.Read(t.Context())
-	require.ErrorIs(t, err, io.EOF)
-	require.Empty(t, output.String())
+	response := decodeResponse(t, output.String())
+	require.NotNil(t, response.Error)
+	require.Equal(t, int64(jsonrpc.CodeInvalidRequest), response.Error.Code)
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(output.String())), &envelope))
+	id, present := envelope["id"]
+	require.True(t, present, "JSON-RPC errors without a request ID must carry id:null")
+	require.Nil(t, id)
 }
 
 func TestStdioConnectionRejectsCancellationCall(t *testing.T) {
@@ -442,7 +373,7 @@ func requestLine(t *testing.T, id any, method string, params any) string {
 
 func currentMeta() map[string]any {
 	return map[string]any{
-		"io.modelcontextprotocol/protocolVersion":    ProtocolVersion,
+		"io.modelcontextprotocol/protocolVersion":    currentProtocolVersion,
 		"io.modelcontextprotocol/clientCapabilities": map[string]any{},
 	}
 }

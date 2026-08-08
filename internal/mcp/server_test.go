@@ -31,7 +31,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	session := connectTestServer(t)
 
 	initialized := session.InitializeResult()
-	require.Equal(t, ProtocolVersion, initialized.ProtocolVersion)
+	require.Equal(t, currentProtocolVersion, initialized.ProtocolVersion)
 	require.NotNil(t, initialized.ServerInfo)
 	require.Equal(t, "kata", initialized.ServerInfo.Name)
 	require.Equal(t, "test-version", initialized.ServerInfo.Version)
