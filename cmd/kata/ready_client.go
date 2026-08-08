@@ -87,6 +87,12 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 	if err != nil {
 		return readyResultForCLI{}, err
 	}
+	if o.All && (o.Unowned || o.Owner != "" || len(o.Labels) > 0 || len(o.NoLabels) > 0) {
+		if err := requireDaemonAPIVersion(ctx, client, baseURL,
+			apiVersionReadyAndSearchFilters, "filtered ready --all"); err != nil {
+			return readyResultForCLI{}, err
+		}
+	}
 
 	getURL, err := o.endpoint(ctx, baseURL)
 	if err != nil {

@@ -334,6 +334,31 @@ func (s *Store) ListAllIssues(ctx context.Context, params db.ListAllIssuesParams
 	if params.MaxPriority != nil {
 		add("i.priority IS NOT NULL AND i.priority <= $%d", *params.MaxPriority)
 	}
+	if params.Unowned {
+		conditions = append(conditions, "i.owner IS NULL")
+	} else if params.Owner != "" {
+		add("i.owner = $%d", params.Owner)
+	}
+	for _, label := range params.Labels {
+		add("EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", strings.ToLower(label))
+	}
+	for _, label := range params.ExcludeLabels {
+		add("NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = $%d)", strings.ToLower(label))
+	}
+	for _, filter := range params.Meta {
+		args = append(args, filter.Key)
+		keyPosition := len(args)
+		if filter.HasValue {
+			args = append(args, filter.Value)
+			conditions = append(conditions, fmt.Sprintf(
+				`EXISTS (SELECT 1 FROM jsonb_each(i.metadata::jsonb) entry
+                  WHERE entry.key = $%d AND jsonb_typeof(entry.value) = 'string'
+                    AND entry.value #>> '{}' = $%d)`,
+				keyPosition, len(args)))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`i.metadata::jsonb ? $%d`, keyPosition))
+		}
+	}
 	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY i.created_at DESC, i.id DESC`
 	if params.Limit > 0 {
 		args = append(args, params.Limit)

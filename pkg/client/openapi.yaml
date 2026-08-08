@@ -2147,6 +2147,16 @@ components:
         set_parent:
           type: string
       type: object
+    ListAllIssuesResponseBody:
+      properties:
+        issues:
+          items:
+            $ref: "#/components/schemas/ListGlobalIssueOut"
+          nullable: true
+          type: array
+      required:
+        - issues
+      type: object
     ListFederationEnrollmentsBody:
       properties:
         enrollments:
@@ -2156,6 +2166,104 @@ components:
           type: array
       required:
         - enrollments
+      type: object
+    ListGlobalIssueOut:
+      properties:
+        author:
+          type: string
+        blocked:
+          type: boolean
+        blocked_by:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          nullable: true
+          type: array
+        blocks:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          nullable: true
+          type: array
+        body:
+          type: string
+        child_counts:
+          $ref: "#/components/schemas/ChildCounts"
+        closed_at:
+          format: date-time
+          type: string
+        closed_reason:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        labels:
+          items:
+            type: string
+          nullable: true
+          type: array
+        metadata:
+          additionalProperties: true
+          type: object
+        occurrence_key:
+          type: string
+        owner:
+          type: string
+        parent:
+          $ref: "#/components/schemas/LinkPeer"
+        priority:
+          format: int64
+          type: integer
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        qualified_id:
+          type: string
+        recurrence_id:
+          format: int64
+          type: integer
+        related:
+          items:
+            $ref: "#/components/schemas/LinkPeer"
+          nullable: true
+          type: array
+        revision:
+          format: int64
+          type: integer
+        short_id:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        uid:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - project_name
+        - qualified_id
+        - id
+        - uid
+        - project_id
+        - short_id
+        - title
+        - body
+        - status
+        - author
+        - metadata
+        - revision
+        - created_at
+        - updated_at
       type: object
     ListIssuesResponseBody:
       properties:
@@ -3883,7 +3991,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.8.0
+  version: 0.9.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -4312,12 +4420,46 @@ paths:
           schema:
             format: int64
             type: integer
+        - explode: false
+          in: query
+          name: unowned
+          schema:
+            type: boolean
+        - explode: false
+          in: query
+          name: owner
+          schema:
+            type: string
+        - explode: true
+          in: query
+          name: label
+          schema:
+            items:
+              type: string
+            nullable: true
+            type: array
+        - explode: true
+          in: query
+          name: exclude_label
+          schema:
+            items:
+              type: string
+            nullable: true
+            type: array
+        - explode: true
+          in: query
+          name: meta
+          schema:
+            items:
+              type: string
+            nullable: true
+            type: array
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ListIssuesResponseBody"
+                $ref: "#/components/schemas/ListAllIssuesResponseBody"
           description: OK
         default:
           content:

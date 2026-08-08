@@ -1275,9 +1275,11 @@ func (c *Client) ListAllIssues(ctx context.Context, options *ListAllIssuesReques
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"limit":        {Style: "form", Explode: &[]bool{false}[0]},
 		"max_priority": {Style: "form", Explode: &[]bool{false}[0]},
+		"owner":        {Style: "form", Explode: &[]bool{false}[0]},
 		"priority":     {Style: "form", Explode: &[]bool{false}[0]},
 		"project_id":   {Style: "form", Explode: &[]bool{false}[0]},
 		"status":       {Style: "form", Explode: &[]bool{false}[0]},
+		"unowned":      {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/issues",

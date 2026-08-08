@@ -76,6 +76,12 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if len(labels) > 0 || len(noLabels) > 0 {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL,
+					apiVersionReadyAndSearchFilters, "filtered search"); err != nil {
+					return err
+				}
+			}
 			searchURL := buildSearchURL(searchURLParams{
 				BaseURL:        baseURL,
 				PID:            pid,

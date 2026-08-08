@@ -59,8 +59,13 @@ type ListAllIssuesQuery struct {
 	Priority *string `json:"priority,omitempty"`
 
 	// MaxPriority include only priority <= this value (0..4); empty = no filter
-	MaxPriority *string `json:"max_priority,omitempty"`
-	Limit       *int64  `json:"limit,omitempty"`
+	MaxPriority  *string  `json:"max_priority,omitempty"`
+	Limit        *int64   `json:"limit,omitempty"`
+	Unowned      *bool    `json:"unowned,omitempty"`
+	Owner        *string  `json:"owner,omitempty"`
+	Label        []string `json:"label,omitempty"`
+	ExcludeLabel []string `json:"exclude_label,omitempty"`
+	Meta         []string `json:"meta,omitempty"`
 }
 
 func (l ListAllIssuesQuery) Validate() error {

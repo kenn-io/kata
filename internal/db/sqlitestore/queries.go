@@ -1095,6 +1095,29 @@ func (d *Store) ListAllIssues(ctx context.Context, p db.ListAllIssuesParams) ([]
 		q += ` AND i.priority IS NOT NULL AND i.priority <= ?`
 		args = append(args, *p.MaxPriority)
 	}
+	if p.Unowned {
+		q += ` AND i.owner IS NULL`
+	} else if p.Owner != "" {
+		q += ` AND i.owner = ?`
+		args = append(args, p.Owner)
+	}
+	for _, label := range p.Labels {
+		q += ` AND EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		args = append(args, strings.ToLower(label))
+	}
+	for _, label := range p.ExcludeLabels {
+		q += ` AND NOT EXISTS (SELECT 1 FROM issue_labels il WHERE il.issue_id = i.id AND il.label = ?)`
+		args = append(args, strings.ToLower(label))
+	}
+	for _, mf := range p.Meta {
+		if mf.HasValue {
+			q += ` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ? AND je.value = ?)`
+			args = append(args, mf.Key, mf.Value)
+		} else {
+			q += ` AND EXISTS (SELECT 1 FROM json_each(i.metadata) je WHERE je.key = ?)`
+			args = append(args, mf.Key)
+		}
+	}
 	q += ` ORDER BY i.created_at DESC, i.id DESC`
 	if p.Limit > 0 {
 		q += fmt.Sprintf(` LIMIT %d`, p.Limit)

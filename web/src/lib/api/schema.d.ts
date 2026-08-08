@@ -2283,8 +2283,57 @@ export interface components {
       remove_related?: string[] | null
       set_parent?: string
     }
+    ListAllIssuesResponseBody: {
+      issues: components['schemas']['ListGlobalIssueOut'][] | null
+    } & {
+      [key: string]: unknown
+    }
     ListFederationEnrollmentsBody: {
       enrollments: components['schemas']['FederationEnrollmentOut'][] | null
+    } & {
+      [key: string]: unknown
+    }
+    ListGlobalIssueOut: {
+      author: string
+      blocked?: boolean
+      blocked_by?: components['schemas']['LinkPeer'][] | null
+      blocks?: components['schemas']['LinkPeer'][] | null
+      body: string
+      child_counts?: components['schemas']['ChildCounts']
+      /** Format: date-time */
+      closed_at?: string
+      closed_reason?: string
+      /** Format: date-time */
+      created_at: string
+      /** Format: date-time */
+      deleted_at?: string
+      /** Format: int64 */
+      id: number
+      labels?: string[] | null
+      metadata: {
+        [key: string]: unknown
+      }
+      occurrence_key?: string
+      owner?: string
+      parent?: components['schemas']['LinkPeer']
+      /** Format: int64 */
+      priority?: number
+      /** Format: int64 */
+      project_id: number
+      project_name: string
+      project_uid?: string
+      qualified_id: string
+      /** Format: int64 */
+      recurrence_id?: number
+      related?: components['schemas']['LinkPeer'][] | null
+      /** Format: int64 */
+      revision: number
+      short_id: string
+      status: string
+      title: string
+      uid: string
+      /** Format: date-time */
+      updated_at: string
     } & {
       [key: string]: unknown
     }
@@ -3596,6 +3645,11 @@ export interface operations {
         /** @description include only priority <= this value (0..4); empty = no filter */
         max_priority?: string
         limit?: number
+        unowned?: boolean
+        owner?: string
+        label?: string[] | null
+        exclude_label?: string[] | null
+        meta?: string[] | null
       }
       header?: never
       path?: never
@@ -3609,7 +3663,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['ListIssuesResponseBody']
+          'application/json': components['schemas']['ListAllIssuesResponseBody']
         }
       }
       /** @description Error */
