@@ -71,7 +71,7 @@ func TestDocsAssetPublisherRejectsInvalidSources(t *testing.T) {
 			tc.mutate(t, source)
 			publisher := installDocsScript(t, repo, "update-assets-branch.sh")
 
-			cmd := exec.Command("bash", publisher, "--source", source)
+			cmd := exec.Command("bash", publisher, "--source", source) //nolint:gosec // test-owned script and TempDir source
 			cmd.Dir = repo
 			output, err := cmd.CombinedOutput()
 
@@ -92,7 +92,7 @@ func TestDocsAssetPublisherCreatesSingleOrphanCommit(t *testing.T) {
 	writeDocsAssets(t, source, "published")
 	publisher := installDocsScript(t, repo, "update-assets-branch.sh")
 
-	cmd := exec.Command("bash", publisher, "--source", source)
+	cmd := exec.Command("bash", publisher, "--source", source) //nolint:gosec // test-owned script and TempDir source
 	cmd.Dir = repo
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -129,12 +129,12 @@ func TestDocsAssetHydratorForceFetchesAndValidatesRemoteBranch(t *testing.T) {
 	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", newCommit)
 
 	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
-	cmd := exec.Command("bash", hydrator)
+	cmd := exec.Command("bash", hydrator) //nolint:gosec // test-owned script installed under TempDir
 	cmd.Dir = repo
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 
-	hydrated, err := os.ReadFile(filepath.Join(repo, "docs", "assets", "screenshots", "web-ui", "workspace.png"))
+	hydrated, err := os.ReadFile(filepath.Join(repo, "docs", "assets", "screenshots", "web-ui", "workspace.png")) //nolint:gosec // test-owned path under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, "new\n", string(hydrated))
 	assert.Equal(t, newCommit, gitOutput(t, repo, "rev-parse", "origin/docs-assets"))
@@ -147,8 +147,9 @@ func TestWebScreenshotGeneratorRunsFocusedCapture(t *testing.T) {
 	fakeBin := filepath.Join(tempDir, "bin")
 	outputDir := filepath.Join(tempDir, "output")
 	argsLog := filepath.Join(tempDir, "bun-args")
-	require.NoError(t, os.MkdirAll(fakeBin, 0o755))
+	require.NoError(t, os.MkdirAll(fakeBin, 0o700))
 	fakeBun := filepath.Join(fakeBin, "bun")
+	//nolint:gosec // test-owned shell fixture must be executable.
 	require.NoError(t, os.WriteFile(fakeBun, []byte(`#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >"$KATA_FAKE_BUN_ARGS"
@@ -156,10 +157,10 @@ mkdir -p "$KATA_DOCS_SCREENSHOT_DIR/web-ui"
 for image in workspace issue-detail relationships daemon-switcher; do
   printf 'synthetic png\n' >"$KATA_DOCS_SCREENSHOT_DIR/web-ui/$image.png"
 done
-`), 0o755))
+`), 0o700))
 
 	script := filepath.Join("..", "docs", "screenshots", "generate-web-ui.sh")
-	cmd := exec.Command("bash", script, "--out", outputDir)
+	cmd := exec.Command("bash", script, "--out", outputDir) //nolint:gosec // fixed repository script and TempDir output
 	cmd.Dir = filepath.Join("..", "web")
 	cmd.Env = append(envWithout("PATH", "KATA_DOCS_SCREENSHOT_DIR", "KATA_FAKE_BUN_ARGS"),
 		"PATH="+fakeBin+":/usr/bin:/bin",
@@ -168,7 +169,7 @@ done
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 
-	args, err := os.ReadFile(argsLog)
+	args, err := os.ReadFile(argsLog) //nolint:gosec // test-owned path under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, "run test:e2e -- tests/docs-screenshots.spec.ts\n", string(args))
 	for _, image := range []string{"workspace", "issue-detail", "relationships", "daemon-switcher"} {
@@ -189,6 +190,7 @@ func TestFederationScreenshotGeneratorConnectsToListenerAuthority(t *testing.T) 
 	tempDir := t.TempDir()
 	outputDir := filepath.Join(tempDir, "output")
 	fakeKata := filepath.Join(tempDir, "kata")
+	//nolint:gosec // test-owned shell fixture must be executable.
 	require.NoError(t, os.WriteFile(fakeKata, []byte(`#!/usr/bin/env bash
 set -euo pipefail
 if [[ " $* " == *" daemon start --foreground "* ]]; then
@@ -230,10 +232,10 @@ if [[ " $* " == *" tui "* ]]; then
   while :; do sleep 1; done
 fi
 exit 0
-`), 0o755))
+`), 0o700))
 
 	script := filepath.Join("..", "docs", "screenshots", "generate-federation-tui.sh")
-	cmd := exec.Command("bash", script, "--out", outputDir)
+	cmd := exec.Command("bash", script, "--out", outputDir) //nolint:gosec // fixed repository script and TempDir output
 	cmd.Dir = filepath.Join("..", "scripts")
 	cmd.Env = append(envWithout("KATA_BIN", "KATA_SERVER", "KATA_AUTH_TOKEN", "KATA_HOME"),
 		"KATA_BIN="+fakeKata,
@@ -284,11 +286,11 @@ func envWithout(names ...string) []string {
 
 func initDocsTestRepo(t *testing.T, repo string) {
 	t.Helper()
-	require.NoError(t, os.MkdirAll(repo, 0o755))
+	require.NoError(t, os.MkdirAll(repo, 0o700))
 	git(t, repo, "init")
 	git(t, repo, "config", "user.name", "Example User")
 	git(t, repo, "config", "user.email", "example@example.invalid")
-	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("example repository\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "README.md"), []byte("example repository\n"), 0o600))
 	git(t, repo, "add", "README.md")
 	git(t, repo, "commit", "-m", "initial fixture")
 }
@@ -296,15 +298,16 @@ func initDocsTestRepo(t *testing.T, repo string) {
 func installDocsScript(t *testing.T, repo, name string) string {
 	t.Helper()
 	destinationDir := filepath.Join(repo, "docs", "screenshots")
-	require.NoError(t, os.MkdirAll(destinationDir, 0o755))
+	require.NoError(t, os.MkdirAll(destinationDir, 0o700))
 	for _, candidate := range []string{"assets.sh", name} {
 		source := filepath.Join("..", "docs", "screenshots", candidate)
-		contents, err := os.ReadFile(source)
+		contents, err := os.ReadFile(source) //nolint:gosec // candidate comes from the fixed script allowlist above
 		if os.IsNotExist(err) && candidate == "assets.sh" {
 			continue
 		}
 		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(filepath.Join(destinationDir, candidate), contents, 0o755))
+		//nolint:gosec // copied test shell fixtures must be executable.
+		require.NoError(t, os.WriteFile(filepath.Join(destinationDir, candidate), contents, 0o700))
 	}
 	return filepath.Join(destinationDir, name)
 }
@@ -313,8 +316,8 @@ func writeDocsAssets(t *testing.T, root, content string) {
 	t.Helper()
 	for _, asset := range docsAssets {
 		path := filepath.Join(root, asset)
-		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-		require.NoError(t, os.WriteFile(path, []byte(content+"\n"), 0o644))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, []byte(content+"\n"), 0o600))
 	}
 }
 
@@ -335,14 +338,14 @@ func commitAssetTree(t *testing.T, bareRepo, workTree, message string) string {
 
 func assertCommandFails(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
 	cmd.Dir = dir
 	require.Error(t, cmd.Run())
 }
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -350,7 +353,7 @@ func git(t *testing.T, dir string, args ...string) {
 
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
 	cmd.Dir = dir
 	output, err := cmd.Output()
 	require.NoError(t, err)
@@ -389,7 +392,7 @@ func gitBareCommand(bareRepo, workTree string, environment []string, args ...str
 		fullArgs = append(fullArgs, "--work-tree", workTree)
 	}
 	fullArgs = append(fullArgs, args...)
-	cmd := exec.Command("git", fullArgs...)
+	cmd := exec.Command("git", fullArgs...) //nolint:gosec // test-controlled Git arguments and TempDir repositories
 	if workTree != "" {
 		cmd.Dir = workTree
 	}
