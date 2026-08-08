@@ -2016,15 +2016,19 @@ func (d *Store) claimOwner(ctx context.Context, issueID int64, actor string, for
 	}, nil
 }
 
-// ReadyIssues returns open, non-deleted issues with no open `blocks` predecessor,
-// ordered by updated_at DESC. limit==0 means no limit. Blockers may live in
-// another project (links span projects, storage v16), but a blocker whose
-// project is archived (projects.deleted_at IS NOT NULL) does not gate
+// ReadyIssues returns actionable open issues with no open `blocks` predecessor,
+// ordered by updated_at DESC. Issues marked someday=true or scheduled after
+// today's UTC date are parked and excluded. limit==0 means no limit. Blockers
+// may live in another project (links span projects, storage v16), but a blocker
+// whose project is archived (projects.deleted_at IS NOT NULL) does not gate
 // readiness — mirroring the child/close queries' archived-project exclusion,
 // so an active issue is not stranded behind hidden archived work.
 func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, filter db.ReadyIssuesFilter) ([]db.Issue, error) {
 	q := issueSelect + `
 		WHERE i.project_id = ? AND i.status = 'open' AND i.deleted_at IS NULL
+		  AND COALESCE(json_extract(i.metadata, '$.someday'), 0) != 1
+		  AND (json_extract(i.metadata, '$.scheduled_on') IS NULL
+		       OR json_extract(i.metadata, '$.scheduled_on') <= ?)
 		  AND NOT EXISTS (
 		    SELECT 1 FROM links l
 		    JOIN issues blocker ON blocker.id = l.from_issue_id
@@ -2033,7 +2037,7 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
 		      AND bp.deleted_at IS NULL
 		  )`
-	args := []any{projectID}
+	args := []any{projectID, time.Now().UTC().Format(time.DateOnly)}
 
 	// Apply owner filters
 	if filter.Unowned {
@@ -2076,18 +2080,21 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 }
 
 // ReadyIssuesGlobal returns ready issues across every non-archived project,
-// each paired with its project name. "Ready" matches ReadyIssues: open,
-// not soft-deleted, and not blocked by an open `blocks` predecessor in an
-// active project. Issues from archived projects (projects.deleted_at IS NOT
-// NULL) are excluded, and an open blocker in an archived project does not
-// gate readiness. Ordering and filter semantics match ReadyIssues so
-// behavior is consistent.
+// each paired with its project name. "Ready" matches ReadyIssues: actionable,
+// open, not soft-deleted, and not blocked by an open `blocks` predecessor in
+// an active project. Issues from archived projects (projects.deleted_at IS NOT
+// NULL) are excluded, and an open blocker in an archived project does not gate
+// readiness. Ordering and filter semantics match ReadyIssues so behavior is
+// consistent.
 func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
 	// issueSelect ends with "FROM issues i JOIN projects p ON p.id = i.project_id"
 	// We need to add p.name before FROM, so we build the SELECT from scratch.
 	q := `SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status, i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id, i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name AS project_name FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.status = 'open' AND i.deleted_at IS NULL
 		  AND p.deleted_at IS NULL
+		  AND COALESCE(json_extract(i.metadata, '$.someday'), 0) != 1
+		  AND (json_extract(i.metadata, '$.scheduled_on') IS NULL
+		       OR json_extract(i.metadata, '$.scheduled_on') <= ?)
 		  AND NOT EXISTS (
 		    SELECT 1 FROM links l
 		    JOIN issues blocker ON blocker.id = l.from_issue_id
@@ -2096,7 +2103,7 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		      AND blocker.status = 'open' AND blocker.deleted_at IS NULL
 		      AND bp.deleted_at IS NULL
 		  )`
-	var args []any
+	args := []any{time.Now().UTC().Format(time.DateOnly)}
 
 	// Apply owner filters (same semantics as ReadyIssues)
 	if filter.Unowned {

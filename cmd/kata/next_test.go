@@ -55,6 +55,20 @@ func TestNext_HumanSelectsP0AndPrintsOneReadyRow(t *testing.T) {
 	assert.NotContains(t, out, "Ready:")
 }
 
+func TestNext_SkipsParkedMetadata(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	actionable := createIssue(t, env, pid, "actionable candidate")
+	someday := createIssue(t, env, pid, "someday parked")
+	future := createIssue(t, env, pid, "future parked")
+	runCLI(t, env, dir, "meta", "set", "--json-value", someday, "someday", "true")
+	runCLI(t, env, dir, "meta", "set", future, "scheduled_on", "2100-01-01")
+
+	out := runCLI(t, env, dir, "next")
+	assert.Contains(t, out, actionable)
+	assert.NotContains(t, out, someday)
+	assert.NotContains(t, out, future)
+}
+
 func TestNext_AgentOutputIsOneLine(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	p0 := int64(0)

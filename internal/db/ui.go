@@ -26,7 +26,11 @@ type UISnapshotQuery struct {
 	IncludeHistory   bool
 	LocalDate        string
 	TimeZone         string
-	Limit            int
+	// ReadyDate is the daemon-selected UTC date used by the synthetic ready
+	// status. It is part of the snapshot cache identity so ready membership can
+	// change at midnight without a database event.
+	ReadyDate string
+	Limit     int
 	// ReuseAuthorityCursor asks the store to omit catalog and collection rows
 	// only when its consistent read observes this exact durable cursor.
 	ReuseAuthorityCursor *int64

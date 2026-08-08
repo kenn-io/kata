@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -190,6 +191,29 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	blocker := createCursorIssue(ctx, t, store, project.ID, "Blocker issue")
 	blocked := createCursorIssue(ctx, t, store, project.ID, "Blocked issue")
 	removed := createCursorIssue(ctx, t, store, project.ID, "Removed child issue")
+	createWithMetadata := func(title string, metadata map[string]json.RawMessage) db.Issue {
+		issue, _, createErr := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: title, Author: "user-a", Metadata: metadata,
+		})
+		require.NoError(t, createErr)
+		return issue
+	}
+	today := time.Now().UTC()
+	someday := createWithMetadata("Someday issue", map[string]json.RawMessage{
+		"someday": json.RawMessage(`true`),
+	})
+	futureScheduled := createWithMetadata("Future scheduled issue", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.AddDate(0, 0, 1).Format(time.DateOnly))),
+	})
+	somedayFalse := createWithMetadata("Someday false issue", map[string]json.RawMessage{
+		"someday": json.RawMessage(`false`),
+	})
+	todayScheduled := createWithMetadata("Today scheduled issue", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.Format(time.DateOnly))),
+	})
+	pastScheduled := createWithMetadata("Past scheduled issue", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.AddDate(-1, 0, 0).Format(time.DateOnly))),
+	})
 	createCursorLink(ctx, t, store, child, parent, "parent")
 	createCursorLink(ctx, t, store, blocker, blocked, "blocks")
 	createCursorLink(ctx, t, store, removed, parent, "parent")
@@ -198,10 +222,22 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	require.True(t, changed)
 
 	ready, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
-		View: "all-open", Statuses: []string{"ready"},
+		View: "all-open", Statuses: []string{"ready"}, ReadyDate: today.Format(time.DateOnly),
 	})
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{parent.UID, child.UID, blocker.UID}, uiIssueUIDs(ready.Issues))
+	require.ElementsMatch(t, []string{
+		parent.UID, child.UID, blocker.UID, somedayFalse.UID, todayScheduled.UID, pastScheduled.UID,
+	}, uiIssueUIDs(ready.Issues))
+	require.NotContains(t, uiIssueUIDs(ready.Issues), someday.UID)
+	require.NotContains(t, uiIssueUIDs(ready.Issues), futureScheduled.UID)
+
+	rolled, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", Statuses: []string{"ready"},
+		ReadyDate: today.AddDate(0, 0, 1).Format(time.DateOnly),
+	})
+	require.NoError(t, err)
+	require.Contains(t, uiIssueUIDs(rolled.Issues), futureScheduled.UID)
+	require.NotContains(t, uiIssueUIDs(rolled.Issues), someday.UID)
 
 	parents, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
 		View: "all-open", Relationships: []string{"child"},

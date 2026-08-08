@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -60,6 +61,15 @@ func (s *countingUIStore) ReadUIReferences(_ context.Context, query db.UIReferen
 }
 
 func newUISnapshotServer(t *testing.T, uiStore db.UIStore, writable bool) *httptest.Server {
+	return newUISnapshotServerWithClock(t, uiStore, writable, time.Now)
+}
+
+func newUISnapshotServerWithClock(
+	t *testing.T,
+	uiStore db.UIStore,
+	writable bool,
+	clock func() time.Time,
+) *httptest.Server {
 	t.Helper()
 	dbh := openTestDB(t)
 	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{
@@ -75,12 +85,32 @@ func newUISnapshotServer(t *testing.T, uiStore db.UIStore, writable bool) *httpt
 	server := daemon.NewServer(daemon.ServerConfig{
 		DB:          dbh.db,
 		UIStore:     uiStore,
+		UIClock:     clock,
 		StartedAt:   dbh.now,
 		WebSessions: manager,
 	})
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+func TestUISnapshotReadyDateRolloverInvalidatesETagAndAuthorityCache(t *testing.T) {
+	store := &countingUIStore{cursor: 41, snapshotCursor: 41}
+	now := time.Date(2026, 8, 8, 23, 59, 0, 0, time.UTC)
+	ts := newUISnapshotServerWithClock(t, store, true, func() time.Time { return now })
+	query := url.Values{"view": {"all-open"}, "status": {"ready"}}
+
+	first, _ := getUISnapshot(t, ts, query, "")
+	require.Equal(t, http.StatusOK, first.StatusCode)
+	require.Equal(t, "2026-08-08", store.lastSnapshot.ReadyDate)
+	require.Equal(t, 1, store.snapshotReads)
+
+	now = now.Add(2 * time.Minute)
+	second, body := getUISnapshot(t, ts, query, first.Header.Get("ETag"))
+	require.Equal(t, http.StatusOK, second.StatusCode, string(body))
+	require.NotEqual(t, first.Header.Get("ETag"), second.Header.Get("ETag"))
+	require.Equal(t, "2026-08-09", store.lastSnapshot.ReadyDate)
+	require.Equal(t, 2, store.snapshotReads)
 }
 
 func getUISnapshot(t *testing.T, ts *httptest.Server, query url.Values, etag string) (*http.Response, []byte) {

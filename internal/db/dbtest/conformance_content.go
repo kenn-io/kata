@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -700,6 +701,56 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
+	someday, err := createFixtureIssue(ctx, store, primary.Project.ID, "someday parked", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	somedayFalse, err := createFixtureIssue(ctx, store, primary.Project.ID, "someday false", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	futureScheduled, err := createFixtureIssue(ctx, store, primary.Project.ID, "future scheduled", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	todayScheduled, err := createFixtureIssue(ctx, store, primary.Project.ID, "today scheduled", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	pastScheduled, err := createFixtureIssue(ctx, store, primary.Project.ID, "past scheduled", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	patchMetadata := func(issue db.Issue, patch map[string]json.RawMessage) error {
+		_, patchErr := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+			IssueID: issue.ID,
+			Actor:   "discovery-author",
+			Patch:   patch,
+		})
+		return patchErr
+	}
+	today := time.Now().UTC()
+	if err := patchMetadata(someday, map[string]json.RawMessage{"someday": json.RawMessage(`true`)}); err != nil {
+		return fmt.Errorf("park someday issue: %w", err)
+	}
+	if err := patchMetadata(somedayFalse, map[string]json.RawMessage{"someday": json.RawMessage(`false`)}); err != nil {
+		return fmt.Errorf("set false someday metadata: %w", err)
+	}
+	if err := patchMetadata(futureScheduled, map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.AddDate(1, 0, 0).Format(time.DateOnly))),
+	}); err != nil {
+		return fmt.Errorf("schedule future issue: %w", err)
+	}
+	if err := patchMetadata(todayScheduled, map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.Format(time.DateOnly))),
+	}); err != nil {
+		return fmt.Errorf("schedule today issue: %w", err)
+	}
+	if err := patchMetadata(pastScheduled, map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(fmt.Sprintf("%q", today.AddDate(-1, 0, 0).Format(time.DateOnly))),
+	}); err != nil {
+		return fmt.Errorf("schedule past issue: %w", err)
+	}
 
 	ready, err := store.ReadyIssues(ctx, primary.Project.ID, 0, db.ReadyIssuesFilter{})
 	if err != nil {
@@ -710,6 +761,11 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	assert.NotContains(t, issueIDs(ready), blocked.ID)
 	assert.NotContains(t, issueIDs(ready), closed.ID)
 	assert.NotContains(t, issueIDs(ready), deleted.ID)
+	assert.NotContains(t, issueIDs(ready), someday.ID)
+	assert.NotContains(t, issueIDs(ready), futureScheduled.ID)
+	assert.Contains(t, issueIDs(ready), somedayFalse.ID)
+	assert.Contains(t, issueIDs(ready), todayScheduled.ID)
+	assert.Contains(t, issueIDs(ready), pastScheduled.ID)
 	owned, err := store.ReadyIssues(ctx, primary.Project.ID, 0, db.ReadyIssuesFilter{Owner: "alice"})
 	if err != nil {
 		return fmt.Errorf("ready issues by owner: %w", err)
@@ -750,6 +806,11 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	assert.Contains(t, globalIDs, primary.Issue.ID)
 	assert.Contains(t, globalIDs, other.Issue.ID)
 	assert.NotContains(t, globalIDs, blocked.ID)
+	assert.NotContains(t, globalIDs, someday.ID)
+	assert.NotContains(t, globalIDs, futureScheduled.ID)
+	assert.Contains(t, globalIDs, somedayFalse.ID)
+	assert.Contains(t, globalIDs, todayScheduled.ID)
+	assert.Contains(t, globalIDs, pastScheduled.ID)
 	for _, row := range global {
 		if row.ID == other.Issue.ID {
 			assert.Equal(t, other.Project.Name, row.ProjectName)
