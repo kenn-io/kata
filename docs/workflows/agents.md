@@ -58,8 +58,7 @@ for the recipe.
 
 ## Use Kata through MCP
 
-Agents with an MCP `2026-07-28` client can start Kata as a project-bound stdio
-server:
+Agents with an MCP client can start Kata as a project-bound stdio server:
 
 ```sh
 kata --workspace /path/to/repository mcp serve

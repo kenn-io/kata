@@ -1,4 +1,4 @@
-// Package mcpserver exposes Kata issue operations through MCP 2026-07-28.
+// Package mcpserver exposes Kata issue operations through MCP.
 package mcpserver
 
 import (

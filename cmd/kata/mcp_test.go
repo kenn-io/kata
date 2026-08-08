@@ -13,8 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	internalclient "go.kenn.io/kata/internal/client"
-	mcpserver "go.kenn.io/kata/internal/mcp"
+	"go.kenn.io/kata/internal/version"
 )
+
+const currentMCPProtocolVersion = "2026-07-28"
 
 func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
 	setupKataEnv(t)
@@ -35,7 +37,7 @@ func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
 		"method":  "server/discover",
 		"params": map[string]any{
 			"_meta": map[string]any{
-				"io.modelcontextprotocol/protocolVersion":    mcpserver.ProtocolVersion,
+				"io.modelcontextprotocol/protocolVersion":    currentMCPProtocolVersion,
 				"io.modelcontextprotocol/clientCapabilities": map[string]any{},
 			},
 		},
@@ -69,8 +71,17 @@ func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
 	var response struct {
 		Result struct {
 			SupportedVersions []string `json:"supportedVersions"`
+			Meta              struct {
+				ServerInfo struct {
+					Name    string `json:"name"`
+					Version string `json:"version"`
+				} `json:"io.modelcontextprotocol/serverInfo"`
+			} `json:"_meta"`
 		} `json:"result"`
 	}
 	require.NoError(t, json.Unmarshal(protocolLine, &response))
-	require.Equal(t, []string{mcpserver.ProtocolVersion}, response.Result.SupportedVersions)
+	require.NotEmpty(t, response.Result.SupportedVersions)
+	require.Contains(t, response.Result.SupportedVersions, currentMCPProtocolVersion)
+	require.Equal(t, "kata", response.Result.Meta.ServerInfo.Name)
+	require.Equal(t, version.Version, response.Result.Meta.ServerInfo.Version)
 }

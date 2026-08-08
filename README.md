@@ -13,7 +13,7 @@ Production Postgres deployments can use separate schema-owner and runtime roles;
 see the [operator ceremony](docs/operations/postgres.md).
 Go applications can instead mount kata's listener-free HTTP service in-process;
 see [Embedding kata in Go](docs/development/embedding.md).
-MCP `2026-07-28` clients can start a project-bound stdio server with `kata mcp
+MCP clients can start Kata's native, project-bound stdio server with `kata mcp
 serve`; see the [MCP reference](docs/reference/mcp.md).
 
 The documentation in [`docs/`](docs/) is the definitive guide, published with

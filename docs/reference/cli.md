@@ -76,11 +76,11 @@ hooks together.
 kata [--workspace PATH | --project NAME] [--daemon NAME] [--as ACTOR] mcp serve
 ```
 
-`kata mcp serve` starts the project-bound MCP `2026-07-28` stdio server. It
-uses the stateless discovery flow, accepts that protocol version only, and
-keeps stdout reserved for newline-delimited JSON-RPC. The startup project and
-actor apply to every tool call. See the [MCP reference](mcp.md) for client
-configuration, the 13-tool surface, limits, and deliberate exclusions.
+`kata mcp serve` starts Kata's native, project-bound MCP stdio server. It
+negotiates supported protocol revisions and keeps stdout reserved for
+newline-delimited JSON-RPC. The startup project and actor apply to every tool
+call. See the [MCP reference](mcp.md) for client configuration, the 13-tool
+surface, limits, and deliberate exclusions.
 
 ## Issue lifecycle
 

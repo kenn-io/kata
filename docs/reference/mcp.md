@@ -40,22 +40,21 @@ process to use a different identity or project.
 
 ## Protocol contract
 
-The server implements MCP `2026-07-28` only. It uses the stateless
-`server/discover` flow and requires these metadata fields on every call:
+Kata delegates protocol negotiation to its bundled official Go MCP SDK.
+Current clients can use the stateless `server/discover` flow and per-request
+metadata; handshake-based clients can use `initialize` followed by
+`notifications/initialized`. Both paths expose the same project-bound tools.
 
-- `io.modelcontextprotocol/protocolVersion`
-- `io.modelcontextprotocol/clientCapabilities`
-
-The legacy `initialize` and `notifications/initialized` flow is not supported.
-Unsupported versions return MCP error `-32022` and advertise only
-`2026-07-28`. JSON-RPC batches are rejected. Each stdio message must be compact
-JSON on one line and is limited to 8 MiB.
+Unsupported revisions receive the standard MCP negotiation error with the
+revisions supported by the bundled SDK. JSON-RPC batches are rejected. Each
+stdio message must be compact JSON on one line and is limited to 8 MiB.
 
 Kata advertises tools only. It does not advertise prompts, resources, roots,
 logging, sampling, server-to-client requests, subscriptions, or tool-list
 change notifications. Discovery and tool catalogs use a five-minute private
-cache hint. Tool execution is limited to 20 starts per second with a burst of
-20 and at most eight concurrent daemon calls per process.
+cache hint when the negotiated revision supports it. Tool execution is limited
+to 20 starts per second with a burst of 20 and at most eight concurrent daemon
+calls per process.
 
 ## Tools
 
