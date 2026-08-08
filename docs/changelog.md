@@ -8,6 +8,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**New features**
+
+- Added a native, project-bound stdio MCP server for protocol `2026-07-28`,
+  with 13 structured issue tools, strict stateless discovery, fixed actor
+  attribution, bounded results, and no legacy initialization path.
+
 **Improvements**
 
 - Centralized Claude Code and Codex hook configuration on kit's shared

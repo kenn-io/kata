@@ -56,6 +56,21 @@ wrapper that runs `kata attention-hook end` after the `codex` invocation exits
 [agent orchestration](../operations/agent-orchestration.md#keep-attention-truthful-with-hooks)
 for the recipe.
 
+## Use Kata through MCP
+
+Agents with an MCP `2026-07-28` client can start Kata as a project-bound stdio
+server:
+
+```sh
+kata --workspace /path/to/repository mcp serve
+```
+
+The MCP server exposes the normal search, list, show, ready, label discovery,
+create, edit, comment, claim, label, metadata, close, and reopen workflows. It
+fixes the project and actor at startup, requires idempotency keys for create and
+comment, and omits administrative and destructive deletion tools. See the
+[MCP reference](../reference/mcp.md) for configuration and exact schemas.
+
 ## Search before creating
 
 ```sh

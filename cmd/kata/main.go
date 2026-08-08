@@ -80,6 +80,7 @@ func newRootCmd() *cobra.Command {
 
 	subs := []*cobra.Command{
 		newDaemonCmd(),
+		newMCPCmd(),
 		newStorageCmd(),
 		newInitCmd(),
 		newCreateCmd(),
