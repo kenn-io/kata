@@ -309,7 +309,7 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 		{name: "ready", tool: "kata.ready", arguments: map[string]any{"limit": 3, "unowned": true}, wantMethod: http.MethodGet, wantPath: "/api/v1/projects/42/ready", wantQuery: []string{"limit=4", "unowned=true"}, wantMatch: "abc1"},
 		{name: "labels", tool: "kata.labels", arguments: map[string]any{}, wantMethod: http.MethodGet, wantPath: "/api/v1/projects/42/labels", wantMatch: "bug"},
 		{name: "create", tool: "kata.create", arguments: map[string]any{"title": "New issue", "idempotency_key": "new-issue-1", "labels": []string{"bug"}}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues", wantActor: true, wantKey: "new-issue-1", wantMatch: "abc1"},
-		{name: "edit", tool: "kata.edit", arguments: map[string]any{"ref": "abc1", "title": "Updated title", "add_related": []string{"def2"}}, wantMethod: http.MethodPatch, wantPath: "/api/v1/projects/42/issues/abc1", wantActor: true, wantMatch: "abc1"},
+		{name: "edit", tool: "kata.edit", arguments: map[string]any{"ref": "abc1", "title": "Updated title", "add_related": []string{"spoke-project#def2"}}, wantMethod: http.MethodPatch, wantPath: "/api/v1/projects/42/issues/abc1", wantActor: true, wantMatch: "abc1"},
 		{name: "comment", tool: "kata.comment", arguments: map[string]any{"ref": "abc1", "body": "Progress note", "idempotency_key": "comment-1"}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/comments", wantActor: true, wantKey: "comment-1", wantMatch: "Progress note"},
 		{name: "claim", tool: "kata.claim", arguments: map[string]any{"ref": "abc1"}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/actions/claim", wantActor: true, wantMatch: "abc1"},
 		{name: "add label", tool: "kata.set_label", arguments: map[string]any{"ref": "abc1", "label": "bug", "present": true}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/labels", wantActor: true, wantMatch: "abc1"},
@@ -356,6 +356,10 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				require.NoError(t, json.Unmarshal(request.Body, &body))
 				require.Equal(t, "example-agent", body["actor"])
 				require.NotContains(t, body, "project")
+				if tt.tool == "kata.edit" {
+					links := body["links_delta"].(map[string]any)
+					require.Equal(t, []any{"def2"}, links["add_related"])
+				}
 			}
 		})
 	}
@@ -495,6 +499,18 @@ func TestLinkSummaryReversesIncomingDirectionalLinks(t *testing.T) {
 		To:   generated.LinkPeer{UID: issueUID},
 	})
 	require.Equal(t, "child", child.Type)
+}
+
+func TestBoundRelationshipRefCanonicalizesQualifiedRef(t *testing.T) {
+	handlers := toolHandlers{options: Options{ProjectName: "spoke-project"}}
+
+	ref, err := handlers.boundRelationshipRef("spoke-project#abc1")
+	require.NoError(t, err)
+	require.Equal(t, "abc1", ref)
+
+	ref, err = handlers.boundRelationshipRef("abc1")
+	require.NoError(t, err)
+	require.Equal(t, "abc1", ref)
 }
 
 func TestToolValidationStopsBeforeDaemonRequest(t *testing.T) {

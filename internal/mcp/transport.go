@@ -136,6 +136,11 @@ func (c *stdioConnection) Read(ctx context.Context) (jsonrpc.Message, error) {
 			return nil, sdkmcp.ErrConnectionClosed
 		case item, ok := <-c.reads:
 			if !ok {
+				select {
+				case <-c.closed:
+					return nil, sdkmcp.ErrConnectionClosed
+				default:
+				}
 				return nil, io.EOF
 			}
 			if item.err != nil {

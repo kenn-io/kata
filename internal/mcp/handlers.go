@@ -617,6 +617,9 @@ func (h toolHandlers) boundRelationshipRef(raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if _, shortID, qualified := strings.Cut(ref, "#"); qualified {
+		ref = shortID
+	}
 	if len(ref) == 26 {
 		if _, err := ulid.ParseStrict(strings.ToUpper(ref)); err == nil {
 			return "", fmt.Errorf("relationship reference %q is an unscoped UID; use a bound-project short reference", ref)
