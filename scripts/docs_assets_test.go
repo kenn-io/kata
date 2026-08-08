@@ -178,6 +178,82 @@ done
 	}
 }
 
+func TestFederationScreenshotGeneratorConnectsToListenerAuthority(t *testing.T) {
+	requireDocsScriptTools(t)
+	for _, command := range []string{"freeze", "tmux"} {
+		if _, err := exec.LookPath(command); err != nil {
+			t.Skipf("%s not available: %v", command, err)
+		}
+	}
+
+	tempDir := t.TempDir()
+	outputDir := filepath.Join(tempDir, "output")
+	fakeKata := filepath.Join(tempDir, "kata")
+	require.NoError(t, os.WriteFile(fakeKata, []byte(`#!/usr/bin/env bash
+set -euo pipefail
+if [[ " $* " == *" daemon start --foreground "* ]]; then
+  printf 'kata daemon: listening on 127.0.0.1:45678\n'
+  trap 'exit 0' TERM INT
+  while :; do sleep 1; done
+fi
+if [[ " $* " == *" init "* && -n "${KATA_SERVER:-}" && "$KATA_SERVER" != "http://127.0.0.1:45678" ]]; then
+  printf 'unexpected live docs daemon authority: %s\n' "$KATA_SERVER" >&2
+  exit 9
+fi
+if [[ " $* " == *" create "* ]]; then
+  printf 'OK create abc4\n'
+  exit 0
+fi
+if [[ " $* " == *" tui "* ]]; then
+  if [[ "${!#}" != "abc4" ]]; then
+    printf 'docs TUI was not opened at the generated issue ref: %s\n' "${!#}" >&2
+    exit 10
+  fi
+  printf '%s\n' 'ship federation TUI enrollment'
+  IFS= read -r -n 1 _ || true
+  printf '%s\n' 'review remote daemon catalog config'
+  IFS= read -r -n 1 _ || true
+  printf '%s\n' \
+    'Project: demo-spoke-project' \
+    'show selected spoke project everywhere' \
+    'kata / federation' \
+    'selected project: demo-spoke-project' \
+    'Select local spoke project' \
+    'Select hub daemon' \
+    'Select hub project' \
+    'demo-hub-project' \
+    'Enrollment Preview' \
+    'Operation: adopt existing local project' \
+    'Confirm Adoption' \
+    'Enrollment Result'
+  trap 'exit 0' TERM INT
+  while :; do sleep 1; done
+fi
+exit 0
+`), 0o755))
+
+	script := filepath.Join("..", "docs", "screenshots", "generate-federation-tui.sh")
+	cmd := exec.Command("bash", script, "--out", outputDir)
+	cmd.Dir = filepath.Join("..", "scripts")
+	cmd.Env = append(envWithout("KATA_BIN", "KATA_SERVER", "KATA_AUTH_TOKEN", "KATA_HOME"),
+		"KATA_BIN="+fakeKata,
+	)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	for _, asset := range []string{
+		"tui/hero.svg",
+		"federation-tui/list.svg",
+		"federation-tui/select-hub.svg",
+		"federation-tui/select-hub-project.svg",
+		"federation-tui/preview.svg",
+		"federation-tui/result.svg",
+	} {
+		info, err := os.Stat(filepath.Join(outputDir, asset))
+		require.NoError(t, err)
+		assert.Positive(t, info.Size())
+	}
+}
+
 func requireDocsScriptTools(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {

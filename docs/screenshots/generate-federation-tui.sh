@@ -98,9 +98,12 @@ capture() {
 }
 
 normalize_svg_assets() {
+    # Perl, not Bash, expands $ENV below.
+    # shellcheck disable=SC2016
     find "$OUTPUT_DIR" -name '*.svg' -print0 |
-        xargs -0 perl -0pi -e '
-            s/demo-hub\.localhost:\d+/demo-hub.localhost:7777/g;
+        KATA_DOCS_HUB_PORT="$HUB_PORT" xargs -0 perl -0pi -e '
+            my $hub_authority = quotemeta("127.0.0.1:$ENV{KATA_DOCS_HUB_PORT}");
+            s/$hub_authority/demo-hub.localhost:7777/g;
             s/01[0-9A-HJKMNP-TV-Z]{24}/01D3M0D3M0D3M0D3M0D3M0D3/g;
         '
 }
@@ -159,7 +162,7 @@ HUB_PID=$!
 wait_for_log "$HUB_LOG" "kata daemon: listening on"
 HUB_BOUND="$(sed -n 's/.*kata daemon: listening on //p' "$HUB_LOG" | tail -n 1)"
 HUB_PORT="${HUB_BOUND##*:}"
-HUB_URL="http://demo-hub.localhost:${HUB_PORT}"
+HUB_URL="http://${HUB_BOUND}"
 
 KATA_HOME="$HUB_HOME" \
 KATA_SERVER="$HUB_URL" \
@@ -233,13 +236,11 @@ tmux_cmd new-session -d -s "$SESSION" -x "$WIDTH" -y "$HEIGHT"
 tmux_cmd set-option -g default-terminal "tmux-256color"
 tmux_cmd set-option -ga terminal-overrides ",*:Tc"
 
-RUN_TUI="env -u NO_COLOR KATA_HOME=$(shell_quote "$SPOKE_HOME") KATA_AUTHOR=demo-operator KATA_DEMO_HUB_AUTH=$(shell_quote "$DEMO_HUB_AUTH_VALUE") KATA_COLOR_MODE=dark $(shell_quote "$KATA_BIN") --workspace $(shell_quote "$SPOKE_WS") --project demo-spoke-project tui"
+RUN_TUI="env -u NO_COLOR KATA_HOME=$(shell_quote "$SPOKE_HOME") KATA_AUTHOR=demo-operator KATA_DEMO_HUB_AUTH=$(shell_quote "$DEMO_HUB_AUTH_VALUE") KATA_COLOR_MODE=dark $(shell_quote "$KATA_BIN") --workspace $(shell_quote "$SPOKE_WS") --project demo-spoke-project tui $(shell_quote "$parent_ref")"
 send "$RUN_TUI" Enter
-wait_until "demo-spoke-project"
-send "j"
-wait_until "project: demo-spoke-project"
-send "C-m"
 wait_until "ship federation TUI enrollment"
+send "Escape"
+wait_until "review remote daemon catalog config"
 send "Right"
 wait_until "show selected spoke project everywhere"
 sleep 0.3
