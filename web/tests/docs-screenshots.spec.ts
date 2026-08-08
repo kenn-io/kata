@@ -5,6 +5,8 @@ import { expect, test } from './fixtures'
 
 const outputRoot = process.env.KATA_DOCS_SCREENSHOT_DIR
 
+test.skip(!outputRoot, 'documentation screenshots run only through the screenshot generator')
+
 test.use({
   trace: 'off',
   colorScheme: 'dark',
