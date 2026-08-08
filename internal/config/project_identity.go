@@ -121,9 +121,11 @@ type AliasInfo struct {
 // DiscoverPaths walks upward from startPath looking for .git (G), then for
 // .kata.toml (W). Both lookups are inclusive of startPath itself. When a git
 // root exists, it bounds the .kata.toml lookup so configuration outside the
-// repository cannot capture paths within it. Git ancestry follows symlinks,
-// with a lexical Git boundary retained when a symlink escapes the repository;
-// non-git workspaces retain lexical ancestor discovery.
+// repository cannot capture paths within it. Lexical traversal is used only
+// when its nearest Git root resolves to the physical Git root; differing roots
+// stay on the physical repository side. A lexical Git boundary is retained
+// when a symlink escapes all physical repositories, while non-git workspaces
+// retain lexical ancestor discovery.
 // startPath must point at an existing file or directory; a missing start path
 // is reported as a resolution error so a typo like `--workspace /no/such/dir`
 // fails loud instead of silently resolving an unrelated ancestor.
@@ -151,20 +153,23 @@ func DiscoverPaths(startPath string) (DiscoveredPaths, error) {
 		physicalWalkRoot = filepath.Dir(resolved)
 	}
 	d := DiscoveredPaths{}
+	lexicalGitRoot, err := walkUp(lexicalWalkRoot, ".git", true, "")
+	if err != nil {
+		return DiscoveredPaths{}, fmt.Errorf("discover .git: %w", err)
+	}
 	physicalGitRoot, err := walkUp(physicalWalkRoot, ".git", true, "")
 	if err != nil {
 		return DiscoveredPaths{}, fmt.Errorf("discover .git: %w", err)
 	}
 	if physicalGitRoot == "" {
-		if d.GitRoot, err = walkUp(lexicalWalkRoot, ".git", true, ""); err != nil {
-			return DiscoveredPaths{}, fmt.Errorf("discover .git: %w", err)
-		}
+		d.GitRoot = lexicalGitRoot
 		if d.WorkspaceRoot, err = walkUp(lexicalWalkRoot, ProjectConfigFilename, false, d.GitRoot); err != nil {
 			return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
 		}
 		return d, nil
 	}
-	if lexicalGitRoot, ok := matchingLexicalAncestor(lexicalWalkRoot, physicalGitRoot); ok {
+	resolvedLexicalGitRoot, resolveErr := filepath.EvalSymlinks(lexicalGitRoot)
+	if resolveErr == nil && resolvedLexicalGitRoot == physicalGitRoot {
 		d.GitRoot = lexicalGitRoot
 		if d.WorkspaceRoot, err = walkUp(lexicalWalkRoot, ProjectConfigFilename, false, lexicalGitRoot); err != nil {
 			return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
@@ -175,30 +180,7 @@ func DiscoverPaths(startPath string) (DiscoveredPaths, error) {
 	if d.WorkspaceRoot, err = walkUp(physicalWalkRoot, ProjectConfigFilename, false, physicalGitRoot); err != nil {
 		return DiscoveredPaths{}, fmt.Errorf("discover %s: %w", ProjectConfigFilename, err)
 	}
-	if lexicalWorkspaceRoot, ok := matchingLexicalAncestor(lexicalWalkRoot, d.WorkspaceRoot); ok {
-		d.WorkspaceRoot = lexicalWorkspaceRoot
-	}
 	return d, nil
-}
-
-// matchingLexicalAncestor preserves the caller's path spelling when one of
-// its lexical ancestors resolves to the discovered physical root.
-func matchingLexicalAncestor(start, physicalRoot string) (string, bool) {
-	if physicalRoot == "" {
-		return "", false
-	}
-	dir := start
-	for {
-		resolved, err := filepath.EvalSymlinks(dir)
-		if err == nil && resolved == physicalRoot {
-			return dir, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
-	}
 }
 
 // walkUp returns the first ancestor (inclusive) containing the named entry,

@@ -108,6 +108,28 @@ func TestDiscoverPaths_SymlinkOutOfGitIgnoresLexicalAncestorConfig(t *testing.T)
 	assert.Equal(t, repo, config.WriteDestination(d, link))
 }
 
+func TestDiscoverPaths_SymlinkFromNestedGitUsesPhysicalRepository(t *testing.T) {
+	parentRepo := t.TempDir()
+	testfix.MkDotGit(t, parentRepo)
+	testfix.WriteKataToml(t, parentRepo, "parent-project")
+	nestedRepo := filepath.Join(parentRepo, "nested")
+	require.NoError(t, os.Mkdir(nestedRepo, 0o755)) //nolint:gosec // test fixture under TempDir.
+	testfix.MkDotGit(t, nestedRepo)
+	testfix.WriteKataToml(t, nestedRepo, "nested-project")
+	target := filepath.Join(parentRepo, "target")
+	require.NoError(t, os.Mkdir(target, 0o755)) //nolint:gosec // test fixture under TempDir.
+	link := filepath.Join(nestedRepo, "parent-workspace")
+	require.NoError(t, os.Symlink(target, link))
+
+	d, err := config.DiscoverPaths(link)
+	require.NoError(t, err)
+	physicalParentRepo, err := filepath.EvalSymlinks(parentRepo)
+	require.NoError(t, err)
+	assert.Equal(t, physicalParentRepo, d.WorkspaceRoot)
+	assert.Equal(t, physicalParentRepo, d.GitRoot)
+	assert.Equal(t, physicalParentRepo, config.WriteDestination(d, link))
+}
+
 func TestDiscoverPaths_SymlinkedNonGitWorkspaceKeepsLexicalAncestorConfig(t *testing.T) {
 	outer := t.TempDir()
 	testfix.WriteKataToml(t, outer, "example-project")
