@@ -90,13 +90,20 @@ List, search, and ready results omit issue bodies and comments to keep agent
 context small. Their limits default to 20 and cannot exceed 100. `kata.show`
 returns at most 100 comments and defaults to the newest 20.
 
+`kata.search` is annotated as open-world because `auto`, `hybrid`, and
+`semantic` modes can use the daemon's configured third-party embedding
+provider. Select `lexical` when a search must stay inside the Kata daemon.
+
 ## Scope and safety
 
 Tool inputs do not accept an actor, workspace, project ID, or project name.
 Subject and relationship references must stay inside the bound project. Use a
 separate MCP server process for cross-project work. Relationship inputs reject
-unscoped full UIDs because they do not prove project membership; use a bare
-short ID or a short ID qualified with the bound project name.
+unscoped full UIDs because they do not prove project membership. They also
+reject 26-character short IDs because the daemon wire form cannot distinguish
+them from globally resolved ULIDs after safe project-name canonicalization.
+Use a bare short ID or a shorter short ID qualified with the bound project
+name. Use the Kata CLI for the rare full-length relationship target.
 
 The baseline server deliberately excludes deletion, purge, restore, project
 administration, token administration, federation, synchronization, import,

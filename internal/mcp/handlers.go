@@ -624,6 +624,9 @@ func (h toolHandlers) boundRelationshipRef(raw string) (string, error) {
 	if parsed.ULID != "" {
 		return "", fmt.Errorf("relationship reference %q is an unscoped UID; use a bound-project short reference", ref)
 	}
+	if len(parsed.ShortID) == shortid.MaxLength {
+		return "", fmt.Errorf("relationship reference %q uses an ambiguous full-length short ID; use the Kata CLI for this target", ref)
+	}
 	if parsed.Project != "" && parsed.Project != h.options.ProjectName {
 		return "", fmt.Errorf("relationship reference %q is outside bound project %q", ref, h.options.ProjectName)
 	}

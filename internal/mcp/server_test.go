@@ -21,6 +21,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -81,7 +82,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		annotations := tool.Annotations
 		require.NotNil(t, annotations, tool.Name)
 		require.NotNil(t, annotations.OpenWorldHint, tool.Name)
-		require.False(t, *annotations.OpenWorldHint, tool.Name)
+		require.Equal(t, tool.Name == "kata.search", *annotations.OpenWorldHint, tool.Name)
 	}
 	require.Equal(t, wantNames, gotNames)
 	require.True(t, sort.StringsAreSorted(gotNames))
@@ -371,6 +372,12 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	project, err := store.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
+	foreignProject, err := store.CreateProject(t.Context(), "other-project")
+	require.NoError(t, err)
+	foreignIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: foreignProject.ID, Title: "Foreign issue", Author: "example-agent",
+	})
+	require.NoError(t, err)
 	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
 	t.Cleanup(func() { require.NoError(t, daemonServer.Close()) })
 	httpServer := httptest.NewServer(daemonServer.Handler())
@@ -394,6 +401,13 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	createdIssue := created.StructuredContent.(map[string]any)["issue"].(map[string]any)
 	require.NotContains(t, createdIssue, "labels")
 	ref := createdIssue["ref"].(string)
+	escaped, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.edit", Arguments: map[string]any{
+			"ref": ref, "add_related": []string{"spoke-project#" + strings.ToLower(foreignIssue.UID)},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, escaped.IsError, "qualified full-length short IDs must not resolve globally")
 	reused, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
 		Name: "kata.create",
 		Arguments: map[string]any{
@@ -532,6 +546,9 @@ func TestBoundRelationshipRefCanonicalizesQualifiedRef(t *testing.T) {
 
 	_, err = handlers.boundRelationshipRef("spoke-project#other-project#def2")
 	require.ErrorContains(t, err, "outside bound project")
+
+	_, err = handlers.boundRelationshipRef("spoke-project#01arz3ndektsv4rrffq69g5fav")
+	require.ErrorContains(t, err, "full-length")
 }
 
 func TestToolValidationStopsBeforeDaemonRequest(t *testing.T) {

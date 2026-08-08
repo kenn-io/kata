@@ -110,9 +110,10 @@ func cacheHintsMiddleware(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
 }
 
 func registerTools(server *sdkmcp.Server, options Options) {
-	read := toolHints(true, false)
-	additive := toolHints(false, false)
-	mutating := toolHints(false, true)
+	read := toolHints(true, false, false)
+	searchRead := toolHints(true, false, true)
+	additive := toolHints(false, false, false)
+	mutating := toolHints(false, true, false)
 	handlers := toolHandlers{options: options}
 
 	addTool(server, "kata.claim", "Claim issue", "Claim an unowned issue for the bound actor. The call fails when another owner already holds it.", additive, handlers.claim)
@@ -124,7 +125,7 @@ func registerTools(server *sdkmcp.Server, options Options) {
 	addTool(server, "kata.list", "List issues", "List compact issue summaries in the bound project with bounded filters.", read, handlers.list)
 	addTool(server, "kata.ready", "List ready issues", "List open issues with no open blocking predecessor in the bound project.", read, handlers.ready)
 	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
-	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", read, handlers.search)
+	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", searchRead, handlers.search)
 	addTool(server, "kata.set_label", "Set label presence", "Ensure that a label is present or absent on an issue.", mutating, handlers.setLabel)
 	addTool(server, "kata.set_metadata", "Patch metadata", "Patch issue metadata; JSON null removes a key. An optional revision makes the write conditional.", mutating, handlers.setMetadata)
 	addTool(server, "kata.show", "Show issue", "Read one issue with its body, metadata, relationships, and a bounded comment history.", read, handlers.show)
@@ -349,8 +350,7 @@ func closeReasonSchemas() []*jsonschema.Schema {
 	return []*jsonschema.Schema{done, wontfix, duplicate, superseded, audit}
 }
 
-func toolHints(readOnly, destructive bool) *sdkmcp.ToolAnnotations {
-	openWorld := false
+func toolHints(readOnly, destructive, openWorld bool) *sdkmcp.ToolAnnotations {
 	return &sdkmcp.ToolAnnotations{
 		DestructiveHint: &destructive,
 		IdempotentHint:  true,
