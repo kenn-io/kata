@@ -104,13 +104,16 @@ The Make target runs:
 
 ```sh
 bash docs/screenshots/hydrate-assets.sh --force
-vercel deploy --prod
+vercel build --prod --yes
+vercel deploy --prebuilt --prod
 ```
 
 For a standalone deployment, hydration fetches `docs-assets` once, resolves the
-fetched branch to an immutable commit, and archives that object before upload.
-The full update helper instead supplies the commit it already validated. Vercel
-build machines consume the pre-hydrated files without Git access.
+fetched branch to an immutable commit, and archives that object. Vercel then
+builds locally so the ignored screenshots are present in the prebuilt output
+uploaded to production. The full update helper instead supplies the commit it
+already validated. The `--yes` flag also retrieves project settings when the
+checkout has not run a Vercel build before.
 
 Useful Vercel references:
 

@@ -39,8 +39,8 @@ The deployment helper pins the generated asset commit in
 `KATA_DOCS_ASSETS_COMMIT`, then `docs/screenshots/hydrate-assets.sh` validates
 and archives that exact object before replacing the ignored screenshot
 directory. Standalone deployment resolves the remote branch to an immutable
-commit once and archives that object. Vercel builds consume those pre-hydrated
-files without Git access.
+commit once and archives that object. The local Vercel build consumes those
+pre-hydrated files, then deployment uploads the resulting prebuilt site.
 
 Pass `--push` only after reviewing the generated files and source changes when
 you intend to replace the remote orphan branch.

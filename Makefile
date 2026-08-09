@@ -100,7 +100,8 @@ docs-assets-branch:
 
 docs-deploy:
 	bash docs/screenshots/hydrate-assets.sh --force
-	vercel deploy --prod
+	vercel build --prod --yes
+	vercel deploy --prebuilt --prod
 
 lint:
 	GOLANGCI_LINT_CACHE="$(CURDIR)/.cache/golangci-lint" golangci-lint run --config .golangci.yml
