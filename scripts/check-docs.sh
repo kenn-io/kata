@@ -96,8 +96,16 @@ stale_config="docs/.zensical-build.XXXXXX.toml"
 stale_docs="docs/zensical-public-docs.XXXXXX"
 vercel_docs_root=""
 missing_assets_docs_root=""
+docs_local_sentinels=(
+  "docs/.cache/kata-docs-build-check"
+  "docs/guide/kata-docs-build-check.out"
+  "docs/guide/kata-docs-build-check~"
+  "docs/guide/.kata-build-check/.kata.local.toml"
+)
 cleanup_check_docs() {
   rm -rf "$stale_config" "$stale_docs"
+  rm -f "${docs_local_sentinels[@]}"
+  rmdir docs/guide/.kata-build-check docs/.cache 2>/dev/null || true
   if [[ -n "$vercel_docs_root" ]]; then
     rm -rf "$vercel_docs_root"
   fi
@@ -111,6 +119,15 @@ trap cleanup_check_docs EXIT
 # repo-local paths and block repeat docs builds.
 : > "$stale_config"
 mkdir -p "$stale_docs"
+
+for sentinel in "${docs_local_sentinels[@]}"; do
+  if [[ -e "$sentinel" ]]; then
+    printf 'docs build check sentinel already exists: %s\n' "$sentinel" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$sentinel")"
+  printf 'must not enter generated docs output\n' > "$sentinel"
+done
 
 rm -rf docs/site
 
@@ -155,9 +172,13 @@ mkdir -p "$vercel_docs_root/docs"
 (cd docs && python3 scripts/check_public_markdown_sources.py)
 
 for generated in \
+  docs/site/.cache/kata-docs-build-check \
   docs/site/.env.local \
   docs/site/.vercel \
   docs/site/federation/index.html \
+  docs/site/guide/.kata-build-check/.kata.local.toml \
+  docs/site/guide/kata-docs-build-check.out \
+  docs/site/guide/kata-docs-build-check~ \
   docs/site/hosted-mode/index.html \
   docs/site/superpowers; do
   if [[ -e "$generated" ]]; then

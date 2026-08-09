@@ -62,11 +62,12 @@ package = false
 Update `docs/pyproject.toml` and refresh `docs/uv.lock` together whenever the
 docs toolchain changes.
 
-Root-linked CLI deployments use the repository-root `.vercelignore` to upload
-only the `docs/` project inputs, including the screenshots hydrated before the
-deploy. Vercel's source bundle lacks Git metadata, so the remote build cannot
-hydrate the assets branch itself and depends on those pre-hydrated screenshots.
-Generated output and machine-local state under `docs/` are excluded. Keep
+Root-linked source deployments use the repository-root `.vercelignore` to
+upload only the `docs/` project inputs. The production CLI path instead builds
+locally and uploads Vercel's prebuilt output. `docs/zensical-docs.sh` stages a
+sanitized docs tree for that build, retaining hydrated screenshots while
+excluding the same generated output, editor state, backups, caches, test
+artifacts, and machine-local configuration excluded by `.vercelignore`. Keep
 Vercel's “Include source files outside of the Root Directory” setting disabled
 because the docs build is self-contained.
 
@@ -97,21 +98,23 @@ running it.
 If you need to run only the Vercel deploy step:
 
 ```sh
-KATA_DOCS_ASSETS_COMMIT=<reviewed-full-commit-id> make docs-deploy
+make docs-deploy
 ```
 
 The Make target runs:
 
 ```sh
-test -n "$KATA_DOCS_ASSETS_COMMIT"
 bash docs/screenshots/hydrate-assets.sh --force
-vercel deploy --prod
+vercel build --prod --yes
+vercel deploy --prebuilt --prod
 ```
 
-The required commit ID must already exist in the local repository. Hydration
-archives that immutable object without refreshing the mutable `docs-assets`
-branch, so Vercel uploads the same assets that were reviewed and validated.
-Vercel build machines do not have Git metadata to fetch the branch themselves.
+For a standalone deployment, hydration fetches `docs-assets` once, resolves the
+fetched branch to an immutable commit, and archives that object. Vercel then
+builds locally so the ignored screenshots are present in the prebuilt output
+uploaded to production. The full update helper instead supplies the commit it
+already validated. The `--yes` flag also retrieves project settings when the
+checkout has not run a Vercel build before.
 
 Useful Vercel references:
 

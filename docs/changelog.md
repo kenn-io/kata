@@ -8,13 +8,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-**Improvements**
-
-- Centralized Claude Code and Codex hook configuration on kit's shared
-  agent-hook manager while preserving the existing init flags, lifecycle
-  matchers, attention behavior, unrelated configuration, and workspace
-  symlink boundary.
-
 ## 0.14.1
 <small>2026-08-08</small>
 
@@ -41,6 +34,10 @@ federation, and daemon operations safer and more observable.
 
 **Improvements**
 
+- Centralized Claude Code and Codex hook configuration on kit's shared
+  agent-hook manager while preserving the existing init flags, lifecycle
+  matchers, attention behavior, unrelated configuration, and workspace
+  symlink boundary.
 - Added field-scoped Markdown rendering to `kata show --render` for issue
   descriptions and comments while preserving literal record structure and
   machine-readable output.

@@ -127,6 +127,24 @@ The daemon refuses parent-close while open children remain. Reviewers
 can replay activity with `kata audit closes` and undo specific lazy
 closes with `kata reopen <ref>`.
 
+## Repository-writer trust/threat model
+
+Repository write access is trusted maintainer authority. A hostile party who
+can push branches or tags, replace generated asset branches, or modify workflow
+definitions is outside Kata's threat model: that authority can already alter
+the product source, release process, and published artifacts directly. Do not
+add operator ceremony or block normal release and deployment workflows solely
+to defend against a malicious repository writer.
+
+In particular, `docs-assets` is intentionally mutable generated storage
+maintained by trusted repository writers. Fetching its current value for a
+standalone docs deployment is not a security finding merely because a writer
+could replace it. Continue to flag concrete boundaries that do not assume a
+hostile writer: untrusted fork or pull-request code receiving secrets or write
+credentials, external input executing before its provenance is established,
+credentials crossing origins, benign races that publish stale or mismatched
+artifacts, and ignored or private local files entering a public build.
+
 ## Federation trust/threat model (security-review triage)
 
 kata federation is mutual trust between a spoke and each hub it joins;

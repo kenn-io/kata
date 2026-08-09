@@ -58,6 +58,7 @@ tmp_config_base=""
   tar \
     --exclude './.venv' \
     --exclude './.vercel' \
+    --exclude './.cache' \
     --exclude './.env*.local' \
     --exclude './site' \
     --exclude './zensical-public-docs.*' \
@@ -65,6 +66,18 @@ tmp_config_base=""
     --exclude './.ruff_cache' \
     --exclude './.mypy_cache' \
     --exclude './superpowers' \
+    --exclude '*/__pycache__' \
+    --exclude '*/__pycache__/*' \
+    --exclude '*/.idea' \
+    --exclude '*/.idea/*' \
+    --exclude '*/.vscode' \
+    --exclude '*/.vscode/*' \
+    --exclude '*.swp' \
+    --exclude '*~' \
+    --exclude '.DS_Store' \
+    --exclude '.kata.local.toml' \
+    --exclude '*.test' \
+    --exclude '*.out' \
     -cf - .
 ) | (cd "$tmp_docs" && tar -xf -)
 awk -v docs_dir="$tmp_docs_name" -v site_dir="$site_dir" '
