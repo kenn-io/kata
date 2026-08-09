@@ -139,6 +139,28 @@ func TestReadDaemonConfig_ReadsListen(t *testing.T) {
 	assert.Equal(t, "100.64.0.5:7777", cfg.Listen)
 }
 
+func TestReadDaemonConfigReadsTimezone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("timezone = \"  America/Los_Angeles  \"\n"), 0o600))
+
+	cfg, err := config.ReadDaemonConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "America/Los_Angeles", cfg.Timezone)
+}
+
+func TestReadDaemonConfigRejectsInvalidTimezone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("timezone = \"Not/AZone\"\n"), 0o600))
+
+	_, err := config.ReadDaemonConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timezone")
+}
+
 func TestReadDaemonConfig_TrimsWhitespace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

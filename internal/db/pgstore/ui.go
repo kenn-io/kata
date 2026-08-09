@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 var _ db.UIStore = (*Store)(nil)
@@ -356,7 +357,7 @@ func readUIProjectStats(ctx context.Context, tx *sql.Tx) (map[int64]db.ProjectSt
 func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	projectNames map[int64]string,
 ) ([]db.UIIssue, error) {
-	statement := issueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
+	statement := scheduledIssueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
 	args := []any{db.SystemProjectName}
 	if query.ProjectUID != "" {
 		args = append(args, query.ProjectUID)
@@ -371,21 +372,18 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			statuses = []string{"closed"}
 		}
 	}
+	filterReadySchedules := false
+	filterCalendarSchedules := query.View == "today" || query.View == "upcoming"
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
 		statusPredicates := []string{}
 		persistedStatuses := []string{}
+		readyRequested := false
 		for _, status := range statuses {
 			if status == "ready" {
-				readyDate := query.ReadyDate
-				if readyDate == "" {
-					readyDate = time.Now().UTC().Format(time.DateOnly)
-				}
-				args = append(args, readyDate)
-				statusPredicates = append(statusPredicates, fmt.Sprintf(`(
+				readyRequested = true
+				statusPredicates = append(statusPredicates, `(
 					i.status = 'open'
 					AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false
-					AND (i.metadata::jsonb ->> 'scheduled_on' IS NULL
-						OR i.metadata::jsonb ->> 'scheduled_on' <= $%d)
 					AND NOT EXISTS (
 						SELECT 1 FROM links ready_link
 						JOIN issues blocker ON blocker.id = ready_link.from_issue_id
@@ -394,11 +392,12 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 						AND blocker.status = 'open' AND blocker.deleted_at IS NULL
 						AND blocker_project.deleted_at IS NULL
 					)
-				)`, len(args)))
+				)`)
 			} else {
 				persistedStatuses = append(persistedStatuses, status)
 			}
 		}
+		filterReadySchedules = readyRequested && !slices.Contains(persistedStatuses, "open")
 		if len(persistedStatuses) > 0 {
 			statusPredicates = append(statusPredicates, `i.status IN (`+uiPostgresArgs(&args, persistedStatuses)+`)`)
 		}
@@ -408,12 +407,11 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	case "inbox":
 		statement += ` AND p.metadata::jsonb ->> 'role' = 'inbox'`
 	case "today":
-		args = append(args, query.LocalDate, query.LocalDate)
-		statement += fmt.Sprintf(` AND (LEFT(i.metadata::jsonb ->> 'scheduled_on', 10) <= $%d`+
-			` OR LEFT(i.metadata::jsonb ->> 'deadline_on', 10) <= $%d)`, len(args)-1, len(args))
-	case "upcoming":
 		args = append(args, query.LocalDate)
-		statement += fmt.Sprintf(` AND LEFT(i.metadata::jsonb ->> 'scheduled_on', 10) > $%d`, len(args))
+		statement += fmt.Sprintf(` AND (i.metadata::jsonb ->> 'scheduled_on' IS NOT NULL`+
+			` OR LEFT(i.metadata::jsonb ->> 'deadline_on', 10) <= $%d)`, len(args))
+	case "upcoming":
+		statement += ` AND i.metadata::jsonb ->> 'scheduled_on' IS NOT NULL`
 	case "deadlines":
 		statement += ` AND i.metadata::jsonb ->> 'deadline_on' IS NOT NULL`
 	}
@@ -441,7 +439,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		limit = 1000
 	}
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules {
 		args = append(args, limit)
 		statement += fmt.Sprintf(` LIMIT $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
 	}
@@ -450,13 +448,53 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		return nil, fmt.Errorf("read UI issues: %w", mapSQLError(err, nil))
 	}
 	issues := []db.UIIssue{}
+	readyAt := time.Now()
+	if filterReadySchedules && query.ReadyAt != "" {
+		var err error
+		readyAt, err = time.Parse(time.RFC3339Nano, query.ReadyAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse UI ready_at: %w", err)
+		}
+	}
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, recurrenceTimezone, err := scanScheduledIssue(rows)
 		if err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
-		issues = append(issues, makeUIIssue(issue, projectNames[issue.ProjectID], nil))
+		if filterReadySchedules && issue.Status == "open" {
+			due, err := metadata.ScheduledOnDue(
+				string(issue.Metadata), readyAt,
+				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
+			)
+			if err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("read UI issue %s schedule: %w", issue.UID, err)
+			}
+			if !due {
+				continue
+			}
+		}
+		scheduledOnDate := ""
+		if filterCalendarSchedules {
+			var matches bool
+			scheduleQuery := query
+			scheduleQuery.DefaultTimezone = scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone)
+			scheduledOnDate, matches, err = db.MatchUICalendarView(string(issue.Metadata), scheduleQuery)
+			if err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
+			}
+			if !matches {
+				continue
+			}
+		}
+		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
+		uiIssue.ScheduledOnDate = scheduledOnDate
+		issues = append(issues, uiIssue)
+		if limit > 0 && len(issues) == limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()

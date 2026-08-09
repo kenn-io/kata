@@ -859,6 +859,7 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly bo
 	}
 	srv := daemon.NewServer(daemon.ServerConfig{
 		DB:                store,
+		DefaultTimezone:   dcfg.Timezone,
 		StartedAt:         time.Now().UTC(),
 		Endpoint:          &endpoint,
 		Hooks:             disp,

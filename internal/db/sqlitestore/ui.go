@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 var _ db.UIStore = (*Store)(nil)
@@ -349,7 +350,7 @@ func readUIIssues(
 	query db.UISnapshotQuery,
 	projectNames map[int64]string,
 ) ([]db.UIIssue, error) {
-	statement := issueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
+	statement := scheduledIssueSelect + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	args := []any{db.SystemProjectName}
 	if query.ProjectUID != "" {
 		statement += ` AND p.uid = ?`
@@ -364,21 +365,18 @@ func readUIIssues(
 			statuses = []string{"closed"}
 		}
 	}
+	filterReadySchedules := false
+	filterCalendarSchedules := query.View == "today" || query.View == "upcoming"
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
 		statusPredicates := []string{}
 		persistedStatuses := []string{}
+		readyRequested := false
 		for _, status := range statuses {
 			if status == "ready" {
-				readyDate := query.ReadyDate
-				if readyDate == "" {
-					readyDate = time.Now().UTC().Format(time.DateOnly)
-				}
-				args = append(args, readyDate)
+				readyRequested = true
 				statusPredicates = append(statusPredicates, `(
 					i.status = 'open'
 					AND COALESCE(json_extract(i.metadata, '$.someday'), 0) != 1
-					AND (json_extract(i.metadata, '$.scheduled_on') IS NULL
-						OR json_extract(i.metadata, '$.scheduled_on') <= ?)
 					AND NOT EXISTS (
 						SELECT 1 FROM links ready_link
 						JOIN issues blocker ON blocker.id = ready_link.from_issue_id
@@ -392,6 +390,7 @@ func readUIIssues(
 				persistedStatuses = append(persistedStatuses, status)
 			}
 		}
+		filterReadySchedules = readyRequested && !slices.Contains(persistedStatuses, "open")
 		if len(persistedStatuses) > 0 {
 			statusPredicates = append(statusPredicates, `i.status IN (`+uiSQLitePlaceholders(len(persistedStatuses))+`)`)
 			for _, status := range persistedStatuses {
@@ -404,12 +403,11 @@ func readUIIssues(
 	case "inbox":
 		statement += ` AND json_extract(p.metadata, '$.role') = 'inbox'`
 	case "today":
-		statement += ` AND (substr(json_extract(i.metadata, '$.scheduled_on'), 1, 10) <= ?` +
+		statement += ` AND (json_extract(i.metadata, '$.scheduled_on') IS NOT NULL` +
 			` OR substr(json_extract(i.metadata, '$.deadline_on'), 1, 10) <= ?)`
-		args = append(args, query.LocalDate, query.LocalDate)
-	case "upcoming":
-		statement += ` AND substr(json_extract(i.metadata, '$.scheduled_on'), 1, 10) > ?`
 		args = append(args, query.LocalDate)
+	case "upcoming":
+		statement += ` AND json_extract(i.metadata, '$.scheduled_on') IS NOT NULL`
 	case "deadlines":
 		statement += ` AND json_extract(i.metadata, '$.deadline_on') IS NOT NULL`
 	}
@@ -444,7 +442,7 @@ func readUIIssues(
 		limit = 1000
 	}
 	statement += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 {
+	if limit > 0 && !filterReadySchedules && !filterCalendarSchedules {
 		statement += ` LIMIT ?`
 		args = append(args, limit)
 	}
@@ -454,12 +452,50 @@ func readUIIssues(
 	}
 	defer func() { _ = rows.Close() }()
 	issues := []db.UIIssue{}
+	readyAt := time.Now()
+	if filterReadySchedules && query.ReadyAt != "" {
+		var err error
+		readyAt, err = time.Parse(time.RFC3339Nano, query.ReadyAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse UI ready_at: %w", err)
+		}
+	}
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, recurrenceTimezone, err := scanScheduledIssue(rows)
 		if err != nil {
 			return nil, err
 		}
-		issues = append(issues, makeUIIssue(issue, projectNames[issue.ProjectID], nil))
+		if filterReadySchedules && issue.Status == "open" {
+			due, err := metadata.ScheduledOnDue(
+				string(issue.Metadata), readyAt,
+				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("read UI issue %s schedule: %w", issue.UID, err)
+			}
+			if !due {
+				continue
+			}
+		}
+		scheduledOnDate := ""
+		if filterCalendarSchedules {
+			var matches bool
+			scheduleQuery := query
+			scheduleQuery.DefaultTimezone = scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone)
+			scheduledOnDate, matches, err = db.MatchUICalendarView(string(issue.Metadata), scheduleQuery)
+			if err != nil {
+				return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
+			}
+			if !matches {
+				continue
+			}
+		}
+		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
+		uiIssue.ScheduledOnDate = scheduledOnDate
+		issues = append(issues, uiIssue)
+		if limit > 0 && len(issues) == limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate UI issues: %w", err)

@@ -208,6 +208,10 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	assert.Equal(t, attached.Recurrence.ID, *linkedIssue.RecurrenceID)
 	require.NotNil(t, linkedIssue.OccurrenceKey)
 	assert.Equal(t, "2026-08-03", *linkedIssue.OccurrenceKey)
+	var linkedMetadata map[string]any
+	require.NoError(t, json.Unmarshal([]byte(linkedIssue.Metadata), &linkedMetadata))
+	assert.Equal(t, "2026-08-03", linkedMetadata["scheduled_on"])
+	assert.Equal(t, "UTC", linkedMetadata["timezone"])
 	require.NotNil(t, attached.Recurrence.NextOccurrenceKey)
 	assert.Equal(t, "2026-08-10", *attached.Recurrence.NextOccurrenceKey)
 	exhaustedRule := "FREQ=DAILY;COUNT=1"
@@ -259,6 +263,15 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	assert.Nil(t, localSchedule.Recurrence.NextOccurrenceKey)
 	owner := "alice"
 	priority := int64(2)
+	_, _, err = store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
+		ProjectID: project.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY", DTStart: "2026-05-11",
+		Timezone: "America/New_York", Template: db.RecurrenceTemplate{
+			Title: "Invalid template", Metadata: json.RawMessage(`{"timezone":"Not/AZone"}`),
+		},
+	})
+	if err == nil {
+		return fmt.Errorf("create recurrence accepted invalid reserved template metadata")
+	}
 	rec, createdEvent, err := store.CreateRecurrence(ctx, db.CreateRecurrenceIn{
 		ProjectID: project.ID,
 		Actor:     "scheduler",
@@ -302,6 +315,14 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, listed, 1)
 	assert.Equal(t, rec.ID, listed[0].ID)
+	invalidMetadata := json.RawMessage(`{"timezone":"Not/AZone"}`)
+	_, err = store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
+		RecurrenceID: rec.ID, IfMatchRev: rec.Revision, Actor: "scheduler",
+		Update: db.RecurrenceUpdate{TemplateMetadata: &invalidMetadata},
+	})
+	if err == nil {
+		return fmt.Errorf("patch recurrence accepted invalid reserved template metadata")
+	}
 
 	noChange, err := store.PatchRecurrence(ctx, db.PatchRecurrenceIn{
 		RecurrenceID: rec.ID, IfMatchRev: rec.Revision, Actor: "scheduler",
@@ -375,6 +396,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	require.NoError(t, json.Unmarshal([]byte(issue.Metadata), &issueMetadata))
 	assert.Equal(t, "weekly", issueMetadata["kind"])
 	assert.Equal(t, materialized.OccurrenceKey, issueMetadata["scheduled_on"])
+	assert.Equal(t, "America/New_York", issueMetadata["timezone"])
 	labels, err := store.LabelsForIssue(ctx, issue.ID)
 	if err != nil {
 		return fmt.Errorf("labels for materialized issue: %w", err)

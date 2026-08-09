@@ -222,7 +222,7 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	require.True(t, changed)
 
 	ready, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
-		View: "all-open", Statuses: []string{"ready"}, ReadyDate: today.Format(time.DateOnly),
+		View: "all-open", Statuses: []string{"ready"}, ReadyAt: today.Format(time.RFC3339Nano),
 	})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{
@@ -233,11 +233,58 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 
 	rolled, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
 		View: "all-open", Statuses: []string{"ready"},
-		ReadyDate: today.AddDate(0, 0, 1).Format(time.DateOnly),
+		ReadyAt: today.AddDate(0, 0, 1).Format(time.RFC3339Nano),
 	})
 	require.NoError(t, err)
 	require.Contains(t, uiIssueUIDs(rolled.Issues), futureScheduled.UID)
 	require.NotContains(t, uiIssueUIDs(rolled.Issues), someday.UID)
+
+	readyAt := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
+	westScheduled := createWithMetadata("West-zone scheduled issue", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T09:00"`),
+		"timezone":     json.RawMessage(`"America/Los_Angeles"`),
+	})
+	eastScheduled := createWithMetadata("East-zone scheduled issue", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T09:00"`),
+		"timezone":     json.RawMessage(`"Asia/Tokyo"`),
+	})
+	dueInstant := createWithMetadata("Due instant", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+	})
+	futureInstant := createWithMetadata("Future instant", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T00:31:00Z"`),
+	})
+	timed, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", Statuses: []string{"ready"}, ReadyAt: readyAt.Format(time.RFC3339Nano),
+	})
+	require.NoError(t, err)
+	require.NotContains(t, uiIssueUIDs(timed.Issues), westScheduled.UID)
+	require.Contains(t, uiIssueUIDs(timed.Issues), eastScheduled.UID)
+	require.Contains(t, uiIssueUIDs(timed.Issues), dueInstant.UID)
+	require.NotContains(t, uiIssueUIDs(timed.Issues), futureInstant.UID)
+	defaultScheduled := createWithMetadata("Default-zone scheduled issue", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01"`),
+	})
+	defaultZoned, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", Statuses: []string{"ready"}, ReadyAt: readyAt.Format(time.RFC3339Nano),
+		DefaultTimezone: "America/Los_Angeles",
+	})
+	require.NoError(t, err)
+	require.NotContains(t, uiIssueUIDs(defaultZoned.Issues), defaultScheduled.UID)
+	require.Contains(t, uiIssueUIDs(defaultZoned.Issues), eastScheduled.UID,
+		"an issue timezone must override the daemon default")
+
+	limitDue := createWithMetadata("Limit due issue", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+	})
+	createWithMetadata("Limit parked issue", map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T00:31:00Z"`),
+	})
+	limited, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", Statuses: []string{"ready"}, ReadyAt: readyAt.Format(time.RFC3339Nano), Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{limitDue.UID}, uiIssueUIDs(limited.Issues))
 
 	parents, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
 		View: "all-open", Relationships: []string{"child"},
@@ -313,6 +360,73 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 			require.Equal(t, []string{matching.UID}, uiIssueUIDs(snapshot.Issues))
 		})
 	}
+
+	t.Run("timed schedules use the browser calendar before limit", func(t *testing.T) {
+		store := open(t)
+		uiStore := store.(db.UIStore)
+		ctx := context.Background()
+		project := createCursorProject(ctx, t, store)
+		previousDay, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Previous browser day", Author: "user-a",
+			Metadata: map[string]json.RawMessage{
+				"scheduled_on": json.RawMessage(`"2026-08-01T00:30:00Z"`),
+			},
+		})
+		require.NoError(t, err)
+		nextDay, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Next browser day", Author: "user-a",
+			Metadata: map[string]json.RawMessage{
+				"scheduled_on": json.RawMessage(`"2026-08-01T07:30:00Z"`),
+			},
+		})
+		require.NoError(t, err)
+
+		today, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "today", LocalDate: "2026-07-31", TimeZone: "America/Los_Angeles", Limit: 1,
+		})
+		require.NoError(t, err)
+		require.Len(t, today.Issues, 1)
+		require.Equal(t, previousDay.UID, today.Issues[0].UID)
+		require.Equal(t, "2026-07-31", today.Issues[0].ScheduledOnDate)
+
+		upcoming, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "upcoming", LocalDate: "2026-07-31", TimeZone: "America/Los_Angeles", Limit: 1,
+		})
+		require.NoError(t, err)
+		require.Len(t, upcoming.Issues, 1)
+		require.Equal(t, nextDay.UID, upcoming.Issues[0].UID)
+		require.Equal(t, "2026-08-01", upcoming.Issues[0].ScheduledOnDate)
+	})
+
+	t.Run("ready uses linked recurrence timezone for legacy issues", func(t *testing.T) {
+		store := open(t)
+		uiStore := store.(db.UIStore)
+		ctx := context.Background()
+		project := createCursorProject(ctx, t, store)
+		issue := createCursorIssue(ctx, t, store, project.ID, "Legacy recurrence issue")
+		_, err := store.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
+			IssueID: issue.ID,
+			Recurrence: db.CreateRecurrenceIn{
+				ProjectID: project.ID, Actor: "user-a", Rule: "FREQ=DAILY;COUNT=2",
+				DTStart: "2026-08-01", Timezone: "America/Los_Angeles",
+				Template: db.RecurrenceTemplate{Title: issue.Title},
+			},
+		})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+			IssueID: issue.ID, Actor: "user-a",
+			Patch: map[string]json.RawMessage{"timezone": json.RawMessage(`null`)},
+		})
+		require.NoError(t, err)
+
+		snapshot, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			ProjectUID: project.UID, Status: "ready",
+			ReadyAt: "2026-08-01T00:30:00Z", DefaultTimezone: "UTC",
+		})
+		require.NoError(t, err)
+		require.Empty(t, snapshot.Issues,
+			"Los Angeles is still on the previous date when the UTC fallback date opens")
+	})
 
 	t.Run("inbox filters before limit", func(t *testing.T) {
 		store := open(t)

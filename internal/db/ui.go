@@ -1,6 +1,12 @@
 package db
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"go.kenn.io/kata/internal/metadata"
+)
 
 // UIStore is the narrow coherent-read contract used by the browser API.
 type UIStore interface {
@@ -26,11 +32,12 @@ type UISnapshotQuery struct {
 	IncludeHistory   bool
 	LocalDate        string
 	TimeZone         string
-	// ReadyDate is the daemon-selected UTC date used by the synthetic ready
-	// status. It is part of the snapshot cache identity so ready membership can
-	// change at midnight without a database event.
-	ReadyDate string
-	Limit     int
+	// ReadyAt is the daemon-selected time used by the synthetic ready status.
+	// It is part of the snapshot cache identity so timed readiness can change
+	// without a database event.
+	ReadyAt         string
+	DefaultTimezone string
+	Limit           int
 	// ReuseAuthorityCursor asks the store to omit catalog and collection rows
 	// only when its consistent read observes this exact durable cursor.
 	ReuseAuthorityCursor *int64
@@ -45,9 +52,38 @@ type UIProject struct {
 // UIIssue is an issue plus the display identity and labels needed by the SPA.
 type UIIssue struct {
 	Issue
-	ProjectName string   `json:"project_name"`
-	QualifiedID string   `json:"qualified_id"`
-	Labels      []string `json:"labels"`
+	ProjectName     string   `json:"project_name"`
+	QualifiedID     string   `json:"qualified_id"`
+	Labels          []string `json:"labels"`
+	ScheduledOnDate string   `json:"scheduled_on_date,omitempty"`
+}
+
+// MatchUICalendarView evaluates date-sensitive browser collection predicates
+// after a schedule has been projected into the browser timezone. The returned
+// date is also the canonical grouping key sent to the browser.
+func MatchUICalendarView(raw string, query UISnapshotQuery) (string, bool, error) {
+	scheduledDate, scheduled, err := metadata.ScheduledOnCalendarDate(
+		raw, query.TimeZone, query.DefaultTimezone,
+	)
+	if err != nil {
+		return "", false, err
+	}
+	switch query.View {
+	case "upcoming":
+		return scheduledDate, scheduled && scheduledDate > query.LocalDate, nil
+	case "today":
+		var values struct {
+			DeadlineOn string `json:"deadline_on"`
+		}
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return "", false, fmt.Errorf("decode UI calendar metadata: %w", err)
+		}
+		scheduleDue := scheduled && scheduledDate <= query.LocalDate
+		deadlineDue := values.DeadlineOn != "" && values.DeadlineOn <= query.LocalDate
+		return scheduledDate, scheduleDue || deadlineDue, nil
+	default:
+		return "", true, nil
+	}
 }
 
 // UILink enriches a stored link with stable display references for each end.

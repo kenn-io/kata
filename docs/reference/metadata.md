@@ -40,12 +40,22 @@ rejected. Everything else is stored verbatim.
 
 | Key | Applies to | Type |
 | --- | --- | --- |
-| `scheduled_on` | Issue | Date (`YYYY-MM-DD`) |
+| `scheduled_on` | Issue | Date, local date-time, or UTC timestamp |
 | `deadline_on` | Issue | Date (`YYYY-MM-DD`) |
 | `someday` | Issue | Boolean |
 | `checklist` | Issue | Checklist structure |
 | `timezone` | Issue | IANA timezone name |
 | `area` | Project | String |
+
+A date-only `scheduled_on` value becomes ready on that calendar day. A local
+date-time (`YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS`) becomes ready at that
+wall-clock time. Both use the issue `timezone`, then the daemon's top-level
+`timezone`, then UTC. An RFC 3339 value ending in `Z` is an exact UTC instant
+and does not use those timezones. If a local time repeats during a daylight
+saving transition, the first occurrence opens the gate. If a local time does
+not exist, the gate opens at the first valid instant after the gap. Numeric
+offsets are rejected because they pin an instant while duplicating the named
+timezone. `deadline_on` remains date-only.
 
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query

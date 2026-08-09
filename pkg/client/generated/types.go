@@ -3635,29 +3635,30 @@ func (u UIGraphUnresolvedRef) Validate() error {
 }
 
 type UIIssue struct {
-	Author        string         `json:"author" validate:"required"`
-	Body          string         `json:"body" validate:"required"`
-	ClosedAt      *time.Time     `json:"closed_at,omitempty"`
-	ClosedReason  *string        `json:"closed_reason,omitempty"`
-	CreatedAt     time.Time      `json:"created_at" validate:"required"`
-	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
-	ID            int64          `json:"id"`
-	Labels        []string       `json:"labels,omitempty" validate:"required"`
-	Metadata      map[string]any `json:"metadata"`
-	OccurrenceKey *string        `json:"occurrence_key,omitempty"`
-	Owner         *string        `json:"owner,omitempty"`
-	Priority      *int64         `json:"priority,omitempty"`
-	ProjectID     int64          `json:"project_id"`
-	ProjectName   string         `json:"project_name" validate:"required"`
-	ProjectUID    *string        `json:"project_uid,omitempty"`
-	QualifiedID   string         `json:"qualified_id" validate:"required"`
-	RecurrenceID  *int64         `json:"recurrence_id,omitempty"`
-	Revision      int64          `json:"revision"`
-	ShortID       string         `json:"short_id" validate:"required"`
-	Status        string         `json:"status" validate:"required"`
-	Title         string         `json:"title" validate:"required"`
-	UID           string         `json:"uid" validate:"required"`
-	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+	Author          string         `json:"author" validate:"required"`
+	Body            string         `json:"body" validate:"required"`
+	ClosedAt        *time.Time     `json:"closed_at,omitempty"`
+	ClosedReason    *string        `json:"closed_reason,omitempty"`
+	CreatedAt       time.Time      `json:"created_at" validate:"required"`
+	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
+	ID              int64          `json:"id"`
+	Labels          []string       `json:"labels,omitempty" validate:"required"`
+	Metadata        map[string]any `json:"metadata"`
+	OccurrenceKey   *string        `json:"occurrence_key,omitempty"`
+	Owner           *string        `json:"owner,omitempty"`
+	Priority        *int64         `json:"priority,omitempty"`
+	ProjectID       int64          `json:"project_id"`
+	ProjectName     string         `json:"project_name" validate:"required"`
+	ProjectUID      *string        `json:"project_uid,omitempty"`
+	QualifiedID     string         `json:"qualified_id" validate:"required"`
+	RecurrenceID    *int64         `json:"recurrence_id,omitempty"`
+	Revision        int64          `json:"revision"`
+	ScheduledOnDate *string        `json:"scheduled_on_date,omitempty"`
+	ShortID         string         `json:"short_id" validate:"required"`
+	Status          string         `json:"status" validate:"required"`
+	Title           string         `json:"title" validate:"required"`
+	UID             string         `json:"uid" validate:"required"`
+	UpdatedAt       time.Time      `json:"updated_at" validate:"required"`
 }
 
 func (u UIIssue) Validate() error {

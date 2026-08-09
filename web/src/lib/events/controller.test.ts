@@ -200,6 +200,33 @@ describe('snapshot refresh scheduling', () => {
     scheduler.stop()
   })
 
+  it('refreshes wall-clock-sensitive SSE views every fifteen seconds', async () => {
+    const refresh = vi.fn(async () => undefined)
+    const openEvents = vi.fn()
+    let wallClockSensitive = false
+    const scheduler = new RefreshScheduler({
+      refresh,
+      openEvents,
+      wallClockSensitive: () => wallClockSensitive,
+    })
+    scheduler.start('sse')
+
+    vi.advanceTimersByTime(15_000)
+    await Promise.resolve()
+    expect(refresh).not.toHaveBeenCalled()
+
+    wallClockSensitive = true
+    vi.advanceTimersByTime(15_000)
+    await Promise.resolve()
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(openEvents).toHaveBeenCalledOnce()
+
+    scheduler.stop()
+    vi.advanceTimersByTime(15_000)
+    await Promise.resolve()
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
   it('refreshes on visibility, focus, timezone change, and local midnight', async () => {
     const refresh = vi.fn(async () => undefined)
     let zone = 'America/Chicago'

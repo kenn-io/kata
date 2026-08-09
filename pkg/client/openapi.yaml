@@ -3744,6 +3744,8 @@ components:
         revision:
           format: int64
           type: integer
+        scheduled_on_date:
+          type: string
         short_id:
           type: string
         status:

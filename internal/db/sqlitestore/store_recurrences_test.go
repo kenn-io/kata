@@ -335,3 +335,28 @@ func TestMaterializeNext_NormalizesLegacyDuplicateLabels(t *testing.T) {
 	assert.Equal(t, rec.UID, payload.RecurrenceUID)
 	assert.Equal(t, "2026-05-22", payload.OccurrenceKey)
 }
+
+func TestMaterializeNext_ReplacesLegacyGeneratedMetadataBeforeValidation(t *testing.T) {
+	d, ctx, p, rec := setupRecurrence(t, db.CreateRecurrenceIn{
+		Rule: "FREQ=WEEKLY", DTStart: "2026-05-15", Timezone: "America/New_York",
+		Template: db.RecurrenceTemplate{Title: "legacy template"},
+	})
+	_, err := d.ExecContext(ctx,
+		`UPDATE recurrences SET template_metadata = ? WHERE id = ?`,
+		`{"scheduled_on":"not-a-date","timezone":"Not/AZone","kind":"weekly"}`, rec.ID)
+	require.NoError(t, err)
+
+	firstID, _ := seedRecurrenceInstance(t, d, p.ID, rec.ID, "2026-05-15", "legacy template")
+	_, _, _, err = d.CloseIssue(ctx, firstID, "done", "tester", "", nil)
+	require.NoError(t, err)
+
+	var rawMetadata string
+	require.NoError(t, d.QueryRowContext(ctx, `
+		SELECT metadata FROM issues WHERE recurrence_id = ? AND occurrence_key = ?`,
+		rec.ID, "2026-05-22").Scan(&rawMetadata))
+	assert.JSONEq(t, `{
+		"scheduled_on":"2026-05-22",
+		"timezone":"America/New_York",
+		"kind":"weekly"
+	}`, rawMetadata)
+}

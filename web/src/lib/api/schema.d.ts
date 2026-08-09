@@ -3070,6 +3070,7 @@ export interface components {
       recurrence_id?: number
       /** Format: int64 */
       revision: number
+      scheduled_on_date?: string
       short_id: string
       status: string
       title: string

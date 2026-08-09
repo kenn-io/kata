@@ -37,9 +37,15 @@ func TestValidateCreateValue_DelegatesToValidate(t *testing.T) {
 
 func TestValidateDate(t *testing.T) {
 	assert.NoError(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20"`)))
+	assert.NoError(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20T15:30"`)))
+	assert.NoError(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20T15:30:45"`)))
+	assert.NoError(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20T22:30:00Z"`)))
+	assert.Error(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20T15:30:00-07:00"`)))
 	assert.Error(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"not-a-date"`)))
 	assert.Error(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-13-01"`)))
 	assert.Error(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`123`)))
+	assert.Error(t, Validate(IssueRegistry, "deadline_on", json.RawMessage(`"2026-05-20T22:30:00Z"`)),
+		"deadline_on remains date-only")
 }
 
 func TestValidateBool(t *testing.T) {
