@@ -242,9 +242,9 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	}
 }
 
-func TestOpenAPISchemaVersionReflectsGlobalListFilters(t *testing.T) {
-	if APISchemaVersion != "0.9.0" {
-		t.Fatalf("APISchemaVersion = %q, want 0.9.0 for global list query parameters", APISchemaVersion)
+func TestOpenAPISchemaVersionReflectsStableUIReferenceFilters(t *testing.T) {
+	if APISchemaVersion != "0.10.0" {
+		t.Fatalf("APISchemaVersion = %q, want 0.10.0 for stable UI reference filters", APISchemaVersion)
 	}
 }
 

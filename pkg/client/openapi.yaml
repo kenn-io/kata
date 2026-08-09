@@ -4007,7 +4007,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.9.0
+  version: 0.10.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:

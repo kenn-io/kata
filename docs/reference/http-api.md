@@ -42,7 +42,7 @@ The schema carries a version in its `info.version` field
 {
   "ok": true,
   "schema_version": 7,
-  "api_schema_version": "0.9.0",
+  "api_schema_version": "0.10.0",
   "version": "1.4.2",
   "uptime": "5m0s",
   "db_path": "/path/to/kata.db"
@@ -82,6 +82,7 @@ and decline to render issue detail.
 
 | Version | Change |
 | --- | --- |
+| `0.10.0` | Added the repeatable `issue_uid` query parameter to UI references so embedding hosts can hydrate summaries by stable issue UID. |
 | `0.9.0` | Added owner, label, exclusion, and metadata filters to the cross-project issue list. Global list rows now include `project_name`. |
 | `0.8.0` | Added repeatable `label` and `exclude_label` query parameters to project-scoped search. It also identifies daemons that support filtered global ready queries. |
 | `0.7.0` | Added transactional federation enrollment rotation, idempotent replay semantics for caller-supplied enrollment tokens, and the optional `federation_config` health block used by startup reconciliation. |

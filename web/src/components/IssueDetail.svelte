@@ -47,20 +47,23 @@
   })
 </script>
 
-{#if editing}
-  <section class="editor-mode" aria-label="Kata issue editor">
-    <div class="editor-toolbar">
-      <button type="button" onclick={() => (editing = false)}>Done editing</button>
-    </div>
-    <IssueEditor {...props} />
-  </section>
-{:else}
+<section class="editor-mode" aria-label="Kata issue editor" hidden={!editing}>
+  <div class="editor-toolbar">
+    <button type="button" onclick={() => (editing = false)}>Done editing</button>
+  </div>
+  <IssueEditor {...props} />
+</section>
+{#if !editing}
   <div class="shared-detail">
     <SharedIssueDetail {detail} {actions} />
   </div>
 {/if}
 
 <style>
+  .editor-mode[hidden] {
+    display: none;
+  }
+
   .shared-detail {
     flex: 1 1 auto;
     min-width: 0;

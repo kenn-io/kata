@@ -529,6 +529,41 @@ func TestUIReferencesPreservesStableIssueUIDFilters(t *testing.T) {
 	require.Equal(t, []string{second, first}, store.lastReferences.IssueUIDs)
 }
 
+func TestUIReferencesExpandsDefaultLimitForStableIssueUIDFilters(t *testing.T) {
+	store := &countingUIStore{cursor: 7, snapshotCursor: 7}
+	ts := newUISnapshotServer(t, store, false)
+	issueUIDs := make([]string, 0, 150)
+	for range 150 {
+		issueUID, err := uid.New()
+		require.NoError(t, err)
+		issueUIDs = append(issueUIDs, issueUID)
+	}
+
+	resp, body := getUIReferences(t, ts, url.Values{"issue_uid": issueUIDs}, "")
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Equal(t, 150, store.lastReferences.Limit)
+}
+
+func TestUIReferencesPreservesExplicitLimitWithStableIssueUIDFilters(t *testing.T) {
+	store := &countingUIStore{cursor: 7, snapshotCursor: 7}
+	ts := newUISnapshotServer(t, store, false)
+	issueUIDs := make([]string, 0, 150)
+	for range 150 {
+		issueUID, err := uid.New()
+		require.NoError(t, err)
+		issueUIDs = append(issueUIDs, issueUID)
+	}
+
+	resp, body := getUIReferences(t, ts, url.Values{
+		"issue_uid": issueUIDs,
+		"limit":     {"50"},
+	}, "")
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Equal(t, 50, store.lastReferences.Limit)
+}
+
 func TestUIReferencesRejectsMalformedIssueUIDFilter(t *testing.T) {
 	store := &countingUIStore{cursor: 7, snapshotCursor: 7}
 	ts := newUISnapshotServer(t, store, false)

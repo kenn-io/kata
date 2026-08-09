@@ -330,10 +330,6 @@ func normalizeUIReferencesIntent(in *api.UIReferencesRequest) (normalizedUIRefer
 	if err != nil {
 		return normalizedUIReferencesIntent{}, err
 	}
-	limit, err := normalizeUILimit(in.Limit, uiReferencesLimitDefault, uiReferencesLimitMax)
-	if err != nil {
-		return normalizedUIReferencesIntent{}, err
-	}
 	issueUIDs := make([]string, 0, len(in.IssueUID))
 	seenIssueUIDs := make(map[string]struct{}, len(in.IssueUID))
 	for _, raw := range in.IssueUID {
@@ -356,6 +352,14 @@ func normalizeUIReferencesIntent(in *api.UIReferencesRequest) (normalizedUIRefer
 			"issue_uid accepts at most 200 distinct values",
 			map[string]any{"limit": uiReferencesLimitMax},
 		)
+	}
+	limit, err := normalizeUILimit(
+		in.Limit,
+		max(uiReferencesLimitDefault, len(issueUIDs)),
+		uiReferencesLimitMax,
+	)
+	if err != nil {
+		return normalizedUIReferencesIntent{}, err
 	}
 	sort.Strings(issueUIDs)
 	return normalizedUIReferencesIntent{

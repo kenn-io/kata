@@ -114,6 +114,29 @@ describe('IssueDetail', () => {
     expect(onEditIssue).toHaveBeenCalledWith('issue-1', { body: 'Updated body' })
   })
 
+  it('preserves editor drafts when returning to the shared presentation', async () => {
+    renderDetail()
+    await openEditor()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit description' }))
+    await fireEvent.input(screen.getByLabelText('Edit description'), {
+      target: { value: 'Keep this body draft' },
+    })
+    await fireEvent.input(screen.getByLabelText('Comment'), {
+      target: { value: 'Keep this comment draft' },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Done editing' }))
+    await openEditor()
+
+    expect(
+      (screen.getByRole('textbox', { name: 'Edit description' }) as HTMLTextAreaElement).value,
+    ).toBe('Keep this body draft')
+    expect((screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement).value).toBe(
+      'Keep this comment draft',
+    )
+  })
+
   it('keeps unrelated drafts visible for manual copying after local authority expires', async () => {
     const onEditIssue = vi.fn(async () => true)
     const view = renderDetail({ onEditIssue })
