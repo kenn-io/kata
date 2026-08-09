@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/recurrence"
 )
 
@@ -39,15 +40,81 @@ func ValidateRecurrenceTemplate(title string, metadata json.RawMessage) error {
 	if strings.TrimSpace(title) == "" {
 		return fmt.Errorf("%w: template_title must be non-empty", ErrInvalidRecurrence)
 	}
-	if len(metadata) == 0 {
-		return nil
+	_, err := validatedRecurrenceTemplateMetadata(metadata)
+	return err
+}
+
+// ComposeRecurrenceIssueMetadata stamps the occurrence's civil date and
+// authoritative IANA timezone before validating the resulting issue metadata.
+// The order preserves compatibility with templates written by older versions:
+// obsolete values in these two generated fields cannot block materialization.
+func ComposeRecurrenceIssueMetadata(
+	templateMetadata json.RawMessage,
+	occurrenceKey string,
+	timezone string,
+) (json.RawMessage, error) {
+	object, err := decodeRecurrenceTemplateMetadata(templateMetadata)
+	if err != nil {
+		return nil, err
+	}
+	scheduledOn, err := json.Marshal(occurrenceKey)
+	if err != nil {
+		return nil, fmt.Errorf("marshal recurrence scheduled_on: %w", err)
+	}
+	timezoneValue, err := json.Marshal(timezone)
+	if err != nil {
+		return nil, fmt.Errorf("marshal recurrence timezone: %w", err)
+	}
+	object["scheduled_on"] = scheduledOn
+	object["timezone"] = timezoneValue
+	if err := validateRecurrenceTemplateMetadataObject(object); err != nil {
+		return nil, err
+	}
+	value, err := json.Marshal(object)
+	if err != nil {
+		return nil, fmt.Errorf("marshal recurrence issue metadata: %w", err)
+	}
+	return value, nil
+}
+
+func validatedRecurrenceTemplateMetadata(value json.RawMessage) (map[string]json.RawMessage, error) {
+	object, err := decodeRecurrenceTemplateMetadata(value)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRecurrenceTemplateMetadataObject(object); err != nil {
+		return nil, err
+	}
+	return object, nil
+}
+
+func decodeRecurrenceTemplateMetadata(value json.RawMessage) (map[string]json.RawMessage, error) {
+	if len(value) == 0 {
+		return map[string]json.RawMessage{}, nil
 	}
 	var object map[string]json.RawMessage
-	if err := json.Unmarshal(metadata, &object); err != nil {
-		return fmt.Errorf("%w: template_metadata must be a JSON object: %v", ErrInvalidRecurrence, err)
+	if err := json.Unmarshal(value, &object); err != nil {
+		return nil, fmt.Errorf("%w: template_metadata must be a JSON object: %v", ErrInvalidRecurrence, err)
 	}
 	if object == nil {
-		return fmt.Errorf("%w: template_metadata must be a JSON object, got null", ErrInvalidRecurrence)
+		return nil, fmt.Errorf("%w: template_metadata must be a JSON object, got null", ErrInvalidRecurrence)
+	}
+	return object, nil
+}
+
+func validateRecurrenceTemplateMetadataObject(object map[string]json.RawMessage) error {
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if _, reserved := metadata.IssueRegistry[key]; !reserved {
+			continue
+		}
+		if err := metadata.ValidateCreateValue(metadata.IssueRegistry, key, object[key]); err != nil {
+			return fmt.Errorf("%w: template_metadata %q: %v", ErrInvalidRecurrence, key, err)
+		}
 	}
 	return nil
 }

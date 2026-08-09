@@ -94,7 +94,7 @@ func newUISnapshotServerWithClock(
 	return ts
 }
 
-func TestUISnapshotReadyDateRolloverInvalidatesETagAndAuthorityCache(t *testing.T) {
+func TestUISnapshotReadyTimeAdvanceInvalidatesETagAndAuthorityCache(t *testing.T) {
 	store := &countingUIStore{cursor: 41, snapshotCursor: 41}
 	now := time.Date(2026, 8, 8, 23, 59, 0, 0, time.UTC)
 	ts := newUISnapshotServerWithClock(t, store, true, func() time.Time { return now })
@@ -102,14 +102,14 @@ func TestUISnapshotReadyDateRolloverInvalidatesETagAndAuthorityCache(t *testing.
 
 	first, _ := getUISnapshot(t, ts, query, "")
 	require.Equal(t, http.StatusOK, first.StatusCode)
-	require.Equal(t, "2026-08-08", store.lastSnapshot.ReadyDate)
+	require.Equal(t, "2026-08-08T23:59:00Z", store.lastSnapshot.ReadyAt)
 	require.Equal(t, 1, store.snapshotReads)
 
 	now = now.Add(2 * time.Minute)
 	second, body := getUISnapshot(t, ts, query, first.Header.Get("ETag"))
 	require.Equal(t, http.StatusOK, second.StatusCode, string(body))
 	require.NotEqual(t, first.Header.Get("ETag"), second.Header.Get("ETag"))
-	require.Equal(t, "2026-08-09", store.lastSnapshot.ReadyDate)
+	require.Equal(t, "2026-08-09T00:01:00Z", store.lastSnapshot.ReadyAt)
 	require.Equal(t, 2, store.snapshotReads)
 }
 

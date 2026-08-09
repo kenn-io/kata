@@ -36,9 +36,12 @@ type ServerConfig struct {
 	// UIStore supplies coherent browser projections. Nil defaults to DB when
 	// the configured storage backend implements db.UIStore.
 	UIStore db.UIStore
-	// UIClock supplies the current time for date-sensitive browser readiness.
-	// Nil uses time.Now. Tests inject it to verify UTC date rollover.
-	UIClock                       func() time.Time
+	// UIClock supplies the current time for browser readiness.
+	// Nil uses time.Now. Tests inject it to verify timed schedule transitions.
+	UIClock func() time.Time
+	// DefaultTimezone applies to civil schedules without an issue-level
+	// timezone. Empty preserves the UTC default.
+	DefaultTimezone               string
 	StartedAt                     time.Time
 	Endpoint                      *kitdaemon.Endpoint
 	Broadcaster                   *EventBroadcaster

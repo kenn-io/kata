@@ -24,10 +24,11 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		filter := db.ReadyIssuesFilter{
-			Unowned:       in.Unowned,
-			Owner:         in.Owner,
-			Labels:        in.Labels,
-			ExcludeLabels: in.ExcludeLabels,
+			Unowned:         in.Unowned,
+			Owner:           in.Owner,
+			Labels:          in.Labels,
+			ExcludeLabels:   in.ExcludeLabels,
+			DefaultTimezone: cfg.DefaultTimezone,
 		}
 		issues, err := cfg.DB.ReadyIssues(ctx, in.ProjectID, in.Limit, filter)
 		if err != nil {
@@ -53,10 +54,11 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"--unowned and --owner are mutually exclusive", "", nil)
 		}
 		filter := db.ReadyIssuesFilter{
-			Unowned:       in.Unowned,
-			Owner:         in.Owner,
-			Labels:        in.Labels,
-			ExcludeLabels: in.ExcludeLabels,
+			Unowned:         in.Unowned,
+			Owner:           in.Owner,
+			Labels:          in.Labels,
+			ExcludeLabels:   in.ExcludeLabels,
+			DefaultTimezone: cfg.DefaultTimezone,
 		}
 		issues, err := cfg.DB.ReadyIssuesGlobal(ctx, in.Limit, filter)
 		if err != nil {

@@ -23,6 +23,7 @@ const (
 	TypeString                   // free-form string
 	TypeChecklist                // array of {id: ULID, text: string, done: bool}
 	TypeTimezoneIANA             // IANA timezone string
+	TypeSchedule                 // date, local date-time, or UTC instant
 )
 
 // Entry describes one server-reserved metadata key.
@@ -33,7 +34,7 @@ type Entry struct {
 // IssueRegistry is the set of server-reserved keys for issues.metadata.
 // Keys outside this set are accepted opaquely by Validate.
 var IssueRegistry = map[string]Entry{
-	"scheduled_on": {Type: TypeDate},
+	"scheduled_on": {Type: TypeSchedule},
 	"deadline_on":  {Type: TypeDate},
 	"someday":      {Type: TypeBool},
 	"checklist":    {Type: TypeChecklist},

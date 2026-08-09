@@ -56,6 +56,7 @@ export interface KataTaskSummary {
   status: 'open' | 'closed'
   project_uid: string
   project_name: string
+  scheduled_on_date?: string | undefined
   metadata: KataTaskMetadata
   revision: number
   owner?: string | undefined

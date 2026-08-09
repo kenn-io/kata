@@ -2,24 +2,27 @@ package pgstore
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // ReadyIssues returns actionable open issues that have no active blocker.
-// Issues marked someday=true or scheduled after today's UTC date are parked
-// and excluded. Optional owner and label filters are composed here so the same
-// query remains useful to the CLI's different ready views.
+// Issues marked someday=true or scheduled after their effective local date or
+// instant are parked and excluded. Optional owner and label filters are
+// composed here so the same query remains useful to the CLI's different ready
+// views.
 func (s *Store) ReadyIssues(
 	ctx context.Context,
 	projectID int64,
 	limit int,
 	filter db.ReadyIssuesFilter,
 ) ([]db.Issue, error) {
-	query := issueSelect + `
+	query := scheduledIssueSelect + `
  WHERE i.project_id = $1
    AND i.status = 'open'
    AND i.deleted_at IS NULL
@@ -40,8 +43,6 @@ func (s *Store) ReadyIssues(
 		return fmt.Sprintf("$%d", len(args))
 	}
 	query += ` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`
-	query += ` AND (i.metadata::jsonb ->> 'scheduled_on' IS NULL OR i.metadata::jsonb ->> 'scheduled_on' <= ` +
-		addArg(time.Now().UTC().Format(time.DateOnly)) + `)`
 	if filter.Unowned {
 		query += ` AND i.owner IS NULL`
 	} else if filter.Owner != "" {
@@ -58,22 +59,34 @@ func (s *Store) ReadyIssues(
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`
 	}
 	query += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 {
-		query += ` LIMIT ` + addArg(limit)
-	}
-
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", mapSQLError(err, nil))
 	}
 	defer func() { _ = rows.Close() }()
 	var issues []db.Issue
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
 	for rows.Next() {
-		issue, err := scanIssue(rows)
+		issue, recurrenceTimezone, err := scanScheduledIssue(rows)
 		if err != nil {
 			return nil, err
 		}
+		due, err := metadata.ScheduledOnDue(
+			string(issue.Metadata), at, scheduleDefaultTimezone(recurrenceTimezone, filter.DefaultTimezone),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("ready issue %s schedule: %w", issue.UID, err)
+		}
+		if !due {
+			continue
+		}
 		issues = append(issues, issue)
+		if limit > 0 && len(issues) == limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate ready issues: %w", mapSQLError(err, nil))
@@ -85,11 +98,10 @@ func (s *Store) ReadyIssues(
 // along with the project name needed to render a qualified reference. Filter
 // and parked-item semantics match ReadyIssues.
 func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
-	query := `SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
-       i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
-       i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at, p.name
+	query := `SELECT ` + issueColumns + `, p.name, schedule_recurrence.timezone
   FROM issues i
   JOIN projects p ON p.id = i.project_id
+	LEFT JOIN recurrences schedule_recurrence ON schedule_recurrence.id = i.recurrence_id
  WHERE i.status = 'open'
    AND i.deleted_at IS NULL
    AND p.deleted_at IS NULL
@@ -110,8 +122,6 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		return fmt.Sprintf("$%d", len(args))
 	}
 	query += ` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`
-	query += ` AND (i.metadata::jsonb ->> 'scheduled_on' IS NULL OR i.metadata::jsonb ->> 'scheduled_on' <= ` +
-		addArg(time.Now().UTC().Format(time.DateOnly)) + `)`
 	if filter.Unowned {
 		query += ` AND i.owner IS NULL`
 	} else if filter.Owner != "" {
@@ -128,9 +138,6 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`
 	}
 	query += ` ORDER BY i.updated_at DESC, i.id DESC`
-	if limit > 0 {
-		query += ` LIMIT ` + addArg(limit)
-	}
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", mapSQLError(err, nil))
@@ -138,10 +145,15 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 	defer func() { _ = rows.Close() }()
 
 	var issues []db.ReadyGlobalIssue
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
 	for rows.Next() {
 		var buffer issueScanBuffer
 		var projectName string
-		destinations := append(buffer.destinations(), &projectName)
+		var recurrenceTimezone sql.NullString
+		destinations := append(buffer.destinations(), &projectName, &recurrenceTimezone)
 		if err := rows.Scan(destinations...); err != nil {
 			return nil, fmt.Errorf("scan ready global issue: %w", mapSQLError(err, nil))
 		}
@@ -149,12 +161,32 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		if err != nil {
 			return nil, err
 		}
+		due, err := metadata.ScheduledOnDue(
+			string(issue.Metadata), at,
+			scheduleDefaultTimezone(recurrenceTimezone.String, filter.DefaultTimezone),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("ready global issue %s schedule: %w", issue.UID, err)
+		}
+		if !due {
+			continue
+		}
 		issues = append(issues, db.ReadyGlobalIssue{Issue: issue, ProjectName: projectName})
+		if limit > 0 && len(issues) == limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate ready global issues: %w", mapSQLError(err, nil))
 	}
 	return issues, nil
+}
+
+func scheduleDefaultTimezone(recurrenceTimezone, daemonTimezone string) string {
+	if recurrenceTimezone != "" {
+		return recurrenceTimezone
+	}
+	return daemonTimezone
 }
 
 // IssueQualifiersByUIDs resolves stable issue UIDs to their current project

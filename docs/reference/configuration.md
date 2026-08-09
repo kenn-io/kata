@@ -187,6 +187,7 @@ named daemon targets:
 ```toml
 listen = "100.64.0.5:7777"
 active_daemon = "shared"
+timezone = "America/Los_Angeles"
 
 [[daemon]]
 name = "shared"
@@ -223,6 +224,11 @@ and hosted deployments. Auto-started daemons also read the config-file listener
 value.
 An empty `[storage].dsn` means "no storage override"; env vars or the default
 database path still apply.
+
+The optional top-level `timezone` is the IANA timezone for date-only and local
+date-time `scheduled_on` values that do not have an issue-level `timezone`. If
+both are unset, Kata uses UTC. RFC 3339 `scheduled_on` values ending in `Z` are
+UTC instants and do not use this setting.
 
 The web UI's daemon selector lists these `[[daemon]]` entries. A plain
 `kata ui` starts or discovers the local browser gateway and initially selects

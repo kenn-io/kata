@@ -132,6 +132,8 @@
     openEvents: () => {
       if (authority?.snapshot) stream.start(authority.cursor)
     },
+    wallClockSensitive: () =>
+      route.kind !== 'route-error' && route.filters.status.includes('ready'),
   })
   const unsubscribe = snapshots.subscribe((state) => {
     authority = { ...state }

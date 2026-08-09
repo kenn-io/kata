@@ -341,10 +341,12 @@ kata next [--all] [--full]
 ```
 
 `ready` returns open issues that do not have an open blocking predecessor. It
-also excludes parked issues: `someday=true` and a `scheduled_on` date after the
-current UTC date are not actionable. Today, past, unset, and `someday=false`
-values remain eligible. The browser ready collection follows the same rule and
-rolls scheduled work in at UTC midnight.
+also excludes parked issues: `someday=true` and a future `scheduled_on` value
+are not actionable. A date or local date-time uses the issue `timezone`, then
+the daemon's configured `timezone`, then UTC. An RFC 3339 timestamp ending in
+`Z` becomes ready at that exact instant. Numeric offsets are not accepted. Past
+and unset values remain eligible. The browser ready collection follows the
+same rule.
 
 Filters combine with AND logic. `--all` lists ready issues across every
 non-archived project; the scoped filters (`--unowned`, `--owner`, `--label`,

@@ -57,9 +57,22 @@ func Validate(registry map[string]Entry, key string, raw json.RawMessage) error 
 		return validateChecklist(raw)
 	case TypeTimezoneIANA:
 		return validateTimezoneIANA(raw)
+	case TypeSchedule:
+		return validateSchedule(raw)
 	default:
 		return fmt.Errorf("no validator for type %d", entry.Type)
 	}
+}
+
+func validateSchedule(raw json.RawMessage) error {
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return fmt.Errorf("%w: schedule must be a JSON string: %v", ErrInvalidValue, err)
+	}
+	if _, _, _, err := classifyScheduledOn(s); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidValue, err)
+	}
+	return nil
 }
 
 func validateDate(raw json.RawMessage) error {

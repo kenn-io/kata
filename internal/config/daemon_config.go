@@ -21,6 +21,9 @@ import (
 // TUI preferences and the named daemon catalog. Workspace-local remote
 // overrides (KATA_SERVER, .kata.local.toml) live in their own resolution path.
 type DaemonConfig struct {
+	// Timezone is the IANA timezone used for civil issue schedules that do not
+	// set their own timezone. Empty preserves the UTC default.
+	Timezone string `toml:"timezone"`
 	// Listen is the bind address used by `kata daemon start` when no
 	// --listen flag is supplied. Same syntax as the flag (host:port).
 	// An empty value (or a missing file) means the platform default:
@@ -321,6 +324,7 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 				return nil, fmt.Errorf("parse %s: unknown key(s): %s", path, strings.Join(keys, ", "))
 			}
 		}
+		cfg.Timezone = strings.TrimSpace(cfg.Timezone)
 		cfg.Listen = strings.TrimSpace(cfg.Listen)
 		cfg.Auth.Token = strings.TrimSpace(cfg.Auth.Token)
 		cfg.Auth.Proxy.TrustedActorHeader = strings.TrimSpace(cfg.Auth.Proxy.TrustedActorHeader)
@@ -342,6 +346,11 @@ func ReadDaemonConfig() (*DaemonConfig, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	applyDaemonConfigEnv(&cfg)
+	if cfg.Timezone != "" {
+		if _, err := time.LoadLocation(cfg.Timezone); err != nil {
+			return nil, fmt.Errorf("timezone %q is not a valid IANA timezone: %w", cfg.Timezone, err)
+		}
+	}
 	if err := normalizeWebConfig(&cfg.Web, cfg.Auth.TrustPrivateNetwork); err != nil {
 		return nil, err
 	}

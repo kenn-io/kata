@@ -101,6 +101,9 @@ type Config struct {
 	Postgres   PostgresConfig
 	Auth       AuthConfig
 	GitHubSync GitHubSyncConfig
+	// DefaultTimezone applies to civil schedules without issue timezone.
+	// Empty means UTC.
+	DefaultTimezone string
 	// Access selects host-supplied in-process authentication and authorization.
 	// It is mutually exclusive with Auth.
 	Access AccessController
@@ -165,6 +168,12 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	if cfg.Profile != EmbeddingProfileStandalone && cfg.Profile != EmbeddingProfileRestricted {
 		return nil, fmt.Errorf("kata: unknown embedding profile %q", cfg.Profile)
+	}
+	cfg.DefaultTimezone = strings.TrimSpace(cfg.DefaultTimezone)
+	if cfg.DefaultTimezone != "" {
+		if _, err := time.LoadLocation(cfg.DefaultTimezone); err != nil {
+			return nil, fmt.Errorf("kata: default timezone %q is not a valid IANA timezone: %w", cfg.DefaultTimezone, err)
+		}
 	}
 	usesAccess := cfg.Access != nil
 	usesToken := strings.TrimSpace(cfg.Auth.Token) != ""
@@ -247,6 +256,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
 		DB:                      store,
+		DefaultTimezone:         cfg.DefaultTimezone,
 		StartedAt:               startedAt,
 		Broadcaster:             broadcaster,
 		FederationWake:          wakeFederation,

@@ -2,13 +2,44 @@ package sqlitestore_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 )
+
+func TestReadyIssuesAppliesScheduleBeforeLimit(t *testing.T) {
+	d, ctx, p := setupTestProject(t)
+	due := makeIssue(t, ctx, d, p.ID, "due in Tokyo", "tester")
+	parked := makeIssue(t, ctx, d, p.ID, "parked in Los Angeles", "tester")
+	for _, fixture := range []struct {
+		issueID int64
+		raw     string
+	}{
+		{issueID: due.ID, raw: `{"scheduled_on":"2026-09-01T09:00","timezone":"Asia/Tokyo"}`},
+		{issueID: parked.ID, raw: `{"scheduled_on":"2026-09-01T09:00","timezone":"America/Los_Angeles"}`},
+	} {
+		var patch map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal([]byte(fixture.raw), &patch))
+		_, err := d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+			IssueID: fixture.issueID,
+			Actor:   "tester",
+			Patch:   patch,
+		})
+		require.NoError(t, err)
+	}
+
+	rows, err := d.ReadyIssues(ctx, p.ID, 1, db.ReadyIssuesFilter{
+		At: time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, due.ID, rows[0].ID)
+}
 
 func TestReadyIssues_FiltersOutClosed(t *testing.T) {
 	d, ctx, p := setupTestProject(t)

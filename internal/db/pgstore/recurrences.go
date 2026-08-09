@@ -213,18 +213,11 @@ func (s *Store) CreateRecurrenceForIssue(
 		if err != nil {
 			return fmt.Errorf("walk after initial occurrence: %w", err)
 		}
-		var issueMetadata map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(issue.Metadata), &issueMetadata); err != nil {
-			return fmt.Errorf("parse issue metadata: %w", err)
-		}
-		if issueMetadata == nil {
-			issueMetadata = make(map[string]json.RawMessage)
-		}
-		scheduledOn, _ := json.Marshal(*firstOccurrence)
-		issueMetadata["scheduled_on"] = scheduledOn
-		updatedMetadata, err := json.Marshal(issueMetadata)
+		updatedMetadata, err := db.ComposeRecurrenceIssueMetadata(
+			json.RawMessage(issue.Metadata), *firstOccurrence, create.Timezone,
+		)
 		if err != nil {
-			return fmt.Errorf("marshal issue metadata: %w", err)
+			return fmt.Errorf("compose initial recurrence issue metadata: %w", err)
 		}
 		updatedAt := nowStoredTimestamp()
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET recurrence_id=$1, occurrence_key=$2,
@@ -582,18 +575,11 @@ func (s *Store) materializeOccurrenceTx(
 	occurrenceKey string,
 	actor string,
 ) (db.MaterializeNextOut, error) {
-	var metadata map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(current.TemplateMetadata), &metadata); err != nil {
-		return db.MaterializeNextOut{}, fmt.Errorf("parse template_metadata: %w", err)
-	}
-	if metadata == nil {
-		metadata = make(map[string]json.RawMessage)
-	}
-	scheduledOn, _ := json.Marshal(occurrenceKey)
-	metadata["scheduled_on"] = scheduledOn
-	issueMetadata, err := json.Marshal(metadata)
+	issueMetadata, err := db.ComposeRecurrenceIssueMetadata(
+		json.RawMessage(current.TemplateMetadata), occurrenceKey, current.Timezone,
+	)
 	if err != nil {
-		return db.MaterializeNextOut{}, fmt.Errorf("marshal issue metadata: %w", err)
+		return db.MaterializeNextOut{}, fmt.Errorf("compose recurrence issue metadata: %w", err)
 	}
 	issueUID, err := katauid.New()
 	if err != nil {

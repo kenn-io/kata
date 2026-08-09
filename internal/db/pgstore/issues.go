@@ -15,10 +15,17 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-const issueSelect = `SELECT i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
+const issueColumns = `i.id, i.uid, i.project_id, p.uid, i.short_id, i.title, i.body, i.status,
        i.closed_reason, i.owner, i.priority, i.author, i.metadata, i.revision, i.recurrence_id,
-       i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at
+       i.occurrence_key, i.created_at, i.updated_at, i.closed_at, i.deleted_at`
+
+const issueSelect = `SELECT ` + issueColumns + `
   FROM issues i JOIN projects p ON p.id = i.project_id`
+
+const scheduledIssueSelect = `SELECT ` + issueColumns + `, schedule_recurrence.timezone
+  FROM issues i
+  JOIN projects p ON p.id = i.project_id
+  LEFT JOIN recurrences schedule_recurrence ON schedule_recurrence.id = i.recurrence_id`
 
 type issueCreatedPayload struct {
 	UID                    string                 `json:"uid"`
@@ -501,6 +508,21 @@ func scanIssue(row rowScanner) (db.Issue, error) {
 		return db.Issue{}, mapSQLError(err, nil)
 	}
 	return buffer.value()
+}
+
+func scanScheduledIssue(row rowScanner) (db.Issue, string, error) {
+	var buffer issueScanBuffer
+	var recurrenceTimezone sql.NullString
+	destinations := append(buffer.destinations(), &recurrenceTimezone)
+	err := row.Scan(destinations...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.Issue{}, "", db.ErrNotFound
+	}
+	if err != nil {
+		return db.Issue{}, "", mapSQLError(err, nil)
+	}
+	issue, err := buffer.value()
+	return issue, recurrenceTimezone.String, err
 }
 
 type issueScanBuffer struct {

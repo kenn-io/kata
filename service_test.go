@@ -78,6 +78,18 @@ func TestNewRejectsMissingAuthenticationPolicy(t *testing.T) {
 	assert.EqualError(t, err, "kata: auth token is required unless caller authentication is explicitly trusted")
 }
 
+func TestNewRejectsInvalidDefaultTimezone(t *testing.T) {
+	service, err := kata.New(context.Background(), kata.Config{
+		DSN:             filepath.Join(t.TempDir(), "service.db"),
+		DefaultTimezone: "Not/AZone",
+		Auth:            kata.AuthConfig{TrustCallerAuthentication: true},
+	})
+
+	assert.Nil(t, service)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `default timezone "Not/AZone" is not a valid IANA timezone`)
+}
+
 func TestNewRejectsAmbiguousAuthenticationPolicy(t *testing.T) {
 	service, err := kata.New(context.Background(), kata.Config{
 		DSN: filepath.Join(t.TempDir(), "service.db"),

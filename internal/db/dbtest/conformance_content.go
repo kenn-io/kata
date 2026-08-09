@@ -731,6 +731,46 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
+	westScheduled, err := createFixtureIssue(ctx, store, primary.Project.ID, "west scheduled", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	eastScheduled, err := createFixtureIssue(ctx, store, primary.Project.ID, "east scheduled", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	pastInstant, err := createFixtureIssue(ctx, store, primary.Project.ID, "past instant", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	futureInstant, err := createFixtureIssue(ctx, store, primary.Project.ID, "future instant", "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	legacyRecurrenceIssue, err := createFixtureIssue(
+		ctx, store, primary.Project.ID, "legacy recurrence timezone", "discovery-author", nil,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = store.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
+		IssueID: legacyRecurrenceIssue.ID,
+		Recurrence: db.CreateRecurrenceIn{
+			ProjectID: primary.Project.ID, Actor: "discovery-author", Rule: "FREQ=DAILY;COUNT=2",
+			DTStart: "2026-09-01", Timezone: "America/Los_Angeles",
+			Template: db.RecurrenceTemplate{Title: "legacy recurrence timezone"},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("attach legacy recurrence issue: %w", err)
+	}
+	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: legacyRecurrenceIssue.ID, Actor: "discovery-author",
+		Patch: map[string]json.RawMessage{"timezone": json.RawMessage(`null`)},
+	})
+	if err != nil {
+		return fmt.Errorf("remove legacy recurrence issue timezone: %w", err)
+	}
 	patchMetadata := func(issue db.Issue, patch map[string]json.RawMessage) error {
 		_, patchErr := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 			IssueID: issue.ID,
@@ -739,7 +779,8 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 		})
 		return patchErr
 	}
-	today := time.Now().UTC()
+	now := time.Date(2026, 9, 1, 0, 30, 0, 0, time.UTC)
+	today := now.UTC()
 	if err := patchMetadata(someday, map[string]json.RawMessage{"someday": json.RawMessage(`true`)}); err != nil {
 		return fmt.Errorf("park someday issue: %w", err)
 	}
@@ -761,8 +802,30 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}); err != nil {
 		return fmt.Errorf("schedule past issue: %w", err)
 	}
+	if err := patchMetadata(westScheduled, map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T09:00"`),
+		"timezone":     json.RawMessage(`"America/Los_Angeles"`),
+	}); err != nil {
+		return fmt.Errorf("schedule west-zone issue: %w", err)
+	}
+	if err := patchMetadata(eastScheduled, map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T09:00"`),
+		"timezone":     json.RawMessage(`"Asia/Tokyo"`),
+	}); err != nil {
+		return fmt.Errorf("schedule east-zone issue: %w", err)
+	}
+	if err := patchMetadata(pastInstant, map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+	}); err != nil {
+		return fmt.Errorf("schedule due instant: %w", err)
+	}
+	if err := patchMetadata(futureInstant, map[string]json.RawMessage{
+		"scheduled_on": json.RawMessage(`"2026-09-01T00:31:00Z"`),
+	}); err != nil {
+		return fmt.Errorf("schedule future instant: %w", err)
+	}
 
-	ready, err := store.ReadyIssues(ctx, primary.Project.ID, 0, db.ReadyIssuesFilter{})
+	ready, err := store.ReadyIssues(ctx, primary.Project.ID, 0, db.ReadyIssuesFilter{At: now})
 	if err != nil {
 		return fmt.Errorf("ready issues: %w", err)
 	}
@@ -776,6 +839,21 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	assert.Contains(t, issueIDs(ready), somedayFalse.ID)
 	assert.Contains(t, issueIDs(ready), todayScheduled.ID)
 	assert.Contains(t, issueIDs(ready), pastScheduled.ID)
+	assert.NotContains(t, issueIDs(ready), westScheduled.ID)
+	assert.Contains(t, issueIDs(ready), eastScheduled.ID)
+	assert.Contains(t, issueIDs(ready), pastInstant.ID)
+	assert.NotContains(t, issueIDs(ready), futureInstant.ID)
+	assert.NotContains(t, issueIDs(ready), legacyRecurrenceIssue.ID,
+		"a linked recurrence timezone must precede the daemon or UTC fallback")
+	defaultZoneReady, err := store.ReadyIssues(ctx, primary.Project.ID, 0, db.ReadyIssuesFilter{
+		At: now, DefaultTimezone: "America/Los_Angeles",
+	})
+	if err != nil {
+		return fmt.Errorf("ready issues with default timezone: %w", err)
+	}
+	assert.NotContains(t, issueIDs(defaultZoneReady), todayScheduled.ID)
+	assert.Contains(t, issueIDs(defaultZoneReady), eastScheduled.ID,
+		"an issue timezone must override the daemon default")
 	owned, err := store.ReadyIssues(ctx, primary.Project.ID, 0, db.ReadyIssuesFilter{Owner: "alice"})
 	if err != nil {
 		return fmt.Errorf("ready issues by owner: %w", err)
@@ -802,13 +880,14 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("ready issues excluding labels: %w", err)
 	}
 	assert.NotContains(t, issueIDs(withoutBug), primary.Issue.ID)
-	limited, err := store.ReadyIssues(ctx, primary.Project.ID, 1, db.ReadyIssuesFilter{})
+	limited, err := store.ReadyIssues(ctx, primary.Project.ID, 1, db.ReadyIssuesFilter{At: now})
 	if err != nil {
 		return fmt.Errorf("limited ready issues: %w", err)
 	}
 	require.Len(t, limited, 1)
+	assert.NotEqual(t, futureInstant.ID, limited[0].ID, "a parked first row must not consume the limit")
 
-	global, err := store.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{})
+	global, err := store.ReadyIssuesGlobal(ctx, 0, db.ReadyIssuesFilter{At: now})
 	if err != nil {
 		return fmt.Errorf("global ready issues: %w", err)
 	}
@@ -821,6 +900,11 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	assert.Contains(t, globalIDs, somedayFalse.ID)
 	assert.Contains(t, globalIDs, todayScheduled.ID)
 	assert.Contains(t, globalIDs, pastScheduled.ID)
+	assert.NotContains(t, globalIDs, westScheduled.ID)
+	assert.Contains(t, globalIDs, eastScheduled.ID)
+	assert.Contains(t, globalIDs, pastInstant.ID)
+	assert.NotContains(t, globalIDs, futureInstant.ID)
+	assert.NotContains(t, globalIDs, legacyRecurrenceIssue.ID)
 	for _, row := range global {
 		if row.ID == other.Issue.ID {
 			assert.Equal(t, other.Project.Name, row.ProjectName)
@@ -889,7 +973,7 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("close readiness blocker: %w", err)
 	}
-	ready, err = store.ReadyIssues(ctx, primary.Project.ID, 0, db.ReadyIssuesFilter{})
+	ready, err = store.ReadyIssues(ctx, primary.Project.ID, 0, db.ReadyIssuesFilter{At: now})
 	if err != nil {
 		return fmt.Errorf("ready issues after blocker close: %w", err)
 	}

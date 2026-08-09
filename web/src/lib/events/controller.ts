@@ -189,6 +189,7 @@ interface RefreshSchedulerOptions {
   openEvents: () => void
   now?: () => Date
   timeZone?: () => string
+  wallClockSensitive?: () => boolean
 }
 
 export class RefreshScheduler {
@@ -196,8 +197,10 @@ export class RefreshScheduler {
   readonly #openEvents: () => void
   readonly #now: () => Date
   readonly #timeZone: () => string
+  readonly #wallClockSensitive: () => boolean
   #pollTimer: ReturnType<typeof setTimeout> | undefined
   #midnightTimer: ReturnType<typeof setTimeout> | undefined
+  #wallClockTimer: ReturnType<typeof setTimeout> | undefined
   #updates: 'sse' | 'poll' = 'poll'
   #visible = true
   #lastTimeZone = ''
@@ -208,6 +211,7 @@ export class RefreshScheduler {
     this.#openEvents = options.openEvents
     this.#now = options.now ?? (() => new Date())
     this.#timeZone = options.timeZone ?? (() => Intl.DateTimeFormat().resolvedOptions().timeZone)
+    this.#wallClockSensitive = options.wallClockSensitive ?? (() => false)
   }
 
   start(updates: 'sse' | 'poll'): void {
@@ -215,8 +219,10 @@ export class RefreshScheduler {
     this.#stopped = false
     this.#updates = updates
     this.#lastTimeZone = this.#timeZone()
-    if (updates === 'sse') this.#openEvents()
-    else this.#schedulePoll()
+    if (updates === 'sse') {
+      this.#openEvents()
+      this.#scheduleWallClock()
+    } else this.#schedulePoll()
     this.#scheduleMidnight()
   }
 
@@ -224,8 +230,10 @@ export class RefreshScheduler {
     this.#stopped = true
     if (this.#pollTimer !== undefined) clearTimeout(this.#pollTimer)
     if (this.#midnightTimer !== undefined) clearTimeout(this.#midnightTimer)
+    if (this.#wallClockTimer !== undefined) clearTimeout(this.#wallClockTimer)
     this.#pollTimer = undefined
     this.#midnightTimer = undefined
+    this.#wallClockTimer = undefined
   }
 
   visibilityChanged(visible: boolean): void {
@@ -273,6 +281,15 @@ export class RefreshScheduler {
       },
       Math.max(1, next.getTime() - now.getTime()),
     )
+  }
+
+  #scheduleWallClock(): void {
+    if (this.#stopped || this.#updates !== 'sse') return
+    this.#wallClockTimer = setTimeout(() => {
+      this.#wallClockTimer = undefined
+      if (this.#visible && this.#wallClockSensitive()) this.#refreshNow()
+      this.#scheduleWallClock()
+    }, 15_000)
   }
 
   #refreshNow(): void {

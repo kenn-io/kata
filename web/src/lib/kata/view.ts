@@ -21,6 +21,10 @@ function issueDate(value: string | undefined): string | undefined {
   return value?.slice(0, 10)
 }
 
+function scheduledDate(issue: KataTaskSummary): string | undefined {
+  return issue.scheduled_on_date ?? issueDate(issue.metadata.scheduled_on)
+}
+
 function compareIssues(a: KataTaskSummary, b: KataTaskSummary): number {
   const ap = a.priority ?? Number.MAX_SAFE_INTEGER
   const bp = b.priority ?? Number.MAX_SAFE_INTEGER
@@ -91,7 +95,7 @@ function buildToday(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
 
   for (const issue of issues) {
     if (issue.status !== 'open') continue
-    const scheduledOn = issueDate(issue.metadata.scheduled_on)
+    const scheduledOn = scheduledDate(issue)
     const deadlineOn = issueDate(issue.metadata.deadline_on)
     const scheduledDue = scheduledOn !== undefined && scheduledOn <= today
     const deadlineDue = deadlineOn !== undefined && deadlineOn <= today
@@ -118,7 +122,7 @@ function buildUpcoming(issues: KataTaskSummary[], today: string): KataTaskGroup[
   const groups = new Map<string, KataTaskGroup>()
   for (const issue of issues) {
     if (issue.status !== 'open') continue
-    const scheduledOn = issueDate(issue.metadata.scheduled_on)
+    const scheduledOn = scheduledDate(issue)
     if (!scheduledOn || scheduledOn <= today) continue
 
     const group = groups.get(scheduledOn) ?? { id: scheduledOn, title: scheduledOn, issues: [] }

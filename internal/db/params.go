@@ -215,6 +215,10 @@ type ReadyIssuesFilter struct {
 	Owner         string   // only issues where owner = this value (empty = no filter)
 	Labels        []string // issues must have ALL these labels (AND logic)
 	ExcludeLabels []string // issues must NOT have any of these labels
+	At            time.Time
+	// DefaultTimezone applies to civil schedules without issue timezone.
+	// Empty means UTC.
+	DefaultTimezone string
 }
 
 // SearchFTSParams parameterizes full-text search candidate retrieval. The
