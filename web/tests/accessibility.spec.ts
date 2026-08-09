@@ -56,6 +56,7 @@ test('desktop and responsive detail remain focused, contrasted, and axe-clean', 
   await expect(page.getByRole('button', { name: 'Switch daemon' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Open workspace' })).toHaveCount(0)
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toBeVisible()
 
   let results = await new AxeBuilder({ page }).analyze()
   expect(results.violations).toEqual([])
