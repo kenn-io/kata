@@ -13,11 +13,12 @@
 
   const detail = $derived(projectIssueDetail(props.issue))
   const actions = $derived.by(() => {
+    const actionsFenced = (props.actionsDisabled ?? false) || (props.authorityBlocked ?? false)
     const next: KataIssueHostAction[] = [
       {
         id: 'edit',
         label: 'Edit issue',
-        disabled: props.actionsDisabled ?? false,
+        disabled: actionsFenced,
         invoke: () => {
           editing = true
         },
@@ -28,7 +29,7 @@
       next.push({
         id: 'workspace',
         label: props.workspaceAction.label,
-        disabled: props.workspaceAction.disabled ?? false,
+        disabled: actionsFenced || (props.workspaceAction.disabled ?? false),
         busy: props.workspaceAction.busy ?? false,
         invoke: props.workspaceAction.onClick,
       })
@@ -37,6 +38,7 @@
       next.push({
         id: 'graph',
         label: 'Open reachable graph',
+        disabled: actionsFenced,
         invoke: () => props.onOpenGraph?.(props.issue.issue),
       })
     }

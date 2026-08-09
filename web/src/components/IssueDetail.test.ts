@@ -272,6 +272,22 @@ describe('IssueDetail', () => {
     expect(onOpenGraph).toHaveBeenCalledWith(expect.objectContaining({ uid: 'issue-1' }))
   })
 
+  it.each([{ actionsDisabled: true }, { authorityBlocked: true }])(
+    'disables the workspace action when mutation authority is fenced',
+    async (fence) => {
+      const onClick = vi.fn()
+      renderDetail({
+        ...fence,
+        workspaceAction: { label: 'Open workspace', onClick },
+      })
+
+      const action = screen.getByRole('button', { name: 'Open workspace' }) as HTMLButtonElement
+      expect(action.disabled).toBe(true)
+      await fireEvent.click(action)
+      expect(onClick).not.toHaveBeenCalled()
+    },
+  )
+
   it('falls back to project UID when the issue omits project name', async () => {
     renderDetail({
       issue: makeIssue({

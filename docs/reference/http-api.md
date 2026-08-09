@@ -141,13 +141,15 @@ endpoints published in OpenAPI:
   returns a safe absolute route into the standalone browser application:
 
   ```json
-  {"available": true, "url": "https://kata.example/kata?issue=<uid>"}
+  {"available": true, "url": "https://kata.example/kata?issue=<uid>#direct=1"}
   ```
 
   When no credential-safe browser origin is configured, it returns HTTP 200
   with `{"available":false,"reason":"browser_origin_unavailable"}` and no
   URL. Unknown or deleted issues, archived projects, and host-denied resources
-  remain not found.
+  remain not found. The `#direct=1` fragment keeps the standalone application
+  on the daemon that issued the target even when its roster defaults to a
+  different remote daemon.
 
 A matching snapshot `If-None-Match` returns `304` without rebuilding the
 projection. The response cursor is captured in the same consistent storage

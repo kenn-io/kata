@@ -35,10 +35,30 @@ function relationFor(
 export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailModel {
   const { issue } = wire
   const labels = issue.labels ?? wire.labels?.map((label) => label.label) ?? []
+  const parent = wire.parent == null ? undefined : projectReference(wire.parent)
+  const children = (wire.children ?? []).map(projectReference)
+  const representedRelationships = new Set<string>()
+  if (parent) representedRelationships.add(`parent:${parent.uid}`)
+  for (const child of children) representedRelationships.add(`child:${child.uid}`)
+  const links: KataIssueDetailModel['links'] = []
+  for (const link of wire.links ?? []) {
+    const peer = link.from.uid === issue.uid ? link.to : link.from
+    const relation = relationFor(link, issue.uid)
+    const relationshipKey = `${relation}:${peer.uid}`
+    if (representedRelationships.has(relationshipKey)) continue
+    representedRelationships.add(relationshipKey)
+    links.push({
+      id: String(link.id),
+      relation,
+      peerUID: peer.uid,
+      peerReference: referenceFor(peer),
+      peerStatus: peer.status ?? '',
+    })
+  }
   const projected: KataIssueDetailModel = {
     issue: {
       uid: issue.uid,
-      projectUID: issue.project_uid,
+      projectUID: issue.project_uid ?? '',
       projectName: issue.project_name ?? '',
       reference: referenceFor(issue),
       title: issue.title,
@@ -62,17 +82,8 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       body: comment.body,
       createdAt: comment.created_at,
     })),
-    links: (wire.links ?? []).map((link) => {
-      const peer = link.from.uid === issue.uid ? link.to : link.from
-      return {
-        id: String(link.id),
-        relation: relationFor(link, issue.uid),
-        peerUID: peer.uid,
-        peerReference: referenceFor(peer),
-        peerStatus: peer.status ?? '',
-      }
-    }),
-    children: (wire.children ?? []).map(projectReference),
+    links,
+    children,
     pendingClaims: (wire.pending_claims ?? []).map((claim) => ({
       holder: claim.holder,
       kind: claim.claim_kind ?? '',
@@ -80,9 +91,7 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
     })),
   }
 
-  if (wire.parent !== undefined && wire.parent !== null) {
-    projected.parent = projectReference(wire.parent)
-  }
+  if (parent) projected.parent = parent
   if (wire.claim !== undefined && wire.claim !== null) {
     projected.claim = {
       holder: wire.claim.holder,

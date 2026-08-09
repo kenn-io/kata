@@ -6,7 +6,7 @@ export interface KataChecklistItem {
 
 export interface KataIssueWire {
   uid: string
-  project_uid: string
+  project_uid?: string | undefined
   project_name?: string | undefined
   short_id?: string | undefined
   qualified_id?: string | undefined
@@ -22,7 +22,7 @@ export interface KataIssueWire {
         checklist?: KataChecklistItem[] | undefined
       }
     | undefined
-  labels?: string[] | undefined
+  labels?: string[] | null | undefined
   updated_at?: string | undefined
 }
 

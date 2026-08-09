@@ -28,6 +28,11 @@ func TestReadUILaunchTargetReturnsConfiguredBrowserRoute(t *testing.T) {
 	manager := newUILaunchTestManager(t, dbh, "https://kata.example")
 	ts := startTestServer(t, daemon.ServerConfig{
 		DB: dbh.db, StartedAt: dbh.now, WebSessions: manager,
+		ActiveWebDaemon: "example-remote",
+		WebDaemons: []config.CatalogDaemonConfig{
+			{Name: "example-local", Local: true},
+			{Name: "example-remote", URL: "https://remote.example"},
+		},
 	})
 
 	resp, body := getUILaunchTarget(t, ts, issue.UID)
@@ -40,7 +45,7 @@ func TestReadUILaunchTargetReturnsConfiguredBrowserRoute(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &out))
 	require.True(t, out.Available)
-	require.Equal(t, "https://kata.example/kata?issue="+issue.UID, out.URL)
+	require.Equal(t, "https://kata.example/kata?issue="+issue.UID+"#direct=1", out.URL)
 	require.Empty(t, out.Reason)
 }
 

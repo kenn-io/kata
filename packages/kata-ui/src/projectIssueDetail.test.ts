@@ -1,9 +1,32 @@
 import { describe, expect, it } from 'vitest'
 
+import type { components } from '../../../web/src/lib/api/schema'
 import { projectIssueDetail } from './projectIssueDetail.js'
 import type { KataIssueDetailWire } from './types.js'
 
+function acceptCanonicalWire(
+  wire: components['schemas']['ShowIssueResponseBody'],
+): KataIssueDetailWire {
+  return wire
+}
+
 describe('projectIssueDetail', () => {
+  it('accepts the generated canonical issue-detail response type', () => {
+    expect(acceptCanonicalWire).toBeTypeOf('function')
+  })
+
+  it('accepts a canonical issue without optional project identity', () => {
+    const wire: KataIssueDetailWire = {
+      issue: {
+        uid: '01TASK',
+        title: 'Older daemon issue',
+        status: 'open',
+      },
+    }
+
+    expect(projectIssueDetail(wire).issue.projectUID).toBe('')
+  })
+
   it('defaults optional fields and ignores additive response fields', () => {
     const wire = {
       issue: {
@@ -90,6 +113,38 @@ describe('projectIssueDetail', () => {
           author: 'alice',
           created_at: '2026-08-08T20:00:00Z',
         },
+        {
+          id: 2,
+          from: {
+            uid: '01TASK',
+            short_id: 'abc4',
+            qualified_id: 'roadmap#abc4',
+            status: 'open',
+          },
+          to: {
+            uid: '01PARENT',
+            short_id: 'par1',
+            qualified_id: 'roadmap#par1',
+            status: 'open',
+          },
+          type: 'parent',
+        },
+        {
+          id: 3,
+          from: {
+            uid: '01CHILD',
+            short_id: 'chi1',
+            qualified_id: 'roadmap#chi1',
+            status: 'open',
+          },
+          to: {
+            uid: '01TASK',
+            short_id: 'abc4',
+            qualified_id: 'roadmap#abc4',
+            status: 'open',
+          },
+          type: 'parent',
+        },
       ],
       parent: {
         uid: '01PARENT',
@@ -136,6 +191,9 @@ describe('projectIssueDetail', () => {
 
     expect(model.issue.checklist).toEqual([{ id: 'item-1', text: 'Publish package', done: true }])
     expect(model.issue.labels).toEqual(['integration'])
+    expect(model.links).toEqual([
+      expect.objectContaining({ relation: 'blocks', peerUID: '01PEER' }),
+    ])
     expect(model.parent?.title).toBe('Parent')
     expect(model.children[0]?.title).toBe('Child')
     expect(model.claim?.holder).toBe('agent-a')

@@ -17,36 +17,28 @@ only Kata wire data and host-supplied actions.
     type KataIssueDetailWire,
   } from '@kenn-io/kata-ui'
 
-  let { daemonURL, issueUID }: { daemonURL: string; issueUID: string } = $props()
-  let detail: KataIssueDetailModel | undefined = $state()
-  let unavailable = $state('')
+  let {
+    apiSchemaVersion,
+    wire,
+  }: { apiSchemaVersion?: string; wire: KataIssueDetailWire } = $props()
 
-  $effect(() => {
-    void loadIssue(daemonURL, issueUID)
-  })
-
-  async function loadIssue(origin: string, uid: string): Promise<void> {
-    detail = undefined
-    unavailable = ''
-    const health = await fetch(`${origin}/api/v1/health`).then((response) => response.json())
-    if (!supportsKataAPISchema(health.api_schema_version ?? '')) {
-      unavailable = 'This Kata daemon is not compatible with the embedded issue detail.'
-      return
-    }
-    const wire: KataIssueDetailWire = await fetch(
-      `${origin}/api/v1/issues/${encodeURIComponent(uid)}`,
-    ).then((response) => response.json())
-    detail = projectIssueDetail(wire)
-  }
+  const compatible = $derived(supportsKataAPISchema(apiSchemaVersion ?? ''))
+  const detail: KataIssueDetailModel | undefined = $derived(
+    compatible ? projectIssueDetail(wire) : undefined,
+  )
 </script>
 
 {#if detail}
   <IssueDetail {detail} />
-{:else if unavailable}
-  <p>{unavailable}</p>
+{:else}
+  <p>This Kata daemon is not compatible with the embedded issue detail.</p>
 {/if}
 ```
 
 `supportsKataAPISchema` accepts Kata API schemas `>=0.9.0 <0.11.0`. A missing
 or empty `api_schema_version` is incompatible for an embedding host. Read the
 version from `GET /api/v1/health`; issue-detail responses do not carry it.
+The embedding host must fetch health and issue data through its authenticated
+backend or credential broker, then pass the resulting version and wire data to
+the component. Do not expose daemon bearer tokens or browser-session headers to
+the package.

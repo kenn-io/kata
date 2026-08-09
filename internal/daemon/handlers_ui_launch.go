@@ -58,5 +58,6 @@ func safeUILaunchURL(manager *WebSessionManager, issueUID string) (string, bool)
 	query := url.Values{}
 	query.Set("issue", issueUID)
 	origin.RawQuery = query.Encode()
+	origin.Fragment = "direct=1"
 	return origin.String(), true
 }
