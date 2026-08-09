@@ -12,6 +12,16 @@ somewhere else, run:
 docs/screenshots/generate.sh --out /tmp/kata-docs-screenshots
 ```
 
+A custom destination must either not exist or be a complete asset directory
+created by this generator. Existing unrelated directories, symlinks, empty
+paths, and broad repository paths are rejected. Generation happens in a
+sibling temporary directory; only a validated result replaces the destination.
+
+The Web UI fixture normalizes generated issue identifiers and relative times
+to stable documentation values before capture. Each image must also reach two
+identical rendered frames, so rerunning the generator with unchanged source
+produces byte-identical PNGs instead of asset-branch churn.
+
 `make docs-assets-branch` regenerates the same set and updates the local
 `docs-assets` branch. The publisher accepts only the declared screenshot files,
 rejects empty files and symlinks, and creates a fresh one-commit orphan branch.

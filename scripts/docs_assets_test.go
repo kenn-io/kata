@@ -28,6 +28,93 @@ var docsAssets = []string{
 	"web-ui/daemon-switcher.png",
 }
 
+func TestDocsScreenshotGeneratorRejectsUnsafeOutputDirectories(t *testing.T) {
+	requireDocsScriptTools(t)
+
+	t.Run("empty output", func(t *testing.T) {
+		tempDir := t.TempDir()
+		repo := filepath.Join(tempDir, "repo")
+		initDocsTestRepo(t, repo)
+		generator := installDocsGeneratorFixture(t, repo)
+		sentinel := filepath.Join(repo, "must-survive")
+		require.NoError(t, os.WriteFile(sentinel, []byte("keep\n"), 0o600))
+
+		cmd := exec.Command("bash", generator, "--out", "") //nolint:gosec // fixed test-owned script under TempDir
+		cmd.Dir = repo
+		output, err := cmd.CombinedOutput()
+
+		require.Error(t, err, string(output))
+		assert.FileExists(t, sentinel)
+		assert.Contains(t, string(output), "refusing unsafe docs screenshot output directory")
+	})
+
+	t.Run("existing unowned directory", func(t *testing.T) {
+		tempDir := t.TempDir()
+		repo := filepath.Join(tempDir, "repo")
+		initDocsTestRepo(t, repo)
+		generator := installDocsGeneratorFixture(t, repo)
+		unowned := filepath.Join(tempDir, "unowned")
+		require.NoError(t, os.MkdirAll(unowned, 0o700))
+		sentinel := filepath.Join(unowned, "must-survive")
+		require.NoError(t, os.WriteFile(sentinel, []byte("keep\n"), 0o600))
+
+		cmd := exec.Command("bash", generator, "--out", unowned) //nolint:gosec // fixed test-owned script and TempDir output
+		cmd.Dir = repo
+		output, err := cmd.CombinedOutput()
+
+		require.Error(t, err, string(output))
+		assert.FileExists(t, sentinel)
+		assert.Contains(t, string(output), "refusing to replace unowned docs screenshot directory")
+	})
+
+	t.Run("symlink", func(t *testing.T) {
+		tempDir := t.TempDir()
+		repo := filepath.Join(tempDir, "repo")
+		initDocsTestRepo(t, repo)
+		generator := installDocsGeneratorFixture(t, repo)
+		target := filepath.Join(tempDir, "target")
+		require.NoError(t, os.MkdirAll(target, 0o700))
+		sentinel := filepath.Join(target, "must-survive")
+		require.NoError(t, os.WriteFile(sentinel, []byte("keep\n"), 0o600))
+		link := filepath.Join(tempDir, "output-link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+
+		cmd := exec.Command("bash", generator, "--out", link) //nolint:gosec // fixed test-owned script and TempDir output
+		cmd.Dir = repo
+		output, err := cmd.CombinedOutput()
+
+		require.Error(t, err, string(output))
+		assert.FileExists(t, sentinel)
+		assert.Contains(t, string(output), "output directory symlink")
+	})
+}
+
+func TestDocsScreenshotGeneratorCreatesAndReplacesOwnedOutput(t *testing.T) {
+	requireDocsScriptTools(t)
+
+	tempDir := t.TempDir()
+	repo := filepath.Join(tempDir, "repo")
+	initDocsTestRepo(t, repo)
+	generator := installDocsGeneratorFixture(t, repo)
+	outputDir := filepath.Join(tempDir, "generated")
+
+	for range 2 {
+		cmd := exec.Command("bash", generator, "--out", outputDir) //nolint:gosec // fixed test-owned script and TempDir output
+		cmd.Dir = repo
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+		for _, asset := range docsAssets {
+			assert.FileExists(t, filepath.Join(outputDir, asset))
+		}
+	}
+
+	staging, err := filepath.Glob(filepath.Join(tempDir, ".kata-docs-screenshots.*"))
+	require.NoError(t, err)
+	assert.Empty(t, staging)
+}
+
 func TestDocsAssetPublisherRejectsInvalidSources(t *testing.T) {
 	requireDocsScriptTools(t)
 
@@ -310,6 +397,35 @@ func installDocsScript(t *testing.T, repo, name string) string {
 		require.NoError(t, os.WriteFile(filepath.Join(destinationDir, candidate), contents, 0o700))
 	}
 	return filepath.Join(destinationDir, name)
+}
+
+func installDocsGeneratorFixture(t *testing.T, repo string) string {
+	t.Helper()
+	generator := installDocsScript(t, repo, "generate.sh")
+	destinationDir := filepath.Dir(generator)
+	for name, contents := range map[string]string{
+		"generate-federation-tui.sh": `#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == "--out" && -n "${2:-}" ]]
+mkdir -p "$2/tui" "$2/federation-tui"
+printf 'svg\n' >"$2/tui/hero.svg"
+for image in list select-hub select-hub-project preview result; do
+  printf 'svg\n' >"$2/federation-tui/$image.svg"
+done
+`,
+		"generate-web-ui.sh": `#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == "--out" && -n "${2:-}" ]]
+mkdir -p "$2/web-ui"
+for image in workspace issue-detail relationships daemon-switcher; do
+  printf 'png\n' >"$2/web-ui/$image.png"
+done
+`,
+	} {
+		//nolint:gosec // copied test shell fixtures must be executable.
+		require.NoError(t, os.WriteFile(filepath.Join(destinationDir, name), []byte(contents), 0o700))
+	}
+	return generator
 }
 
 func writeDocsAssets(t *testing.T, root, content string) {

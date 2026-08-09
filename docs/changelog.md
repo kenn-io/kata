@@ -63,6 +63,21 @@ federation, and daemon operations safer and more observable.
   publication, allowing the release workflow to validate and publish the
   embedded Web UI artifacts successfully.
 
+**Acknowledgements**
+
+- Thanks to [Rusty Shackleford](https://github.com/salmonumbrella) for the
+  native MCP server, cross-project list filters and version checks, scoped
+  search label filters, parked-ready semantics, and direct TUI issue opening.
+- Thanks to [Wes McKinney](https://github.com/wesm) for the Web UI, bounded
+  federation work, Git-root workspace discovery, legacy installer support,
+  and clean GoReleaser validation.
+- Thanks to [Matthew Jacobs](https://github.com/mjacobs) for Markdown rendering
+  in `kata show`.
+- Thanks to [Joi Ito](https://github.com/Joi) for composing `ready --all` and
+  `next --all` with scoped filters.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for the
+  standard daemon profiling endpoints.
+
 ## 0.13.0
 <small>2026-07-31</small>
 
