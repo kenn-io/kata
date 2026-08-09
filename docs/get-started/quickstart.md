@@ -59,6 +59,10 @@ cursor's screen row when it lands on the first or final page, then jumps to the
 first or last issue only when no further page movement is possible. Press `?`
 inside the TUI for the full keybinding list.
 
+Open the same project in the browser with `kata ui`, or jump directly to an
+issue with `kata ui abc4`. The [Web UI guide](../guide/web-ui.md) covers
+collections, editing, relationship graphs, recurrences, and daemon switching.
+
 ## Initialize a workspace
 
 ```sh

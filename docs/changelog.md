@@ -8,17 +8,75 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-**New features**
-
-- Added a native, project-bound stdio MCP server with 13 structured issue
-  tools, protocol negotiation, fixed actor attribution, and bounded results.
-
 **Improvements**
 
 - Centralized Claude Code and Codex hook configuration on kit's shared
   agent-hook manager while preserving the existing init flags, lifecycle
   matchers, attention behavior, unrelated configuration, and workspace
   symlink boundary.
+
+## 0.14.1
+<small>2026-08-08</small>
+
+kata 0.14.1 adds a first-class browser workspace and native MCP integration,
+expands cross-project and label-filtered discovery, and makes release,
+federation, and daemon operations safer and more observable.
+
+**New features**
+
+- Added a daemon-served Web UI for managing projects, issue collections,
+  fields, comments, checklists, relationships, recurrences, and multiple
+  configured daemons.
+- Added a native, project-bound stdio MCP server with 13 structured issue
+  tools, protocol negotiation, fixed actor attribution, and bounded results.
+- Added `kata list --all`, with status, priority, owner, label, exclusion, and
+  metadata filters that compose across all non-archived projects.
+- Added repeatable `--label` and `--no-label` filters to project-scoped
+  `kata search`, applied before lexical limits and during vector-result
+  hydration.
+- Allowed `kata tui <issue-ref>` to resolve and open an issue's detail view
+  directly.
+- Exposed the standard Go profiling handlers under `/debug/pprof/` on the
+  daemon's existing authenticated listener.
+
+**Improvements**
+
+- Added field-scoped Markdown rendering to `kata show --render` for issue
+  descriptions and comments while preserving literal record structure and
+  machine-readable output.
+- Made `ready --all` and `next --all` compose with owner and label filters.
+- Excluded issues parked with `someday=true` or a future `scheduled_on` date
+  from scoped, global, and browser ready queues.
+- Limited workspace binding discovery to the current Git root, preventing an
+  ancestor repository's `.kata.toml` from capturing a nested repository.
+- Avoided federation-wide link reconciliation for batches that cannot affect
+  links and gave synchronization requests their own bounded timeout.
+- Kept the release installers compatible with releases that predate embedded
+  Web UI validation while requiring current releases to validate their assets.
+- Added daemon API-version preflights before filtered global list/ready and
+  filtered search operations, so older daemons fail with an upgrade message
+  instead of silently ignoring filters.
+
+**Bug fixes**
+
+- Kept GoReleaser validation from dirtying the release checkout before archive
+  publication, allowing the release workflow to validate and publish the
+  embedded Web UI artifacts successfully.
+
+**Acknowledgements**
+
+- Thanks to [Rusty Shackleford](https://github.com/salmonumbrella) for the
+  native MCP server, cross-project list filters and version checks, scoped
+  search label filters, parked-ready semantics, and direct TUI issue opening.
+- Thanks to [Wes McKinney](https://github.com/wesm) for the Web UI, bounded
+  federation work, Git-root workspace discovery, legacy installer support,
+  and clean GoReleaser validation.
+- Thanks to [Matthew Jacobs](https://github.com/mjacobs) for Markdown rendering
+  in `kata show`.
+- Thanks to [Joi Ito](https://github.com/Joi) for composing `ready --all` and
+  `next --all` with scoped filters.
+- Thanks to [Marius van Niekerk](https://github.com/mariusvniekerk) for the
+  standard daemon profiling endpoints.
 
 ## 0.13.0
 <small>2026-07-31</small>

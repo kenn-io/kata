@@ -26,6 +26,9 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 The installers detect your OS and CPU architecture and download the latest
 archive from [GitHub releases](https://github.com/kenn-io/kata/releases).
 They verify the downloaded archive against `SHA256SUMS` before installing it.
+For v0.14.x and newer versions, they also ask the extracted binary to validate
+its embedded Web UI before replacement. The installer remains able to install
+canonical older releases that predate that embedded-asset check.
 The shell installer places `kata` in `/usr/local/bin` or `~/.local/bin`.
 The PowerShell installer places `kata.exe` in `%USERPROFILE%\.kata\bin` by
 default and adds that directory to the user `Path`. Review the installers at

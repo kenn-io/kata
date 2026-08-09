@@ -20,6 +20,12 @@ kata init --project product
 `kata init` writes `.kata.toml` and ensures `.kata.local.toml` is ignored. The
 local file is for per-machine settings such as a remote daemon URL.
 
+Inside a Git repository, Kata searches for those files only as far as the
+nearest Git root, including when the workspace was entered through a symlink.
+A `.kata.toml` above that boundary cannot bind a nested repository or redirect
+`kata init` output outside it. Non-Git workspaces retain normal ancestor
+discovery.
+
 ## Bind many workspaces to one project
 
 Use the same project name in each workspace:
