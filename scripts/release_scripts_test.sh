@@ -265,6 +265,63 @@ test_release_creates_and_pushes_bare_semver_tag() {
   git -C "$remote" rev-parse -q --verify refs/tags/v0.5.0 >/dev/null || fail "remote tag v0.5.0 missing"
 }
 
+test_release_accepts_prerelease_version() {
+  local repo="$tmp_root/release-prerelease"
+  local remote="$tmp_root/release-prerelease-origin.git"
+  init_repo "$repo"
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+
+  printf 'y\n' | run_in_repo "$repo" env CHANGELOG_AGENT=none \
+    "$repo_root/scripts/release.sh" 0.14.2-rc.1 >/dev/null
+
+  git -C "$repo" rev-parse -q --verify refs/tags/v0.14.2-rc.1 >/dev/null || \
+    fail "local prerelease tag missing"
+  git -C "$remote" rev-parse -q --verify refs/tags/v0.14.2-rc.1 >/dev/null || \
+    fail "remote prerelease tag missing"
+}
+
+test_stable_release_changelog_uses_previous_stable_tag() {
+  local repo="$tmp_root/release-after-prerelease"
+  local remote="$tmp_root/release-after-prerelease-origin.git"
+  init_repo "$repo"
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" tag v0.4.0
+
+  printf 'stable feature\n' >"$repo/feature.txt"
+  git -C "$repo" add feature.txt
+  git -C "$repo" commit -q -m "feat: ship stable feature"
+
+  printf 'y\n' | run_in_repo "$repo" env CHANGELOG_AGENT=none \
+    "$repo_root/scripts/release.sh" 0.5.0-rc.1 >/dev/null
+  printf 'y\n' | run_in_repo "$repo" env CHANGELOG_AGENT=none \
+    "$repo_root/scripts/release.sh" 0.5.0 >/dev/null
+
+  local tag_message
+  tag_message="$(git -C "$repo" tag -l v0.5.0 --format='%(contents)')"
+  assert_contains "$tag_message" "feat: ship stable feature" \
+    "stable changelog should include changes since the previous stable tag"
+}
+
+test_release_version_rejects_malformed_prereleases() {
+  local value
+  local invalid=(
+    v0.14.2-
+    v0.14.2-rc..1
+    v0.14.2-01
+    v0.14.2+build.1
+    v01.14.2
+    release-0.14.2
+  )
+  for value in "${invalid[@]}"; do
+    if bash -c 'source "$1"; is_release_tag "$2"' bash \
+      "$repo_root/scripts/release-version.sh" "$value"; then
+      fail "malformed release tag accepted: $value"
+    fi
+  done
+}
+
 test_release_preview_matches_categorized_changelog_style() {
   local repo="$tmp_root/release-preview"
   local remote="$tmp_root/release-preview-origin.git"
@@ -358,7 +415,7 @@ test_verify_release_tag_accepts_tag_on_origin_main() {
   git -C "$repo" tag -a v0.5.0 -m "Release 0.5.0"
   git -C "$repo" push -q origin v0.5.0
   local tag_sha
-  tag_sha="$(git -C "$repo" rev-parse v0.5.0^{commit})"
+  tag_sha="$(git -C "$repo" rev-parse 'v0.5.0^{commit}')"
 
   local output
   output="$(run_in_repo "$repo" env GITHUB_OUTPUT="$github_output" EXPECTED_TAG_SHA="$tag_sha" "$repo_root/scripts/verify-release-tag.sh" v0.5.0)"
@@ -367,6 +424,29 @@ test_verify_release_tag_accepts_tag_on_origin_main() {
   assert_contains "$(cat "$github_output")" "tag_name=v0.5.0" "valid release tag outputs"
   assert_contains "$(cat "$github_output")" "version=0.5.0" "valid release tag outputs"
   assert_contains "$(cat "$github_output")" "tag_sha=$tag_sha" "valid release tag outputs"
+  assert_contains "$(cat "$github_output")" "prerelease=false" "stable release classification"
+}
+
+test_verify_release_tag_accepts_prerelease() {
+  local repo="$tmp_root/release-tag-prerelease"
+  local remote="$tmp_root/release-tag-prerelease.git"
+  local github_output="$tmp_root/release-tag-prerelease-output"
+  init_repo "$repo"
+  git -C "$repo" branch -M main
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" push -q -u origin main
+  git -C "$repo" tag -a v0.14.2-rc.1 -m "Release 0.14.2-rc.1"
+  git -C "$repo" push -q origin v0.14.2-rc.1
+  local tag_sha
+  tag_sha="$(git -C "$repo" rev-parse 'v0.14.2-rc.1^{commit}')"
+
+  run_in_repo "$repo" env GITHUB_OUTPUT="$github_output" EXPECTED_TAG_SHA="$tag_sha" \
+    "$repo_root/scripts/verify-release-tag.sh" v0.14.2-rc.1 >/dev/null
+
+  assert_contains "$(<"$github_output")" "tag_name=v0.14.2-rc.1" "prerelease tag output"
+  assert_contains "$(<"$github_output")" "version=0.14.2-rc.1" "prerelease version output"
+  assert_contains "$(<"$github_output")" "prerelease=true" "prerelease classification"
 }
 
 test_verify_release_tag_rejects_workflow_sha_mismatch() {
@@ -407,7 +487,7 @@ test_verify_release_tag_rejects_tag_moved_after_validation() {
   git -C "$repo" tag -a v0.5.0 -m "Release 0.5.0"
   git -C "$repo" push -q origin v0.5.0
   local validated_sha
-  validated_sha="$(git -C "$repo" rev-parse v0.5.0^{commit})"
+  validated_sha="$(git -C "$repo" rev-parse 'v0.5.0^{commit}')"
 
   run_in_repo "$repo" env EXPECTED_TAG_SHA="$validated_sha" "$repo_root/scripts/verify-release-tag.sh" v0.5.0 >/dev/null
 
@@ -544,10 +624,14 @@ test_changelog_defaults_to_codex_agent
 test_changelog_allows_explicit_agent_opt_in
 test_changelog_rejects_unknown_agent
 test_release_creates_and_pushes_bare_semver_tag
+test_release_accepts_prerelease_version
+test_stable_release_changelog_uses_previous_stable_tag
+test_release_version_rejects_malformed_prereleases
 test_release_preview_matches_categorized_changelog_style
 test_release_uses_codex_changelog_by_default
 test_verify_release_tag_rejects_tag_outside_origin_main
 test_verify_release_tag_accepts_tag_on_origin_main
+test_verify_release_tag_accepts_prerelease
 test_verify_release_tag_rejects_workflow_sha_mismatch
 test_verify_release_tag_rejects_tag_moved_after_validation
 test_install_checksum_cannot_be_skipped

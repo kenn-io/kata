@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/release-version.sh"
 
 usage() {
   printf 'usage: %s <bare-version> [extra changelog instructions]\n' "$0" >&2
@@ -21,7 +22,7 @@ if [[ "$version" == v* ]]; then
   exit 2
 fi
 
-if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if ! is_release_version "$version"; then
   printf 'version must use X.Y.Z semver shape\n' >&2
   exit 2
 fi
@@ -58,7 +59,17 @@ case "$changelog_agent" in
     ;;
 esac
 
-"$repo_root/scripts/changelog.sh" "$version" "-" "$extra_instructions" >"$notes_file"
+changelog_start="-"
+if ! is_prerelease_version "$version"; then
+  while IFS= read -r candidate; do
+    if is_release_tag "$candidate" && ! is_prerelease_version "${candidate#v}"; then
+      changelog_start="$candidate"
+      break
+    fi
+  done < <(git tag --merged HEAD --sort=-version:refname)
+fi
+
+"$repo_root/scripts/changelog.sh" "$version" "$changelog_start" "$extra_instructions" >"$notes_file"
 
 printf '\n'
 printf '==========================================\n'

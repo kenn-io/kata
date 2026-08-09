@@ -570,6 +570,11 @@ Disable telemetry with:
 export KATA_TELEMETRY_ENABLED=0
 ```
 
+Release archives and package-manager builds use this same telemetry policy.
+Installing through Homebrew, a `.deb`, an `.rpm`, or another package manager
+does not implicitly opt out; set `KATA_TELEMETRY_ENABLED=0` before the daemon
+starts to disable the events.
+
 ## Federation credentials
 
 Federation enrollment tokens are separate from daemon API tokens. The hub

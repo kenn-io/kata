@@ -22,6 +22,7 @@ required_files=(
   "docs/operations/backup-restore.md"
   "docs/reference/configuration.md"
   "docs/development/contributing.md"
+  "docs/development/packaging.md"
   "docs/development/deploying-docs.md"
   "docs/zensical.toml"
   "docs/vercel.json"

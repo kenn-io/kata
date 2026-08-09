@@ -56,6 +56,91 @@ func TestUpdate_IsWiredOnRoot(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestUpdateInstall_PackageManagedBuildFailsBeforeClientConstruction(t *testing.T) {
+	tests := []struct {
+		name         string
+		distribution string
+		want         string
+	}{
+		{name: "homebrew", distribution: "homebrew", want: "brew upgrade kata"},
+		{name: "deb", distribution: "deb", want: ".deb package"},
+		{name: "rpm", distribution: "rpm", want: ".rpm package"},
+		{name: "third party", distribution: "nixpkgs", want: `"nixpkgs"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetFlags(t)
+			stubDistribution(t, tt.distribution)
+			constructed := false
+			orig := newSelfUpdateClient
+			newSelfUpdateClient = func(string) (updateClient, error) {
+				constructed = true
+				return nil, errors.New("client must not be constructed")
+			}
+			t.Cleanup(func() { newSelfUpdateClient = orig })
+
+			_, _, err := executeRootCapture(t, context.Background(), "update", "--yes")
+
+			ce := requireCLIError(t, err, ExitUsage)
+			assert.Equal(t, kindUsage, ce.Kind)
+			assert.Contains(t, ce.Message, tt.want)
+			assert.False(t, constructed)
+		})
+	}
+}
+
+func TestUpdateInstall_PackageManagedFormsFailBeforeClientConstruction(t *testing.T) {
+	forms := [][]string{
+		{"update"},
+		{"update", "--yes"},
+		{"update", "--force"},
+	}
+	for _, args := range forms {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			resetFlags(t)
+			stubDistribution(t, "homebrew")
+			constructed := false
+			orig := newSelfUpdateClient
+			newSelfUpdateClient = func(string) (updateClient, error) {
+				constructed = true
+				return nil, errors.New("client must not be constructed")
+			}
+			t.Cleanup(func() { newSelfUpdateClient = orig })
+
+			_, _, err := executeRootCapture(t, context.Background(), args...)
+
+			ce := requireCLIError(t, err, ExitUsage)
+			assert.Equal(t, kindUsage, ce.Kind)
+			assert.False(t, constructed)
+		})
+	}
+}
+
+func TestUpdateCheck_PackageManagedFlagCombinationsRemainReadOnly(t *testing.T) {
+	forms := [][]string{
+		{"update", "--check", "--yes"},
+		{"update", "--check", "--force"},
+	}
+	for _, args := range forms {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			resetFlags(t)
+			stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+			stubDistribution(t, "homebrew")
+			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+				CurrentVersion: "v0.4.0",
+				LatestVersion:  "v0.5.0",
+			}}}
+			stubUpdateClient(t, fake)
+
+			_, _, err := executeRootCapture(t, context.Background(), args...)
+
+			require.NoError(t, err)
+			assert.Len(t, fake.checks, 1)
+			assert.Empty(t, fake.installed)
+		})
+	}
+}
+
 func TestUpdateCheck_HumanUpToDate(t *testing.T) {
 	resetFlags(t)
 	stubVersionInfo(t, "v0.5.0", "abc1234", "2026-06-19T12:00:00Z")
@@ -85,6 +170,23 @@ func TestUpdateCheck_HumanUpdateAvailable(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "update available: v0.4.0 -> v0.5.0\n", stdout)
+	assert.Empty(t, fake.installed)
+}
+
+func TestUpdateCheck_HomebrewHumanUpdateAvailable(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	stubDistribution(t, "homebrew")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--check")
+
+	require.NoError(t, err)
+	assert.Equal(t, "update available: v0.4.0 -> v0.5.0\n\nHomebrew manages this installation. Try 'brew upgrade kata' when the update is packaged; the formula may trail GitHub releases.\n", stdout)
 	assert.Empty(t, fake.installed)
 }
 
@@ -123,12 +225,14 @@ func TestUpdateCheck_JSONOutput(t *testing.T) {
 
 	require.NoError(t, err)
 	var got struct {
-		KataAPIVersion  int    `json:"kata_api_version"`
-		CurrentVersion  string `json:"current_version"`
-		LatestVersion   string `json:"latest_version"`
-		UpdateAvailable bool   `json:"update_available"`
-		AssetName       string `json:"asset_name"`
-		IsDevBuild      bool   `json:"is_dev_build"`
+		KataAPIVersion       int    `json:"kata_api_version"`
+		CurrentVersion       string `json:"current_version"`
+		LatestVersion        string `json:"latest_version"`
+		UpdateAvailable      bool   `json:"update_available"`
+		AssetName            string `json:"asset_name"`
+		IsDevBuild           bool   `json:"is_dev_build"`
+		Distribution         string `json:"distribution"`
+		PackageReleaseMayLag bool   `json:"package_release_may_lag"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
 	assert.Equal(t, 1, got.KataAPIVersion)
@@ -137,6 +241,35 @@ func TestUpdateCheck_JSONOutput(t *testing.T) {
 	assert.True(t, got.UpdateAvailable)
 	assert.Equal(t, "kata_0.5.0_linux_amd64.tar.gz", got.AssetName)
 	assert.True(t, got.IsDevBuild)
+	assert.Empty(t, got.Distribution)
+	assert.False(t, got.PackageReleaseMayLag)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &fields))
+	assert.NotContains(t, fields, "upgrade_hint")
+}
+
+func TestUpdateCheck_HomebrewJSONOutput(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	stubDistribution(t, "homebrew")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "--json", "update", "--check")
+
+	require.NoError(t, err)
+	var got struct {
+		Distribution         string `json:"distribution"`
+		UpgradeHint          string `json:"upgrade_hint"`
+		PackageReleaseMayLag bool   `json:"package_release_may_lag"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, "homebrew", got.Distribution)
+	assert.Equal(t, "brew upgrade kata", got.UpgradeHint)
+	assert.True(t, got.PackageReleaseMayLag)
 }
 
 func TestUpdateCheck_AgentOutput(t *testing.T) {
@@ -151,7 +284,23 @@ func TestUpdateCheck_AgentOutput(t *testing.T) {
 	stdout, _, err := executeRootCapture(t, context.Background(), "--agent", "update", "--check")
 
 	require.NoError(t, err)
-	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0\n", stdout)
+	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0 distribution=\"\" package_release_may_lag=false\n", stdout)
+}
+
+func TestUpdateCheck_HomebrewAgentOutput(t *testing.T) {
+	resetFlags(t)
+	stubVersionInfo(t, "v0.4.0", "abc1234", "2026-06-19T12:00:00Z")
+	stubDistribution(t, "homebrew")
+	fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{
+		CurrentVersion: "v0.4.0",
+		LatestVersion:  "v0.5.0",
+	}}}
+	stubUpdateClient(t, fake)
+
+	stdout, _, err := executeRootCapture(t, context.Background(), "--agent", "update", "--check")
+
+	require.NoError(t, err)
+	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0 distribution=homebrew upgrade_hint=\"brew upgrade kata\" package_release_may_lag=true\n", stdout)
 }
 
 func TestUpdateInstall_HumanShowsDownloadDetailsBeforeConfirmation(t *testing.T) {

@@ -285,8 +285,8 @@ This compatibility policy does not extend to legacy v0.9 directional unlink
 payloads. `issue.unlinked` events for `blocks` and `parent` must carry
 `link_from_uid` and `link_to_uid` in storage orientation. The hub rejects a
 payload that omits them; it does not infer orientation from current graph state
-or rewrite the event. This is a deliberate pre-1.0 contract boundary, not a
-transient version-skew condition.
+or rewrite the event. This is a deliberate legacy compatibility boundary, not
+a transient version-skew condition.
 
 Upgrade hubs before push-enabled spokes when rolling out a new federation
 schema. If an older build already quarantined a batch because of transient

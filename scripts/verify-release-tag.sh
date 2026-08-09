@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$repo_root/scripts/release-version.sh"
+
 usage() {
   printf 'usage: %s <vMAJOR.MINOR.PATCH>\n' "$0" >&2
 }
@@ -11,9 +14,9 @@ if [[ -z "$tag_name" ]]; then
   exit 2
 fi
 
-if [[ ! "$tag_name" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if ! is_release_tag "$tag_name"; then
   printf 'Invalid release tag: %s\n' "$tag_name" >&2
-  printf 'Expected format: vMAJOR.MINOR.PATCH\n' >&2
+  printf 'Expected format: vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease\n' >&2
   exit 2
 fi
 
@@ -39,11 +42,16 @@ if ! git merge-base --is-ancestor "$tag_sha" origin/main; then
 fi
 
 version="${tag_name#v}"
+prerelease=false
+if is_prerelease_version "$version"; then
+  prerelease=true
+fi
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     printf 'tag_name=%s\n' "$tag_name"
     printf 'version=%s\n' "$version"
     printf 'tag_sha=%s\n' "$tag_sha"
+    printf 'prerelease=%s\n' "$prerelease"
   } >>"$GITHUB_OUTPUT"
 fi
 

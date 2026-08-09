@@ -29,6 +29,7 @@ func newVersionCmd() *cobra.Command {
 					"version":      version.Version,
 					"commit":       version.Commit,
 					"built":        version.BuildDate,
+					"distribution": version.Distribution,
 					"go":           runtime.Version(),
 					"os":           runtime.GOOS,
 					"arch":         runtime.GOARCH,

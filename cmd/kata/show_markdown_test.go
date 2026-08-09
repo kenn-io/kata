@@ -45,7 +45,9 @@ func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
 		_, _ = fmt.Fprintf(os.Stderr, "renderer rejected %s", payload)
 		os.Exit(9)
 	case "wait":
-		select {}
+		// Keep a timer registered so the runtime does not mistake this helper
+		// process for a deadlock and exit before the renderer cancels it.
+		time.Sleep(24 * time.Hour)
 	case "spawn-descendant":
 		readyPath := os.Args[marker+2]
 		//nolint:gosec // G204: this test starts its own fixed test binary helper with fixed arguments.
@@ -68,7 +70,9 @@ func TestShowMarkdownRendererHelperProcess(_ *testing.T) {
 		if err := os.Rename(readyTempPath, readyPath); err != nil {
 			os.Exit(25)
 		}
-		select {}
+		// Keep a timer registered for the same reason as the wait helper. The
+		// renderer cancellation path is responsible for ending this process.
+		time.Sleep(24 * time.Hour)
 	default:
 		os.Exit(22)
 	}

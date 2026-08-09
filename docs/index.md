@@ -40,6 +40,12 @@ issue editing, relationships, recurrences, and configured-daemon switching.
 === "macOS / Linux"
 
     ```sh
+    brew install kenn-io/tap/kata
+    ```
+
+    Or install the ordinary release archive:
+
+    ```sh
     curl -fsSL https://katatracker.com/install.sh | bash
     ```
 
@@ -60,10 +66,9 @@ kata version
 Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
 [Install](get-started/install.md).
 
-!!! note "Pre-1.0"
-    kata publishes versioned pre-1.0 releases. The CLI, daemon, and TUI are
-    usable, but command contracts and UI details can still change before a
-    stable release.
+!!! note "Stable"
+    Since v0.14.0, kata releases preserve backward compatibility across
+    upgrades.
 
 ## Why kata
 

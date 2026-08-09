@@ -19,13 +19,18 @@ serve`; see the [MCP reference](docs/reference/mcp.md).
 The documentation in [`docs/`](docs/) is the definitive guide, published with
 Zensical at <https://katatracker.com/>.
 
-> **Pre-1.0:** kata publishes versioned pre-1.0 releases. The CLI, daemon, and
-> TUI are usable, but command contracts and UI details can still change before a
-> stable release.
+> **Stable:** Since v0.14.0, kata releases preserve backward compatibility
+> across upgrades.
 
 ## Install
 
 macOS or Linux:
+
+```sh
+brew install kenn-io/tap/kata
+```
+
+Or use the release installer:
 
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
@@ -45,9 +50,10 @@ the install with:
 kata version
 ```
 
-Release builds update themselves with `kata update`. Linux `.deb` and `.rpm`
-packages are published for `amd64` and `arm64`. Prefer to build from source?
-kata needs **Go 1.26 or later**:
+Release-archive builds update themselves with `kata update`. Homebrew installs
+use `brew upgrade kata`; Linux `.deb` and `.rpm` packages are published for
+`amd64` and `arm64` and remain owned by the system package manager. Prefer to
+build from source? kata needs **Go 1.26 or later**:
 
 ```sh
 go install go.kenn.io/kata/cmd/kata@latest

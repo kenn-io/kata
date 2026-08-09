@@ -8,10 +8,25 @@ daemon it starts itself, and it stores data locally in SQLite.
 The release installers below do not require Go. Install Go 1.26 or later from
 <https://go.dev/dl/> only when using `go install` or building from a clone.
 
-GitHub release binaries are available starting with `v0.5.0`. The recommended
-path for most users is the release installer for their platform.
+GitHub release binaries are available starting with `v0.5.0`. Since v0.14.0,
+kata publishes stable releases that preserve backward compatibility across
+upgrades.
 
-On macOS or Linux:
+The recommended path on macOS or Linux is the official Homebrew tap:
+
+```sh
+brew install kenn-io/tap/kata
+```
+
+Homebrew owns this binary. Check Kata's release feed with `kata update --check`,
+and install packaged updates with:
+
+```sh
+brew upgrade kata
+```
+
+The formula may trail a newly published GitHub release. To install an ordinary
+release archive on macOS or Linux instead:
 
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
@@ -38,7 +53,8 @@ before running them if you prefer.
 Linux `.deb` and `.rpm` packages are also published for `amd64` and `arm64`.
 Download the package for your distribution from
 [GitHub releases](https://github.com/kenn-io/kata/releases), then install it
-with your system package tool.
+with your system package tool. Upgrade those installations with the same
+package manager; Kata will not replace a package-owned binary itself.
 
 After installing a release build, check for newer releases:
 
@@ -46,15 +62,20 @@ After installing a release build, check for newer releases:
 kata update --check
 ```
 
-Install an available update from GitHub release assets:
+For an ordinary release archive or installer-based installation, install an
+available update from GitHub release assets:
 
 ```sh
 kata update
 ```
 
 `kata update` verifies the downloaded archive against `SHA256SUMS` before
-replacing the installed binary. Installing with `go install` remains supported,
-and building from a clone is still useful for development builds.
+replacing the installed binary. Package-managed installations keep
+`kata update --check`, but install-capable update forms direct you back to the
+owning package manager. Packagers can read the complete
+[packaging contract](../development/packaging.md). Installing with `go install`
+remains supported, and building from a clone is still useful for development
+builds.
 
 ## Install with `go install`
 

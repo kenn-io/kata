@@ -24,9 +24,17 @@ func stubVersionInfo(t *testing.T, ver, commit, built string) {
 	})
 }
 
+func stubDistribution(t *testing.T, distribution string) {
+	t.Helper()
+	orig := version.Distribution
+	version.Distribution = distribution
+	t.Cleanup(func() { version.Distribution = orig })
+}
+
 func TestVersion_HumanFormatIncludesBuildMetadata(t *testing.T) {
 	resetFlags(t)
 	stubVersionInfo(t, "v0.0.1-test", "abc1234", "2026-05-12T11:17:12Z")
+	stubDistribution(t, "homebrew")
 
 	out := string(executeRoot(t, newVersionCmd()))
 
@@ -44,20 +52,22 @@ func TestVersion_HumanFormatIncludesBuildMetadata(t *testing.T) {
 func TestVersion_JSONEnvelope(t *testing.T) {
 	resetFlags(t)
 	stubVersionInfo(t, "v0.0.1-test", "abc1234", "2026-05-12T11:17:12Z")
+	stubDistribution(t, "homebrew")
 	t.Chdir(t.TempDir())
 	t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
 
 	out := executeRoot(t, newRootCmd(), "version", "--json")
 
 	var got struct {
-		APIVersion int    `json:"kata_api_version"`
-		Name       string `json:"name"`
-		Version    string `json:"version"`
-		Commit     string `json:"commit"`
-		Built      string `json:"built"`
-		Go         string `json:"go"`
-		OS         string `json:"os"`
-		Arch       string `json:"arch"`
+		APIVersion   int    `json:"kata_api_version"`
+		Name         string `json:"name"`
+		Version      string `json:"version"`
+		Commit       string `json:"commit"`
+		Built        string `json:"built"`
+		Go           string `json:"go"`
+		OS           string `json:"os"`
+		Arch         string `json:"arch"`
+		Distribution string `json:"distribution"`
 	}
 	require.NoError(t, json.Unmarshal(out, &got))
 	assert.Equal(t, 1, got.APIVersion)
@@ -68,13 +78,14 @@ func TestVersion_JSONEnvelope(t *testing.T) {
 	assert.Equal(t, runtime.Version(), got.Go)
 	assert.Equal(t, runtime.GOOS, got.OS)
 	assert.Equal(t, runtime.GOARCH, got.Arch)
+	assert.Equal(t, "homebrew", got.Distribution)
 }
 
 func TestVersion_AgentIncludesFormatVersion(t *testing.T) {
 	resetFlags(t)
+	stubDistribution(t, "homebrew")
 	out := string(executeRoot(t, newRootCmd(), "--agent", "version"))
-	assert.Contains(t, out, "OK version ")
-	assert.Contains(t, out, "agent_format=1")
+	assert.Equal(t, "OK version version="+agentValue(version.Version)+" agent_format=1\n", out)
 }
 
 func TestVersion_JSONIncludesAgentFormat(t *testing.T) {
