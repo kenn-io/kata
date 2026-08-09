@@ -21,6 +21,7 @@ coverage.out
 __pycache__/
 /docs/.zensical-build.*.toml
 /docs/zensical-public-docs.*/
+/node_modules/
 /web/node_modules/
 /web/dist/
 /web/coverage/
