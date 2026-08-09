@@ -73,10 +73,15 @@ fi
 
 run make docs-install
 run bash docs/screenshots/update-assets-branch.sh --push
-# hydrate-assets.sh exits early when screenshots exist, so clear local ignored
-# assets before hydrating from the newly pushed docs-assets branch.
-run rm -rf docs/assets/screenshots
-run bash docs/screenshots/hydrate-assets.sh
+assets_branch="${KATA_DOCS_ASSETS_BRANCH:-docs-assets}"
+if [[ "$DRY_RUN" == false ]]; then
+  assets_commit="$(git rev-parse --verify "refs/heads/$assets_branch^{commit}")"
+  printf '+ pin docs assets %s\n' "$assets_commit"
+else
+  assets_commit="<generated-$assets_branch-commit>"
+  printf '+ pin docs assets to the generated %s commit\n' "$assets_branch"
+fi
+run env "KATA_DOCS_ASSETS_COMMIT=$assets_commit" bash docs/screenshots/hydrate-assets.sh --force
 run make docs-build
 run make docs-check
-run make docs-deploy
+run env "KATA_DOCS_ASSETS_COMMIT=$assets_commit" make docs-deploy

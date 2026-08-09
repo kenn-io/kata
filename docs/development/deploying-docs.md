@@ -88,22 +88,30 @@ root:
 scripts/update-docs.sh
 ```
 
-The helper regenerates and pushes the `docs-assets` screenshot branch, hydrates
-local screenshots, builds the docs, runs the docs checks, and deploys with
-Vercel. It does not commit source changes; commit or stash non-ignored docs
-edits before running it.
+The helper regenerates and pushes the `docs-assets` screenshot branch, captures
+that immutable commit ID, hydrates local screenshots from that exact commit,
+builds the docs, runs the docs checks, and deploys the same assets with Vercel.
+It does not commit source changes; commit or stash non-ignored docs edits before
+running it.
 
 If you need to run only the Vercel deploy step:
 
 ```sh
-make docs-deploy
+KATA_DOCS_ASSETS_COMMIT=<reviewed-full-commit-id> make docs-deploy
 ```
 
 The Make target runs:
 
 ```sh
+test -n "$KATA_DOCS_ASSETS_COMMIT"
+bash docs/screenshots/hydrate-assets.sh --force
 vercel deploy --prod
 ```
+
+The required commit ID must already exist in the local repository. Hydration
+archives that immutable object without refreshing the mutable `docs-assets`
+branch, so Vercel uploads the same assets that were reviewed and validated.
+Vercel build machines do not have Git metadata to fetch the branch themselves.
 
 Useful Vercel references:
 

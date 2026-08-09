@@ -209,22 +209,65 @@ func TestDocsAssetHydratorForceFetchesAndValidatesRemoteBranch(t *testing.T) {
 	oldCommit := commitAssetTree(t, remote, oldSource, "old docs assets")
 	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", oldCommit)
 	git(t, repo, "fetch", "origin", "docs-assets:refs/remotes/origin/docs-assets")
+	git(t, repo, "branch", "docs-assets", "refs/remotes/origin/docs-assets")
+	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
+	cmd := exec.Command("bash", hydrator) //nolint:gosec // test-owned script installed under TempDir
+	cmd.Dir = repo
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	hydrated, err := os.ReadFile(filepath.Join(repo, "docs", "assets", "screenshots", "web-ui", "workspace.png")) //nolint:gosec // test-owned path under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "old\n", string(hydrated))
 
 	newSource := filepath.Join(tempDir, "new")
 	writeDocsAssets(t, newSource, "new")
 	newCommit := commitAssetTree(t, remote, newSource, "new docs assets")
 	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", newCommit)
 
-	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
-	cmd := exec.Command("bash", hydrator) //nolint:gosec // test-owned script installed under TempDir
+	cmd = exec.Command("bash", hydrator, "--force") //nolint:gosec // test-owned script installed under TempDir
 	cmd.Dir = repo
+	output, err = cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+
+	hydrated, err = os.ReadFile(filepath.Join(repo, "docs", "assets", "screenshots", "web-ui", "workspace.png")) //nolint:gosec // test-owned path under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "new\n", string(hydrated))
+	assert.Equal(t, newCommit, gitOutput(t, repo, "rev-parse", "origin/docs-assets"))
+}
+
+func TestDocsAssetHydratorUsesPinnedCommitWithoutRefreshingRemote(t *testing.T) {
+	requireDocsScriptTools(t)
+
+	tempDir := t.TempDir()
+	remote := filepath.Join(tempDir, "remote.git")
+	repo := filepath.Join(tempDir, "repo")
+	git(t, tempDir, "init", "--bare", remote)
+	initDocsTestRepo(t, repo)
+	git(t, repo, "remote", "add", "origin", remote)
+
+	pinnedSource := filepath.Join(tempDir, "pinned")
+	writeDocsAssets(t, pinnedSource, "pinned")
+	pinnedCommit := commitAssetTree(t, remote, pinnedSource, "pinned docs assets")
+	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", pinnedCommit)
+	git(t, repo, "fetch", "origin", "docs-assets:refs/remotes/origin/docs-assets")
+
+	replacementSource := filepath.Join(tempDir, "replacement")
+	writeDocsAssets(t, replacementSource, "replacement")
+	replacementCommit := commitAssetTree(t, remote, replacementSource, "replacement docs assets")
+	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", replacementCommit)
+
+	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
+	cmd := exec.Command("bash", hydrator, "--force") //nolint:gosec // test-owned script installed under TempDir
+	cmd.Dir = repo
+	cmd.Env = append(envWithout("KATA_DOCS_ASSETS_COMMIT"), "KATA_DOCS_ASSETS_COMMIT="+pinnedCommit)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 
 	hydrated, err := os.ReadFile(filepath.Join(repo, "docs", "assets", "screenshots", "web-ui", "workspace.png")) //nolint:gosec // test-owned path under TempDir
 	require.NoError(t, err)
-	assert.Equal(t, "new\n", string(hydrated))
-	assert.Equal(t, newCommit, gitOutput(t, repo, "rev-parse", "origin/docs-assets"))
+	assert.Equal(t, "pinned\n", string(hydrated))
+	assert.Equal(t, pinnedCommit, gitOutput(t, repo, "rev-parse", "origin/docs-assets"))
+	assert.Equal(t, replacementCommit, gitBareOutput(t, remote, nil, "rev-parse", "refs/heads/docs-assets"))
 }
 
 func TestWebScreenshotGeneratorRunsFocusedCapture(t *testing.T) {
