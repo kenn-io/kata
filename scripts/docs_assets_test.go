@@ -209,19 +209,26 @@ func TestDocsAssetHydratorForceFetchesAndValidatesRemoteBranch(t *testing.T) {
 	oldCommit := commitAssetTree(t, remote, oldSource, "old docs assets")
 	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", oldCommit)
 	git(t, repo, "fetch", "origin", "docs-assets:refs/remotes/origin/docs-assets")
+	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
+	cmd := exec.Command("bash", hydrator) //nolint:gosec // test-owned script installed under TempDir
+	cmd.Dir = repo
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	hydrated, err := os.ReadFile(filepath.Join(repo, "docs", "assets", "screenshots", "web-ui", "workspace.png")) //nolint:gosec // test-owned path under TempDir
+	require.NoError(t, err)
+	assert.Equal(t, "old\n", string(hydrated))
 
 	newSource := filepath.Join(tempDir, "new")
 	writeDocsAssets(t, newSource, "new")
 	newCommit := commitAssetTree(t, remote, newSource, "new docs assets")
 	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", newCommit)
 
-	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
-	cmd := exec.Command("bash", hydrator) //nolint:gosec // test-owned script installed under TempDir
+	cmd = exec.Command("bash", hydrator, "--force") //nolint:gosec // test-owned script installed under TempDir
 	cmd.Dir = repo
-	output, err := cmd.CombinedOutput()
+	output, err = cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 
-	hydrated, err := os.ReadFile(filepath.Join(repo, "docs", "assets", "screenshots", "web-ui", "workspace.png")) //nolint:gosec // test-owned path under TempDir
+	hydrated, err = os.ReadFile(filepath.Join(repo, "docs", "assets", "screenshots", "web-ui", "workspace.png")) //nolint:gosec // test-owned path under TempDir
 	require.NoError(t, err)
 	assert.Equal(t, "new\n", string(hydrated))
 	assert.Equal(t, newCommit, gitOutput(t, repo, "rev-parse", "origin/docs-assets"))

@@ -99,7 +99,7 @@ docs-assets-branch:
 	bash docs/screenshots/update-assets-branch.sh
 
 docs-deploy:
-	bash docs/screenshots/hydrate-assets.sh
+	bash docs/screenshots/hydrate-assets.sh --force
 	vercel deploy --prod
 
 lint:

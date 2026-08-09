@@ -7,12 +7,28 @@ docs_root="$(cd "$script_dir/.." && pwd)"
 repo_root="$(cd "$docs_root/.." && pwd)"
 assets_branch="${KATA_DOCS_ASSETS_BRANCH:-docs-assets}"
 target="$docs_root/assets/screenshots"
+force=false
+case "${1:-}" in
+  "")
+    ;;
+  --force)
+    force=true
+    ;;
+  -h|--help)
+    printf 'usage: %s [--force]\n' "${0##*/}"
+    exit 0
+    ;;
+  *)
+    printf 'usage: %s [--force]\n' "${0##*/}" >&2
+    exit 2
+    ;;
+esac
 
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=assets.sh
 . "$script_dir/assets.sh"
 
-if kata_docs_validate_assets "$target" >/dev/null 2>&1; then
+if [[ "$force" == false ]] && kata_docs_validate_assets "$target" >/dev/null 2>&1; then
   exit 0
 fi
 

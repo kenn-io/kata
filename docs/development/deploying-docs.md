@@ -102,13 +102,13 @@ make docs-deploy
 The Make target runs:
 
 ```sh
-bash docs/screenshots/hydrate-assets.sh
+bash docs/screenshots/hydrate-assets.sh --force
 vercel deploy --prod
 ```
 
-The hydration step ensures the ignored screenshot assets are included in the
-Vercel upload; Vercel build machines do not have Git metadata to fetch the
-asset branch themselves.
+The forced hydration refreshes the ignored screenshot assets from the
+`docs-assets` branch before upload; Vercel build machines do not have Git
+metadata to fetch that branch themselves.
 
 Useful Vercel references:
 
