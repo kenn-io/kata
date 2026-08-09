@@ -75,6 +75,8 @@ it. That is deliberate: a version-detection field has to survive version skew,
 so a client generated from a schema that includes it can still parse the
 response of an older daemon that predates it. Treat an **absent or empty**
 `api_schema_version` as "a daemon older than this field," not a parse error.
+Embedding hosts using `@kenn-io/kata-ui` must treat that state as incompatible
+and decline to render issue detail.
 
 ### Version history
 
@@ -132,7 +134,20 @@ endpoints published in OpenAPI:
   selected detail/history/graph projection, capability envelope, durable event
   cursor, and strong ETag.
 - `GET /api/v1/ui/references` returns bounded projects, owners, labels, and
-  qualified issue references for pickers and typeahead.
+  qualified issue references for pickers and typeahead. Repeating `issue_uid`
+  hydrates summaries for up to 200 stable issue UIDs and composes with the
+  existing project and text filters.
+- `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
+  returns a safe absolute route into the standalone browser application:
+
+  ```json
+  {"available": true, "url": "https://kata.example/kata?issue=<uid>"}
+  ```
+
+  When no credential-safe browser origin is configured, it returns HTTP 200
+  with `{"available":false,"reason":"browser_origin_unavailable"}` and no
+  URL. Unknown or deleted issues, archived projects, and host-denied resources
+  remain not found.
 
 A matching snapshot `If-None-Match` returns `304` without rebuilding the
 projection. The response cursor is captured in the same consistent storage
@@ -153,6 +168,11 @@ Session-authentication errors advertise the canonical browser origin in
 `X-Kata-Web-Authentication`, allowing `kata ui` to distinguish a configured
 keyless loopback URL from an authenticated deployment without carrying a
 launch credential.
+
+The launch-target URL is derived only from the daemon's configured canonical
+browser origin. Request `Host`, `Origin`, and forwarding headers never supply
+authority, and origins with credentials, path prefixes, query strings, or
+fragments are unavailable rather than rewritten.
 
 Every browser data request requires both the instance cookie and
 `X-Kata-Web-Session`. Mutations additionally require the exact `Origin` and

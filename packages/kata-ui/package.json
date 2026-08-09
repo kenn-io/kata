@@ -17,8 +17,13 @@
     }
   },
   "files": [
-    "src",
-    "README.md"
+    "README.md",
+    "src/index.ts",
+    "src/types.ts",
+    "src/compatibility.ts",
+    "src/projectIssueDetail.ts",
+    "src/IssueDetail.svelte",
+    "src/components"
   ],
   "scripts": {
     "test": "vitest run",
