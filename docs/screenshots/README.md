@@ -35,8 +35,10 @@ docs/screenshots/update-assets-branch.sh \
 The `docs-assets` branch is intentionally an orphan branch with one commit.
 Generated images stay out of `main`; docs pages reference them through
 `/assets/screenshots/...`. Local preview reads the ignored generated files.
-Production builds run `docs/screenshots/hydrate-assets.sh`, which force-fetches
-and validates the branch before replacing the ignored screenshot directory.
+The deployment helper pins the generated asset commit in
+`KATA_DOCS_ASSETS_COMMIT`, then `docs/screenshots/hydrate-assets.sh` validates
+and archives that exact object before replacing the ignored screenshot
+directory. Vercel builds consume those pre-hydrated files without Git access.
 
 Pass `--push` only after reviewing the generated files and source changes when
 you intend to replace the remote orphan branch.
