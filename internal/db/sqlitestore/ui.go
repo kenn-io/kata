@@ -954,6 +954,13 @@ func readUIReferenceIssues(
 		statement += ` AND p.uid = ?`
 		args = append(args, query.ProjectUID)
 	}
+	if len(query.IssueUIDs) > 0 {
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(query.IssueUIDs)), ",")
+		statement += ` AND i.uid IN (` + placeholders + `)` // #nosec G202 -- only SQL placeholders are constructed.
+		for _, issueUID := range query.IssueUIDs {
+			args = append(args, issueUID)
+		}
+	}
 	if query.Query != "" {
 		needle := "%" + strings.ToLower(query.Query) + "%"
 		statement += ` AND (LOWER(i.title) LIKE ? OR LOWER(i.short_id) LIKE ? OR LOWER(p.name) LIKE ? OR LOWER(p.name || '#' || i.short_id) LIKE ?)`

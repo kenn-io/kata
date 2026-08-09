@@ -201,6 +201,36 @@ func TestOpenAPIDocumentIncludesUIReadContract(t *testing.T) {
 	require.NotNil(t, references, "missing UI references path")
 	require.NotNil(t, references.Get, "missing GET UI references operation")
 	require.Contains(t, references.Get.Responses, "200")
+	var referenceIssueUID *huma.Param
+	for _, parameter := range references.Get.Parameters {
+		if parameter.Name == "issue_uid" && parameter.In == "query" {
+			referenceIssueUID = parameter
+			break
+		}
+	}
+	require.NotNil(t, referenceIssueUID, "missing repeated UI reference issue_uid query parameter")
+	require.Equal(t, huma.TypeArray, referenceIssueUID.Schema.Type)
+	require.NotNil(t, referenceIssueUID.Explode)
+	require.True(t, *referenceIssueUID.Explode)
+
+	launch := doc.Paths["/api/v1/ui/launch-target"]
+	require.NotNil(t, launch, "missing UI launch target path")
+	require.NotNil(t, launch.Get, "missing GET UI launch target operation")
+	require.Contains(t, launch.Get.Responses, "200")
+	var launchIssueUID *huma.Param
+	for _, parameter := range launch.Get.Parameters {
+		if parameter.Name == "issue_uid" && parameter.In == "query" {
+			launchIssueUID = parameter
+			break
+		}
+	}
+	require.NotNil(t, launchIssueUID, "missing required launch issue_uid query parameter")
+	require.True(t, launchIssueUID.Required)
+	launchResponse := doc.Components.Schemas.Map()["UILaunchTargetResponseBody"]
+	require.NotNil(t, launchResponse, "missing UI launch target response schema")
+	require.Contains(t, launchResponse.Properties, "url")
+	require.Contains(t, launchResponse.Properties, "reason")
+	require.Equal(t, []any{"browser_origin_unavailable"}, launchResponse.Properties["reason"].Enum)
 
 	response := doc.Components.Schemas.Map()["UISnapshotResponseBody"]
 	require.NotNil(t, response, "missing UI snapshot response schema")

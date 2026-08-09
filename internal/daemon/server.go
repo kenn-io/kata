@@ -462,6 +462,7 @@ func registerRoutes(humaAPI huma.API, mux *http.ServeMux, cfg ServerConfig) {
 	registerDigestHandlers(humaAPI, cfg)
 	registerAuditHandlers(humaAPI, cfg)
 	registerUIHandlers(humaAPI, cfg)
+	registerUILaunchHandler(humaAPI, cfg)
 }
 
 // registerHealth registers /api/v1/ping and /api/v1/health.

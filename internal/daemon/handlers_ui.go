@@ -67,9 +67,10 @@ func (in normalizedUISnapshotIntent) storeQuery() db.UISnapshotQuery {
 }
 
 type normalizedUIReferencesIntent struct {
-	Query      string `json:"query,omitempty"`
-	ProjectUID string `json:"project_uid,omitempty"`
-	Limit      int    `json:"limit"`
+	Query      string   `json:"query,omitempty"`
+	ProjectUID string   `json:"project_uid,omitempty"`
+	IssueUIDs  []string `json:"issue_uids,omitempty"`
+	Limit      int      `json:"limit"`
 }
 
 type uiPolicy struct {
@@ -257,7 +258,8 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 			}
 			data, err := cfg.UIStore.ReadUIReferences(ctx, db.UIReferencesQuery{
-				Query: intent.Query, ProjectUID: intent.ProjectUID, Limit: intent.Limit,
+				Query: intent.Query, ProjectUID: intent.ProjectUID,
+				IssueUIDs: append([]string(nil), intent.IssueUIDs...), Limit: intent.Limit,
 			})
 			if err != nil {
 				return nil, internalAPIError(err)
@@ -332,8 +334,32 @@ func normalizeUIReferencesIntent(in *api.UIReferencesRequest) (normalizedUIRefer
 	if err != nil {
 		return normalizedUIReferencesIntent{}, err
 	}
+	issueUIDs := make([]string, 0, len(in.IssueUID))
+	seenIssueUIDs := make(map[string]struct{}, len(in.IssueUID))
+	for _, raw := range in.IssueUID {
+		issueUID, err := normalizeUIUID(raw, "issue_uid", false)
+		if err != nil {
+			return normalizedUIReferencesIntent{}, err
+		}
+		if issueUID == "" {
+			continue
+		}
+		if _, seen := seenIssueUIDs[issueUID]; seen {
+			continue
+		}
+		seenIssueUIDs[issueUID] = struct{}{}
+		issueUIDs = append(issueUIDs, issueUID)
+	}
+	if len(issueUIDs) > uiReferencesLimitMax {
+		return normalizedUIReferencesIntent{}, uiValidationError(
+			"issue_uid",
+			"issue_uid accepts at most 200 distinct values",
+			map[string]any{"limit": uiReferencesLimitMax},
+		)
+	}
+	sort.Strings(issueUIDs)
 	return normalizedUIReferencesIntent{
-		Query: strings.TrimSpace(in.Query), ProjectUID: projectUID, Limit: limit,
+		Query: strings.TrimSpace(in.Query), ProjectUID: projectUID, IssueUIDs: issueUIDs, Limit: limit,
 	}, nil
 }
 

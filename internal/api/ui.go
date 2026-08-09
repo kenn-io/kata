@@ -93,7 +93,15 @@ type UIReferencesRequest struct {
 	IfNoneMatch string      `header:"If-None-Match"`
 	Query       string      `query:"q"`
 	ProjectUID  string      `query:"project_uid"`
+	IssueUID    []string    `query:"issue_uid"`
 	Limit       OptionalInt `query:"limit"`
+}
+
+// Resolve preserves every repeated stable issue identifier.
+func (in *UIReferencesRequest) Resolve(ctx huma.Context) []error {
+	requestURL := ctx.URL()
+	in.IssueUID = append([]string(nil), requestURL.Query()["issue_uid"]...)
+	return nil
 }
 
 // UIReferencesResponseBody contains bounded, coherent reference choices.

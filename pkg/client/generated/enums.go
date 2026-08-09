@@ -208,6 +208,22 @@ func (u UICapabilitiesUpdates) Validate() error {
 	}
 }
 
+type UILaunchTargetResponseBodyReason string
+
+const (
+	BrowserOriginUnavailable UILaunchTargetResponseBodyReason = "browser_origin_unavailable"
+)
+
+// Validate checks if the UILaunchTargetResponseBodyReason value is valid
+func (u UILaunchTargetResponseBodyReason) Validate() error {
+	switch u {
+	case BrowserOriginUnavailable:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid UILaunchTargetResponseBodyReason value, got: %v", u))
+	}
+}
+
 type ListAllIssuesQueryStatus string
 
 const (

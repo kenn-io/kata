@@ -7,7 +7,7 @@ func registerTaskOperationPolicies(policies map[string]HostOperationPolicy) {
 		"listLabels", "listRecurrences", "showRecurrence", "readyIssues", "readyIssuesGlobal",
 		"searchIssues", "pollEvents", "pollProjectEvents", "auditCloses", "digestGlobal",
 		"digestProject", "getIssueLeaseStatus", "readUISnapshot", "readUIReferences",
-		"resolveUIIssueReference")
+		"resolveUIIssueReference", "readUILaunchTarget")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTaskRead, Capability: hostCapabilityRead, LongLived: true,

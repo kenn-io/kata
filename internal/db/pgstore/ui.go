@@ -929,6 +929,14 @@ func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReference
 		args = append(args, query.ProjectUID)
 		statement += fmt.Sprintf(` AND p.uid = $%d`, len(args))
 	}
+	if len(query.IssueUIDs) > 0 {
+		placeholders := make([]string, 0, len(query.IssueUIDs))
+		for _, issueUID := range query.IssueUIDs {
+			args = append(args, issueUID)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		statement += ` AND i.uid IN (` + strings.Join(placeholders, ",") + `)` // #nosec G202 -- only SQL placeholders are constructed.
+	}
 	if query.Query != "" {
 		needle := "%" + strings.ToLower(query.Query) + "%"
 		args = append(args, needle, needle, needle, needle)

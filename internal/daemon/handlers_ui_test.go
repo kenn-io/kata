@@ -15,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 type countingUIStore struct {
@@ -511,6 +512,47 @@ func TestUIReferencesBoundedCapabilities(t *testing.T) {
 	require.Equal(t, []string{"a-project#a1", "z-project#z9"}, []string{envelope.Issues[0].QualifiedID, envelope.Issues[1].QualifiedID})
 	require.Equal(t, []string{"user-a", "user-b"}, envelope.Owners)
 	require.Equal(t, []string{"backend", "urgent"}, envelope.Labels)
+}
+
+func TestUIReferencesPreservesStableIssueUIDFilters(t *testing.T) {
+	store := &countingUIStore{cursor: 7, snapshotCursor: 7}
+	ts := newUISnapshotServer(t, store, false)
+	first := "01J00000000000000000000002"
+	second := "01J00000000000000000000001"
+
+	resp, body := getUIReferences(t, ts, url.Values{
+		"issue_uid": {" " + first + " ", second, first},
+	}, "")
+
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Equal(t, 1, store.referenceReads)
+	require.Equal(t, []string{second, first}, store.lastReferences.IssueUIDs)
+}
+
+func TestUIReferencesRejectsMalformedIssueUIDFilter(t *testing.T) {
+	store := &countingUIStore{cursor: 7, snapshotCursor: 7}
+	ts := newUISnapshotServer(t, store, false)
+
+	resp, body := getUIReferences(t, ts, url.Values{"issue_uid": {"not-a-uid"}}, "")
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+	require.Zero(t, store.referenceReads)
+}
+
+func TestUIReferencesRejectsTooManyIssueUIDFilters(t *testing.T) {
+	store := &countingUIStore{cursor: 7, snapshotCursor: 7}
+	ts := newUISnapshotServer(t, store, false)
+	issueUIDs := make([]string, 0, 201)
+	for range 201 {
+		issueUID, err := uid.New()
+		require.NoError(t, err)
+		issueUIDs = append(issueUIDs, issueUID)
+	}
+
+	resp, body := getUIReferences(t, ts, url.Values{"issue_uid": issueUIDs}, "")
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+	require.Zero(t, store.referenceReads)
 }
 
 func getUIReferences(t *testing.T, ts *httptest.Server, query url.Values, etag string) (*http.Response, []byte) {

@@ -373,6 +373,10 @@ type ClientInterface interface {
 	ResolveUIIssueReference(ctx context.Context, options *ResolveUIIssueReferenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ResolveUIIssueReferenceResponse, error)
 	ResolveUIIssueReferenceWithResponse(ctx context.Context, options *ResolveUIIssueReferenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ResolveUIIssueReferenceResp, error)
 
+	// ReadUILaunchTarget Read the safe browser launch target for an active issue
+	ReadUILaunchTarget(ctx context.Context, options *ReadUILaunchTargetRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUILaunchTargetResponse, error)
+	ReadUILaunchTargetWithResponse(ctx context.Context, options *ReadUILaunchTargetRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUILaunchTargetResp, error)
+
 	// ReadUIReferences Read bounded browser reference choices
 	ReadUIReferences(ctx context.Context, options *ReadUIReferencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUIReferencesResponse, error)
 	ReadUIReferencesWithResponse(ctx context.Context, options *ReadUIReferencesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUIReferencesResp, error)
@@ -5746,6 +5750,74 @@ func (c *Client) ResolveUIIssueReference(ctx context.Context, options *ResolveUI
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/ui/issue-reference")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+// ReadUILaunchTarget Read the safe browser launch target for an active issue
+func (c *Client) ReadUILaunchTarget(ctx context.Context, options *ReadUILaunchTargetRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ReadUILaunchTargetResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"issue_uid": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/ui/launch-target",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ReadUILaunchTargetResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ReadUILaunchTargetErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ReadUILaunchTargetErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ReadUILaunchTargetResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ReadUILaunchTargetResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/ui/launch-target")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

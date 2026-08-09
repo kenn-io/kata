@@ -138,6 +138,7 @@ type UISnapshotData struct {
 type UIReferencesQuery struct {
 	Query      string
 	ProjectUID string
+	IssueUIDs  []string
 	Limit      int
 }
 
