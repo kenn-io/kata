@@ -99,10 +99,6 @@ docs-assets-branch:
 	bash docs/screenshots/update-assets-branch.sh
 
 docs-deploy:
-	@test -n "$${KATA_DOCS_ASSETS_COMMIT:-}" || { \
-		printf 'KATA_DOCS_ASSETS_COMMIT is required for docs deployment\n' >&2; \
-		exit 2; \
-	}
 	bash docs/screenshots/hydrate-assets.sh --force
 	vercel deploy --prod
 

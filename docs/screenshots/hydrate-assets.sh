@@ -39,12 +39,13 @@ if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 fetch_remote_assets() {
+  local remote_ref="refs/remotes/origin/$assets_branch"
   if ! git -C "$repo_root" fetch --force --depth=1 origin \
-    "+refs/heads/$assets_branch:refs/remotes/origin/$assets_branch" >/dev/null; then
+    "+refs/heads/$assets_branch:$remote_ref" >/dev/null; then
     printf 'docs screenshots not hydrated: failed to fetch origin/%s\n' "$assets_branch" >&2
     exit 1
   fi
-  asset_ref="refs/remotes/origin/$assets_branch"
+  asset_ref="$(git -C "$repo_root" rev-parse --verify "$remote_ref^{commit}")"
 }
 
 if [[ -n "$pinned_commit" ]]; then

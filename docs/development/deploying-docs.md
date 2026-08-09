@@ -97,21 +97,20 @@ running it.
 If you need to run only the Vercel deploy step:
 
 ```sh
-KATA_DOCS_ASSETS_COMMIT=<reviewed-full-commit-id> make docs-deploy
+make docs-deploy
 ```
 
 The Make target runs:
 
 ```sh
-test -n "$KATA_DOCS_ASSETS_COMMIT"
 bash docs/screenshots/hydrate-assets.sh --force
 vercel deploy --prod
 ```
 
-The required commit ID must already exist in the local repository. Hydration
-archives that immutable object without refreshing the mutable `docs-assets`
-branch, so Vercel uploads the same assets that were reviewed and validated.
-Vercel build machines do not have Git metadata to fetch the branch themselves.
+For a standalone deployment, hydration fetches `docs-assets` once, resolves the
+fetched branch to an immutable commit, and archives that object before upload.
+The full update helper instead supplies the commit it already validated. Vercel
+build machines consume the pre-hydrated files without Git access.
 
 Useful Vercel references:
 
