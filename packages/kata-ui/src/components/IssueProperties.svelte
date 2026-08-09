@@ -39,7 +39,7 @@
   }
 
   .summary > span:first-child {
-    color: var(--accent-green, #227a41);
+    color: color-mix(in srgb, var(--accent-green, #227a41) 72%, var(--text-primary, #202124));
   }
 
   .summary > span.closed {
