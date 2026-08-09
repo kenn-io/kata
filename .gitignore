@@ -22,6 +22,7 @@ __pycache__/
 /docs/.zensical-build.*.toml
 /docs/zensical-public-docs.*/
 /node_modules/
+/packages/*/node_modules/
 /web/node_modules/
 /web/dist/
 /web/coverage/

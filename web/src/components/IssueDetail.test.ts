@@ -69,27 +69,33 @@ function renderDetail(props: Partial<IssueDetailProps> = {}) {
   })
 }
 
+async function openEditor(): Promise<void> {
+  await fireEvent.click(screen.getByRole('button', { name: 'Edit issue' }))
+}
+
 describe('IssueDetail', () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
   })
 
-  it('renders the selected issue shell and composed sections', () => {
+  it('renders the package-owned presentation before entering Kata editing mode', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T13:00:00Z'))
     renderDetail()
 
-    const detail = screen.getByRole('region', { name: 'Task detail' })
+    const detail = screen.getByRole('region', { name: 'Kata issue detail' })
     expect(within(detail).getByRole('heading', { name: 'Ship the thing' })).toBeTruthy()
     expect(within(detail).getByText('INBOX-1')).toBeTruthy()
-    expect(within(detail).getByText('1h ago')).toBeTruthy()
     expect(within(detail).getByText('Initial body')).toBeTruthy()
+    expect(within(detail).getByRole('button', { name: 'Edit issue' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Task detail' })).toBeNull()
   })
 
   it('edits title and description through the issue edit callback', async () => {
     const onEditIssue = vi.fn(async () => true)
     renderDetail({ onEditIssue })
+    await openEditor()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
     await fireEvent.input(screen.getByLabelText('Edit title'), {
@@ -111,6 +117,7 @@ describe('IssueDetail', () => {
   it('keeps unrelated drafts visible for manual copying after local authority expires', async () => {
     const onEditIssue = vi.fn(async () => true)
     const view = renderDetail({ onEditIssue })
+    await openEditor()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit description' }))
     await fireEvent.input(screen.getByLabelText('Edit description'), {
@@ -149,6 +156,7 @@ describe('IssueDetail', () => {
     const view = renderDetail({
       issue: makeIssue({ uid: 'issue-2', short_id: 'I-2', qualified_id: 'INBOX-2' }),
     })
+    await openEditor()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit description' }))
     await fireEvent.input(screen.getByLabelText('Edit description'), {
@@ -166,6 +174,7 @@ describe('IssueDetail', () => {
   it('moves the issue from the task actions menu', async () => {
     const onMoveIssue = vi.fn(async () => true)
     renderDetail({ onMoveIssue })
+    await openEditor()
 
     await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Move to another project' }))
@@ -176,6 +185,7 @@ describe('IssueDetail', () => {
 
   it('shows recurrence creation only for an open issue without a recurrence', async () => {
     const view = renderDetail({ issue: makeIssue({ metadata: {} }), selectedRecurrences: [] })
+    await openEditor()
 
     expect(screen.getByRole('region', { name: 'Recurrences' })).toBeTruthy()
     expect(
@@ -237,6 +247,7 @@ describe('IssueDetail', () => {
       ],
       onAddComment,
     } as Partial<IssueDetailProps>)
+    await openEditor()
 
     await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Add checklist' }))
@@ -261,7 +272,7 @@ describe('IssueDetail', () => {
     expect(onOpenGraph).toHaveBeenCalledWith(expect.objectContaining({ uid: 'issue-1' }))
   })
 
-  it('falls back to project UID when the issue omits project name', () => {
+  it('falls back to project UID when the issue omits project name', async () => {
     renderDetail({
       issue: makeIssue({
         project_id: 1,
@@ -269,6 +280,7 @@ describe('IssueDetail', () => {
         project_name: '',
       }),
     })
+    await openEditor()
 
     expect(screen.getByText('Roadmap')).toBeTruthy()
   })

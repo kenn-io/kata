@@ -1,9 +1,96 @@
 <script lang="ts">
+  import {
+    IssueDetail as SharedIssueDetail,
+    projectIssueDetail,
+    type KataIssueHostAction,
+  } from '@kenn-io/kata-ui'
   import type { ComponentProps } from 'svelte'
 
   import IssueEditor from './IssueEditor.svelte'
 
   let props: ComponentProps<typeof IssueEditor> = $props()
+  let editing = $state(false)
+
+  const detail = $derived(projectIssueDetail(props.issue))
+  const actions = $derived.by(() => {
+    const next: KataIssueHostAction[] = [
+      {
+        id: 'edit',
+        label: 'Edit issue',
+        disabled: props.actionsDisabled ?? false,
+        invoke: () => {
+          editing = true
+        },
+      },
+    ]
+
+    if (props.workspaceAction?.onClick) {
+      next.push({
+        id: 'workspace',
+        label: props.workspaceAction.label,
+        disabled: props.workspaceAction.disabled ?? false,
+        busy: props.workspaceAction.busy ?? false,
+        invoke: props.workspaceAction.onClick,
+      })
+    }
+    if (props.onOpenGraph) {
+      next.push({
+        id: 'graph',
+        label: 'Open reachable graph',
+        invoke: () => props.onOpenGraph?.(props.issue.issue),
+      })
+    }
+
+    return next
+  })
 </script>
 
-<IssueEditor {...props} />
+{#if editing}
+  <section class="editor-mode" aria-label="Kata issue editor">
+    <div class="editor-toolbar">
+      <button type="button" onclick={() => (editing = false)}>Done editing</button>
+    </div>
+    <IssueEditor {...props} />
+  </section>
+{:else}
+  <div class="shared-detail">
+    <SharedIssueDetail {detail} {actions} />
+  </div>
+{/if}
+
+<style>
+  .shared-detail {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    background: var(--bg-primary);
+    padding: 18px 22px;
+  }
+
+  .editor-mode {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .editor-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    border-bottom: 1px solid var(--border-default);
+    padding: 8px 22px;
+    background: var(--bg-primary);
+  }
+
+  .editor-toolbar button {
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 5px 9px;
+    background: var(--surface-interactive);
+    color: var(--text-primary);
+    font: inherit;
+    cursor: pointer;
+  }
+</style>
