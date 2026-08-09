@@ -62,11 +62,12 @@ package = false
 Update `docs/pyproject.toml` and refresh `docs/uv.lock` together whenever the
 docs toolchain changes.
 
-Root-linked CLI deployments use the repository-root `.vercelignore` to upload
-only the `docs/` project inputs, including the screenshots hydrated before the
-deploy. Vercel's source bundle lacks Git metadata, so the remote build cannot
-hydrate the assets branch itself and depends on those pre-hydrated screenshots.
-Generated output and machine-local state under `docs/` are excluded. Keep
+Root-linked source deployments use the repository-root `.vercelignore` to
+upload only the `docs/` project inputs. The production CLI path instead builds
+locally and uploads Vercel's prebuilt output. `docs/zensical-docs.sh` stages a
+sanitized docs tree for that build, retaining hydrated screenshots while
+excluding the same generated output, editor state, backups, caches, test
+artifacts, and machine-local configuration excluded by `.vercelignore`. Keep
 Vercel's “Include source files outside of the Root Directory” setting disabled
 because the docs build is self-contained.
 

@@ -24,6 +24,24 @@ with a SHA, that pin is the source of truth. Flag only concrete
 breaking changes visible in the diff. Otherwise phrase as a LOW-severity
 question, not a Medium/High "fix".
 
+## Repository writers are trusted maintainers
+
+Repository write access is a trusted operator boundary. Do not model a hostile
+party who can push branches or tags, replace generated asset branches, or edit
+workflow definitions: that authority can already change product source,
+release automation, and published artifacts directly. Findings whose exploit
+requires malicious repository-writer access are out of scope and must not drive
+extra approval inputs or operator ceremony.
+
+The force-updated `docs-assets` branch is intentionally mutable generated
+storage controlled by trusted repository writers. A standalone deployment that
+fetches its current value is not a security finding solely because a writer
+could replace the branch. Valid findings still include untrusted fork or pull-
+request code receiving secrets or write credentials, external inputs executing
+before trust is established, credentials crossing origins, benign races that
+publish stale or mismatched artifacts, and ignored or private local files
+entering public build output.
+
 ## Trust model — local daemon plus first-class browser client
 
 Kata is a single-operator tool, not a public multi-tenant service. The default
