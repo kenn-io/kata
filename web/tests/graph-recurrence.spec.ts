@@ -47,6 +47,7 @@ test('recurrence authority is shown and can be deleted from issue detail', async
   )
   expect(response.status()).toBe(201)
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
+  await page.getByRole('button', { name: 'Edit issue' }).click()
   await expect(page.getByRole('region', { name: 'Recurrences' })).toContainText(
     'Weekly example review',
   )

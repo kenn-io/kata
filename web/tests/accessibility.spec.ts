@@ -57,6 +57,7 @@ test('desktop and responsive detail remain focused, contrasted, and axe-clean', 
   await expect(page.getByRole('button', { name: 'Open workspace' })).toHaveCount(0)
   await expect(page.getByRole('dialog', { name: 'Command palette' })).toHaveCount(0)
 
+  await page.getByRole('button', { name: 'Edit issue' }).click()
   await page.getByRole('button', { name: 'Edit title' }).click()
   await expect(page.getByRole('textbox', { name: 'Edit title' })).toBeFocused()
   await page.getByRole('textbox', { name: 'Edit title' }).press('Escape')
