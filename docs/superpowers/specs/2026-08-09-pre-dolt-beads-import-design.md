@@ -127,4 +127,3 @@ The Beads migration guide will state that kata supports legacy SQLite-era
 workspaces when the matching `bd` binary remains installed. It will also make
 the boundary explicit: kata asks `bd` to read the workspace and does not parse
 historical database files itself.
-
