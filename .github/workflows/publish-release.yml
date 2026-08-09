@@ -105,7 +105,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           KATA_HOME: ${{ runner.temp }}/kata-web-release/home
           KATA_DB: ${{ runner.temp }}/kata-web-release/home/kata.db
           KATA_WORKSPACE: ${{ runner.temp }}/kata-web-release/workspace
