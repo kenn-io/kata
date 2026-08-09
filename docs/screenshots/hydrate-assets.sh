@@ -37,15 +37,21 @@ if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
-if git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$assets_branch" >/dev/null; then
-  asset_ref="refs/heads/$assets_branch"
+fetch_remote_assets() {
+	if ! git -C "$repo_root" fetch --force --depth=1 origin \
+		"+refs/heads/$assets_branch:refs/remotes/origin/$assets_branch" >/dev/null; then
+		printf 'docs screenshots not hydrated: failed to fetch origin/%s\n' "$assets_branch" >&2
+		exit 1
+	fi
+	asset_ref="refs/remotes/origin/$assets_branch"
+}
+
+if [[ "$force" == true ]]; then
+	fetch_remote_assets
+elif git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$assets_branch" >/dev/null; then
+	asset_ref="refs/heads/$assets_branch"
 else
-  if ! git -C "$repo_root" fetch --force --depth=1 origin \
-    "+refs/heads/$assets_branch:refs/remotes/origin/$assets_branch" >/dev/null; then
-    printf 'docs screenshots not hydrated: failed to fetch origin/%s\n' "$assets_branch" >&2
-    exit 1
-  fi
-  asset_ref="refs/remotes/origin/$assets_branch"
+	fetch_remote_assets
 fi
 
 if ! git -C "$repo_root" rev-parse --verify --quiet "$asset_ref" >/dev/null; then

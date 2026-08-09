@@ -209,6 +209,7 @@ func TestDocsAssetHydratorForceFetchesAndValidatesRemoteBranch(t *testing.T) {
 	oldCommit := commitAssetTree(t, remote, oldSource, "old docs assets")
 	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", oldCommit)
 	git(t, repo, "fetch", "origin", "docs-assets:refs/remotes/origin/docs-assets")
+	git(t, repo, "branch", "docs-assets", "refs/remotes/origin/docs-assets")
 	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
 	cmd := exec.Command("bash", hydrator) //nolint:gosec // test-owned script installed under TempDir
 	cmd.Dir = repo
