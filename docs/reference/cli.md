@@ -540,6 +540,7 @@ kata health
 kata whoami
 kata quickstart
 kata version [--json]
+kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
 
@@ -553,6 +554,7 @@ not require a workspace or a running daemon. The output is a single JSON object:
   "version": "v0.6.0",
   "commit": "abcdef0",
   "built": "2026-07-12T12:00:00Z",
+  "distribution": "homebrew",
   "go": "go1.25.0",
   "os": "linux",
   "arch": "amd64",
@@ -562,11 +564,22 @@ not require a workspace or a running daemon. The output is a single JSON object:
 
 `name` is the canonical tool name. `version` is the semantic version for a
 release build; development builds may report a development identifier.
-`commit` and `built` identify the source revision and build time, while `go`,
-`os`, and `arch` describe the build runtime and target. `agent_format` is the
-version of the agent-readable text contract. Consumers should use
+`commit` and `built` identify the source revision and build time.
+`distribution` identifies the package manager that owns the binary and is an
+empty string for ordinary archives and source builds. `go`, `os`, and `arch`
+describe the build runtime and target. `agent_format` is the version of the
+agent-readable text contract. Consumers should use
 `kata_api_version` to select the JSON schema and ignore additional fields they
 do not recognize. Plain `kata version` retains its human-readable output.
+
+`kata update --check` checks Kata's GitHub release feed without installing.
+Its JSON result includes `distribution` and `package_release_may_lag`, plus an
+`upgrade_hint` when a package manager owns the binary. The package release may
+trail a new GitHub tag, so the hint is guidance rather than a promise that the
+new version is already packaged. On package-managed builds, plain `kata update`
+and install-capable flag combinations fail with exit code 2 before constructing
+the update client; upgrade through Homebrew or the owning system package
+manager instead. Ordinary archives retain the self-installing update behavior.
 
 Local commands auto-start the daemon when appropriate. `daemon start` starts a
 background daemon and returns after startup is confirmed. Use

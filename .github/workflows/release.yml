@@ -15,6 +15,7 @@ jobs:
       tag_name: ${{ steps.validate.outputs.tag_name }}
       version: ${{ steps.validate.outputs.version }}
       tag_sha: ${{ steps.validate.outputs.tag_sha }}
+      prerelease: ${{ steps.validate.outputs.prerelease }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
@@ -67,16 +68,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ needs.validate-tag.outputs.tag_name }}
+          PRERELEASE: ${{ needs.validate-tag.outputs.prerelease }}
         run: |
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
             echo "Release $TAG_NAME already exists"
             exit 0
           fi
 
-          gh release create "$TAG_NAME" \
-            --verify-tag \
-            --title "$TAG_NAME" \
+          release_args=(
+            "$TAG_NAME"
+            --verify-tag
+            --title "$TAG_NAME"
             --notes-from-tag
+          )
+          if [[ "$PRERELEASE" == "true" ]]; then
+            release_args+=(--prerelease)
+          fi
+          gh release create "${release_args[@]}"
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
@@ -105,6 +113,18 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           KATA_HOME: ${{ runner.temp }}/kata-web-release/home
           KATA_DB: ${{ runner.temp }}/kata-web-release/home/kata.db
           KATA_WORKSPACE: ${{ runner.temp }}/kata-web-release/workspace
+
+      - name: Retain Homebrew formula candidates
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: kata-homebrew-formulae-${{ needs.validate-tag.outputs.tag_name }}
+          path: |
+            dist/homebrew/Formula/kata.rb
+            release-artifacts/homebrew-core/kata.rb
+            release-artifacts/source-archive.json
+          if-no-files-found: error
+          retention-days: 30

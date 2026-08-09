@@ -130,6 +130,26 @@ Empty reads emit the header with `count=0` and no rows:
 OK search count=0 query="login race"
 ```
 
+`kata update --check --agent` appends package ownership fields after the
+existing result fields, in this order:
+
+```text
+OK update update_available=true current=v0.14.1 latest=v0.14.2 distribution=homebrew upgrade_hint="brew upgrade kata" package_release_may_lag=true
+```
+
+The field order is `update_available`, `current`, `latest`, `distribution`,
+optional `upgrade_hint`, then `package_release_may_lag`. Ordinary archives emit
+`distribution="" package_release_may_lag=false` and omit `upgrade_hint`.
+Install-capable forms on package-managed builds use the existing usage error
+shape and exit code 2:
+
+```text
+ERR update usage: Homebrew manages this installation; run 'brew upgrade kata' instead
+```
+
+The check reads Kata's GitHub release feed, so a reported release can appear
+before the owning package manager publishes it.
+
 #### Federation quarantine discovery
 
 `kata federation quarantine list --agent` emits one row per active quarantine:

@@ -34,6 +34,10 @@ var Commit = unknown
 // comes from debug.BuildInfo's vcs.time setting.
 var BuildDate = unknown
 
+// Distribution identifies a package manager that owns this binary. An empty
+// value denotes an ordinary Kata archive or source build.
+var Distribution string
+
 func init() {
 	if Version == defaultVersion {
 		Version = versionFromVCS()

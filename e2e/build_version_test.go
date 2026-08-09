@@ -38,14 +38,16 @@ func TestMakeBuildBakesGitDescribeVersion(t *testing.T) {
 
 	out := commandOutput(t, root, bin, "--json", "version")
 	var got struct {
-		Version string `json:"version"`
-		Commit  string `json:"commit"`
-		Built   string `json:"built"`
+		Version      string `json:"version"`
+		Commit       string `json:"commit"`
+		Built        string `json:"built"`
+		Distribution string `json:"distribution"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got), "version output: %s", out)
 	assert.Equal(t, expected, got.Version)
 	assert.Equal(t, expectedCommit, got.Commit)
 	assert.Equal(t, expectedBuilt, got.Built)
+	assert.Empty(t, got.Distribution)
 }
 
 func TestMakeInstallBakesGitDescribeVersion(t *testing.T) {
@@ -65,10 +67,12 @@ func TestMakeInstallBakesGitDescribeVersion(t *testing.T) {
 
 	out := commandOutput(t, root, filepath.Join(gobin, "kata"), "--json", "version")
 	var got struct {
-		Version string `json:"version"`
+		Version      string `json:"version"`
+		Distribution string `json:"distribution"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got), "version output: %s", out)
 	assert.Equal(t, expected, got.Version)
+	assert.Empty(t, got.Distribution)
 }
 
 func TestMakeBuildSanitizesGitDescribeVersionForShellRecipe(t *testing.T) {

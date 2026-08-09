@@ -8,6 +8,24 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**New features**
+
+- Added the official `kenn-io/tap/kata` Homebrew installation path for macOS
+  and Linux.
+- Added a build-time distribution marker so Homebrew, `.deb`, `.rpm`, and
+  third-party packages retain ownership of their installed binary while
+  `kata update --check` remains available.
+- Added a checksummed release source archive with production browser assets and
+  vendored Go dependencies for reproducible, network-free Homebrew Core builds.
+
+**Improvements**
+
+- Upgraded `go.kenn.io/kit` from v0.14.0 to v0.19.1.
+- Added prerelease-safe publishing so release candidates do not replace the
+  latest stable GitHub release or update the stable Homebrew tap formula.
+- Kept stable release notes based on the previous stable tag after publishing
+  a release candidate from the same commit.
+
 ## 0.14.1
 <small>2026-08-08</small>
 
