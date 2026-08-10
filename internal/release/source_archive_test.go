@@ -170,9 +170,30 @@ func TestRenderHomebrewCoreFormula_ProducesValidRuby(t *testing.T) {
 		Version: "0.14.2", SHA256: strings.Repeat("a", 64), BuildDate: "2026-08-08T01:02:03Z",
 	}
 	require.NoError(t, RenderHomebrewCoreFormula(templatePath, output, meta))
+	formula, err := os.ReadFile(output) //nolint:gosec // test-owned temporary path
+	require.NoError(t, err)
+	assert.Contains(t, string(formula), `assert_match '"distribution":"homebrew"', info`)
+	assert.NotContains(t, string(formula), `%Q("distribution":"homebrew")`)
 	cmd := exec.Command(ruby, "-c", output) //nolint:gosec // fixed test tool and generated fixture path
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s", out)
+}
+
+func TestRenderHomebrewCoreFormula_OrdersLivecheckBeforeDependencies(t *testing.T) {
+	templatePath := filepath.Join("..", "..", "packaging", "homebrew-core", "kata.rb.tmpl")
+	output := filepath.Join(t.TempDir(), "kata.rb")
+	meta := SourceArchiveMetadata{
+		Version: "0.14.2", SHA256: strings.Repeat("a", 64), BuildDate: "2026-08-08T01:02:03Z",
+	}
+	require.NoError(t, RenderHomebrewCoreFormula(templatePath, output, meta))
+	formula, err := os.ReadFile(output) //nolint:gosec // test-owned temporary path
+	require.NoError(t, err)
+
+	livecheck := strings.Index(string(formula), "  livecheck do")
+	dependency := strings.Index(string(formula), `  depends_on "go" => :build`)
+	require.NotEqual(t, -1, livecheck)
+	require.NotEqual(t, -1, dependency)
+	assert.Less(t, livecheck, dependency)
 }
 
 type archiveTestEntry struct {
