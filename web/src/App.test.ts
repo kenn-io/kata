@@ -1,6 +1,7 @@
 // @vitest-environment-options { "url": "http://127.0.0.2/kata" }
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.svelte'
@@ -301,6 +302,30 @@ describe('App', () => {
   it('shows token login when a fresh tab roster requires authentication', async () => {
     const paths: string[] = []
     let snapshotReads = 0
+    let releaseRoster!: (response: Response) => void
+    const rosterResponse = new Promise<Response>((resolve) => {
+      releaseRoster = resolve
+    })
+    let markRosterClassified!: () => void
+    const rosterClassified = new Promise<void>((resolve) => {
+      markRosterClassified = resolve
+    })
+    const authenticationChallenge = new Proxy(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'login' },
+      }),
+      {
+        get(target, property) {
+          if (property === 'status') queueMicrotask(() => queueMicrotask(markRosterClassified))
+          return Reflect.get(target, property, target)
+        },
+      },
+    )
+    let markRosterRequested!: () => void
+    const rosterRequested = new Promise<void>((resolve) => {
+      markRosterRequested = resolve
+    })
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -310,10 +335,8 @@ describe('App', () => {
           return new Response('', { status: 404 })
         }
         if (target.pathname === '/api/v1/ui/daemons') {
-          return new Response('', {
-            status: 401,
-            headers: { 'X-Kata-Web-Authentication': 'login' },
-          })
+          markRosterRequested()
+          return rosterResponse
         }
         if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
           snapshotReads += 1
@@ -323,8 +346,12 @@ describe('App', () => {
     )
 
     render(App)
+    await rosterRequested
+    releaseRoster(authenticationChallenge)
+    await rosterClassified
+    await tick()
 
-    expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
     expect(snapshotReads).toBe(0)
@@ -333,6 +360,30 @@ describe('App', () => {
 
   it('replaces roster recovery with token login after an authenticated retry', async () => {
     let rosterReads = 0
+    let releaseRoster!: (response: Response) => void
+    const rosterResponse = new Promise<Response>((resolve) => {
+      releaseRoster = resolve
+    })
+    let markRosterClassified!: () => void
+    const rosterClassified = new Promise<void>((resolve) => {
+      markRosterClassified = resolve
+    })
+    const authenticationChallenge = new Proxy(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'login' },
+      }),
+      {
+        get(target, property) {
+          if (property === 'status') queueMicrotask(() => queueMicrotask(markRosterClassified))
+          return Reflect.get(target, property, target)
+        },
+      },
+    )
+    let markRosterRequested!: () => void
+    const rosterRequested = new Promise<void>((resolve) => {
+      markRosterRequested = resolve
+    })
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -343,10 +394,8 @@ describe('App', () => {
         if (target.pathname === '/api/v1/ui/daemons') {
           rosterReads += 1
           if (rosterReads === 1) return new Response('', { status: 503 })
-          return new Response('', {
-            status: 401,
-            headers: { 'X-Kata-Web-Authentication': 'login' },
-          })
+          markRosterRequested()
+          return rosterResponse
         }
         throw new Error(`Unexpected request: ${target.pathname}`)
       }),
@@ -358,7 +407,11 @@ describe('App', () => {
       'Configured daemons are unavailable',
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
-    expect(await screen.findByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    await rosterRequested
+    releaseRoster(authenticationChallenge)
+    await rosterClassified
+    await tick()
+    expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByText('Configured daemons are unavailable')).toBeNull()
   })
