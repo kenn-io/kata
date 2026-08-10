@@ -9,9 +9,10 @@ how each Beads field maps onto kata.
 Beads and kata solve the same problem: a durable task ledger that humans and
 coding agents can both operate. They make different architectural bets.
 
-Beads keeps issue state in a project-local `.beads/` Dolt database with native
-history, branching, merging, and push/pull. kata keeps issue state in a
-user-local SQLite database behind a daemon, and commits only a small
+Current Beads releases keep issue state in a project-local `.beads/` Dolt
+database with native history, branching, merging, and push/pull. Releases before
+the Dolt transition used a project-local SQLite database. kata keeps issue state
+in a user-local SQLite database behind a daemon, and commits only a small
 `.kata.toml` binding to the repository.
 
 | Design choice | Beads | kata |
@@ -34,8 +35,16 @@ The importer drives the Beads CLI directly, so you need:
 - a Beads project (a `.beads/` database) in the workspace you import from;
 - kata installed (see [Install](../get-started/install.md)).
 
-kata reads Beads through `bd export --no-memories` and `bd comments`. You do not
-export anything by hand.
+kata supports Beads v0.9.11 and later, including SQLite-era workspaces, when the
+matching `bd` binary remains installed. It asks `bd` to read the workspace and
+never opens a historical Beads database directly. Beads v0.9.1 through v0.9.10
+predate the `bd comments` command required to preserve comments and are not
+supported.
+
+kata reads Beads through `bd export` and `bd comments`. It uses
+`bd export --no-memories` when available and retries plain `bd export` for older
+versions that do not recognize that flag. Those versions predate Beads memories.
+You do not export anything by hand.
 
 ## Migrate
 
@@ -85,12 +94,12 @@ internal import mapping, and a footer appended to the issue body.
 | `status` | `open` or `closed` | kata has no in-progress state. See below. |
 | `priority` | priority (`0`–`4`) | Pass-through when `0`–`4`; values outside that range are dropped. |
 | `labels` | labels | Lowercased and normalized. `source:beads` and `beads-id:<id>` are always added. |
-| `owner` | owner | Empty owner becomes unowned. |
+| `owner` / legacy `assignee` | owner | A non-blank `owner` wins; otherwise a non-blank `assignee` is used. |
 | `created_by` | author | Falls back to `--as` / `$KATA_AUTHOR` when empty. |
 | `created_at` / `updated_at` | same | Preserved. A closed issue with no `closed_at` uses `updated_at`. |
 | `close_reason` | close reason | `done`, `wontfix`, `duplicate` are kept; any other reason becomes `done`. |
 | `dependencies` | `blocks` links | If Beads issue A depends on B, kata records `B blocks A`. |
-| comments | comments | Pulled with `bd comments`. |
+| comments | comments | Pulled with `bd comments`; legacy numeric comment IDs are preserved as decimal strings. |
 
 ### Status mapping
 
@@ -104,7 +113,8 @@ tagged `beads-status:in_progress`.
 ## What does not carry over
 
 - **Dolt history, branches, and merges.** The importer reads one current snapshot.
-- **Beads memories.** Excluded with `--no-memories`.
+- **Beads memories.** Excluded with `--no-memories`; versions without that flag
+  predate memories.
 - **Dependency types.** Every dependency becomes a `blocks` link; `parent` and
   `related` are not generated.
 - **In-progress states.** Kept as `beads-status:` labels, not as a kata status.
