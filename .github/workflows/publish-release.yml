@@ -105,6 +105,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ steps.validate.outputs.tag_name }}
           KATA_HOME: ${{ runner.temp }}/kata-web-release/home
           KATA_DB: ${{ runner.temp }}/kata-web-release/home/kata.db
           KATA_WORKSPACE: ${{ runner.temp }}/kata-web-release/workspace
