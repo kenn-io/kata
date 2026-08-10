@@ -6835,8 +6835,6 @@ paths:
           name: issue_uid
           required: true
           schema:
-            maxLength: 26
-            minLength: 26
             type: string
       responses:
         "200":

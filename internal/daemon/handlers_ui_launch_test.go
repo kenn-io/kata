@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -16,6 +17,17 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
+
+type ambiguousUILaunchStore struct {
+	db.Storage
+	matches []db.Issue
+}
+
+func (s ambiguousUILaunchStore) IssueUIDPrefixMatch(
+	context.Context, string, int, db.IncludeDeleted,
+) ([]db.Issue, error) {
+	return s.matches, nil
+}
 
 func TestReadUILaunchTargetReturnsConfiguredBrowserRoute(t *testing.T) {
 	dbh := openTestDB(t)
@@ -47,6 +59,47 @@ func TestReadUILaunchTargetReturnsConfiguredBrowserRoute(t *testing.T) {
 	require.True(t, out.Available)
 	require.Equal(t, "https://kata.example/kata?issue="+issue.UID+"#direct=1", out.URL)
 	require.Empty(t, out.Reason)
+}
+
+func TestReadUILaunchTargetRequiresExactUID(t *testing.T) {
+	dbh := openTestDB(t)
+	project, err := dbh.db.CreateProject(t.Context(), "alpha-project")
+	require.NoError(t, err)
+	issue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Example task", Author: "user-a",
+	})
+	require.NoError(t, err)
+	manager := newUILaunchTestManager(t, dbh, "https://kata.example")
+	leakingMatches := []db.Issue{
+		{UID: "01J00000000000000000000001", ShortID: "secret-a", ProjectID: 4242},
+		{UID: "01J00000000000000000000002", ShortID: "secret-b", ProjectID: 8484},
+	}
+	ts := startTestServer(t, daemon.ServerConfig{
+		DB:        ambiguousUILaunchStore{Storage: dbh.db, matches: leakingMatches},
+		StartedAt: dbh.now, WebSessions: manager,
+	})
+
+	padding := strings.Repeat(" ", 9)
+	prefixResp, prefixBody := getUILaunchTarget(t, ts, padding+issue.UID[:8]+padding)
+
+	require.Equal(t, http.StatusBadRequest, prefixResp.StatusCode, string(prefixBody))
+	var failure struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(prefixBody, &failure))
+	require.Equal(t, "validation", failure.Error.Code)
+	for _, match := range leakingMatches {
+		require.NotContains(t, string(prefixBody), match.UID)
+		require.NotContains(t, string(prefixBody), match.ShortID)
+	}
+	require.NotContains(t, string(prefixBody), "4242")
+	require.NotContains(t, string(prefixBody), "8484")
+
+	fullResp, fullBody := getUILaunchTarget(t, ts, "  "+issue.UID+"  ")
+	require.Equal(t, http.StatusOK, fullResp.StatusCode, string(fullBody))
+	require.Contains(t, string(fullBody), "/kata?issue="+issue.UID)
 }
 
 func TestReadUILaunchTargetRejectsUnsafeBrowserOrigins(t *testing.T) {

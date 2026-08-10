@@ -247,7 +247,7 @@ func (r ResolveUIIssueReferenceQuery) Validate() error {
 }
 
 type ReadUILaunchTargetQuery struct {
-	IssueUID string `json:"issue_uid" validate:"required,max=26,min=26"`
+	IssueUID string `json:"issue_uid" validate:"required"`
 }
 
 func (r ReadUILaunchTargetQuery) Validate() error {

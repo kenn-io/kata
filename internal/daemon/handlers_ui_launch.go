@@ -11,6 +11,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func registerUILaunchHandler(humaAPI huma.API, cfg ServerConfig) {
@@ -20,7 +21,19 @@ func registerUILaunchHandler(humaAPI huma.API, cfg ServerConfig) {
 		Path:        "/api/v1/ui/launch-target",
 		Summary:     "Read the safe browser launch target for an active issue",
 	}, func(ctx context.Context, in *api.UILaunchTargetRequest) (*api.UILaunchTargetResponse, error) {
-		issue, err := resolveIssueByUIDOrPrefix(ctx, cfg.DB, strings.TrimSpace(in.IssueUID), db.IncludeDeletedNo)
+		issueUID := strings.ToUpper(strings.TrimSpace(in.IssueUID))
+		if !uid.Valid(issueUID) {
+			return nil, api.NewError(
+				http.StatusBadRequest, "validation",
+				"issue_uid must be a full 26-character UID", "", nil,
+			)
+		}
+		issue, err := cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+		if errors.Is(err, db.ErrNotFound) {
+			err = api.NewError(http.StatusNotFound, "issue_not_found", "issue not found", "", nil)
+		} else if err != nil {
+			err = internalAPIError(err)
+		}
 		if err != nil {
 			return nil, concealHostUILaunchNotFound(ctx, err)
 		}
