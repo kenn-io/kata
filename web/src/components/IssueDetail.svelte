@@ -7,11 +7,20 @@
   import type { ComponentProps } from 'svelte'
 
   import IssueEditor from './IssueEditor.svelte'
+  import IssueHistory from './IssueHistory.svelte'
+  import RecurrencePanel from './RecurrencePanel.svelte'
 
   let props: ComponentProps<typeof IssueEditor> = $props()
   let editing = $state(false)
 
   const detail = $derived(projectIssueDetail(props.issue))
+  const visibleRecurrences = $derived.by(() => {
+    const recurrences = props.selectedRecurrences ?? []
+    const attachedID = props.issue.issue.recurrence_id
+    if (attachedID === undefined) return recurrences
+    const attached = recurrences.find((recurrence) => recurrence.id === attachedID)
+    return attached ? [attached] : []
+  })
   const actions = $derived.by(() => {
     const actionsFenced = (props.actionsDisabled ?? false) || (props.authorityBlocked ?? false)
     const next: KataIssueHostAction[] = [
@@ -56,6 +65,10 @@
 {#if !editing}
   <div class="shared-detail">
     <SharedIssueDetail {detail} {actions} />
+    {#if visibleRecurrences.length > 0}
+      <RecurrencePanel recurrences={visibleRecurrences} readOnly />
+    {/if}
+    <IssueHistory events={props.events ?? []} />
   </div>
 {/if}
 

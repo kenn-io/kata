@@ -92,6 +92,57 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('region', { name: 'Task detail' })).toBeNull()
   })
 
+  it('shows recurrence and history to read-only users without mutation controls', () => {
+    const view = renderDetail({
+      actionsDisabled: true,
+      events: [
+        {
+          event_id: 1,
+          event_uid: 'event-1',
+          origin_instance_uid: 'instance-example',
+          type: 'issue.commented',
+          project_id: 1,
+          project_uid: 'project-1',
+          project_name: 'example-project',
+          actor: 'user-a',
+          created_at: '2026-06-01T12:31:00Z',
+        },
+      ],
+      selectedRecurrences: [
+        {
+          id: 1,
+          uid: 'recurrence-1',
+          project_id: 1,
+          rrule: 'FREQ=WEEKLY;COUNT=2',
+          dtstart: '2026-06-01',
+          timezone: 'UTC',
+          template_title: 'Weekly example',
+          template_body: '',
+          template_labels: [],
+          template_metadata: {},
+          next_occurrence_key: '2026-06-08',
+          author: 'user-a',
+          revision: 1,
+          created_at: '2026-06-01T12:00:00Z',
+          updated_at: '2026-06-01T12:00:00Z',
+        },
+      ],
+    })
+    const sharedDetail = view.container.querySelector('.shared-detail')
+    expect(sharedDetail).not.toBeNull()
+    const shared = within(sharedDetail as HTMLElement)
+
+    expect(shared.getByText('Weekly example')).toBeTruthy()
+    expect(shared.getByText('commented')).toBeTruthy()
+    expect(shared.getByRole('heading', { name: 'Events' })).toBeTruthy()
+    expect((shared.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    expect(shared.queryByRole('button', { name: /New recurrence/ })).toBeNull()
+    expect(shared.queryByRole('button', { name: 'Delete recurrence' })).toBeNull()
+    expect(shared.queryByRole('button', { name: 'Weekly example' })).toBeNull()
+  })
+
   it('edits title and description through the issue edit callback', async () => {
     const onEditIssue = vi.fn(async () => true)
     renderDetail({ onEditIssue })
