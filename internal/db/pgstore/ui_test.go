@@ -306,6 +306,20 @@ func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	hydration, err := store.ReadUIReferenceHydration(ctx, db.UIReferencesQuery{
+		IssueUIDs: []string{second.UID, first.UID, deleted.UID, archived.UID, second.UID},
+		Limit:     20,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int64{firstProject.ID, secondProject.ID}, hydration.ProjectIDs)
+	require.Len(t, hydration.References.Issues, 2)
+	require.Equal(t, []string{first.UID, second.UID}, []string{
+		hydration.References.Issues[0].UID, hydration.References.Issues[1].UID,
+	})
+	require.Empty(t, hydration.References.Projects)
+	require.Empty(t, hydration.References.Owners)
+	require.Empty(t, hydration.References.Labels)
+
 	projectIDs, err := store.ResolveUIReferenceProjectIDs(ctx, []string{
 		second.UID, first.UID, deleted.UID, archived.UID, second.UID,
 	})

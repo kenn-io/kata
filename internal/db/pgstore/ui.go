@@ -198,6 +198,42 @@ func (s *Store) ResolveUIReferenceProjectIDs(ctx context.Context, issueUIDs []st
 	return projectIDs, mapSQLError(rows.Err(), nil)
 }
 
+// ReadUIReferenceHydration captures bounded issue summaries, their owning
+// project IDs, and the event cursor in one repeatable-read transaction.
+func (s *Store) ReadUIReferenceHydration(
+	ctx context.Context,
+	query db.UIReferencesQuery,
+) (db.UIReferenceHydration, error) {
+	tx, err := s.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return db.UIReferenceHydration{}, fmt.Errorf("begin UI reference hydration read: %w", mapSQLError(err, nil))
+	}
+	defer func() { _ = tx.Rollback() }()
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	capture := db.UIReferenceHydration{References: db.UIReferencesData{
+		Projects: []db.Project{}, Issues: []db.UIIssueReference{},
+		Owners: []string{}, Labels: []string{},
+	}}
+	capture.References.Issues, capture.ProjectIDs, err = readUIReferenceIssues(ctx, tx, query, limit)
+	if err != nil {
+		return db.UIReferenceHydration{}, err
+	}
+	capture.References.Cursor, err = maxUIEventID(ctx, tx)
+	if err != nil {
+		return db.UIReferenceHydration{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.UIReferenceHydration{}, fmt.Errorf("commit UI reference hydration read: %w", mapSQLError(err, nil))
+	}
+	return capture, nil
+}
+
 // ReadUIReferences captures bounded typeahead choices and their cursor in one
 // read-only repeatable-read transaction.
 func (s *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery) (db.UIReferencesData, error) {
@@ -232,7 +268,7 @@ func (s *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 			return db.UIReferencesData{}, fmt.Errorf("UI read stage: %w", err)
 		}
 	}
-	data.Issues, err = readUIReferenceIssues(ctx, tx, query, limit)
+	data.Issues, _, err = readUIReferenceIssues(ctx, tx, query, limit)
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
@@ -954,8 +990,8 @@ func collectUIDetailedLinks(rows *sql.Rows) ([]db.UILink, error) {
 
 func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReferencesQuery,
 	limit int,
-) ([]db.UIIssueReference, error) {
-	statement := `SELECT i.uid, p.uid, p.name, i.short_id, i.title, i.status
+) ([]db.UIIssueReference, []int64, error) {
+	statement := `SELECT i.project_id, i.uid, p.uid, p.name, i.short_id, i.title, i.status
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
 	args := []any{db.SystemProjectName}
@@ -981,20 +1017,25 @@ func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReference
 	statement += fmt.Sprintf(` ORDER BY p.name, i.short_id LIMIT $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
-		return nil, fmt.Errorf("read UI issue references: %w", mapSQLError(err, nil))
+		return nil, nil, fmt.Errorf("read UI issue references: %w", mapSQLError(err, nil))
 	}
 	defer func() { _ = rows.Close() }()
 	issues := []db.UIIssueReference{}
+	projectIDs := []int64{}
 	for rows.Next() {
 		var issue db.UIIssueReference
-		if err := rows.Scan(&issue.UID, &issue.ProjectUID, &issue.ProjectName,
+		var projectID int64
+		if err := rows.Scan(&projectID, &issue.UID, &issue.ProjectUID, &issue.ProjectName,
 			&issue.ShortID, &issue.Title, &issue.Status); err != nil {
-			return nil, fmt.Errorf("scan UI issue reference: %w", mapSQLError(err, nil))
+			return nil, nil, fmt.Errorf("scan UI issue reference: %w", mapSQLError(err, nil))
 		}
 		issue.QualifiedID = issue.ProjectName + "#" + issue.ShortID
 		issues = append(issues, issue)
+		if !slices.Contains(projectIDs, projectID) {
+			projectIDs = append(projectIDs, projectID)
+		}
 	}
-	return issues, mapSQLError(rows.Err(), nil)
+	return issues, projectIDs, mapSQLError(rows.Err(), nil)
 }
 
 func readUIReferenceStrings(ctx context.Context, tx *sql.Tx, statement string,

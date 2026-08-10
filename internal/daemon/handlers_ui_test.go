@@ -24,9 +24,11 @@ type countingUIStore struct {
 	cursorReads      int
 	snapshotReads    int
 	referenceReads   int
+	hydrationReads   int
 	snapshot         db.UISnapshotData
 	projectSnapshots map[string]db.UISnapshotData
 	references       db.UIReferencesData
+	hydration        db.UIReferenceHydration
 	lastSnapshot     db.UISnapshotQuery
 	lastReferences   db.UIReferencesQuery
 }
@@ -55,6 +57,17 @@ func (s *countingUIStore) ReadUISnapshot(_ context.Context, query db.UISnapshotQ
 
 func (s *countingUIStore) ResolveUIReferenceProjectIDs(context.Context, []string) ([]int64, error) {
 	return []int64{}, nil
+}
+
+func (s *countingUIStore) ReadUIReferenceHydration(
+	_ context.Context,
+	query db.UIReferencesQuery,
+) (db.UIReferenceHydration, error) {
+	s.hydrationReads++
+	s.lastReferences = query
+	data := s.hydration
+	data.References.Cursor = s.snapshotCursor
+	return data, nil
 }
 
 func (s *countingUIStore) ReadUIReferences(_ context.Context, query db.UIReferencesQuery) (db.UIReferencesData, error) {

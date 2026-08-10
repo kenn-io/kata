@@ -12,6 +12,7 @@ import (
 type UIStore interface {
 	UIEventCursor(context.Context) (int64, error)
 	ReadUISnapshot(context.Context, UISnapshotQuery) (UISnapshotData, error)
+	ReadUIReferenceHydration(context.Context, UIReferencesQuery) (UIReferenceHydration, error)
 	ResolveUIReferenceProjectIDs(context.Context, []string) ([]int64, error)
 	ReadUIReferences(context.Context, UIReferencesQuery) (UIReferencesData, error)
 }
@@ -141,6 +142,13 @@ type UIReferencesQuery struct {
 	ProjectUID string
 	IssueUIDs  []string
 	Limit      int
+}
+
+// UIReferenceHydration captures bounded issue summaries and the internal
+// project scope that owns those exact rows in one backend read transaction.
+type UIReferenceHydration struct {
+	References UIReferencesData
+	ProjectIDs []int64
 }
 
 // UIIssueReference is the bounded typeahead identity for one active issue.
