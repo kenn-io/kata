@@ -75,9 +75,21 @@ events and excluded data.
 
 ## Official tap publishing
 
-Stable release workflows publish the generated formula to
-`kenn-io/homebrew-tap`. Configure the Kata repository Actions secret
-`HOMEBREW_TAP_GITHUB_TOKEN` with a fine-grained GitHub PAT scoped only to that
-tap repository and grant it repository contents write permission. The normal
-workflow `GITHUB_TOKEN` remains responsible for Kata release assets and does
-not need cross-repository access.
+Kata release workflows publish artifacts but never write to
+`kenn-io/homebrew-tap`. The tap's hourly workflow reads Kata's latest stable
+release, validates it, and opens a same-repository formula update pull request
+with the tap repository's short-lived `GITHUB_TOKEN`.
+
+The release repository and tap updater share this exact archive-name contract:
+
+```text
+kata_<version>_homebrew_darwin_amd64.tar.gz
+kata_<version>_homebrew_darwin_arm64.tar.gz
+kata_<version>_homebrew_linux_amd64.tar.gz
+kata_<version>_homebrew_linux_arm64.tar.gz
+```
+
+Renaming any of these archives requires a coordinated tap updater change before
+the release. A missing or renamed archive fails the scheduled tap workflow;
+the red workflow run and GitHub's failed scheduled-workflow notification are
+the maintainer alert for a broken cross-repository contract.
