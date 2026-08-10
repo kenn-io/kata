@@ -21,6 +21,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/textsafe"
 )
 
 const (
@@ -427,6 +428,10 @@ func redactWebDaemonURL(raw string) string {
 	return parsed.String()
 }
 
+func webDaemonLogValue(value string) string {
+	return textsafe.Line(value)
+}
+
 func (g *webDaemonGateway) daemonHealth(ctx context.Context, d resolvedWebDaemon) string {
 	if d.local {
 		return "connected"
@@ -564,7 +569,12 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			slog.Warn("web daemon proxy failed", "daemon", d.id, "target", redactWebDaemonURL(d.baseURL), "err", err)
+			//nolint:gosec // G706: values are sanitized to single-line text before structured logging.
+			slog.Warn("web daemon proxy failed",
+				"daemon", webDaemonLogValue(d.id),
+				"target", webDaemonLogValue(redactWebDaemonURL(d.baseURL)),
+				"err", webDaemonLogValue(err.Error()),
+			)
 			if errors.Is(err, errWebDaemonRedirectForbidden) {
 				writeWebDaemonError(w, http.StatusBadGateway, "daemon_redirect_forbidden")
 				return

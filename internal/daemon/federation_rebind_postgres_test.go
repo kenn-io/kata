@@ -227,7 +227,7 @@ func getFederationClaimStatus(ctx context.Context, endpoint string) error {
 }
 
 func requireSuccessfulFederationResponse(req *http.Request) error {
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: test request uses a local httptest server URL.
 	if err != nil {
 		return err
 	}
