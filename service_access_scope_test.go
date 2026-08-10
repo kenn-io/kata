@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -59,6 +60,43 @@ func TestServiceAccessControllerScopesGlobalAndFilteredReads(t *testing.T) {
 	assert.True(t, global.Operation.AllProjects)
 	assert.Empty(t, audit.Operation.ProjectIDs)
 	assert.True(t, audit.Operation.AllProjects)
+}
+
+func TestServiceAccessControllerScopesStableUIReferenceHydration(t *testing.T) {
+	controller := &recordingAccessController{}
+	_, server := newAccessTestServer(t, controller)
+	firstProject := createProject(t, server.URL, "first-project")
+	secondProject := createProject(t, server.URL, "second-project")
+	firstIssue := createAccessIssue(t, server, firstProject.Project.ID, "first issue")
+	secondIssue := createAccessIssue(t, server, secondProject.Project.ID, "second issue")
+	controller.authorize = func(request kata.AccessRequest) error {
+		if request.Operation.ID == "readUIReferences" && request.Operation.AllProjects {
+			return kata.ErrAccessDenied
+		}
+		return nil
+	}
+
+	query := url.Values{"issue_uid": {firstIssue.Issue.UID, secondIssue.Issue.UID}}
+	filtered, err := server.Client().Get(server.URL + "/api/v1/ui/references?" + query.Encode())
+	require.NoError(t, err)
+	_ = filtered.Body.Close()
+	require.Equal(t, http.StatusOK, filtered.StatusCode)
+
+	global, err := server.Client().Get(server.URL + "/api/v1/ui/references")
+	require.NoError(t, err)
+	_ = global.Body.Close()
+	require.Equal(t, http.StatusNotFound, global.StatusCode)
+
+	requests := controller.snapshot()
+	filteredRequest := operationRequest(t, requests, "readUIReferences", 0)
+	globalRequest := operationRequest(t, requests, "readUIReferences", 1)
+	assert.ElementsMatch(t,
+		[]int64{firstProject.Project.ID, secondProject.Project.ID},
+		filteredRequest.Operation.ProjectIDs,
+	)
+	assert.False(t, filteredRequest.Operation.AllProjects)
+	assert.Empty(t, globalRequest.Operation.ProjectIDs)
+	assert.True(t, globalRequest.Operation.AllProjects)
 }
 
 func TestServiceAccessControllerScopesFederationEnrollmentBody(t *testing.T) {

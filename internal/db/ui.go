@@ -12,6 +12,7 @@ import (
 type UIStore interface {
 	UIEventCursor(context.Context) (int64, error)
 	ReadUISnapshot(context.Context, UISnapshotQuery) (UISnapshotData, error)
+	ResolveUIReferenceProjectIDs(context.Context, []string) ([]int64, error)
 	ReadUIReferences(context.Context, UIReferencesQuery) (UIReferencesData, error)
 }
 

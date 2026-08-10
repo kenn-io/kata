@@ -53,6 +53,10 @@ func (s *countingUIStore) ReadUISnapshot(_ context.Context, query db.UISnapshotQ
 	return data, nil
 }
 
+func (s *countingUIStore) ResolveUIReferenceProjectIDs(context.Context, []string) ([]int64, error) {
+	return []int64{}, nil
+}
+
 func (s *countingUIStore) ReadUIReferences(_ context.Context, query db.UIReferencesQuery) (db.UIReferencesData, error) {
 	s.referenceReads++
 	s.lastReferences = query

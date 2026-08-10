@@ -243,6 +243,10 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			ctx, err = authorizeUIReferencesHostScope(ctx, cfg.UIStore, intent.IssueUIDs)
+			if err != nil {
+				return nil, err
+			}
 			policy := effectiveUIPolicy(ctx, cfg)
 			if in.IfNoneMatch != "" {
 				cursor, err := cfg.UIStore.UIEventCursor(ctx)
@@ -271,6 +275,24 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return referencesResponse(data, policy, validator), nil
 		})
+}
+
+func authorizeUIReferencesHostScope(
+	ctx context.Context,
+	store db.UIStore,
+	issueUIDs []string,
+) (context.Context, error) {
+	if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); !mounted {
+		return ctx, nil
+	}
+	if len(issueUIDs) == 0 {
+		return authorizeHostProjectScope(ctx, nil, nil, true)
+	}
+	projectIDs, err := store.ResolveUIReferenceProjectIDs(ctx, issueUIDs)
+	if err != nil {
+		return ctx, internalAPIError(err)
+	}
+	return authorizeHostProjectScope(ctx, projectIDs, nil, false)
 }
 
 func normalizeUISnapshotIntent(in *api.UISnapshotRequest) (normalizedUISnapshotIntent, error) {

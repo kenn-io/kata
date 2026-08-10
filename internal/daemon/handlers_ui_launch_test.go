@@ -186,6 +186,80 @@ func TestReadUILaunchTargetHidesHostAccessDenial(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 }
 
+type scopedUILaunchHostAccess struct {
+	deniedProjectID int64
+}
+
+func (a scopedUILaunchHostAccess) Authorize(
+	_ context.Context,
+	request daemon.HostAccessRequest,
+) (daemon.HostAccessDecision, error) {
+	for _, projectID := range request.Operation.ProjectIDs {
+		if projectID == a.deniedProjectID {
+			return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+		}
+	}
+	return daemon.HostAccessDecision{}, nil
+}
+
+func TestReadUILaunchTargetConcealsHostResourceState(t *testing.T) {
+	dbh := openTestDB(t)
+	activeProject, err := dbh.db.CreateProject(t.Context(), "active-project")
+	require.NoError(t, err)
+	deniedProject, err := dbh.db.CreateProject(t.Context(), "denied-project")
+	require.NoError(t, err)
+	archivedProject, err := dbh.db.CreateProject(t.Context(), "archived-project")
+	require.NoError(t, err)
+	deletedIssue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: activeProject.ID, Title: "Deleted task", Author: "user-a",
+	})
+	require.NoError(t, err)
+	_, _, _, err = dbh.db.SoftDeleteIssue(t.Context(), deletedIssue.ID, "user-a")
+	require.NoError(t, err)
+	deniedIssue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: deniedProject.ID, Title: "Denied task", Author: "user-a",
+	})
+	require.NoError(t, err)
+	archivedIssue, _, err := dbh.db.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: archivedProject.ID, Title: "Archived task", Author: "user-a",
+	})
+	require.NoError(t, err)
+	_, _, err = dbh.db.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: archivedProject.ID, Actor: "user-a", Force: true,
+	})
+	require.NoError(t, err)
+	missingUID, err := uid.New()
+	require.NoError(t, err)
+
+	manager := newUILaunchTestManager(t, dbh, "https://kata.example")
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB: dbh.db, StartedAt: dbh.now, WebSessions: manager,
+		HostAccess: scopedUILaunchHostAccess{deniedProjectID: deniedProject.ID},
+	})
+	ts := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		ctx := daemon.WithPrincipal(request.Context(), daemon.Principal{
+			Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "user-a",
+		})
+		server.Handler().ServeHTTP(writer, request.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+
+	wantBody := `{"status":404,"error":{"code":"not_found","message":"resource not found"}}`
+	for name, issueUID := range map[string]string{
+		"missing":      missingUID,
+		"deleted":      deletedIssue.UID,
+		"archived":     archivedIssue.UID,
+		"unauthorized": deniedIssue.UID,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp, body := getUILaunchTarget(t, ts, issueUID)
+
+			require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+			require.JSONEq(t, wantBody, string(body))
+		})
+	}
+}
+
 func newUILaunchTestManager(t *testing.T, dbh testDBHandle, origin string) *daemon.WebSessionManager {
 	t.Helper()
 	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{

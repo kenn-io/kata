@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,14 +22,14 @@ func registerUILaunchHandler(humaAPI huma.API, cfg ServerConfig) {
 	}, func(ctx context.Context, in *api.UILaunchTargetRequest) (*api.UILaunchTargetResponse, error) {
 		issue, err := resolveIssueByUIDOrPrefix(ctx, cfg.DB, strings.TrimSpace(in.IssueUID), db.IncludeDeletedNo)
 		if err != nil {
-			return nil, err
+			return nil, concealHostUILaunchNotFound(ctx, err)
 		}
 		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
 		if err != nil {
 			return nil, err
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, issue.ProjectID); err != nil {
-			return nil, err
+			return nil, concealHostUILaunchNotFound(ctx, err)
 		}
 
 		out := &api.UILaunchTargetResponse{}
@@ -41,6 +42,17 @@ func registerUILaunchHandler(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.URL = launchURL
 		return out, nil
 	})
+}
+
+func concealHostUILaunchNotFound(ctx context.Context, err error) error {
+	if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); !mounted {
+		return err
+	}
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+		return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+	}
+	return err
 }
 
 func safeUILaunchURL(manager *WebSessionManager, issueUID string) (string, bool) {
