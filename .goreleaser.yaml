@@ -178,15 +178,17 @@ brews:
   - name: kata
     ids:
       - kata-homebrew
+    # Pinned GoReleaser v2.16.0 skips formula generation when repository.name
+    # is absent, even with upload disabled. These fields select no credential
+    # and are retained only so snapshot and release runs render the candidate.
     repository:
       owner: kenn-io
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: https://katatracker.com
     description: Git-native issue tracking for agentic development
     license: MIT
-    skip_upload: auto
+    skip_upload: true
     test: |
       info = shell_output("#{bin}/kata version --json")
       assert_match %Q("distribution":"homebrew"), info
