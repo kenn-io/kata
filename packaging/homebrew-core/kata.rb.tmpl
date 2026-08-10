@@ -5,12 +5,12 @@ class Kata < Formula
   sha256 "{{ .SHA256 }}"
   license "MIT"
 
-  depends_on "go" => :build
-
   livecheck do
     url :stable
     strategy :github_latest
   end
+
+  depends_on "go" => :build
 
   def install
     ENV["CGO_ENABLED"] = "0"
@@ -26,7 +26,7 @@ class Kata < Formula
   test do
     info = shell_output("#{bin}/kata version --json")
     assert_match %Q("version":"v#{version}"), info
-    assert_match %Q("distribution":"homebrew"), info
+    assert_match '"distribution":"homebrew"', info
     system bin/"kata", "_web-assets-check"
     assert_match "brew upgrade kata", shell_output("#{bin}/kata update --yes 2>&1", 2)
   end

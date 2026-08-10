@@ -191,6 +191,6 @@ brews:
     skip_upload: true
     test: |
       info = shell_output("#{bin}/kata version --json")
-      assert_match %Q("distribution":"homebrew"), info
+      assert_match '"distribution":"homebrew"', info
       system bin/"kata", "_web-assets-check"
       assert_match "brew upgrade kata", shell_output("#{bin}/kata update --yes 2>&1", 2)
