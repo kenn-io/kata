@@ -6,21 +6,24 @@ description: Release history for kata
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
-## Unreleased
+## 0.14.3
+<small>2026-08-10</small>
+
+**New features**
+
+- Let Forge reuse Kata's issue details, including properties, checklists,
+  links, and comments, through a network-free shared presentation package and
+  bounded daemon reads.
 
 **Improvements**
 
-- Published the network-free `@kenn-io/kata-ui` issue-detail presentation
-  boundary for embedding hosts, with explicit daemon API compatibility gating
-  and release checks that keep tests and repository artifacts out of its
-  tarball.
-- Added bounded stable-UID summary hydration and a credential-safe launch API
-  for hosts that link to Kata tasks without moving host linkage metadata into
-  Kata.
-- Centralized Claude Code and Codex hook configuration on kit's shared
-  agent-hook manager while preserving the existing init flags, lifecycle
-  matchers, attention behavior, unrelated configuration, and workspace
-  symlink boundary.
+- Ensured release artifacts use the requested release tag throughout the
+  automatic and manual publishing paths.
+
+**Bug fixes**
+
+- Restored login discovery for Web UI tabs opened directly, preserving the
+  server-advertised authentication handoff.
 
 ## 0.14.2
 <small>2026-08-10</small>
