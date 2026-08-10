@@ -6,12 +6,15 @@ description: Release history for kata
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
-## Unreleased
+## 0.14.2
+<small>2026-08-10</small>
 
 **New features**
 
 - Added the official `kenn-io/tap/kata` Homebrew installation path for macOS
   and Linux.
+- Added import support for SQLite-era Beads databases through the existing
+  `kata import --source-format beads` workflow.
 - Added a build-time distribution marker so Homebrew, `.deb`, `.rpm`, and
   third-party packages retain ownership of their installed binary while
   `kata update --check` remains available.
@@ -41,6 +44,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Protected edited TUI new-issue and new-child-issue drafts with discard
   confirmation when Esc is pressed, without prompting for untouched forms.
+- Corrected `scheduled_on` timezone handling and civil-time semantics across
+  readiness queries and browser snapshots.
 
 ## 0.14.1
 <small>2026-08-08</small>
