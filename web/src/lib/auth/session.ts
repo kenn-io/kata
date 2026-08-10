@@ -5,7 +5,10 @@ const directTargetStorageKey = 'kata.web.direct-target.v1'
 export type AuthenticationMode = 'login'
 
 export class AuthenticationRequiredError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly authenticationTransitioned = false,
+  ) {
     super(message)
     this.name = 'AuthenticationRequiredError'
   }

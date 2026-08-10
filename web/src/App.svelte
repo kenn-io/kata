@@ -11,9 +11,11 @@
   import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
   import {
+    AuthenticationRequiredError,
     clearSessionCredentials,
     consumeLaunchFragment,
     exchangeLoginToken,
+    isAuthenticationRequiredError,
     loadSessionCredentials,
     openLocalSession,
     openTrustedProxySession,
@@ -104,7 +106,11 @@
     return response
   }
   const daemonFetch = createDaemonFetch(() => activeDaemonID, observedFetch)
-  const browserFetch = createCredentialedFetch(undefined, daemonFetch, requireAuthentication)
+  const browserFetch = createCredentialedFetch(
+    undefined,
+    daemonFetch,
+    rejectCredentialsAndRequireAuthentication,
+  )
   const client = createKataClient(undefined, browserFetch)
   const snapshots = new SnapshotController(
     createUISnapshotRequest(browserFetch),
@@ -685,9 +691,13 @@
     return advertisedAuthentication === 'login' ? 'login' : 'launch'
   }
 
-  function requireAuthentication(): void {
-    if (authenticationRecoveryPending) return
+  function rejectCredentialsAndRequireAuthentication(): boolean {
     clearSessionCredentials()
+    return requireAuthentication()
+  }
+
+  function requireAuthentication(): boolean {
+    if (authenticationRecoveryPending || loadSessionCredentials() !== undefined) return false
     scheduler.stop()
     stream.stop()
     invalidations.pause()
@@ -702,9 +712,10 @@
       mode = authority?.snapshot ? 'ready' : 'loading'
       authenticationRecoveryCompletion = startAutomaticSession(returnPath, advertisedAuthentication)
       void authenticationRecoveryCompletion
-      return
+      return true
     }
     mode = authenticationView(selectedAuthentication)
+    return true
   }
 
   async function startAutomaticSession(
@@ -796,7 +807,15 @@
           if (restored.kind !== 'route-error') route = restored
         }
       }
-    } catch {
+    } catch (error) {
+      if (
+        isAuthenticationRequiredError(error) &&
+        error instanceof AuthenticationRequiredError &&
+        error.authenticationTransitioned
+      ) {
+        daemonError = undefined
+        return false
+      }
       snapshots.clear()
       referenceGeneration += 1
       referenceAbort?.abort()

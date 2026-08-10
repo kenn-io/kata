@@ -1,3 +1,6 @@
+import { AuthenticationRequiredError } from '../auth/session'
+import { responseTriggeredAuthenticationTransition } from '../api/client'
+
 export type WebDaemonHealth = 'connected' | 'auth_required' | 'down' | 'upgrade_required'
 
 export interface WebDaemonInfo {
@@ -45,6 +48,12 @@ export async function fetchWebDaemons(fetcher: typeof fetch = fetch): Promise<We
     credentials: 'same-origin',
     redirect: 'error',
   })
+  if (response.status === 401) {
+    throw new AuthenticationRequiredError(
+      'Configured daemons are unavailable',
+      responseTriggeredAuthenticationTransition(response),
+    )
+  }
   if (!response.ok) throw new Error('Configured daemons are unavailable')
   const value = (await response.json()) as unknown
   if (!isRecord(value) || !Array.isArray(value.daemons)) {

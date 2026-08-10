@@ -1,6 +1,7 @@
 // @vitest-environment-options { "url": "http://127.0.0.2/kata" }
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.svelte'
@@ -298,6 +299,168 @@ describe('App', () => {
     expect(screen.queryByRole('region', { name: 'Kata workspace' })).toBeNull()
   })
 
+  it('shows token login when a fresh tab roster requires authentication', async () => {
+    const paths: string[] = []
+    let snapshotReads = 0
+    let releaseRoster!: (response: Response) => void
+    const rosterResponse = new Promise<Response>((resolve) => {
+      releaseRoster = resolve
+    })
+    let markRosterClassified!: () => void
+    const rosterClassified = new Promise<void>((resolve) => {
+      markRosterClassified = resolve
+    })
+    const authenticationChallenge = new Proxy(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'login' },
+      }),
+      {
+        get(target, property) {
+          if (property === 'status') queueMicrotask(() => queueMicrotask(markRosterClassified))
+          return Reflect.get(target, property, target)
+        },
+      },
+    )
+    let markRosterRequested!: () => void
+    const rosterRequested = new Promise<void>((resolve) => {
+      markRosterRequested = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        paths.push(target.pathname)
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return new Response('', { status: 404 })
+        }
+        if (target.pathname === '/api/v1/ui/daemons') {
+          markRosterRequested()
+          return rosterResponse
+        }
+        if (target.pathname.endsWith('/api/v1/ui/snapshot')) {
+          snapshotReads += 1
+        }
+        throw new Error(`Unexpected request: ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    await rosterRequested
+    releaseRoster(authenticationChallenge)
+    await rosterClassified
+    await tick()
+
+    expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry daemon roster' })).toBeNull()
+    expect(snapshotReads).toBe(0)
+    expect(paths).toEqual(['/api/v1/ui/session/local', '/api/v1/ui/daemons'])
+  })
+
+  it('replaces roster recovery with token login after an authenticated retry', async () => {
+    let rosterReads = 0
+    let releaseRoster!: (response: Response) => void
+    const rosterResponse = new Promise<Response>((resolve) => {
+      releaseRoster = resolve
+    })
+    let markRosterClassified!: () => void
+    const rosterClassified = new Promise<void>((resolve) => {
+      markRosterClassified = resolve
+    })
+    const authenticationChallenge = new Proxy(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'login' },
+      }),
+      {
+        get(target, property) {
+          if (property === 'status') queueMicrotask(() => queueMicrotask(markRosterClassified))
+          return Reflect.get(target, property, target)
+        },
+      },
+    )
+    let markRosterRequested!: () => void
+    const rosterRequested = new Promise<void>((resolve) => {
+      markRosterRequested = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return new Response('', { status: 404 })
+        }
+        if (target.pathname === '/api/v1/ui/daemons') {
+          rosterReads += 1
+          if (rosterReads === 1) return new Response('', { status: 503 })
+          markRosterRequested()
+          return rosterResponse
+        }
+        throw new Error(`Unexpected request: ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Configured daemons are unavailable',
+    )
+    await fireEvent.click(screen.getByRole('button', { name: 'Retry daemon roster' }))
+    await rosterRequested
+    releaseRoster(authenticationChallenge)
+    await rosterClassified
+    await tick()
+    expect(screen.getByRole('form', { name: 'Log in to Kata' })).not.toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText('Configured daemons are unavailable')).toBeNull()
+  })
+
+  it('keeps roster recovery when a delayed 401 belongs to superseded credentials', async () => {
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let releaseRoster!: (response: Response) => void
+    const rosterResponse = new Promise<Response>((resolve) => {
+      releaseRoster = resolve
+    })
+    let markRosterRequested!: () => void
+    const rosterRequested = new Promise<void>((resolve) => {
+      markRosterRequested = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const target = new URL(String(input), window.location.origin)
+        if (target.pathname === '/api/v1/ui/daemons') {
+          markRosterRequested()
+          return rosterResponse
+        }
+        throw new Error(`Unexpected request: ${target.pathname}`)
+      }),
+    )
+
+    render(App)
+    await rosterRequested
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'renewed-session', csrf: 'renewed-csrf' }),
+    )
+    releaseRoster(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'login' },
+      }),
+    )
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Configured daemons are unavailable',
+    )
+    expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
+    expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
+  })
+
   it('opens a trusted-proxy tab without presenting token login', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     const paths: string[] = []
@@ -588,7 +751,7 @@ describe('App', () => {
     )
   })
 
-  it('does not fall back to local authority when roster renewal fails', async () => {
+  it('keeps roster recovery when a roster 401 is suppressed during session renewal', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
@@ -619,7 +782,10 @@ describe('App', () => {
               ],
             })
           }
-          return Response.json({ error: { code: 'daemon_unavailable' } }, { status: 503 })
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'loopback' },
+          })
         }
         if (target.pathname === '/api/v1/ui/session/local') {
           return Response.json({
@@ -665,6 +831,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
     expect(snapshotDaemons).toEqual(['example-remote', 'example-remote'])
     expect(screen.queryByText('Wrong workspace issue')).toBeNull()
+    expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
   })
 
   it('clears stale authority before activating a roster replacement', async () => {
@@ -842,6 +1009,61 @@ describe('App', () => {
           (value instanceof Request ? value.method : options?.method) === 'POST',
       ),
     ).toBe(true)
+  })
+
+  it('ignores a delayed mutation 401 from superseded credentials', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let releaseMutation!: (response: Response) => void
+    const mutationResponse = new Promise<Response>((resolve) => {
+      releaseMutation = resolve
+    })
+    let markMutationRequested!: () => void
+    const mutationRequested = new Promise<void>((resolve) => {
+      markMutationRequested = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (request.method === 'POST' && target.pathname === '/api/v1/projects') {
+          markMutationRequested()
+          return mutationResponse
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return new Response('', { status: 404 })
+        }
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
+    const input = screen.getByLabelText('New project name')
+    await fireEvent.input(input, { target: { value: 'example-workspace' } })
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    await mutationRequested
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'renewed-session', csrf: 'renewed-csrf' }),
+    )
+    releaseMutation(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'loopback' },
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
+    expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
   })
 
   it('fences browser authority when a reference request rejects the session', async () => {
