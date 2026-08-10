@@ -26,6 +26,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Kept stable release notes based on the previous stable tag after publishing
   a release candidate from the same commit.
 
+**Bug fixes**
+
+- Protected edited TUI new-issue and new-child-issue drafts with discard
+  confirmation when Esc is pressed, without prompting for untouched forms.
+
 ## 0.14.1
 <small>2026-08-08</small>
 

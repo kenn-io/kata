@@ -10,14 +10,15 @@ import (
 
 // modalKind names which centered confirm/info modal is active.
 // modalNone is the quiescent state. The current cases confirm quitting
-// and discarding a dirty comment draft; future confirmations extend the
-// enum.
+// and discarding dirty comment or new-issue drafts; future confirmations
+// extend the enum.
 type modalKind int
 
 const (
 	modalNone modalKind = iota
 	modalQuitConfirm
 	modalDiscardComment
+	modalDiscardNewIssue
 )
 
 // renderQuitConfirmModal returns the centered "Are you sure?" panel.
@@ -46,12 +47,25 @@ func renderDiscardCommentModal() string {
 	return modalBoxStyle.Render(body)
 }
 
+func renderDiscardNewIssueModal() string {
+	body := strings.Join([]string{
+		"Discard new issue draft?",
+		"",
+		"Your unsaved issue will be lost.",
+		"",
+		"[Y] Discard    [N] Keep editing",
+	}, "\n")
+	return modalBoxStyle.Render(body)
+}
+
 func renderConfirmModal(kind modalKind) string {
 	switch kind {
 	case modalQuitConfirm:
 		return renderQuitConfirmModal()
 	case modalDiscardComment:
 		return renderDiscardCommentModal()
+	case modalDiscardNewIssue:
+		return renderDiscardNewIssueModal()
 	}
 	return ""
 }

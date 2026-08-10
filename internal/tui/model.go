@@ -89,7 +89,7 @@ type Model struct {
 	// the input's bubbles model; canQuit() gates global keys.
 	input inputState
 	// modal is the active centered confirm/info overlay (quit confirm or
-	// dirty-comment discard confirm; future plans may add others).
+	// dirty-draft discard confirm; future plans may add others).
 	// modalNone is the quiescent state. While a modal is open it
 	// owns key dispatch — `y`/`n`/`esc` route through it instead of
 	// reaching list/detail handlers.
@@ -1930,11 +1930,16 @@ func snapshotListSelection(lm listModel) listSelectionSnapshot {
 }
 
 func (m Model) requestInputCancel() (Model, tea.Cmd) {
-	if m.input.kind == inputCommentForm && m.input.saving {
+	if m.input.saving &&
+		(m.input.kind == inputCommentForm || m.input.kind == inputNewIssueForm) {
 		return m, nil
 	}
-	if m.input.hasCommentDraft() {
+	switch {
+	case m.input.hasCommentDraft():
 		m.modal = modalDiscardComment
+		return m, nil
+	case m.input.hasNewIssueDraft():
+		m.modal = modalDiscardNewIssue
 		return m, nil
 	}
 	return m.cancelInput()
@@ -2537,7 +2542,7 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 
 // canQuit reports whether a global keystroke (q, ?, R) should be
 // honored. False while an input shell (M3a/M3b/M3.5c bars/prompts
-// /forms) or a confirm modal (quit or comment discard) is open. Both
+// /forms) or a confirm modal (quit or draft discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
 	if m.modal != modalNone {
@@ -2550,8 +2555,8 @@ func (m Model) canQuit() bool {
 }
 
 // routeModalKey delivers a key to the active centered modal. Quit
-// confirmation maps y/Y to tea.Quit and n/N/esc to close; comment
-// discard maps y/Y to cancelInput and n/N/esc to resume editing.
+// confirmation maps y/Y to tea.Quit and n/N/esc to close; draft discard
+// maps y/Y to cancelInput and n/N/esc to resume editing.
 // Other keys are absorbed (the modal owns dispatch; nothing reaches
 // the underlying view).
 //
@@ -2571,7 +2576,7 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.modal = modalNone
 			return m, nil
 		}
-	case modalDiscardComment:
+	case modalDiscardComment, modalDiscardNewIssue:
 		switch msg.String() {
 		case "y", "Y":
 			m.modal = modalNone

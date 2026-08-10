@@ -479,23 +479,153 @@ func TestNewIssueForm_MutationFailureLeavesFormOpenWithErr(t *testing.T) {
 	}
 }
 
-// TestNewIssueForm_EscDiscardsAndReturnsToList: esc closes the form
-// and does NOT auto-open detail (the M3.5c-era inline-row + M4 post-
-// create chain forced detail open; the multi-field form does not).
-func TestNewIssueForm_EscDiscardsAndReturnsToList(t *testing.T) {
+func TestNewIssueForm_EscUnchangedReturnsToList(t *testing.T) {
 	m := openNewIssueForm(t, newIssueFormFixture())
-	m = typeString(m, "draft")
 	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	assertInputKind(t, nm, inputNone)
-	if nm.view != viewList {
-		t.Fatalf("view = %v, want viewList (no auto-detail)", nm.view)
+	if nm.input.kind != inputNone || nm.modal != modalNone || cmd != nil {
+		t.Fatalf("unchanged cancel = input %v modal %v cmd %T",
+			nm.input.kind, nm.modal, cmd)
 	}
-	if cmd != nil {
-		if msg := cmd(); msg != nil {
-			if _, isOpen := msg.(openDetailMsg); isOpen {
-				t.Fatal("esc on new-issue form emitted openDetailMsg; must not auto-open detail")
-			}
+}
+
+func TestNewChildForm_EscUnchangedReturnsToList(t *testing.T) {
+	m := newIssueFormFixture()
+	m.input = newNewIssueFormWithParent("42aa")
+	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if nm.input.kind != inputNone || nm.modal != modalNone || cmd != nil {
+		t.Fatalf("unchanged child cancel = input %v modal %v cmd %T",
+			nm.input.kind, nm.modal, cmd)
+	}
+}
+
+func TestNewIssueForm_EscWhitespaceOnlyOrRestoredBaselineClosesImmediately(t *testing.T) {
+	t.Run("ordinary whitespace", func(t *testing.T) {
+		m := openNewIssueForm(t, newIssueFormFixture())
+		for i := range m.input.fields {
+			m.input.fields[i].setValue(" \t\n")
 		}
+		nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+		if nm.input.kind != inputNone || nm.modal != modalNone || cmd != nil {
+			t.Fatalf("whitespace cancel = input %v modal %v cmd %T",
+				nm.input.kind, nm.modal, cmd)
+		}
+	})
+
+	t.Run("child parent restored", func(t *testing.T) {
+		m := newIssueFormFixture()
+		m.input = focusNewIssueField(newNewIssueFormWithParent("42aa"), newIssueFormParentIndex)
+		m.input, _ = m.input.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		m.input.fields[newIssueFormParentIndex].setValue(" 42aa ")
+		nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+		if nm.input.kind != inputNone || nm.modal != modalNone || cmd != nil {
+			t.Fatalf("restored child cancel = input %v modal %v cmd %T",
+				nm.input.kind, nm.modal, cmd)
+		}
+	})
+}
+
+func TestNewIssueForm_EscEditedFieldRequiresConfirmation(t *testing.T) {
+	tests := []struct {
+		name  string
+		field int
+		value string
+	}{
+		{name: "title", field: 0, value: "draft title"},
+		{name: "body", field: 1, value: "draft body"},
+		{name: "labels", field: 2, value: "bug"},
+		{name: "owner", field: 3, value: "user-a"},
+		{name: "parent", field: 4, value: "42aa"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := openNewIssueForm(t, newIssueFormFixture())
+			m.input.fields[tt.field].setValue(tt.value)
+			nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+			if cmd != nil || nm.modal != modalDiscardNewIssue ||
+				nm.input.kind != inputNewIssueForm ||
+				nm.input.fields[tt.field].value() != tt.value {
+				t.Fatalf("dirty cancel = input %v modal %v value %q cmd %T",
+					nm.input.kind, nm.modal, nm.input.fields[tt.field].value(), cmd)
+			}
+		})
+	}
+}
+
+func TestNewChildForm_EscEditedFieldRequiresConfirmation(t *testing.T) {
+	m := newIssueFormFixture()
+	m.input = newNewIssueFormWithParent("42aa")
+	m.input.fields[0].setValue("draft child")
+	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if cmd != nil || nm.modal != modalDiscardNewIssue ||
+		nm.input.fields[0].value() != "draft child" ||
+		nm.input.fields[newIssueFormParentIndex].value() != "42aa" {
+		t.Fatalf("dirty child cancel = input %v modal %v cmd %T",
+			nm.input.kind, nm.modal, cmd)
+	}
+}
+
+func TestNewIssueForm_EscWhileSavingIsAbsorbed(t *testing.T) {
+	m := openNewIssueForm(t, newIssueFormFixture())
+	m.input.fields[0].setValue("draft title")
+	m.input.saving = true
+	before := m.input
+	nm, cmd := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if cmd != nil || nm.modal != modalNone || nm.input.kind != inputNewIssueForm {
+		t.Fatalf("saving cancel = input %v modal %v cmd %T", nm.input.kind, nm.modal, cmd)
+	}
+	if !nm.input.saving || nm.input.fields[0].value() != "draft title" ||
+		nm.input.active != before.active || nm.input.formGen != before.formGen {
+		t.Fatal("saving cancel changed the installed new-issue form state")
+	}
+}
+
+func TestNewIssueDiscardModal_CancelPreservesDraft(t *testing.T) {
+	for _, msg := range []tea.KeyPressMsg{runeKey('n'), {Code: tea.KeyEsc}} {
+		m := newIssueFormFixture()
+		m.input = focusNewIssueField(newNewIssueFormWithParent("42aa"), newIssueFormBodyIndex)
+		m.input.fields[newIssueFormBodyIndex].area.SetValue("line one\nline two")
+		m.input.formGen = 17
+		m.modal = modalDiscardNewIssue
+		before := m.input
+		beforeArea := before.fields[newIssueFormBodyIndex].area
+
+		nm, cmd := stepModel(m, msg)
+		if cmd != nil || nm.modal != modalNone || nm.input.kind != inputNewIssueForm {
+			t.Fatalf("cancel = input %v modal %v cmd %T", nm.input.kind, nm.modal, cmd)
+		}
+		afterArea := nm.input.fields[newIssueFormBodyIndex].area
+		if afterArea.Value() != beforeArea.Value() ||
+			afterArea.Line() != beforeArea.Line() ||
+			afterArea.Column() != beforeArea.Column() ||
+			afterArea.ScrollYOffset() != beforeArea.ScrollYOffset() ||
+			nm.input.active != before.active ||
+			nm.input.formGen != before.formGen ||
+			nm.input.fields[newIssueFormParentIndex].value() != "42aa" {
+			t.Fatal("cancel changed the installed new-issue form state")
+		}
+	}
+}
+
+func TestNewIssueDiscardModal_ConfirmClearsDraft(t *testing.T) {
+	m := newIssueFormFixture()
+	m.input = newNewIssueForm()
+	m.input.fields[0].setValue("draft title")
+	m.modal = modalDiscardNewIssue
+	nm, cmd := stepModel(m, runeKey('y'))
+	if cmd != nil || nm.modal != modalNone || nm.input.kind != inputNone {
+		t.Fatalf("confirm = input %v modal %v cmd %T", nm.input.kind, nm.modal, cmd)
+	}
+}
+
+func TestNewIssueDiscardModal_AbsorbsOtherKeys(t *testing.T) {
+	m := newIssueFormFixture()
+	m.input = newNewIssueForm()
+	m.input.fields[0].setValue("draft title")
+	m.modal = modalDiscardNewIssue
+	nm, cmd := stepModel(m, runeKey('j'))
+	if cmd != nil || nm.modal != modalDiscardNewIssue ||
+		nm.input.fields[0].value() != "draft title" {
+		t.Fatal("unrelated key escaped new-issue discard modal")
 	}
 }
 
@@ -632,7 +762,8 @@ func TestNewIssueFormCreateRefetchCarriesConnGen(t *testing.T) {
 
 // TestNewIssueForm_StaleResponseFromPriorFormDropped pins the
 // formGen-mismatch guard added by jobs 242/244: if the user submits
-// form A (formGen=N), Esc, then opens a NEW form B (formGen=N+1)
+// form A (formGen=N), confirms discard after Esc, then opens a NEW form B
+// (formGen=N+1)
 // before form A's response returns, the stale response carrying
 // formGen=N MUST be dropped without touching form B's state.
 //
@@ -647,8 +778,12 @@ func TestNewIssueForm_StaleResponseFromPriorFormDropped(t *testing.T) {
 	staleGen := m.input.formGen
 	// Type something into the original form so we have observable state.
 	m = typeString(m, "draft A")
-	// User presses esc, closing form A.
+	// User presses Esc and confirms discard, closing form A.
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.modal != modalDiscardNewIssue {
+		t.Fatalf("discard request modal = %v, want %v", m.modal, modalDiscardNewIssue)
+	}
+	m, _ = stepModel(m, runeKey('y'))
 	assertInputKind(t, m, inputNone)
 	// User opens form B — fresh formGen should be staleGen+1 (or larger).
 	m = openNewIssueForm(t, m)

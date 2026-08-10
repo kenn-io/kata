@@ -163,6 +163,14 @@ func TestViewChromeHelpRows_ModalPrecedesInput(t *testing.T) {
 			}},
 		},
 		{
+			name:  "discard new issue",
+			modal: modalDiscardNewIssue,
+			want: [][]helpItem{{
+				{key: "y", desc: "discard"},
+				{key: "n/esc", desc: "keep editing"},
+			}},
+		},
+		{
 			name:  "quit",
 			modal: modalQuitConfirm,
 			want: [][]helpItem{{

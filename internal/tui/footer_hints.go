@@ -224,7 +224,7 @@ func modalHelpRows(kind modalKind) [][]helpItem {
 			{key: "y", desc: "confirm"},
 			{key: "n/esc", desc: "cancel"},
 		}}
-	case modalDiscardComment:
+	case modalDiscardComment, modalDiscardNewIssue:
 		return [][]helpItem{{
 			{key: "y", desc: "discard"},
 			{key: "n/esc", desc: "keep editing"},
