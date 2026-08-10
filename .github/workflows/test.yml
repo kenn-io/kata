@@ -32,7 +32,7 @@ jobs:
       - name: Install frozen web dependencies
         run: make web-install
 
-      - name: Run web static checks
+      - name: Run shared UI and web static checks
         run: make web-check web-audit web-test
 
   web-browser:

@@ -339,6 +339,10 @@ type ResolveUIIssueReferenceResponse = UIIssueReferenceResponseBody
 
 type ResolveUIIssueReferenceErrorResponse = ErrorEnvelope
 
+type ReadUILaunchTargetResponse = UILaunchTargetResponseBody
+
+type ReadUILaunchTargetErrorResponse = ErrorEnvelope
+
 type ReadUIReferencesResponse = UIReferencesResponseBody
 
 type ReadUISnapshotResponse = UISnapshotResponseBody
@@ -947,6 +951,13 @@ type ResolveUIIssueReferenceResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ResolveUIIssueReferenceResponse
+}
+
+type ReadUILaunchTargetResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ReadUILaunchTargetResponse
 }
 
 type ReadUIReferencesResp200Headers struct {

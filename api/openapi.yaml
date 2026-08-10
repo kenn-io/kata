@@ -4004,6 +4004,21 @@ components:
       required:
         - issue
       type: object
+    UILaunchTargetResponseBody:
+      additionalProperties: true
+      properties:
+        available:
+          type: boolean
+        reason:
+          enum:
+            - browser_origin_unavailable
+          type: string
+        url:
+          format: uri
+          type: string
+      required:
+        - available
+      type: object
     UILink:
       additionalProperties: true
       properties:
@@ -4208,7 +4223,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.9.0
+  version: 0.10.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -7041,6 +7056,30 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
       summary: Resolve an active issue to its browser route identity
+  /api/v1/ui/launch-target:
+    get:
+      operationId: readUILaunchTarget
+      parameters:
+        - explode: false
+          in: query
+          name: issue_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UILaunchTargetResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Read the safe browser launch target for an active issue
   /api/v1/ui/references:
     get:
       operationId: readUIReferences
@@ -7059,6 +7098,15 @@ paths:
           name: project_uid
           schema:
             type: string
+        - explode: true
+          in: query
+          name: issue_uid
+          schema:
+            items:
+              type: string
+            type:
+              - array
+              - "null"
         - explode: false
           in: query
           name: limit

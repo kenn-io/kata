@@ -6,14 +6,22 @@
   import { formatRRule } from '../lib/recurrence/rrule'
 
   interface Props {
-    recurrences: KataRecurrence[]
-    canCreate: boolean
-    onCreate: () => void
-    onEdit: (rec: KataRecurrence) => void
-    onDelete: (rec: KataRecurrence) => void
+    recurrences: readonly KataRecurrence[]
+    canCreate?: boolean
+    readOnly?: boolean
+    onCreate?: () => void
+    onEdit?: (rec: KataRecurrence) => void
+    onDelete?: (rec: KataRecurrence) => void
   }
 
-  let { recurrences, canCreate, onCreate, onEdit, onDelete }: Props = $props()
+  let {
+    recurrences,
+    canCreate = false,
+    readOnly = false,
+    onCreate = () => {},
+    onEdit = () => {},
+    onDelete = () => {},
+  }: Props = $props()
 
   function status(rec: KataRecurrence): 'deleted' | 'done' | 'active' {
     if (rec.deleted_at) return 'deleted'
@@ -22,16 +30,41 @@
   }
 </script>
 
+{#snippet recurrenceContent(rec: KataRecurrence)}
+  <div class="recurrence-icon" aria-hidden="true">
+    {#if status(rec) === 'deleted'}<Trash2 size={15} />
+    {:else if status(rec) === 'done'}<CheckCircle2 size={15} />
+    {:else}<CalendarClock size={15} />{/if}
+  </div>
+  <div class="recurrence-main">
+    <div class="recurrence-title">{rec.template_title}</div>
+    <div class="recurrence-meta">
+      <span>{formatRRule(rec.rrule)}</span>
+      <span>Start {rec.dtstart}</span>
+      <span>{rec.timezone}</span>
+    </div>
+    <div class="recurrence-meta">
+      {#if status(rec) === 'deleted'}<span>Deleted</span>
+      {:else if rec.next_occurrence_key}<span>Next {rec.next_occurrence_key}</span>
+      {:else}<span>Done</span>{/if}
+      {#if rec.last_materialized_uid}<span>Last {rec.last_materialized_uid}</span>{/if}
+      {#if rec.template_labels.length > 0}<span>{rec.template_labels.join(' · ')}</span>{/if}
+    </div>
+  </div>
+{/snippet}
+
 <section class="recurrence-panel" aria-label="Recurrences">
   <header class="head">
     <h3>Recurring</h3>
-    <button
-      type="button"
-      class="add"
-      disabled={!canCreate}
-      onclick={onCreate}
-      aria-label="+ New recurrence">+ New</button
-    >
+    {#if !readOnly}
+      <button
+        type="button"
+        class="add"
+        disabled={!canCreate}
+        onclick={onCreate}
+        aria-label="+ New recurrence">+ New</button
+      >
+    {/if}
   </header>
   {#if recurrences.length === 0}
     <p class="empty">No recurring tasks</p>
@@ -39,40 +72,24 @@
     <div class="recurrence-list">
       {#each recurrences as rec (rec.uid)}
         <div class="recurrence-row">
-          <button
-            type="button"
-            class="row-main"
-            aria-label={rec.template_title}
-            onclick={() => onEdit(rec)}
-          >
-            <div class="recurrence-icon" aria-hidden="true">
-              {#if status(rec) === 'deleted'}<Trash2 size={15} />
-              {:else if status(rec) === 'done'}<CheckCircle2 size={15} />
-              {:else}<CalendarClock size={15} />{/if}
-            </div>
-            <div class="recurrence-main">
-              <div class="recurrence-title">{rec.template_title}</div>
-              <div class="recurrence-meta">
-                <span>{formatRRule(rec.rrule)}</span>
-                <span>Start {rec.dtstart}</span>
-                <span>{rec.timezone}</span>
-              </div>
-              <div class="recurrence-meta">
-                {#if status(rec) === 'deleted'}<span>Deleted</span>
-                {:else if rec.next_occurrence_key}<span>Next {rec.next_occurrence_key}</span>
-                {:else}<span>Done</span>{/if}
-                {#if rec.last_materialized_uid}<span>Last {rec.last_materialized_uid}</span>{/if}
-                {#if rec.template_labels.length > 0}<span>{rec.template_labels.join(' · ')}</span
-                  >{/if}
-              </div>
-            </div>
-          </button>
-          <button
-            type="button"
-            class="row-delete"
-            aria-label="Delete recurrence"
-            onclick={() => onDelete(rec)}><Trash2 size={14} /></button
-          >
+          {#if readOnly}
+            <div class="row-main read-only">{@render recurrenceContent(rec)}</div>
+          {:else}
+            <button
+              type="button"
+              class="row-main"
+              aria-label={rec.template_title}
+              onclick={() => onEdit(rec)}
+            >
+              {@render recurrenceContent(rec)}
+            </button>
+            <button
+              type="button"
+              class="row-delete"
+              aria-label="Delete recurrence"
+              onclick={() => onDelete(rec)}><Trash2 size={14} /></button
+            >
+          {/if}
         </div>
       {/each}
     </div>
@@ -132,6 +149,12 @@
   }
   .row-main:hover {
     background: var(--bg-surface-hover);
+  }
+  .row-main.read-only {
+    cursor: default;
+  }
+  .row-main.read-only:hover {
+    background: none;
   }
   .row-delete {
     align-self: start;

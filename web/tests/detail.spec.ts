@@ -13,6 +13,7 @@ test('detail editing and close reasons round-trip through live Kata authority', 
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
+  await page.getByRole('button', { name: 'Edit issue' }).click()
   await page.getByRole('button', { name: 'Edit title' }).click()
   await page.getByRole('textbox', { name: 'Edit title' }).fill('Edited example task')
   await page.getByRole('textbox', { name: 'Edit title' }).press('Enter')
@@ -57,6 +58,7 @@ test('comments, links, checklist, and history update without API fan-out', async
   })
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
 
+  await page.getByRole('button', { name: 'Edit issue' }).click()
   await page.getByRole('textbox', { name: 'Comment' }).fill('A neutral collaboration note')
   await page.getByRole('button', { name: 'Add comment' }).click()
   await expect(page.getByText('A neutral collaboration note')).toBeVisible()

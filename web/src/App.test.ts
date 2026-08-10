@@ -1571,6 +1571,7 @@ describe('App', () => {
     vi.stubGlobal('fetch', fetcher)
 
     render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
     await fireEvent.click(await screen.findByRole('button', { name: 'Delete recurrence' }))
     await fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
@@ -1636,6 +1637,7 @@ describe('App', () => {
     )
 
     render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
     const editor = await screen.findByRole('textbox', { name: 'Comment' })
     await fireEvent.input(editor, { target: { value: 'Retry-safe comment' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
@@ -1704,6 +1706,7 @@ describe('App', () => {
     )
 
     render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'Edit issue' }))
     const editor = await screen.findByRole('textbox', { name: 'Comment' })
     await fireEvent.input(editor, { target: { value: 'Keep this draft' } })
     await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))

@@ -27,6 +27,19 @@ const base: KataRecurrence = {
 }
 
 describe('RecurrencePanel', () => {
+  test('renders recurrence details without controls in read-only mode', () => {
+    render(RecurrencePanel, {
+      props: {
+        recurrences: [base],
+        readOnly: true,
+      },
+    })
+
+    expect(screen.getByText('Weekly review')).toBeTruthy()
+    expect(screen.getByText('Weekly, 2 times')).toBeTruthy()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
   test('uses formatRRule for the summary (Weekly, 2 times)', () => {
     render(RecurrencePanel, {
       props: {

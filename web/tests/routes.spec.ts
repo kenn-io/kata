@@ -13,10 +13,14 @@ test('canonical routes survive reload and UID issue deep links', async ({ page, 
   const issue = await kata.seedIssue(page, credentials, { title: 'Deep link task' })
 
   await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await expect(page.getByRole('region', { name: 'Task detail' })).toContainText('Deep link task')
+  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
+    'Deep link task',
+  )
   await page.reload()
   await expect(page).toHaveURL(`${kata.origin}/kata?issue=${issue.uid}`)
-  await expect(page.getByRole('region', { name: 'Task detail' })).toContainText('Deep link task')
+  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
+    'Deep link task',
+  )
 })
 
 test('issue selection preserves the active Forge project scope', async ({ page, kata }) => {
@@ -29,7 +33,9 @@ test('issue selection preserves the active Forge project scope', async ({ page, 
 
   await expect(page).toHaveURL(`${kata.origin}/kata?scope=${kata.projectUID}&issue=${issue.uid}`)
   await expect(page.getByRole('heading', { name: 'example-project', exact: true })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Task detail' })).toContainText('Scoped route task')
+  await expect(page.getByRole('region', { name: 'Kata issue detail' })).toContainText(
+    'Scoped route task',
+  )
 })
 
 test('short issue references remain invalid routes with an explicit search recovery', async ({

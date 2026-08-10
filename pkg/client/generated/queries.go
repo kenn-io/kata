@@ -246,10 +246,19 @@ func (r ResolveUIIssueReferenceQuery) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type ReadUILaunchTargetQuery struct {
+	IssueUID string `json:"issue_uid" validate:"required"`
+}
+
+func (r ReadUILaunchTargetQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type ReadUIReferencesQuery struct {
-	Q          *string `json:"q,omitempty"`
-	ProjectUID *string `json:"project_uid,omitempty"`
-	Limit      *int64  `json:"limit,omitempty"`
+	Q          *string  `json:"q,omitempty"`
+	ProjectUID *string  `json:"project_uid,omitempty"`
+	IssueUID   []string `json:"issue_uid,omitempty"`
+	Limit      *int64   `json:"limit,omitempty"`
 }
 
 type ReadUISnapshotQuery struct {

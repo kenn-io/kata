@@ -330,6 +330,7 @@ describe('AppShell', () => {
       },
     })
 
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit issue' }))
     expect(screen.getByRole('region', { name: 'Task detail' })).not.toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
     await fireEvent.input(screen.getByLabelText('Edit title'), {

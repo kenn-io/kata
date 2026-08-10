@@ -164,6 +164,46 @@ func readUIGraphIssues(
 	return issues, nil
 }
 
+// ReadUIReferenceHydration captures bounded issue summaries, their owning
+// project IDs, and the event cursor in one repeatable-read transaction.
+func (s *Store) ReadUIReferenceHydration(
+	ctx context.Context,
+	query db.UIReferencesQuery,
+) (db.UIReferenceHydration, error) {
+	tx, err := s.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return db.UIReferenceHydration{}, fmt.Errorf("begin UI reference hydration read: %w", mapSQLError(err, nil))
+	}
+	defer func() { _ = tx.Rollback() }()
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	capture := db.UIReferenceHydration{References: db.UIReferencesData{
+		Projects: []db.Project{}, Issues: []db.UIIssueReference{},
+		Owners: []string{}, Labels: []string{},
+	}}
+	capture.ResolvedUIDs, capture.ProjectIDs, err = readUIReferenceScope(ctx, tx, query.IssueUIDs)
+	if err != nil {
+		return db.UIReferenceHydration{}, err
+	}
+	capture.References.Issues, err = readUIReferenceIssues(ctx, tx, query, limit)
+	if err != nil {
+		return db.UIReferenceHydration{}, err
+	}
+	capture.References.Cursor, err = maxUIEventID(ctx, tx)
+	if err != nil {
+		return db.UIReferenceHydration{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.UIReferenceHydration{}, fmt.Errorf("commit UI reference hydration read: %w", mapSQLError(err, nil))
+	}
+	return capture, nil
+}
+
 // ReadUIReferences captures bounded typeahead choices and their cursor in one
 // read-only repeatable-read transaction.
 func (s *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery) (db.UIReferencesData, error) {
@@ -918,16 +958,66 @@ func collectUIDetailedLinks(rows *sql.Rows) ([]db.UILink, error) {
 	return links, mapSQLError(rows.Close(), nil)
 }
 
+func readUIReferenceScope(
+	ctx context.Context, tx *sql.Tx, issueUIDs []string,
+) ([]string, []int64, error) {
+	if len(issueUIDs) == 0 {
+		return []string{}, []int64{}, nil
+	}
+	args := []any{db.SystemProjectName}
+	placeholders := make([]string, 0, len(issueUIDs))
+	for _, issueUID := range issueUIDs {
+		args = append(args, issueUID)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+	}
+	statement := `SELECT i.uid, i.project_id
+		FROM issues i JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1
+		AND i.uid IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY i.uid` // #nosec G202 -- only SQL placeholders are constructed.
+	rows, err := tx.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read UI reference scope: %w", mapSQLError(err, nil))
+	}
+	defer func() { _ = rows.Close() }()
+	resolvedUIDs := []string{}
+	projectIDs := []int64{}
+	for rows.Next() {
+		var issueUID string
+		var projectID int64
+		if err := rows.Scan(&issueUID, &projectID); err != nil {
+			return nil, nil, fmt.Errorf("scan UI reference scope: %w", mapSQLError(err, nil))
+		}
+		resolvedUIDs = append(resolvedUIDs, issueUID)
+		if !slices.Contains(projectIDs, projectID) {
+			projectIDs = append(projectIDs, projectID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate UI reference scope: %w", mapSQLError(err, nil))
+	}
+	slices.Sort(projectIDs)
+	return resolvedUIDs, projectIDs, nil
+}
+
 func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReferencesQuery,
 	limit int,
 ) ([]db.UIIssueReference, error) {
-	statement := `SELECT i.uid, p.uid, p.name, i.short_id, i.title, i.status
+	statement := `SELECT i.project_id, i.uid, p.uid, p.name, i.short_id, i.title, i.status
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
 	args := []any{db.SystemProjectName}
 	if query.ProjectUID != "" {
 		args = append(args, query.ProjectUID)
 		statement += fmt.Sprintf(` AND p.uid = $%d`, len(args))
+	}
+	if len(query.IssueUIDs) > 0 {
+		placeholders := make([]string, 0, len(query.IssueUIDs))
+		for _, issueUID := range query.IssueUIDs {
+			args = append(args, issueUID)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		statement += ` AND i.uid IN (` + strings.Join(placeholders, ",") + `)` // #nosec G202 -- only SQL placeholders are constructed.
 	}
 	if query.Query != "" {
 		needle := "%" + strings.ToLower(query.Query) + "%"
@@ -945,7 +1035,8 @@ func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReference
 	issues := []db.UIIssueReference{}
 	for rows.Next() {
 		var issue db.UIIssueReference
-		if err := rows.Scan(&issue.UID, &issue.ProjectUID, &issue.ProjectName,
+		var projectID int64
+		if err := rows.Scan(&projectID, &issue.UID, &issue.ProjectUID, &issue.ProjectName,
 			&issue.ShortID, &issue.Title, &issue.Status); err != nil {
 			return nil, fmt.Errorf("scan UI issue reference: %w", mapSQLError(err, nil))
 		}

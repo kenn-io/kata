@@ -1,4 +1,4 @@
-.PHONY: build install test test-short test-stress test-federation-docker release-scripts-test lint vet clean fmt nilaway openapi api-generate api-check tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
+.PHONY: build install test test-short test-stress test-federation-docker release-scripts-test lint vet clean fmt nilaway openapi api-generate api-check tui tui-demo docs-install docs-build docs-serve docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
 GOBIN ?= $(HOME)/.local/bin
@@ -36,13 +36,22 @@ web-install:
 web-generate:
 	cd web && bun run generate
 
-web-check:
+kata-ui-check:
+	bun run --cwd packages/kata-ui check
+
+kata-ui-test:
+	bun run --cwd packages/kata-ui test
+
+kata-ui-pack-check:
+	cd packages/kata-ui && bun x vitest run pack.test.ts
+
+web-check: kata-ui-check
 	cd web && bun run check
 
 web-audit:
 	cd web && bun run audit
 
-web-test:
+web-test: kata-ui-test kata-ui-pack-check
 	cd web && bun run test
 
 web-test-browser:

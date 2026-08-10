@@ -3696,6 +3696,27 @@ func (u UIIssueReferenceResponseBody) Validate() error {
 	return errors
 }
 
+type UILaunchTargetResponseBody struct {
+	Available bool                              `json:"available"`
+	Reason    *UILaunchTargetResponseBodyReason `json:"reason,omitempty"`
+	URL       *string                           `json:"url,omitempty"`
+}
+
+func (u UILaunchTargetResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if u.Reason != nil {
+		if v, ok := any(u.Reason).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Reason", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type UILink struct {
 	Author          string    `json:"author" validate:"required"`
 	CreatedAt       time.Time `json:"created_at" validate:"required"`

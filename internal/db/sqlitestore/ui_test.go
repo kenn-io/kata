@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -293,6 +294,83 @@ func TestReadUIReferences(t *testing.T) {
 	assert.Equal(t, []string{"user-a"}, references.Owners)
 	assert.Equal(t, []string{"ready"}, references.Labels)
 	assert.Greater(t, references.Cursor, int64(0))
+}
+
+func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
+	ctx := context.Background()
+	store := openUIStore(t)
+	firstProject := createUIProject(t, store, "alpha-project")
+	secondProject := createUIProject(t, store, "beta-project")
+	first, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: firstProject.ID, Title: "First selected issue", Author: "user-a",
+	})
+	require.NoError(t, err)
+	ignored, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: firstProject.ID, Title: "Ignored issue", Author: "user-a",
+	})
+	require.NoError(t, err)
+	for index := range 201 {
+		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: firstProject.ID, Title: fmt.Sprintf("Ignored issue %03d", index), Author: "user-a",
+		})
+		require.NoError(t, err)
+	}
+	second, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: secondProject.ID, Title: "Second selected issue", Author: "user-a",
+	})
+	require.NoError(t, err)
+	deleted, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: firstProject.ID, Title: "Deleted selected issue", Author: "user-a",
+	})
+	require.NoError(t, err)
+	_, _, _, err = store.SoftDeleteIssue(ctx, deleted.ID, "user-a")
+	require.NoError(t, err)
+	archivedProject := createUIProject(t, store, "archived-project")
+	archived, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: archivedProject.ID, Title: "Archived selected issue", Author: "user-a",
+	})
+	require.NoError(t, err)
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: archivedProject.ID, Actor: "user-a", Force: true,
+	})
+	require.NoError(t, err)
+
+	hydration, err := store.ReadUIReferenceHydration(ctx, db.UIReferencesQuery{
+		Query:     "First selected",
+		IssueUIDs: []string{second.UID, first.UID, deleted.UID, archived.UID, second.UID},
+		Limit:     1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{first.UID, second.UID}, hydration.ResolvedUIDs)
+	require.Equal(t, []int64{firstProject.ID, secondProject.ID}, hydration.ProjectIDs)
+	require.Len(t, hydration.References.Issues, 1)
+	require.Equal(t, first.UID, hydration.References.Issues[0].UID)
+	require.Empty(t, hydration.References.Projects)
+	require.Empty(t, hydration.References.Owners)
+	require.Empty(t, hydration.References.Labels)
+
+	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{
+		IssueUIDs: []string{second.UID, first.UID, deleted.UID, archived.UID, second.UID}, Limit: 20,
+	})
+	require.NoError(t, err)
+	require.Len(t, references.Issues, 2)
+	require.Equal(t, []string{first.UID, second.UID}, []string{
+		references.Issues[0].UID, references.Issues[1].UID,
+	})
+	for _, reference := range references.Issues {
+		require.NotEqual(t, ignored.UID, reference.UID)
+		require.NotEqual(t, deleted.UID, reference.UID)
+		require.NotEqual(t, archived.UID, reference.UID)
+	}
+
+	projectReferences, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{
+		ProjectUID: firstProject.UID,
+		IssueUIDs:  []string{first.UID, second.UID},
+		Limit:      20,
+	})
+	require.NoError(t, err)
+	require.Len(t, projectReferences.Issues, 1)
+	require.Equal(t, first.UID, projectReferences.Issues[0].UID)
 }
 
 func openUIStore(t *testing.T) *Store {

@@ -25,6 +25,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
   latest stable GitHub release or update the stable Homebrew tap formula.
 - Kept stable release notes based on the previous stable tag after publishing
   a release candidate from the same commit.
+- Published the network-free `@kenn-io/kata-ui` issue-detail presentation
+  boundary for embedding hosts, with explicit daemon API compatibility gating
+  and release checks that keep tests and repository artifacts out of its
+  tarball.
+- Added bounded stable-UID summary hydration and a credential-safe launch API
+  for hosts that link to Kata tasks without moving host linkage metadata into
+  Kata.
+- Centralized Claude Code and Codex hook configuration on kit's shared
+  agent-hook manager while preserving the existing init flags, lifecycle
+  matchers, attention behavior, unrelated configuration, and workspace
+  symlink boundary.
 
 **Bug fixes**
 

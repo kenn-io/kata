@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -67,9 +68,10 @@ func (in normalizedUISnapshotIntent) storeQuery() db.UISnapshotQuery {
 }
 
 type normalizedUIReferencesIntent struct {
-	Query      string `json:"query,omitempty"`
-	ProjectUID string `json:"project_uid,omitempty"`
-	Limit      int    `json:"limit"`
+	Query      string   `json:"query,omitempty"`
+	ProjectUID string   `json:"project_uid,omitempty"`
+	IssueUIDs  []string `json:"issue_uids,omitempty"`
+	Limit      int      `json:"limit"`
 }
 
 type uiPolicy struct {
@@ -242,6 +244,39 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
+			query := db.UIReferencesQuery{
+				Query: intent.Query, ProjectUID: intent.ProjectUID,
+				IssueUIDs: append([]string(nil), intent.IssueUIDs...), Limit: intent.Limit,
+			}
+			if len(intent.IssueUIDs) > 0 {
+				capture, err := cfg.UIStore.ReadUIReferenceHydration(ctx, query)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				if !slices.Equal(capture.ResolvedUIDs, intent.IssueUIDs) {
+					return nil, api.NewError(
+						http.StatusNotFound, "not_found", "resource not found", "", nil,
+					)
+				}
+				ctx, err = authorizeHostProjectScope(ctx, capture.ProjectIDs, nil, false)
+				if err != nil {
+					return nil, err
+				}
+				policy := effectiveUIPolicy(ctx, cfg)
+				validator, err := makeUIETag(intent, capture.References.Cursor, policy)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				if matchesStrongETag(in.IfNoneMatch, validator) {
+					return &api.UIReferencesResponse{Status: http.StatusNotModified, ETag: validator}, nil
+				}
+				sortUIReferences(&capture.References)
+				return referencesResponse(capture.References, policy, validator), nil
+			}
+			ctx, err = authorizeHostProjectScope(ctx, nil, nil, true)
+			if err != nil {
+				return nil, err
+			}
 			policy := effectiveUIPolicy(ctx, cfg)
 			if in.IfNoneMatch != "" {
 				cursor, err := cfg.UIStore.UIEventCursor(ctx)
@@ -256,9 +291,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return &api.UIReferencesResponse{Status: http.StatusNotModified, ETag: validator}, nil
 				}
 			}
-			data, err := cfg.UIStore.ReadUIReferences(ctx, db.UIReferencesQuery{
-				Query: intent.Query, ProjectUID: intent.ProjectUID, Limit: intent.Limit,
-			})
+			data, err := cfg.UIStore.ReadUIReferences(ctx, query)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
@@ -328,12 +361,40 @@ func normalizeUIReferencesIntent(in *api.UIReferencesRequest) (normalizedUIRefer
 	if err != nil {
 		return normalizedUIReferencesIntent{}, err
 	}
-	limit, err := normalizeUILimit(in.Limit, uiReferencesLimitDefault, uiReferencesLimitMax)
+	issueUIDs := make([]string, 0, len(in.IssueUID))
+	seenIssueUIDs := make(map[string]struct{}, len(in.IssueUID))
+	for _, raw := range in.IssueUID {
+		issueUID, err := normalizeUIUID(raw, "issue_uid", false)
+		if err != nil {
+			return normalizedUIReferencesIntent{}, err
+		}
+		if issueUID == "" {
+			continue
+		}
+		if _, seen := seenIssueUIDs[issueUID]; seen {
+			continue
+		}
+		seenIssueUIDs[issueUID] = struct{}{}
+		issueUIDs = append(issueUIDs, issueUID)
+	}
+	if len(issueUIDs) > uiReferencesLimitMax {
+		return normalizedUIReferencesIntent{}, uiValidationError(
+			"issue_uid",
+			"issue_uid accepts at most 200 distinct values",
+			map[string]any{"limit": uiReferencesLimitMax},
+		)
+	}
+	limit, err := normalizeUILimit(
+		in.Limit,
+		max(uiReferencesLimitDefault, len(issueUIDs)),
+		uiReferencesLimitMax,
+	)
 	if err != nil {
 		return normalizedUIReferencesIntent{}, err
 	}
+	sort.Strings(issueUIDs)
 	return normalizedUIReferencesIntent{
-		Query: strings.TrimSpace(in.Query), ProjectUID: projectUID, Limit: limit,
+		Query: strings.TrimSpace(in.Query), ProjectUID: projectUID, IssueUIDs: issueUIDs, Limit: limit,
 	}, nil
 }
 
