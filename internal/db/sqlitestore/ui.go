@@ -163,39 +163,6 @@ func readUIGraphIssues(
 	return issues, nil
 }
 
-// ResolveUIReferenceProjectIDs returns the distinct active project IDs that
-// own active issues in the bounded UID set used by UI reference hydration.
-func (d *Store) ResolveUIReferenceProjectIDs(ctx context.Context, issueUIDs []string) ([]int64, error) {
-	if len(issueUIDs) == 0 {
-		return []int64{}, nil
-	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(issueUIDs)), ",")
-	args := make([]any, 0, len(issueUIDs)+1)
-	args = append(args, db.SystemProjectName)
-	for _, issueUID := range issueUIDs {
-		args = append(args, issueUID)
-	}
-	rows, err := d.QueryContext(ctx, `
-		SELECT DISTINCT i.project_id
-		FROM issues i JOIN projects p ON p.id = i.project_id
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
-		  AND i.uid IN (`+placeholders+`)
-		ORDER BY i.project_id`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("resolve UI reference project ids: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	projectIDs := []int64{}
-	for rows.Next() {
-		var projectID int64
-		if err := rows.Scan(&projectID); err != nil {
-			return nil, fmt.Errorf("scan UI reference project id: %w", err)
-		}
-		projectIDs = append(projectIDs, projectID)
-	}
-	return projectIDs, rows.Err()
-}
-
 // ReadUIReferenceHydration captures bounded issue summaries, their owning
 // project IDs, and the event cursor in one read-only transaction.
 func (d *Store) ReadUIReferenceHydration(

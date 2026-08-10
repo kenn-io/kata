@@ -164,40 +164,6 @@ func readUIGraphIssues(
 	return issues, nil
 }
 
-// ResolveUIReferenceProjectIDs returns the distinct active project IDs that
-// own active issues in the bounded UID set used by UI reference hydration.
-func (s *Store) ResolveUIReferenceProjectIDs(ctx context.Context, issueUIDs []string) ([]int64, error) {
-	if len(issueUIDs) == 0 {
-		return []int64{}, nil
-	}
-	args := make([]any, 0, len(issueUIDs)+1)
-	args = append(args, db.SystemProjectName)
-	placeholders := make([]string, 0, len(issueUIDs))
-	for _, issueUID := range issueUIDs {
-		args = append(args, issueUID)
-		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
-	}
-	rows, err := s.QueryContext(ctx, `
-		SELECT DISTINCT i.project_id
-		FROM issues i JOIN projects p ON p.id = i.project_id
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1
-		  AND i.uid IN (`+strings.Join(placeholders, ",")+`)
-		ORDER BY i.project_id`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("resolve UI reference project ids: %w", mapSQLError(err, nil))
-	}
-	defer func() { _ = rows.Close() }()
-	projectIDs := []int64{}
-	for rows.Next() {
-		var projectID int64
-		if err := rows.Scan(&projectID); err != nil {
-			return nil, fmt.Errorf("scan UI reference project id: %w", mapSQLError(err, nil))
-		}
-		projectIDs = append(projectIDs, projectID)
-	}
-	return projectIDs, mapSQLError(rows.Err(), nil)
-}
-
 // ReadUIReferenceHydration captures bounded issue summaries, their owning
 // project IDs, and the event cursor in one repeatable-read transaction.
 func (s *Store) ReadUIReferenceHydration(

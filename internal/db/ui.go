@@ -13,7 +13,6 @@ type UIStore interface {
 	UIEventCursor(context.Context) (int64, error)
 	ReadUISnapshot(context.Context, UISnapshotQuery) (UISnapshotData, error)
 	ReadUIReferenceHydration(context.Context, UIReferencesQuery) (UIReferenceHydration, error)
-	ResolveUIReferenceProjectIDs(context.Context, []string) ([]int64, error)
 	ReadUIReferences(context.Context, UIReferencesQuery) (UIReferencesData, error)
 }
 

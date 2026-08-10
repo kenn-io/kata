@@ -79,8 +79,24 @@ func TestServiceAccessControllerScopesStableUIReferenceHydration(t *testing.T) {
 	query := url.Values{"issue_uid": {firstIssue.Issue.UID, secondIssue.Issue.UID}}
 	filtered, err := server.Client().Get(server.URL + "/api/v1/ui/references?" + query.Encode())
 	require.NoError(t, err)
+	var filteredBody struct {
+		Projects []json.RawMessage `json:"projects"`
+		Issues   []struct {
+			UID string `json:"uid"`
+		} `json:"issues"`
+		Owners []string `json:"owners"`
+		Labels []string `json:"labels"`
+	}
+	require.NoError(t, json.NewDecoder(filtered.Body).Decode(&filteredBody))
 	_ = filtered.Body.Close()
 	require.Equal(t, http.StatusOK, filtered.StatusCode)
+	require.Empty(t, filteredBody.Projects)
+	require.Empty(t, filteredBody.Owners)
+	require.Empty(t, filteredBody.Labels)
+	require.Len(t, filteredBody.Issues, 2)
+	assert.ElementsMatch(t, []string{firstIssue.Issue.UID, secondIssue.Issue.UID}, []string{
+		filteredBody.Issues[0].UID, filteredBody.Issues[1].UID,
+	})
 
 	global, err := server.Client().Get(server.URL + "/api/v1/ui/references")
 	require.NoError(t, err)

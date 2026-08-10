@@ -55,10 +55,6 @@ func (s *countingUIStore) ReadUISnapshot(_ context.Context, query db.UISnapshotQ
 	return data, nil
 }
 
-func (s *countingUIStore) ResolveUIReferenceProjectIDs(context.Context, []string) ([]int64, error) {
-	return []int64{}, nil
-}
-
 func (s *countingUIStore) ReadUIReferenceHydration(
 	_ context.Context,
 	query db.UIReferencesQuery,
@@ -542,7 +538,8 @@ func TestUIReferencesPreservesStableIssueUIDFilters(t *testing.T) {
 	}, "")
 
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	require.Equal(t, 1, store.referenceReads)
+	require.Equal(t, 1, store.hydrationReads)
+	require.Zero(t, store.referenceReads)
 	require.Equal(t, []string{second, first}, store.lastReferences.IssueUIDs)
 }
 
@@ -581,6 +578,79 @@ func TestUIReferencesPreservesExplicitLimitWithStableIssueUIDFilters(t *testing.
 	require.Equal(t, 50, store.lastReferences.Limit)
 }
 
+type scopedUIReferencesHostAccess struct {
+	deniedProjectID int64
+	requests        []daemon.HostAccessRequest
+}
+
+func (a *scopedUIReferencesHostAccess) Authorize(
+	_ context.Context,
+	request daemon.HostAccessRequest,
+) (daemon.HostAccessDecision, error) {
+	a.requests = append(a.requests, request)
+	for _, projectID := range request.Operation.ProjectIDs {
+		if projectID == a.deniedProjectID {
+			return daemon.HostAccessDecision{}, daemon.ErrHostAccessDenied
+		}
+	}
+	return daemon.HostAccessDecision{}, nil
+}
+
+func TestUIReferencesHostHydrationAuthorizesCapturedScope(t *testing.T) {
+	issueUID, err := uid.New()
+	require.NoError(t, err)
+	projectUID, err := uid.New()
+	require.NoError(t, err)
+	reference := db.UIIssueReference{
+		UID: issueUID, ProjectUID: projectUID, ProjectName: "restricted-project",
+		ShortID: "a1", QualifiedID: "restricted-project#a1", Title: "Restricted issue", Status: "open",
+	}
+	store := &countingUIStore{
+		cursor: 31, snapshotCursor: 31,
+		references: db.UIReferencesData{Issues: []db.UIIssueReference{reference}},
+		hydration: db.UIReferenceHydration{
+			References: db.UIReferencesData{Issues: []db.UIIssueReference{reference}},
+			ProjectIDs: []int64{42},
+		},
+	}
+	access := &scopedUIReferencesHostAccess{}
+	dbh := openTestDB(t)
+	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{
+		Origin: "https://daemon.example", OriginStable: true, InstanceID: "example",
+		Auth: config.AuthConfig{}, DB: dbh.db,
+	})
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB: dbh.db, UIStore: store, StartedAt: dbh.now, WebSessions: manager, HostAccess: access,
+	})
+	ts := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		ctx := daemon.WithPrincipal(request.Context(), daemon.Principal{
+			Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "user-a",
+		})
+		server.Handler().ServeHTTP(writer, request.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+	query := url.Values{"issue_uid": {issueUID}}
+
+	first, body := getUIReferences(t, ts, query, "")
+	require.Equal(t, http.StatusOK, first.StatusCode, string(body))
+	etag := first.Header.Get("ETag")
+	require.NotEmpty(t, etag)
+
+	access.deniedProjectID = 42
+	second, body := getUIReferences(t, ts, query, etag)
+	require.Equal(t, http.StatusNotFound, second.StatusCode, string(body))
+	require.JSONEq(t,
+		`{"status":404,"error":{"code":"not_found","message":"resource not found"}}`,
+		string(body),
+	)
+	require.Equal(t, 2, store.hydrationReads)
+	require.Zero(t, store.referenceReads)
+	require.Len(t, access.requests, 2)
+	require.Equal(t, []int64{42}, access.requests[1].Operation.ProjectIDs)
+	require.False(t, access.requests[1].Operation.AllProjects)
+}
+
 func TestUIReferencesRejectsMalformedIssueUIDFilter(t *testing.T) {
 	store := &countingUIStore{cursor: 7, snapshotCursor: 7}
 	ts := newUISnapshotServer(t, store, false)
@@ -589,6 +659,7 @@ func TestUIReferencesRejectsMalformedIssueUIDFilter(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
 	require.Zero(t, store.referenceReads)
+	require.Zero(t, store.hydrationReads)
 }
 
 func TestUIReferencesRejectsTooManyIssueUIDFilters(t *testing.T) {
@@ -605,6 +676,7 @@ func TestUIReferencesRejectsTooManyIssueUIDFilters(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
 	require.Zero(t, store.referenceReads)
+	require.Zero(t, store.hydrationReads)
 }
 
 func getUIReferences(t *testing.T, ts *httptest.Server, query url.Values, etag string) (*http.Response, []byte) {

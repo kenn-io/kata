@@ -243,7 +243,31 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, err
 			}
-			ctx, err = authorizeUIReferencesHostScope(ctx, cfg.UIStore, intent.IssueUIDs)
+			query := db.UIReferencesQuery{
+				Query: intent.Query, ProjectUID: intent.ProjectUID,
+				IssueUIDs: append([]string(nil), intent.IssueUIDs...), Limit: intent.Limit,
+			}
+			if len(intent.IssueUIDs) > 0 {
+				capture, err := cfg.UIStore.ReadUIReferenceHydration(ctx, query)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				ctx, err = authorizeHostProjectScope(ctx, capture.ProjectIDs, nil, false)
+				if err != nil {
+					return nil, err
+				}
+				policy := effectiveUIPolicy(ctx, cfg)
+				validator, err := makeUIETag(intent, capture.References.Cursor, policy)
+				if err != nil {
+					return nil, internalAPIError(err)
+				}
+				if matchesStrongETag(in.IfNoneMatch, validator) {
+					return &api.UIReferencesResponse{Status: http.StatusNotModified, ETag: validator}, nil
+				}
+				sortUIReferences(&capture.References)
+				return referencesResponse(capture.References, policy, validator), nil
+			}
+			ctx, err = authorizeHostProjectScope(ctx, nil, nil, true)
 			if err != nil {
 				return nil, err
 			}
@@ -261,10 +285,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 					return &api.UIReferencesResponse{Status: http.StatusNotModified, ETag: validator}, nil
 				}
 			}
-			data, err := cfg.UIStore.ReadUIReferences(ctx, db.UIReferencesQuery{
-				Query: intent.Query, ProjectUID: intent.ProjectUID,
-				IssueUIDs: append([]string(nil), intent.IssueUIDs...), Limit: intent.Limit,
-			})
+			data, err := cfg.UIStore.ReadUIReferences(ctx, query)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
@@ -275,24 +296,6 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			return referencesResponse(data, policy, validator), nil
 		})
-}
-
-func authorizeUIReferencesHostScope(
-	ctx context.Context,
-	store db.UIStore,
-	issueUIDs []string,
-) (context.Context, error) {
-	if _, mounted := ctx.Value(hostAccessStateContextKey{}).(*hostAccessState); !mounted {
-		return ctx, nil
-	}
-	if len(issueUIDs) == 0 {
-		return authorizeHostProjectScope(ctx, nil, nil, true)
-	}
-	projectIDs, err := store.ResolveUIReferenceProjectIDs(ctx, issueUIDs)
-	if err != nil {
-		return ctx, internalAPIError(err)
-	}
-	return authorizeHostProjectScope(ctx, projectIDs, nil, false)
 }
 
 func normalizeUISnapshotIntent(in *api.UISnapshotRequest) (normalizedUISnapshotIntent, error) {
