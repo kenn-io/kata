@@ -697,8 +697,7 @@
   }
 
   function requireAuthentication(): boolean {
-    if (authenticationRecoveryPending) return false
-    clearSessionCredentials()
+    if (authenticationRecoveryPending || loadSessionCredentials() !== undefined) return false
     scheduler.stop()
     stream.stop()
     invalidations.pause()

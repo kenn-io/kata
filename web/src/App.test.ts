@@ -1011,6 +1011,61 @@ describe('App', () => {
     ).toBe(true)
   })
 
+  it('ignores a delayed mutation 401 from superseded credentials', async () => {
+    history.replaceState(null, '', '/kata#direct=1')
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
+    )
+    let releaseMutation!: (response: Response) => void
+    const mutationResponse = new Promise<Response>((resolve) => {
+      releaseMutation = resolve
+    })
+    let markMutationRequested!: () => void
+    const mutationRequested = new Promise<void>((resolve) => {
+      markMutationRequested = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request =
+          input instanceof Request
+            ? input
+            : new Request(new URL(String(input), window.location.origin), init)
+        const target = new URL(request.url)
+        if (request.method === 'POST' && target.pathname === '/api/v1/projects') {
+          markMutationRequested()
+          return mutationResponse
+        }
+        if (target.pathname === '/api/v1/ui/session/local') {
+          return new Response('', { status: 404 })
+        }
+        return Response.json(snapshot(), { headers: { ETag: '"snapshot-1"' } })
+      }),
+    )
+
+    render(App)
+    await fireEvent.click(await screen.findByRole('button', { name: 'New project' }))
+    const input = screen.getByLabelText('New project name')
+    await fireEvent.input(input, { target: { value: 'example-workspace' } })
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    await mutationRequested
+    sessionStorage.setItem(
+      'kata.web.session.v1',
+      JSON.stringify({ session: 'renewed-session', csrf: 'renewed-csrf' }),
+    )
+    releaseMutation(
+      new Response('', {
+        status: 401,
+        headers: { 'X-Kata-Web-Authentication': 'loopback' },
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session')
+    expect(screen.getByRole('region', { name: 'Kata workspace' })).not.toBeNull()
+  })
+
   it('fences browser authority when a reference request rejects the session', async () => {
     history.replaceState(null, '', '/kata#direct=1')
     sessionStorage.setItem(
