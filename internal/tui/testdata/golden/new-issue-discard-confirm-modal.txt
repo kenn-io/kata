@@ -1,0 +1,30 @@
+ Project: kata                                                                                          kata カタ · dev
+ open: 1 · closed: 1 · all: 3
+    #     prio status    title                                                           kids    owner         updated
+▶   #aaa1 P1   op╭────────────────────────────────────────────────────────────────────────────────────╮-4.7    3h ago
+    #bbb2 —    cl│ new issue                                                                          │        1h ago
+    #ccc3 —    [d│ Title *                                                                            │        2h ago
+                 │ draft issue title                                                                  │
+                 │ Body                                                                               │
+                 │                                                                                    │
+                 │                                                                                    │
+                 │                       ╭────────────────────────────────────╮                       │
+                 │                       │                                    │                       │
+                 │                       │  Discard new issue draft?          │                       │
+                 │                       │                                    │                       │
+                 │                       │  Your unsaved issue will be lost.  │                       │
+                 │                       │                                    │                       │
+                 │                       │  [Y] Discard    [N] Keep editing   │                       │
+                 │                       │                                    │                       │
+                 │ Labels                ╰────────────────────────────────────╯                       │
+                 │                                                                                    │
+                 │ Owner                                                                              │
+                 │                                                                                    │
+                 │ Parent                                                                             │
+                 │                                                                                    │
+                 │ ctrl+o save · esc cancel · tab next · ctrl+e (body only)                           │
+                 ╰────────────────────────────────────────────────────────────────────────────────────╯
+
+
+                                                                                                                  [1/3]
+ y discard▕ n/esc keep editing

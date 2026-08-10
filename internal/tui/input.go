@@ -224,8 +224,11 @@ func (f *inputField) blur() {
 // preSplitDetailCaptured distinguishes an intentionally captured nil detail
 // from a search that has not entered split layout yet.
 //
-// target / err / saving / formGen are populated for centered-form and
-// panel-prompt kinds. target carries the issue context so a stale
+// initialFieldValues is the normalized at-open baseline for new-issue forms,
+// including the prefilled Parent value in the new-child flow. It lets Esc
+// distinguish user edits from constructor-provided state. target / err /
+// saving / formGen are populated for centered-form and panel-prompt kinds.
+// target carries the issue context so a stale
 // editor return / label-suggestion fetch cannot land on the wrong
 // issue; formGen is the per-form monotonic ID (assigned by
 // Model.openInput at form-open time) used to reject stale
@@ -244,6 +247,7 @@ type inputState struct {
 	active                 int
 	err                    string
 	saving                 bool
+	initialFieldValues     []string
 	preFilter              ListFilter
 	preListSelection       listSelectionSnapshot
 	restoreSplitDetail     bool
@@ -310,6 +314,30 @@ func (s *inputState) hasCommentDraft() bool {
 	}
 	f := s.activeField()
 	return f != nil && strings.TrimSpace(f.value()) != ""
+}
+
+func normalizedFieldValues(fields []inputField) []string {
+	values := make([]string, len(fields))
+	for i := range fields {
+		values[i] = strings.TrimSpace(fields[i].value())
+	}
+	return values
+}
+
+func (s *inputState) hasNewIssueDraft() bool {
+	if s == nil || s.kind != inputNewIssueForm {
+		return false
+	}
+	if len(s.fields) != len(s.initialFieldValues) {
+		return true
+	}
+	current := normalizedFieldValues(s.fields)
+	for i := range current {
+		if current[i] != s.initialFieldValues[i] {
+			return true
+		}
+	}
+	return false
 }
 
 // Update routes a key into the active field and reports the action
@@ -815,13 +843,16 @@ func joinLabelsForFilterForm(labels []string) string {
 // blank. tab cycles fields with wrap; ctrl+o commits (ctrl+s remains
 // compatible); esc cancels.
 func newNewIssueForm() inputState {
-	return newNewIssueFormBase("new issue")
+	s := newNewIssueFormBase("new issue")
+	s.initialFieldValues = normalizedFieldValues(s.fields)
+	return s
 }
 
 func newNewIssueFormWithParent(parentShortID string) inputState {
 	s := newNewIssueFormBase("new child issue")
 	s.fields[newIssueFormParentIndex].input.SetValue(parentShortID)
 	s.fields[newIssueFormParentIndex].locked = true
+	s.initialFieldValues = normalizedFieldValues(s.fields)
 	return s
 }
 

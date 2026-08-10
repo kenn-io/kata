@@ -292,6 +292,25 @@ func TestSnapshot_CommentDiscardConfirmModal(t *testing.T) {
 	assertGolden(t, "comment-discard-confirm-modal", got)
 }
 
+func TestSnapshot_NewIssueDiscardConfirmModal(t *testing.T) {
+	defer snapshotInit(t)()
+	m := newIssueFormFixture()
+	m.width, m.height = 120, 30
+	m.list = snapListModel(snapListFixture())
+	m.input = newNewIssueForm()
+	m.input.fields[0].setValue("draft issue title")
+	m.modal = modalDiscardNewIssue
+	got := m.viewContent()
+	lines := strings.Split(stripANSI(got), "\n")
+	footer := lines[len(lines)-1]
+	if !strings.Contains(footer, "y discard") ||
+		!strings.Contains(footer, "n/esc keep editing") ||
+		strings.Contains(footer, "ctrl+o create") {
+		t.Fatalf("discard modal footer = %q", footer)
+	}
+	assertGolden(t, "new-issue-discard-confirm-modal", got)
+}
+
 // TestSnapshot_List_SearchBarActive covers the inline command bar
 // in place of the chip strip when chrome.input.kind == inputSearchBar.
 // The footer help row swaps to the bar's enter/esc/ctrl+u keys.
