@@ -14,6 +14,7 @@
     clearSessionCredentials,
     consumeLaunchFragment,
     exchangeLoginToken,
+    isAuthenticationRequiredError,
     loadSessionCredentials,
     openLocalSession,
     openTrustedProxySession,
@@ -796,7 +797,11 @@
           if (restored.kind !== 'route-error') route = restored
         }
       }
-    } catch {
+    } catch (error) {
+      if (isAuthenticationRequiredError(error) && snapshots.state.authenticationRequired) {
+        daemonError = undefined
+        return false
+      }
       snapshots.clear()
       referenceGeneration += 1
       referenceAbort?.abort()
