@@ -483,6 +483,11 @@ func TestSharedTCPBearerUISnapshotAcceptsCanonicalPublicAuthority(t *testing.T) 
 	}
 }
 
+func TestWebDaemonLogValueSanitizesControlCharacters(t *testing.T) {
+	assert.Equal(t, `remote\ninjected`, webDaemonLogValue("remote\ninjected"))
+	assert.Equal(t, "remoteinjected", webDaemonLogValue("remote\x1b[2Jinjected"))
+}
+
 func newAuthorizedWebDaemonGateway(
 	t *testing.T, insecureReadonly, writable bool, target config.CatalogDaemonConfig,
 ) (http.Handler, *WebSessionManager) {

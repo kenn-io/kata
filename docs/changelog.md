@@ -8,10 +8,29 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+**Improvements**
+
+- Published the network-free `@kenn-io/kata-ui` issue-detail presentation
+  boundary for embedding hosts, with explicit daemon API compatibility gating
+  and release checks that keep tests and repository artifacts out of its
+  tarball.
+- Added bounded stable-UID summary hydration and a credential-safe launch API
+  for hosts that link to Kata tasks without moving host linkage metadata into
+  Kata.
+- Centralized Claude Code and Codex hook configuration on kit's shared
+  agent-hook manager while preserving the existing init flags, lifecycle
+  matchers, attention behavior, unrelated configuration, and workspace
+  symlink boundary.
+
+## 0.14.2
+<small>2026-08-10</small>
+
 **New features**
 
 - Added the official `kenn-io/tap/kata` Homebrew installation path for macOS
   and Linux.
+- Added import support for SQLite-era Beads databases through the existing
+  `kata import --source-format beads` workflow.
 - Added a build-time distribution marker so Homebrew, `.deb`, `.rpm`, and
   third-party packages retain ownership of their installed binary while
   `kata update --check` remains available.
@@ -25,22 +44,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   latest stable GitHub release or update the stable Homebrew tap formula.
 - Kept stable release notes based on the previous stable tag after publishing
   a release candidate from the same commit.
-- Published the network-free `@kenn-io/kata-ui` issue-detail presentation
-  boundary for embedding hosts, with explicit daemon API compatibility gating
-  and release checks that keep tests and repository artifacts out of its
-  tarball.
-- Added bounded stable-UID summary hydration and a credential-safe launch API
-  for hosts that link to Kata tasks without moving host linkage metadata into
-  Kata.
-- Centralized Claude Code and Codex hook configuration on kit's shared
-  agent-hook manager while preserving the existing init flags, lifecycle
-  matchers, attention behavior, unrelated configuration, and workspace
-  symlink boundary.
 
 **Bug fixes**
 
 - Protected edited TUI new-issue and new-child-issue drafts with discard
   confirmation when Esc is pressed, without prompting for untouched forms.
+- Corrected `scheduled_on` timezone handling and civil-time semantics across
+  readiness queries and browser snapshots.
 
 ## 0.14.1
 <small>2026-08-08</small>
