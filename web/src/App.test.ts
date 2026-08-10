@@ -831,6 +831,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Retry daemon roster' })).not.toBeNull()
     expect(snapshotDaemons).toEqual(['example-remote', 'example-remote'])
     expect(screen.queryByText('Wrong workspace issue')).toBeNull()
+    expect(sessionStorage.getItem('kata.web.session.v1')).toBeNull()
   })
 
   it('clears stale authority before activating a roster replacement', async () => {

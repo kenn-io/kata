@@ -106,7 +106,11 @@
     return response
   }
   const daemonFetch = createDaemonFetch(() => activeDaemonID, observedFetch)
-  const browserFetch = createCredentialedFetch(undefined, daemonFetch, requireAuthentication)
+  const browserFetch = createCredentialedFetch(
+    undefined,
+    daemonFetch,
+    rejectCredentialsAndRequireAuthentication,
+  )
   const client = createKataClient(undefined, browserFetch)
   const snapshots = new SnapshotController(
     createUISnapshotRequest(browserFetch),
@@ -685,6 +689,11 @@
   function authenticationView(authentication: AuthenticationMode | undefined): ShellMode {
     if (authentication === 'login') return 'login'
     return advertisedAuthentication === 'login' ? 'login' : 'launch'
+  }
+
+  function rejectCredentialsAndRequireAuthentication(): boolean {
+    clearSessionCredentials()
+    return requireAuthentication()
   }
 
   function requireAuthentication(): boolean {
