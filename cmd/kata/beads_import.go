@@ -31,6 +31,7 @@ type beadsIssue struct {
 	Priority     int               `json:"priority"`
 	IssueType    string            `json:"issue_type"`
 	Owner        string            `json:"owner"`
+	Assignee     string            `json:"assignee"`
 	CreatedAt    time.Time         `json:"created_at"`
 	CreatedBy    string            `json:"created_by"`
 	UpdatedAt    time.Time         `json:"updated_at"`
@@ -38,7 +39,7 @@ type beadsIssue struct {
 	CloseReason  string            `json:"close_reason"`
 	Labels       []string          `json:"labels"`
 	Dependencies []beadsDependency `json:"dependencies"`
-	CommentCount int               `json:"comment_count"`
+	CommentCount *int              `json:"comment_count"`
 }
 
 type beadsDependency struct {
@@ -57,6 +58,30 @@ type beadsComment struct {
 	Text      string    `json:"text"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+func (c *beadsComment) UnmarshalJSON(data []byte) error {
+	type commentAlias beadsComment
+	var raw struct {
+		commentAlias
+		ID json.RawMessage `json:"id"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*c = beadsComment(raw.commentAlias)
+	if len(raw.ID) == 0 || bytes.Equal(bytes.TrimSpace(raw.ID), []byte("null")) {
+		return nil
+	}
+	if err := json.Unmarshal(raw.ID, &c.ID); err == nil {
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(raw.ID, &number); err == nil && number != "" {
+		c.ID = number.String()
+		return nil
+	}
+	return fmt.Errorf("beads comment id must be a string or number")
 }
 
 type beadsImportRequest struct {
@@ -151,7 +176,7 @@ func collectBeadsImportRequest(ctx context.Context, workspace, actor string) (be
 			ExitCode: ExitValidation,
 		}
 	}
-	exportData, err := runBD(ctx, workspace, bdPath, "export", "--no-memories")
+	exportData, err := runBeadsExport(ctx, workspace, bdPath)
 	if err != nil {
 		return beadsImportRequest{}, err
 	}
@@ -174,6 +199,36 @@ func collectBeadsImportRequest(ctx context.Context, workspace, actor string) (be
 	return buildBeadsImportRequest(bytes.NewReader(exportData), comments, actor)
 }
 
+func runBeadsExport(ctx context.Context, workspace, bdPath string) ([]byte, error) {
+	out, err := runBD(ctx, workspace, bdPath, "export", "--no-memories")
+	if err == nil {
+		return out, nil
+	}
+	var commandErr *bdCommandError
+	if !errors.As(err, &commandErr) || !strings.Contains(commandErr.stderr, "unknown flag: --no-memories") {
+		return nil, err
+	}
+	return runBD(ctx, workspace, bdPath, "export")
+}
+
+type bdCommandError struct {
+	args   []string
+	stderr string
+	err    error
+}
+
+func (e *bdCommandError) Error() string {
+	msg := strings.TrimSpace(e.stderr)
+	if msg == "" {
+		msg = e.err.Error()
+	}
+	return fmt.Sprintf("bd %s: %s", strings.Join(e.args, " "), msg)
+}
+
+func (e *bdCommandError) Unwrap() error {
+	return e.err
+}
+
 func runBD(ctx context.Context, workspace, bdPath string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, bdPath, args...) //nolint:gosec // bd path comes from PATH lookup and args are fixed by kata.
 	cmd.Dir = workspace
@@ -181,11 +236,7 @@ func runBD(ctx context.Context, workspace, bdPath string, args ...string) ([]byt
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return nil, fmt.Errorf("bd %s: %s", strings.Join(args, " "), msg)
+		return nil, &bdCommandError{args: args, stderr: stderr.String(), err: err}
 	}
 	return out, nil
 }
@@ -306,8 +357,11 @@ func parseBeadsCommentsJSON(r io.Reader) ([]beadsComment, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
-	var comments []beadsComment
-	if err := json.Unmarshal(data, &comments); err == nil {
+	if data[0] == '[' {
+		var comments []beadsComment
+		if err := json.Unmarshal(data, &comments); err != nil {
+			return nil, fmt.Errorf("decode beads comments: %w", err)
+		}
 		return comments, nil
 	}
 	var wrapped struct {
@@ -346,8 +400,11 @@ func buildBeadsImportRequest(r io.Reader, comments map[string][]beadsComment, ac
 		}
 
 		var owner *string
-		if trimmed := strings.TrimSpace(b.Owner); trimmed != "" {
-			owner = &trimmed
+		for _, candidate := range []string{b.Owner, b.Assignee} {
+			if trimmed := strings.TrimSpace(candidate); trimmed != "" {
+				owner = &trimmed
+				break
+			}
 		}
 		author := strings.TrimSpace(b.CreatedBy)
 		if author == "" {
@@ -368,10 +425,15 @@ func buildBeadsImportRequest(r io.Reader, comments map[string][]beadsComment, ac
 			}
 		}
 
+		issueComments := comments[b.ID]
+		commentCount := len(issueComments)
+		if b.CommentCount != nil {
+			commentCount = *b.CommentCount
+		}
 		item := beadsImportIssueInput{
 			ExternalID:   b.ID,
 			Title:        b.Title,
-			Body:         strings.TrimRight(b.Description, "\n") + beadsFooter(b),
+			Body:         strings.TrimRight(b.Description, "\n") + beadsFooter(b, commentCount),
 			Author:       author,
 			Owner:        owner,
 			Priority:     mapBeadsPriority(b.Priority),
@@ -382,7 +444,7 @@ func buildBeadsImportRequest(r io.Reader, comments map[string][]beadsComment, ac
 			ClosedAt:     closedAt,
 			Labels:       labels,
 		}
-		for _, c := range comments[b.ID] {
+		for _, c := range issueComments {
 			commentAuthor := strings.TrimSpace(c.Author)
 			if commentAuthor == "" {
 				commentAuthor = actor
@@ -454,7 +516,7 @@ func mapBeadsStatus(raw string) string {
 	}
 }
 
-func beadsFooter(b beadsIssue) string {
+func beadsFooter(b beadsIssue, commentCount int) string {
 	labels, err := json.Marshal(b.Labels)
 	if err != nil {
 		labels = []byte("[]")
@@ -471,7 +533,7 @@ func beadsFooter(b beadsIssue) string {
 		b.UpdatedAt.Format(time.RFC3339Nano),
 		closedAt,
 		b.CloseReason,
-		b.CommentCount,
+		commentCount,
 	)
 }
 

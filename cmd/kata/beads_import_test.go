@@ -94,6 +94,32 @@ func TestImportBeadsFromLiveBD(t *testing.T) {
 	assert.Contains(t, show, "Comment body from beads")
 }
 
+func TestImportBeadsFromLegacyBD(t *testing.T) {
+	env, dir, pid := setupCLIWorkspace(t)
+	installLegacyFakeBD(t)
+
+	out, err := runCLICapture(t, env, dir, "import", "--source-format", "beads", "--as", "importer")
+	require.NoError(t, err)
+	assert.Contains(t, out, "imported beads: created 1, updated 0, unchanged 0, comments 1, links 0")
+
+	rows, err := env.DB.QueryContext(context.Background(),
+		"SELECT short_id, owner FROM issues WHERE project_id = ? LIMIT 1", pid)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	require.True(t, rows.Next(), "imported issue not found")
+	var short, owner string
+	require.NoError(t, rows.Scan(&short, &owner))
+	assert.Equal(t, "user-a", owner)
+
+	show := runCLI(t, env, dir, "show", short)
+	assert.Contains(t, show, "Legacy comment")
+	assert.Contains(t, show, "beads_comment_count: 1")
+
+	out, err = runCLICapture(t, env, dir, "import", "--source-format", "beads", "--as", "importer")
+	require.NoError(t, err)
+	assert.Contains(t, out, "imported beads: created 0, updated 0, unchanged 1, comments 0, links 0")
+}
+
 func TestImportBeadsJSONSummaryFromLiveBD(t *testing.T) {
 	env, dir, _ := setupCLIWorkspace(t)
 	installFakeBD(t)
@@ -237,6 +263,172 @@ fi
 `
 	require.NoError(t, os.WriteFile(path, []byte(script), 0o755)) //nolint:gosec // test fixture: fake bd script needs executable bit
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func installLegacyFakeBD(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake bd is a POSIX shell script; legacy beads import isn't exercised on Windows")
+	}
+	bin := t.TempDir()
+	path := filepath.Join(bin, "bd")
+	script := `#!/bin/sh
+set -eu
+if [ "$#" -eq 2 ] && [ "$1" = "export" ] && [ "$2" = "--no-memories" ]; then
+	echo "Error: unknown flag: --no-memories" >&2
+	exit 1
+elif [ "$#" -eq 1 ] && [ "$1" = "export" ]; then
+cat <<'JSONL'
+{"id":"legacy-1","title":"Legacy bead","description":"Legacy body","status":"open","priority":1,"issue_type":"task","assignee":" user-a ","created_at":"2025-10-20T10:00:00Z","updated_at":"2025-10-20T10:00:00Z"}
+JSONL
+elif [ "$#" -eq 3 ] && [ "$1" = "comments" ] && [ "$2" = "legacy-1" ] && [ "$3" = "--json" ]; then
+cat <<'JSON'
+[{"id":1,"issue_id":"legacy-1","author":"user-b","text":"Legacy comment","created_at":"2025-10-20T11:00:00Z"}]
+JSON
+else
+	echo "unexpected bd args: $*" >&2
+	exit 2
+fi
+`
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755)) //nolint:gosec // test fixture: fake bd script needs executable bit
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestRunBeadsExportFallsBackForUnsupportedNoMemories(t *testing.T) {
+	bdPath, callsPath := installBDExportFixture(t, "fallback-success")
+
+	got, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
+
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `"id":"legacy-1"`)
+	assert.Equal(t, "export --no-memories\nexport\n", readFixtureCalls(t, callsPath))
+}
+
+func TestRunBeadsExportDoesNotFallbackForOtherErrors(t *testing.T) {
+	bdPath, callsPath := installBDExportFixture(t, "unrelated-error")
+
+	_, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
+
+	require.ErrorContains(t, err, "database unavailable")
+	assert.Equal(t, "export --no-memories\n", readFixtureCalls(t, callsPath))
+}
+
+func TestRunBeadsExportReturnsPlainExportFailure(t *testing.T) {
+	bdPath, callsPath := installBDExportFixture(t, "fallback-error")
+
+	_, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
+
+	require.ErrorContains(t, err, "legacy database corrupt")
+	assert.NotContains(t, err.Error(), "unknown flag")
+	assert.Equal(t, "export --no-memories\nexport\n", readFixtureCalls(t, callsPath))
+}
+
+func installBDExportFixture(t *testing.T, mode string) (string, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake bd is a POSIX shell script; beads export fallback isn't exercised on Windows")
+	}
+	bin := t.TempDir()
+	bdPath := filepath.Join(bin, "bd")
+	callsPath := filepath.Join(bin, "calls")
+	script := `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$FAKE_BD_CALLS"
+case "$FAKE_BD_MODE:$*" in
+	"fallback-success:export --no-memories"|"fallback-error:export --no-memories")
+		echo "Error: unknown flag: --no-memories" >&2
+		exit 1
+		;;
+	"fallback-success:export")
+		echo '{"id":"legacy-1"}'
+		;;
+	"fallback-error:export")
+		echo "legacy database corrupt" >&2
+		exit 1
+		;;
+	"unrelated-error:export --no-memories")
+		echo "database unavailable" >&2
+		exit 1
+		;;
+	*)
+		echo "unexpected bd args: $*" >&2
+		exit 2
+		;;
+esac
+`
+	require.NoError(t, os.WriteFile(bdPath, []byte(script), 0o755)) //nolint:gosec // test fixture: fake bd script needs executable bit
+	t.Setenv("FAKE_BD_MODE", mode)
+	t.Setenv("FAKE_BD_CALLS", callsPath)
+	return bdPath, callsPath
+}
+
+func readFixtureCalls(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // test-controlled path
+	require.NoError(t, err)
+	return string(data)
+}
+
+func TestParseBeadsCommentsJSONAcceptsLegacyNumericID(t *testing.T) {
+	comments, err := parseBeadsCommentsJSON(strings.NewReader(
+		`[{"id":9007199254740993,"issue_id":"legacy-1","author":"user-a","text":"note","created_at":"2026-01-01T00:00:00Z"}]`,
+	))
+
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "9007199254740993", comments[0].ID)
+}
+
+func TestParseBeadsCommentsJSONRejectsInvalidIDShape(t *testing.T) {
+	_, err := parseBeadsCommentsJSON(strings.NewReader(
+		`[{"id":{},"issue_id":"legacy-1","created_at":"2026-01-01T00:00:00Z"}]`,
+	))
+
+	require.ErrorContains(t, err, "comment id")
+}
+
+func TestBuildBeadsImportRequestLegacyFields(t *testing.T) {
+	comment := beadsComment{
+		ID:        "1",
+		IssueID:   "legacy-1",
+		Author:    "user-c",
+		Text:      "Legacy comment",
+		CreatedAt: mustParseTime(t, "2025-10-20T11:00:00Z"),
+	}
+	tests := []struct {
+		name             string
+		export           string
+		wantOwner        string
+		wantCommentCount int
+	}{
+		{
+			name:             "owner wins and explicit count is preserved",
+			export:           `{"id":"legacy-1","title":"Legacy","owner":" user-a ","assignee":"user-b","created_at":"2025-10-20T10:00:00Z","updated_at":"2025-10-20T10:00:00Z","comment_count":0}`,
+			wantOwner:        "user-a",
+			wantCommentCount: 0,
+		},
+		{
+			name:             "blank owner falls back to assignee and omitted count uses comments",
+			export:           `{"id":"legacy-1","title":"Legacy","owner":"   ","assignee":" user-b ","created_at":"2025-10-20T10:00:00Z","updated_at":"2025-10-20T10:00:00Z"}`,
+			wantOwner:        "user-b",
+			wantCommentCount: 1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := buildBeadsImportRequest(
+				strings.NewReader(tc.export),
+				map[string][]beadsComment{"legacy-1": {comment}},
+				"importer",
+			)
+
+			require.NoError(t, err)
+			require.Len(t, req.Items, 1)
+			require.NotNil(t, req.Items[0].Owner)
+			assert.Equal(t, tc.wantOwner, *req.Items[0].Owner)
+			assert.Contains(t, req.Items[0].Body, "beads_comment_count: "+itoa(int64(tc.wantCommentCount)))
+		})
+	}
 }
 
 func TestParseBeadsExportAndBuildImportRequest(t *testing.T) {
