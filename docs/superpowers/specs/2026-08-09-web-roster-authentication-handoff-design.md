@@ -16,11 +16,13 @@ same sequence and leaves the tab at a dead end.
 
 ## Scope
 
-Treat only HTTP 401 from the daemon roster as an authentication handoff. Keep
-the existing fail-closed roster recovery behavior for empty, malformed,
-incompatible, unavailable, and other non-401 roster responses. Do not change
-daemon authentication policy, session issuance, roster visibility, target
-selection, or persisted state.
+Treat HTTP 401 from the daemon roster as an authentication handoff only when
+the credential transport recorded the corresponding authentication-required
+state. Keep the existing fail-closed roster recovery behavior when that
+transition was suppressed, and for empty, malformed, incompatible,
+unavailable, and other non-401 roster responses. Do not change daemon
+authentication policy, session issuance, roster visibility, target selection,
+or persisted state.
 
 ## Considered Approaches
 
@@ -58,15 +60,25 @@ invalid roster body will continue to throw `Configured daemons are
 unavailable`.
 
 The application roster loader will catch errors by value. When the error is an
-authentication-required error, it will return `false` immediately. It will not
-clear snapshots, references, the accepted route, the current shell mode, or the
-roster error field. The credential transport remains the single owner of the
-authentication transition: it clears tab credentials, fences snapshot
-authority, records the requested return path, and selects the login or launch
-view from the server-advertised authentication mode.
+authentication-required error and `snapshots.state.authenticationRequired` is
+true, it will clear any prior `daemonError` and return `false` immediately. It
+will not clear snapshots, references, the accepted route, or the current shell
+mode. The credential transport remains the single owner of the authentication
+transition: it clears tab credentials, fences snapshot authority, records the
+requested return path, and selects the login or launch view from the
+server-advertised authentication mode.
 
-For all other errors, the current catch path remains unchanged. It clears stale
-authority and reference projections, enters loading mode, reports the roster as
+The snapshot authentication flag is the proof that this transition occurred.
+The roster loader must not infer a completed transition from the HTTP status or
+from `authenticationRecoveryPending`. The credential transport deliberately
+suppresses its callback while transparent recovery is active and when a
+request's credentials were superseded during flight. If a roster 401 reaches
+the catch block without the snapshot authentication flag, the loader will use
+the generic fail-closed roster recovery path instead of returning silently.
+
+For all other errors, including a 401 whose authentication callback was
+suppressed, the current catch path remains unchanged. It clears stale authority
+and reference projections, enters loading mode, reports the roster as
 unavailable, and offers an explicit retry. This preserves the existing rule
 that a missing or invalid catalog must never imply direct access to the host
 daemon's local workspace.
@@ -83,7 +95,8 @@ For a fresh tab on a login-mode daemon:
 5. The credential transport records the advertised mode and transitions the
    app to authentication-required login state.
 6. The roster client throws `AuthenticationRequiredError`.
-7. The roster loader stops without overwriting the authentication transition.
+7. The roster loader observes the recorded authentication-required state,
+   clears any stale roster error, and stops without overwriting the transition.
 8. The token login form remains visible with the original return path.
 
 After a successful token exchange, the existing login flow invalidates and
@@ -92,8 +105,12 @@ authority.
 
 ## Error Handling
 
-- Roster HTTP 401: preserve the authentication transition and do not show a
-  roster error.
+- Roster HTTP 401 with recorded authentication-required state: clear any stale
+  roster error, preserve the authentication transition, and do not show roster
+  recovery.
+- Roster HTTP 401 with a suppressed authentication callback: show the existing
+  configured-daemons recovery panel instead of leaving the shell in loading
+  mode without a recovery control.
 - Other non-success roster responses: show the existing configured-daemons
   recovery panel.
 - Empty, malformed, or invalid roster bodies: show the existing recovery panel.
@@ -107,6 +124,17 @@ Add an application regression test that starts with empty tab-local state,
 returns 404 from local-session bootstrap, and returns 401 with the `login`
 authentication header from the roster. It must observe the login form, no
 roster error panel, no roster retry control, and no snapshot request.
+
+Add an application regression test that first enters roster recovery, then
+receives a 401 with the `login` authentication header on retry. It must observe
+that the login form replaces the recovery panel and that the prior roster error
+does not remain on the login view.
+
+Add an application regression test in which transparent local-session recovery
+is still pending when the newly authenticated roster request returns 401. The
+authentication callback is suppressed in this state, so the app must retain
+the fail-closed roster recovery panel rather than remain at an indefinite
+loading state.
 
 Add a roster-client unit test that verifies HTTP 401 rejects with
 `AuthenticationRequiredError`. Existing tests for empty and unavailable
