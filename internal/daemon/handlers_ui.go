@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -251,6 +252,11 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				capture, err := cfg.UIStore.ReadUIReferenceHydration(ctx, query)
 				if err != nil {
 					return nil, internalAPIError(err)
+				}
+				if !slices.Equal(capture.ResolvedUIDs, intent.IssueUIDs) {
+					return nil, api.NewError(
+						http.StatusNotFound, "not_found", "resource not found", "", nil,
+					)
 				}
 				ctx, err = authorizeHostProjectScope(ctx, capture.ProjectIDs, nil, false)
 				if err != nil {

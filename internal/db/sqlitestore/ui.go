@@ -185,7 +185,11 @@ func (d *Store) ReadUIReferenceHydration(
 		Projects: []db.Project{}, Issues: []db.UIIssueReference{},
 		Owners: []string{}, Labels: []string{},
 	}}
-	capture.References.Issues, capture.ProjectIDs, err = readUIReferenceIssues(ctx, tx, query, limit)
+	capture.ResolvedUIDs, capture.ProjectIDs, err = readUIReferenceScope(ctx, tx, query.IssueUIDs)
+	if err != nil {
+		return db.UIReferenceHydration{}, err
+	}
+	capture.References.Issues, err = readUIReferenceIssues(ctx, tx, query, limit)
 	if err != nil {
 		return db.UIReferenceHydration{}, err
 	}
@@ -234,7 +238,7 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 			return db.UIReferencesData{}, fmt.Errorf("UI read stage: %w", err)
 		}
 	}
-	data.Issues, _, err = readUIReferenceIssues(ctx, tx, query, limit)
+	data.Issues, err = readUIReferenceIssues(ctx, tx, query, limit)
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
@@ -979,9 +983,50 @@ func enrichUILinks(ctx context.Context, tx *sql.Tx, links []db.Link) ([]db.UILin
 	return enriched, nil
 }
 
+func readUIReferenceScope(
+	ctx context.Context, tx *sql.Tx, issueUIDs []string,
+) ([]string, []int64, error) {
+	if len(issueUIDs) == 0 {
+		return []string{}, []int64{}, nil
+	}
+	statement := `SELECT i.uid, i.project_id
+		FROM issues i JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
+		AND i.uid IN (` + uiSQLitePlaceholders(len(issueUIDs)) + `)
+		ORDER BY i.uid` // #nosec G202 -- only SQL placeholders are constructed.
+	args := make([]any, 0, len(issueUIDs)+1)
+	args = append(args, db.SystemProjectName)
+	for _, issueUID := range issueUIDs {
+		args = append(args, issueUID)
+	}
+	rows, err := tx.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read UI reference scope: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	resolvedUIDs := []string{}
+	projectIDs := []int64{}
+	for rows.Next() {
+		var issueUID string
+		var projectID int64
+		if err := rows.Scan(&issueUID, &projectID); err != nil {
+			return nil, nil, fmt.Errorf("scan UI reference scope: %w", err)
+		}
+		resolvedUIDs = append(resolvedUIDs, issueUID)
+		if !slices.Contains(projectIDs, projectID) {
+			projectIDs = append(projectIDs, projectID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate UI reference scope: %w", err)
+	}
+	slices.Sort(projectIDs)
+	return resolvedUIDs, projectIDs, nil
+}
+
 func readUIReferenceIssues(
 	ctx context.Context, tx *sql.Tx, query db.UIReferencesQuery, limit int,
-) ([]db.UIIssueReference, []int64, error) {
+) ([]db.UIIssueReference, error) {
 	statement := `SELECT i.project_id, i.uid, p.uid, p.name, i.short_id, i.title, i.status
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
@@ -1006,25 +1051,21 @@ func readUIReferenceIssues(
 	args = append(args, limit)
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read UI issue references: %w", err)
+		return nil, fmt.Errorf("read UI issue references: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	issues := []db.UIIssueReference{}
-	projectIDs := []int64{}
 	for rows.Next() {
 		var issue db.UIIssueReference
 		var projectID int64
 		if err := rows.Scan(&projectID, &issue.UID, &issue.ProjectUID, &issue.ProjectName,
 			&issue.ShortID, &issue.Title, &issue.Status); err != nil {
-			return nil, nil, fmt.Errorf("scan UI issue reference: %w", err)
+			return nil, fmt.Errorf("scan UI issue reference: %w", err)
 		}
 		issue.QualifiedID = issue.ProjectName + "#" + issue.ShortID
 		issues = append(issues, issue)
-		if !slices.Contains(projectIDs, projectID) {
-			projectIDs = append(projectIDs, projectID)
-		}
 	}
-	return issues, projectIDs, rows.Err()
+	return issues, rows.Err()
 }
 
 func readUIReferenceStrings(

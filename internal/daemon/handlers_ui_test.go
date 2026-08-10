@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
@@ -62,6 +63,9 @@ func (s *countingUIStore) ReadUIReferenceHydration(
 	s.hydrationReads++
 	s.lastReferences = query
 	data := s.hydration
+	if data.ResolvedUIDs == nil {
+		data.ResolvedUIDs = append([]string(nil), query.IssueUIDs...)
+	}
 	data.References.Cursor = s.snapshotCursor
 	return data, nil
 }
@@ -597,20 +601,25 @@ func (a *scopedUIReferencesHostAccess) Authorize(
 }
 
 func TestUIReferencesHostHydrationAuthorizesCapturedScope(t *testing.T) {
-	issueUID, err := uid.New()
+	firstIssueUID, err := uid.New()
 	require.NoError(t, err)
+	secondIssueUID, err := uid.New()
+	require.NoError(t, err)
+	resolvedUIDs := []string{firstIssueUID, secondIssueUID}
+	slices.Sort(resolvedUIDs)
 	projectUID, err := uid.New()
 	require.NoError(t, err)
 	reference := db.UIIssueReference{
-		UID: issueUID, ProjectUID: projectUID, ProjectName: "restricted-project",
+		UID: firstIssueUID, ProjectUID: projectUID, ProjectName: "restricted-project",
 		ShortID: "a1", QualifiedID: "restricted-project#a1", Title: "Restricted issue", Status: "open",
 	}
 	store := &countingUIStore{
 		cursor: 31, snapshotCursor: 31,
 		references: db.UIReferencesData{Issues: []db.UIIssueReference{reference}},
 		hydration: db.UIReferenceHydration{
-			References: db.UIReferencesData{Issues: []db.UIIssueReference{reference}},
-			ProjectIDs: []int64{42},
+			References:   db.UIReferencesData{Issues: []db.UIIssueReference{reference}},
+			ResolvedUIDs: resolvedUIDs,
+			ProjectIDs:   []int64{42, 84},
 		},
 	}
 	access := &scopedUIReferencesHostAccess{}
@@ -630,14 +639,14 @@ func TestUIReferencesHostHydrationAuthorizesCapturedScope(t *testing.T) {
 		server.Handler().ServeHTTP(writer, request.WithContext(ctx))
 	}))
 	t.Cleanup(ts.Close)
-	query := url.Values{"issue_uid": {issueUID}}
+	query := url.Values{"issue_uid": {firstIssueUID, secondIssueUID}, "q": {"Restricted"}}
 
 	first, body := getUIReferences(t, ts, query, "")
 	require.Equal(t, http.StatusOK, first.StatusCode, string(body))
 	etag := first.Header.Get("ETag")
 	require.NotEmpty(t, etag)
 
-	access.deniedProjectID = 42
+	access.deniedProjectID = 84
 	second, body := getUIReferences(t, ts, query, etag)
 	require.Equal(t, http.StatusNotFound, second.StatusCode, string(body))
 	require.JSONEq(t,
@@ -647,8 +656,50 @@ func TestUIReferencesHostHydrationAuthorizesCapturedScope(t *testing.T) {
 	require.Equal(t, 2, store.hydrationReads)
 	require.Zero(t, store.referenceReads)
 	require.Len(t, access.requests, 2)
-	require.Equal(t, []int64{42}, access.requests[1].Operation.ProjectIDs)
+	require.Equal(t, []int64{42, 84}, access.requests[1].Operation.ProjectIDs)
 	require.False(t, access.requests[1].Operation.AllProjects)
+}
+
+func TestUIReferencesHostHydrationConcealsUnavailableUID(t *testing.T) {
+	firstIssueUID, err := uid.New()
+	require.NoError(t, err)
+	missingIssueUID, err := uid.New()
+	require.NoError(t, err)
+	store := &countingUIStore{
+		cursor: 31, snapshotCursor: 31,
+		hydration: db.UIReferenceHydration{
+			ResolvedUIDs: []string{firstIssueUID},
+			ProjectIDs:   []int64{42},
+		},
+	}
+	access := &scopedUIReferencesHostAccess{}
+	dbh := openTestDB(t)
+	manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{
+		Origin: "https://daemon.example", OriginStable: true, InstanceID: "example",
+		Auth: config.AuthConfig{}, DB: dbh.db,
+	})
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{
+		DB: dbh.db, UIStore: store, StartedAt: dbh.now, WebSessions: manager, HostAccess: access,
+	})
+	ts := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		ctx := daemon.WithPrincipal(request.Context(), daemon.Principal{
+			Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "user-a",
+		})
+		server.Handler().ServeHTTP(writer, request.WithContext(ctx))
+	}))
+	t.Cleanup(ts.Close)
+
+	resp, body := getUIReferences(t, ts, url.Values{
+		"issue_uid": {firstIssueUID, missingIssueUID},
+	}, "")
+
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+	require.JSONEq(t,
+		`{"status":404,"error":{"code":"not_found","message":"resource not found"}}`,
+		string(body),
+	)
+	require.Empty(t, access.requests)
 }
 
 func TestUIReferencesRejectsMalformedIssueUIDFilter(t *testing.T) {

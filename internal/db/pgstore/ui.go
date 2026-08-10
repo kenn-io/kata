@@ -186,7 +186,11 @@ func (s *Store) ReadUIReferenceHydration(
 		Projects: []db.Project{}, Issues: []db.UIIssueReference{},
 		Owners: []string{}, Labels: []string{},
 	}}
-	capture.References.Issues, capture.ProjectIDs, err = readUIReferenceIssues(ctx, tx, query, limit)
+	capture.ResolvedUIDs, capture.ProjectIDs, err = readUIReferenceScope(ctx, tx, query.IssueUIDs)
+	if err != nil {
+		return db.UIReferenceHydration{}, err
+	}
+	capture.References.Issues, err = readUIReferenceIssues(ctx, tx, query, limit)
 	if err != nil {
 		return db.UIReferenceHydration{}, err
 	}
@@ -234,7 +238,7 @@ func (s *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 			return db.UIReferencesData{}, fmt.Errorf("UI read stage: %w", err)
 		}
 	}
-	data.Issues, _, err = readUIReferenceIssues(ctx, tx, query, limit)
+	data.Issues, err = readUIReferenceIssues(ctx, tx, query, limit)
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
@@ -954,9 +958,51 @@ func collectUIDetailedLinks(rows *sql.Rows) ([]db.UILink, error) {
 	return links, mapSQLError(rows.Close(), nil)
 }
 
+func readUIReferenceScope(
+	ctx context.Context, tx *sql.Tx, issueUIDs []string,
+) ([]string, []int64, error) {
+	if len(issueUIDs) == 0 {
+		return []string{}, []int64{}, nil
+	}
+	args := []any{db.SystemProjectName}
+	placeholders := make([]string, 0, len(issueUIDs))
+	for _, issueUID := range issueUIDs {
+		args = append(args, issueUID)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+	}
+	statement := `SELECT i.uid, i.project_id
+		FROM issues i JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1
+		AND i.uid IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY i.uid` // #nosec G202 -- only SQL placeholders are constructed.
+	rows, err := tx.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read UI reference scope: %w", mapSQLError(err, nil))
+	}
+	defer func() { _ = rows.Close() }()
+	resolvedUIDs := []string{}
+	projectIDs := []int64{}
+	for rows.Next() {
+		var issueUID string
+		var projectID int64
+		if err := rows.Scan(&issueUID, &projectID); err != nil {
+			return nil, nil, fmt.Errorf("scan UI reference scope: %w", mapSQLError(err, nil))
+		}
+		resolvedUIDs = append(resolvedUIDs, issueUID)
+		if !slices.Contains(projectIDs, projectID) {
+			projectIDs = append(projectIDs, projectID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate UI reference scope: %w", mapSQLError(err, nil))
+	}
+	slices.Sort(projectIDs)
+	return resolvedUIDs, projectIDs, nil
+}
+
 func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReferencesQuery,
 	limit int,
-) ([]db.UIIssueReference, []int64, error) {
+) ([]db.UIIssueReference, error) {
 	statement := `SELECT i.project_id, i.uid, p.uid, p.name, i.short_id, i.title, i.status
 		FROM issues i JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> $1`
@@ -983,25 +1029,21 @@ func readUIReferenceIssues(ctx context.Context, tx *sql.Tx, query db.UIReference
 	statement += fmt.Sprintf(` ORDER BY p.name, i.short_id LIMIT $%d`, len(args)) // #nosec G202 -- only a generated placeholder number is interpolated.
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read UI issue references: %w", mapSQLError(err, nil))
+		return nil, fmt.Errorf("read UI issue references: %w", mapSQLError(err, nil))
 	}
 	defer func() { _ = rows.Close() }()
 	issues := []db.UIIssueReference{}
-	projectIDs := []int64{}
 	for rows.Next() {
 		var issue db.UIIssueReference
 		var projectID int64
 		if err := rows.Scan(&projectID, &issue.UID, &issue.ProjectUID, &issue.ProjectName,
 			&issue.ShortID, &issue.Title, &issue.Status); err != nil {
-			return nil, nil, fmt.Errorf("scan UI issue reference: %w", mapSQLError(err, nil))
+			return nil, fmt.Errorf("scan UI issue reference: %w", mapSQLError(err, nil))
 		}
 		issue.QualifiedID = issue.ProjectName + "#" + issue.ShortID
 		issues = append(issues, issue)
-		if !slices.Contains(projectIDs, projectID) {
-			projectIDs = append(projectIDs, projectID)
-		}
 	}
-	return issues, projectIDs, mapSQLError(rows.Err(), nil)
+	return issues, mapSQLError(rows.Err(), nil)
 }
 
 func readUIReferenceStrings(ctx context.Context, tx *sql.Tx, statement string,

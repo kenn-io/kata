@@ -143,11 +143,12 @@ type UIReferencesQuery struct {
 	Limit      int
 }
 
-// UIReferenceHydration captures bounded issue summaries and the internal
-// project scope that owns those exact rows in one backend read transaction.
+// UIReferenceHydration captures bounded issue summaries and the complete
+// active issue/project scope requested for hydration in one read transaction.
 type UIReferenceHydration struct {
-	References UIReferencesData
-	ProjectIDs []int64
+	References   UIReferencesData
+	ResolvedUIDs []string
+	ProjectIDs   []int64
 }
 
 // UIIssueReference is the bounded typeahead identity for one active issue.
