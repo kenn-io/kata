@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createCredentialedFetch } from './client'
+import { createCredentialedFetch, responseTriggeredAuthenticationTransition } from './client'
 
 describe('Kata browser API credentials', () => {
   it('attaches the tab session to reads and adds CSRF only to mutations', async () => {
@@ -30,7 +30,7 @@ describe('Kata browser API credentials', () => {
   })
 
   it('fences browser authority when a credentialed request returns 401', async () => {
-    const onAuthenticationRequired = vi.fn()
+    const onAuthenticationRequired = vi.fn(() => true)
     const fetcher = createCredentialedFetch(
       () => ({ session: 'expired-session', csrf: 'expired-csrf' }),
       vi.fn(async () => new Response('', { status: 401 })) as typeof fetch,
@@ -41,6 +41,7 @@ describe('Kata browser API credentials', () => {
 
     expect(response.status).toBe(401)
     expect(onAuthenticationRequired).toHaveBeenCalledTimes(1)
+    expect(responseTriggeredAuthenticationTransition(response)).toBe(true)
   })
 
   it('ignores a delayed 401 from a superseded browser session', async () => {
@@ -49,7 +50,7 @@ describe('Kata browser API credentials', () => {
     const response = new Promise<Response>((resolve) => {
       release = resolve
     })
-    const onAuthenticationRequired = vi.fn()
+    const onAuthenticationRequired = vi.fn(() => true)
     const fetcher = createCredentialedFetch(
       () => credentials,
       vi.fn(async () => response) as typeof fetch,
@@ -60,7 +61,9 @@ describe('Kata browser API credentials', () => {
     credentials = { session: 'renewed-session', csrf: 'renewed-csrf' }
     release(new Response('', { status: 401 }))
 
-    expect((await pending).status).toBe(401)
+    const result = await pending
+    expect(result.status).toBe(401)
     expect(onAuthenticationRequired).not.toHaveBeenCalled()
+    expect(responseTriggeredAuthenticationTransition(result)).toBe(false)
   })
 })

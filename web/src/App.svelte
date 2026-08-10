@@ -11,6 +11,7 @@
   import { createDaemonFetch, fetchWebDaemons, type WebDaemonInfo } from './lib/daemons/client'
   import { loadDaemonRoute, saveDaemonRoute } from './lib/daemons/state'
   import {
+    AuthenticationRequiredError,
     clearSessionCredentials,
     consumeLaunchFragment,
     exchangeLoginToken,
@@ -686,8 +687,8 @@
     return advertisedAuthentication === 'login' ? 'login' : 'launch'
   }
 
-  function requireAuthentication(): void {
-    if (authenticationRecoveryPending) return
+  function requireAuthentication(): boolean {
+    if (authenticationRecoveryPending) return false
     clearSessionCredentials()
     scheduler.stop()
     stream.stop()
@@ -703,9 +704,10 @@
       mode = authority?.snapshot ? 'ready' : 'loading'
       authenticationRecoveryCompletion = startAutomaticSession(returnPath, advertisedAuthentication)
       void authenticationRecoveryCompletion
-      return
+      return true
     }
     mode = authenticationView(selectedAuthentication)
+    return true
   }
 
   async function startAutomaticSession(
@@ -798,7 +800,11 @@
         }
       }
     } catch (error) {
-      if (isAuthenticationRequiredError(error) && snapshots.state.authenticationRequired) {
+      if (
+        isAuthenticationRequiredError(error) &&
+        error instanceof AuthenticationRequiredError &&
+        error.authenticationTransitioned
+      ) {
         daemonError = undefined
         return false
       }

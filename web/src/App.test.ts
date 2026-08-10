@@ -751,7 +751,7 @@ describe('App', () => {
     )
   })
 
-  it('does not fall back to local authority when roster renewal fails', async () => {
+  it('keeps roster recovery when a roster 401 is suppressed during session renewal', async () => {
     sessionStorage.setItem(
       'kata.web.session.v1',
       JSON.stringify({ session: 'expired-session', csrf: 'expired-csrf' }),
@@ -782,7 +782,10 @@ describe('App', () => {
               ],
             })
           }
-          return Response.json({ error: { code: 'daemon_unavailable' } }, { status: 503 })
+          return new Response('', {
+            status: 401,
+            headers: { 'X-Kata-Web-Authentication': 'loopback' },
+          })
         }
         if (target.pathname === '/api/v1/ui/session/local') {
           return Response.json({

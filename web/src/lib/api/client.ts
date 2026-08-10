@@ -5,11 +5,18 @@ import type { SessionCredentials } from '../auth/session'
 import { loadSessionCredentials } from '../auth/session'
 
 type CredentialReader = () => SessionCredentials | undefined
+type AuthenticationRequiredHandler = () => boolean
+
+const authenticationTransitionResponses = new WeakSet<Response>()
+
+export function responseTriggeredAuthenticationTransition(response: Response): boolean {
+  return authenticationTransitionResponses.has(response)
+}
 
 export function createCredentialedFetch(
   readCredentials: CredentialReader = () => loadSessionCredentials(),
   upstream: typeof fetch = fetch,
-  onAuthenticationRequired: () => void = () => undefined,
+  onAuthenticationRequired: AuthenticationRequiredHandler = () => false,
 ): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = input instanceof Request ? input : undefined
@@ -32,7 +39,7 @@ export function createCredentialedFetch(
       headers,
     })
     if (response.status === 401 && readCredentials()?.session === credentials?.session) {
-      onAuthenticationRequired()
+      if (onAuthenticationRequired()) authenticationTransitionResponses.add(response)
     }
     return response
   }
