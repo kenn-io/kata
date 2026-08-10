@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
 
+import { AuthenticationRequiredError } from '../auth/session'
 import { createDaemonFetch, fetchWebDaemons } from './client'
 
 describe('web daemon transport', () => {
@@ -87,5 +88,11 @@ describe('web daemon transport', () => {
       expect.objectContaining({ id: 'example-remote', auth: 'token', health: 'auth_required' }),
       expect.objectContaining({ id: 'example-legacy', health: 'upgrade_required' }),
     ])
+  })
+
+  test('classifies authentication-required roster responses', async () => {
+    const fetcher = vi.fn(async () => new Response('', { status: 401 }))
+
+    await expect(fetchWebDaemons(fetcher)).rejects.toBeInstanceOf(AuthenticationRequiredError)
   })
 })
