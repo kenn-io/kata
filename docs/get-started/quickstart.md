@@ -1,22 +1,34 @@
 # Quickstart
 
-Install kata, enter a workspace, bind it to a kata project, and create your
-first issue:
+Install kata on macOS with the official Homebrew tap:
+
+```sh
+brew install kenn-io/tap/kata
+```
+
+On Linux, install the release binary with:
 
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
-
-cd your-repo
-kata init
-kata create "fix login race"
-kata list
-kata show abc4
 ```
 
 On Windows PowerShell, install the release binary with:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
+```
+
+See [Install](install.md) for package upgrades and alternative installation
+methods.
+
+Then enter a workspace, bind it to a kata project, and create your first issue:
+
+```sh
+cd your-repo
+kata init
+kata create "fix login race"
+kata list
+kata show abc4
 ```
 
 `kata create` prints the issue's short ID. Use that short ID in later commands.
