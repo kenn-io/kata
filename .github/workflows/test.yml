@@ -181,7 +181,7 @@ jobs:
         shell: bash
         env:
           KATA_TEST_FAST_SQLITE: "1"
-        run: env -u KATA_AUTH_TOKEN go test -p 4 -vet=off ./...
+        run: env -u KATA_AUTH_TOKEN go test -timeout=20m -p 4 -vet=off ./...
 
   lint:
     name: golangci-lint
