@@ -4,7 +4,32 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) {
+	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
+
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "vectors.db")
+	ix, err := Open(ctx, path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ix.Close() })
+
+	var mode string
+	require.NoError(t, ix.db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode))
+	assert.Equal(t, "wal", mode)
+
+	var sync int
+	require.NoError(t, ix.db.QueryRowContext(ctx, "PRAGMA synchronous").Scan(&sync))
+	assert.Zero(t, sync)
+
+	var tempStore int
+	require.NoError(t, ix.db.QueryRowContext(ctx, "PRAGMA temp_store").Scan(&tempStore))
+	assert.Equal(t, 2, tempStore)
+}
 
 func TestOpenCreatesAndReopens(t *testing.T) {
 	ctx := context.Background()

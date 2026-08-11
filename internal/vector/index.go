@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 
+	"go.kenn.io/kata/internal/sqliteconfig"
 	kitvec "go.kenn.io/kit/vector"
 	"go.kenn.io/kit/vector/sqlitevec"
 )
@@ -42,7 +43,7 @@ type Index struct {
 // mismatch deletes and recreates the file: the sidecar is derived state and
 // re-embedding is the supported rebuild path.
 func Open(ctx context.Context, path string) (*Index, error) {
-	db, err := openSidecar(path)
+	db, err := openSidecar(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +57,7 @@ func Open(ctx context.Context, path string) (*Index, error) {
 		if err := removeSidecar(path); err != nil {
 			return nil, err
 		}
-		if db, err = openSidecar(path); err != nil {
+		if db, err = openSidecar(ctx, path); err != nil {
 			return nil, err
 		}
 	}
@@ -97,11 +98,16 @@ func (ix *Index) Close() error {
 	return ix.db.Close()
 }
 
-func openSidecar(path string) (*sql.DB, error) {
+func openSidecar(ctx context.Context, path string) (*sql.DB, error) {
 	sqlitevec.Register() // no-op on modernc builds; required on cgo builds
-	db, err := sql.Open(sidecarDriver, sidecarDSN(path))
+	fast := sqliteconfig.FastTestMode()
+	db, err := sql.Open(sidecarDriver, sidecarDSN(path, fast))
 	if err != nil {
 		return nil, fmt.Errorf("vector: open sidecar %s: %w", path, err)
+	}
+	if err := sqliteconfig.ConfigureWAL(ctx, db, fast); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("vector: configure sidecar %s: %w", path, err)
 	}
 	return db, nil
 }

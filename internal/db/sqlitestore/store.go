@@ -11,8 +11,6 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +18,7 @@ import (
 	_ "modernc.org/sqlite" // pure-Go SQLite driver registered as "sqlite"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/sqliteconfig"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -62,14 +61,14 @@ type readQuerier interface {
 var _ db.Storage = (*Store)(nil)
 
 // Open opens (and if needed initializes) the kata SQLite database at path.
-// PRAGMAs are applied for every connection via the connection string. Fresh
-// databases are bootstrapped from schema.sql inside a transaction; older
-// databases return ErrSchemaCutoverRequired so the storeopen path can run
-// JSONL cutover before reopening; newer databases are an unrecoverable state
-// for this binary. Open is the single authoritative writer of
-// meta.instance_uid outside an import transaction: after bootstrap, if the
-// row is absent it generates one via uid.New(). The cached value is exposed
-// via InstanceUID for insert paths.
+// Connection-local PRAGMAs are applied via the connection string; WAL is
+// enabled once during setup. Fresh databases are bootstrapped from schema.sql
+// inside a transaction. Older databases return ErrSchemaCutoverRequired so
+// storeopen can run JSONL cutover before reopening; newer databases are an
+// unrecoverable state for this binary. Open is the single authoritative
+// writer of meta.instance_uid outside an import transaction. After bootstrap,
+// if the row is absent it generates one via uid.New(). The cached value is
+// exposed via InstanceUID for insert paths.
 //
 // Pass db.ReadOnly() to open an existing database without bootstrapping or
 // PRAGMA writes. The cutover and preflight paths use this to inspect an old
@@ -79,12 +78,12 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 	if cfg.ReadOnly {
 		return openReadOnly(ctx, path)
 	}
+	fast := sqliteconfig.FastTestMode()
 	synchronous := "NORMAL"
 	pragmas := []string{
 		"_pragma=foreign_keys(1)",
-		"_pragma=journal_mode(WAL)",
 	}
-	if fastSQLiteForTestHarness() {
+	if fast {
 		synchronous = "OFF"
 		pragmas = append(pragmas, "_pragma=temp_store(MEMORY)")
 	}
@@ -98,9 +97,9 @@ func Open(ctx context.Context, path string, opts ...db.OpenOption) (*Store, erro
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	// Single writer is fine for v1; SetMaxOpenConns left at default for reads.
-	if err := sdb.PingContext(ctx); err != nil {
+	if err := sqliteconfig.ConfigureWAL(ctx, sdb, fast); err != nil {
 		_ = sdb.Close()
-		return nil, fmt.Errorf("ping %s: %w", path, err)
+		return nil, fmt.Errorf("configure %s: %w", path, err)
 	}
 	d := &Store{DB: sdb, path: path, idempotencyLocks: newIdempotencyLockSet()}
 	d.readQ = sdb
@@ -357,21 +356,6 @@ func retryWrite3[A, B, C any](ctx context.Context, d *Store, op func() (A, B, C,
 		return err
 	})
 	return a, b, c, err
-}
-
-// testFastSQLiteEnv opts test binaries into reduced-durability PRAGMAs
-// (synchronous=OFF, temp_store=MEMORY). Production binaries ignore it; the
-// guard requires the env *and* an os.Args[0] basename ending in .test or
-// .test.exe so a flag accidentally exported into a production shell can't
-// degrade real-database durability.
-const testFastSQLiteEnv = "KATA_TEST_FAST_SQLITE"
-
-func fastSQLiteForTestHarness() bool {
-	if os.Getenv(testFastSQLiteEnv) != "1" {
-		return false
-	}
-	bin := strings.ToLower(filepath.Base(os.Args[0]))
-	return strings.HasSuffix(bin, ".test") || strings.HasSuffix(bin, ".test.exe")
 }
 
 // PeekSchemaVersion reads meta.schema_version without bootstrapping the DB.

@@ -15,11 +15,15 @@ import (
 // substitutes the pure-Go modernc driver instead.
 const sidecarDriver = "sqlite3"
 
-// sidecarDSN builds the mattn/go-sqlite3 DSN for the sidecar: WAL journal
-// mode and a 5s busy timeout, expressed as mattn's `_`-prefixed query
-// params.
-func sidecarDSN(path string) string {
-	return path + "?_journal_mode=WAL&_busy_timeout=5000"
+// sidecarDSN builds the mattn/go-sqlite3 DSN for the sidecar. Connection-local
+// settings live here so every pooled connection receives them; ConfigureWAL
+// enables WAL separately after fast-mode settings take effect.
+func sidecarDSN(path string, fast bool) string {
+	dsn := path + "?_busy_timeout=5000"
+	if fast {
+		dsn += "&_synchronous=OFF"
+	}
+	return dsn
 }
 
 func sidecarVectorValue(vector kitvec.Vector) (string, any, error) {

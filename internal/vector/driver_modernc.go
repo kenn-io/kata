@@ -18,12 +18,18 @@ import (
 // build. driver_cgo.go substitutes mattn/go-sqlite3 on cgo Unix builds.
 const sidecarDriver = "sqlite"
 
-// sidecarDSN builds the modernc "sqlite" DSN for the sidecar, matching the
-// pragmas driver_cgo.go sets through mattn's `_`-prefixed params: WAL
-// journal mode and a 5s busy timeout. modernc expresses connection pragmas
-// as repeated `_pragma=name(value)` params.
-func sidecarDSN(path string) string {
-	return path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+// sidecarDSN builds the modernc "sqlite" DSN for the sidecar. Connection-local
+// settings live here so every pooled connection receives them; ConfigureWAL
+// enables WAL separately after fast-mode settings take effect.
+func sidecarDSN(path string, fast bool) string {
+	pragmas := []string{"_pragma=busy_timeout(5000)"}
+	if fast {
+		pragmas = append(pragmas,
+			"_pragma=synchronous(OFF)",
+			"_pragma=temp_store(MEMORY)",
+		)
+	}
+	return path + "?" + strings.Join(pragmas, "&")
 }
 
 func sidecarVectorValue(vector kitvec.Vector) (string, any, error) {
