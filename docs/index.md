@@ -37,13 +37,19 @@ issue editing, relationships, recurrences, and configured-daemon switching.
 
 ## Install
 
-=== "macOS / Linux"
+=== "macOS"
 
     ```sh
-    brew install kenn-io/tap/kata
+    brew install kata
     ```
 
     Or install the ordinary release archive:
+
+    ```sh
+    curl -fsSL https://katatracker.com/install.sh | bash
+    ```
+
+=== "Linux"
 
     ```sh
     curl -fsSL https://katatracker.com/install.sh | bash
@@ -55,9 +61,9 @@ issue editing, relationships, recurrences, and configured-daemon switching.
     powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
     ```
 
-The installer detects your OS and CPU architecture, downloads the latest GitHub
-release archive, and verifies it against `SHA256SUMS` before installing. Confirm
-the install with:
+The release installers detect your OS and CPU architecture, download the latest
+GitHub release archive, and verify it against `SHA256SUMS` before installing.
+Confirm the install with:
 
 ```sh
 kata version
