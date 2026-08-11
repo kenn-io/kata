@@ -12,10 +12,10 @@ GitHub release binaries are available starting with `v0.5.0`. Since v0.14.0,
 kata publishes stable releases that preserve backward compatibility across
 upgrades.
 
-The recommended path on macOS or Linux is the official Homebrew tap:
+The recommended path on macOS is Homebrew Core:
 
 ```sh
-brew install kenn-io/tap/kata
+brew install kata
 ```
 
 Homebrew owns this binary. Check Kata's release feed with `kata update --check`,
@@ -25,11 +25,19 @@ and install packaged updates with:
 brew upgrade kata
 ```
 
-The formula may trail a newly published GitHub release. To install an ordinary
-release archive on macOS or Linux instead:
+The formula may trail a newly published GitHub release. On Linux, or to install
+an ordinary release archive on macOS instead:
 
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
+```
+
+Linux and WSL 2 users who already use
+[Homebrew](https://docs.brew.sh/Homebrew-on-Linux) can install from Core
+instead:
+
+```sh
+brew install kata
 ```
 
 On Windows PowerShell:

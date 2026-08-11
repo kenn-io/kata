@@ -24,17 +24,21 @@ Zensical at <https://katatracker.com/>.
 
 ## Install
 
-macOS or Linux:
+macOS:
 
 ```sh
-brew install kenn-io/tap/kata
+brew install kata
 ```
 
-Or use the release installer:
+Linux, or macOS without Homebrew:
 
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
+
+Linux and WSL 2 users who already use
+[Homebrew](https://docs.brew.sh/Homebrew-on-Linux) can also run
+`brew install kata`.
 
 Windows PowerShell:
 

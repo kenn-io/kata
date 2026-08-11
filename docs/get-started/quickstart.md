@@ -1,9 +1,9 @@
 # Quickstart
 
-Install kata on macOS with the official Homebrew tap:
+Install kata on macOS from Homebrew Core:
 
 ```sh
-brew install kenn-io/tap/kata
+brew install kata
 ```
 
 On Linux, install the release binary with:
@@ -11,6 +11,10 @@ On Linux, install the release binary with:
 ```sh
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
+
+If you already use
+[Homebrew on Linux or WSL 2](https://docs.brew.sh/Homebrew-on-Linux), you can
+install Kata with `brew install kata` instead.
 
 On Windows PowerShell, install the release binary with:
 
