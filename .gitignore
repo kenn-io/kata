@@ -55,3 +55,4 @@ __pycache__/
 # docs Vercel artifacts
 .vercel
 .env*.local
+.env*
