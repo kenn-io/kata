@@ -466,6 +466,37 @@ func TestRebindFederationReplicaConvergesEveryDurableState(t *testing.T) {
 	}
 }
 
+func TestRebindFederationReplicaConvergesLegacyCredentialOnlyInsecureState(t *testing.T) {
+	ctx := context.Background()
+	store, project, binding := prepareFederationRebind(t, rebindSourceURL)
+	binding.AllowInsecure = false
+	_, err := store.UpsertFederationBinding(ctx, binding)
+	require.NoError(t, err)
+	credentials := newReplicaCredentialStore()
+	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
+
+	result, err := daemon.RebindFederationReplica(
+		ctx, store, credentials,
+		daemon.RebindFederationReplicaParams{
+			ProjectID:  project.ID,
+			HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindTargetURL},
+			FetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
+				return api.ProjectFederationBody{ProjectID: 42, ProjectUID: project.UID}, nil
+			},
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, daemon.FederationRebindStateRebound, result.State)
+	assert.Equal(t, rebindTargetURL, result.Binding.HubURL)
+	assert.False(t, result.Binding.AllowInsecure)
+	credential, found, err := credentials.FederationCredential(ctx, project.UID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, rebindTargetURL, credential.HubURL)
+	assert.False(t, credential.AllowInsecure)
+}
+
 func TestRebindFederationReplicaRemoteValidationFailureLeavesLocalStateUnchanged(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

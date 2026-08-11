@@ -424,8 +424,11 @@ func classifyFederationRebindState(
 			state.sourceInsecure = credential.AllowInsecure
 		} else {
 			sourceURL, sourceErr := canonicalFederationRebindBaseURL(state.sourceHubURL)
+			// Pre-persistence bindings keep their same-endpoint plaintext opt-in
+			// only in the credential; federation transport already honors it.
+			legacyCredentialOnlyInsecure := !state.sourceInsecure && credential.AllowInsecure
 			if sourceErr != nil || sourceURL != credentialURL ||
-				state.sourceInsecure != credential.AllowInsecure {
+				(state.sourceInsecure != credential.AllowInsecure && !legacyCredentialOnlyInsecure) {
 				return federationRebindLocalState{}, federationReplicaError(
 					ErrFederationReplicaBindingConflict,
 					"binding and credential disagree on the current federation endpoint",
