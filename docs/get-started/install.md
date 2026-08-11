@@ -32,6 +32,14 @@ an ordinary release archive on macOS instead:
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
 
+Linux and WSL 2 users who already use
+[Homebrew](https://docs.brew.sh/Homebrew-on-Linux) can install from Core
+instead:
+
+```sh
+brew install kata
+```
+
 On Windows PowerShell:
 
 ```powershell

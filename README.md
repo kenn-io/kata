@@ -36,6 +36,10 @@ Linux, or macOS without Homebrew:
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
 
+Linux and WSL 2 users who already use
+[Homebrew](https://docs.brew.sh/Homebrew-on-Linux) can also run
+`brew install kata`.
+
 Windows PowerShell:
 
 ```powershell

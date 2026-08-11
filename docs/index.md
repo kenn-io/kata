@@ -55,6 +55,13 @@ issue editing, relationships, recurrences, and configured-daemon switching.
     curl -fsSL https://katatracker.com/install.sh | bash
     ```
 
+    If you already use
+    [Homebrew on Linux or WSL 2](https://docs.brew.sh/Homebrew-on-Linux):
+
+    ```sh
+    brew install kata
+    ```
+
 === "Windows (PowerShell)"
 
     ```powershell
