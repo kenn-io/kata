@@ -34,7 +34,7 @@ func TestWireDiscoveryPublishesNegotiatedToolsCapability(t *testing.T) {
 	require.EqualValues(t, 5*time.Minute.Milliseconds(), result["ttlMs"])
 	require.NotEmpty(t, result["resultType"])
 	capabilities := result["capabilities"].(map[string]any)
-	require.Equal(t, map[string]any{"tools": map[string]any{}}, capabilities)
+	require.Equal(t, map[string]any{"tools": map[string]any{"listChanged": true}}, capabilities)
 	meta := result["_meta"].(map[string]any)
 	serverInfo := meta["io.modelcontextprotocol/serverInfo"].(map[string]any)
 	require.Equal(t, "kata", serverInfo["name"])
@@ -124,6 +124,12 @@ func TestWireCancellationSuppressesLateToolResponse(t *testing.T) {
 	apiClient, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
 	require.NoError(t, err)
 	connection, reader := rawServerConnectionWithClient(t, apiClient)
+	writeWireRequest(t, connection, 0, "tools/call", map[string]any{
+		"name": "kata.load_issue_discovery", "arguments": map[string]any{}, "_meta": currentMeta(),
+	})
+	loadResponse := readWireResponse(t, reader)
+	require.Nil(t, loadResponse.Error)
+	require.EqualValues(t, 0, loadResponse.ID)
 
 	writeWireRequest(t, connection, 1, "tools/call", map[string]any{
 		"name": "kata.search", "arguments": map[string]any{"query": "slow"}, "_meta": currentMeta(),

@@ -13,8 +13,11 @@ Production Postgres deployments can use separate schema-owner and runtime roles;
 see the [operator ceremony](docs/operations/postgres.md).
 Go applications can instead mount kata's listener-free HTTP service in-process;
 see [Embedding kata in Go](docs/development/embedding.md).
-MCP clients can start Kata's native, project-bound stdio server with `kata mcp
-serve`; see the [MCP reference](docs/reference/mcp.md).
+MCP clients can start Kata's native stdio server with `kata mcp serve`. It can
+use the complete daemon catalog by default, or narrow access to one project or
+a fixed allowlist. Thirteen section loaders progressively expose Kata's typed
+issue, administration, automation, and event workflows. See the [MCP
+reference](docs/reference/mcp.md).
 
 The documentation in [`docs/`](docs/) is the definitive guide, published with
 Zensical at <https://katatracker.com/>.

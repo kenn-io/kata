@@ -14,6 +14,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added paired `kata schedule` / `kata deadline` commands and
   `kata.set_schedule` / `kata.set_deadline` MCP tools for first-class planning
   date updates.
+- Expanded the native MCP server from the original project-bound issue tools
+  to complete scoped issue, project, token, federation, synchronization,
+  recurrence, import, digest, and live-event workflows.
+- Made MCP follow all projects in the selected daemon by default, with optional
+  one-project and fixed-allowlist boundaries.
+- Added 13 section loaders that progressively disclose the detailed typed MCP
+  tools and publish tool-list change notifications.
+- Added first-class MCP scheduling fields, force-create and force-claim, and
+  generic metadata support for native markers such as `someday=true`.
+- Added explicit host-local JSONL export and configured-target import tools
+  behind `--storage-root` and startup target aliases.
 
 **Improvements**
 
@@ -21,6 +32,22 @@ All notable changes to kata, grouped by release. Versioned releases start with
   projection rules as `scheduled_on`.
 - Added schedule, deadline, and someday commands to generated agent guidance and
   public workflow documentation.
+
+**Bug fixes**
+
+- Kept fixed MCP scopes intact across project renames and prevented scoped
+  graph, pagination, token, and federation operations from crossing their
+  startup boundary.
+- Protected active and configured SQLite paths from storage export overwrite,
+  and required exact confirmation before replacing an existing artifact.
+- Made token administration an explicit MCP startup capability, made federation
+  leave phases and commit acknowledgement explicit, and made storage restore
+  installation race-safe and rollback-aware.
+- Anchored MCP storage operations to their configured root, protected active
+  SQLite sidecars, preserved owner-only restore permissions, and redacted
+  cross-scope relationship data from issue and event results.
+- Made `kata.next` consider the complete ready set, returned archived projects
+  from the catalog, and rejected partial two-request issue-plus-metadata edits.
 
 ## 0.14.3
 <small>2026-08-10</small>

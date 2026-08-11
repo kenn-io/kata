@@ -13,6 +13,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/time/rate"
 
+	"go.kenn.io/kata/internal/storageadmin"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
@@ -24,25 +25,37 @@ const (
 	toolCallConcurrency = 8
 )
 
-// Options binds one Kata daemon project and actor to an MCP server process.
+// Options fixes the Kata daemon scope and actor for one MCP process.
 type Options struct {
-	Client      *kataclient.Client
-	ProjectID   int64
-	ProjectName string
-	Actor       string
-	Version     string
+	Client           *kataclient.Client
+	Scope            *Scope
+	ProjectID        int64
+	ProjectName      string
+	Actor            string
+	Version          string
+	StorageAdmin     *storageadmin.Admin
+	EnableTokenAdmin bool
 }
 
-// New creates a tools-only MCP server for one bound Kata project.
+// New creates a tools-only MCP server for one startup project scope.
 func New(options Options) (*sdkmcp.Server, error) {
 	if options.Client == nil {
 		return nil, errors.New("kata API client is required")
 	}
-	if options.ProjectID <= 0 {
-		return nil, errors.New("kata project ID is required")
+	if options.Scope == nil {
+		scope, err := NewBoundScope(ProjectIdentity{ID: options.ProjectID, Name: options.ProjectName})
+		if err != nil {
+			return nil, err
+		}
+		options.Scope = scope
 	}
-	if strings.TrimSpace(options.ProjectName) == "" {
-		return nil, errors.New("kata project name is required")
+	if options.Scope.Mode() == ScopeBound {
+		projects, err := options.Scope.Projects(context.Background(), nil, false)
+		if err != nil {
+			return nil, err
+		}
+		options.ProjectID = projects[0].ID
+		options.ProjectName = projects[0].Name
 	}
 	if strings.TrimSpace(options.Actor) == "" {
 		return nil, errors.New("kata actor is required")
@@ -51,15 +64,19 @@ func New(options Options) (*sdkmcp.Server, error) {
 		return nil, errors.New("kata server version is required")
 	}
 
+	scopeDescription := "startup project scope"
+	if options.Scope.Mode() == ScopeBound {
+		scopeDescription = "project " + options.ProjectName
+	}
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{
 		Name:        "kata",
 		Title:       "Kata issue tracker",
-		Description: "Project-bound issue tracking tools for coding agents.",
+		Description: "Scoped Kata data and administration tools for coding agents.",
 		Version:     options.Version,
 	}, &sdkmcp.ServerOptions{
-		Instructions: "Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to project " + options.ProjectName + " and actor " + options.Actor + ".",
+		Instructions: "Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + ".",
 		Capabilities: &sdkmcp.ServerCapabilities{
-			Tools: &sdkmcp.ToolCapabilities{},
+			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
 	})
 	server.AddReceivingMiddleware(toolAdmissionMiddleware(
@@ -67,7 +84,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 		make(chan struct{}, toolCallConcurrency),
 	))
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
-	registerTools(server, options)
+	registerSectionLoaders(server, options)
 	return server, nil
 }
 
@@ -109,28 +126,44 @@ func cacheHintsMiddleware(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
 	}
 }
 
-func registerTools(server *sdkmcp.Server, options Options) {
+func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, false)
 	searchRead := toolHints(true, false, true)
+	addTool(server, "kata.graph", "Issue graph", "Read the bounded reachable relationship graph for one issue.", read, handlers.graph)
+	addTool(server, "kata.labels", "List labels", "List labels already used in the selected project scope with issue counts.", read, handlers.labels)
+	addTool(server, "kata.list", "List issues", "List compact issue summaries in the selected project scope with bounded filters.", read, handlers.list)
+	addTool(server, "kata.next", "Next issue", "Select the highest-priority ready issue.", read, handlers.next)
+	addTool(server, "kata.ready", "List ready issues", "List open issues with no open blocking predecessor in the selected project scope.", read, handlers.ready)
+	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", searchRead, handlers.search)
+	addTool(server, "kata.show", "Show issue", "Read one issue with its body, metadata, relationships, and a bounded comment history.", read, handlers.show)
+}
+
+func registerIssueMutationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
-	handlers := toolHandlers{options: options}
-
 	addTool(server, "kata.claim", "Claim issue", "Claim an unowned issue for the bound actor. The call fails when another owner already holds it.", additive, handlers.claim)
-	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence.", mutating, handlers.close)
 	addTool(server, "kata.comment", "Add comment", "Append a progress or context comment using a required idempotency key.", additive, handlers.comment)
 	addTool(server, "kata.create", "Create issue", "Create project work after searching for duplicates. A stable idempotency key is required.", additive, handlers.create)
 	addTool(server, "kata.edit", "Edit issue", "Edit issue fields, ownership, priority, and relationship deltas atomically.", mutating, handlers.edit)
-	addTool(server, "kata.labels", "List labels", "List labels already used in the bound project with issue counts.", read, handlers.labels)
-	addTool(server, "kata.list", "List issues", "List compact issue summaries in the bound project with bounded filters.", read, handlers.list)
-	addTool(server, "kata.ready", "List ready issues", "List open issues with no open blocking predecessor in the bound project.", read, handlers.ready)
-	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
-	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", searchRead, handlers.search)
+	addTool(server, "kata.edit_comment", "Edit comment", "Replace one comment body as the startup actor.", mutating, handlers.editComment)
+	addTool(server, "kata.move", "Move issue", "Move an issue to another in-scope project while preserving its UID and relationships.", mutating, handlers.move)
 	addTool(server, "kata.set_deadline", "Set deadline", "Set or clear an issue deadline. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setDeadline)
 	addTool(server, "kata.set_label", "Set label presence", "Ensure that a label is present or absent on an issue.", mutating, handlers.setLabel)
 	addTool(server, "kata.set_metadata", "Patch metadata", "Patch issue metadata; JSON null removes a key. An optional revision makes the write conditional.", mutating, handlers.setMetadata)
 	addTool(server, "kata.set_schedule", "Set schedule", "Set or clear an issue schedule gate. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setSchedule)
-	addTool(server, "kata.show", "Show issue", "Read one issue with its body, metadata, relationships, and a bounded comment history.", read, handlers.show)
+}
+
+func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
+	read := toolHints(true, false, false)
+	additive := toolHints(false, false, false)
+	mutating := toolHints(false, true, false)
+	addTool(server, "kata.audit_closes", "Audit closes", "List close records with bounded project and time filters.", read, handlers.auditCloses)
+	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence.", mutating, handlers.close)
+	addTool(server, "kata.delete", "Delete issue", "Soft-delete an issue after exact confirmation.", mutating, handlers.deleteIssue)
+	addTool(server, "kata.purge", "Purge issue", "Irreversibly purge a soft-deleted issue after exact confirmation.", mutating, handlers.purgeIssue)
+	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
+	addTool(server, "kata.restore", "Restore issue", "Restore a soft-deleted issue.", additive, handlers.restoreIssue)
+	addTool(server, "kata.wait", "Wait for issues", "Wait for issue status conditions with a bounded timeout.", read, handlers.wait)
 }
 
 func addTool[In, Out any](
@@ -227,6 +260,8 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setNumberBounds("priority", 0, 4)
 		forbidTrueWith("clear_owner", "owner")
 		forbidTrueWith("clear_priority", "priority")
+		forbidTrueWith("clear_scheduled_on", "scheduled_on")
+		forbidTrueWith("clear_timezone", "timezone")
 		forbidTogether("parent", "remove_parent")
 	case "kata.comment":
 		setStringBounds("ref", 1, 256)
@@ -264,6 +299,35 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			field.Minimum = &minimum
 		}
 		schema.OneOf = planningDateSchemas("schedule", "clear_schedule")
+	case "kata.recurrence_update":
+		setEnum("action", "create", "patch")
+		if field := property("revision"); field != nil {
+			minimum := float64(1)
+			field.Minimum = &minimum
+		}
+		patchAction := any("patch")
+		schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
+			If: &jsonschema.Schema{
+				Required: []string{"action"},
+				Properties: map[string]*jsonschema.Schema{
+					"action": {Const: &patchAction},
+				},
+			},
+			Then: &jsonschema.Schema{Required: []string{"uid", "revision"}},
+		})
+	case "kata.federation_leave":
+		setEnum("phase", "preflight", "prepare", "commit")
+		setEnum("disposition", "detach", "archive")
+		commit := any("commit")
+		schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
+			If: &jsonschema.Schema{
+				Required: []string{"phase"},
+				Properties: map[string]*jsonschema.Schema{
+					"phase": {Const: &commit},
+				},
+			},
+			Then: &jsonschema.Schema{Required: []string{"confirm"}},
+		})
 	case "kata.close":
 		setStringBounds("ref", 1, 256)
 		setStringBounds("message", 1, 1<<20)
@@ -396,6 +460,7 @@ func toolHints(readOnly, destructive, openWorld bool) *sdkmcp.ToolAnnotations {
 
 // SearchInput selects matching issues without returning large issue bodies.
 type SearchInput struct {
+	Project       string   `json:"project,omitempty" jsonschema:"Project name; omit to search every project in scope"`
 	Query         string   `json:"query" jsonschema:"Non-empty text to search for"`
 	Mode          string   `json:"mode,omitempty" jsonschema:"Search mode: auto, lexical, hybrid, or semantic"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 through 100; default 20"`
@@ -405,6 +470,7 @@ type SearchInput struct {
 
 // ListInput filters project issues. Empty status means open and closed.
 type ListInput struct {
+	Project       string   `json:"project,omitempty" jsonschema:"Project name; omit to list every project in scope"`
 	Status        string   `json:"status,omitempty" jsonschema:"Issue status: open, closed, or empty for both"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 through 100; default 20"`
 	Priority      *int64   `json:"priority,omitempty" jsonschema:"Exact priority from 0 through 4"`
@@ -418,6 +484,7 @@ type ListInput struct {
 
 // ReadyInput filters unblocked open work.
 type ReadyInput struct {
+	Project       string   `json:"project,omitempty" jsonschema:"Project name; omit to list ready work in every project in scope"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 through 100; default 20"`
 	Owner         string   `json:"owner,omitempty" jsonschema:"Only issues owned by this actor"`
 	Unowned       bool     `json:"unowned,omitempty" jsonschema:"Only issues with no owner"`
@@ -425,8 +492,10 @@ type ReadyInput struct {
 	ExcludeLabels []string `json:"exclude_labels,omitempty" jsonschema:"Labels that issues must not have"`
 }
 
-// LabelsInput has no project selector because the server is project-bound.
-type LabelsInput struct{}
+// LabelsInput selects one project or aggregates across the startup scope.
+type LabelsInput struct {
+	Project string `json:"project,omitempty" jsonschema:"Project name; omit to list labels in every project in scope"`
+}
 
 // ShowInput selects one bound-project issue.
 type ShowInput struct {
@@ -436,12 +505,16 @@ type ShowInput struct {
 
 // CreateInput creates one issue and its initial relationships.
 type CreateInput struct {
+	Project        string         `json:"project,omitempty" jsonschema:"Target project; required in multi-project modes"`
 	Title          string         `json:"title" jsonschema:"Concise issue title"`
 	Body           string         `json:"body,omitempty" jsonschema:"Issue context, reason, and acceptance details"`
 	Owner          string         `json:"owner,omitempty" jsonschema:"Initial owner"`
 	Priority       *int64         `json:"priority,omitempty" jsonschema:"Priority from 0 through 4"`
 	Labels         []string       `json:"labels,omitempty" jsonschema:"Initial project labels"`
 	Metadata       map[string]any `json:"metadata,omitempty" jsonschema:"Initial issue metadata"`
+	ScheduledOn    string         `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or an RFC 3339 UTC instant ending in Z"`
+	Timezone       string         `json:"timezone,omitempty" jsonschema:"IANA timezone for date-only and local scheduled_on values"`
+	ForceNew       bool           `json:"force_new,omitempty" jsonschema:"Create even when Kata finds a likely duplicate"`
 	Parent         string         `json:"parent,omitempty" jsonschema:"Parent issue reference"`
 	Blocks         []string       `json:"blocks,omitempty" jsonschema:"Issues this new issue blocks"`
 	BlockedBy      []string       `json:"blocked_by,omitempty" jsonschema:"Issues that block this new issue"`
@@ -451,38 +524,44 @@ type CreateInput struct {
 
 // EditInput applies issue field and relationship deltas atomically.
 type EditInput struct {
-	Ref             string   `json:"ref" jsonschema:"Issue reference in the bound project"`
-	Title           *string  `json:"title,omitempty" jsonschema:"Replacement title"`
-	Body            *string  `json:"body,omitempty" jsonschema:"Replacement body"`
-	Owner           *string  `json:"owner,omitempty" jsonschema:"Replacement owner"`
-	ClearOwner      bool     `json:"clear_owner,omitempty" jsonschema:"Remove the current owner"`
-	Priority        *int64   `json:"priority,omitempty" jsonschema:"Replacement priority from 0 through 4"`
-	ClearPriority   bool     `json:"clear_priority,omitempty" jsonschema:"Remove the current priority"`
-	Parent          *string  `json:"parent,omitempty" jsonschema:"Replacement parent reference"`
-	RemoveParent    *string  `json:"remove_parent,omitempty" jsonschema:"Current parent reference to remove strictly"`
-	AddBlocks       []string `json:"add_blocks,omitempty" jsonschema:"Issue references to add as blocked by this issue"`
-	RemoveBlocks    []string `json:"remove_blocks,omitempty" jsonschema:"Blocking relationships to remove"`
-	AddBlockedBy    []string `json:"add_blocked_by,omitempty" jsonschema:"Issue references that block this issue"`
-	RemoveBlockedBy []string `json:"remove_blocked_by,omitempty" jsonschema:"Blocked-by relationships to remove"`
-	AddRelated      []string `json:"add_related,omitempty" jsonschema:"Related issue references to add"`
-	RemoveRelated   []string `json:"remove_related,omitempty" jsonschema:"Related issue references to remove"`
+	Ref              string         `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
+	Title            *string        `json:"title,omitempty" jsonschema:"Replacement title"`
+	Body             *string        `json:"body,omitempty" jsonschema:"Replacement body"`
+	Owner            *string        `json:"owner,omitempty" jsonschema:"Replacement owner"`
+	ClearOwner       bool           `json:"clear_owner,omitempty" jsonschema:"Remove the current owner"`
+	Priority         *int64         `json:"priority,omitempty" jsonschema:"Replacement priority from 0 through 4"`
+	ClearPriority    bool           `json:"clear_priority,omitempty" jsonschema:"Remove the current priority"`
+	Metadata         map[string]any `json:"metadata,omitempty" jsonschema:"Issue metadata merge patch; JSON null removes a key"`
+	ScheduledOn      *string        `json:"scheduled_on,omitempty" jsonschema:"Schedule as YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or an RFC 3339 UTC instant ending in Z"`
+	Timezone         *string        `json:"timezone,omitempty" jsonschema:"IANA timezone for date-only and local scheduled_on values"`
+	ClearScheduledOn bool           `json:"clear_scheduled_on,omitempty" jsonschema:"Remove scheduled_on"`
+	ClearTimezone    bool           `json:"clear_timezone,omitempty" jsonschema:"Remove timezone"`
+	Parent           *string        `json:"parent,omitempty" jsonschema:"Replacement parent reference"`
+	RemoveParent     *string        `json:"remove_parent,omitempty" jsonschema:"Current parent reference to remove strictly"`
+	AddBlocks        []string       `json:"add_blocks,omitempty" jsonschema:"Issue references to add as blocked by this issue"`
+	RemoveBlocks     []string       `json:"remove_blocks,omitempty" jsonschema:"Blocking relationships to remove"`
+	AddBlockedBy     []string       `json:"add_blocked_by,omitempty" jsonschema:"Issue references that block this issue"`
+	RemoveBlockedBy  []string       `json:"remove_blocked_by,omitempty" jsonschema:"Blocked-by relationships to remove"`
+	AddRelated       []string       `json:"add_related,omitempty" jsonschema:"Related issue references to add"`
+	RemoveRelated    []string       `json:"remove_related,omitempty" jsonschema:"Related issue references to remove"`
 }
 
 // CommentInput appends an idempotent comment.
 type CommentInput struct {
-	Ref            string `json:"ref" jsonschema:"Issue reference in the bound project"`
+	Ref            string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Body           string `json:"body" jsonschema:"Comment body"`
 	IdempotencyKey string `json:"idempotency_key" jsonschema:"Stable unique key for safe retries"`
 }
 
-// ClaimInput claims an issue without a force path.
+// ClaimInput claims an issue, optionally replacing its current owner.
 type ClaimInput struct {
-	Ref string `json:"ref" jsonschema:"Issue reference in the bound project"`
+	Ref   string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
+	Force bool   `json:"force,omitempty" jsonschema:"Replace a different current owner"`
 }
 
 // SetLabelInput makes label presence explicit and naturally idempotent.
 type SetLabelInput struct {
-	Ref     string `json:"ref" jsonschema:"Issue reference in the bound project"`
+	Ref     string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Label   string `json:"label" jsonschema:"Project label"`
 	Present bool   `json:"present" jsonschema:"True to add the label; false to remove it"`
 }
@@ -505,7 +584,7 @@ type SetScheduleInput struct {
 
 // SetMetadataInput patches several keys in one operation.
 type SetMetadataInput struct {
-	Ref      string         `json:"ref" jsonschema:"Issue reference in the bound project"`
+	Ref      string         `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Patch    map[string]any `json:"patch" jsonschema:"Metadata values to set; JSON null removes a key"`
 	Revision *int64         `json:"revision,omitempty" jsonschema:"Required current issue revision for a conditional write"`
 }
@@ -523,7 +602,7 @@ type Evidence struct {
 
 // CloseInput makes the completion assertion explicit.
 type CloseInput struct {
-	Ref      string     `json:"ref" jsonschema:"Issue reference in the bound project"`
+	Ref      string     `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Reason   string     `json:"reason" jsonschema:"Close reason: done, wontfix, duplicate, superseded, or audit-no-change"`
 	Message  string     `json:"message" jsonschema:"Substantive completion message"`
 	Evidence []Evidence `json:"evidence" jsonschema:"Typed evidence that supports the close"`
@@ -532,12 +611,13 @@ type CloseInput struct {
 
 // ReopenInput reactivates closed work.
 type ReopenInput struct {
-	Ref string `json:"ref" jsonschema:"Issue reference in the bound project"`
+	Ref string `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 }
 
 // ProjectIdentity identifies the immutable startup project.
 type ProjectIdentity struct {
 	ID   int64  `json:"id"`
+	UID  string `json:"uid,omitempty"`
 	Name string `json:"name"`
 }
 
@@ -554,13 +634,16 @@ type IssueSummary struct {
 	Blocked      *bool     `json:"blocked,omitempty"`
 	Revision     int64     `json:"revision"`
 	UpdatedAt    string    `json:"updated_at"`
+	ScheduledOn  *string   `json:"scheduled_on,omitempty"`
+	Timezone     *string   `json:"timezone,omitempty"`
 }
 
 // IssueListOutput is a bounded collection without issue bodies or comments.
 type IssueListOutput struct {
-	Project   ProjectIdentity `json:"project"`
-	Issues    []IssueSummary  `json:"issues"`
-	Truncated bool            `json:"truncated"`
+	Project   ProjectIdentity   `json:"project"`
+	Projects  []ProjectIdentity `json:"projects,omitempty"`
+	Issues    []IssueSummary    `json:"issues"`
+	Truncated bool              `json:"truncated"`
 }
 
 // SearchHit adds relevance information to a compact issue.
@@ -572,13 +655,14 @@ type SearchHit struct {
 
 // SearchOutput reports the effective mode and any semantic fallback.
 type SearchOutput struct {
-	Project        ProjectIdentity `json:"project"`
-	Query          string          `json:"query"`
-	Mode           string          `json:"mode"`
-	Degraded       bool            `json:"degraded"`
-	DegradedReason string          `json:"degraded_reason,omitempty"`
-	Results        []SearchHit     `json:"results"`
-	Truncated      bool            `json:"truncated"`
+	Project        ProjectIdentity   `json:"project"`
+	Projects       []ProjectIdentity `json:"projects,omitempty"`
+	Query          string            `json:"query"`
+	Mode           string            `json:"mode"`
+	Degraded       bool              `json:"degraded"`
+	DegradedReason string            `json:"degraded_reason,omitempty"`
+	Results        []SearchHit       `json:"results"`
+	Truncated      bool              `json:"truncated"`
 }
 
 // LabelCount reports project label reuse.
@@ -589,8 +673,9 @@ type LabelCount struct {
 
 // LabelsOutput is the project label catalog.
 type LabelsOutput struct {
-	Project ProjectIdentity `json:"project"`
-	Labels  []LabelCount    `json:"labels"`
+	Project  ProjectIdentity   `json:"project"`
+	Projects []ProjectIdentity `json:"projects,omitempty"`
+	Labels   []LabelCount      `json:"labels"`
 }
 
 // CommentSummary is a bounded comment representation.
@@ -655,11 +740,12 @@ type LinkChangesSummary struct {
 
 // MutationOutput is the common mutation result.
 type MutationOutput struct {
-	Project ProjectIdentity `json:"project"`
-	Issue   IssueSummary    `json:"issue"`
-	Changed bool            `json:"changed"`
-	Reused  *bool           `json:"reused,omitempty"`
-	Event   *EventSummary   `json:"event,omitempty"`
+	Project       ProjectIdentity `json:"project"`
+	Issue         IssueSummary    `json:"issue"`
+	Changed       bool            `json:"changed"`
+	Reused        *bool           `json:"reused,omitempty"`
+	Event         *EventSummary   `json:"event,omitempty"`
+	PreviousOwner *string         `json:"previous_owner,omitempty"`
 }
 
 // EditOutput preserves every ordered event and applied relationship change.

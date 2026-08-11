@@ -2,14 +2,18 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/sync/errgroup"
 
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -41,44 +45,86 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		}
 		mode = &value
 	}
-	limit64 := int64(limit + 1)
-	response, err := h.options.Client.SearchIssues(ctx, &generated.SearchIssuesRequestOptions{
-		PathParams: &generated.SearchIssuesPath{ProjectID: h.options.ProjectID},
-		Query: &generated.SearchIssuesQuery{
-			Q:            query,
-			Limit:        &limit64,
-			Mode:         mode,
-			Label:        compactStrings(input.Labels),
-			ExcludeLabel: compactStrings(input.ExcludeLabels),
-		},
-	})
+	projects, err := h.readProjects(ctx, input.Project)
 	if err != nil {
 		return nil, SearchOutput{}, err
 	}
-	truncated := len(response.Results) > limit
-	hits := response.Results
-	if truncated {
-		hits = hits[:limit]
+	type projectSearch struct {
+		response *generated.SearchIssuesResponse
+		err      error
 	}
-	results := make([]SearchHit, 0, len(hits))
-	for _, hit := range hits {
-		results = append(results, SearchHit{
-			Issue:     h.summaryFromIssue(hit.Issue),
-			Score:     hit.Score,
-			MatchedIn: nonNilStrings(hit.MatchedIn),
+	searches := make([]projectSearch, len(projects))
+	group, groupContext := errgroup.WithContext(ctx)
+	group.SetLimit(toolCallConcurrency)
+	for index := range projects {
+		index := index
+		group.Go(func() error {
+			limit64 := int64(limit + 1)
+			response, searchErr := h.options.Client.SearchIssues(groupContext, &generated.SearchIssuesRequestOptions{
+				PathParams: &generated.SearchIssuesPath{ProjectID: projects[index].ID},
+				Query: &generated.SearchIssuesQuery{
+					Q:            query,
+					Limit:        &limit64,
+					Mode:         mode,
+					Label:        compactStrings(input.Labels),
+					ExcludeLabel: compactStrings(input.ExcludeLabels),
+				},
+			})
+			searches[index] = projectSearch{response: response, err: searchErr}
+			if searchErr != nil {
+				return fmt.Errorf("search project %q: %w", projects[index].Name, searchErr)
+			}
+			return nil
 		})
 	}
-	degraded := response.Degraded != nil && *response.Degraded
-	degradedReason := ""
-	if response.DegradedReason != nil {
-		degradedReason = *response.DegradedReason
+	if err := group.Wait(); err != nil {
+		return nil, SearchOutput{}, err
 	}
+	results := make([]SearchHit, 0)
+	truncated := false
+	degraded := false
+	degradedReasons := make([]string, 0)
+	effectiveMode := ""
+	for index, search := range searches {
+		response := search.response
+		if effectiveMode == "" {
+			effectiveMode = response.Mode
+		}
+		if len(response.Results) > limit {
+			truncated = true
+		}
+		for _, hit := range response.Results {
+			results = append(results, SearchHit{
+				Issue:     h.summaryFromIssue(projects[index], hit.Issue),
+				Score:     hit.Score,
+				MatchedIn: nonNilStrings(hit.MatchedIn),
+			})
+		}
+		if response.Degraded != nil && *response.Degraded {
+			degraded = true
+		}
+		if response.DegradedReason != nil && *response.DegradedReason != "" {
+			degradedReasons = append(degradedReasons, projects[index].Name+": "+*response.DegradedReason)
+		}
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Score != results[j].Score {
+			return results[i].Score > results[j].Score
+		}
+		return results[i].Issue.QualifiedRef < results[j].Issue.QualifiedRef
+	})
+	if len(results) > limit {
+		results = results[:limit]
+		truncated = true
+	}
+	project, outputProjects := outputProjectScope(projects)
 	return successResult(), SearchOutput{
-		Project:        h.project(),
-		Query:          response.Query,
-		Mode:           response.Mode,
+		Project:        project,
+		Projects:       outputProjects,
+		Query:          query,
+		Mode:           effectiveMode,
 		Degraded:       degraded,
-		DegradedReason: degradedReason,
+		DegradedReason: strings.Join(degradedReasons, "; "),
 		Results:        results,
 		Truncated:      truncated,
 	}, nil
@@ -93,12 +139,15 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		return nil, IssueListOutput{}, errors.New("owner and unowned are mutually exclusive")
 	}
 	var status *generated.ListIssuesQueryStatus
+	var globalStatus *generated.ListAllIssuesQueryStatus
 	if input.Status != "" {
 		value := generated.ListIssuesQueryStatus(input.Status)
 		if err := value.Validate(); err != nil {
 			return nil, IssueListOutput{}, fmt.Errorf("status: %w", err)
 		}
 		status = &value
+		globalValue := generated.ListAllIssuesQueryStatus(input.Status)
+		globalStatus = &globalValue
 	}
 	priority, err := priorityQuery(input.Priority)
 	if err != nil {
@@ -108,37 +157,79 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if err != nil {
 		return nil, IssueListOutput{}, err
 	}
-	limit64 := int64(limit + 1)
-	owner := optionalString(input.Owner)
-	unowned := optionalTrue(input.Unowned)
-	response, err := h.options.Client.ListIssues(ctx, &generated.ListIssuesRequestOptions{
-		PathParams: &generated.ListIssuesPath{ProjectID: h.options.ProjectID},
-		Query: &generated.ListIssuesQuery{
-			Status:       status,
-			Priority:     priority,
-			MaxPriority:  maxPriority,
-			Limit:        &limit64,
-			Unowned:      unowned,
-			Owner:        owner,
-			Label:        compactStrings(input.Labels),
-			ExcludeLabel: compactStrings(input.ExcludeLabels),
-			Meta:         compactStrings(input.Metadata),
-		},
-	})
+	projects, err := h.readProjects(ctx, input.Project)
 	if err != nil {
 		return nil, IssueListOutput{}, err
 	}
-	truncated := len(response.Issues) > limit
-	responseIssues := response.Issues
-	if truncated {
-		responseIssues = responseIssues[:limit]
+	limit64 := int64(limit + 1)
+	owner := optionalString(input.Owner)
+	unowned := optionalTrue(input.Unowned)
+	issues := make([]IssueSummary, 0)
+	truncated := false
+	if h.options.Scope.Mode() == ScopeAllowlist && strings.TrimSpace(input.Project) == "" {
+		for _, project := range projects {
+			response, listErr := h.options.Client.ListIssues(ctx, &generated.ListIssuesRequestOptions{
+				PathParams: &generated.ListIssuesPath{ProjectID: project.ID},
+				Query: &generated.ListIssuesQuery{
+					Status: status, Priority: priority, MaxPriority: maxPriority, Limit: &limit64,
+					Unowned: unowned, Owner: owner, Label: compactStrings(input.Labels),
+					ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata),
+				},
+			})
+			if listErr != nil {
+				return nil, IssueListOutput{}, listErr
+			}
+			if len(response.Issues) > limit {
+				truncated = true
+			}
+			for _, issue := range response.Issues {
+				issues = append(issues, h.summaryFromIssueOut(project, issue))
+			}
+		}
+		sortIssueSummaries(issues)
+		truncated = truncated || len(issues) > limit
+	} else if len(projects) == 1 && (h.options.Scope.Mode() == ScopeBound || strings.TrimSpace(input.Project) != "") {
+		response, listErr := h.options.Client.ListIssues(ctx, &generated.ListIssuesRequestOptions{
+			PathParams: &generated.ListIssuesPath{ProjectID: projects[0].ID},
+			Query: &generated.ListIssuesQuery{
+				Status: status, Priority: priority, MaxPriority: maxPriority, Limit: &limit64,
+				Unowned: unowned, Owner: owner, Label: compactStrings(input.Labels),
+				ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata),
+			},
+		})
+		if listErr != nil {
+			return nil, IssueListOutput{}, listErr
+		}
+		truncated = len(response.Issues) > limit
+		for _, issue := range response.Issues {
+			issues = append(issues, h.summaryFromIssueOut(projects[0], issue))
+		}
+	} else {
+		response, listErr := h.options.Client.ListAllIssues(ctx, &generated.ListAllIssuesRequestOptions{
+			Query: &generated.ListAllIssuesQuery{
+				Status: globalStatus, Priority: priority, MaxPriority: maxPriority, Limit: &limit64,
+				Unowned: unowned, Owner: owner, Label: compactStrings(input.Labels),
+				ExcludeLabel: compactStrings(input.ExcludeLabels), Meta: compactStrings(input.Metadata),
+			},
+		})
+		if listErr != nil {
+			return nil, IssueListOutput{}, listErr
+		}
+		allowed := projectIDSet(projects)
+		for _, issue := range response.Issues {
+			if _, ok := allowed[issue.ProjectID]; ok {
+				issues = append(issues, summaryFromGlobalIssue(issue))
+			}
+		}
+		truncated = len(response.Issues) > limit || len(issues) > limit
 	}
-	issues := make([]IssueSummary, 0, len(responseIssues))
-	for _, issue := range responseIssues {
-		issues = append(issues, h.summaryFromIssueOut(issue))
+	if len(issues) > limit {
+		issues = issues[:limit]
 	}
+	project, outputProjects := outputProjectScope(projects)
 	return successResult(), IssueListOutput{
-		Project:   h.project(),
+		Project:   project,
+		Projects:  outputProjects,
 		Issues:    issues,
 		Truncated: truncated,
 	}, nil
@@ -152,52 +243,116 @@ func (h toolHandlers) ready(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if input.Unowned && strings.TrimSpace(input.Owner) != "" {
 		return nil, IssueListOutput{}, errors.New("owner and unowned are mutually exclusive")
 	}
-	limit64 := int64(limit + 1)
-	response, err := h.options.Client.ReadyIssues(ctx, &generated.ReadyIssuesRequestOptions{
-		PathParams: &generated.ReadyIssuesPath{ProjectID: h.options.ProjectID},
-		Query: &generated.ReadyIssuesQuery{
-			Limit:        &limit64,
-			Unowned:      optionalTrue(input.Unowned),
-			Owner:        optionalString(input.Owner),
-			Label:        compactStrings(input.Labels),
-			ExcludeLabel: compactStrings(input.ExcludeLabels),
-		},
-	})
+	projects, err := h.readProjects(ctx, input.Project)
 	if err != nil {
 		return nil, IssueListOutput{}, err
 	}
-	truncated := len(response.Issues) > limit
-	responseIssues := response.Issues
-	if truncated {
-		responseIssues = responseIssues[:limit]
+	limit64 := int64(limit + 1)
+	issues := make([]IssueSummary, 0)
+	truncated := false
+	if h.options.Scope.Mode() == ScopeAllowlist && strings.TrimSpace(input.Project) == "" {
+		for _, project := range projects {
+			response, readyErr := h.options.Client.ReadyIssues(ctx, &generated.ReadyIssuesRequestOptions{
+				PathParams: &generated.ReadyIssuesPath{ProjectID: project.ID},
+				Query: &generated.ReadyIssuesQuery{
+					Limit: &limit64, Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner),
+					Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels),
+				},
+			})
+			if readyErr != nil {
+				return nil, IssueListOutput{}, readyErr
+			}
+			if len(response.Issues) > limit {
+				truncated = true
+			}
+			for _, issue := range response.Issues {
+				issues = append(issues, h.summaryFromIssueOut(project, issue))
+			}
+		}
+		sortIssueSummaries(issues)
+		truncated = truncated || len(issues) > limit
+	} else if len(projects) == 1 && (h.options.Scope.Mode() == ScopeBound || strings.TrimSpace(input.Project) != "") {
+		response, readyErr := h.options.Client.ReadyIssues(ctx, &generated.ReadyIssuesRequestOptions{
+			PathParams: &generated.ReadyIssuesPath{ProjectID: projects[0].ID},
+			Query: &generated.ReadyIssuesQuery{
+				Limit: &limit64, Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner),
+				Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels),
+			},
+		})
+		if readyErr != nil {
+			return nil, IssueListOutput{}, readyErr
+		}
+		truncated = len(response.Issues) > limit
+		for _, issue := range response.Issues {
+			issues = append(issues, h.summaryFromIssueOut(projects[0], issue))
+		}
+	} else {
+		response, readyErr := h.options.Client.ReadyIssuesGlobal(ctx, &generated.ReadyIssuesGlobalRequestOptions{
+			Query: &generated.ReadyIssuesGlobalQuery{
+				Limit: &limit64, Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner),
+				Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels),
+			},
+		})
+		if readyErr != nil {
+			return nil, IssueListOutput{}, readyErr
+		}
+		allowed := projectIDSet(projects)
+		for _, issue := range response.Issues {
+			if _, ok := allowed[issue.ProjectID]; ok {
+				issues = append(issues, summaryFromReadyGlobalIssue(issue))
+			}
+		}
+		truncated = len(response.Issues) > limit || len(issues) > limit
 	}
-	issues := make([]IssueSummary, 0, len(responseIssues))
-	for _, issue := range responseIssues {
-		issues = append(issues, h.summaryFromIssueOut(issue))
+	if len(issues) > limit {
+		issues = issues[:limit]
 	}
+	project, outputProjects := outputProjectScope(projects)
 	return successResult(), IssueListOutput{
-		Project:   h.project(),
+		Project:   project,
+		Projects:  outputProjects,
 		Issues:    issues,
 		Truncated: truncated,
 	}, nil
 }
 
-func (h toolHandlers) labels(ctx context.Context, _ *sdkmcp.CallToolRequest, _ LabelsInput) (*sdkmcp.CallToolResult, LabelsOutput, error) {
-	response, err := h.options.Client.ListLabels(ctx, &generated.ListLabelsRequestOptions{
-		PathParams: &generated.ListLabelsPath{ProjectID: h.options.ProjectID},
+func sortIssueSummaries(issues []IssueSummary) {
+	sort.SliceStable(issues, func(i, j int) bool {
+		if issues[i].UpdatedAt != issues[j].UpdatedAt {
+			return issues[i].UpdatedAt > issues[j].UpdatedAt
+		}
+		return issues[i].QualifiedRef < issues[j].QualifiedRef
 	})
+}
+
+func (h toolHandlers) labels(ctx context.Context, _ *sdkmcp.CallToolRequest, input LabelsInput) (*sdkmcp.CallToolResult, LabelsOutput, error) {
+	projects, err := h.readProjects(ctx, input.Project)
 	if err != nil {
 		return nil, LabelsOutput{}, err
 	}
-	labels := make([]LabelCount, 0, len(response.Labels))
-	for _, label := range response.Labels {
-		labels = append(labels, LabelCount{Label: label.Label, Count: label.Count})
+	counts := make(map[string]int64)
+	for _, project := range projects {
+		response, listErr := h.options.Client.ListLabels(ctx, &generated.ListLabelsRequestOptions{
+			PathParams: &generated.ListLabelsPath{ProjectID: project.ID},
+		})
+		if listErr != nil {
+			return nil, LabelsOutput{}, fmt.Errorf("list labels for project %q: %w", project.Name, listErr)
+		}
+		for _, label := range response.Labels {
+			counts[label.Label] += label.Count
+		}
 	}
-	return successResult(), LabelsOutput{Project: h.project(), Labels: labels}, nil
+	labels := make([]LabelCount, 0, len(counts))
+	for label, count := range counts {
+		labels = append(labels, LabelCount{Label: label, Count: count})
+	}
+	sort.Slice(labels, func(i, j int) bool { return labels[i].Label < labels[j].Label })
+	project, outputProjects := outputProjectScope(projects)
+	return successResult(), LabelsOutput{Project: project, Projects: outputProjects, Labels: labels}, nil
 }
 
 func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input ShowInput) (*sdkmcp.CallToolResult, ShowOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, false)
 	if err != nil {
 		return nil, ShowOutput{}, err
 	}
@@ -209,7 +364,7 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		return nil, ShowOutput{}, fmt.Errorf("comment_limit must be between 1 and %d when set", maximumResultLimit)
 	}
 	response, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
-		PathParams: &generated.ShowIssuePath{ProjectID: h.options.ProjectID, Ref: ref},
+		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
 	})
 	if err != nil {
 		return nil, ShowOutput{}, err
@@ -228,16 +383,33 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		labels = append(labels, label.Label)
 	}
 	links := make([]LinkSummary, 0, len(response.Links))
+	var allowedLinkProjects map[string]struct{}
+	if h.options.Scope.Mode() != ScopeAll {
+		projects, scopeErr := h.options.Scope.Projects(ctx, h.options.Client, false)
+		if scopeErr != nil {
+			return nil, ShowOutput{}, scopeErr
+		}
+		allowedLinkProjects = make(map[string]struct{}, len(projects))
+		for _, allowedProject := range projects {
+			allowedLinkProjects[allowedProject.Name] = struct{}{}
+		}
+	}
 	for _, link := range response.Links {
+		peer, _ := linkPeerAndType(response.Issue.UID, link)
+		if allowedLinkProjects != nil {
+			if _, allowed := allowedLinkProjects[peer.Project]; !allowed {
+				continue
+			}
+		}
 		links = append(links, linkSummary(response.Issue.UID, link))
 	}
-	summary := h.summaryFromIssue(response.Issue)
+	summary := h.summaryFromIssue(project, response.Issue)
 	metadata := response.Issue.Metadata
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
 	return successResult(), ShowOutput{
-		Project: h.project(),
+		Project: project,
 		Issue: IssueDetail{
 			IssueSummary: summary,
 			Labels:       labels,
@@ -263,7 +435,15 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if err := validatePriority(input.Priority); err != nil {
 		return nil, MutationOutput{}, err
 	}
-	links, err := h.createLinks(input)
+	project, err := h.createTarget(ctx, input.Project)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	links, err := h.createLinks(ctx, project, input)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	issueMetadata, err := createMetadata(input)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
@@ -272,8 +452,9 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		Title:    title,
 		Labels:   compactStrings(input.Labels),
 		Links:    links,
-		Metadata: input.Metadata,
+		Metadata: issueMetadata,
 		Priority: input.Priority,
+		ForceNew: optionalTrue(input.ForceNew),
 	}
 	if input.Body != "" {
 		body.Body = &input.Body
@@ -282,18 +463,18 @@ func (h toolHandlers) create(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		body.Owner = &input.Owner
 	}
 	response, err := h.options.Client.CreateIssue(ctx, &generated.CreateIssueRequestOptions{
-		PathParams: &generated.CreateIssuePath{ProjectID: h.options.ProjectID},
+		PathParams: &generated.CreateIssuePath{ProjectID: project.ID},
 		Body:       &body,
 		Header:     &generated.CreateIssueHeaders{IdempotencyKey: &key},
 	})
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
 }
 
 func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input EditInput) (*sdkmcp.CallToolResult, EditOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, EditOutput{}, err
 	}
@@ -312,7 +493,11 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if err := validatePriority(input.Priority); err != nil {
 		return nil, EditOutput{}, err
 	}
-	delta, err := h.linksDelta(input)
+	delta, err := h.linksDelta(ctx, project, input)
+	if err != nil {
+		return nil, EditOutput{}, err
+	}
+	metadataPatch, err := editMetadata(input)
 	if err != nil {
 		return nil, EditOutput{}, err
 	}
@@ -329,35 +514,64 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		empty := ""
 		body.Owner = &empty
 	}
-	if body.Title == nil && body.Body == nil && body.Owner == nil && body.SetPriority == nil && body.ClearPriority == nil && body.LinksDelta == nil {
+	hasIssueEdit := body.Title != nil || body.Body != nil || body.Owner != nil || body.SetPriority != nil || body.ClearPriority != nil || body.LinksDelta != nil
+	if !hasIssueEdit && len(metadataPatch) == 0 {
 		return nil, EditOutput{}, errors.New("edit requires at least one change")
 	}
-	response, err := h.options.Client.EditIssue(ctx, &generated.EditIssueRequestOptions{
-		PathParams: &generated.EditIssuePath{ProjectID: h.options.ProjectID, Ref: ref},
-		Body:       &body,
-	})
-	if err != nil {
-		return nil, EditOutput{}, err
+	if hasIssueEdit && len(metadataPatch) > 0 {
+		return nil, EditOutput{}, errors.New("issue fields and metadata must be changed in separate calls")
 	}
-	events := make([]EventSummary, 0, len(response.Events))
-	for index := range response.Events {
-		if event := eventSummary(&response.Events[index]); event != nil {
+	var issue generated.Issue
+	var changed bool
+	var mainEvent *EventSummary
+	var changes *LinkChangesSummary
+	events := make([]EventSummary, 0)
+	if hasIssueEdit {
+		response, editErr := h.options.Client.EditIssue(ctx, &generated.EditIssueRequestOptions{
+			PathParams: &generated.EditIssuePath{ProjectID: project.ID, Ref: ref},
+			Body:       &body,
+		})
+		if editErr != nil {
+			return nil, EditOutput{}, editErr
+		}
+		issue = response.Issue
+		changed = response.Changed
+		mainEvent = eventSummary(&response.Event)
+		changes = linkChangesSummary(response.Changes)
+		for index := range response.Events {
+			if event := eventSummary(&response.Events[index]); event != nil {
+				events = append(events, *event)
+			}
+		}
+	}
+	if len(metadataPatch) > 0 {
+		response, patchErr := h.options.Client.PatchIssueMetadata(ctx, &generated.PatchIssueMetadataRequestOptions{
+			PathParams: &generated.PatchIssueMetadataPath{ProjectID: project.ID, Ref: ref},
+			Body:       &generated.PatchIssueMetadataBody{Actor: &h.options.Actor, Patch: metadataPatch},
+		})
+		if patchErr != nil {
+			return nil, EditOutput{}, patchErr
+		}
+		issue = response.Issue
+		changed = changed || response.Changed
+		if event := eventSummary(response.Event); event != nil {
+			mainEvent = event
 			events = append(events, *event)
 		}
 	}
 	return successResult(), EditOutput{
-		Project: h.project(),
-		Issue:   h.summaryFromIssue(response.Issue),
-		Changed: response.Changed,
+		Project: project,
+		Issue:   h.summaryFromIssue(project, issue),
+		Changed: changed,
 		Reused:  nil,
-		Event:   eventSummary(&response.Event),
+		Event:   mainEvent,
 		Events:  events,
-		Changes: linkChangesSummary(response.Changes),
+		Changes: changes,
 	}, nil
 }
 
 func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, input CommentInput) (*sdkmcp.CallToolResult, CommentOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, CommentOutput{}, err
 	}
@@ -369,7 +583,7 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 		return nil, CommentOutput{}, errors.New("idempotency_key must not be empty")
 	}
 	response, err := h.options.Client.CreateComment(ctx, &generated.CreateCommentRequestOptions{
-		PathParams: &generated.CreateCommentPath{ProjectID: h.options.ProjectID, Ref: ref},
+		PathParams: &generated.CreateCommentPath{ProjectID: project.ID, Ref: ref},
 		Body:       &generated.CreateCommentBody{Actor: &h.options.Actor, Body: input.Body},
 		Header:     &generated.CreateCommentHeaders{IdempotencyKey: &key},
 	})
@@ -377,8 +591,8 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 		return nil, CommentOutput{}, err
 	}
 	return successResult(), CommentOutput{
-		Project: h.project(),
-		Issue:   h.summaryFromIssue(response.Issue),
+		Project: project,
+		Issue:   h.summaryFromIssue(project, response.Issue),
 		Comment: commentSummary(response.Comment),
 		Changed: response.Changed,
 		Reused:  optionalTrue(!response.Changed),
@@ -387,22 +601,24 @@ func (h toolHandlers) comment(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 }
 
 func (h toolHandlers) claim(ctx context.Context, _ *sdkmcp.CallToolRequest, input ClaimInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
 	response, err := h.options.Client.ClaimIssue(ctx, &generated.ClaimIssueRequestOptions{
-		PathParams: &generated.ClaimIssuePath{ProjectID: h.options.ProjectID, Ref: ref},
-		Body:       &generated.ClaimIssueBody{Actor: h.options.Actor},
+		PathParams: &generated.ClaimIssuePath{ProjectID: project.ID, Ref: ref},
+		Body:       &generated.ClaimIssueBody{Actor: h.options.Actor, Force: optionalTrue(input.Force)},
 	})
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(response.Issue, response.Changed, nil, response.Event), nil
+	output := h.mutation(project, response.Issue, response.Changed, nil, response.Event)
+	output.PreviousOwner = response.PreviousOwner
+	return successResult(), output, nil
 }
 
 func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetLabelInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
@@ -412,26 +628,26 @@ func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	}
 	if input.Present {
 		response, err := h.options.Client.AddLabel(ctx, &generated.AddLabelRequestOptions{
-			PathParams: &generated.AddLabelPath{ProjectID: h.options.ProjectID, Ref: ref},
+			PathParams: &generated.AddLabelPath{ProjectID: project.ID, Ref: ref},
 			Body:       &generated.AddLabelBody{Actor: &h.options.Actor, Label: label},
 		})
 		if err != nil {
 			return nil, MutationOutput{}, err
 		}
-		return successResult(), h.mutation(response.Issue, response.Changed, nil, &response.Event), nil
+		return successResult(), h.mutation(project, response.Issue, response.Changed, nil, &response.Event), nil
 	}
 	response, err := h.options.Client.RemoveLabel(ctx, &generated.RemoveLabelRequestOptions{
-		PathParams: &generated.RemoveLabelPath{ProjectID: h.options.ProjectID, Ref: ref, Label: label},
+		PathParams: &generated.RemoveLabelPath{ProjectID: project.ID, Ref: ref, Label: label},
 		Query:      &generated.RemoveLabelQuery{Actor: &h.options.Actor},
 	})
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
 }
 
 func (h toolHandlers) setDeadline(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetDeadlineInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
@@ -445,11 +661,11 @@ func (h toolHandlers) setDeadline(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if input.Deadline != nil {
 		value = *input.Deadline
 	}
-	return h.patchMetadata(ctx, ref, map[string]any{"deadline_on": value}, input.Revision)
+	return h.patchMetadata(ctx, project, ref, map[string]any{"deadline_on": value}, input.Revision)
 }
 
 func (h toolHandlers) setSchedule(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetScheduleInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
@@ -463,11 +679,11 @@ func (h toolHandlers) setSchedule(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if input.Schedule != nil {
 		value = *input.Schedule
 	}
-	return h.patchMetadata(ctx, ref, map[string]any{"scheduled_on": value}, input.Revision)
+	return h.patchMetadata(ctx, project, ref, map[string]any{"scheduled_on": value}, input.Revision)
 }
 
 func (h toolHandlers) setMetadata(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetMetadataInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
@@ -479,10 +695,10 @@ func (h toolHandlers) setMetadata(ctx context.Context, _ *sdkmcp.CallToolRequest
 			return nil, MutationOutput{}, errors.New("metadata keys must not be empty")
 		}
 	}
-	return h.patchMetadata(ctx, ref, input.Patch, input.Revision)
+	return h.patchMetadata(ctx, project, ref, input.Patch, input.Revision)
 }
 
-func (h toolHandlers) patchMetadata(ctx context.Context, ref string, patch map[string]any, revision *int64) (*sdkmcp.CallToolResult, MutationOutput, error) {
+func (h toolHandlers) patchMetadata(ctx context.Context, project ProjectIdentity, ref string, patch map[string]any, revision *int64) (*sdkmcp.CallToolResult, MutationOutput, error) {
 	var headers *generated.PatchIssueMetadataHeaders
 	if revision != nil {
 		if *revision < 0 {
@@ -492,18 +708,18 @@ func (h toolHandlers) patchMetadata(ctx context.Context, ref string, patch map[s
 		headers = &generated.PatchIssueMetadataHeaders{IfMatch: &ifMatch}
 	}
 	response, err := h.options.Client.PatchIssueMetadata(ctx, &generated.PatchIssueMetadataRequestOptions{
-		PathParams: &generated.PatchIssueMetadataPath{ProjectID: h.options.ProjectID, Ref: ref},
+		PathParams: &generated.PatchIssueMetadataPath{ProjectID: project.ID, Ref: ref},
 		Body:       &generated.PatchIssueMetadataBody{Actor: &h.options.Actor, Patch: patch},
 		Header:     headers,
 	})
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(response.Issue, response.Changed, nil, response.Event), nil
+	return successResult(), h.mutation(project, response.Issue, response.Changed, nil, response.Event), nil
 }
 
 func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, input CloseInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
@@ -516,14 +732,14 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	}
 	evidence := make([]generated.Evidence, 0, len(input.Evidence))
 	for index, item := range input.Evidence {
-		converted, err := h.convertEvidence(item)
+		converted, err := h.convertEvidence(ctx, project, item)
 		if err != nil {
 			return nil, MutationOutput{}, fmt.Errorf("evidence %d: %w", index+1, err)
 		}
 		evidence = append(evidence, converted)
 	}
 	response, err := h.options.Client.CloseIssue(ctx, &generated.CloseIssueRequestOptions{
-		PathParams: &generated.CloseIssuePath{ProjectID: h.options.ProjectID, Ref: ref},
+		PathParams: &generated.CloseIssuePath{ProjectID: project.ID, Ref: ref},
 		Body: &generated.CloseIssueBody{
 			Actor:    &h.options.Actor,
 			Reason:   &reason,
@@ -535,28 +751,28 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
 }
 
 func (h toolHandlers) reopen(ctx context.Context, _ *sdkmcp.CallToolRequest, input ReopenInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
-	ref, err := h.boundRef(input.Ref)
+	project, ref, err := h.options.Scope.IssueTarget(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
 	response, err := h.options.Client.ReopenIssue(ctx, &generated.ReopenIssueRequestOptions{
-		PathParams: &generated.ReopenIssuePath{ProjectID: h.options.ProjectID, Ref: ref},
+		PathParams: &generated.ReopenIssuePath{ProjectID: project.ID, Ref: ref},
 		Body:       &generated.ReopenIssueBody{Actor: &h.options.Actor},
 	})
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
 }
 
-func (h toolHandlers) createLinks(input CreateInput) ([]generated.CreateInitialLinkBody, error) {
+func (h toolHandlers) createLinks(ctx context.Context, project ProjectIdentity, input CreateInput) ([]generated.CreateInitialLinkBody, error) {
 	links := make([]generated.CreateInitialLinkBody, 0, 1+len(input.Blocks)+len(input.BlockedBy)+len(input.Related))
 	add := func(ref string, linkType generated.CreateInitialLinkBodyType, incoming bool) error {
-		bound, err := h.boundRelationshipRef(ref)
+		bound, err := h.relationshipRef(ctx, project, ref)
 		if err != nil {
 			return err
 		}
@@ -590,11 +806,11 @@ func (h toolHandlers) createLinks(input CreateInput) ([]generated.CreateInitialL
 	return links, nil
 }
 
-func (h toolHandlers) linksDelta(input EditInput) (*generated.LinksDelta, error) {
+func (h toolHandlers) linksDelta(ctx context.Context, project ProjectIdentity, input EditInput) (*generated.LinksDelta, error) {
 	delta := &generated.LinksDelta{}
 	var changed bool
 	setOne := func(target **string, raw string) error {
-		ref, err := h.boundRelationshipRef(raw)
+		ref, err := h.relationshipRef(ctx, project, raw)
 		if err != nil {
 			return err
 		}
@@ -604,7 +820,7 @@ func (h toolHandlers) linksDelta(input EditInput) (*generated.LinksDelta, error)
 	}
 	setMany := func(target *[]string, raw []string) error {
 		for _, item := range raw {
-			ref, err := h.boundRelationshipRef(item)
+			ref, err := h.relationshipRef(ctx, project, item)
 			if err != nil {
 				return err
 			}
@@ -641,17 +857,6 @@ func (h toolHandlers) linksDelta(input EditInput) (*generated.LinksDelta, error)
 	return delta, nil
 }
 
-func (h toolHandlers) boundRef(raw string) (string, error) {
-	ref := strings.TrimSpace(raw)
-	if ref == "" {
-		return "", errors.New("issue reference must not be empty")
-	}
-	if project, _, qualified := strings.Cut(ref, "#"); qualified && project != h.options.ProjectName {
-		return "", fmt.Errorf("issue reference %q is outside bound project %q", ref, h.options.ProjectName)
-	}
-	return ref, nil
-}
-
 func (h toolHandlers) boundRelationshipRef(raw string) (string, error) {
 	ref := strings.TrimSpace(raw)
 	if ref == "" {
@@ -673,28 +878,173 @@ func (h toolHandlers) boundRelationshipRef(raw string) (string, error) {
 	return parsed.ShortID, nil
 }
 
-func (h toolHandlers) project() ProjectIdentity {
-	return ProjectIdentity{ID: h.options.ProjectID, Name: h.options.ProjectName}
+func (h toolHandlers) readProjects(ctx context.Context, selector string) ([]ProjectIdentity, error) {
+	if strings.TrimSpace(selector) != "" {
+		project, err := h.options.Scope.Project(ctx, h.options.Client, selector, false)
+		if err != nil {
+			return nil, err
+		}
+		return []ProjectIdentity{project}, nil
+	}
+	return h.options.Scope.Projects(ctx, h.options.Client, false)
 }
 
-func (h toolHandlers) summaryFromIssue(issue generated.Issue) IssueSummary {
+func (h toolHandlers) createTarget(ctx context.Context, selector string) (ProjectIdentity, error) {
+	selector = strings.TrimSpace(selector)
+	if h.options.Scope.Mode() != ScopeBound && selector == "" {
+		return ProjectIdentity{}, errors.New("multi-project creates require project")
+	}
+	return h.options.Scope.Project(ctx, h.options.Client, selector, false)
+}
+
+func createMetadata(input CreateInput) (map[string]any, error) {
+	patch := copyMetadata(input.Metadata)
+	if input.ScheduledOn != "" {
+		if _, exists := patch["scheduled_on"]; exists {
+			return nil, errors.New("scheduled_on is present in both the dedicated field and metadata")
+		}
+		patch["scheduled_on"] = input.ScheduledOn
+	}
+	if input.Timezone != "" {
+		if _, exists := patch["timezone"]; exists {
+			return nil, errors.New("timezone is present in both the dedicated field and metadata")
+		}
+		patch["timezone"] = input.Timezone
+	}
+	for key, value := range patch {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("metadata %q: %w", key, err)
+		}
+		if err := metadata.ValidateCreateValue(metadata.IssueRegistry, key, raw); err != nil {
+			return nil, fmt.Errorf("metadata %q: %w", key, err)
+		}
+	}
+	if len(patch) == 0 {
+		return nil, nil
+	}
+	return patch, nil
+}
+
+func editMetadata(input EditInput) (map[string]any, error) {
+	patch := copyMetadata(input.Metadata)
+	if input.ScheduledOn != nil && input.ClearScheduledOn {
+		return nil, errors.New("scheduled_on and clear_scheduled_on are mutually exclusive")
+	}
+	if input.Timezone != nil && input.ClearTimezone {
+		return nil, errors.New("timezone and clear_timezone are mutually exclusive")
+	}
+	if input.ScheduledOn != nil || input.ClearScheduledOn {
+		if _, exists := patch["scheduled_on"]; exists {
+			return nil, errors.New("scheduled_on is present in both the dedicated field and metadata")
+		}
+		if input.ClearScheduledOn {
+			patch["scheduled_on"] = nil
+		} else {
+			patch["scheduled_on"] = *input.ScheduledOn
+		}
+	}
+	if input.Timezone != nil || input.ClearTimezone {
+		if _, exists := patch["timezone"]; exists {
+			return nil, errors.New("timezone is present in both the dedicated field and metadata")
+		}
+		if input.ClearTimezone {
+			patch["timezone"] = nil
+		} else {
+			patch["timezone"] = *input.Timezone
+		}
+	}
+	for key, value := range patch {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("metadata %q: %w", key, err)
+		}
+		if err := metadata.Validate(metadata.IssueRegistry, key, raw); err != nil {
+			return nil, fmt.Errorf("metadata %q: %w", key, err)
+		}
+	}
+	if len(patch) == 0 {
+		return nil, nil
+	}
+	return patch, nil
+}
+
+func copyMetadata(source map[string]any) map[string]any {
+	if len(source) == 0 {
+		return make(map[string]any)
+	}
+	result := make(map[string]any, len(source)+2)
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func (h toolHandlers) relationshipRef(ctx context.Context, source ProjectIdentity, raw string) (string, error) {
+	ref := strings.TrimSpace(raw)
+	if ref == "" {
+		return "", errors.New("relationship reference must not be empty")
+	}
+	parsed, err := shortid.Parse(ref)
+	if err != nil {
+		return "", fmt.Errorf("relationship reference %q is invalid", ref)
+	}
+	if parsed.ULID != "" {
+		return "", fmt.Errorf("relationship reference %q is an unscoped UID; use a project-qualified short reference", ref)
+	}
+	if len(parsed.ShortID) == shortid.MaxLength {
+		return "", fmt.Errorf("relationship reference %q uses an ambiguous full-length short ID; use a shorter project-qualified reference", ref)
+	}
+	if h.options.Scope.Mode() == ScopeBound {
+		if parsed.Project != "" && parsed.Project != source.Name {
+			return "", fmt.Errorf("relationship reference %q is outside bound project %q", ref, source.Name)
+		}
+		return parsed.ShortID, nil
+	}
+	if parsed.Project == "" {
+		return "", errors.New("multi-project relationships require project#ref")
+	}
+	if _, err := h.options.Scope.Project(ctx, h.options.Client, parsed.Project, false); err != nil {
+		return "", err
+	}
+	return parsed.Project + "#" + parsed.ShortID, nil
+}
+
+func outputProjectScope(projects []ProjectIdentity) (ProjectIdentity, []ProjectIdentity) {
+	if len(projects) == 1 {
+		return projects[0], nil
+	}
+	return ProjectIdentity{}, projects
+}
+
+func projectIDSet(projects []ProjectIdentity) map[int64]struct{} {
+	result := make(map[int64]struct{}, len(projects))
+	for _, project := range projects {
+		result[project.ID] = struct{}{}
+	}
+	return result
+}
+
+func (h toolHandlers) summaryFromIssue(project ProjectIdentity, issue generated.Issue) IssueSummary {
 	return IssueSummary{
 		UID:          issue.UID,
 		Ref:          issue.ShortID,
-		QualifiedRef: h.options.ProjectName + "#" + issue.ShortID,
+		QualifiedRef: project.Name + "#" + issue.ShortID,
 		Title:        issue.Title,
 		Status:       issue.Status,
 		Owner:        issue.Owner,
 		Priority:     issue.Priority,
 		Revision:     issue.Revision,
 		UpdatedAt:    formatTime(issue.UpdatedAt),
+		ScheduledOn:  metadataString(issue.Metadata, "scheduled_on"),
+		Timezone:     metadataString(issue.Metadata, "timezone"),
 	}
 }
 
-func (h toolHandlers) summaryFromIssueOut(issue generated.IssueOut) IssueSummary {
+func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generated.IssueOut) IssueSummary {
 	qualified := issue.QualifiedID
 	if qualified == "" {
-		qualified = h.options.ProjectName + "#" + issue.ShortID
+		qualified = project.Name + "#" + issue.ShortID
 	}
 	return IssueSummary{
 		UID:          issue.UID,
@@ -708,13 +1058,43 @@ func (h toolHandlers) summaryFromIssueOut(issue generated.IssueOut) IssueSummary
 		Blocked:      issue.Blocked,
 		Revision:     issue.Revision,
 		UpdatedAt:    formatTime(issue.UpdatedAt),
+		ScheduledOn:  metadataString(issue.Metadata, "scheduled_on"),
+		Timezone:     metadataString(issue.Metadata, "timezone"),
 	}
 }
 
-func (h toolHandlers) mutation(issue generated.Issue, changed bool, reused *bool, event *generated.Event) MutationOutput {
+func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
+	return IssueSummary{
+		UID: issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
+		Title: issue.Title, Status: issue.Status, Owner: issue.Owner, Priority: issue.Priority,
+		Labels: stringSlicePointer(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
+		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
+		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
+	}
+}
+
+func summaryFromReadyGlobalIssue(issue generated.ReadyGlobalIssueOut) IssueSummary {
+	return IssueSummary{
+		UID: issue.UID, Ref: issue.ShortID, QualifiedRef: issue.QualifiedID,
+		Title: issue.Title, Status: issue.Status, Owner: issue.Owner, Priority: issue.Priority,
+		Labels: stringSlicePointer(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
+		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
+		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
+	}
+}
+
+func metadataString(values map[string]any, key string) *string {
+	value, ok := values[key].(string)
+	if !ok {
+		return nil
+	}
+	return &value
+}
+
+func (h toolHandlers) mutation(project ProjectIdentity, issue generated.Issue, changed bool, reused *bool, event *generated.Event) MutationOutput {
 	return MutationOutput{
-		Project: h.project(),
-		Issue:   h.summaryFromIssue(issue),
+		Project: project,
+		Issue:   h.summaryFromIssue(project, issue),
 		Changed: changed,
 		Reused:  reused,
 		Event:   eventSummary(event),
@@ -738,6 +1118,15 @@ func commentSummary(comment generated.Comment) CommentSummary {
 }
 
 func linkSummary(issueUID string, link generated.LinkOut) LinkSummary {
+	peer, typeName := linkPeerAndType(issueUID, link)
+	return LinkSummary{
+		Type:         typeName,
+		QualifiedRef: peer.QualifiedID,
+		Status:       peer.Status,
+	}
+}
+
+func linkPeerAndType(issueUID string, link generated.LinkOut) (generated.LinkPeer, string) {
 	peer := link.To
 	typeName := link.Type
 	if link.To.UID == issueUID {
@@ -749,11 +1138,7 @@ func linkSummary(issueUID string, link generated.LinkOut) LinkSummary {
 			typeName = "child"
 		}
 	}
-	return LinkSummary{
-		Type:         typeName,
-		QualifiedRef: peer.QualifiedID,
-		Status:       peer.Status,
-	}
+	return peer, typeName
 }
 
 func linkChangesSummary(changes *generated.LinkChanges) *LinkChangesSummary {
@@ -795,7 +1180,7 @@ func linkPeerSummary(peer *generated.LinkPeer) *LinkPeerSummary {
 	}
 }
 
-func (h toolHandlers) convertEvidence(input Evidence) (generated.Evidence, error) {
+func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdentity, input Evidence) (generated.Evidence, error) {
 	typeName := strings.TrimSpace(input.Type)
 	allowed := map[string]bool{
 		"commit": true, "pr": true, "test": true, "reviewed-paths": true,
@@ -811,7 +1196,7 @@ func (h toolHandlers) convertEvidence(input Evidence) (generated.Evidence, error
 	result.Command = optionalString(input.Command)
 	result.Rationale = optionalString(input.Rationale)
 	if input.IssueRef != "" {
-		ref, err := h.boundRelationshipRef(input.IssueRef)
+		ref, err := h.relationshipRef(ctx, project, input.IssueRef)
 		if err != nil {
 			return generated.Evidence{}, err
 		}

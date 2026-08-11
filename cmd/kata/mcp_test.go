@@ -16,6 +16,63 @@ import (
 	"go.kenn.io/kata/internal/version"
 )
 
+func TestMCPServeProjectModesRejectFlagConflicts(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "allowlist with project", args: []string{"--project", "spoke-project", "mcp", "serve", "--projects", "hub-project"}},
+		{name: "allowlist with workspace", args: []string{"--workspace", t.TempDir(), "mcp", "serve", "--projects", "spoke-project"}},
+		{name: "token administration with project", args: []string{"--project", "spoke-project", "mcp", "serve", "--enable-token-admin"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command := newRootCmd()
+			command.SetArgs(tt.args)
+			err := command.Execute()
+			require.ErrorContains(t, err, "cannot be combined")
+		})
+	}
+}
+
+func TestMCPServeDefaultsToDaemonWideScope(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	var requests int
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests++
+		http.Error(writer, "unexpected project resolution", http.StatusInternalServerError)
+	}))
+	t.Cleanup(daemon.Close)
+
+	command := newRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"mcp", "serve"})
+	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
+
+	require.NoError(t, command.Execute())
+	require.Zero(t, requests, "daemon-wide startup must not resolve the current workspace")
+}
+
+func TestMCPServeDoesNotExposeAllProjectsFlag(t *testing.T) {
+	command := newMCPServeCmd()
+	require.Nil(t, command.Flags().Lookup("all-projects"))
+}
+
+func TestParseMCPStorageTargets(t *testing.T) {
+	targets, err := parseMCPStorageTargets([]string{"restore=restore.db", "archive=postgres://db.example/kata"})
+	require.NoError(t, err)
+	require.Equal(t, "restore.db", targets["restore"])
+	require.Equal(t, "postgres://db.example/kata", targets["archive"])
+
+	_, err = parseMCPStorageTargets([]string{"restore=one.db", "restore=two.db"})
+	require.ErrorContains(t, err, "duplicate")
+	_, err = parseMCPStorageTargets([]string{"missing-separator"})
+	require.Error(t, err)
+}
+
 const currentMCPProtocolVersion = "2026-07-28"
 
 func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
@@ -23,11 +80,19 @@ func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	workspace := t.TempDir()
 	var resolved bool
+	var cataloged bool
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/api/v1/projects/resolve", request.URL.Path)
-		resolved = true
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"project":{"id":42,"name":"spoke-project"}}`))
+		switch request.URL.Path {
+		case "/api/v1/projects/resolve":
+			resolved = true
+			_, _ = writer.Write([]byte(`{"project":{"id":42,"name":"spoke-project"}}`))
+		case "/api/v1/projects":
+			cataloged = true
+			_, _ = writer.Write([]byte(`{"projects":[{"id":42,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`))
+		default:
+			http.NotFound(writer, request)
+		}
 	}))
 	t.Cleanup(daemon.Close)
 
@@ -66,6 +131,7 @@ func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
 	rest, err := io.ReadAll(outputReader)
 	require.NoError(t, err)
 	require.True(t, resolved)
+	require.True(t, cataloged)
 	require.Empty(t, stderr.String())
 	require.Empty(t, rest, "stdout must contain protocol messages only")
 	var response struct {

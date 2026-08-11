@@ -78,13 +78,20 @@ hooks together.
 
 ```sh
 kata [--workspace PATH | --project NAME] [--daemon NAME] [--as ACTOR] mcp serve
+kata mcp serve --projects NAME[,NAME...]
+kata mcp serve --enable-token-admin
 ```
 
-`kata mcp serve` starts Kata's native, project-bound MCP stdio server. It
-negotiates supported protocol revisions and keeps stdout reserved for
-newline-delimited JSON-RPC. The startup project and actor apply to every tool
-call. See the [MCP reference](mcp.md) for client configuration, the 13-tool
-surface, limits, and deliberate exclusions.
+`kata mcp serve` starts Kata's native MCP stdio server and follows all projects
+in the selected daemon catalog by default. `--workspace` or `--project` narrows
+the process to one project. `--projects` fixes an allowlist by project UID. The
+startup scope and actor apply to every tool call. The initial catalog contains
+13 section loaders that progressively expose the detailed typed tools. Optional
+`--storage-root` and repeatable `--storage-target
+alias=path-or-DSN` enable the otherwise absent host-local JSONL tools. See the
+[MCP reference](mcp.md) for the complete catalog, scheduling formats, safety
+rules, and limits. Daemon-wide token tools are absent unless
+`--enable-token-admin` is explicit.
 
 ## Issue lifecycle
 
