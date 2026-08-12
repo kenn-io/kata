@@ -158,7 +158,9 @@
 }
 
 .md-typeset .kata-install-command pre {
+  display: flex;
   min-height: 3.25rem;
+  align-items: center;
   margin: 0;
   border-radius: 0;
   overflow-x: auto;
