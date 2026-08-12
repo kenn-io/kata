@@ -215,7 +215,8 @@ Add this complete rail treatment:
   display: none;
 }
 
-.md-typeset .kata-install-command.highlight {
+.md-typeset
+  .kata-install-command.highlight:not([hidden]):not(.kata-install-command--fallback-hidden) {
   display: flex;
   min-height: 3.25rem;
   align-items: stretch;
