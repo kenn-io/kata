@@ -126,8 +126,8 @@ function renderPanel() {
       <button data-install-platform-button="linux" aria-pressed="false">Linux</button>
       <button data-install-platform-button="windows" aria-pressed="false">Windows</button>
       <div data-install-platform-content="macos">brew</div>
-      <div data-install-platform-content="linux" hidden>curl</div>
-      <div data-install-platform-content="windows" hidden>irm</div>
+      <div class="kata-install-command--fallback-hidden" data-install-platform-content="linux">curl</div>
+      <div class="kata-install-command--fallback-hidden" data-install-platform-content="windows">irm</div>
       <p data-install-platform-status>macOS selected · choose another platform anytime.</p>
     </section>`
 }
@@ -149,6 +149,9 @@ describe('initializeInstallPanel', () => {
     expect(button('macos')?.getAttribute('aria-pressed')).toBe('false')
     expect(content('windows')?.hidden).toBe(false)
     expect(content('macos')?.hidden).toBe(true)
+    expect(content('windows')?.classList).not.toContain(
+      'kata-install-command--fallback-hidden',
+    )
     expect(document.querySelector('[data-install-platform-status]')?.textContent).toBe(
       'Windows selected · choose another platform anytime.',
     )
@@ -209,6 +212,7 @@ function selectInstallPlatform(panel, platform) {
   }
 
   for (const content of panel.querySelectorAll('[data-install-platform-content]')) {
+    content.classList.remove('kata-install-command--fallback-hidden')
     content.hidden = content.dataset.installPlatformContent !== platform
   }
 
@@ -292,7 +296,9 @@ git commit -m "feat: select the homepage install platform"
 - [ ] **Step 1: Add the install panel markup and remove the duplicated section**
 
 Replace the current hero body with the following content, then remove the full
-`## Install` section through the `Stable` admonition:
+`## Install` section through the `Stable` admonition. Put the command contract
+directly on each SuperFence; nested `markdown` wrappers leave XML elements in
+Zensical's raw HTML stash while its table-of-contents processor expects strings:
 
 ````markdown
 <div class="kata-hero" markdown>
@@ -315,27 +321,18 @@ Replace the current hero body with the following content, then remove the full
       <button type="button" data-install-platform-button="windows" aria-pressed="false">Windows</button>
     </div>
   </div>
-  <div class="kata-install-command" data-install-platform-content="macos" markdown>
-
-```sh
+```sh { .kata-install-command data-install-platform-content="macos" }
 brew install kata
 ```
 
-  </div>
-  <div class="kata-install-command" data-install-platform-content="linux" hidden markdown>
-
-```sh
+```sh { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="linux" }
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
 
-  </div>
-  <div class="kata-install-command" data-install-platform-content="windows" hidden markdown>
-
-```powershell
+```powershell { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="windows" }
 powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
 ```
 
-  </div>
   <div class="kata-install-meta">
     <p data-install-platform-status>macOS selected · choose another platform anytime.</p>
     <a href="get-started/install.md">All install options →</a>
@@ -439,11 +436,12 @@ tagline and button rules, and append these styles:
   outline-offset: 2px;
 }
 
-.md-typeset .kata-install-command[hidden] {
+.md-typeset .kata-install-command[hidden],
+.md-typeset .kata-install-command--fallback-hidden {
   display: none;
 }
 
-.md-typeset .kata-install-command .highlight {
+.md-typeset .kata-install-command.highlight {
   margin: 0.8rem 0 0.6rem;
 }
 
