@@ -53,6 +53,7 @@ function renderProperties(
     ownerOptions: typeof ownerOptions
     actionsDisabled: boolean
     draftResetGeneration: number
+    draftFenceGeneration: number
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
     onAssignOwner: (uid: string, owner: string) => boolean | Promise<boolean>
     onUnassignOwner: (uid: string) => boolean | Promise<boolean>
@@ -152,6 +153,18 @@ describe('IssueProperties', () => {
     expect((screen.getByLabelText('New label') as HTMLInputElement).value).toBe('urgent')
   })
 
+  it('resets a label draft after authentication authority changes', async () => {
+    const view = renderProperties({ draftFenceGeneration: 0 })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add label' }))
+    await fireEvent.input(screen.getByLabelText('New label'), {
+      target: { value: 'old-authority-label' },
+    })
+
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect(screen.queryByLabelText('New label')).toBeNull()
+  })
+
   it('persists due date and priority changes', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     const onSetPriority = vi.fn(async () => true)
@@ -180,6 +193,27 @@ describe('IssueProperties', () => {
     await fireEvent.click(screen.getByRole('option', { name: 'P1' }))
 
     expect(onSetPriority).toHaveBeenCalledWith('issue-1', 1)
+  })
+
+  it.each([
+    ['UTC instant', '2026-09-01T00:30:00Z'],
+    ['local time', '2026-09-01T09:00'],
+  ])('uses the projected date for a timed %s deadline without replacing it', async (_, raw) => {
+    const onPatchMetadata = vi.fn(async () => true)
+    renderProperties({
+      issue: makeIssue({
+        deadline_on_date: '2026-08-31',
+        metadata: { deadline_on: raw },
+      }),
+      onPatchMetadata,
+    })
+
+    expect(screen.getByRole('button', { name: 'Edit due date' }).textContent).toContain('Aug 31')
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit due date' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Due:/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Aug 31, 2026/ }))
+
+    expect(onPatchMetadata).not.toHaveBeenCalled()
   })
 
   it('patches scheduled and due dates and closes editors on accepted replacement', async () => {

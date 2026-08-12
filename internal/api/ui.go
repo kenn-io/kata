@@ -7,7 +7,7 @@ import (
 )
 
 // UISnapshotContractVersion identifies the browser snapshot wire contract.
-const UISnapshotContractVersion = "1"
+const UISnapshotContractVersion = "2"
 
 // UICapabilities describes the browser behavior authorized for this request.
 type UICapabilities struct {

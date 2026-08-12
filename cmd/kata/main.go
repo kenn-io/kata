@@ -87,6 +87,8 @@ func newRootCmd() *cobra.Command {
 		newShowCmd(),
 		newListCmd(),
 		newEditCmd(),
+		newScheduleCmd(),
+		newDeadlineCmd(),
 		newMetaCmd(),
 		newMoveCmd(),
 		newCommentCmd(),

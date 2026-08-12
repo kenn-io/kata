@@ -1672,6 +1672,7 @@ describe('App', () => {
       },
     }
     let commentRejected = false
+    let renewedSnapshotAccepted = false
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1701,6 +1702,9 @@ describe('App', () => {
         if (target.pathname.endsWith('/api/v1/ui/references')) {
           return Response.json({ issues: [], labels: [], owners: [], projects: [] })
         }
+        if (request.headers.get('X-Kata-Web-Session') === 'renewed-session') {
+          renewedSnapshotAccepted = true
+        }
         return Response.json(accepted, { headers: { ETag: '"snapshot-1"' } })
       }),
     )
@@ -1716,6 +1720,20 @@ describe('App', () => {
       expect((screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement).value).toBe(
         'Keep this draft',
       ),
+    )
+    await waitFor(() =>
+      expect(sessionStorage.getItem('kata.web.session.v1')).toContain('renewed-session'),
+    )
+    await waitFor(() => expect(renewedSnapshotAccepted).toBe(true))
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'New task' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    )
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement).disabled,
+      ).toBe(true),
     )
   })
 
@@ -1845,7 +1863,7 @@ describe('App', () => {
 
 function snapshot() {
   return {
-    contract_version: '1',
+    contract_version: '2',
     cursor: 12,
     capabilities: { writable: true, updates: 'poll', actor_policy: 'identity' },
     origin: 'https://daemon.example',

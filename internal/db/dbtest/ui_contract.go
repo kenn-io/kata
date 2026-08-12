@@ -398,6 +398,141 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		require.Equal(t, "2026-08-01", upcoming.Issues[0].ScheduledOnDate)
 	})
 
+	t.Run("timed deadlines use the browser calendar before limit", func(t *testing.T) {
+		store := open(t)
+		uiStore := store.(db.UIStore)
+		ctx := context.Background()
+		project := createCursorProject(ctx, t, store)
+		previousDay, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Previous browser deadline", Author: "user-a",
+			Metadata: map[string]json.RawMessage{
+				"deadline_on": json.RawMessage(`"2026-08-01T00:30:00Z"`),
+			},
+		})
+		require.NoError(t, err)
+		_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Next browser deadline", Author: "user-a",
+			Metadata: map[string]json.RawMessage{
+				"deadline_on": json.RawMessage(`"2026-08-01T07:30:00Z"`),
+			},
+		})
+		require.NoError(t, err)
+
+		today, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "today", LocalDate: "2026-07-31", TimeZone: "America/Los_Angeles", Limit: 1,
+		})
+		require.NoError(t, err)
+		require.Len(t, today.Issues, 1)
+		require.Equal(t, previousDay.UID, today.Issues[0].UID)
+		require.Equal(t, "2026-07-31", today.Issues[0].DeadlineOnDate)
+	})
+
+	t.Run("deadline projection does not inherit a recurrence timezone", func(t *testing.T) {
+		store := open(t)
+		uiStore := store.(db.UIStore)
+		ctx := context.Background()
+		project := createCursorProject(ctx, t, store)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Recurrence deadline", Author: "user-a",
+			Metadata: map[string]json.RawMessage{
+				"deadline_on": json.RawMessage(`"2026-08-01T23:30"`),
+			},
+		})
+		require.NoError(t, err)
+		_, err = store.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
+			IssueID: issue.ID,
+			Recurrence: db.CreateRecurrenceIn{
+				ProjectID: project.ID, Actor: "user-a", Rule: "FREQ=DAILY;COUNT=2",
+				DTStart: "2026-08-01", Timezone: "America/Los_Angeles",
+				Template: db.RecurrenceTemplate{Title: issue.Title},
+			},
+		})
+		require.NoError(t, err)
+		_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+			IssueID: issue.ID, Actor: "user-a",
+			Patch: map[string]json.RawMessage{
+				"scheduled_on": json.RawMessage(`null`),
+				"timezone":     json.RawMessage(`null`),
+			},
+		})
+		require.NoError(t, err)
+
+		snapshot, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			ProjectUID: project.UID, View: "deadlines", LocalDate: "2026-08-01",
+			TimeZone: "UTC", DefaultTimezone: "UTC",
+		})
+		require.NoError(t, err)
+		require.Len(t, snapshot.Issues, 1)
+		require.Equal(t, "2026-08-01", snapshot.Issues[0].DeadlineOnDate)
+
+		today, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			ProjectUID: project.UID, View: "today", LocalDate: "2026-08-01",
+			TimeZone: "UTC", DefaultTimezone: "UTC",
+		})
+		require.NoError(t, err)
+		require.Len(t, today.Issues, 1,
+			"Today must evaluate the deadline with the daemon timezone, not the recurrence timezone")
+		require.Equal(t, issue.UID, today.Issues[0].UID)
+	})
+
+	t.Run("non-calendar views project deadline dates", func(t *testing.T) {
+		store := open(t)
+		uiStore := store.(db.UIStore)
+		ctx := context.Background()
+		project := createCursorProject(ctx, t, store)
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "All-open deadline", Author: "user-a",
+			Metadata: map[string]json.RawMessage{
+				"deadline_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+			},
+		})
+		require.NoError(t, err)
+
+		snapshot, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+			ProjectUID: project.UID, View: "all-open", TimeZone: "America/Los_Angeles",
+			DefaultTimezone: "UTC",
+		})
+		require.NoError(t, err)
+		require.Len(t, snapshot.Issues, 1)
+		require.Equal(t, issue.UID, snapshot.Issues[0].UID)
+		require.Equal(t, "2026-08-31", snapshot.Issues[0].DeadlineOnDate)
+	})
+
+	t.Run("selected issues project timed deadline dates", func(t *testing.T) {
+		for _, test := range []struct {
+			name     string
+			metadata map[string]json.RawMessage
+		}{
+			{name: "UTC instant", metadata: map[string]json.RawMessage{
+				"deadline_on": json.RawMessage(`"2026-09-01T00:30:00Z"`),
+			}},
+			{name: "local time", metadata: map[string]json.RawMessage{
+				"deadline_on": json.RawMessage(`"2026-09-01T09:00"`),
+				"timezone":    json.RawMessage(`"Asia/Tokyo"`),
+			}},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				store := open(t)
+				uiStore := store.(db.UIStore)
+				ctx := context.Background()
+				project := createCursorProject(ctx, t, store)
+				issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: project.ID, Title: "Selected deadline", Author: "user-a",
+					Metadata: test.metadata,
+				})
+				require.NoError(t, err)
+
+				snapshot, err := uiStore.ReadUISnapshot(ctx, db.UISnapshotQuery{
+					ProjectUID: project.UID, View: "all-open", SelectedIssueUID: issue.UID,
+					TimeZone: "America/Los_Angeles", DefaultTimezone: "UTC",
+				})
+				require.NoError(t, err)
+				require.NotNil(t, snapshot.SelectedIssue)
+				require.Equal(t, "2026-08-31", snapshot.SelectedIssue.DeadlineOnDate)
+			})
+		}
+	})
+
 	t.Run("ready uses linked recurrence timezone for legacy issues", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)

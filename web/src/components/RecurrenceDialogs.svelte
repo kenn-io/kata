@@ -13,6 +13,7 @@
     recurrences: readonly KataRecurrence[]
     actor: string
     disabled?: boolean | undefined
+    draftFenceGeneration?: number | undefined
     onCreate: (projectID: number, input: KataCreateRecurrenceInput) => Promise<void>
     onPatch: (id: number, input: KataPatchRecurrenceInput, etag: string) => Promise<void>
     onDelete: (recurrence: KataRecurrence) => Promise<boolean>
@@ -23,6 +24,7 @@
     recurrences,
     actor,
     disabled = false,
+    draftFenceGeneration = 0,
     onCreate,
     onPatch,
     onDelete,
@@ -38,9 +40,23 @@
     recurrence: null,
   })
   let deletingRecurrence = $state(false)
+  let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
     reconcileRecurrences(recurrences)
+  })
+
+  $effect(() => {
+    const nextGeneration = draftFenceGeneration
+    if (lastDraftFenceGeneration === null) {
+      lastDraftFenceGeneration = nextGeneration
+      return
+    }
+    if (nextGeneration === lastDraftFenceGeneration) return
+    lastDraftFenceGeneration = nextGeneration
+    recurrenceDialog = { open: false, mode: 'create', recurrence: null, etag: '' }
+    recurrenceDelete = { open: false, recurrence: null }
+    deletingRecurrence = false
   })
 
   export function openCreateRecurrence(): void {

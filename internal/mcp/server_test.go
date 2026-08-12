@@ -58,8 +58,10 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.ready",
 		"kata.reopen",
 		"kata.search",
+		"kata.set_deadline",
 		"kata.set_label",
 		"kata.set_metadata",
+		"kata.set_schedule",
 		"kata.show",
 	}
 	gotNames := make([]string, 0, len(result.Tools))
@@ -273,6 +275,28 @@ func TestCloseInputSchemaMirrorsDaemonEvidenceMatrix(t *testing.T) {
 	}
 }
 
+func TestSetDeadlineInputSchemaRequiresOneMutation(t *testing.T) {
+	schema, err := inputSchemaFor[SetDeadlineInput]("kata.set_deadline").Resolve(nil)
+	require.NoError(t, err)
+
+	require.NoError(t, schema.Validate(map[string]any{"ref": "abc1", "deadline": "2026-09-01T09:30"}))
+	require.NoError(t, schema.Validate(map[string]any{"ref": "abc1", "clear_deadline": true}))
+	require.Error(t, schema.Validate(map[string]any{"ref": "abc1"}))
+	require.Error(t, schema.Validate(map[string]any{"ref": "abc1", "deadline": "2026-09-01", "clear_deadline": true}))
+	require.Error(t, schema.Validate(map[string]any{"ref": "abc1", "clear_deadline": false}))
+}
+
+func TestSetScheduleInputSchemaRequiresOneMutation(t *testing.T) {
+	schema, err := inputSchemaFor[SetScheduleInput]("kata.set_schedule").Resolve(nil)
+	require.NoError(t, err)
+
+	require.NoError(t, schema.Validate(map[string]any{"ref": "abc1", "schedule": "2026-09-01T09:30"}))
+	require.NoError(t, schema.Validate(map[string]any{"ref": "abc1", "clear_schedule": true}))
+	require.Error(t, schema.Validate(map[string]any{"ref": "abc1"}))
+	require.Error(t, schema.Validate(map[string]any{"ref": "abc1", "schedule": "2026-09-01", "clear_schedule": true}))
+	require.Error(t, schema.Validate(map[string]any{"ref": "abc1", "clear_schedule": false}))
+}
+
 func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 	requests := make(chan capturedRequest, 20)
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -313,6 +337,8 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 		{name: "edit", tool: "kata.edit", arguments: map[string]any{"ref": "abc1", "title": "Updated title", "add_related": []string{"spoke-project#def2"}}, wantMethod: http.MethodPatch, wantPath: "/api/v1/projects/42/issues/abc1", wantActor: true, wantMatch: "abc1"},
 		{name: "comment", tool: "kata.comment", arguments: map[string]any{"ref": "abc1", "body": "Progress note", "idempotency_key": "comment-1"}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/comments", wantActor: true, wantKey: "comment-1", wantMatch: "Progress note"},
 		{name: "claim", tool: "kata.claim", arguments: map[string]any{"ref": "abc1"}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/actions/claim", wantActor: true, wantMatch: "abc1"},
+		{name: "set deadline", tool: "kata.set_deadline", arguments: map[string]any{"ref": "abc1", "deadline": "2026-09-01T09:30", "revision": 7}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/metadata", wantActor: true, wantMatch: "abc1"},
+		{name: "set schedule", tool: "kata.set_schedule", arguments: map[string]any{"ref": "abc1", "schedule": "2026-09-01T09:30", "revision": 7}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/metadata", wantActor: true, wantMatch: "abc1"},
 		{name: "add label", tool: "kata.set_label", arguments: map[string]any{"ref": "abc1", "label": "bug", "present": true}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/labels", wantActor: true, wantMatch: "abc1"},
 		{name: "patch metadata", tool: "kata.set_metadata", arguments: map[string]any{"ref": "abc1", "patch": map[string]any{"work.attention": "ok"}, "revision": 7}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/metadata", wantActor: true, wantMatch: "abc1"},
 		{name: "close", tool: "kata.close", arguments: map[string]any{"ref": "abc1", "reason": "done", "message": "Completed the requested work and verified its behavior.", "evidence": []map[string]any{{"type": "test", "command": "go test ./..."}}}, wantMethod: http.MethodPost, wantPath: "/api/v1/projects/42/issues/abc1/actions/close", wantActor: true, wantMatch: "abc1"},
@@ -349,7 +375,7 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 			if tt.wantKey != "" {
 				require.Equal(t, tt.wantKey, request.Header.Get("Idempotency-Key"))
 			}
-			if tt.tool == "kata.set_metadata" {
+			if tt.tool == "kata.set_metadata" || tt.tool == "kata.set_deadline" || tt.tool == "kata.set_schedule" {
 				require.Equal(t, `"rev-7"`, request.Header.Get("If-Match"))
 			}
 			if tt.wantActor {
@@ -360,6 +386,12 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				if tt.tool == "kata.edit" {
 					links := body["links_delta"].(map[string]any)
 					require.Equal(t, []any{"def2"}, links["add_related"])
+				}
+				if tt.tool == "kata.set_deadline" {
+					require.Equal(t, map[string]any{"deadline_on": "2026-09-01T09:30"}, body["patch"])
+				}
+				if tt.tool == "kata.set_schedule" {
+					require.Equal(t, map[string]any{"scheduled_on": "2026-09-01T09:30"}, body["patch"])
 				}
 			}
 		})
@@ -451,6 +483,58 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, conflict.IsError)
 	require.Contains(t, string(mustJSON(t, conflict.Content)), "revision")
+
+	deadlineSet, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_deadline", Arguments: map[string]any{"ref": ref, "deadline": "2026-09-01T16:30:00Z"},
+	})
+	require.NoError(t, err)
+	require.False(t, deadlineSet.IsError, deadlineSet.Content)
+
+	shown, err = session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.show", Arguments: map[string]any{"ref": ref},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "2026-09-01T16:30:00Z",
+		shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any)["deadline_on"])
+
+	deadlineCleared, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_deadline", Arguments: map[string]any{"ref": ref, "clear_deadline": true},
+	})
+	require.NoError(t, err)
+	require.False(t, deadlineCleared.IsError, deadlineCleared.Content)
+
+	shown, err = session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.show", Arguments: map[string]any{"ref": ref},
+	})
+	require.NoError(t, err)
+	require.NotContains(t,
+		shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any), "deadline_on")
+
+	scheduleSet, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_schedule", Arguments: map[string]any{"ref": ref, "schedule": "2026-09-02T09:30"},
+	})
+	require.NoError(t, err)
+	require.False(t, scheduleSet.IsError, scheduleSet.Content)
+
+	shown, err = session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.show", Arguments: map[string]any{"ref": ref},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "2026-09-02T09:30",
+		shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any)["scheduled_on"])
+
+	scheduleCleared, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.set_schedule", Arguments: map[string]any{"ref": ref, "clear_schedule": true},
+	})
+	require.NoError(t, err)
+	require.False(t, scheduleCleared.IsError, scheduleCleared.Content)
+
+	shown, err = session.CallTool(t.Context(), &sdkmcp.CallToolParams{
+		Name: "kata.show", Arguments: map[string]any{"ref": ref},
+	})
+	require.NoError(t, err)
+	require.NotContains(t,
+		shown.StructuredContent.(map[string]any)["issue"].(map[string]any)["metadata"].(map[string]any), "scheduled_on")
 }
 
 func assertSummaryHydration(t *testing.T, tool string, structured map[string]any) {
@@ -574,6 +658,10 @@ func TestToolValidationStopsBeforeDaemonRequest(t *testing.T) {
 		{name: "oversize limit", tool: "kata.list", arguments: map[string]any{"limit": 101}},
 		{name: "empty idempotency key", tool: "kata.comment", arguments: map[string]any{"ref": "abc1", "body": "note", "idempotency_key": " "}},
 		{name: "edit conflict", tool: "kata.edit", arguments: map[string]any{"ref": "abc1", "priority": 1, "clear_priority": true}},
+		{name: "missing deadline mutation", tool: "kata.set_deadline", arguments: map[string]any{"ref": "abc1"}},
+		{name: "conflicting deadline mutation", tool: "kata.set_deadline", arguments: map[string]any{"ref": "abc1", "deadline": "2026-09-01", "clear_deadline": true}},
+		{name: "missing schedule mutation", tool: "kata.set_schedule", arguments: map[string]any{"ref": "abc1"}},
+		{name: "conflicting schedule mutation", tool: "kata.set_schedule", arguments: map[string]any{"ref": "abc1", "schedule": "2026-09-01", "clear_schedule": true}},
 		{name: "empty metadata patch", tool: "kata.set_metadata", arguments: map[string]any{"ref": "abc1", "patch": map[string]any{}}},
 		{name: "invalid close reason", tool: "kata.close", arguments: map[string]any{"ref": "abc1", "reason": "finished", "message": "done", "evidence": []any{}}},
 		{name: "incomplete close evidence", tool: "kata.close", arguments: map[string]any{"ref": "abc1", "reason": "done", "message": "done", "evidence": []any{map[string]any{"type": "commit"}}}},

@@ -84,6 +84,11 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				return db.UISnapshotData{}, err
 			}
 		} else {
+			if err := db.ProjectUIDeadlineDate(&selected, query); err != nil {
+				return db.UISnapshotData{}, fmt.Errorf(
+					"read UI selected issue %s deadline: %w", selected.UID, err,
+				)
+			}
 			data.SelectedState = "available"
 			data.SelectedIssue = &selected
 			data.Comments, err = readUIComments(ctx, tx, selected.ID)
@@ -406,7 +411,7 @@ func readUIIssues(
 		}
 	}
 	filterReadySchedules := false
-	filterCalendarSchedules := query.View == "today" || query.View == "upcoming"
+	filterCalendarSchedules := query.View == "today" || query.View == "upcoming" || query.View == "deadlines"
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
 		statusPredicates := []string{}
 		persistedStatuses := []string{}
@@ -444,8 +449,7 @@ func readUIIssues(
 		statement += ` AND json_extract(p.metadata, '$.role') = 'inbox'`
 	case "today":
 		statement += ` AND (json_extract(i.metadata, '$.scheduled_on') IS NOT NULL` +
-			` OR substr(json_extract(i.metadata, '$.deadline_on'), 1, 10) <= ?)`
-		args = append(args, query.LocalDate)
+			` OR json_extract(i.metadata, '$.deadline_on') IS NOT NULL)`
 	case "upcoming":
 		statement += ` AND json_extract(i.metadata, '$.scheduled_on') IS NOT NULL`
 	case "deadlines":
@@ -518,20 +522,30 @@ func readUIIssues(
 			}
 		}
 		scheduledOnDate := ""
+		deadlineOnDate := ""
 		if filterCalendarSchedules {
 			var matches bool
-			scheduleQuery := query
-			scheduleQuery.DefaultTimezone = scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone)
-			scheduledOnDate, matches, err = db.MatchUICalendarView(string(issue.Metadata), scheduleQuery)
+			scheduledOnDate, deadlineOnDate, matches, err = db.MatchUICalendarView(
+				string(issue.Metadata), query,
+				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
+			)
 			if err != nil {
 				return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
 			}
 			if !matches {
 				continue
 			}
+		} else {
+			deadlineOnDate, _, err = metadata.DeadlineOnCalendarDate(
+				string(issue.Metadata), query.TimeZone, query.DefaultTimezone,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("read UI issue %s deadline: %w", issue.UID, err)
+			}
 		}
 		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
 		uiIssue.ScheduledOnDate = scheduledOnDate
+		uiIssue.DeadlineOnDate = deadlineOnDate
 		issues = append(issues, uiIssue)
 		if limit > 0 && len(issues) == limit {
 			break

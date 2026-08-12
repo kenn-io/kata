@@ -35,7 +35,7 @@ type Entry struct {
 // Keys outside this set are accepted opaquely by Validate.
 var IssueRegistry = map[string]Entry{
 	"scheduled_on": {Type: TypeSchedule},
-	"deadline_on":  {Type: TypeDate},
+	"deadline_on":  {Type: TypeSchedule},
 	"someday":      {Type: TypeBool},
 	"checklist":    {Type: TypeChecklist},
 	"timezone":     {Type: TypeTimezoneIANA},

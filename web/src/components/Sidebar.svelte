@@ -24,6 +24,7 @@
     currentView: KataCurrentView
     searchFilters: KataTaskSearchFilters
     projectCreationDisabled: boolean
+    draftFenceGeneration?: number | undefined
     inboxProjectUID?: string | undefined
     inboxDesignationDisabled: boolean
     onOpenView: (name: KataTaskViewName) => void | Promise<void>
@@ -38,6 +39,7 @@
     currentView,
     searchFilters,
     projectCreationDisabled,
+    draftFenceGeneration = 0,
     inboxProjectUID,
     inboxDesignationDisabled,
     onOpenView,
@@ -65,11 +67,23 @@
   let createInput: HTMLInputElement | null = $state(null)
   let collapsedAreas = $state<string[]>([])
   let inboxError = $state('')
+  let lastDraftFenceGeneration = $state<number | null>(null)
   const inboxOptions = $derived.by<TypeaheadOption[]>(() =>
     projects
       .map((project) => ({ name: project.uid, label: project.name }))
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
   )
+
+  $effect(() => {
+    const nextGeneration = draftFenceGeneration
+    if (lastDraftFenceGeneration === null) {
+      lastDraftFenceGeneration = nextGeneration
+      return
+    }
+    if (nextGeneration === lastDraftFenceGeneration) return
+    lastDraftFenceGeneration = nextGeneration
+    cancelCreatingProject()
+  })
 
   function toggleArea(name: string): void {
     collapsedAreas = collapsedAreas.includes(name)

@@ -37,6 +37,17 @@ describe('IssueLinks', () => {
     expect((screen.getByLabelText('Related issue') as HTMLInputElement).value).toBe('')
   })
 
+  it('resets a related-link draft after authentication authority changes', async () => {
+    const view = renderLinks({ draftFenceGeneration: 0 })
+    await fireEvent.input(screen.getByLabelText('Related issue'), {
+      target: { value: 'old-authority-ref' },
+    })
+
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect((screen.getByLabelText('Related issue') as HTMLInputElement).value).toBe('')
+  })
+
   it('navigates resolved peers by their stable identity', async () => {
     const onSelectIssue = vi.fn()
     renderLinks({ onSelectIssue })

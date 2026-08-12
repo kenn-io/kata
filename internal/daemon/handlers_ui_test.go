@@ -246,12 +246,14 @@ func TestUISnapshotTemporalIntent(t *testing.T) {
 	for _, view := range []string{"inbox", "all-open", "logbook"} {
 		t.Run(view, func(t *testing.T) {
 			first, _ := getUISnapshot(t, ts, url.Values{
-				"view": {view}, "local_date": {"2026-08-01"}, "time_zone": {"America/Chicago"},
+				"view": {view}, "time_zone": {"America/Chicago"},
 			}, "")
+			require.Equal(t, "America/Chicago", store.lastSnapshot.TimeZone)
+			require.Empty(t, store.lastSnapshot.LocalDate)
 			second, _ := getUISnapshot(t, ts, url.Values{
-				"view": {view}, "local_date": {"2026-08-02"}, "time_zone": {"America/New_York"},
+				"view": {view}, "time_zone": {"America/New_York"},
 			}, "")
-			require.Equal(t, first.Header.Get("ETag"), second.Header.Get("ETag"))
+			require.NotEqual(t, first.Header.Get("ETag"), second.Header.Get("ETag"))
 		})
 	}
 }

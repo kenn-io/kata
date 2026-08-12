@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-08
+last_edited: 2026-08-12
 ---
 
 # Agent workflows
@@ -29,8 +29,8 @@ Default to `--agent` for ordinary reads and mutations in agent logs. Use
 To make a workspace self-documenting for agents, run `kata init --with-agents`
 once. It writes a marker-delimited kata briefing into existing real `AGENTS.md`
 and `CLAUDE.md` files, or creates `AGENTS.md` when neither exists. The block
-points back at `kata quickstart` and carries a short `work.*` attention
-conventions section (see
+points back at `kata quickstart` and carries short planning-date and `work.*`
+conventions (see
 [agent orchestration](../operations/agent-orchestration.md)); re-running
 refreshes only kata's block, so a repo initialized before that section shipped
 gains it on the next run. If a target file still carries a Beads integration
@@ -39,6 +39,22 @@ and writes a `<file>.kata-proposed` sidecar to adopt or discard — see
 [`--with-agents`](../get-started/quickstart.md#initialize-a-workspace). If
 `AGENTS.md` is a symlink, kata refuses to manage it before reading the target;
 replace it with a regular file before using `--with-agents`.
+
+The generated block gives agents exact commands for native planning state:
+
+```sh
+# A future schedule parks work until its gate opens.
+kata schedule <ref> <date-or-time>
+kata schedule <ref> -
+
+# A deadline does not park work.
+kata deadline <ref> <date-or-time>
+kata deadline <ref> -
+
+# Someday parks work with no date. Remove the key to return it to the queue.
+kata meta set <ref> someday true --json-value
+kata meta unset <ref> someday
+```
 
 Guidance files produce tendency, not contract: an agent can still end a session
 without updating its issue. For Claude Code workspaces,

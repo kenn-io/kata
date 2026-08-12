@@ -18,6 +18,7 @@
     searchReferences: (query: string) => Promise<Reference[]>
     actionsDisabled?: boolean | undefined
     draftResetGeneration?: number | undefined
+    draftFenceGeneration?: number | undefined
     onAddComment: (uid: string, body: string) => boolean | Promise<boolean>
   }
 
@@ -33,10 +34,12 @@
     searchReferences,
     actionsDisabled = false,
     draftResetGeneration = 0,
+    draftFenceGeneration = 0,
     onAddComment,
   }: Props = $props()
 
   let commentDraft = $state('')
+  let commentDraftGeneration = $state(0)
   let commentDraftRevision = 0
   let lastDraftResetGeneration = $state<number | null>(null)
   let pendingCommentReset = $state<PendingDraftReset | null>(null)
@@ -50,6 +53,9 @@
       return tb - ta
     })
   })
+  const commentDraftFenced = $derived(
+    commentDraft.trim() !== '' && commentDraftGeneration !== draftFenceGeneration,
+  )
 
   $effect(() => {
     const nextGeneration = draftResetGeneration
@@ -73,11 +79,12 @@
 
   function updateCommentDraft(value: string): void {
     commentDraft = value
+    if (!actionsDisabled) commentDraftGeneration = draftFenceGeneration
     commentDraftRevision += 1
   }
 
   async function submitComment(): Promise<void> {
-    if (actionsDisabled) return
+    if (actionsDisabled || commentDraftFenced) return
     const draft = commentDraft
     const body = draft.trim()
     if (!body) return
@@ -136,7 +143,7 @@
       size="sm"
       class="comment-submit"
       label="Add comment"
-      disabled={actionsDisabled || commentDraft.trim() === ''}
+      disabled={actionsDisabled || commentDraftFenced || commentDraft.trim() === ''}
     />
   </form>
   {#if sortedComments.length === 0}

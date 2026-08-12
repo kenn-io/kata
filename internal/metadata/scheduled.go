@@ -22,6 +22,7 @@ const (
 
 type scheduleMetadata struct {
 	ScheduledOn *string `json:"scheduled_on"`
+	DeadlineOn  *string `json:"deadline_on"`
 	Timezone    string  `json:"timezone"`
 }
 
@@ -71,6 +72,26 @@ func ScheduledOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
+	return metadataCalendarDate(raw, "scheduled_on", displayTimezone, defaultTimezone)
+}
+
+// DeadlineOnCalendarDate returns the display calendar date for deadline_on.
+// It uses the same date, local date-time, and UTC-instant rules as
+// ScheduledOnCalendarDate.
+func DeadlineOnCalendarDate(
+	raw string,
+	displayTimezone string,
+	defaultTimezone string,
+) (string, bool, error) {
+	return metadataCalendarDate(raw, "deadline_on", displayTimezone, defaultTimezone)
+}
+
+func metadataCalendarDate(
+	raw string,
+	key string,
+	displayTimezone string,
+	defaultTimezone string,
+) (string, bool, error) {
 	if len(raw) == 0 {
 		return "", false, nil
 	}
@@ -78,24 +99,28 @@ func ScheduledOnCalendarDate(
 	if err != nil {
 		return "", false, err
 	}
-	if values.ScheduledOn == nil {
+	value := values.ScheduledOn
+	if key == "deadline_on" {
+		value = values.DeadlineOn
+	}
+	if value == nil {
 		return "", false, nil
 	}
 
-	scheduledOn := *values.ScheduledOn
-	kind, layout, instant, err := classifyScheduledOn(scheduledOn)
+	scheduleValue := *value
+	kind, layout, instant, err := classifyScheduledOn(scheduleValue)
 	if err != nil {
 		return "", false, err
 	}
 	if kind == scheduledOnDate {
-		return scheduledOn, true, nil
+		return scheduleValue, true, nil
 	}
 	if kind == scheduledOnLocalTime {
 		location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
 		if err != nil {
 			return "", false, err
 		}
-		instant, err = resolveLocalSchedule(scheduledOn, layout, location)
+		instant, err = resolveLocalSchedule(scheduleValue, layout, location)
 		if err != nil {
 			return "", false, err
 		}

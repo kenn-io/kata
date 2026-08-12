@@ -245,6 +245,25 @@ describe('IssueDetail', () => {
     ).toBe('Draft on the newer task')
   })
 
+  it('resets title and description drafts after authentication authority changes', async () => {
+    const view = renderDetail({ draftFenceGeneration: 0 })
+    await openEditor()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    await fireEvent.input(screen.getByLabelText('Edit title'), {
+      target: { value: 'Old authority title' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit description' }))
+    await fireEvent.input(screen.getByLabelText('Edit description'), {
+      target: { value: 'Old authority body' },
+    })
+
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect(screen.queryByRole('textbox', { name: 'Edit title' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'Edit description' })).toBeNull()
+  })
+
   it('moves the issue from the task actions menu', async () => {
     const onMoveIssue = vi.fn(async () => true)
     renderDetail({ onMoveIssue })
@@ -270,6 +289,24 @@ describe('IssueDetail', () => {
     expect(screen.queryByRole('region', { name: 'Recurrences' })).toBeNull()
     await fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
     expect(screen.queryByRole('menuitem', { name: 'Create recurrence...' })).toBeNull()
+  })
+
+  it('closes a recurrence draft after authentication authority changes', async () => {
+    const view = renderDetail({
+      issue: makeIssue({ metadata: {} }),
+      selectedRecurrences: [],
+      draftFenceGeneration: 0,
+    })
+    await openEditor()
+    await fireEvent.click(screen.getByRole('button', { name: /\+ New recurrence/ }))
+    const recurrenceDialog = screen.getByRole('dialog')
+    await fireEvent.input(within(recurrenceDialog).getByLabelText(/Title/i), {
+      target: { value: 'Old authority recurrence' },
+    })
+
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('composes the ported checklist, recurrence, comments, links, and history sections', async () => {

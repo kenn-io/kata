@@ -24,6 +24,16 @@ func TestQuickstart_PrintsAgentInstructions(t *testing.T) {
 	assert.Contains(t, out, `kata events --after 0 --limit 100 --agent`)
 }
 
+func TestQuickstart_IncludesScheduleDeadlineAndSomedayCommands(t *testing.T) {
+	resetFlags(t)
+	out := string(executeRoot(t, newQuickstartCmd()))
+
+	assert.Contains(t, out, "kata schedule <ref> <date-or-time>")
+	assert.Contains(t, out, "kata deadline <ref> <date-or-time>")
+	assert.Contains(t, out, "kata meta set <ref> someday true --json-value")
+	assert.Contains(t, out, "kata meta unset <ref> someday")
+}
+
 func TestQuickstart_PromotesCloseStep(t *testing.T) {
 	resetFlags(t)
 	out := string(executeRoot(t, newQuickstartCmd()))

@@ -28,6 +28,7 @@
     onLinkFiltersChange: (next: KataLinkFilters) => void
     actionsDisabled?: boolean | undefined
     draftResetGeneration?: number | undefined
+    draftFenceGeneration?: number | undefined
     onEditIssue: (uid: string, patch: KataTaskEditPatch) => boolean | Promise<boolean>
     onSelectIssue: (target: IssueNavigationTarget) => void | Promise<void>
   }
@@ -46,6 +47,7 @@
     onLinkFiltersChange,
     actionsDisabled = false,
     draftResetGeneration = 0,
+    draftFenceGeneration = 0,
     onEditIssue,
     onSelectIssue,
   }: Props = $props()
@@ -53,6 +55,7 @@
   let relatedDraft = $state('')
   let relatedDraftRevision = 0
   let lastDraftResetGeneration = $state<number | null>(null)
+  let lastDraftFenceGeneration = $state<number | null>(null)
   let pendingRelatedReset = $state<PendingDraftReset | null>(null)
 
   const visibleLinks = $derived(
@@ -79,6 +82,18 @@
         relatedDraft = ''
       }
     }
+    pendingRelatedReset = null
+  })
+
+  $effect(() => {
+    const nextGeneration = draftFenceGeneration
+    if (lastDraftFenceGeneration === null) {
+      lastDraftFenceGeneration = nextGeneration
+      return
+    }
+    if (nextGeneration === lastDraftFenceGeneration) return
+    lastDraftFenceGeneration = nextGeneration
+    relatedDraft = ''
     pendingRelatedReset = null
   })
 

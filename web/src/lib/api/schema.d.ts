@@ -3066,6 +3066,7 @@ export interface components {
       closed_reason?: string
       /** Format: date-time */
       created_at: string
+      deadline_on_date?: string
       /** Format: date-time */
       deleted_at?: string
       /** Format: int64 */

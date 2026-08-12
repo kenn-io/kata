@@ -14,6 +14,7 @@
     ownerOptions: TypeaheadOption[]
     actionsDisabled?: boolean | undefined
     draftResetGeneration?: number | undefined
+    draftFenceGeneration?: number | undefined
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
     onAssignOwner: (uid: string, owner: string) => boolean | Promise<boolean>
     onUnassignOwner: (uid: string) => boolean | Promise<boolean>
@@ -27,6 +28,7 @@
     ownerOptions,
     actionsDisabled = false,
     draftResetGeneration = 0,
+    draftFenceGeneration = 0,
     onPatchMetadata,
     onAssignOwner,
     onUnassignOwner,
@@ -67,6 +69,7 @@
   let ownerEditorGeneration = $state(0)
   let trackedUID = $state<string | null>(null)
   let lastDraftResetGeneration = $state<number | null>(null)
+  let lastDraftFenceGeneration = $state<number | null>(null)
   let pendingDraftReset = $state.raw<PendingDraftReset | null>(null)
 
   $effect(() => {
@@ -85,6 +88,19 @@
     ownerEditorGeneration += 1
     pendingDraftReset = null
     lastDraftResetGeneration = draftResetGeneration
+  })
+
+  $effect(() => {
+    const nextGeneration = draftFenceGeneration
+    if (lastDraftFenceGeneration === null) {
+      lastDraftFenceGeneration = nextGeneration
+      return
+    }
+    if (nextGeneration === lastDraftFenceGeneration) return
+    lastDraftFenceGeneration = nextGeneration
+    for (const key of ['scheduled', 'due', 'priority', 'owner', 'label'] as const) resetDraft(key)
+    editingLabels = false
+    pendingDraftReset = null
   })
 
   $effect(() => {
@@ -171,8 +187,12 @@
   }
 
   function dueLabel(): string {
-    const value = issue.issue.metadata.deadline_on
+    const value = deadlineDate()
     return value ? formatDate(value) : 'No due date'
+  }
+
+  function deadlineDate(): string {
+    return issue.issue.deadline_on_date ?? issue.issue.metadata.deadline_on ?? ''
   }
 
   function priorityLabel(): string {
@@ -186,7 +206,7 @@
     if (property === 'scheduled') {
       scheduledDraft = issue.issue.metadata.scheduled_on ?? ''
     } else if (property === 'due') {
-      dueDraft = issue.issue.metadata.deadline_on ?? ''
+      dueDraft = deadlineDate()
     } else {
       priorityDraft =
         issue.issue.priority === undefined || issue.issue.priority === null
@@ -209,6 +229,10 @@
     if (actionsDisabled) return
     const property = 'due'
     dueDraft = value
+    if (value !== '' && value === deadlineDate()) {
+      resetDraft(property)
+      return
+    }
     const mutationUID = uid()
     const generation = draftResetGeneration
     const ok = await onPatchMetadata(mutationUID, { deadline_on: value === '' ? null : value })

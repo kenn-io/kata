@@ -944,6 +944,7 @@
 {#snippet row(issue: KataTaskSummary, depth = 0)}
   {@const priority = priorityLabel(issue.priority)}
   {@const labels = issue.labels?.join(' · ') ?? ''}
+  {@const deadline = issue.deadline_on_date ?? issue.metadata.deadline_on}
   {@const expandable = hasChildren(issue)}
   {@const isExpanded = expanded[issue.uid] === true}
   {@const titleId = `kata-issue-title-${issue.uid}`}
@@ -990,8 +991,8 @@
         </span>
       {/if}
       {#if columnVisibility.due}
-        <span class="cell cell-due" title={issue.metadata.deadline_on ?? ''}>
-          {#if issue.metadata.deadline_on}{shortDate(issue.metadata.deadline_on)}{/if}
+        <span class="cell cell-due" title={deadline ?? ''}>
+          {#if deadline}{shortDate(deadline)}{/if}
         </span>
       {/if}
       {#if columnVisibility.owner}<span class="cell cell-owner">{issue.owner ?? ''}</span>{/if}
@@ -1002,9 +1003,7 @@
       {/if}
       <span class="kit-sr-only">
         <span>project: {issue.project_name}</span>
-        {#if issue.metadata.deadline_on}<span>
-            · Due {shortDate(issue.metadata.deadline_on)}</span
-          >{/if}
+        {#if deadline}<span> · Due {shortDate(deadline)}</span>{/if}
         {#if issue.owner}<span> · owner: {issue.owner}</span>{/if}
         {#if issue.priority !== undefined}<span> · priority: {issue.priority}</span>{/if}
       </span>
