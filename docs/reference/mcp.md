@@ -68,7 +68,7 @@ checks, federation trust, claims, and mutation policy.
 The initial catalog contains 13 read-only section loaders. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
-typed tools needed for the current task instead of placing all 55 tools in the
+typed tools needed for the current task instead of placing all 57 tools in the
 model context at startup.
 
 | Loader | Detailed tools |
