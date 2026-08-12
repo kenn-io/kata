@@ -396,6 +396,46 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 	assert.Zero(t, restore.startCalls)
 }
 
+func TestDiscoverIgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
+	tmp := setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID:             os.Getpid(),
+		ProcessIdentity: kitdaemon.ProcessIdentity("1"),
+		Address:         "unix://" + filepath.Join(tmp, "missing.sock"),
+		StartedAt:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	_, ok, err := Discover(context.Background(), ns.DataDir)
+
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestEnsureRunningAutoStartsWhenRuntimePIDWasReused(t *testing.T) {
+	tmp := setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID:             os.Getpid(),
+		ProcessIdentity: kitdaemon.ProcessIdentity("1"),
+		Address:         "unix://" + filepath.Join(tmp, "missing.sock"),
+		StartedAt:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+
+	url, err := EnsureRunning(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://new-daemon", url)
+	assert.Equal(t, 1, restore.startCalls)
+}
+
 func TestEnsureRunningAutoStartsWhenRuntimePIDIsDead(t *testing.T) {
 	tmp := setupKataEnv(t)
 	address := "unix://" + filepath.Join(tmp, "missing.sock")

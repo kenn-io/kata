@@ -189,7 +189,7 @@ func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bo
 	var staleURL string
 	var unreachable error
 	for _, r := range recs {
-		if !kitdaemon.ProcessAlive(r.PID) {
+		if !runtimeRecordProcessAlive(r) {
 			continue
 		}
 		address := r.Endpoint().ConfigAddress()
