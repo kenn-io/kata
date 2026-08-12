@@ -259,7 +259,7 @@ Run:
 
 ```bash
 cd web && bun x vitest run src/lib/docs/install-platform.test.js
-cd web && bun x eslint src/lib/docs/install-platform.test.js ../docs/javascripts/install-platform.js
+./web/node_modules/.bin/eslint --config web/eslint.config.js docs/javascripts/install-platform.js web/src/lib/docs/install-platform.test.js
 cd web && bun run format:check
 ```
 
