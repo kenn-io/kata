@@ -26,7 +26,7 @@ The commands are:
 - macOS: `brew install kata`
 - Linux: `curl -fsSL https://katatracker.com/install.sh | bash`
 - Windows: `powershell -ExecutionPolicy ByPass -c "irm
-  https://katatracker.com/install.ps1 | iex"`
+https://katatracker.com/install.ps1 | iex"`
 
 Remove the separate installation section lower on the homepage so the page does
 not repeat the same commands. Keep the existing product overview, screenshots,
@@ -58,6 +58,10 @@ requirements. Do not use filled cyan buttons or oversized rounded controls.
 Do not include the previous `Install kata` title, supporting subtitle,
 detected-platform sentence, or stability claim. The command is the focal point;
 supporting links remain visually quiet.
+
+Render the `$` prompt outside the copied code text, preferably with a CSS
+pseudo-element. The theme's copy control must copy only the executable command.
+Keep `QUICKSTART →` pointed at the retained homepage `#quickstart` section.
 
 ## Platform selection
 
