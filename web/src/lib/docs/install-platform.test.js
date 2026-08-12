@@ -33,7 +33,7 @@ function renderPanel() {
       <div data-install-platform-content="macos">brew</div>
       <div class="kata-install-command--fallback-hidden" data-install-platform-content="linux" hidden>curl</div>
       <div class="kata-install-command--fallback-hidden" data-install-platform-content="windows" hidden>irm</div>
-      <p data-install-platform-status>macOS selected · choose another platform anytime.</p>
+      <p data-install-platform-status>legacy status</p>
     </section>`
 }
 
@@ -56,7 +56,7 @@ describe('initializeInstallPanel', () => {
     expect(content('macos')?.hidden).toBe(true)
     expect(content('windows')?.classList).not.toContain('kata-install-command--fallback-hidden')
     expect(document.querySelector('[data-install-platform-status]')?.textContent).toBe(
-      'Windows selected · choose another platform anytime.',
+      'legacy status',
     )
   })
 

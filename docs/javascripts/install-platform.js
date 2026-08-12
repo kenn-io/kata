@@ -1,11 +1,5 @@
 const DEFAULT_PLATFORM = 'macos'
 
-const PLATFORM_LABELS = {
-  macos: 'macOS',
-  linux: 'Linux',
-  windows: 'Windows',
-}
-
 const initializedPanels = new WeakSet()
 
 export function detectInstallPlatform(platform) {
@@ -29,11 +23,6 @@ function selectInstallPlatform(panel, platform) {
   for (const content of panel.querySelectorAll('[data-install-platform-content]')) {
     content.classList.remove('kata-install-command--fallback-hidden')
     content.hidden = content.dataset.installPlatformContent !== platform
-  }
-
-  const status = panel.querySelector('[data-install-platform-status]')
-  if (status) {
-    status.textContent = `${PLATFORM_LABELS[platform]} selected · choose another platform anytime.`
   }
 }
 
