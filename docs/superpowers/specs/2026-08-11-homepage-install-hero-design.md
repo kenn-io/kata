@@ -71,6 +71,13 @@ text content. The theme's copy control must therefore copy only the executable
 command. Keep the copy control at the far right of the command row and keep
 `QUICKSTART →` pointed at the retained homepage `#quickstart` section.
 
+Center the complete inline shell line vertically within the command body. The
+generated `pre` element should use a flex row with `align-items: center`; the
+`code` element remains the single aligned child containing both prompt and
+command. Do not approximate centering with a fixed line height or top padding.
+In the rendered macOS state, the whitespace above and below the visible command
+text may differ by no more than two pixels.
+
 ## Platform selection
 
 The generated HTML makes macOS visible by default. On every homepage load, a
@@ -139,11 +146,13 @@ built homepage at desktop and phone viewport sizes, and confirm that platform
 switching, command copying, the installation-guide link, keyboard focus, and
 page width behave as designed. Confirm in the rendered page that the prompt and
 command share the same font metrics, line height, and baseline, and that copying
-returns the exact bare command without `$` or leading whitespace. A separate
-committed Playwright suite is out of scope: the DOM behavior is covered by
-Vitest/jsdom, and the existing docs build plus focused browser inspection covers
-Zensical integration without adding a second documentation-site server to
-continuous integration.
+returns the exact bare command without `$` or leading whitespace. Measure the
+visible command text against the command-body bounds and require its top and
+bottom whitespace to differ by no more than two pixels. A separate committed
+Playwright suite is out of scope: the DOM behavior is covered by Vitest/jsdom,
+and the existing docs build plus focused browser inspection covers Zensical
+integration without adding a second documentation-site server to continuous
+integration.
 
 ## Scope
 
