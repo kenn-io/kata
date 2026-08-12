@@ -576,7 +576,7 @@ Expected: every item passes with no browser console errors.
 After the final implementation commit is known, run:
 
 ```bash
-kata close 6g5x --done --message "Moved platform-aware installation guidance into the homepage top fold; verified Vitest, web checks, strict docs validation, and desktop/mobile browser behavior." --commit "$(git rev-parse HEAD)" --evidence "test:web unit and static checks pass" --evidence "test:strict docs validation passes" --evidence "manual:desktop and mobile install-panel preview verified" --agent
+kata close 6g5x --done --message "Moved platform-aware installation guidance into the homepage top fold; verified Vitest, web checks, strict docs validation, and desktop/mobile browser behavior." --commit "$(git rev-parse HEAD)" --test "cd web && bun run test" --test "cd web && bun run check" --test "make docs-check" --agent
 ```
 
 Expected: issue `6g5x` closes as done with the final commit and typed evidence.
