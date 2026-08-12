@@ -286,10 +286,14 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 		return "", fmt.Errorf("auto-start daemon: %w", err)
 	}
 	deadline := time.Now().Add(daemonStartupWait)
+	var unreachable error
 	for time.Now().Before(deadline) {
 		url, compatible, ok, err := discoverDaemonForAutoStart(ctx, dataDir)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return "", err
+		}
+		if errors.Is(err, ErrLocalDaemonUnreachable) {
+			unreachable = err
 		}
 		if ok && compatible {
 			return url, nil
@@ -299,6 +303,9 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 			return "", ctx.Err()
 		case <-time.After(50 * time.Millisecond):
 		}
+	}
+	if unreachable != nil {
+		return "", unreachable
 	}
 	return "", fmt.Errorf("daemon failed to start within %s; inspect kata daemon status and kata daemon logs", daemonStartupWait)
 }

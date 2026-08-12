@@ -202,22 +202,57 @@ func TestAutoStartAllowsDaemonStartupBeyondFiveSeconds(t *testing.T) {
 	})
 }
 
-func TestAutoStartReportsUnreachableSpawnedDaemonWithoutWaiting(t *testing.T) {
-	home := setupKataEnv(t)
-	ns, err := daemon.NewNamespace()
-	require.NoError(t, err)
-	address := "unix://" + filepath.Join(home, "missing.sock")
+func TestAutoStartWaitsForUnreachableSpawnedDaemonToBecomeReady(t *testing.T) {
+	dataDir := setupKataEnv(t)
 	originalStart := startDetachedDaemonForEnsure
+	originalDiscover := discoverDaemonForAutoStart
 	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
-		return writeRuntimeRecord(t, home, address)
+		return nil
 	}
-	t.Cleanup(func() { startDetachedDaemonForEnsure = originalStart })
+	t.Cleanup(func() {
+		startDetachedDaemonForEnsure = originalStart
+		discoverDaemonForAutoStart = originalDiscover
+	})
 
 	synctest.Test(t, func(t *testing.T) {
-		_, err := autoStart(t.Context(), ns.DataDir)
+		startedAt := time.Now()
+		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool, error) {
+			if time.Since(startedAt) < 6*time.Second {
+				return "", false, false, fmt.Errorf("%w: listener not ready", ErrLocalDaemonUnreachable)
+			}
+			return "http://127.0.0.1:27123", true, true, nil
+		}
+
+		url, err := autoStart(t.Context(), dataDir)
+
+		require.NoError(t, err)
+		assert.Equal(t, "http://127.0.0.1:27123", url)
+	})
+}
+
+func TestAutoStartReportsPersistentUnreachableDaemonAfterReadinessDeadline(t *testing.T) {
+	dataDir := setupKataEnv(t)
+	originalStart := startDetachedDaemonForEnsure
+	originalDiscover := discoverDaemonForAutoStart
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
+		return nil
+	}
+	t.Cleanup(func() {
+		startDetachedDaemonForEnsure = originalStart
+		discoverDaemonForAutoStart = originalDiscover
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		probeErr := fmt.Errorf("%w: daemon pid 123 at unix:///tmp/kata.sock", ErrLocalDaemonUnreachable)
+		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool, error) {
+			return "", false, false, probeErr
+		}
+
+		_, err := autoStart(t.Context(), dataDir)
 
 		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-		assert.Contains(t, err.Error(), address)
+		assert.ErrorIs(t, err, probeErr)
+		assert.Contains(t, err.Error(), "daemon pid 123")
 		assert.NotContains(t, err.Error(), "failed to start within")
 	})
 }
