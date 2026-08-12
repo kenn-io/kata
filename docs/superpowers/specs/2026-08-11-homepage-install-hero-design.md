@@ -59,9 +59,17 @@ Do not include the previous `Install kata` title, supporting subtitle,
 detected-platform sentence, or stability claim. The command is the focal point;
 supporting links remain visually quiet.
 
-Render the `$` prompt outside the copied code text, preferably with a CSS
-pseudo-element. The theme's copy control must copy only the executable command.
-Keep `QUICKSTART →` pointed at the retained homepage `#quickstart` section.
+Render the `$` prompt with a `code::before` pseudo-element so it participates in
+the same inline formatting context as the first command character. The prompt
+and command must use the same font metrics and line height and share one
+typographic baseline. Do not place the prompt in a flex column, gutter, or
+separately centered wrapper. Keep one normal inter-character space between the
+prompt and command.
+
+The pseudo-element must be non-selectable and absent from the code element's
+text content. The theme's copy control must therefore copy only the executable
+command. Keep the copy control at the far right of the command row and keep
+`QUICKSTART →` pointed at the retained homepage `#quickstart` section.
 
 ## Platform selection
 
@@ -129,10 +137,13 @@ assertions.
 Build the documentation in strict mode after the focused tests pass. Inspect the
 built homepage at desktop and phone viewport sizes, and confirm that platform
 switching, command copying, the installation-guide link, keyboard focus, and
-page width behave as designed. A separate committed Playwright suite is out of
-scope: the DOM behavior is covered by Vitest/jsdom, and the existing docs build
-plus focused browser inspection covers Zensical integration without adding a
-second documentation-site server to continuous integration.
+page width behave as designed. Confirm in the rendered page that the prompt and
+command share the same font metrics, line height, and baseline, and that copying
+returns the exact bare command without `$` or leading whitespace. A separate
+committed Playwright suite is out of scope: the DOM behavior is covered by
+Vitest/jsdom, and the existing docs build plus focused browser inspection covers
+Zensical integration without adding a second documentation-site server to
+continuous integration.
 
 ## Scope
 
