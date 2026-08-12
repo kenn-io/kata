@@ -228,6 +228,7 @@ export function initializeInstallPanel(root, browserPlatform = readBrowserPlatfo
 
   if (!initializedPanels.has(panel)) {
     panel.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) return
       const button = event.target.closest('[data-install-platform-button]')
       if (button && panel.contains(button)) {
         selectInstallPlatform(panel, button.dataset.installPlatformButton)
@@ -258,7 +259,7 @@ Run:
 
 ```bash
 cd web && bun x vitest run src/lib/docs/install-platform.test.js
-cd web && bun run lint
+cd web && bun x eslint src/lib/docs/install-platform.test.js ../docs/javascripts/install-platform.js
 cd web && bun run format:check
 ```
 
@@ -302,7 +303,7 @@ Replace the current hero body with the following content, then remove the full
 
 <p class="kata-hero-summary">A local-first task ledger agents drive from the CLI and humans supervise in the terminal or browser.</p>
 
-<section class="kata-install" data-install-panel>
+<section class="kata-install" data-install-panel markdown>
   <div class="kata-install-header">
     <div>
       <h2>Install kata</h2>
