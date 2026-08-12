@@ -82,6 +82,7 @@ var (
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
 	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
 	discoverDaemonForAutoStart   = discoverForEnsureWithError
+	checkDaemonStateForEnsure    = checkDaemonStateWritable
 )
 
 // EnsureRunning returns a live daemon's base URL, auto-starting the daemon
@@ -284,6 +285,16 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 	// to a daemon.log file under the data dir; if that can't be opened, leave
 	// them nil so exec connects the child to the null device. Either way we
 	// never hand the daemon the caller's stderr.
+	if err := checkDaemonStateForEnsure(dataDir); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return "", fmt.Errorf(
+				"auto-start daemon: cannot write Kata state directory %s: %w; "+
+					"this may be caused by a sandbox or restricted environment; grant access to the Kata state directory and retry",
+				dataDir, err,
+			)
+		}
+		return "", fmt.Errorf("auto-start daemon: cannot write Kata state directory %s: %w", dataDir, err)
+	}
 	if logw := daemonLogWriter(dataDir); logw != nil {
 		defer func() { _ = logw.Close() }() // child keeps its own handle after Start
 		opts.Stdout = logw
@@ -315,6 +326,22 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 		return "", unreachable
 	}
 	return "", fmt.Errorf("daemon failed to start within %s; inspect kata daemon status and kata daemon logs", daemonStartupWait)
+}
+
+// checkDaemonStateWritable verifies that an auto-started daemon can write its
+// runtime record before spawning it. Without this check, a sandboxed child can
+// fail silently and leave the caller waiting for the full readiness deadline.
+func checkDaemonStateWritable(dataDir string) error {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dataDir, ".kata-write-check-*")
+	if err != nil {
+		return err
+	}
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+	return f.Close()
 }
 
 // daemonLogWriter opens <dataDir>/daemon.log for the auto-started daemon's
