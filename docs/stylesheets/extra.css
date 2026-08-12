@@ -133,7 +133,12 @@
 
 .md-typeset .kata-install-platforms button[aria-pressed="true"] {
   background: var(--md-primary-fg-color);
-  color: var(--md-primary-bg-color);
+  color: #071019;
+}
+
+.md-typeset .kata-install-platforms button[aria-pressed="false"]:hover {
+  background: color-mix(in srgb, var(--md-primary-fg-color) 14%, transparent);
+  color: var(--md-default-fg-color);
 }
 
 .md-typeset .kata-install-platforms button:focus-visible {

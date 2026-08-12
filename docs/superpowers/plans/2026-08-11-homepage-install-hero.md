@@ -127,8 +127,8 @@ function renderPanel() {
       <button data-install-platform-button="linux" aria-pressed="false">Linux</button>
       <button data-install-platform-button="windows" aria-pressed="false">Windows</button>
       <div data-install-platform-content="macos">brew</div>
-      <div class="kata-install-command--fallback-hidden" data-install-platform-content="linux">curl</div>
-      <div class="kata-install-command--fallback-hidden" data-install-platform-content="windows">irm</div>
+      <div class="kata-install-command--fallback-hidden" data-install-platform-content="linux" hidden>curl</div>
+      <div class="kata-install-command--fallback-hidden" data-install-platform-content="windows" hidden>irm</div>
       <p data-install-platform-status>macOS selected · choose another platform anytime.</p>
     </section>`
 }
@@ -326,11 +326,11 @@ Zensical's raw HTML stash while its table-of-contents processor expects strings:
 brew install kata
 ```
 
-```sh { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="linux" }
+```sh { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="linux" hidden="hidden" }
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
 
-```powershell { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="windows" }
+```powershell { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="windows" hidden="hidden" }
 powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
 ```
 
@@ -429,7 +429,12 @@ tagline and button rules, and append these styles:
 
 .md-typeset .kata-install-platforms button[aria-pressed="true"] {
   background: var(--md-primary-fg-color);
-  color: var(--md-primary-bg-color);
+  color: #071019;
+}
+
+.md-typeset .kata-install-platforms button[aria-pressed="false"]:hover {
+  background: color-mix(in srgb, var(--md-primary-fg-color) 14%, transparent);
+  color: var(--md-default-fg-color);
 }
 
 .md-typeset .kata-install-platforms button:focus-visible {

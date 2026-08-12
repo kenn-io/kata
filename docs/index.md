@@ -27,11 +27,11 @@ description: Local-first issue tracking for humans and coding agents.
 brew install kata
 ```
 
-```sh { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="linux" }
+```sh { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="linux" hidden="hidden" }
 curl -fsSL https://katatracker.com/install.sh | bash
 ```
 
-```powershell { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="windows" }
+```powershell { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="windows" hidden="hidden" }
 powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
 ```
 
