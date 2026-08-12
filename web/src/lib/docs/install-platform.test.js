@@ -10,6 +10,7 @@ describe('detectInstallPlatform', () => {
     ['macOS', 'macos'],
     ['MacIntel', 'macos'],
     ['iPhone', 'macos'],
+    ['iOS', 'macos'],
     ['Win32', 'windows'],
     ['Windows', 'windows'],
     ['Linux x86_64', 'linux'],

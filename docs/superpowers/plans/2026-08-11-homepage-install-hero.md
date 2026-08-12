@@ -54,6 +54,7 @@ describe('detectInstallPlatform', () => {
     ['macOS', 'macos'],
     ['MacIntel', 'macos'],
     ['iPhone', 'macos'],
+    ['iOS', 'macos'],
     ['Win32', 'windows'],
     ['Windows', 'windows'],
     ['Linux x86_64', 'linux'],
@@ -310,17 +311,17 @@ Zensical's raw HTML stash while its table-of-contents processor expects strings:
 <p class="kata-hero-summary">A local-first task ledger agents drive from the CLI and humans supervise in the terminal or browser.</p>
 
 <section class="kata-install" data-install-panel markdown>
-  <div class="kata-install-header">
-    <div>
-      <h2>Install kata</h2>
-      <p>One binary. No runtime dependencies.</p>
-    </div>
-    <div class="kata-install-platforms" role="group" aria-label="Choose your operating system">
-      <button type="button" data-install-platform-button="macos" aria-pressed="true">macOS</button>
-      <button type="button" data-install-platform-button="linux" aria-pressed="false">Linux</button>
-      <button type="button" data-install-platform-button="windows" aria-pressed="false">Windows</button>
-    </div>
-  </div>
+<div class="kata-install-header">
+<div>
+<h2>Install kata</h2>
+<p>One binary. No runtime dependencies.</p>
+</div>
+<div class="kata-install-platforms" role="group" aria-label="Choose your operating system">
+<button type="button" data-install-platform-button="macos" aria-pressed="true">macOS</button>
+<button type="button" data-install-platform-button="linux" aria-pressed="false">Linux</button>
+<button type="button" data-install-platform-button="windows" aria-pressed="false">Windows</button>
+</div>
+</div>
 ```sh { .kata-install-command data-install-platform-content="macos" }
 brew install kata
 ```
@@ -333,11 +334,11 @@ curl -fsSL https://katatracker.com/install.sh | bash
 powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
 ```
 
-  <div class="kata-install-meta">
-    <p data-install-platform-status>macOS selected · choose another platform anytime.</p>
-    <a href="get-started/install.md">All install options →</a>
-  </div>
-  <p class="kata-install-stability"><strong>Stable since v0.14.0:</strong> releases preserve backward compatibility across upgrades.</p>
+<div class="kata-install-meta">
+<p data-install-platform-status>macOS selected · choose another platform anytime.</p>
+<a href="get-started/install.md">All install options →</a>
+</div>
+<p class="kata-install-stability"><strong>Stable since v0.14.0:</strong> releases preserve backward compatibility across upgrades.</p>
 </section>
 
 [Quickstart](#quickstart){ .md-button }
