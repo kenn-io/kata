@@ -18,7 +18,9 @@ The install panel contains:
   dependencies.`;
 - an always-visible macOS, Linux, and Windows selector;
 - one visible command block with the documentation theme's copy control;
-- a short status line that identifies the selected platform; and
+- a short status line that identifies the selected platform;
+- the existing backward-compatibility note as a compact stability trust signal;
+  and
 - a link to the complete installation guide.
 
 The commands are:
@@ -31,6 +33,18 @@ The commands are:
 Remove the separate installation section lower on the homepage so the page does
 not repeat the same commands. Keep the existing product overview, screenshots,
 quickstart, concepts, and next-step content below the hero.
+
+Remove the current `Install` hero button because the panel replaces both its
+action and its `#install` target. Keep the `Quickstart` button as the secondary
+hero action and place it after the install panel so installation remains the
+primary visual action.
+
+Move the existing stability note into the install panel in this compact form:
+`Stable since v0.14.0: releases preserve backward compatibility across
+upgrades.` Remove the homepage's separate `kata version` confirmation and
+checksum explanation with the old install section. The complete installation
+guide remains the source for confirmation, checksum verification, package
+formats, and alternative installation methods.
 
 ## Platform selection
 
@@ -66,6 +80,12 @@ back to that static macOS state. The selector script must initialize both on a
 normal document load and when Zensical's instant navigation renders the
 homepage.
 
+This macOS-only no-script fallback is deliberate. Rendering all three commands
+before the script collapses them would cause the top fold to change shape during
+startup. The static macOS command keeps first paint stable, while the complete
+installation-guide link gives Linux and Windows visitors a script-independent
+path to their commands.
+
 ## Responsive layout
 
 On wide screens, the install heading and selector share one row. The command
@@ -80,15 +100,21 @@ without requiring a horizontal page scroll.
 
 ## Test strategy
 
-Add behavior tests before the implementation. Cover macOS, Linux, Windows, and
-unknown platform detection; manual selection; reset on a fresh initialization;
-and accessible selected/hidden state. Exercise the rendered interaction instead
-of asserting that source files contain specific strings.
+Reuse the repository's existing Vitest and jsdom harness under `web/` rather
+than introduce a second JavaScript package under `docs/`. Add behavior tests
+that import the public documentation script and exercise its actual DOM
+interaction. Cover macOS, Linux, Windows, and unknown platform detection;
+manual selection; reset on a fresh initialization; and accessible
+selected/hidden state. Write and run these tests before the implementation.
+Do not replace them with source-content assertions.
 
 Build the documentation in strict mode after the focused tests pass. Inspect the
 built homepage at desktop and phone viewport sizes, and confirm that platform
 switching, command copying, the installation-guide link, keyboard focus, and
-page width behave as designed.
+page width behave as designed. A separate committed Playwright suite is out of
+scope: the DOM behavior is covered by Vitest/jsdom, and the existing docs build
+plus focused browser inspection covers Zensical integration without adding a
+second documentation-site server to continuous integration.
 
 ## Scope
 
