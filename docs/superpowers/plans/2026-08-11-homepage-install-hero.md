@@ -95,6 +95,10 @@ Replace the visible command and prompt rules with:
   background: var(--md-code-bg-color);
 }
 
+.md-typeset .kata-install-command code {
+  display: inline;
+}
+
 .md-typeset .kata-install-command code::before {
   color: var(--md-primary-fg-color);
   content: "$ ";
@@ -112,7 +116,9 @@ Replace the visible command and prompt rules with:
 ```
 
 Delete the outer `.kata-install-command.highlight::before` rule and its phone
-padding override. Do not add font declarations to the pseudo-element; inheriting
+padding override. Zensical's theme normally renders `code` as a grid, so scope
+the inline override to install commands; otherwise the grid blockifies the
+pseudo-element. Do not add font declarations to the pseudo-element; inheriting
 from `code` is what guarantees identical metrics.
 
 - [ ] **Step 4: Rebuild and verify the green rendered state**
@@ -178,10 +184,11 @@ Expected: all web tests, static checks, and docs validation pass.
 
 - [ ] **Step 7: Commit the implementation**
 
-Use the mandatory commit skill and stage only the stylesheet:
+Use the mandatory commit skill and stage the stylesheet plus this plan's
+renderer-specific correction:
 
 ```bash
-git add docs/stylesheets/extra.css
+git add docs/stylesheets/extra.css docs/superpowers/plans/2026-08-11-homepage-install-hero.md
 git commit -m "fix: align the homepage shell prompt"
 ```
 

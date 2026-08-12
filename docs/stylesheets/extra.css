@@ -136,29 +136,29 @@
 }
 
 .md-typeset
-  .kata-install-command.highlight:not([hidden]):not(.kata-install-command--fallback-hidden) {
-  display: flex;
+  .kata-install-command.highlight:not([hidden]):not(
+    .kata-install-command--fallback-hidden
+  ) {
   min-height: 3.25rem;
-  align-items: stretch;
   margin: 0;
   border-radius: 0;
   background: var(--md-code-bg-color);
 }
 
-.md-typeset .kata-install-command.highlight::before {
-  display: flex;
-  align-items: center;
-  padding-left: 0.9rem;
+.md-typeset .kata-install-command code {
+  display: inline;
+}
+
+.md-typeset .kata-install-command code::before {
   color: var(--md-primary-fg-color);
-  content: "$";
-  font-family: var(--md-code-font);
-  font-size: 0.72rem;
+  content: "$ ";
+  display: inline;
   user-select: none;
+  vertical-align: baseline;
 }
 
 .md-typeset .kata-install-command pre {
-  min-width: 0;
-  flex: 1;
+  min-height: 3.25rem;
   margin: 0;
   border-radius: 0;
   overflow-x: auto;
@@ -198,10 +198,6 @@
     min-height: 2.35rem;
     flex: 1;
     padding-inline: 0.35rem;
-  }
-
-  .md-typeset .kata-install-command.highlight::before {
-    padding-left: 0.65rem;
   }
 
   .md-typeset .kata-hero-actions {
