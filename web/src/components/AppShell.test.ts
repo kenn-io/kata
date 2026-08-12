@@ -611,7 +611,7 @@ function mutationProps(overrides: Record<string, unknown> = {}) {
 
 function snapshot(): UISnapshot {
   return {
-    contract_version: '1',
+    contract_version: '2',
     cursor: 12,
     capabilities: { writable: true, updates: 'sse', actor_policy: 'identity' },
     origin: 'https://daemon.example',

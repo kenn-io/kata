@@ -430,6 +430,42 @@ func (h toolHandlers) setLabel(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	return successResult(), h.mutation(response.Issue, response.Changed, response.Reused, &response.Event), nil
 }
 
+func (h toolHandlers) setDeadline(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetDeadlineInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	ref, err := h.boundRef(input.Ref)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	if input.Deadline != nil && input.ClearDeadline {
+		return nil, MutationOutput{}, errors.New("deadline and clear_deadline are mutually exclusive")
+	}
+	if input.Deadline == nil && !input.ClearDeadline {
+		return nil, MutationOutput{}, errors.New("set_deadline requires deadline or clear_deadline")
+	}
+	value := any(nil)
+	if input.Deadline != nil {
+		value = *input.Deadline
+	}
+	return h.patchMetadata(ctx, ref, map[string]any{"deadline_on": value}, input.Revision)
+}
+
+func (h toolHandlers) setSchedule(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetScheduleInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	ref, err := h.boundRef(input.Ref)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	if input.Schedule != nil && input.ClearSchedule {
+		return nil, MutationOutput{}, errors.New("schedule and clear_schedule are mutually exclusive")
+	}
+	if input.Schedule == nil && !input.ClearSchedule {
+		return nil, MutationOutput{}, errors.New("set_schedule requires schedule or clear_schedule")
+	}
+	value := any(nil)
+	if input.Schedule != nil {
+		value = *input.Schedule
+	}
+	return h.patchMetadata(ctx, ref, map[string]any{"scheduled_on": value}, input.Revision)
+}
+
 func (h toolHandlers) setMetadata(ctx context.Context, _ *sdkmcp.CallToolRequest, input SetMetadataInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
 	ref, err := h.boundRef(input.Ref)
 	if err != nil {
@@ -443,17 +479,21 @@ func (h toolHandlers) setMetadata(ctx context.Context, _ *sdkmcp.CallToolRequest
 			return nil, MutationOutput{}, errors.New("metadata keys must not be empty")
 		}
 	}
+	return h.patchMetadata(ctx, ref, input.Patch, input.Revision)
+}
+
+func (h toolHandlers) patchMetadata(ctx context.Context, ref string, patch map[string]any, revision *int64) (*sdkmcp.CallToolResult, MutationOutput, error) {
 	var headers *generated.PatchIssueMetadataHeaders
-	if input.Revision != nil {
-		if *input.Revision < 0 {
+	if revision != nil {
+		if *revision < 0 {
 			return nil, MutationOutput{}, errors.New("revision must not be negative")
 		}
-		ifMatch := `"rev-` + strconv.FormatInt(*input.Revision, 10) + `"`
+		ifMatch := `"rev-` + strconv.FormatInt(*revision, 10) + `"`
 		headers = &generated.PatchIssueMetadataHeaders{IfMatch: &ifMatch}
 	}
 	response, err := h.options.Client.PatchIssueMetadata(ctx, &generated.PatchIssueMetadataRequestOptions{
 		PathParams: &generated.PatchIssueMetadataPath{ProjectID: h.options.ProjectID, Ref: ref},
-		Body:       &generated.PatchIssueMetadataBody{Actor: &h.options.Actor, Patch: input.Patch},
+		Body:       &generated.PatchIssueMetadataBody{Actor: &h.options.Actor, Patch: patch},
 		Header:     headers,
 	})
 	if err != nil {

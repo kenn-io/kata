@@ -186,3 +186,42 @@ func TestScheduledOnCalendarDateWithoutSchedule(t *testing.T) {
 	assert.False(t, present)
 	assert.Empty(t, date)
 }
+
+func TestDeadlineOnCalendarDateUsesDisplayTimezoneForTimedValues(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "UTC instant moves to previous browser day",
+			raw:  `{"deadline_on":"2026-09-01T00:30:00Z"}`,
+			want: "2026-08-31",
+		},
+		{
+			name: "local time resolves before browser projection",
+			raw:  `{"deadline_on":"2026-09-01T09:00","timezone":"Asia/Tokyo"}`,
+			want: "2026-08-31",
+		},
+		{
+			name: "date keeps its civil day",
+			raw:  `{"deadline_on":"2026-09-01","timezone":"Asia/Tokyo"}`,
+			want: "2026-09-01",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, present, err := DeadlineOnCalendarDate(tt.raw, "America/Los_Angeles", "UTC")
+			require.NoError(t, err)
+			assert.True(t, present)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestDeadlineOnCalendarDateWithoutDeadline(t *testing.T) {
+	date, present, err := DeadlineOnCalendarDate(`{"scheduled_on":"2026-09-01"}`, "UTC", "")
+	require.NoError(t, err)
+	assert.False(t, present)
+	assert.Empty(t, date)
+}

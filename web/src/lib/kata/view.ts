@@ -25,6 +25,10 @@ function scheduledDate(issue: KataTaskSummary): string | undefined {
   return issue.scheduled_on_date ?? issueDate(issue.metadata.scheduled_on)
 }
 
+function deadlineDate(issue: KataTaskSummary): string | undefined {
+  return issue.deadline_on_date ?? issueDate(issue.metadata.deadline_on)
+}
+
 function compareIssues(a: KataTaskSummary, b: KataTaskSummary): number {
   const ap = a.priority ?? Number.MAX_SAFE_INTEGER
   const bp = b.priority ?? Number.MAX_SAFE_INTEGER
@@ -35,8 +39,8 @@ function compareIssues(a: KataTaskSummary, b: KataTaskSummary): number {
 }
 
 function compareByDeadline(a: KataTaskSummary, b: KataTaskSummary): number {
-  const ad = issueDate(a.metadata.deadline_on) ?? ''
-  const bd = issueDate(b.metadata.deadline_on) ?? ''
+  const ad = deadlineDate(a) ?? ''
+  const bd = deadlineDate(b) ?? ''
   if (ad !== bd) return ad.localeCompare(bd)
   return compareIssues(a, b)
 }
@@ -96,7 +100,7 @@ function buildToday(issues: KataTaskSummary[], today: string): KataTaskGroup[] {
   for (const issue of issues) {
     if (issue.status !== 'open') continue
     const scheduledOn = scheduledDate(issue)
-    const deadlineOn = issueDate(issue.metadata.deadline_on)
+    const deadlineOn = deadlineDate(issue)
     const scheduledDue = scheduledOn !== undefined && scheduledOn <= today
     const deadlineDue = deadlineOn !== undefined && deadlineOn <= today
     if (!scheduledDue && !deadlineDue) continue
@@ -156,7 +160,7 @@ function buildDeadlines(issues: KataTaskSummary[], today: string): KataTaskGroup
 
   for (const issue of issues) {
     if (issue.status !== 'open') continue
-    const deadlineOn = issueDate(issue.metadata.deadline_on)
+    const deadlineOn = deadlineDate(issue)
     if (!deadlineOn) continue
 
     if (deadlineOn < today) {

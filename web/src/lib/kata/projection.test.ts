@@ -112,6 +112,21 @@ describe('normalizeKataUISnapshot', () => {
     )
   })
 
+  test('preserves the server-projected browser date for timed deadlines', () => {
+    const source = snapshot()
+    source.collection![0]!.metadata = { deadline_on: '2026-09-01T00:30:00Z' }
+    source.collection![0]!.deadline_on_date = '2026-08-31'
+
+    const projection = normalizeKataUISnapshot(source)
+
+    expect(projection.issues[0]).toEqual(
+      expect.objectContaining({
+        deadline_on_date: '2026-08-31',
+        metadata: { deadline_on: '2026-09-01T00:30:00Z' },
+      }),
+    )
+  })
+
   test('preserves selected-link endpoint authority outside the filtered collection', () => {
     const authority = snapshot()
     authority.collection = authority.collection!.filter((issue) => issue.uid !== 'issue-parent')
@@ -135,7 +150,7 @@ describe('normalizeKataUISnapshot', () => {
 
 function snapshot(): UISnapshot {
   return {
-    contract_version: '1',
+    contract_version: '2',
     cursor: 12,
     capabilities: { writable: true, updates: 'sse', actor_policy: 'identity' },
     origin: 'https://daemon.example',

@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-12
+---
+
 # Metadata
 
 Every kata issue (and every project) carries a free-form JSON `metadata` object.
@@ -41,7 +45,7 @@ rejected. Everything else is stored verbatim.
 | Key | Applies to | Type |
 | --- | --- | --- |
 | `scheduled_on` | Issue | Date, local date-time, or UTC timestamp |
-| `deadline_on` | Issue | Date (`YYYY-MM-DD`) |
+| `deadline_on` | Issue | Date, local date-time, or UTC timestamp |
 | `someday` | Issue | Boolean |
 | `checklist` | Issue | Checklist structure |
 | `timezone` | Issue | IANA timezone name |
@@ -55,7 +59,8 @@ and does not use those timezones. If a local time repeats during a daylight
 saving transition, the first occurrence opens the gate. If a local time does
 not exist, the gate opens at the first valid instant after the gap. Numeric
 offsets are rejected because they pin an instant while duplicating the named
-timezone. `deadline_on` remains date-only.
+timezone. `deadline_on` accepts the same three forms and uses the same timezone
+rules. It is a deadline only; it does not control `ready` or `next`.
 
 All other keys are accepted opaquely by design: consumers carry their own
 metadata without a daemon release. When an opaque key later needs query
@@ -79,6 +84,8 @@ concurrency; it accepts either the bare revision (`7`) or the ETag form
 
 ```sh
 kata meta set abc4 work.branch "agent/task-slug"
+kata schedule abc4 "2026-09-01T09:30"
+kata deadline abc4 "2026-09-01T17:00"
 kata meta set abc4 someday true --json-value
 kata meta set abc4 work.attention needs-human --if-match rev-7
 ```
@@ -88,6 +95,11 @@ kata meta set abc4 work.attention needs-human --if-match rev-7
 ```sh
 kata meta unset <ref> <key>
 ```
+
+Use `kata schedule <ref> <date-or-time>` as the first-class form for setting
+`scheduled_on`, and `kata deadline <ref> <date-or-time>` for `deadline_on`.
+Pass `-` to either command to clear its value. The generic `kata meta set` and
+`kata meta unset` forms remain available for both keys.
 
 Sends a `null` merge patch, clearing the key. Accepts `--if-match <rev>` for
 optimistic concurrency, same as `kata meta set`.

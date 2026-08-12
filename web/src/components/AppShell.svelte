@@ -46,6 +46,7 @@
     mutationPending: boolean
     mutationMessage?: string | undefined
     draftResetGeneration: number
+    draftFenceGeneration?: number | undefined
     ownerOptions: TypeaheadOption[]
     preferences?: Preferences | undefined
     daemons?: WebDaemonInfo[] | undefined
@@ -94,6 +95,7 @@
     mutationPending,
     mutationMessage = undefined,
     draftResetGeneration,
+    draftFenceGeneration = 0,
     ownerOptions,
     preferences = defaultPreferences,
     daemons = [],
@@ -422,6 +424,7 @@
       }}
       {searchFilters}
       projectCreationDisabled={!canMutate || mutationPending}
+      {draftFenceGeneration}
       inboxProjectUID={inboxProject?.uid}
       inboxDesignationDisabled={!canMutate || mutationPending}
       onOpenView={openView}
@@ -517,6 +520,7 @@
         actionsDisabled={!canMutate || mutationPending}
         authorityBlocked={!canMutate}
         {draftResetGeneration}
+        {draftFenceGeneration}
         movePending={mutationPending}
         {onMoveIssue}
         {onPatchMetadata}
@@ -549,6 +553,7 @@
 <QuickCapture
   open={captureOpen}
   disabled={!canMutate || mutationPending}
+  {draftFenceGeneration}
   onClose={() => {
     captureOpen = false
   }}

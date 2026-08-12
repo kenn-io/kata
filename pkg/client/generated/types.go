@@ -3640,6 +3640,7 @@ type UIIssue struct {
 	ClosedAt        *time.Time     `json:"closed_at,omitempty"`
 	ClosedReason    *string        `json:"closed_reason,omitempty"`
 	CreatedAt       time.Time      `json:"created_at" validate:"required"`
+	DeadlineOnDate  *string        `json:"deadline_on_date,omitempty"`
 	DeletedAt       *time.Time     `json:"deleted_at,omitempty"`
 	ID              int64          `json:"id"`
 	Labels          []string       `json:"labels,omitempty" validate:"required"`

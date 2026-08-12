@@ -75,6 +75,7 @@
   let references = $state<components['schemas']['UIReferencesResponseBody'] | undefined>()
   let mutationPending = $state(false)
   let mutationState = $state<MutationState>({ kind: 'idle' })
+  let draftFenceGeneration = $state(0)
   let pendingCreate: { title: string; key: string } | undefined
   let pendingComment: { issueUID: string; body: string; key: string } | undefined
   let automaticSessionAttempted: 'loopback' | 'proxy' | undefined
@@ -693,6 +694,7 @@
 
   function rejectCredentialsAndRequireAuthentication(): boolean {
     clearSessionCredentials()
+    draftFenceGeneration += 1
     return requireAuthentication()
   }
 
@@ -970,6 +972,7 @@
         {mutationPending}
         mutationMessage={mutationMessage(mutationState)}
         draftResetGeneration={authority.cursor}
+        {draftFenceGeneration}
         {preferences}
         daemons={daemonInfos}
         {activeDaemonID}

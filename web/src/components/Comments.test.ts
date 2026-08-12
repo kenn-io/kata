@@ -33,6 +33,38 @@ describe('Comments', () => {
     expect((screen.getByLabelText('Comment') as HTMLTextAreaElement).value).toBe('')
   })
 
+  it('fences an old-authority draft until the user edits it under current authority', async () => {
+    const onAddComment = vi.fn(async () => true)
+    const view = renderComments({ onAddComment, draftFenceGeneration: 0 })
+
+    const composer = screen.getByLabelText('Comment') as HTMLTextAreaElement
+    await fireEvent.input(composer, { target: { value: 'Old authority draft' } })
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect(
+      (screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+
+    await fireEvent.input(composer, { target: { value: 'Old authority draft, reviewed' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Add comment' }))
+
+    expect(onAddComment).toHaveBeenCalledWith('issue-1', 'Old authority draft, reviewed')
+  })
+
+  it('does not accept draft edits made while replacement authority is pending', async () => {
+    const view = renderComments({ draftFenceGeneration: 0 })
+    const composer = screen.getByLabelText('Comment') as HTMLTextAreaElement
+
+    await fireEvent.input(composer, { target: { value: 'Old authority draft' } })
+    await view.rerender({ actionsDisabled: true, draftFenceGeneration: 1 })
+    await fireEvent.input(composer, { target: { value: 'Edited during renewal' } })
+    await view.rerender({ actionsDisabled: false })
+
+    expect(
+      (screen.getByRole('button', { name: 'Add comment' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+  })
+
   it('inserts short references and qualifies duplicate names', async () => {
     const searchReferences = vi.fn(
       async (): Promise<Reference[]> => [

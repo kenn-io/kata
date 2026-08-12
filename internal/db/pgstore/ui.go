@@ -81,6 +81,11 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				return db.UISnapshotData{}, err
 			}
 		} else {
+			if err := db.ProjectUIDeadlineDate(&selected, query); err != nil {
+				return db.UISnapshotData{}, fmt.Errorf(
+					"read UI selected issue %s deadline: %w", selected.UID, err,
+				)
+			}
 			data.SelectedState = "available"
 			data.SelectedIssue = &selected
 			data.Comments, err = readUIComments(ctx, tx, selected.ID)
@@ -413,7 +418,7 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 		}
 	}
 	filterReadySchedules := false
-	filterCalendarSchedules := query.View == "today" || query.View == "upcoming"
+	filterCalendarSchedules := query.View == "today" || query.View == "upcoming" || query.View == "deadlines"
 	if len(statuses) > 0 && !slices.Contains(statuses, "all") {
 		statusPredicates := []string{}
 		persistedStatuses := []string{}
@@ -447,9 +452,8 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 	case "inbox":
 		statement += ` AND p.metadata::jsonb ->> 'role' = 'inbox'`
 	case "today":
-		args = append(args, query.LocalDate)
-		statement += fmt.Sprintf(` AND (i.metadata::jsonb ->> 'scheduled_on' IS NOT NULL`+
-			` OR LEFT(i.metadata::jsonb ->> 'deadline_on', 10) <= $%d)`, len(args))
+		statement += ` AND (i.metadata::jsonb ->> 'scheduled_on' IS NOT NULL` +
+			` OR i.metadata::jsonb ->> 'deadline_on' IS NOT NULL)`
 	case "upcoming":
 		statement += ` AND i.metadata::jsonb ->> 'scheduled_on' IS NOT NULL`
 	case "deadlines":
@@ -516,11 +520,13 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			}
 		}
 		scheduledOnDate := ""
+		deadlineOnDate := ""
 		if filterCalendarSchedules {
 			var matches bool
-			scheduleQuery := query
-			scheduleQuery.DefaultTimezone = scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone)
-			scheduledOnDate, matches, err = db.MatchUICalendarView(string(issue.Metadata), scheduleQuery)
+			scheduledOnDate, deadlineOnDate, matches, err = db.MatchUICalendarView(
+				string(issue.Metadata), query,
+				scheduleDefaultTimezone(recurrenceTimezone, query.DefaultTimezone),
+			)
 			if err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("read UI issue %s calendar schedule: %w", issue.UID, err)
@@ -528,9 +534,18 @@ func readUIIssues(ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
 			if !matches {
 				continue
 			}
+		} else {
+			deadlineOnDate, _, err = metadata.DeadlineOnCalendarDate(
+				string(issue.Metadata), query.TimeZone, query.DefaultTimezone,
+			)
+			if err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("read UI issue %s deadline: %w", issue.UID, err)
+			}
 		}
 		uiIssue := makeUIIssue(issue, projectNames[issue.ProjectID], nil)
 		uiIssue.ScheduledOnDate = scheduledOnDate
+		uiIssue.DeadlineOnDate = deadlineOnDate
 		issues = append(issues, uiIssue)
 		if limit > 0 && len(issues) == limit {
 			break

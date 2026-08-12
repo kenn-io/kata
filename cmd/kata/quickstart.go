@@ -97,7 +97,25 @@ Use kata as the shared issue ledger for this workspace.
    # Release ownership
    kata unassign <ref>
 
-7. Use relationships deliberately. They live as flags on create + edit and
+7. Use native planning dates deliberately:
+
+   # Park until a date or time; a future value excludes the issue from ready/next.
+   # This is the first-class form of setting or clearing scheduled_on.
+   kata schedule <ref> <date-or-time>
+   kata schedule <ref> -
+
+   # Set or clear deadline_on. A deadline does not park the issue.
+   kata deadline <ref> <date-or-time>
+   kata deadline <ref> -
+
+   # Park with no date. Remove the marker to return; do not store false.
+   kata meta set <ref> someday true --json-value
+   kata meta unset <ref> someday
+
+   Date and time values accept YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS],
+   or an RFC 3339 UTC instant ending in Z.
+
+8. Use relationships deliberately. They live as flags on create + edit and
    are framed from the operating issue's POV — no argument-order traps:
 
    parent      = this issue is a sub-task of a larger issue
@@ -112,13 +130,13 @@ Use kata as the shared issue ledger for this workspace.
    fail loudly. Read parent before asserting a removal. The other
    --remove-* flags are idempotent (no-op when the link is already gone).
 
-8. To leave context alongside a mutation, pass --comment TEXT on
+9. To leave context alongside a mutation, pass --comment TEXT on
    close, reopen, edit, assign, unassign, or label add/rm. The
    mutation lands first; the comment is appended in a follow-up call.
    If the comment call fails, the error names the issue so you can
    retry with kata comment <ref> --body ...
 
-9. Do not run delete or purge unless the user explicitly asks for that exact
+10. Do not run delete or purge unless the user explicitly asks for that exact
    destructive action and issue ref.
 
 For long-running agents, poll events:

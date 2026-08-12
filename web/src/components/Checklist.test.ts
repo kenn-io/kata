@@ -165,6 +165,25 @@ describe('Checklist', () => {
     )
   })
 
+  it('resets the add-item draft after authentication authority changes', async () => {
+    const view = render(Checklist, {
+      props: {
+        issue: makeIssue(),
+        revealed: true,
+        draftFenceGeneration: 0,
+        onPatchMetadata: vi.fn(async () => true),
+        onReveal: vi.fn(),
+      },
+    })
+
+    await fireEvent.input(screen.getByLabelText('New checklist item'), {
+      target: { value: 'Old authority item' },
+    })
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect((screen.getByLabelText('New checklist item') as HTMLInputElement).value).toBe('')
+  })
+
   it('keeps checklist mutations disabled while the owning snapshot is stale', async () => {
     const onPatchMetadata = vi.fn(async () => true)
     render(Checklist, {

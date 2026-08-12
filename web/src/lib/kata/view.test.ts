@@ -196,6 +196,44 @@ describe('kata task view builder', () => {
     ])
   })
 
+  test('uses the server-projected browser date for timed deadlines', () => {
+    const previousBrowserDay = {
+      ...issue('issue-1', 'Previous browser deadline', 'project-health', {
+        deadline_on: '2026-09-01T00:30:00Z',
+      }),
+      deadline_on_date: '2026-08-31',
+    }
+    const nextBrowserDay = {
+      ...issue('issue-2', 'Next browser deadline', 'project-workspace', {
+        deadline_on: '2026-09-01T07:30:00Z',
+      }),
+      deadline_on_date: '2026-09-01',
+    }
+
+    const todayView = buildKataTaskView({
+      view: 'today',
+      issues: [previousBrowserDay, nextBrowserDay],
+      projects,
+      today: '2026-08-31',
+      fetched_at: fetchedAt,
+    })
+    expect(todayView.groups.flatMap((group) => group.issues.map((item) => item.title))).toEqual([
+      'Previous browser deadline',
+    ])
+
+    const deadlinesView = buildKataTaskView({
+      view: 'deadlines',
+      issues: [previousBrowserDay, nextBrowserDay],
+      projects,
+      today: '2026-08-31',
+      fetched_at: fetchedAt,
+    })
+    expect(deadlinesView.groups.map((group) => [group.id, group.issues[0]?.title])).toEqual([
+      ['today', 'Previous browser deadline'],
+      ['2026-09-01', 'Next browser deadline'],
+    ])
+  })
+
   test('builds Inbox only from task inbox projects', () => {
     const view = buildKataTaskView({
       view: 'inbox',

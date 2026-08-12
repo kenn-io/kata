@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-12
+---
+
 # CLI reference
 
 This page summarizes the command surface. Run `kata <command> --help` for the
@@ -299,6 +303,8 @@ issue is already owned by someone else unless `--force` is used.
 ## Issue metadata
 
 ```sh
+kata schedule <ref> <date-or-time|-> [--if-match <rev>]
+kata deadline <ref> <date-or-time|-> [--if-match <rev>]
 kata meta set <ref> <key> <value> [--json-value] [--if-match <rev>]
 kata meta unset <ref> <key> [--if-match <rev>]
 kata meta get <ref> [key]
@@ -311,7 +317,27 @@ takes the same guard. `kata meta unset` clears a key (null merge-patch). `kata m
 metadata object or one key, and honors the global `--json` and `--agent`
 flags.
 
-See the [metadata conventions](metadata.md) for standard `work.*` keys.
+`kata schedule` sets the reserved `scheduled_on` value, and `kata deadline`
+sets `deadline_on`. Pass `-` to either command to clear its value. A date or
+time can use `YYYY-MM-DD`, local `YYYY-MM-DDTHH:MM[:SS]`, or an RFC 3339 UTC
+instant that ends in `Z`. A local value uses the issue timezone, then the daemon
+timezone, then UTC. Numeric offsets are not accepted. `--if-match` has the same
+revision behavior as the metadata commands.
+
+Use `scheduled_on` to keep an issue out of `ready` and `next` until a date or
+time. Use `someday=true` to park it with no date. A deadline value is only a
+deadline; it does not park the issue:
+
+```sh
+kata schedule abc4 2026-09-01T09:30
+kata schedule abc4 -
+kata deadline abc4 2026-09-01T17:00
+kata deadline abc4 -
+kata meta set abc4 someday true --json-value
+kata meta unset abc4 someday
+```
+
+See the [metadata conventions](metadata.md) for all reserved and standard keys.
 
 ## Coordination and wait
 

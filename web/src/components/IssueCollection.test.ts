@@ -161,6 +161,25 @@ describe('IssueCollection', () => {
     expect(within(row).getByText('user-a')).toBeTruthy()
   })
 
+  it('renders the projected deadline date in the due column and accessible text', () => {
+    const issue = task({
+      title: 'Timed deadline',
+      metadata: { deadline_on: '2026-09-01T00:30:00Z' },
+      deadline_on_date: '2026-08-31',
+    })
+    const { container } = render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([issue]),
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    expect(container.querySelector('.cell-due')?.textContent?.trim()).toBe('Aug 31')
+    expect(screen.getByRole('button', { name: /Due Aug 31/ })).toBeTruthy()
+  })
+
   it('renders only authoritative ready rows even though other tasks are open', () => {
     const closed = task({
       ...baseIssues[1]!,

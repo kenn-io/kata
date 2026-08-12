@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-12
+---
+
 # Model Context Protocol server
 
 Kata includes a native stdio server for coding agents and other MCP clients:
@@ -69,8 +73,10 @@ calls per process.
 | `kata.edit` | Atomically change issue fields, ownership, priority, and relationship deltas. |
 | `kata.comment` | Append a progress or context comment. |
 | `kata.claim` | Claim an unowned issue for the bound actor. There is no force mode. |
+| `kata.set_deadline` | Set or clear an issue deadline, with an optional revision guard. |
 | `kata.set_label` | Ensure that a label is present or absent. |
 | `kata.set_metadata` | Patch metadata. A JSON `null` value removes a key. |
+| `kata.set_schedule` | Set or clear an issue schedule gate, with an optional revision guard. |
 | `kata.close` | Close completed work with a reason, message, and typed evidence. |
 | `kata.reopen` | Reopen work that needs another change. |
 
@@ -84,6 +90,14 @@ the actual event actor when an event exists.
 daemon applied. Compact issue results omit labels and blocked state when the
 daemon response does not contain those fields; they do not invent empty or
 false values.
+
+`kata.set_schedule` writes the reserved `scheduled_on` metadata key. Pass
+`schedule` to set a value or `clear_schedule: true` to remove it.
+`kata.set_deadline` writes `deadline_on`; pass `deadline` or
+`clear_deadline: true`. Each pair is mutually exclusive. An optional `revision`
+adds the same conditional-write guard as `kata.set_metadata`. Both tools accept
+`YYYY-MM-DD`, local `YYYY-MM-DDTHH:MM[:SS]`, or an RFC 3339 UTC instant that
+ends in `Z`.
 
 List, search, and ready results omit issue bodies and comments to keep agent
 context small. Their limits default to 20 and cannot exceed 100. `kata.show`

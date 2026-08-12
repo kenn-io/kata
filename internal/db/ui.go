@@ -2,8 +2,6 @@ package db
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"go.kenn.io/kata/internal/metadata"
 )
@@ -57,34 +55,55 @@ type UIIssue struct {
 	QualifiedID     string   `json:"qualified_id"`
 	Labels          []string `json:"labels"`
 	ScheduledOnDate string   `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate  string   `json:"deadline_on_date,omitempty"`
 }
 
 // MatchUICalendarView evaluates date-sensitive browser collection predicates
-// after a schedule has been projected into the browser timezone. The returned
-// date is also the canonical grouping key sent to the browser.
-func MatchUICalendarView(raw string, query UISnapshotQuery) (string, bool, error) {
+// after planning dates have been projected into the browser timezone.
+// scheduledDefaultTimezone can include the legacy recurrence fallback;
+// deadlines always use the daemon default from query.
+func MatchUICalendarView(
+	raw string,
+	query UISnapshotQuery,
+	scheduledDefaultTimezone string,
+) (string, string, bool, error) {
 	scheduledDate, scheduled, err := metadata.ScheduledOnCalendarDate(
+		raw, query.TimeZone, scheduledDefaultTimezone,
+	)
+	if err != nil {
+		return "", "", false, err
+	}
+	deadlineDate, deadline, err := metadata.DeadlineOnCalendarDate(
 		raw, query.TimeZone, query.DefaultTimezone,
 	)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	switch query.View {
 	case "upcoming":
-		return scheduledDate, scheduled && scheduledDate > query.LocalDate, nil
+		return scheduledDate, deadlineDate, scheduled && scheduledDate > query.LocalDate, nil
 	case "today":
-		var values struct {
-			DeadlineOn string `json:"deadline_on"`
-		}
-		if err := json.Unmarshal([]byte(raw), &values); err != nil {
-			return "", false, fmt.Errorf("decode UI calendar metadata: %w", err)
-		}
 		scheduleDue := scheduled && scheduledDate <= query.LocalDate
-		deadlineDue := values.DeadlineOn != "" && values.DeadlineOn <= query.LocalDate
-		return scheduledDate, scheduleDue || deadlineDue, nil
+		deadlineDue := deadline && deadlineDate <= query.LocalDate
+		return scheduledDate, deadlineDate, scheduleDue || deadlineDue, nil
+	case "deadlines":
+		return "", deadlineDate, true, nil
 	default:
-		return "", true, nil
+		return scheduledDate, deadlineDate, true, nil
 	}
+}
+
+// ProjectUIDeadlineDate gives a selected issue the same browser-calendar
+// deadline projection as collection rows.
+func ProjectUIDeadlineDate(issue *UIIssue, query UISnapshotQuery) error {
+	deadlineDate, _, err := metadata.DeadlineOnCalendarDate(
+		string(issue.Metadata), query.TimeZone, query.DefaultTimezone,
+	)
+	if err != nil {
+		return err
+	}
+	issue.DeadlineOnDate = deadlineDate
+	return nil
 }
 
 // UILink enriches a stored link with stable display references for each end.

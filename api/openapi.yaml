@@ -3903,6 +3903,8 @@ components:
         created_at:
           format: date-time
           type: string
+        deadline_on_date:
+          type: string
         deleted_at:
           format: date-time
           type: string

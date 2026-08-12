@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { SnapshotController, type SnapshotRequest } from './snapshot'
+import { parseRoute } from '../router'
+import { SnapshotController, snapshotIntentForRoute, type SnapshotRequest } from './snapshot'
 
 interface TestIntent {
   key: string
@@ -127,6 +128,22 @@ describe('SnapshotController', () => {
       loading: false,
       canMutate: false,
     })
+  })
+})
+
+describe('snapshotIntentForRoute', () => {
+  it('includes the browser timezone for non-calendar collections', () => {
+    const route = parseRoute(new URL('https://daemon.example/kata?view=all-open'))
+    if (route.kind === 'route-error') throw new Error('expected a Kata route')
+
+    const intent = snapshotIntentForRoute(
+      route,
+      new Date('2026-09-01T00:30:00Z'),
+      'America/Los_Angeles',
+    )
+
+    expect(intent.timeZone).toBe('America/Los_Angeles')
+    expect(intent.localDate).toBeUndefined()
   })
 })
 

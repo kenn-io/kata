@@ -126,8 +126,10 @@ func registerTools(server *sdkmcp.Server, options Options) {
 	addTool(server, "kata.ready", "List ready issues", "List open issues with no open blocking predecessor in the bound project.", read, handlers.ready)
 	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
 	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", searchRead, handlers.search)
+	addTool(server, "kata.set_deadline", "Set deadline", "Set or clear an issue deadline. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setDeadline)
 	addTool(server, "kata.set_label", "Set label presence", "Ensure that a label is present or absent on an issue.", mutating, handlers.setLabel)
 	addTool(server, "kata.set_metadata", "Patch metadata", "Patch issue metadata; JSON null removes a key. An optional revision makes the write conditional.", mutating, handlers.setMetadata)
+	addTool(server, "kata.set_schedule", "Set schedule", "Set or clear an issue schedule gate. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setSchedule)
 	addTool(server, "kata.show", "Show issue", "Read one issue with its body, metadata, relationships, and a bounded comment history.", read, handlers.show)
 }
 
@@ -236,6 +238,14 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setStringBounds("ref", 1, 256)
 		setStringBounds("label", 1, 64)
 		property("label").Pattern = `^[a-z0-9._:-]+$`
+	case "kata.set_deadline":
+		setStringBounds("ref", 1, 256)
+		setStringBounds("deadline", 1, 64)
+		if field := property("revision"); field != nil {
+			minimum := float64(0)
+			field.Minimum = &minimum
+		}
+		schema.OneOf = planningDateSchemas("deadline", "clear_deadline")
 	case "kata.set_metadata":
 		setStringBounds("ref", 1, 256)
 		if field := property("revision"); field != nil {
@@ -246,6 +256,14 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 			minimum := 1
 			field.MinProperties = &minimum
 		}
+	case "kata.set_schedule":
+		setStringBounds("ref", 1, 256)
+		setStringBounds("schedule", 1, 64)
+		if field := property("revision"); field != nil {
+			minimum := float64(0)
+			field.Minimum = &minimum
+		}
+		schema.OneOf = planningDateSchemas("schedule", "clear_schedule")
 	case "kata.close":
 		setStringBounds("ref", 1, 256)
 		setStringBounds("message", 1, 1<<20)
@@ -256,6 +274,23 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setStringBounds("ref", 1, 256)
 	}
 	return schema
+}
+
+func planningDateSchemas(valueField, clearField string) []*jsonschema.Schema {
+	trueValue := any(true)
+	return []*jsonschema.Schema{
+		{
+			Required: []string{valueField},
+			Not:      &jsonschema.Schema{Required: []string{clearField}},
+		},
+		{
+			Required: []string{clearField},
+			Properties: map[string]*jsonschema.Schema{
+				clearField: {Const: &trueValue},
+			},
+			Not: &jsonschema.Schema{Required: []string{valueField}},
+		},
+	}
 }
 
 func evidenceVariant(kind string) *jsonschema.Schema {
@@ -450,6 +485,22 @@ type SetLabelInput struct {
 	Ref     string `json:"ref" jsonschema:"Issue reference in the bound project"`
 	Label   string `json:"label" jsonschema:"Project label"`
 	Present bool   `json:"present" jsonschema:"True to add the label; false to remove it"`
+}
+
+// SetDeadlineInput sets or clears the deadline_on metadata primitive.
+type SetDeadlineInput struct {
+	Ref           string  `json:"ref" jsonschema:"Issue reference in the bound project"`
+	Deadline      *string `json:"deadline,omitempty" jsonschema:"Deadline date, local date-time, or RFC 3339 UTC instant ending in Z"`
+	ClearDeadline bool    `json:"clear_deadline,omitempty" jsonschema:"Remove the current deadline"`
+	Revision      *int64  `json:"revision,omitempty" jsonschema:"Required current issue revision for a conditional write"`
+}
+
+// SetScheduleInput sets or clears the scheduled_on metadata primitive.
+type SetScheduleInput struct {
+	Ref           string  `json:"ref" jsonschema:"Issue reference in the bound project"`
+	Schedule      *string `json:"schedule,omitempty" jsonschema:"Schedule date, local date-time, or RFC 3339 UTC instant ending in Z"`
+	ClearSchedule bool    `json:"clear_schedule,omitempty" jsonschema:"Remove the current schedule gate"`
+	Revision      *int64  `json:"revision,omitempty" jsonschema:"Required current issue revision for a conditional write"`
 }
 
 // SetMetadataInput patches several keys in one operation.

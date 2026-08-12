@@ -93,7 +93,7 @@ func TestOpenWebUIRemoteReadonlyOpensWithoutLogin(t *testing.T) {
 		assert.Empty(t, r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
 		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
-			"contract_version": "1",
+			"contract_version": "2",
 			"cursor":           1,
 			"capabilities": map[string]any{
 				"writable": false, "updates": "poll", "actor_policy": "request",

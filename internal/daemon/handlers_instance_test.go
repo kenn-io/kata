@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
@@ -31,7 +32,7 @@ func TestInstance_ReturnsLocalUID(t *testing.T) {
 	getAndUnmarshal(t, ts, "/api/v1/instance", http.StatusOK, &body)
 	assert.Equal(t, d.db.InstanceUID(), body.InstanceUID)
 	assert.True(t, uid.Valid(body.InstanceUID), "instance_uid %q invalid", body.InstanceUID)
-	assert.Equal(t, "1", body.WebUIContractVersion)
+	assert.Equal(t, api.UISnapshotContractVersion, body.WebUIContractVersion)
 }
 
 // TestInstance_503WhenUIDUnset covers spec §8.8 second bullet: the handler

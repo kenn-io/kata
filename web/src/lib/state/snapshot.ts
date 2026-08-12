@@ -232,13 +232,13 @@ export function snapshotIntentForRoute(
     relationships: [...route.filters.relationship],
     includeGraph: Boolean(route.issueUID) && route.graph,
     includeHistory: Boolean(route.issueUID),
+    timeZone,
   }
   if (route.projectUID) intent.projectUID = route.projectUID
   if (route.issueUID) intent.selectedIssueUID = route.issueUID
   if (route.filters.text) intent.text = route.filters.text
   if (['today', 'upcoming', 'deadlines'].includes(intent.view)) {
     intent.localDate = localDate(now, timeZone)
-    intent.timeZone = timeZone
   }
   return intent
 }

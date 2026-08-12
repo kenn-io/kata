@@ -1,3 +1,7 @@
+---
+last_edited: 2026-08-12
+---
+
 # Quickstart
 
 Install kata on macOS from Homebrew Core:
@@ -149,6 +153,18 @@ kata comment abc4 --body "Reproduced on macOS."
 
 Priorities run from `0` to `4`; `0` is highest. Omit priority when it is not
 useful.
+
+Set a schedule, deadline, or undated parking marker with these commands:
+
+```sh
+kata schedule abc4 2026-09-01T09:30
+kata deadline abc4 2026-09-01T17:00
+kata meta set abc4 someday true --json-value
+```
+
+A future `scheduled_on` value and `someday=true` keep the issue out of `ready`
+and `next`. A deadline does not. Clear these values with `kata schedule abc4 -`,
+`kata deadline abc4 -`, and `kata meta unset abc4 someday`.
 
 Human `kata list` output groups fetched children beneath their fetched parents
 with tree connectors. A child remains a top-level row when its parent is outside

@@ -187,6 +187,18 @@ describe('Sidebar', () => {
     await fireEvent.submit(input.closest('form')!)
     expect(onCreateProject).not.toHaveBeenCalled()
   })
+
+  it('resets a project draft after authentication authority changes', async () => {
+    const view = renderSidebar({ draftFenceGeneration: 0 })
+    await fireEvent.click(screen.getByRole('button', { name: 'New project' }))
+    await fireEvent.input(screen.getByRole('textbox', { name: 'New project name' }), {
+      target: { value: 'Old authority project' },
+    })
+
+    await view.rerender({ draftFenceGeneration: 1 })
+
+    expect(screen.queryByRole('textbox', { name: 'New project name' })).toBeNull()
+  })
 })
 
 function project(overrides: Partial<KataProjectSummary>): KataProjectSummary {

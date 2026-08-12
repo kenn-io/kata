@@ -306,6 +306,7 @@ function normalizeIssue(
     project_name:
       issue.project_name || project?.name || projectNameFromQualifiedID(issue.qualified_id),
     scheduled_on_date: issue.scheduled_on_date,
+    deadline_on_date: issue.deadline_on_date,
     metadata: { ...issue.metadata },
     revision: issue.revision,
     owner: issue.owner,

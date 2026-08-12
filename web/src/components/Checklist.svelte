@@ -11,6 +11,7 @@
     revealed: boolean
     disabled?: boolean
     draftResetGeneration?: number
+    draftFenceGeneration?: number
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
     onReveal: () => void
   }
@@ -20,6 +21,7 @@
     revealed,
     disabled = false,
     draftResetGeneration = 0,
+    draftFenceGeneration = 0,
     onPatchMetadata,
     onReveal,
   }: Props = $props()
@@ -29,6 +31,7 @@
   let checklistInput: HTMLInputElement | null = $state(null)
   let trackedUID = $state<string | null>(null)
   let lastDraftResetGeneration = $state<number | null>(null)
+  let lastDraftFenceGeneration = $state<number | null>(null)
   let pendingDraftResetUID = $state<string | null>(null)
   let pendingDraftResetGeneration = $state<number | null>(null)
 
@@ -46,6 +49,17 @@
     checklistPending = false
     pendingDraftResetUID = null
     pendingDraftResetGeneration = null
+  })
+
+  $effect(() => {
+    const nextGeneration = draftFenceGeneration
+    if (lastDraftFenceGeneration === null) {
+      lastDraftFenceGeneration = nextGeneration
+      return
+    }
+    if (nextGeneration === lastDraftFenceGeneration) return
+    lastDraftFenceGeneration = nextGeneration
+    resetChecklistDraft()
   })
 
   $effect(() => {

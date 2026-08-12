@@ -35,17 +35,19 @@ func TestValidateCreateValue_DelegatesToValidate(t *testing.T) {
 	assert.NoError(t, ValidateCreateValue(IssueRegistry, "weird_consumer_field", json.RawMessage(`"hi"`)))
 }
 
-func TestValidateDate(t *testing.T) {
-	assert.NoError(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20"`)))
-	assert.NoError(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20T15:30"`)))
-	assert.NoError(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20T15:30:45"`)))
-	assert.NoError(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20T22:30:00Z"`)))
-	assert.Error(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-05-20T15:30:00-07:00"`)))
-	assert.Error(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"not-a-date"`)))
-	assert.Error(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`"2026-13-01"`)))
-	assert.Error(t, Validate(IssueRegistry, "scheduled_on", json.RawMessage(`123`)))
-	assert.Error(t, Validate(IssueRegistry, "deadline_on", json.RawMessage(`"2026-05-20T22:30:00Z"`)),
-		"deadline_on remains date-only")
+func TestValidateScheduleValues(t *testing.T) {
+	for _, key := range []string{"scheduled_on", "deadline_on"} {
+		t.Run(key, func(t *testing.T) {
+			assert.NoError(t, Validate(IssueRegistry, key, json.RawMessage(`"2026-05-20"`)))
+			assert.NoError(t, Validate(IssueRegistry, key, json.RawMessage(`"2026-05-20T15:30"`)))
+			assert.NoError(t, Validate(IssueRegistry, key, json.RawMessage(`"2026-05-20T15:30:45"`)))
+			assert.NoError(t, Validate(IssueRegistry, key, json.RawMessage(`"2026-05-20T22:30:00Z"`)))
+			assert.Error(t, Validate(IssueRegistry, key, json.RawMessage(`"2026-05-20T15:30:00-07:00"`)))
+			assert.Error(t, Validate(IssueRegistry, key, json.RawMessage(`"not-a-date"`)))
+			assert.Error(t, Validate(IssueRegistry, key, json.RawMessage(`"2026-13-01"`)))
+			assert.Error(t, Validate(IssueRegistry, key, json.RawMessage(`123`)))
+		})
+	}
 }
 
 func TestValidateBool(t *testing.T) {

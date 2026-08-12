@@ -1,10 +1,26 @@
 ---
 title: Changelog
 description: Release history for kata
+last_edited: 2026-08-12
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
+
+## Unreleased
+
+**New features**
+
+- Added paired `kata schedule` / `kata deadline` commands and
+  `kata.set_schedule` / `kata.set_deadline` MCP tools for first-class planning
+  date updates.
+
+**Improvements**
+
+- Gave deadlines the same date, local date-time, UTC-instant, and timezone
+  projection rules as `scheduled_on`.
+- Added schedule, deadline, and someday commands to generated agent guidance and
+  public workflow documentation.
 
 ## 0.14.3
 <small>2026-08-10</small>

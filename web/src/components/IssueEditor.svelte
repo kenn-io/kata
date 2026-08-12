@@ -57,6 +57,7 @@
     actionsDisabled?: boolean | undefined
     authorityBlocked?: boolean | undefined
     draftResetGeneration?: number | undefined
+    draftFenceGeneration?: number | undefined
     movePending?: boolean | undefined
     onMoveIssue: (toProjectUID: string) => boolean | Promise<boolean>
     onPatchMetadata: (uid: string, patch: Record<string, unknown>) => boolean | Promise<boolean>
@@ -95,6 +96,7 @@
     actionsDisabled = false,
     authorityBlocked = undefined,
     draftResetGeneration = 0,
+    draftFenceGeneration = 0,
     movePending = false,
     onMoveIssue,
     onPatchMetadata,
@@ -127,6 +129,7 @@
   let cancelingTitle = $state(false)
   let lastIssueUID = $state<string | null>(null)
   let lastDraftResetGeneration = $state<number | null>(null)
+  let lastDraftFenceGeneration = $state<number | null>(null)
   let pendingTitleResetUID = $state<string | null>(null)
   let pendingTitleResetGeneration = $state<number | null>(null)
   let pendingBodyResetUID = $state<string | null>(null)
@@ -136,6 +139,7 @@
     openCreateRecurrence: () => void
     openEditRecurrence: (recurrence: KataRecurrence) => void
     openDeleteRecurrence: (recurrence: KataRecurrence) => void
+    closeAll: () => void
   } | null = $state(null)
 
   const detailInert = $derived(authorityBlocked ?? actionsDisabled)
@@ -165,6 +169,20 @@
     pendingBodyResetUID = null
     pendingBodyResetGeneration = null
     checklistRevealed = false
+  })
+
+  $effect(() => {
+    const nextGeneration = draftFenceGeneration
+    if (lastDraftFenceGeneration === null) {
+      lastDraftFenceGeneration = nextGeneration
+      return
+    }
+    if (nextGeneration === lastDraftFenceGeneration) return
+    lastDraftFenceGeneration = nextGeneration
+    resetTitleDraft()
+    resetBodyDraft()
+    checklistRevealed = false
+    recurrenceDialogs?.closeAll()
   })
 
   $effect(() => {
@@ -375,20 +393,22 @@
             <NetworkIcon size={14} strokeWidth={1.9} aria-hidden="true" />
           </button>
         {/if}
-        <MoveIssueDialog
-          {issue}
-          {projects}
-          hasChecklist={(issue.issue.metadata.checklist ?? []).length > 0 || checklistRevealed}
-          hasRecurrence={!canCreateRecurrence}
-          {movePending}
-          {onMoveIssue}
-          onAddChecklist={() => {
-            checklistRevealed = true
-          }}
-          onCreateRecurrence={() => recurrenceDialogs?.openCreateRecurrence()}
-          {onDeleteIssue}
-        />
-        <IssueStateDialog {issue} {onCloseIssue} {onReopenIssue} />
+        {#key draftFenceGeneration}
+          <MoveIssueDialog
+            {issue}
+            {projects}
+            hasChecklist={(issue.issue.metadata.checklist ?? []).length > 0 || checklistRevealed}
+            hasRecurrence={!canCreateRecurrence}
+            {movePending}
+            {onMoveIssue}
+            onAddChecklist={() => {
+              checklistRevealed = true
+            }}
+            onCreateRecurrence={() => recurrenceDialogs?.openCreateRecurrence()}
+            {onDeleteIssue}
+          />
+          <IssueStateDialog {issue} {onCloseIssue} {onReopenIssue} />
+        {/key}
       </div>
     </div>
 
@@ -459,6 +479,7 @@
     {ownerOptions}
     {actionsDisabled}
     {draftResetGeneration}
+    {draftFenceGeneration}
     {onPatchMetadata}
     {onAssignOwner}
     {onUnassignOwner}
@@ -473,6 +494,7 @@
       revealed={checklistRevealed}
       disabled={actionsDisabled}
       {draftResetGeneration}
+      {draftFenceGeneration}
       {onPatchMetadata}
       onReveal={() => {
         checklistRevealed = true
@@ -500,10 +522,18 @@
       {onLinkFiltersChange}
       {actionsDisabled}
       {draftResetGeneration}
+      {draftFenceGeneration}
       {onEditIssue}
       {onSelectIssue}
     />
-    <Comments {issue} {searchReferences} {actionsDisabled} {draftResetGeneration} {onAddComment} />
+    <Comments
+      {issue}
+      {searchReferences}
+      {actionsDisabled}
+      {draftResetGeneration}
+      {draftFenceGeneration}
+      {onAddComment}
+    />
     <IssueHistory {events} />
   {/key}
 </section>
@@ -514,6 +544,7 @@
   recurrences={selectedRecurrences}
   actor=""
   disabled={actionsDisabled}
+  {draftFenceGeneration}
   onCreate={onCreateRecurrence}
   onPatch={onPatchRecurrence}
   onDelete={onDeleteRecurrence}

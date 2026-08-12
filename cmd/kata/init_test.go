@@ -607,6 +607,27 @@ func TestInit_WithAgents_BlockIncludesWorkConventions(t *testing.T) {
 	assert.NotContains(t, got, "docs/operations/agent-orchestration.md")
 }
 
+func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testing.T) {
+	env := testenv.New(t)
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--quiet")
+	runGit(t, dir, "remote", "add", "origin", "https://github.com/example/example-project.git")
+
+	flags.JSON = true
+	t.Cleanup(func() { flags.JSON = false })
+
+	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
+	require.NoError(t, err)
+	got := string(content)
+	assert.Contains(t, got, "kata schedule <ref> <date-or-time>")
+	assert.Contains(t, got, "kata deadline <ref> <date-or-time>")
+	assert.Contains(t, got, "kata meta set <ref> someday true --json-value")
+	assert.Contains(t, got, "kata meta unset <ref> someday")
+}
+
 // oldAgentsBlockBody is the managed-block body kata shipped before the work.*
 // conventions section was added. A repo initialized with an older kata carries
 // this verbatim between the markers; re-running --with-agents must upgrade it in

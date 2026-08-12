@@ -23,7 +23,8 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 		assert.Equal(t, "/api/v1/instance", r.URL.Path)
 		assert.Equal(t, "Bearer target-token", r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"instance_uid":"01J00000000000000000000001","web_ui_contract_version":"1"}`)
+		_, _ = fmt.Fprintf(w, `{"instance_uid":"01J00000000000000000000001","web_ui_contract_version":%q}`,
+			api.UISnapshotContractVersion)
 	}))
 	t.Cleanup(connected.Close)
 	authRequired := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -98,6 +99,36 @@ func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {
 	assert.Equal(t, "daemon does not support the Kata web UI", roster.Daemons[1].Hint)
 }
 
+func TestWebDaemonRosterRejectsPreviousSnapshotContract(t *testing.T) {
+	previous := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w,
+			`{"instance_uid":"01J00000000000000000000001","web_ui_contract_version":"1"}`)
+	}))
+	t.Cleanup(previous.Close)
+
+	d := openTestDB(t)
+	server := startTestServer(t, daemon.ServerConfig{
+		DB: d.db, StartedAt: d.now,
+		WebDaemons: []config.CatalogDaemonConfig{
+			{Name: "example-local", Local: true},
+			{Name: "example-remote", URL: previous.URL, AllowInsecure: true},
+		},
+	})
+
+	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	require.NoError(t, err)
+	defer func() { _ = response.Body.Close() }()
+	var roster struct {
+		Daemons []struct {
+			Health string `json:"health"`
+		} `json:"daemons"`
+	}
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&roster))
+	require.Len(t, roster.Daemons, 2)
+	assert.Equal(t, "upgrade_required", roster.Daemons[1].Health)
+}
+
 func TestAnonymousReadonlyRosterHidesConfiguredCredentialTargetsBeforeProbing(t *testing.T) {
 	var calls atomic.Int64
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -157,7 +188,8 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Accept"))
 		w.Header().Set("Set-Cookie", "upstream=secret")
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"contract_version":"1","cursor":7,"capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`)
+		_, _ = fmt.Fprintf(w, `{"contract_version":%q,"cursor":7,"capabilities":{"writable":true,"updates":"sse","actor_policy":"request"}}`,
+			api.UISnapshotContractVersion)
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -185,7 +217,8 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-	assert.JSONEq(t, `{"contract_version":"1","cursor":7,"capabilities":{"writable":true,"updates":"poll","actor_policy":"request"}}`, string(body))
+	assert.JSONEq(t, fmt.Sprintf(`{"contract_version":%q,"cursor":7,"capabilities":{"writable":true,"updates":"poll","actor_policy":"request"}}`,
+		api.UISnapshotContractVersion), string(body))
 	assert.Empty(t, response.Header.Get("Set-Cookie"))
 }
 

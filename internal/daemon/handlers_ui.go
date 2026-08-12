@@ -342,7 +342,6 @@ func normalizeUISnapshotIntent(in *api.UISnapshotRequest) (normalizedUISnapshotI
 		}
 	} else {
 		localDate = ""
-		timeZone = ""
 	}
 	return normalizedUISnapshotIntent{
 		View: view, ProjectUID: projectUID,

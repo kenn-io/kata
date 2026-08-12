@@ -676,6 +676,16 @@ const agentsBlockBody = "## kata issue tracker\n\n" +
 	"- Close only verified work: `kata close <ref> --done --message \"<scope + verification>\" --commit <sha>`.\n" +
 	"- If work is incomplete, label `needs-review` and comment what remains rather than closing.\n" +
 	"- Never `kata delete` or `kata purge` without explicit user authorization.\n\n" +
+	"## kata planning dates\n\n" +
+	"- Park work until a date or time with `kata schedule <ref> <date-or-time>`;\n" +
+	"  clear it with `kata schedule <ref> -`. This maps to `scheduled_on`; a future value excludes the issue\n" +
+	"  from `ready` and `next` until its gate opens.\n" +
+	"- Set a deadline with `kata deadline <ref> <date-or-time>`; clear it with `kata deadline <ref> -`.\n" +
+	"  This maps to `deadline_on`; a deadline does not park the issue.\n" +
+	"- Park work with no date by running `kata meta set <ref> someday true --json-value`;\n" +
+	"  return it to the queue with `kata meta unset <ref> someday` (do not store `false`).\n" +
+	"- Date and time values accept `YYYY-MM-DD`, local `YYYY-MM-DDTHH:MM[:SS]`, or an\n" +
+	"  RFC 3339 UTC instant ending in `Z`.\n\n" +
 	"## kata work.* conventions (agent orchestration)\n\n" +
 	"When working a kata-tracked issue, keep its `work.*` metadata truthful\n" +
 	"(see https://katatracker.com/operations/agent-orchestration/ for the full recipe):\n\n" +

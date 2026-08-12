@@ -6,20 +6,34 @@
   interface Props {
     open: boolean
     disabled?: boolean | undefined
+    draftFenceGeneration?: number | undefined
     onClose: () => void
     onSubmit: (title: string) => void | Promise<void>
   }
 
-  let { open, disabled = false, onClose, onSubmit }: Props = $props()
+  let { open, disabled = false, draftFenceGeneration = 0, onClose, onSubmit }: Props = $props()
 
   let title = $state('')
   let pending = $state(false)
+  let lastDraftFenceGeneration = $state<number | null>(null)
 
   $effect(() => {
     if (!open) {
       title = ''
       pending = false
     }
+  })
+
+  $effect(() => {
+    const nextGeneration = draftFenceGeneration
+    if (lastDraftFenceGeneration === null) {
+      lastDraftFenceGeneration = nextGeneration
+      return
+    }
+    if (nextGeneration === lastDraftFenceGeneration) return
+    lastDraftFenceGeneration = nextGeneration
+    title = ''
+    pending = false
   })
 
   async function submit(): Promise<void> {
