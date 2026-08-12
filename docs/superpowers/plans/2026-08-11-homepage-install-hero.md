@@ -1,27 +1,27 @@
-# Shell-Baseline Install Command Implementation Plan
+# Vertically Centered Install Command Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the homepage install prompt and command read as one authentic shell line while keeping the prompt out of copied text.
+**Goal:** Vertically center the complete inline shell command within the homepage install row.
 
-**Architecture:** Keep the existing Zensical SuperFence markup and copy control. Move the decorative prompt from the outer highlight container to the generated `code` element's inline formatting context. Verify the contract against the built page with a temporary real-browser assertion and visual inspection.
+**Architecture:** Preserve the current inline `$ command` treatment and Zensical copy control. Make the generated installer `pre` a flex row whose sole in-flow `code` child is centered. Validate the visible command text against the rendered command-body bounds with a real-browser red-green assertion.
 
 **Tech Stack:** Zensical 0.0.43, CSS, Playwright's installed Chromium, Bun 1.3.14
 
 ## Global Constraints
 
-- Render `$` through `code::before`; do not add it to Markdown or DOM text.
-- The prompt and command use the same font family, font size, line height, and baseline.
-- Keep one normal space between `$` and the command.
+- Keep `$ ` and the command in one inline formatting context and on one baseline.
+- Vertically center the complete inline shell line with a flex row and `align-items: center`.
+- The visible command text's top and bottom whitespace may differ by no more than two pixels.
+- Do not simulate centering with fixed line height or asymmetric padding.
 - Copying returns the exact executable command without `$` or leading whitespace.
-- Keep the copy control at the far right of the command row.
-- Preserve OS detection, native platform buttons, hidden panels, responsive containment, instant navigation, and the macOS no-JavaScript fallback.
+- Preserve the right-aligned copy control, OS selection, hidden panels, responsive containment, instant navigation, and macOS no-JavaScript fallback.
 - Do not add a committed Playwright suite or source-content assertion test.
 - Do not change installers, packaging, the application web UI, the daemon, or persisted data.
 
 ---
 
-### Task 1: Put the Prompt on the Command Baseline
+### Task 1: Center the Inline Shell Line
 
 **Files:**
 
@@ -30,9 +30,9 @@
 
 **Interfaces:**
 
-- Consumes: Zensical's `.kata-install-command.highlight > pre > code` output and theme copy button
-- Produces: an inline, non-selectable `$ ` prefix through `code::before`
-- Preserves: copied `code.textContent` as the bare executable command
+- Consumes: Zensical's `.kata-install-command.highlight > pre > code` output
+- Produces: a flex-centered `code` child within the 65px command body
+- Preserves: inline prompt baseline and bare-command clipboard text
 
 - [ ] **Step 1: Build the current page**
 
@@ -44,7 +44,7 @@ make docs-build
 
 Expected: the strict Zensical build succeeds and refreshes `docs/site`.
 
-- [ ] **Step 2: Run a rendered assertion and verify the red state**
+- [ ] **Step 2: Run the geometry assertion and verify the red state**
 
 Run:
 
@@ -52,76 +52,51 @@ Run:
 node --input-type=module -e '
 import { chromium } from "./web/node_modules/playwright/index.mjs";
 const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage();
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await page.goto("http://127.0.0.1:8765/", { waitUntil: "networkidle" });
-const result = await page.locator("[data-install-platform-content=macos] code").evaluate((code) => {
-  const prompt = getComputedStyle(code, "::before");
-  const command = getComputedStyle(code);
+const result = await page.locator("[data-install-platform-content=macos]").evaluate((highlight) => {
+  const pre = highlight.querySelector("pre");
+  const text = highlight.querySelector("code span[id^=__span]");
+  const preRect = pre.getBoundingClientRect();
+  const textRect = text.getBoundingClientRect();
+  const top = textRect.top - preRect.top;
+  const bottom = preRect.bottom - textRect.bottom;
   return {
-    promptContent: prompt.content,
-    promptDisplay: prompt.display,
-    sameFontFamily: prompt.fontFamily === command.fontFamily,
-    sameFontSize: prompt.fontSize === command.fontSize,
-    sameLineHeight: prompt.lineHeight === command.lineHeight,
+    top,
+    bottom,
+    difference: Math.abs(top - bottom),
+    preDisplay: getComputedStyle(pre).display,
+    alignItems: getComputedStyle(pre).alignItems,
   };
 });
 await browser.close();
 console.log(JSON.stringify(result, null, 2));
-if (
-  result.promptContent !== "\"$ \"" ||
-  result.promptDisplay !== "inline" ||
-  !result.sameFontFamily ||
-  !result.sameFontSize ||
-  !result.sameLineHeight
-) process.exit(1);
+if (result.difference > 2) process.exit(1);
 '
 ```
 
-Expected: FAIL because the current `$` pseudo-element belongs to the outer
-highlight and the `code` element reports no prompt content.
+Expected: FAIL with roughly 3px above, 46px below, and a difference greater
+than 40px because normal preformatted flow pins the line near the top.
 
-- [ ] **Step 3: Move the prompt into the code line**
+- [ ] **Step 3: Center the code child**
 
-Replace the visible command and prompt rules with:
+Add two declarations to the existing installer `pre` rule:
 
 ```css
-.md-typeset
-  .kata-install-command.highlight:not([hidden]):not(
-    .kata-install-command--fallback-hidden
-  ) {
-  min-height: 3.25rem;
-  margin: 0;
-  border-radius: 0;
-  background: var(--md-code-bg-color);
-}
-
-.md-typeset .kata-install-command code {
-  display: inline;
-}
-
-.md-typeset .kata-install-command code::before {
-  color: var(--md-primary-fg-color);
-  content: "$ ";
-  display: inline;
-  user-select: none;
-  vertical-align: baseline;
-}
-
 .md-typeset .kata-install-command pre {
+  display: flex;
   min-height: 3.25rem;
+  align-items: center;
   margin: 0;
   border-radius: 0;
   overflow-x: auto;
 }
 ```
 
-Delete the outer `.kata-install-command.highlight::before` rule and its phone
-padding override. Zensical's theme normally renders `code` as a grid, so scope
-the inline override to install commands; otherwise the grid blockifies the
-pseudo-element. Do not add font declarations to the pseudo-element; inheriting
-from `code` is what guarantees identical metrics.
+Do not change the `code::before` prompt, command height, padding, or copy-control
+markup.
 
-- [ ] **Step 4: Rebuild and verify the green rendered state**
+- [ ] **Step 4: Rebuild and verify the green geometry**
 
 Run:
 
@@ -130,47 +105,44 @@ make docs-build
 node --input-type=module -e '
 import { chromium } from "./web/node_modules/playwright/index.mjs";
 const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage();
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await page.goto("http://127.0.0.1:8765/", { waitUntil: "networkidle" });
-const result = await page.locator("[data-install-platform-content=macos] code").evaluate((code) => {
-  const prompt = getComputedStyle(code, "::before");
-  const command = getComputedStyle(code);
+const result = await page.locator("[data-install-platform-content=macos]").evaluate((highlight) => {
+  const pre = highlight.querySelector("pre");
+  const text = highlight.querySelector("code span[id^=__span]");
+  const preRect = pre.getBoundingClientRect();
+  const textRect = text.getBoundingClientRect();
+  const top = textRect.top - preRect.top;
+  const bottom = preRect.bottom - textRect.bottom;
   return {
-    promptContent: prompt.content,
-    promptDisplay: prompt.display,
-    sameFontFamily: prompt.fontFamily === command.fontFamily,
-    sameFontSize: prompt.fontSize === command.fontSize,
-    sameLineHeight: prompt.lineHeight === command.lineHeight,
+    top,
+    bottom,
+    difference: Math.abs(top - bottom),
+    preDisplay: getComputedStyle(pre).display,
+    alignItems: getComputedStyle(pre).alignItems,
   };
 });
 await browser.close();
 console.log(JSON.stringify(result, null, 2));
-if (
-  result.promptContent !== "\"$ \"" ||
-  result.promptDisplay !== "inline" ||
-  !result.sameFontFamily ||
-  !result.sameFontSize ||
-  !result.sameLineHeight
-) process.exit(1);
+if (result.difference > 2) process.exit(1);
 '
 ```
 
-Expected: the build succeeds and the rendered assertion passes with `$ ` on the
-`code::before` pseudo-element and identical font metrics.
+Expected: PASS with `preDisplay: "flex"`, `alignItems: "center"`, and no more
+than a two-pixel top/bottom difference.
 
-- [ ] **Step 5: Verify exact copying and visual alignment**
+- [ ] **Step 5: Verify the rendered interaction**
 
 At 1440×900 and 390×844:
 
-- capture the homepage top fold with macOS selected;
-- confirm `$ brew install kata` reads as one line on one baseline;
-- select Windows and confirm the longer command remains contained;
-- click the copy control and require clipboard text to equal the selected code
-  element's trimmed `textContent` exactly;
+- capture the macOS command row and confirm it is visibly centered;
+- select Windows and confirm the long command scrolls inside the row;
+- copy macOS and Windows and require clipboard text to equal each code element's
+  trimmed `textContent`;
 - confirm no horizontal page overflow or console errors; and
-- confirm JavaScript-disabled rendering shows only the macOS command.
+- confirm JavaScript-disabled rendering shows only macOS.
 
-- [ ] **Step 6: Run the full relevant checks**
+- [ ] **Step 6: Run all relevant checks**
 
 Run:
 
@@ -182,18 +154,15 @@ make docs-check
 
 Expected: all web tests, static checks, and docs validation pass.
 
-- [ ] **Step 7: Commit the implementation**
+- [ ] **Step 7: Commit and preview**
 
-Use the mandatory commit skill and stage the stylesheet plus this plan's
-renderer-specific correction:
+Use the mandatory commit skill, stage the stylesheet, and commit:
 
 ```bash
-git add docs/stylesheets/extra.css docs/superpowers/plans/2026-08-11-homepage-install-hero.md
-git commit -m "fix: align the homepage shell prompt"
+git add docs/stylesheets/extra.css
+git commit -m "fix: center the homepage install command"
 ```
 
-- [ ] **Step 8: Close the issue and relaunch the preview**
-
-Close `6g5x` with the implementation commit and the three test commands as typed
-evidence. Rebuild and open `http://127.0.0.1:8765/`, keeping the static server
+Close `6g5x` with the implementation commit and the three check commands as
+typed evidence. Rebuild and open `http://127.0.0.1:8765/`, keeping the server
 running for user inspection.
