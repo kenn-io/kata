@@ -81,7 +81,7 @@ var (
 	startDetachedDaemonForEnsure = kitdaemon.StartDetached
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
 	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
-	discoverDaemonForAutoStart   = discoverForEnsure
+	discoverDaemonForAutoStart   = discoverForEnsureWithError
 )
 
 // EnsureRunning returns a live daemon's base URL, auto-starting the daemon
@@ -160,7 +160,11 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if url, compatible, ok := discoverForEnsure(ctx, ns.DataDir); ok {
+	url, compatible, ok, err := discoverForEnsureWithError(ctx, ns.DataDir)
+	if err != nil {
+		return "", err
+	}
+	if ok {
 		if compatible {
 			return url, nil
 		}
@@ -173,30 +177,47 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 }
 
 func discoverForEnsure(ctx context.Context, dataDir string) (string, bool, bool) {
+	url, compatible, ok, _ := discoverForEnsureWithError(ctx, dataDir)
+	return url, compatible, ok
+}
+
+func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bool, bool, error) {
 	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
-		return "", false, false
+		return "", false, false, err
 	}
 	var staleURL string
+	var unreachable error
 	for _, r := range recs {
 		if !kitdaemon.ProcessAlive(r.PID) {
 			continue
 		}
-		url, info, ok := probeAddress(ctx, r.Endpoint().ConfigAddress())
-		if !ok {
+		address := r.Endpoint().ConfigAddress()
+		url, info, probeErr := probeAddressWithError(ctx, address)
+		if probeErr != nil {
+			if err := ctx.Err(); err != nil {
+				return "", false, false, err
+			}
+			if unreachable == nil {
+				unreachable = &localDaemonUnreachableError{
+					pid:     r.PID,
+					address: address,
+					cause:   probeErr,
+				}
+			}
 			continue
 		}
 		if daemonVersionCheckSkipped() || daemonVersionCompatible(info) {
-			return url, true, true
+			return url, true, true, nil
 		}
 		if staleURL == "" {
 			staleURL = url
 		}
 	}
 	if staleURL != "" {
-		return staleURL, false, true
+		return staleURL, false, true, nil
 	}
-	return "", false, false
+	return "", false, false, unreachable
 }
 
 func daemonVersionCheckSkipped() bool {
@@ -266,7 +287,11 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 	}
 	deadline := time.Now().Add(daemonStartupWait)
 	for time.Now().Before(deadline) {
-		if url, compatible, ok := discoverDaemonForAutoStart(ctx, dataDir); ok && compatible {
+		url, compatible, ok, err := discoverDaemonForAutoStart(ctx, dataDir)
+		if err != nil {
+			return "", err
+		}
+		if ok && compatible {
 			return url, nil
 		}
 		select {

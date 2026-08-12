@@ -60,52 +60,85 @@ type PingInfo struct {
 	PID     int    `json:"pid,omitempty"`
 }
 
+// ErrLocalDaemonUnreachable identifies a live local daemon process whose
+// recorded endpoint could not be reached.
+var ErrLocalDaemonUnreachable = errors.New("local daemon is unreachable")
+
+type localDaemonUnreachableError struct {
+	pid     int
+	address string
+	cause   error
+}
+
+func (e *localDaemonUnreachableError) Error() string {
+	return fmt.Sprintf("daemon pid %d is running at %s but is unreachable: %v",
+		e.pid, e.address, e.cause)
+}
+
+func (e *localDaemonUnreachableError) Unwrap() error {
+	return e.cause
+}
+
+func (e *localDaemonUnreachableError) Is(target error) bool {
+	return target == ErrLocalDaemonUnreachable
+}
+
 // Discover scans the namespace's runtime files and returns the base URL of
-// the first daemon that passes /api/v1/ping. The bool is false when none
-// respond — auto-start logic lives separately in EnsureRunning so callers
-// that should never spawn (e.g. health probes) can opt out.
-func Discover(ctx context.Context, dataDir string) (string, bool) {
+// the first daemon that passes /api/v1/ping. The bool is false when no live
+// runtime record exists. A live process whose endpoint cannot be reached
+// returns ErrLocalDaemonUnreachable so callers do not mistake a permission or
+// transport failure for an absent daemon.
+func Discover(ctx context.Context, dataDir string) (string, bool, error) {
 	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
+	var unreachable error
 	for _, r := range recs {
 		if !kitdaemon.ProcessAlive(r.PID) {
 			continue
 		}
-		if url, ok := pingAddress(ctx, r.Endpoint().ConfigAddress()); ok {
-			return url, true
+		address := r.Endpoint().ConfigAddress()
+		url, _, probeErr := probeAddressWithError(ctx, address)
+		if probeErr == nil {
+			return url, true, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return "", false, err
+		}
+		if unreachable == nil {
+			unreachable = &localDaemonUnreachableError{
+				pid:     r.PID,
+				address: address,
+				cause:   probeErr,
+			}
 		}
 	}
-	return "", false
-}
-
-// pingAddress probes /api/v1/ping at a runtime-file address. Returns the
-// base URL the caller should use to reach the daemon. Version/service
-// compatibility is enforced by EnsureRunning; plain Discover only needs
-// the endpoint to answer the kata liveness shape.
-func pingAddress(ctx context.Context, address string) (string, bool) {
-	url, _, ok := probeAddress(ctx, address)
-	return url, ok
+	return "", false, unreachable
 }
 
 func probeAddress(ctx context.Context, address string) (string, PingInfo, bool) {
+	url, info, err := probeAddressWithError(ctx, address)
+	return url, info, err == nil
+}
+
+func probeAddressWithError(ctx context.Context, address string) (string, PingInfo, error) {
 	if strings.HasPrefix(address, "unix://") {
 		path := strings.TrimPrefix(address, "unix://")
 		client := &http.Client{Transport: UnixTransport(path), Timeout: 1 * time.Second}
 		info, err := Probe(ctx, client, UnixBase)
 		if err == nil {
-			return UnixBase, info, true
+			return UnixBase, info, nil
 		}
-		return "", PingInfo{}, false
+		return "", PingInfo{}, err
 	}
 	url := "http://" + address
 	client := &http.Client{Timeout: 1 * time.Second}
 	info, err := Probe(ctx, client, url)
 	if err == nil {
-		return url, info, true
+		return url, info, nil
 	}
-	return "", PingInfo{}, false
+	return "", PingInfo{}, err
 }
 
 // Ping is true when GET base+/api/v1/ping returns 200.

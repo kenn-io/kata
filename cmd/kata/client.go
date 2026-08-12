@@ -56,17 +56,10 @@ func ensureDaemon(ctx context.Context) (string, error) {
 	}
 	workspaceStart := workspaceStartForRemote()
 	baseURL, err := client.EnsureRunningInWorkspace(ctx, workspaceStart)
-	if err == nil {
-		return baseURL, nil
+	if err != nil {
+		return "", cliDaemonTargetError(err)
 	}
-	if errors.Is(err, client.ErrRemoteUnavailable) {
-		return "", &cliError{
-			Message:  err.Error(),
-			Kind:     kindDaemonUnavail,
-			ExitCode: ExitDaemonUnavail,
-		}
-	}
-	return "", err
+	return baseURL, nil
 }
 
 // workspaceStartForRemote returns the absolute --workspace path when
@@ -134,7 +127,9 @@ func discoverDaemon(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if url, ok := client.Discover(ctx, ns.DataDir); ok {
+	if url, ok, err := client.Discover(ctx, ns.DataDir); err != nil {
+		return "", cliDaemonTargetError(err)
+	} else if ok {
 		return url, nil
 	}
 	return "", noDaemonRunningError()
@@ -156,7 +151,8 @@ func cliDaemonTargetError(err error) error {
 			ExitCode: ExitValidation,
 		}
 	}
-	if errors.Is(err, client.ErrRemoteUnavailable) {
+	if errors.Is(err, client.ErrRemoteUnavailable) ||
+		errors.Is(err, client.ErrLocalDaemonUnreachable) {
 		return &cliError{
 			Message:  err.Error(),
 			Kind:     kindDaemonUnavail,

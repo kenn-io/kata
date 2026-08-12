@@ -502,6 +502,26 @@ func TestHealth_DoesNotAutoStartDaemon(t *testing.T) {
 		"hint must point the user at the right action")
 }
 
+func TestHealthReportsLiveUnreachableDaemon(t *testing.T) {
+	resetFlags(t)
+	home := setupKataEnv(t)
+	t.Setenv("KATA_SERVER", "")
+	address := "unix://" + filepath.Join(home, "missing.sock")
+	require.NoError(t, writeRuntimeFor(home, address))
+
+	_, err := discoverDaemon(context.Background())
+
+	require.Error(t, err)
+	var ce *cliError
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, ExitDaemonUnavail, ce.ExitCode)
+	assert.Equal(t, kindDaemonUnavail, ce.Kind)
+	assert.Contains(t, ce.Message, "daemon pid")
+	assert.Contains(t, ce.Message, address)
+	assert.Contains(t, ce.Message, "missing.sock")
+	assert.NotContains(t, ce.Message, "no daemon running")
+}
+
 func TestHealth_NamedLocalDaemonDoesNotAutoStart(t *testing.T) {
 	resetFlags(t)
 	home := t.TempDir()

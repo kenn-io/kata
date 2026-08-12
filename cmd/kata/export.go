@@ -182,7 +182,11 @@ func refuseRunningDaemonWithMessage(ctx context.Context, message string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := client.Discover(ctx, ns.DataDir); ok {
+	_, ok, err := client.Discover(ctx, ns.DataDir)
+	if err != nil {
+		return cliDaemonTargetError(err)
+	}
+	if ok {
 		return &cliError{
 			Message:  message,
 			Kind:     kindValidation,
