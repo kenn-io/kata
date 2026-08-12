@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -55,9 +56,12 @@ func TestExportImportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
 	require.Equal(t, "Imported issue", issues[0].Title)
-	restoredInfo, err := os.Stat(filepath.Join(root, "restore.db"))
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), restoredInfo.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		// Owner-only Unix modes are not meaningful on Windows (ACL-based).
+		restoredInfo, err := os.Stat(filepath.Join(root, "restore.db"))
+		require.NoError(t, err)
+		require.Equal(t, os.FileMode(0o600), restoredInfo.Mode().Perm())
+	}
 
 	_, err = New(Config{Root: root, SourceDSN: "sqlite://" + source, Targets: map[string]string{"active": "source.db"}})
 	require.ErrorContains(t, err, "active SQLite storage")
