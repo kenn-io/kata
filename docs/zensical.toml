@@ -10,6 +10,9 @@ repo_url = "https://github.com/kenn-io/kata"
 repo_name = "kenn-io/kata"
 edit_uri = "edit/main/docs/"
 extra_css = ["stylesheets/extra.css"]
+extra_javascript = [
+  { path = "javascripts/install-platform.js", type = "module" },
+]
 nav = [
   {"Start" = [
     {"Overview" = "index.md"},

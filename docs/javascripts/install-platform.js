@@ -23,13 +23,11 @@ export function detectInstallPlatform(platform) {
 
 function selectInstallPlatform(panel, platform) {
   for (const button of panel.querySelectorAll('[data-install-platform-button]')) {
-    button.setAttribute(
-      'aria-pressed',
-      String(button.dataset.installPlatformButton === platform),
-    )
+    button.setAttribute('aria-pressed', String(button.dataset.installPlatformButton === platform))
   }
 
   for (const content of panel.querySelectorAll('[data-install-platform-content]')) {
+    content.classList.remove('kata-install-command--fallback-hidden')
     content.hidden = content.dataset.installPlatformContent !== platform
   }
 
@@ -66,7 +64,9 @@ function initializeCurrentPage() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeCurrentPage, { once: true })
+  document.addEventListener('DOMContentLoaded', initializeCurrentPage, {
+    once: true,
+  })
 } else {
   initializeCurrentPage()
 }

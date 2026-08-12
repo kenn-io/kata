@@ -9,15 +9,39 @@ description: Local-first issue tracking for humans and coding agents.
 
 <p class="kata-hero-tagline">The issue tracker built for coding agents and the humans steering them.</p>
 
-Coding agents need somewhere durable to track work: not a chat thread, not a
-markdown to-do list. kata gives them a local task ledger they can drive from the
-CLI: create, claim, relate, and close issues with evidence. Humans supervise the
-same work in a terminal UI. By default, issue state lives in a local SQLite
-database, so your repo stays clean and no hosted tracker is required. When a team
-of humans and agents needs to share, you can opt into a remote daemon or
-federation.
+<p class="kata-hero-summary">A local-first task ledger agents drive from the CLI and humans supervise in the terminal or browser.</p>
 
-[Install](#install){ .md-button .md-button--primary }
+<section class="kata-install" data-install-panel markdown>
+  <div class="kata-install-header">
+    <div>
+      <h2>Install kata</h2>
+      <p>One binary. No runtime dependencies.</p>
+    </div>
+    <div class="kata-install-platforms" role="group" aria-label="Choose your operating system">
+      <button type="button" data-install-platform-button="macos" aria-pressed="true">macOS</button>
+      <button type="button" data-install-platform-button="linux" aria-pressed="false">Linux</button>
+      <button type="button" data-install-platform-button="windows" aria-pressed="false">Windows</button>
+    </div>
+  </div>
+```sh { .kata-install-command data-install-platform-content="macos" }
+brew install kata
+```
+
+```sh { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="linux" }
+curl -fsSL https://katatracker.com/install.sh | bash
+```
+
+```powershell { .kata-install-command .kata-install-command--fallback-hidden data-install-platform-content="windows" }
+powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
+```
+
+  <div class="kata-install-meta">
+    <p data-install-platform-status>macOS selected · choose another platform anytime.</p>
+    <a href="get-started/install.md">All install options →</a>
+  </div>
+  <p class="kata-install-stability"><strong>Stable since v0.14.0:</strong> releases preserve backward compatibility across upgrades.</p>
+</section>
+
 [Quickstart](#quickstart){ .md-button }
 
 </div>
@@ -34,54 +58,6 @@ full browser workspace:
 Both images are generated from disposable synthetic data by the docs screenshot
 workflow. See the [Web UI guide](guide/web-ui.md) for projects, collections,
 issue editing, relationships, recurrences, and configured-daemon switching.
-
-## Install
-
-=== "macOS"
-
-    ```sh
-    brew install kata
-    ```
-
-    Or install the ordinary release archive:
-
-    ```sh
-    curl -fsSL https://katatracker.com/install.sh | bash
-    ```
-
-=== "Linux"
-
-    ```sh
-    curl -fsSL https://katatracker.com/install.sh | bash
-    ```
-
-    If you already use
-    [Homebrew on Linux or WSL 2](https://docs.brew.sh/Homebrew-on-Linux):
-
-    ```sh
-    brew install kata
-    ```
-
-=== "Windows (PowerShell)"
-
-    ```powershell
-    powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 | iex"
-    ```
-
-The release installers detect your OS and CPU architecture, download the latest
-GitHub release archive, and verify it against `SHA256SUMS` before installing.
-Confirm the install with:
-
-```sh
-kata version
-```
-
-Prefer `go install`, `.deb`/`.rpm` packages, or building from source? See
-[Install](get-started/install.md).
-
-!!! note "Stable"
-    Since v0.14.0, kata releases preserve backward compatibility across
-    upgrades.
 
 ## Why kata
 
