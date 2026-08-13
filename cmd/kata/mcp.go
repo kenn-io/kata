@@ -27,6 +27,7 @@ func newMCPCmd() *cobra.Command {
 }
 
 func newMCPServeCmd() *cobra.Command {
+	var allProjects bool
 	var projects []string
 	var storageRoot string
 	var storageTargets []string
@@ -39,14 +40,17 @@ func newMCPServeCmd() *cobra.Command {
 			if strings.TrimSpace(storageRoot) == "" && len(storageTargets) > 0 {
 				return errors.New("--storage-target requires --storage-root")
 			}
+			if allProjects && (len(projects) > 0 || strings.TrimSpace(flags.Workspace) != "" || strings.TrimSpace(flags.Project) != "") {
+				return errors.New("--all-projects cannot be combined with --projects, --project, or --workspace")
+			}
 			if len(projects) > 0 && strings.TrimSpace(flags.Workspace) != "" {
 				return errors.New("--projects cannot be combined with --workspace")
 			}
 			if len(projects) > 0 && strings.TrimSpace(flags.Project) != "" {
 				return errors.New("--projects cannot be combined with --project")
 			}
-			if enableTokenAdmin && (len(projects) > 0 || strings.TrimSpace(flags.Workspace) != "" || strings.TrimSpace(flags.Project) != "") {
-				return errors.New("--enable-token-admin cannot be combined with a narrow project scope")
+			if enableTokenAdmin && !allProjects {
+				return errors.New("--enable-token-admin requires --all-projects")
 			}
 			ctx := command.Context()
 			var storage *storageadmin.Admin
@@ -85,19 +89,22 @@ func newMCPServeCmd() *cobra.Command {
 			var projectID int64
 			var projectName string
 			switch {
+			case allProjects:
+				scope = mcpserver.NewAllScope()
 			case len(projects) > 0:
 				scope, err = mcpserver.ResolveAllowlistScope(ctx, apiClient, projects)
-			case strings.TrimSpace(flags.Workspace) != "" || strings.TrimSpace(flags.Project) != "":
+			default:
 				start, startErr := resolveStartPath(flags.Workspace)
 				if startErr != nil {
 					return startErr
 				}
 				projectID, projectName, err = resolveProjectIDAndNameWithClient(ctx, httpClient, baseURL, start)
+				if err != nil && strings.TrimSpace(flags.Workspace) == "" && strings.TrimSpace(flags.Project) == "" {
+					err = fmt.Errorf("%w (run inside a kata workspace, or pass --project, --workspace, --projects, or --all-projects)", err)
+				}
 				if err == nil {
 					scope, err = mcpserver.ResolveBoundScope(ctx, apiClient, mcpserver.ProjectIdentity{ID: projectID, Name: projectName})
 				}
-			default:
-				scope = mcpserver.NewAllScope()
 			}
 			if err != nil {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
@@ -129,6 +136,7 @@ func newMCPServeCmd() *cobra.Command {
 			return err
 		},
 	}
+	command.Flags().BoolVar(&allProjects, "all-projects", false, "serve every project visible to the selected daemon")
 	command.Flags().StringSliceVar(&projects, "projects", nil, "serve only these project names")
 	command.Flags().StringVar(&storageRoot, "storage-root", "", "enable host-local JSONL artifacts under this directory")
 	command.Flags().StringArrayVar(&storageTargets, "storage-target", nil, "approved import target alias=path-or-DSN (repeatable)")

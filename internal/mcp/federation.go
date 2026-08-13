@@ -77,24 +77,6 @@ type FederationStatusOutput struct {
 	Enrollments []FederationEnrollmentSummary       `json:"enrollments"`
 }
 
-// FederationEnrollInput enables a hub project or creates an enrollment.
-type FederationEnrollInput struct {
-	Action                       string `json:"action,omitempty"`
-	Project                      string `json:"project,omitempty"`
-	SpokeInstanceUID             string `json:"spoke_instance_uid,omitempty"`
-	Capabilities                 string `json:"capabilities,omitempty"`
-	Token                        string `json:"token,omitempty"`
-	AllowAdoptionSnapshotAuthors bool   `json:"allow_adoption_snapshot_authors,omitempty"`
-}
-
-// FederationEnrollOutput reports federation metadata or a new enrollment.
-type FederationEnrollOutput struct {
-	Project    ProjectIdentity                  `json:"project"`
-	Metadata   *generated.ProjectFederationBody `json:"metadata,omitempty"`
-	Enrollment *FederationEnrollmentSummary     `json:"enrollment,omitempty"`
-	Token      string                           `json:"token,omitempty"`
-}
-
 // FederationEnrollmentRevokeInput selects an enrollment to revoke.
 type FederationEnrollmentRevokeInput struct {
 	ID int64 `json:"id"`
@@ -188,7 +170,6 @@ func registerFederationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	mutating := toolHints(false, true, true)
 	additive := toolHints(false, false, true)
 	addTool(server, "kata.federation_status", "Federation status", "Read in-scope federation, enrollment, replica, and quarantine status without secrets.", read, handlers.federationStatus)
-	addTool(server, "kata.federation_enroll", "Federation enrollment", "Enable federation for a project or create a spoke enrollment.", additive, handlers.federationEnroll)
 	addTool(server, "kata.federation_enrollment_revoke", "Revoke enrollment", "Revoke a federation enrollment by ID.", mutating, handlers.federationEnrollmentRevoke)
 	addTool(server, "kata.federation_join", "Join federation", "Join or adopt an enrolled hub project as a spoke.", additive, handlers.federationJoin)
 	addTool(server, "kata.federation_rebind", "Rebind federation", "Rebind a spoke to a configured hub catalog entry.", mutating, handlers.federationRebind)
@@ -362,43 +343,6 @@ func (h toolHandlers) federationStatus(ctx context.Context, _ *sdkmcp.CallToolRe
 		enrollments = append(enrollments, federationEnrollmentSummary(item))
 	}
 	return successResult(), FederationStatusOutput{Statuses: statuses, Enrollments: enrollments}, nil
-}
-
-func (h toolHandlers) federationEnroll(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationEnrollInput) (*sdkmcp.CallToolResult, FederationEnrollOutput, error) {
-	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, false)
-	if err != nil {
-		return nil, FederationEnrollOutput{}, err
-	}
-	action := strings.TrimSpace(input.Action)
-	if action == "" {
-		action = "enroll"
-	}
-	if action == "enable" {
-		response, enableErr := h.options.Client.EnableProjectFederation(ctx, &generated.EnableProjectFederationRequestOptions{PathParams: &generated.EnableProjectFederationPath{ProjectID: project.ID}, Body: &generated.EnableProjectFederationBody{Actor: &h.options.Actor}})
-		if enableErr != nil {
-			return nil, FederationEnrollOutput{}, enableErr
-		}
-		return successResult(), FederationEnrollOutput{Project: project, Metadata: response}, nil
-	}
-	if action != "enroll" {
-		return nil, FederationEnrollOutput{}, errors.New("action must be enable or enroll")
-	}
-	if strings.TrimSpace(input.SpokeInstanceUID) == "" || strings.TrimSpace(input.Capabilities) == "" {
-		return nil, FederationEnrollOutput{}, errors.New("enroll requires spoke_instance_uid and capabilities")
-	}
-	response, err := h.options.Client.CreateFederationEnrollment(ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &generated.CreateFederationEnrollmentBody{
-		Actor: &h.options.Actor, ProjectID: project.ID, SpokeInstanceUID: input.SpokeInstanceUID,
-		Capabilities: input.Capabilities, Token: optionalString(input.Token), AllowAdoptionSnapshotAuthors: optionalTrue(input.AllowAdoptionSnapshotAuthors),
-	}})
-	if err != nil {
-		return nil, FederationEnrollOutput{}, err
-	}
-	summary := federationEnrollmentSummary(*response)
-	output := FederationEnrollOutput{Project: project, Enrollment: &summary}
-	if response.Token != nil {
-		output.Token = *response.Token
-	}
-	return successResult(), output, nil
 }
 
 func (h toolHandlers) federationEnrollmentRevoke(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationEnrollmentRevokeInput) (*sdkmcp.CallToolResult, FederationEnrollmentRevokeOutput, error) {

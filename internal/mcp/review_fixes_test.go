@@ -118,6 +118,126 @@ func TestEventPeerRedactionPropagatesTransientLookupFailure(t *testing.T) {
 	require.Equal(t, peerUID, output.Events[0].Payload.(map[string]any)["link_to_uid"])
 }
 
+func TestEventPeerRedactionCoversParentLinkAndArrayShapes(t *testing.T) {
+	allowedUID := "01HCCCCCCCCCCCCCCCCCCCCCCC"
+	foreignUID := "01HDDDDDDDDDDDDDDDDDDDDDDD"
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case strings.HasPrefix(request.URL.Path, "/api/v1/issues/"):
+			uid := strings.TrimPrefix(request.URL.Path, "/api/v1/issues/")
+			projectID, projectName := int64(1), "spoke-project"
+			if uid == foreignUID {
+				projectID, projectName = 2, "other-project"
+			}
+			issue := issueJSON(projectID, projectName, "peer1")
+			issue["uid"] = uid
+			writeJSON(writer, map[string]any{
+				"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+	output := EventsOutput{Events: []StreamEvent{
+		{Payload: map[string]any{
+			"parent_set": "in1", "parent_set_uid": allowedUID,
+			"blocks_added": []any{"in1", "out1"}, "blocks_added_uids": []any{allowedUID, foreignUID},
+			"links": []any{map[string]any{"type": "blocks", "to_short_id": "out1", "to_issue_uid": foreignUID}},
+		}},
+		{Payload: map[string]any{
+			"parent_removed": "out1", "parent_removed_uid": foreignUID,
+			"related_added": []any{"out1"}, "related_added_uids": []any{foreignUID},
+		}},
+	}}
+
+	require.NoError(t, handlers.redactEventsOutsideScope(t.Context(), &output))
+	first := output.Events[0].Payload.(map[string]any)
+	require.Equal(t, allowedUID, first["parent_set_uid"])
+	require.Equal(t, "in1", first["parent_set"])
+	require.Equal(t, []any{allowedUID}, first["blocks_added_uids"])
+	require.Equal(t, []any{"in1"}, first["blocks_added"])
+	link := first["links"].([]any)[0].(map[string]any)
+	require.NotContains(t, link, "to_issue_uid")
+	require.NotContains(t, link, "to_short_id")
+	second := output.Events[1].Payload.(map[string]any)
+	require.NotContains(t, second, "parent_removed_uid")
+	require.NotContains(t, second, "parent_removed")
+	require.NotContains(t, second, "related_added_uids")
+	require.NotContains(t, second, "related_added")
+}
+
+func TestEventRedactionScopesMovedProjectReferences(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+			return
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+	output := EventsOutput{Events: []StreamEvent{{
+		ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA",
+		Payload: map[string]any{
+			"from_project_uid": "01HEEEEEEEEEEEEEEEEEEEEEEE", "from_short_id": "old1",
+			"to_project_uid": "01HAAAAAAAAAAAAAAAAAAAAAAA", "to_short_id": "new1",
+			"source_uid": "01HEEEEEEEEEEEEEEEEEEEEEEE",
+		},
+	}}}
+
+	require.NoError(t, handlers.redactEventsOutsideScope(t.Context(), &output))
+	payload := output.Events[0].Payload.(map[string]any)
+	require.NotContains(t, payload, "from_project_uid")
+	require.NotContains(t, payload, "from_short_id")
+	require.NotContains(t, payload, "source_uid")
+	require.Equal(t, "01HAAAAAAAAAAAAAAAAAAAAAAA", payload["to_project_uid"])
+	require.Equal(t, "new1", payload["to_short_id"])
+}
+
+func TestAuditClosesRedactsForeignQualifiedParents(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case "/api/v1/audit/closes":
+			writeJSON(writer, map[string]any{"rows": []any{
+				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "abc1", "parent": "other-project#zz9"},
+				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "def2", "parent": "ghi3"},
+			}})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project"})
+	require.NoError(t, err)
+	require.Len(t, output.Rows, 2)
+	require.Nil(t, output.Rows[0].Parent)
+	require.NotNil(t, output.Rows[1].Parent)
+	require.Equal(t, "ghi3", *output.Rows[1].Parent)
+}
+
 func TestEventPeerRedactionDropsShortIDsWithoutUIDs(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/projects" {

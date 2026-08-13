@@ -12,6 +12,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 func TestAdministrationToolsArePublished(t *testing.T) {
@@ -25,9 +26,10 @@ func TestAdministrationToolsArePublished(t *testing.T) {
 	for _, tool := range result.Tools {
 		names[tool.Name] = true
 	}
+	require.False(t, names["kata.federation_enroll"], "credential-minting enrollment must stay outside MCP")
 	for _, name := range []string{
 		"kata.digest", "kata.events", "kata.import_issues",
-		"kata.federation_enroll", "kata.federation_enrollment_revoke", "kata.federation_join",
+		"kata.federation_enrollment_revoke", "kata.federation_join",
 		"kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_status",
 		"kata.project_create", "kata.project_merge", "kata.project_purge", "kata.project_remove",
 		"kata.project_restore", "kata.project_update", "kata.projects", "kata.system",
@@ -82,12 +84,21 @@ func TestAdministrationToolsRoundTripAgainstDaemon(t *testing.T) {
 	system := callAdministrationTool(t, session, "kata.system", map[string]any{})
 	require.NotEmpty(t, system["instance_uid"])
 	require.NotContains(t, system, "db_path")
-	callAdministrationTool(t, session, "kata.federation_enroll", map[string]any{"action": "enable", "project": "renamed-project"})
-	enrollment := callAdministrationTool(t, session, "kata.federation_enroll", map[string]any{
-		"project": "renamed-project", "spoke_instance_uid": system["instance_uid"], "capabilities": "pull",
+	// Enrollment credentials are minted through the CLI/daemon, never MCP.
+	renamed, err := store.ProjectByName(t.Context(), "renamed-project")
+	require.NoError(t, err)
+	actor := "example-agent"
+	_, err = client.EnableProjectFederation(t.Context(), &generated.EnableProjectFederationRequestOptions{
+		PathParams: &generated.EnableProjectFederationPath{ProjectID: renamed.ID},
+		Body:       &generated.EnableProjectFederationBody{Actor: &actor},
 	})
-	require.NotEmpty(t, enrollment["token"])
-	enrollmentID := enrollment["enrollment"].(map[string]any)["id"]
+	require.NoError(t, err)
+	enrolled, err := client.CreateFederationEnrollment(t.Context(), &generated.CreateFederationEnrollmentRequestOptions{Body: &generated.CreateFederationEnrollmentBody{
+		Actor: &actor, ProjectID: renamed.ID,
+		SpokeInstanceUID: system["instance_uid"].(string), Capabilities: "pull",
+	}})
+	require.NoError(t, err)
+	enrollmentID := enrolled.ID
 	federation := callAdministrationTool(t, session, "kata.federation_status", map[string]any{})
 	require.NotEmpty(t, federation["enrollments"])
 	require.NotContains(t, federation["enrollments"].([]any)[0].(map[string]any), "token")

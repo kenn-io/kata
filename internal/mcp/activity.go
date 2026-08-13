@@ -542,7 +542,42 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	return successResult(), AuditClosesOutput{Project: project, Rows: response.Rows}, nil
+	rows, err := h.redactAuditParentsOutsideScope(ctx, response.Rows)
+	if err != nil {
+		return nil, AuditClosesOutput{}, err
+	}
+	return successResult(), AuditClosesOutput{Project: project, Rows: rows}, nil
+}
+
+// redactAuditParentsOutsideScope blanks qualified parent references whose
+// project qualifier is not in the startup scope. Bare parent refs are
+// same-project by the daemon's rendering contract.
+func (h toolHandlers) redactAuditParentsOutsideScope(ctx context.Context, rows []generated.AuditCloseRow) ([]generated.AuditCloseRow, error) {
+	if h.options.Scope.Mode() == ScopeAll {
+		return rows, nil
+	}
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, true)
+	if err != nil {
+		return nil, err
+	}
+	inScope := make(map[string]struct{}, len(projects))
+	for _, project := range projects {
+		inScope[project.Name] = struct{}{}
+	}
+	for index := range rows {
+		parent := rows[index].Parent
+		if parent == nil {
+			continue
+		}
+		qualifier, _, qualified := strings.Cut(*parent, "#")
+		if !qualified {
+			continue
+		}
+		if _, ok := inScope[qualifier]; !ok {
+			rows[index].Parent = nil
+		}
+	}
+	return rows, nil
 }
 
 func (h toolHandlers) digest(ctx context.Context, _ *sdkmcp.CallToolRequest, input DigestInput) (*sdkmcp.CallToolResult, DigestOutput, error) {
@@ -814,8 +849,18 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 		return err
 	}
 	allowedProjects := make(map[int64]struct{}, len(projects))
+	allowedProjectUIDs := make(map[string]bool, len(projects))
 	for _, project := range projects {
 		allowedProjects[project.ID] = struct{}{}
+		if project.UID != "" {
+			allowedProjectUIDs[project.UID] = true
+		}
+	}
+	// An event's own project passed the scope filter already.
+	for _, event := range output.Events {
+		if event.ProjectUID != "" {
+			allowedProjectUIDs[event.ProjectUID] = true
+		}
 	}
 	peerUIDs := make(map[string]struct{})
 	for _, event := range output.Events {
@@ -846,7 +891,7 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 			event.RelatedIssueUID = ""
 			event.RelatedIssueShortID = ""
 		}
-		event.Payload = redactEventPayloadPeers(event.Payload, allowedPeers)
+		event.Payload = redactEventPayloadPeers(event.Payload, allowedPeers, allowedProjectUIDs)
 	}
 	return nil
 }
@@ -861,17 +906,42 @@ func isHTTPStatus(err error, status int) bool {
 }
 
 var eventPeerUIDKeys = map[string]struct{}{
-	"from_uid": {}, "to_uid": {}, "link_from_uid": {}, "link_to_uid": {},
-	"peer_uid": {}, "related_issue_uid": {},
+	"from_uid": {}, "to_uid": {}, "from_issue_uid": {}, "to_issue_uid": {},
+	"link_from_uid": {}, "link_to_uid": {}, "peer_uid": {}, "related_issue_uid": {},
+	"parent_set_uid": {}, "parent_removed_uid": {},
 }
 
-var eventPeerShortIDUIDKeys = map[string]string{
-	"from_short_id":          "from_uid",
-	"to_short_id":            "to_uid",
-	"link_from_short_id":     "link_from_uid",
-	"link_to_short_id":       "link_to_uid",
-	"peer_short_id":          "peer_uid",
-	"related_issue_short_id": "related_issue_uid",
+// A display reference survives only when one of its present UID companions
+// resolves in scope. Move payloads carry short IDs vouched for by a project
+// UID instead of an issue UID, so those keys list a project companion too.
+var eventPeerShortIDUIDKeys = map[string][]string{
+	"from_short_id":          {"from_uid", "from_issue_uid"},
+	"to_short_id":            {"to_uid", "to_issue_uid"},
+	"link_from_short_id":     {"link_from_uid"},
+	"link_to_short_id":       {"link_to_uid"},
+	"peer_short_id":          {"peer_uid"},
+	"related_issue_short_id": {"related_issue_uid"},
+	"parent_set":             {"parent_set_uid"},
+	"parent_removed":         {"parent_removed_uid"},
+}
+
+var eventPeerShortIDProjectUIDKeys = map[string]string{
+	"from_short_id": "from_project_uid",
+	"to_short_id":   "to_project_uid",
+}
+
+// Aggregated relationship deltas store parallel UID and display arrays.
+var eventPeerUIDListKeys = map[string]string{
+	"blocks_added_uids":       "blocks_added",
+	"blocks_removed_uids":     "blocks_removed",
+	"blocked_by_added_uids":   "blocked_by_added",
+	"blocked_by_removed_uids": "blocked_by_removed",
+	"related_added_uids":      "related_added",
+	"related_removed_uids":    "related_removed",
+}
+
+var eventProjectUIDKeys = map[string]struct{}{
+	"from_project_uid": {}, "to_project_uid": {}, "source_uid": {},
 }
 
 func collectEventPeerUIDs(value any, output map[string]struct{}) {
@@ -883,6 +953,15 @@ func collectEventPeerUIDs(value any, output map[string]struct{}) {
 					output[uid] = struct{}{}
 				}
 			}
+			if _, listKey := eventPeerUIDListKeys[key]; listKey {
+				if list, ok := nested.([]any); ok {
+					for _, element := range list {
+						if uid, ok := element.(string); ok && uid != "" {
+							output[uid] = struct{}{}
+						}
+					}
+				}
+			}
 			collectEventPeerUIDs(nested, output)
 		}
 	case []any:
@@ -892,7 +971,7 @@ func collectEventPeerUIDs(value any, output map[string]struct{}) {
 	}
 }
 
-func redactEventPayloadPeers(value any, allowed map[string]bool) any {
+func redactEventPayloadPeers(value any, allowed map[string]bool, allowedProjects map[string]bool) any {
 	switch current := value.(type) {
 	case map[string]any:
 		for key := range current {
@@ -902,23 +981,88 @@ func redactEventPayloadPeers(value any, allowed map[string]bool) any {
 					delete(current, key)
 				}
 			}
+			if _, projectKey := eventProjectUIDKeys[key]; projectKey {
+				uid, ok := current[key].(string)
+				if !ok || !allowedProjects[uid] {
+					delete(current, key)
+				}
+			}
 		}
-		for shortIDKey, uidKey := range eventPeerShortIDUIDKeys {
+		for uidsKey, displayKey := range eventPeerUIDListKeys {
+			redactEventPeerUIDList(current, uidsKey, displayKey, allowed)
+		}
+		for shortIDKey, uidKeys := range eventPeerShortIDUIDKeys {
 			if _, present := current[shortIDKey]; !present {
 				continue
 			}
-			uid, ok := current[uidKey].(string)
-			if !ok || !allowed[uid] {
+			vouched := false
+			for _, uidKey := range uidKeys {
+				if uid, ok := current[uidKey].(string); ok && allowed[uid] {
+					vouched = true
+					break
+				}
+			}
+			if projectKey, paired := eventPeerShortIDProjectUIDKeys[shortIDKey]; paired && !vouched {
+				if uid, ok := current[projectKey].(string); ok && allowedProjects[uid] {
+					vouched = true
+				}
+			}
+			if !vouched {
 				delete(current, shortIDKey)
 			}
 		}
 		for key, nested := range current {
-			current[key] = redactEventPayloadPeers(nested, allowed)
+			current[key] = redactEventPayloadPeers(nested, allowed, allowedProjects)
 		}
 	case []any:
 		for index, nested := range current {
-			current[index] = redactEventPayloadPeers(nested, allowed)
+			current[index] = redactEventPayloadPeers(nested, allowed, allowedProjects)
 		}
 	}
 	return value
+}
+
+func redactEventPeerUIDList(payload map[string]any, uidsKey, displayKey string, allowed map[string]bool) {
+	rawUIDs, present := payload[uidsKey]
+	rawDisplay, displayPresent := payload[displayKey]
+	if !present {
+		// A display array with no UID companion cannot be vouched for.
+		if displayPresent {
+			delete(payload, displayKey)
+		}
+		return
+	}
+	uids, ok := rawUIDs.([]any)
+	if !ok {
+		delete(payload, uidsKey)
+		delete(payload, displayKey)
+		return
+	}
+	display, displayOK := rawDisplay.([]any)
+	pairwise := displayPresent && displayOK && len(display) == len(uids)
+	keptUIDs := make([]any, 0, len(uids))
+	keptDisplay := make([]any, 0, len(uids))
+	for index, element := range uids {
+		uid, isString := element.(string)
+		if !isString || !allowed[uid] {
+			continue
+		}
+		keptUIDs = append(keptUIDs, uid)
+		if pairwise {
+			keptDisplay = append(keptDisplay, display[index])
+		}
+	}
+	if len(keptUIDs) == 0 {
+		delete(payload, uidsKey)
+		delete(payload, displayKey)
+		return
+	}
+	payload[uidsKey] = keptUIDs
+	if displayPresent {
+		if pairwise {
+			payload[displayKey] = keptDisplay
+		} else {
+			delete(payload, displayKey)
+		}
+	}
 }

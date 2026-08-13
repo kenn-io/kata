@@ -164,8 +164,8 @@ func (s *Scope) Projects(ctx context.Context, client *kataclient.Client, include
 			projects = append(projects, project)
 		}
 	}
-	if len(projects) != len(allowed) {
-		return nil, errors.New("one or more projects in the MCP startup scope are no longer available")
+	if len(projects) == 0 {
+		return nil, errors.New("no projects in the MCP startup scope are available")
 	}
 	return projects, nil
 }
@@ -183,6 +183,11 @@ func (s *Scope) Project(ctx context.Context, client *kataclient.Client, name str
 	for _, project := range projects {
 		if project.Name == name {
 			return project, nil
+		}
+	}
+	for _, startup := range s.projects {
+		if startup.Name == name {
+			return ProjectIdentity{}, fmt.Errorf("project %q in the MCP startup scope is no longer available", name)
 		}
 	}
 	return ProjectIdentity{}, fmt.Errorf("project %q is outside the MCP startup scope", name)

@@ -61,6 +61,34 @@ func TestResolveAllowlistScopeRejectsDuplicateAndMissingProjects(t *testing.T) {
 	require.EqualError(t, err, `MCP project "missing-project" was not found`)
 }
 
+func TestAllowlistScopeServesRemainingProjectsWhenOneIsMissing(t *testing.T) {
+	client := projectCatalogClient(t, `{"projects":[{"id":1,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`)
+	scope, err := NewAllowlistScope([]ProjectIdentity{
+		{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"},
+		{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "hub-project"},
+	})
+	require.NoError(t, err)
+
+	projects, err := scope.Projects(t.Context(), client, false)
+	require.NoError(t, err)
+	require.Len(t, projects, 1)
+	require.Equal(t, "spoke-project", projects[0].Name)
+
+	_, err = scope.Project(t.Context(), client, "spoke-project", false)
+	require.NoError(t, err)
+	_, err = scope.Project(t.Context(), client, "hub-project", false)
+	require.EqualError(t, err, `project "hub-project" in the MCP startup scope is no longer available`)
+}
+
+func TestScopeProjectsFailWhenNoMembersRemain(t *testing.T) {
+	client := projectCatalogClient(t, `{"projects":[]}`)
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"}})
+	require.NoError(t, err)
+
+	_, err = scope.Projects(t.Context(), client, false)
+	require.EqualError(t, err, "no projects in the MCP startup scope are available")
+}
+
 func projectCatalogClient(t *testing.T, response string) *kataclient.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

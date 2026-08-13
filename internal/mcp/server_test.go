@@ -150,7 +150,6 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.edit",
 		"kata.edit_comment",
 		"kata.events",
-		"kata.federation_enroll",
 		"kata.federation_enrollment_revoke",
 		"kata.federation_join",
 		"kata.federation_leave",
@@ -201,7 +200,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	gotNames := make([]string, 0, len(result.Tools))
 	projectSelectors := map[string]bool{
 		"kata.audit_closes": true,
-		"kata.create":       true, "kata.digest": true, "kata.events": true, "kata.federation_enroll": true,
+		"kata.create":       true, "kata.digest": true, "kata.events": true,
 		"kata.federation_leave": true, "kata.federation_quarantine": true, "kata.federation_rebind": true,
 		"kata.import_issues": true, "kata.labels": true, "kata.list": true, "kata.next": true,
 		"kata.project_purge": true, "kata.project_remove": true, "kata.project_restore": true,
@@ -210,8 +209,8 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.search": true, "kata.sync_once": true, "kata.sync_status": true, "kata.sync_update": true,
 	}
 	openWorld := map[string]bool{
-		"kata.federation_enroll": true, "kata.federation_enrollment_revoke": true,
-		"kata.federation_join": true, "kata.federation_leave": true, "kata.federation_quarantine": true,
+		"kata.federation_enrollment_revoke": true,
+		"kata.federation_join":              true, "kata.federation_leave": true, "kata.federation_quarantine": true,
 		"kata.federation_rebind": true, "kata.federation_status": true, "kata.import_issues": true,
 		"kata.search": true, "kata.sync_once": true, "kata.sync_status": true, "kata.sync_update": true,
 	}
@@ -275,7 +274,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	}
 	additive := map[string]bool{
 		"kata.claim": true, "kata.comment": true, "kata.create": true,
-		"kata.federation_enroll": true, "kata.federation_join": true, "kata.import_issues": true,
+		"kata.federation_join": true, "kata.import_issues": true,
 		"kata.lease": true, "kata.project_create": true, "kata.project_restore": true,
 		"kata.recurrence_update": true, "kata.restore": true, "kata.sync_once": true,
 		"kata.token_create": true,

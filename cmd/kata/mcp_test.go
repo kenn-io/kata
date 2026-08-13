@@ -23,7 +23,9 @@ func TestMCPServeProjectModesRejectFlagConflicts(t *testing.T) {
 	}{
 		{name: "allowlist with project", args: []string{"--project", "spoke-project", "mcp", "serve", "--projects", "hub-project"}},
 		{name: "allowlist with workspace", args: []string{"--workspace", t.TempDir(), "mcp", "serve", "--projects", "spoke-project"}},
-		{name: "token administration with project", args: []string{"--project", "spoke-project", "mcp", "serve", "--enable-token-admin"}},
+		{name: "all projects with project", args: []string{"--project", "spoke-project", "mcp", "serve", "--all-projects"}},
+		{name: "all projects with workspace", args: []string{"--workspace", t.TempDir(), "mcp", "serve", "--all-projects"}},
+		{name: "all projects with allowlist", args: []string{"mcp", "serve", "--all-projects", "--projects", "spoke-project"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -35,7 +37,18 @@ func TestMCPServeProjectModesRejectFlagConflicts(t *testing.T) {
 	}
 }
 
-func TestMCPServeDefaultsToDaemonWideScope(t *testing.T) {
+func TestMCPServeTokenAdminRequiresAllProjects(t *testing.T) {
+	for _, args := range [][]string{
+		{"mcp", "serve", "--enable-token-admin"},
+		{"--project", "spoke-project", "mcp", "serve", "--enable-token-admin"},
+	} {
+		command := newRootCmd()
+		command.SetArgs(args)
+		require.ErrorContains(t, command.Execute(), "--enable-token-admin requires --all-projects")
+	}
+}
+
+func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	var requests int
@@ -49,16 +62,28 @@ func TestMCPServeDefaultsToDaemonWideScope(t *testing.T) {
 	command.SetIn(bytes.NewReader(nil))
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{"mcp", "serve"})
+	command.SetArgs([]string{"mcp", "serve", "--all-projects"})
 	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
 
 	require.NoError(t, command.Execute())
 	require.Zero(t, requests, "daemon-wide startup must not resolve the current workspace")
 }
 
-func TestMCPServeDoesNotExposeAllProjectsFlag(t *testing.T) {
-	command := newMCPServeCmd()
-	require.Nil(t, command.Flags().Lookup("all-projects"))
+func TestMCPServeDefaultRequiresWorkspaceBinding(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	t.Chdir(t.TempDir())
+	daemon := httptest.NewServer(http.HandlerFunc(http.NotFound))
+	t.Cleanup(daemon.Close)
+
+	command := newRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"mcp", "serve"})
+	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
+
+	require.ErrorContains(t, command.Execute(), "--all-projects")
 }
 
 func TestParseMCPStorageTargets(t *testing.T) {

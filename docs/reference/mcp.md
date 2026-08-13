@@ -9,18 +9,21 @@ clients. The server gives typed access to Kata issue data, administration,
 automation, and event workflows.
 
 ```sh
-# Every project visible to the selected daemon (default)
+# The current workspace's project (default)
 kata mcp serve
 
-# Add explicit daemon credential administration
-kata mcp serve --enable-token-admin
-
-# One project
+# One explicit project
 kata --workspace /path/to/repository mcp serve
 kata --project example-project mcp serve
 
 # A fixed project allowlist
 kata mcp serve --projects example-project,shared-project
+
+# Every project visible to the selected daemon
+kata mcp serve --all-projects
+
+# Add explicit daemon credential administration
+kata mcp serve --all-projects --enable-token-admin
 ```
 
 JSON-RPC uses stdin and stdout. Kata writes no status text or logs to stdout.
@@ -44,15 +47,18 @@ private-network checks, and Unix socket discovery.
 
 ## Project scope
 
-The server follows the selected daemon's active project catalog by default.
-This matches a long-lived MCP client's need to use any project that the daemon
-can access. Use startup flags only when the MCP process needs a narrower
-boundary:
+The server binds the current workspace's project by default, so a bare
+`kata mcp serve` never grants an MCP peer more authority than the repository
+it was launched for. Broader boundaries are explicit startup choices:
 
-- `--workspace` or `--project` serves one project. Bare issue references remain
-  valid.
-- Allowlist mode resolves the supplied names once and keeps their immutable
-  project UIDs. A later rename does not change the boundary.
+- `--workspace` or `--project` serves one explicit project. Bare issue
+  references remain valid in one-project mode.
+- `--projects` resolves the supplied names once and keeps their immutable
+  project UIDs. A later rename does not change the boundary, and a member
+  that is later archived or merged away drops out without disabling the
+  remaining allowlist.
+- `--all-projects` follows the selected daemon's active project catalog for
+  long-lived clients that need every project the daemon can access.
 
 Multi-project issue reads and writes use `project#ref`. Project-list tools can
 read all projects in scope. Issue creation and other project-selected writes
@@ -68,7 +74,7 @@ checks, federation trust, claims, and mutation policy.
 The initial catalog contains 13 read-only section loaders. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
-typed tools needed for the current task instead of placing all 57 tools in the
+typed tools needed for the current task instead of placing all 56 tools in the
 model context at startup.
 
 | Loader | Detailed tools |
@@ -80,7 +86,7 @@ model context at startup.
 | `kata.load_projects` | `kata.projects`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
 | `kata.load_tokens` | `kata.tokens`, `kata.token_create`, `kata.token_revoke` when `--enable-token-admin` is set in daemon-wide mode |
 | `kata.load_system` | `kata.system` |
-| `kata.load_federation` | `kata.federation_status`, `kata.federation_enroll`, `kata.federation_enrollment_revoke`, `kata.federation_join`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine` |
+| `kata.load_federation` | `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_join`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine` |
 | `kata.load_sync` | `kata.sync_status`, `kata.sync_update`, `kata.sync_once` |
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
@@ -146,10 +152,16 @@ polling. A `sync.reset_required` result returns `reset_after_id`, advances
 
 `kata.token_create` returns the plaintext token once. `kata.tokens`, status
 tools, errors, and later calls never return that secret or its hash. Token
-administration requires both the default daemon-wide startup scope and the
-explicit `--enable-token-admin` startup capability. A normal server, a
-one-project server, and a fixed-allowlist server cannot read, create, or revoke
-global daemon tokens.
+administration requires both the `--all-projects` daemon-wide startup scope and
+the explicit `--enable-token-admin` startup capability. A default workspace
+server, a one-project server, and a fixed-allowlist server cannot read, create,
+or revoke global daemon tokens.
+
+Federation enrollment credentials are never minted through MCP: creating an
+enrollment and reading its token stay CLI/operator workflows.
+`kata.federation_status` lists secret-free enrollment records, and
+`kata.federation_enrollment_revoke` can revoke one, but no MCP tool creates or
+returns enrollment secrets.
 
 Federation leave exposes `preflight`, `prepare`, and `commit` phases so an
 operator can preserve the normal revoke-before-local-teardown order. The phase
