@@ -338,10 +338,7 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		setStringBounds("ref", 1, 256)
 	case "kata.audit_closes":
 		setNumberBounds("limit", 1, maximumResultLimit)
-		if field := property("after_event_id"); field != nil {
-			minimum := float64(0)
-			field.Minimum = &minimum
-		}
+		setStringBounds("cursor", 1, 64)
 	}
 	return schema
 }

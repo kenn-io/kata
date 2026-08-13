@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,23 +135,23 @@ type WaitOutput struct {
 
 // AuditClosesInput filters close audit records.
 type AuditClosesInput struct {
-	Project      string `json:"project,omitempty"`
-	Since        string `json:"since,omitempty"`
-	Until        string `json:"until,omitempty"`
-	Actor        string `json:"actor,omitempty"`
-	Parent       string `json:"parent,omitempty"`
-	Reason       string `json:"reason,omitempty"`
-	NoEvidence   bool   `json:"no_evidence,omitempty"`
-	Limit        int64  `json:"limit,omitempty" jsonschema:"Maximum rows from 1 through 100; default 20"`
-	AfterEventID int64  `json:"after_event_id,omitempty" jsonschema:"Return rows whose event_id is greater than this immutable cursor; pass the previous result's next_after_event_id to continue"`
+	Project    string `json:"project,omitempty"`
+	Since      string `json:"since,omitempty"`
+	Until      string `json:"until,omitempty"`
+	Actor      string `json:"actor,omitempty"`
+	Parent     string `json:"parent,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	NoEvidence bool   `json:"no_evidence,omitempty"`
+	Limit      int64  `json:"limit,omitempty" jsonschema:"Maximum rows from 1 through 100; default 20"`
+	Cursor     string `json:"cursor,omitempty" jsonschema:"Opaque pagination cursor from the previous result's next_cursor; keep the other filters identical and omit for the first page"`
 }
 
 // AuditClosesOutput contains close audit records for one project.
 type AuditClosesOutput struct {
-	Project          ProjectIdentity           `json:"project"`
-	Rows             []generated.AuditCloseRow `json:"rows"`
-	Truncated        bool                      `json:"truncated,omitempty"`
-	NextAfterEventID *int64                    `json:"next_after_event_id,omitempty"`
+	Project    ProjectIdentity           `json:"project"`
+	Rows       []generated.AuditCloseRow `json:"rows"`
+	Truncated  bool                      `json:"truncated,omitempty"`
+	NextCursor *string                   `json:"next_cursor,omitempty"`
 }
 
 // DigestInput defines an activity digest window.
@@ -552,9 +553,6 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if limit < 1 || limit > maximumResultLimit {
 		return nil, AuditClosesOutput{}, fmt.Errorf("limit must be between 1 and %d", maximumResultLimit)
 	}
-	if input.AfterEventID < 0 {
-		return nil, AuditClosesOutput{}, errors.New("after_event_id must not be negative")
-	}
 	response, err := h.options.Client.AuditCloses(ctx, &generated.AuditClosesRequestOptions{Query: &generated.AuditClosesQuery{
 		ProjectID: project.ID, Since: optionalString(input.Since), Until: optionalString(input.Until),
 		Actor: optionalString(input.Actor), Parent: optionalString(input.Parent), Reason: optionalString(input.Reason),
@@ -563,21 +561,32 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	// Rows are ordered by immutable close-event ID, so this cursor never
-	// repeats rows and never skips rows that existed when the page was
-	// requested — even across purges, merges, or shared timestamps.
-	rows := make([]generated.AuditCloseRow, 0, len(response.Rows))
-	for _, row := range response.Rows {
-		if row.EventID > input.AfterEventID {
-			rows = append(rows, row)
+	// Rows are ordered by immutable close-event ID. The cursor records the
+	// last returned event ID plus the number of rows at or below it, so a
+	// below-cursor change — history merged in from another project or rows
+	// removed by a purge — invalidates pagination explicitly instead of
+	// silently skipping or repeating rows.
+	rows := response.Rows
+	start := 0
+	if input.Cursor != "" {
+		cursorEventID, seen, cursorErr := parseAuditCursor(input.Cursor)
+		if cursorErr != nil {
+			return nil, AuditClosesOutput{}, cursorErr
+		}
+		for start < len(rows) && rows[start].EventID <= cursorEventID {
+			start++
+		}
+		if int64(start) != seen || start == 0 || rows[start-1].EventID != cursorEventID {
+			return nil, AuditClosesOutput{}, errors.New("close history below the pagination cursor changed (project merge or issue purge); restart without a cursor")
 		}
 	}
+	rows = rows[start:]
 	output := AuditClosesOutput{Project: project}
 	if int64(len(rows)) > limit {
 		rows = rows[:limit]
 		output.Truncated = true
-		next := rows[len(rows)-1].EventID
-		output.NextAfterEventID = &next
+		next := encodeAuditCursor(rows[len(rows)-1].EventID, int64(start+len(rows)))
+		output.NextCursor = &next
 	}
 	rows, err = h.redactAuditParentsOutsideScope(ctx, project, rows)
 	if err != nil {
@@ -585,6 +594,26 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	}
 	output.Rows = rows
 	return successResult(), output, nil
+}
+
+func encodeAuditCursor(eventID, seen int64) string {
+	return fmt.Sprintf("v1:%d:%d", eventID, seen)
+}
+
+func parseAuditCursor(raw string) (eventID, seen int64, err error) {
+	var version string
+	parts := strings.Split(raw, ":")
+	if len(parts) == 3 {
+		version = parts[0]
+		eventID, err = strconv.ParseInt(parts[1], 10, 64)
+		if err == nil {
+			seen, err = strconv.ParseInt(parts[2], 10, 64)
+		}
+	}
+	if version != "v1" || err != nil || eventID < 1 || seen < 1 {
+		return 0, 0, errors.New("cursor is not a value returned in next_cursor")
+	}
+	return eventID, seen, nil
 }
 
 // validateAuditParentFilter stops fixed scopes from probing foreign refs

@@ -100,10 +100,11 @@ into a generic command tool.
 
 The tools use structured input and output. List-like results, including
 `kata.audit_closes` rows, default to 20 and are bounded at 100;
-`kata.audit_closes` pages with an immutable close-event-ID cursor
-(`after_event_id` in, `truncated` plus `next_after_event_id` out), so purges,
-merges, and shared timestamps cannot skip or repeat rows. `kata.show` returns
-at most 100 comments. Create and
+`kata.audit_closes` pages with an opaque `cursor` (`truncated` plus
+`next_cursor` out) validated against the close history below it, so shared
+timestamps cannot skip or repeat rows and a project merge or issue purge
+during pagination fails the page with a restart error instead of silently
+skewing it. `kata.show` returns at most 100 comments. Create and
 comment require idempotency keys. `kata.token_create` and recurrence creation
 have no idempotency key, are annotated non-idempotent, and mint a new record
 on every identical retry. Destructive tools preserve Kata's exact

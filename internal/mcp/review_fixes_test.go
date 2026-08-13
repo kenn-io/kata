@@ -260,6 +260,52 @@ func TestDigestRedactsForeignLinkActionTargets(t *testing.T) {
 		"link-vouched peer survives; unvouched targets are stripped to their action type even when a same-short-ID issue exists")
 }
 
+func TestAuditPaginationInvalidatesWhenHistoryBelowCursorChanges(t *testing.T) {
+	auditRow := func(eventID int, issue string) map[string]any {
+		return map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": issue, "event_id": eventID}
+	}
+	merged := false
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case "/api/v1/audit/closes":
+			rows := []any{auditRow(11, "abc1"), auditRow(14, "def2"), auditRow(15, "ghi3")}
+			if merged {
+				// A project merge rehomed an older close event whose ID
+				// falls below the first page's cursor.
+				rows = []any{auditRow(11, "abc1"), auditRow(12, "hij4"), auditRow(14, "def2"), auditRow(15, "ghi3")}
+			}
+			writeJSON(writer, map[string]any{"rows": rows})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, first, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2})
+	require.NoError(t, err)
+	require.True(t, first.Truncated)
+	require.NotNil(t, first.NextCursor)
+
+	merged = true
+	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2, Cursor: *first.NextCursor})
+	require.ErrorContains(t, err, "restart without a cursor",
+		"history merged in below the cursor must invalidate pagination, not be skipped")
+
+	merged = false
+	_, resumed, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2, Cursor: *first.NextCursor})
+	require.NoError(t, err, "an unchanged prefix keeps the cursor valid")
+	require.Len(t, resumed.Rows, 1)
+	require.Equal(t, "ghi3", resumed.Rows[0].Issue)
+}
+
 func TestProjectsListingSurvivesMissingAllowlistMember(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/projects" {
@@ -542,22 +588,23 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 	require.Nil(t, output.Rows[2].Parent, "bare parent without link provenance must be blanked")
 
 	// A bounded limit truncates before the result can exceed the transport
-	// message cap; the immutable event-ID cursor pages without skipping
-	// or repeating rows even when every row shares one timestamp.
+	// message cap; the event-ID cursor pages without skipping or repeating
+	// rows even when every row shares one timestamp.
 	_, limited, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2})
 	require.NoError(t, err)
 	require.Len(t, limited.Rows, 2)
 	require.True(t, limited.Truncated)
-	require.NotNil(t, limited.NextAfterEventID)
-	require.EqualValues(t, 12, *limited.NextAfterEventID)
-	_, page, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2, AfterEventID: *limited.NextAfterEventID})
+	require.NotNil(t, limited.NextCursor)
+	_, page, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2, Cursor: *limited.NextCursor})
 	require.NoError(t, err)
 	require.Len(t, page.Rows, 1)
 	require.False(t, page.Truncated)
-	require.Nil(t, page.NextAfterEventID)
+	require.Nil(t, page.NextCursor)
 	require.Equal(t, "jkl4", page.Rows[0].Issue)
 	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 101})
 	require.ErrorContains(t, err, "limit must be between 1 and 100")
+	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Cursor: "not-a-cursor"})
+	require.ErrorContains(t, err, "cursor is not a value returned in next_cursor")
 
 	// Foreign or unprovable parent filters are rejected before any request.
 	before := auditRequests
