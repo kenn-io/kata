@@ -1016,8 +1016,10 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 	}
 	allowedProjects := make(map[int64]struct{}, len(projects))
 	allowedProjectUIDs := make(map[string]bool, len(projects))
+	allowedProjectNames := make(map[string]struct{}, len(projects))
 	for _, project := range projects {
 		allowedProjects[project.ID] = struct{}{}
+		allowedProjectNames[project.Name] = struct{}{}
 		if project.UID != "" {
 			allowedProjectUIDs[project.UID] = true
 		}
@@ -1026,6 +1028,9 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 	for _, event := range output.Events {
 		if event.ProjectUID != "" {
 			allowedProjectUIDs[event.ProjectUID] = true
+		}
+		if event.ProjectName != "" {
+			allowedProjectNames[event.ProjectName] = struct{}{}
 		}
 	}
 	peerUIDs := make(map[string]struct{})
@@ -1058,8 +1063,69 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 			event.RelatedIssueShortID = ""
 		}
 		event.Payload = redactEventPayloadPeers(event.Payload, allowedPeers, allowedProjectUIDs)
+		redactEventTypedDisplayRefs(event, allowedProjectNames)
 	}
 	return nil
+}
+
+// redactEventTypedDisplayRefs removes event-type-specific display references
+// that carry no UID companion: close-throttle cohort refs span projects and
+// close-evidence refs are stored verbatim.
+func redactEventTypedDisplayRefs(event *StreamEvent, inScope map[string]struct{}) {
+	payload, ok := event.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	switch event.Type {
+	case "close.throttled":
+		for _, key := range []string{"parent", "prior"} {
+			if ref, isString := payload[key].(string); isString && ref != "" && !displayRefInScope(ref, inScope) {
+				delete(payload, key)
+			}
+		}
+		cohort, isList := payload["cohort"].([]any)
+		if !isList {
+			return
+		}
+		kept := make([]any, 0, len(cohort))
+		for _, element := range cohort {
+			ref, isString := element.(string)
+			if isString && displayRefInScope(ref, inScope) {
+				kept = append(kept, ref)
+			}
+		}
+		if len(kept) == 0 {
+			delete(payload, "cohort")
+		} else {
+			payload["cohort"] = kept
+		}
+	case "issue.closed":
+		evidence, isList := payload["evidence"].([]any)
+		if !isList {
+			return
+		}
+		for _, element := range evidence {
+			entry, isMap := element.(map[string]any)
+			if !isMap {
+				continue
+			}
+			if ref, isString := entry["issue_ref"].(string); isString && ref != "" && !displayRefInScope(ref, inScope) {
+				delete(entry, "issue_ref")
+			}
+		}
+	}
+}
+
+// displayRefInScope applies the display-reference rendering contract:
+// qualified refs name their project, bare refs are same-project, and
+// full-length values are globally resolved and unprovable.
+func displayRefInScope(ref string, inScope map[string]struct{}) bool {
+	qualifier, _, qualified := strings.Cut(ref, "#")
+	if qualified {
+		_, ok := inScope[qualifier]
+		return ok
+	}
+	return len(ref) < shortid.MaxLength
 }
 
 func isHTTPStatus(err error, status int) bool {

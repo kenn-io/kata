@@ -286,6 +286,90 @@ func TestProjectsListingSurvivesMissingAllowlistMember(t *testing.T) {
 	require.EqualError(t, err, `project "hub-project" in the MCP startup scope is no longer available`)
 }
 
+func TestScopedSyncEnableRequiresDaemonWideScope(t *testing.T) {
+	var syncRequests []string
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case strings.Contains(request.URL.Path, "/issue-sync/"):
+			syncRequests = append(syncRequests, request.URL.Path)
+			writeJSON(writer, map[string]any{"status": map[string]any{"binding_id": 1, "enabled": false, "last_comments": 0, "last_created": 0}})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	scoped := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, _, err = scoped.syncUpdate(t.Context(), nil, SyncUpdateInput{
+		Project: "spoke-project", Action: "enable",
+		Config: map[string]any{"owner": "victim-org", "repo": "private-repo"},
+	})
+	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.Empty(t, syncRequests, "scoped enable must not reach the daemon")
+
+	_, _, err = scoped.syncUpdate(t.Context(), nil, SyncUpdateInput{Project: "spoke-project", Action: "disable"})
+	require.NoError(t, err, "scoped disable of the operator-configured binding stays allowed")
+
+	wide := toolHandlers{options: Options{Client: client, Scope: NewAllScope()}}
+	_, _, err = wide.syncUpdate(t.Context(), nil, SyncUpdateInput{
+		Project: "spoke-project", Action: "enable",
+		Config: map[string]any{"owner": "example-org", "repo": "example-repo"},
+	})
+	require.NoError(t, err, "daemon-wide enable remains an operator action")
+	require.Len(t, syncRequests, 2)
+}
+
+func TestEventRedactionCoversThrottleAndEvidenceDisplayRefs(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+			return
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+	output := EventsOutput{Events: []StreamEvent{
+		{Type: "close.throttled", ProjectName: "spoke-project", Payload: map[string]any{
+			"reason": "sibling-burst",
+			"parent": "other-project#zz9",
+			"prior":  "hub-project#abc4",
+			"cohort": []any{"abc1", "other-project#def2", "01HDDDDDDDDDDDDDDDDDDDDDDD"},
+		}},
+		{Type: "issue.closed", ProjectName: "spoke-project", Payload: map[string]any{
+			"reason": "duplicate",
+			"evidence": []any{
+				map[string]any{"type": "duplicate-of", "issue_ref": "other-project#ghi3"},
+				map[string]any{"type": "duplicate-of", "issue_ref": "def2"},
+				map[string]any{"type": "commit", "sha": "abc1234"},
+			},
+		}},
+	}}
+
+	require.NoError(t, handlers.redactEventsOutsideScope(t.Context(), &output))
+	throttled := output.Events[0].Payload.(map[string]any)
+	require.NotContains(t, throttled, "parent", "foreign qualified throttle parent must be blanked")
+	require.NotContains(t, throttled, "prior")
+	require.Equal(t, []any{"abc1"}, throttled["cohort"], "bare same-project cohort refs survive; foreign and full-length refs do not")
+	closed := output.Events[1].Payload.(map[string]any)
+	evidence := closed["evidence"].([]any)
+	require.NotContains(t, evidence[0].(map[string]any), "issue_ref", "foreign qualified evidence ref must be blanked")
+	require.Equal(t, "def2", evidence[1].(map[string]any)["issue_ref"], "bare same-project evidence ref survives")
+	require.Equal(t, "abc1234", evidence[2].(map[string]any)["sha"], "non-ref evidence is untouched")
+}
+
 func linkPeerJSON(project, shortID, uid string) map[string]any {
 	return map[string]any{
 		"project": project, "qualified_id": project + "#" + shortID,

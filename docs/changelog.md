@@ -34,14 +34,19 @@ All notable changes to kata, grouped by release. Versioned releases start with
   sidecars, require exact confirmation before replacing an artifact or target,
   and install restores race-safely with owner-only permissions.
 - Gated daemon token administration behind the explicit `--enable-token-admin`
-  capability in daemon-wide scope, and kept credential-minting federation
-  enrollment outside MCP entirely: scoped status, enrollment revocation, join,
-  phased leave with commit acknowledgement, rebind, and quarantine tools
-  remain, and no MCP tool creates or returns enrollment secrets.
+  capability in daemon-wide scope, kept credential-minting federation
+  enrollment outside MCP entirely, and restricted enabling issue
+  synchronization — which selects the repository the daemon's GitHub
+  credentials read — to the daemon-wide scope: scoped servers can only
+  disable or run the operator-configured binding.
 - Redacted cross-scope relationship identities, including parent, link,
-  relationship-array, moved-project, and audit parent references, from scoped
-  MCP issue, event, digest, edit-delta, and close-audit results, and rejected
-  close-audit parent filters that cannot prove startup-scope membership.
+  relationship-array, moved-project, close-evidence, close-throttle, and
+  audit parent references, from scoped MCP issue, event, digest, edit-delta,
+  and close-audit results, and rejected close-audit parent filters that
+  cannot prove startup-scope membership.
+- Compared PostgreSQL storage-import targets with the active daemon storage
+  by persisted instance identity, so equivalent DSN spellings cannot bypass
+  the textual overlap guard.
 
 **Improvements**
 

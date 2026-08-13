@@ -585,20 +585,54 @@ func (a *Admin) importFresh(ctx context.Context, input io.Reader, target string,
 	}
 	installedFreshPostgres := storeopen.InstalledFreshPostgresSchema(store)
 	instanceUID := store.InstanceUID()
-	if err := jsonl.ImportWithOptions(ctx, input, store, jsonl.ImportOptions{RequireFreshTarget: true, NewInstance: options.NewInstance}); err != nil {
+	fail := func(importErr error) (ImportResult, error) {
 		closeErr := store.Close()
 		if installedFreshPostgres {
 			cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
 			cleanupErr := storeopen.RemoveFreshPostgresTarget(cleanupContext, target, instanceUID)
-			return ImportResult{}, errors.Join(err, closeErr, cleanupErr)
+			return ImportResult{}, errors.Join(importErr, closeErr, cleanupErr)
 		}
-		return ImportResult{}, errors.Join(err, closeErr)
+		return ImportResult{}, errors.Join(importErr, closeErr)
+	}
+	if backend == "postgres" {
+		// The DSN-hash guard is textual; equivalent DSNs (localhost vs
+		// 127.0.0.1) hash differently, so compare the persisted instance
+		// identity of the opened target with the active source store.
+		sourceUID, sourceErr := a.sourceInstanceUID(ctx)
+		if sourceErr != nil {
+			return fail(sourceErr)
+		}
+		if sourceUID != "" && sourceUID == instanceUID {
+			return fail(errors.New("storage import target must differ from the active daemon storage"))
+		}
+	}
+	if err := jsonl.ImportWithOptions(ctx, input, store, jsonl.ImportOptions{RequireFreshTarget: true, NewInstance: options.NewInstance}); err != nil {
+		return fail(err)
 	}
 	if err := store.Close(); err != nil {
 		return ImportResult{}, err
 	}
 	return ImportResult{Artifact: options.Artifact, Target: options.Target, Backend: backend}, nil
+}
+
+// sourceInstanceUID reads the active daemon storage's persisted instance
+// identity so an import target can be compared by identity, not DSN text.
+func (a *Admin) sourceInstanceUID(ctx context.Context) (string, error) {
+	source, err := storeopen.OpenReadOnly(ctx, a.sourceDSN)
+	if err != nil {
+		return "", fmt.Errorf("open active storage identity: %w", err)
+	}
+	defer func() { _ = source.Close() }()
+	uid := source.InstanceUID()
+	if uid == "" {
+		// A read-only handle may not have cached the identity; a refresh
+		// failure means no persisted identity exists yet.
+		if refreshErr := source.RefreshInstanceUID(ctx); refreshErr == nil {
+			uid = source.InstanceUID()
+		}
+	}
+	return uid, nil
 }
 
 func moveSQLiteSetWithLink(from, to string, link func(string, string) error) error {

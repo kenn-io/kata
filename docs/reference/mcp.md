@@ -165,6 +165,12 @@ enrollment and reading its token stay CLI/operator workflows.
 `kata.federation_enrollment_revoke` can revoke one, but no MCP tool creates or
 returns enrollment secrets.
 
+Enabling issue synchronization selects which external repository the daemon's
+configured GitHub credentials read, so `kata.sync_update` with
+`action: "enable"` requires the `--all-projects` daemon-wide scope. Scoped
+servers can still disable the operator-configured binding and run
+`kata.sync_once` against it.
+
 Federation leave exposes `preflight`, `prepare`, and `commit` phases so an
 operator can preserve the normal revoke-before-local-teardown order. The phase
 is required. A commit without external hub revocation also requires

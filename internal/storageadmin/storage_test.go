@@ -2,6 +2,7 @@ package storageadmin
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/testenv"
@@ -322,4 +324,63 @@ func TestFailedPostgresImportRemovesFreshSchema(t *testing.T) {
 	version, err := storeopen.PeekSchemaVersion(t.Context(), dsn)
 	require.NoError(t, err)
 	require.Zero(t, version)
+}
+
+func TestPostgresImportRefusesActiveDatabaseByIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_POSTGRES_SCHEMA", "mcp_restore_identity")
+
+	alias, swappable := swapPostgresHost(t, dsn)
+	if !swappable {
+		t.Skip("container DSN has no swappable localhost/127.0.0.1 host")
+	}
+	require.NotEqual(t, config.DBHash(dsn), config.DBHash(alias),
+		"equivalent DSNs must hash differently for this test to exercise the identity guard")
+
+	// Give the active source a persisted instance identity, then confirm
+	// the alias spelling reaches the same server.
+	active, err := storeopen.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	require.NoError(t, active.Close())
+	probe, probeErr := storeopen.OpenReadOnly(t.Context(), alias)
+	if probeErr != nil {
+		t.Skipf("alias host is not reachable in this environment: %v", probeErr)
+	}
+	require.NoError(t, probe.Close())
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "backup.jsonl"), []byte("{}\n"), 0o600))
+	admin, err := New(Config{Root: root, SourceDSN: dsn, Targets: map[string]string{"restore": alias}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, admin.Close()) })
+
+	_, err = admin.Import(t.Context(), ImportOptions{Artifact: "backup.jsonl", Target: "restore"})
+	require.ErrorContains(t, err, "must differ from the active daemon storage")
+	version, err := storeopen.PeekSchemaVersion(t.Context(), dsn)
+	require.NoError(t, err)
+	require.NotZero(t, version, "identity refusal must not remove the active schema")
+}
+
+func swapPostgresHost(t *testing.T, dsn string) (string, bool) {
+	t.Helper()
+	parsed, err := url.Parse(dsn)
+	require.NoError(t, err)
+	port := parsed.Port()
+	switch parsed.Hostname() {
+	case "localhost":
+		parsed.Host = "127.0.0.1"
+	case "127.0.0.1":
+		parsed.Host = "localhost"
+	default:
+		return "", false
+	}
+	if port != "" {
+		parsed.Host += ":" + port
+	}
+	return parsed.String(), true
 }
