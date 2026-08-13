@@ -279,10 +279,16 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 		"kata.recurrence_update": true, "kata.restore": true, "kata.sync_once": true,
 		"kata.token_create": true,
 	}
+	nonIdempotentTools := map[string]bool{
+		// Identical retries mint new records: no idempotency key or natural
+		// unique key deduplicates these creations.
+		"kata.token_create":      true,
+		"kata.recurrence_update": true,
+	}
 	for _, tool := range result.Tools {
 		annotations := tool.Annotations
 		require.Equal(t, readOnly[tool.Name], annotations.ReadOnlyHint, tool.Name)
-		require.True(t, annotations.IdempotentHint, tool.Name)
+		require.Equal(t, !nonIdempotentTools[tool.Name], annotations.IdempotentHint, tool.Name)
 		require.NotNil(t, annotations.DestructiveHint, tool.Name)
 		if readOnly[tool.Name] || additive[tool.Name] {
 			require.False(t, *annotations.DestructiveHint, tool.Name)

@@ -61,7 +61,7 @@ type RecurrenceDeleteOutput struct {
 
 func registerRecurrenceTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.recurrences", "Read recurrences", "List recurrences or show one recurrence in an in-scope project.", toolHints(true, false, false), handlers.recurrences)
-	addTool(server, "kata.recurrence_update", "Update recurrence", "Create a recurrence or patch one at its required visible revision.", toolHints(false, false, false), handlers.recurrenceUpdate)
+	addTool(server, "kata.recurrence_update", "Update recurrence", "Create a recurrence or patch one at its required visible revision.", nonIdempotent(toolHints(false, false, false)), handlers.recurrenceUpdate)
 	addTool(server, "kata.recurrence_delete", "Delete recurrence", "Delete a recurrence at its visible revision.", toolHints(false, true, false), handlers.recurrenceDelete)
 }
 

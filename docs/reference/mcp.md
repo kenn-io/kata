@@ -100,7 +100,9 @@ into a generic command tool.
 
 The tools use structured input and output. List-like results default to 20 and
 are bounded at 100. `kata.show` returns at most 100 comments. Create and
-comment require idempotency keys. Destructive tools preserve Kata's exact
+comment require idempotency keys. `kata.token_create` and recurrence creation
+have no idempotency key, are annotated non-idempotent, and mint a new record
+on every identical retry. Destructive tools preserve Kata's exact
 confirmation and revision contracts.
 
 Recurrence patch and delete calls require the current positive `revision` and

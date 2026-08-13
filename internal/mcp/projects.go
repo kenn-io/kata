@@ -158,10 +158,15 @@ func (h toolHandlers) projects(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		result = append(result, projectSummaryOut(project))
 	}
 	if name != "" && len(result) == 0 {
+		for _, startup := range h.options.Scope.projects {
+			if startup.Name == name {
+				return nil, ProjectsOutput{}, fmt.Errorf("project %q in the MCP startup scope is no longer available", name)
+			}
+		}
 		return nil, ProjectsOutput{}, fmt.Errorf("project %q is outside the MCP startup scope", name)
 	}
-	if h.options.Scope.Mode() != ScopeAll && name == "" && len(result) != len(h.options.Scope.projects) {
-		return nil, ProjectsOutput{}, errors.New("one or more projects in the MCP startup scope are no longer available")
+	if h.options.Scope.Mode() != ScopeAll && name == "" && len(result) == 0 {
+		return nil, ProjectsOutput{}, errors.New("no projects in the MCP startup scope are available")
 	}
 	return successResult(), ProjectsOutput{Projects: result}, nil
 }

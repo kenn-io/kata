@@ -227,13 +227,20 @@ func TestDigestRedactsForeignLinkActionTargets(t *testing.T) {
 					"issues": []any{map[string]any{
 						"issue_uid": "01HCCCCCCCCCCCCCCCCCCCCCCC", "issue_short_id": "abc1",
 						"project_id": 1, "project_name": "spoke-project",
-						"actions": []any{"created", "labeled:bug", "blocks:def2", "unparent:zz9", "commented:2"},
+						"actions": []any{"created", "labeled:bug", "blocks:def2", "unparent:zz9", "related:xyz9", "commented:2"},
 					}},
 				}},
 			})
-		case "/api/v1/projects/1/issues/def2":
+		case "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["uid"] = "01HCCCCCCCCCCCCCCCCCCCCCCC"
 			writeJSON(writer, map[string]any{
-				"issue": issueJSON(1, "spoke-project", "def2"), "labels": []any{}, "comments": []any{}, "links": []any{},
+				"issue": issue, "labels": []any{}, "comments": []any{},
+				"links": []any{map[string]any{
+					"id": 1, "type": "blocks", "author": "example-agent", "created_at": "2026-08-11T00:00:00Z",
+					"from": linkPeerJSON("spoke-project", "abc1", "01HCCCCCCCCCCCCCCCCCCCCCCC"),
+					"to":   linkPeerJSON("spoke-project", "def2", "01HEEEEEEEEEEEEEEEEEEEEEEE"),
+				}},
 			})
 		default:
 			http.NotFound(writer, request)
@@ -249,7 +256,41 @@ func TestDigestRedactsForeignLinkActionTargets(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, output.Digests, 1)
 	actions := output.Digests[0].Digest.Actors[0].Issues[0].Actions
-	require.Equal(t, []string{"created", "labeled:bug", "blocks:def2", "commented:2"}, actions)
+	require.Equal(t, []string{"created", "labeled:bug", "blocks:def2", "unparent", "related", "commented:2"}, actions,
+		"link-vouched peer survives; unvouched targets are stripped to their action type even when a same-short-ID issue exists")
+}
+
+func TestProjectsListingSurvivesMissingAllowlistMember(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+			return
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{
+		{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"},
+		{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "hub-project"},
+	})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := handlers.projects(t.Context(), nil, ProjectsInput{})
+	require.NoError(t, err)
+	require.Len(t, output.Projects, 1)
+	require.Equal(t, "spoke-project", output.Projects[0].Name)
+
+	_, _, err = handlers.projects(t.Context(), nil, ProjectsInput{Project: "hub-project"})
+	require.EqualError(t, err, `project "hub-project" in the MCP startup scope is no longer available`)
+}
+
+func linkPeerJSON(project, shortID, uid string) map[string]any {
+	return map[string]any{
+		"project": project, "qualified_id": project + "#" + shortID,
+		"short_id": shortID, "status": "open", "uid": uid,
+	}
 }
 
 func TestEditFiltersLinkChangePeersOutsideScope(t *testing.T) {
@@ -352,9 +393,16 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "def2", "parent": "ghi3"},
 				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "jkl4", "parent": "gone5"},
 			}})
-		case "/api/v1/projects/1/issues/ghi3":
+		case "/api/v1/projects/1/issues/def2":
+			issue := issueJSON(1, "spoke-project", "def2")
+			issue["uid"] = "01HCCCCCCCCCCCCCCCCCCCCCCC"
 			writeJSON(writer, map[string]any{
-				"issue": issueJSON(1, "spoke-project", "ghi3"), "labels": []any{}, "comments": []any{}, "links": []any{},
+				"issue": issue, "labels": []any{}, "comments": []any{},
+				"links": []any{map[string]any{
+					"id": 1, "type": "parent", "author": "example-agent", "created_at": "2026-08-11T00:00:00Z",
+					"from": linkPeerJSON("spoke-project", "def2", "01HCCCCCCCCCCCCCCCCCCCCCCC"),
+					"to":   linkPeerJSON("spoke-project", "ghi3", "01HEEEEEEEEEEEEEEEEEEEEEEE"),
+				}},
 			})
 		default:
 			http.NotFound(writer, request)
@@ -370,9 +418,9 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, output.Rows, 3)
 	require.Nil(t, output.Rows[0].Parent, "foreign qualified parent must be blanked")
-	require.NotNil(t, output.Rows[1].Parent)
+	require.NotNil(t, output.Rows[1].Parent, "parent vouched by the child's current in-scope parent link survives")
 	require.Equal(t, "ghi3", *output.Rows[1].Parent)
-	require.Nil(t, output.Rows[2].Parent, "bare parent that no longer resolves in the project must be blanked")
+	require.Nil(t, output.Rows[2].Parent, "bare parent without link provenance must be blanked")
 
 	// Foreign or unprovable parent filters are rejected before any request.
 	before := auditRequests

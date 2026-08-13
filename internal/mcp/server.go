@@ -458,6 +458,13 @@ func toolHints(readOnly, destructive, openWorld bool) *sdkmcp.ToolAnnotations {
 	}
 }
 
+// nonIdempotent marks a creation tool whose identical retry mints a new
+// record because no idempotency key or natural unique key deduplicates it.
+func nonIdempotent(hints *sdkmcp.ToolAnnotations) *sdkmcp.ToolAnnotations {
+	hints.IdempotentHint = false
+	return hints
+}
+
 // SearchInput selects matching issues without returning large issue bodies.
 type SearchInput struct {
 	Project       string   `json:"project,omitempty" jsonschema:"Project name; omit to search every project in scope"`

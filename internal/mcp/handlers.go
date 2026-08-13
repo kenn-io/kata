@@ -1152,13 +1152,9 @@ func (h toolHandlers) scopedLinkChanges(ctx context.Context, changes *generated.
 	if changes == nil || h.options.Scope.Mode() == ScopeAll {
 		return changes, nil
 	}
-	projects, err := h.options.Scope.Projects(ctx, h.options.Client, true)
+	inScope, err := h.scopeProjectNames(ctx)
 	if err != nil {
 		return nil, err
-	}
-	inScope := make(map[string]struct{}, len(projects))
-	for _, project := range projects {
-		inScope[project.Name] = struct{}{}
 	}
 	keep := func(peers []generated.LinkPeer) []generated.LinkPeer {
 		kept := make([]generated.LinkPeer, 0, len(peers))

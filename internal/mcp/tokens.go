@@ -56,7 +56,7 @@ func registerTokenTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, false)
 	mutating := toolHints(false, true, false)
 	additive := toolHints(false, false, false)
-	addTool(server, "kata.token_create", "Create token", "Create a daemon token; the plaintext appears only in this result.", additive, handlers.tokenCreate)
+	addTool(server, "kata.token_create", "Create token", "Create a daemon token; the plaintext appears only in this result.", nonIdempotent(additive), handlers.tokenCreate)
 	addTool(server, "kata.token_revoke", "Revoke token", "Revoke one daemon token by ID.", mutating, handlers.tokenRevoke)
 	addTool(server, "kata.tokens", "List tokens", "List redacted daemon token records without secrets or hashes.", read, handlers.tokens)
 }

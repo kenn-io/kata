@@ -578,23 +578,20 @@ func (h toolHandlers) validateAuditParentFilter(ctx context.Context, raw string)
 }
 
 // redactAuditParentsOutsideScope blanks qualified parent references whose
-// project qualifier is not in the startup scope. Live bare parent refs are
-// same-project by the daemon's rendering contract, but a purged parent falls
-// back to its stored short ID, which can be foreign — keep a bare ref only
-// when it still resolves in the audited project.
+// project qualifier is not in the startup scope. Bare parent refs carry no
+// provenance — a purged parent falls back to its stored short ID, which can
+// be foreign and collide with an unrelated in-scope short ID — so a bare ref
+// is kept only when the closed child's current parent link vouches for it
+// with immutable peer identity.
 func (h toolHandlers) redactAuditParentsOutsideScope(ctx context.Context, project ProjectIdentity, rows []generated.AuditCloseRow) ([]generated.AuditCloseRow, error) {
 	if h.options.Scope.Mode() == ScopeAll {
 		return rows, nil
 	}
-	projects, err := h.options.Scope.Projects(ctx, h.options.Client, true)
+	inScope, err := h.scopeProjectNames(ctx)
 	if err != nil {
 		return nil, err
 	}
-	inScope := make(map[string]struct{}, len(projects))
-	for _, scoped := range projects {
-		inScope[scoped.Name] = struct{}{}
-	}
-	resolvedBare := make(map[string]bool)
+	childParents := make(map[string]string)
 	for index := range rows {
 		parent := rows[index].Parent
 		if parent == nil {
@@ -607,39 +604,73 @@ func (h toolHandlers) redactAuditParentsOutsideScope(ctx context.Context, projec
 			}
 			continue
 		}
-		allowed, seen := resolvedBare[*parent]
+		parentShort, seen := childParents[rows[index].Issue]
 		if !seen {
-			allowed, err = h.issueVisibleInProject(ctx, project, *parent)
+			parentShort, err = h.inScopeParentShortID(ctx, project, rows[index].Issue, inScope)
 			if err != nil {
 				return nil, err
 			}
-			resolvedBare[*parent] = allowed
+			childParents[rows[index].Issue] = parentShort
 		}
-		if !allowed {
+		if parentShort == "" || parentShort != *parent {
 			rows[index].Parent = nil
 		}
 	}
 	return rows, nil
 }
 
-// issueVisibleInProject reports whether ref resolves inside project. A
-// transient daemon failure fails closed with a redacted error.
-func (h toolHandlers) issueVisibleInProject(ctx context.Context, project ProjectIdentity, ref string) (bool, error) {
+// inScopeParentShortID returns the short ID of ref's current parent when that
+// parent's project is in scope, or "" when there is no provable parent.
+func (h toolHandlers) inScopeParentShortID(ctx context.Context, project ProjectIdentity, ref string, inScope map[string]struct{}) (string, error) {
+	issueUID, links, found, err := h.issueLinksForVouching(ctx, project, ref)
+	if err != nil || !found {
+		return "", err
+	}
+	for _, link := range links {
+		peer, typeName := linkPeerAndType(issueUID, link)
+		if typeName != "parent" {
+			continue
+		}
+		if _, ok := inScope[peer.Project]; ok {
+			return peer.ShortID, nil
+		}
+	}
+	return "", nil
+}
+
+// issueLinksForVouching reads an issue's current links so display references
+// can be vouched by immutable peer identity. A missing issue is not an error;
+// a transient daemon failure fails closed with a redacted error.
+func (h toolHandlers) issueLinksForVouching(ctx context.Context, project ProjectIdentity, ref string) (string, []generated.LinkOut, bool, error) {
 	includeDeleted := true
-	_, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
+	response, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
 		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
 		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
 	})
 	if err == nil {
-		return true, nil
+		return response.Issue.UID, response.Links, true, nil
 	}
 	if ctx.Err() != nil {
-		return false, ctx.Err()
+		return "", nil, false, ctx.Err()
 	}
 	if isHTTPStatus(err, http.StatusNotFound) {
-		return false, nil
+		return "", nil, false, nil
 	}
-	return false, errors.New("resolve scoped issue reference: daemon request failed")
+	return "", nil, false, errors.New("resolve scoped issue reference: daemon request failed")
+}
+
+// scopeProjectNames returns the startup scope's current project names,
+// including archived members, for display-reference checks.
+func (h toolHandlers) scopeProjectNames(ctx context.Context) (map[string]struct{}, error) {
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, true)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]struct{}, len(projects))
+	for _, project := range projects {
+		names[project.Name] = struct{}{}
+	}
+	return names, nil
 }
 
 func (h toolHandlers) digest(ctx context.Context, _ *sdkmcp.CallToolRequest, input DigestInput) (*sdkmcp.CallToolResult, DigestOutput, error) {
@@ -680,14 +711,19 @@ var digestLinkActionPrefixes = map[string]struct{}{
 	"unblocks": {}, "unblocked_by": {}, "unparent": {}, "unrelated": {},
 }
 
-// redactDigestLinkActions drops link action tokens whose peer short ID does
-// not resolve in the digest's project. Cross-project peers of an in-scope
-// issue render as bare short IDs, so resolution is the scope check.
+// redactDigestLinkActions strips the peer short ID from link action tokens
+// unless the digest issue's current links vouch for that peer with immutable
+// in-scope identity. Bare short IDs alone are not provenance: a foreign
+// peer's short ID can collide with an unrelated in-scope short ID.
 func (h toolHandlers) redactDigestLinkActions(ctx context.Context, project ProjectIdentity, digest *generated.DigestResponseBody) error {
-	resolved := make(map[string]bool)
+	inScope, err := h.scopeProjectNames(ctx)
+	if err != nil {
+		return err
+	}
 	for actorIndex := range digest.Actors {
 		for issueIndex := range digest.Actors[actorIndex].Issues {
 			issueActions := &digest.Actors[actorIndex].Issues[issueIndex]
+			var peers map[string]bool
 			kept := make([]string, 0, len(issueActions.Actions))
 			for _, action := range issueActions.Actions {
 				prefix, target, split := strings.Cut(action, ":")
@@ -699,23 +735,39 @@ func (h toolHandlers) redactDigestLinkActions(ctx context.Context, project Proje
 					kept = append(kept, action)
 					continue
 				}
-				allowed, seen := resolved[target]
-				if !seen {
-					var err error
-					allowed, err = h.issueVisibleInProject(ctx, project, target)
+				if peers == nil {
+					peers, err = h.inScopeLinkPeerShortIDs(ctx, project, issueActions.IssueShortID, inScope)
 					if err != nil {
 						return err
 					}
-					resolved[target] = allowed
 				}
-				if allowed {
+				if peers[target] {
 					kept = append(kept, action)
+				} else {
+					kept = append(kept, prefix)
 				}
 			}
 			issueActions.Actions = kept
 		}
 	}
 	return nil
+}
+
+// inScopeLinkPeerShortIDs collects the short IDs of ref's current link peers
+// whose projects are inside the startup scope.
+func (h toolHandlers) inScopeLinkPeerShortIDs(ctx context.Context, project ProjectIdentity, ref string, inScope map[string]struct{}) (map[string]bool, error) {
+	peers := make(map[string]bool)
+	issueUID, links, found, err := h.issueLinksForVouching(ctx, project, ref)
+	if err != nil || !found {
+		return peers, err
+	}
+	for _, link := range links {
+		peer, _ := linkPeerAndType(issueUID, link)
+		if _, ok := inScope[peer.Project]; ok {
+			peers[peer.ShortID] = true
+		}
+	}
+	return peers, nil
 }
 
 func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, input EventsInput) (*sdkmcp.CallToolResult, EventsOutput, error) {
