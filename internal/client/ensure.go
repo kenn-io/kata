@@ -176,11 +176,6 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 	return startDaemonForEnsure(ctx, ns.DataDir)
 }
 
-func discoverForEnsure(ctx context.Context, dataDir string) (string, bool, bool) {
-	url, compatible, ok, _ := discoverForEnsureWithError(ctx, dataDir)
-	return url, compatible, ok
-}
-
 func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bool, bool, error) {
 	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
@@ -214,10 +209,13 @@ func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bo
 			staleURL = url
 		}
 	}
+	if unreachable != nil {
+		return "", false, false, unreachable
+	}
 	if staleURL != "" {
 		return staleURL, false, true, nil
 	}
-	return "", false, false, unreachable
+	return "", false, false, nil
 }
 
 func daemonVersionCheckSkipped() bool {
@@ -233,6 +231,7 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 	if err != nil {
 		return err
 	}
+	signaled := false
 	for _, r := range recs {
 		if !kitdaemon.ProcessAlive(r.PID) {
 			continue
@@ -248,11 +247,19 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 		if err := signalDaemonStopForEnsure(r, dbhash); err != nil {
 			return fmt.Errorf("stop old daemon pid %d: %w", r.PID, err)
 		}
+		signaled = true
+	}
+	if !signaled {
+		return nil
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, _, ok := discoverForEnsure(ctx, dataDir); !ok {
+		_, _, ok, err := discoverForEnsureWithError(ctx, dataDir)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			return nil
 		}
 		select {

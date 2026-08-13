@@ -334,6 +334,34 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	assert.Equal(t, ns.DBHash, signaledDBHash)
 }
 
+func TestStopRunningDaemonsReportsUnreachableDaemonRemainingAfterSignal(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": "old-version",
+		"pid":     child.Process.Pid,
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, child.Process.Pid, addr))
+	unreachableAddress := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), unreachableAddress))
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+
+	origSignal := signalDaemonStopForEnsure
+	signalDaemonStopForEnsure = func(rec kitdaemon.RuntimeRecord, _ string) error {
+		return os.Remove(filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", rec.PID)))
+	}
+	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+
+	err = stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash)
+
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), unreachableAddress)
+}
+
 func TestStopRunningDaemonsReturnsSignalError(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	tmp := setupKataEnv(t)
@@ -393,6 +421,29 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 	assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
 	assert.Contains(t, err.Error(), address)
 	assert.Contains(t, err.Error(), "missing.sock")
+	assert.Zero(t, restore.startCalls)
+}
+
+func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": "old-version",
+		"pid":     child.Process.Pid,
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, child.Process.Pid, addr))
+	unreachableAddress := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), unreachableAddress))
+	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+
+	_, err := EnsureRunning(context.Background())
+
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), unreachableAddress)
+	assert.Zero(t, restore.stopCalls)
 	assert.Zero(t, restore.startCalls)
 }
 
