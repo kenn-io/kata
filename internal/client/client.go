@@ -95,7 +95,7 @@ func Discover(ctx context.Context, dataDir string) (string, bool, error) {
 	}
 	var unreachable error
 	for _, r := range recs {
-		if !runtimeRecordProcessAlive(r) {
+		if !daemon.RuntimeProcessAlive(r) {
 			continue
 		}
 		address := r.Endpoint().ConfigAddress()
@@ -115,14 +115,6 @@ func Discover(ctx context.Context, dataDir string) (string, bool, error) {
 		}
 	}
 	return "", false, unreachable
-}
-
-func runtimeRecordProcessAlive(record kitdaemon.RuntimeRecord) bool {
-	if !kitdaemon.ProcessAlive(record.PID) {
-		return false
-	}
-	return kitdaemon.CompareRuntimeProcessIdentity(record) !=
-		kitdaemon.ProcessIdentityMismatch
 }
 
 func probeAddress(ctx context.Context, address string) (string, PingInfo, bool) {
@@ -348,7 +340,7 @@ func unixClientFromRuntime(ctx context.Context, opts Opts) (*http.Client, error)
 		return nil, err
 	}
 	for _, r := range recs {
-		if !kitdaemon.ProcessAlive(r.PID) {
+		if !daemon.RuntimeProcessAlive(r) {
 			continue
 		}
 		ep := r.Endpoint()

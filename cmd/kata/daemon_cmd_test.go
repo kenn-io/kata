@@ -175,6 +175,17 @@ func TestDaemonStatus_AgentReportsStopped(t *testing.T) {
 	assert.Equal(t, "OK daemon status=stopped\n", string(out))
 }
 
+func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	child := startSleepProcess(t)
+	writeReusedRuntimePID(t, tmp, child.Process.Pid)
+
+	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "status")
+
+	assert.Equal(t, "OK daemon status=stopped\n", string(out))
+}
+
 func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
@@ -562,6 +573,18 @@ func TestDaemonStop_AgentNoDaemonReportsNoop(t *testing.T) {
 	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "stop")
 
 	assert.Equal(t, "OK daemon action=stop stopped=0\n", string(out))
+}
+
+func TestDaemonStop_DoesNotSignalRuntimeRecordWhosePIDWasReused(t *testing.T) {
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	child := startSleepProcess(t)
+	writeReusedRuntimePID(t, tmp, child.Process.Pid)
+
+	out := executeRoot(t, newRootCmd(), "--agent", "daemon", "stop")
+
+	assert.Equal(t, "OK daemon action=stop stopped=0\n", string(out))
+	assert.True(t, kitdaemon.ProcessAlive(child.Process.Pid))
 }
 
 func TestDaemonStop_JSONReportsStoppedPIDs(t *testing.T) {
@@ -2202,4 +2225,27 @@ func writeRuntimePID(t *testing.T, home string, pid int) {
 	// A faked daemon PID has none, so create them here; no-op on Unix, where
 	// stop/reload deliver SIGTERM/SIGHUP straight to the PID.
 	registerDaemonSignalEndpoints(t, ns.DBHash, pid)
+}
+
+func writeReusedRuntimePID(t *testing.T, home string, pid int) {
+	t.Helper()
+	identity, ok := kitdaemon.ReadProcessIdentity(pid)
+	require.True(t, ok)
+	encoded := string(identity)
+	replacement := byte('0')
+	if encoded[len(encoded)-1] == replacement {
+		replacement = '1'
+	}
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID:               pid,
+		ProcessIdentity:   identity,
+		ProcessIdentityV2: kitdaemon.ProcessIdentity(encoded[:len(encoded)-1] + string(replacement)),
+		Network:           "unix",
+		Address:           filepath.Join(home, "daemon.sock"),
+		StartedAt:         time.Now().UTC(),
+	})
+	require.NoError(t, err)
 }
