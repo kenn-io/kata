@@ -365,16 +365,23 @@ func (h toolHandlers) federationLeave(ctx context.Context, _ *sdkmcp.CallToolReq
 	if phase != "preflight" && phase != "prepare" && phase != "commit" {
 		return nil, FederationLeaveOutput{}, errors.New("phase must be preflight, prepare, or commit")
 	}
-	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, true)
-	if err != nil {
-		return nil, FederationLeaveOutput{}, err
-	}
 	disposition := strings.TrimSpace(input.Disposition)
 	if disposition == "" {
 		disposition = "detach"
 	}
 	if disposition != "detach" && disposition != "archive" {
 		return nil, FederationLeaveOutput{}, errors.New("disposition must be detach or archive")
+	}
+	if disposition == "archive" {
+		// Archiving through leave is project catalog administration; a
+		// scoped server may only detach.
+		if err := h.requireProjectAdminScope("federation leave with the archive disposition"); err != nil {
+			return nil, FederationLeaveOutput{}, err
+		}
+	}
+	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, true)
+	if err != nil {
+		return nil, FederationLeaveOutput{}, err
 	}
 	if phase == "commit" {
 		expected := "COMMIT FEDERATION LEAVE " + project.Name

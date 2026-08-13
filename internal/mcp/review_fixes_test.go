@@ -777,6 +777,51 @@ func TestFederationLeaveRequiresPhaseAndCommitConfirmation(t *testing.T) {
 	require.Zero(t, requests.Load())
 }
 
+func TestScopedFederationLeaveCannotArchive(t *testing.T) {
+	var mutations int
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case "/api/v1/federation/replicas/1/actions/leave":
+			mutations++
+			writeJSON(writer, map[string]any{
+				"project":     projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+				"disposition": "detach", "detached": false,
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	bound, err := NewBoundScope(ProjectIdentity{ID: 1, Name: "spoke-project"})
+	require.NoError(t, err)
+	allowlist, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+
+	for name, scope := range map[string]*Scope{"bound": bound, "allowlist": allowlist} {
+		handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+		before := mutations
+		for _, phase := range []string{"preflight", "prepare", "commit"} {
+			_, _, err := handlers.federationLeave(t.Context(), nil, FederationLeaveInput{
+				Project: "spoke-project", Phase: phase, Disposition: "archive",
+				Confirm: "COMMIT FEDERATION LEAVE spoke-project",
+			})
+			require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope", "%s %s", name, phase)
+		}
+		require.Equal(t, before, mutations, "scoped archive leave must fail before any daemon mutation")
+
+		_, _, err := handlers.federationLeave(t.Context(), nil, FederationLeaveInput{
+			Project: "spoke-project", Phase: "preflight", Disposition: "detach",
+		})
+		require.NoError(t, err, "%s scope keeps the detach disposition", name)
+		require.Equal(t, before+1, mutations)
+	}
+}
+
 func TestFederationLeaveResolvesArchivedProjectForRetry(t *testing.T) {
 	var sawArchivedCatalog atomic.Bool
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
