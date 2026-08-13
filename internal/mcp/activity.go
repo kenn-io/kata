@@ -15,6 +15,7 @@ import (
 	oapiruntime "github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -534,6 +535,9 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
+	if err := h.validateAuditParentFilter(ctx, input.Parent); err != nil {
+		return nil, AuditClosesOutput{}, err
+	}
 	response, err := h.options.Client.AuditCloses(ctx, &generated.AuditClosesRequestOptions{Query: &generated.AuditClosesQuery{
 		ProjectID: project.ID, Since: optionalString(input.Since), Until: optionalString(input.Until),
 		Actor: optionalString(input.Actor), Parent: optionalString(input.Parent), Reason: optionalString(input.Reason),
@@ -542,17 +546,43 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	rows, err := h.redactAuditParentsOutsideScope(ctx, response.Rows)
+	rows, err := h.redactAuditParentsOutsideScope(ctx, project, response.Rows)
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
 	return successResult(), AuditClosesOutput{Project: project, Rows: rows}, nil
 }
 
+// validateAuditParentFilter stops fixed scopes from probing foreign refs
+// through the daemon's global parent-filter resolution.
+func (h toolHandlers) validateAuditParentFilter(ctx context.Context, raw string) error {
+	ref := strings.TrimSpace(raw)
+	if ref == "" || h.options.Scope.Mode() == ScopeAll {
+		return nil
+	}
+	parsed, err := shortid.Parse(ref)
+	if err != nil {
+		return fmt.Errorf("parent filter %q is invalid", ref)
+	}
+	if parsed.ULID != "" {
+		return fmt.Errorf("parent filter %q is an unscoped UID; use a project-qualified short reference", ref)
+	}
+	if len(parsed.ShortID) == shortid.MaxLength {
+		return fmt.Errorf("parent filter %q uses an ambiguous full-length short ID; use a shorter project-qualified reference", ref)
+	}
+	if parsed.Project == "" {
+		return nil
+	}
+	_, err = h.options.Scope.Project(ctx, h.options.Client, parsed.Project, true)
+	return err
+}
+
 // redactAuditParentsOutsideScope blanks qualified parent references whose
-// project qualifier is not in the startup scope. Bare parent refs are
-// same-project by the daemon's rendering contract.
-func (h toolHandlers) redactAuditParentsOutsideScope(ctx context.Context, rows []generated.AuditCloseRow) ([]generated.AuditCloseRow, error) {
+// project qualifier is not in the startup scope. Live bare parent refs are
+// same-project by the daemon's rendering contract, but a purged parent falls
+// back to its stored short ID, which can be foreign — keep a bare ref only
+// when it still resolves in the audited project.
+func (h toolHandlers) redactAuditParentsOutsideScope(ctx context.Context, project ProjectIdentity, rows []generated.AuditCloseRow) ([]generated.AuditCloseRow, error) {
 	if h.options.Scope.Mode() == ScopeAll {
 		return rows, nil
 	}
@@ -561,23 +591,55 @@ func (h toolHandlers) redactAuditParentsOutsideScope(ctx context.Context, rows [
 		return nil, err
 	}
 	inScope := make(map[string]struct{}, len(projects))
-	for _, project := range projects {
-		inScope[project.Name] = struct{}{}
+	for _, scoped := range projects {
+		inScope[scoped.Name] = struct{}{}
 	}
+	resolvedBare := make(map[string]bool)
 	for index := range rows {
 		parent := rows[index].Parent
 		if parent == nil {
 			continue
 		}
 		qualifier, _, qualified := strings.Cut(*parent, "#")
-		if !qualified {
+		if qualified {
+			if _, ok := inScope[qualifier]; !ok {
+				rows[index].Parent = nil
+			}
 			continue
 		}
-		if _, ok := inScope[qualifier]; !ok {
+		allowed, seen := resolvedBare[*parent]
+		if !seen {
+			allowed, err = h.issueVisibleInProject(ctx, project, *parent)
+			if err != nil {
+				return nil, err
+			}
+			resolvedBare[*parent] = allowed
+		}
+		if !allowed {
 			rows[index].Parent = nil
 		}
 	}
 	return rows, nil
+}
+
+// issueVisibleInProject reports whether ref resolves inside project. A
+// transient daemon failure fails closed with a redacted error.
+func (h toolHandlers) issueVisibleInProject(ctx context.Context, project ProjectIdentity, ref string) (bool, error) {
+	includeDeleted := true
+	_, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
+		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
+		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
+	})
+	if err == nil {
+		return true, nil
+	}
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if isHTTPStatus(err, http.StatusNotFound) {
+		return false, nil
+	}
+	return false, errors.New("resolve scoped issue reference: daemon request failed")
 }
 
 func (h toolHandlers) digest(ctx context.Context, _ *sdkmcp.CallToolRequest, input DigestInput) (*sdkmcp.CallToolResult, DigestOutput, error) {
@@ -601,10 +663,59 @@ func (h toolHandlers) digest(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		if digestErr != nil {
 			return nil, DigestOutput{}, digestErr
 		}
+		if h.options.Scope.Mode() != ScopeAll {
+			if redactErr := h.redactDigestLinkActions(ctx, project, response); redactErr != nil {
+				return nil, DigestOutput{}, redactErr
+			}
+		}
 		projectCopy := project
 		out = append(out, ProjectDigest{Project: &projectCopy, Digest: *response})
 	}
 	return successResult(), DigestOutput{Digests: out}, nil
+}
+
+// Digest action tokens that carry a peer issue short ID after the colon.
+var digestLinkActionPrefixes = map[string]struct{}{
+	"blocks": {}, "blocked_by": {}, "parent": {}, "related": {},
+	"unblocks": {}, "unblocked_by": {}, "unparent": {}, "unrelated": {},
+}
+
+// redactDigestLinkActions drops link action tokens whose peer short ID does
+// not resolve in the digest's project. Cross-project peers of an in-scope
+// issue render as bare short IDs, so resolution is the scope check.
+func (h toolHandlers) redactDigestLinkActions(ctx context.Context, project ProjectIdentity, digest *generated.DigestResponseBody) error {
+	resolved := make(map[string]bool)
+	for actorIndex := range digest.Actors {
+		for issueIndex := range digest.Actors[actorIndex].Issues {
+			issueActions := &digest.Actors[actorIndex].Issues[issueIndex]
+			kept := make([]string, 0, len(issueActions.Actions))
+			for _, action := range issueActions.Actions {
+				prefix, target, split := strings.Cut(action, ":")
+				if !split || target == "" {
+					kept = append(kept, action)
+					continue
+				}
+				if _, linkAction := digestLinkActionPrefixes[prefix]; !linkAction {
+					kept = append(kept, action)
+					continue
+				}
+				allowed, seen := resolved[target]
+				if !seen {
+					var err error
+					allowed, err = h.issueVisibleInProject(ctx, project, target)
+					if err != nil {
+						return err
+					}
+					resolved[target] = allowed
+				}
+				if allowed {
+					kept = append(kept, action)
+				}
+			}
+			issueActions.Actions = kept
+		}
+	}
+	return nil
 }
 
 func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, input EventsInput) (*sdkmcp.CallToolResult, EventsOutput, error) {
@@ -908,7 +1019,7 @@ func isHTTPStatus(err error, status int) bool {
 var eventPeerUIDKeys = map[string]struct{}{
 	"from_uid": {}, "to_uid": {}, "from_issue_uid": {}, "to_issue_uid": {},
 	"link_from_uid": {}, "link_to_uid": {}, "peer_uid": {}, "related_issue_uid": {},
-	"parent_set_uid": {}, "parent_removed_uid": {},
+	"parent_uid": {}, "parent_set_uid": {}, "parent_removed_uid": {},
 }
 
 // A display reference survives only when one of its present UID companions
@@ -921,6 +1032,7 @@ var eventPeerShortIDUIDKeys = map[string][]string{
 	"link_to_short_id":       {"link_to_uid"},
 	"peer_short_id":          {"peer_uid"},
 	"related_issue_short_id": {"related_issue_uid"},
+	"parent_short_id":        {"parent_uid"},
 	"parent_set":             {"parent_set_uid"},
 	"parent_removed":         {"parent_removed_uid"},
 }

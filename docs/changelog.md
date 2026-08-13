@@ -40,7 +40,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   remain, and no MCP tool creates or returns enrollment secrets.
 - Redacted cross-scope relationship identities, including parent, link,
   relationship-array, moved-project, and audit parent references, from scoped
-  MCP issue, event, and close-audit results.
+  MCP issue, event, digest, edit-delta, and close-audit results, and rejected
+  close-audit parent filters that cannot prove startup-scope membership.
 
 **Improvements**
 

@@ -537,7 +537,11 @@ func (h toolHandlers) edit(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		issue = response.Issue
 		changed = response.Changed
 		mainEvent = eventSummary(&response.Event)
-		changes = linkChangesSummary(response.Changes)
+		scopedChanges, changesErr := h.scopedLinkChanges(ctx, response.Changes)
+		if changesErr != nil {
+			return nil, EditOutput{}, changesErr
+		}
+		changes = linkChangesSummary(scopedChanges)
 		for index := range response.Events {
 			if event := eventSummary(&response.Events[index]); event != nil {
 				events = append(events, *event)
@@ -1139,6 +1143,53 @@ func linkPeerAndType(issueUID string, link generated.LinkOut) (generated.LinkPee
 		}
 	}
 	return peer, typeName
+}
+
+// scopedLinkChanges removes relationship-change peers in projects outside
+// the startup scope, such as a replaced parent that lived in a foreign
+// project, before the deltas reach the client.
+func (h toolHandlers) scopedLinkChanges(ctx context.Context, changes *generated.LinkChanges) (*generated.LinkChanges, error) {
+	if changes == nil || h.options.Scope.Mode() == ScopeAll {
+		return changes, nil
+	}
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, true)
+	if err != nil {
+		return nil, err
+	}
+	inScope := make(map[string]struct{}, len(projects))
+	for _, project := range projects {
+		inScope[project.Name] = struct{}{}
+	}
+	keep := func(peers []generated.LinkPeer) []generated.LinkPeer {
+		kept := make([]generated.LinkPeer, 0, len(peers))
+		for _, peer := range peers {
+			if _, ok := inScope[peer.Project]; ok {
+				kept = append(kept, peer)
+			}
+		}
+		if len(kept) == 0 {
+			return nil
+		}
+		return kept
+	}
+	keepOne := func(peer *generated.LinkPeer) *generated.LinkPeer {
+		if peer == nil {
+			return nil
+		}
+		if _, ok := inScope[peer.Project]; !ok {
+			return nil
+		}
+		return peer
+	}
+	changes.BlockedByAdded = keep(changes.BlockedByAdded)
+	changes.BlockedByRemoved = keep(changes.BlockedByRemoved)
+	changes.BlocksAdded = keep(changes.BlocksAdded)
+	changes.BlocksRemoved = keep(changes.BlocksRemoved)
+	changes.ParentRemoved = keepOne(changes.ParentRemoved)
+	changes.ParentSet = keepOne(changes.ParentSet)
+	changes.RelatedAdded = keep(changes.RelatedAdded)
+	changes.RelatedRemoved = keep(changes.RelatedRemoved)
+	return changes, nil
 }
 
 func linkChangesSummary(changes *generated.LinkChanges) *LinkChangesSummary {
