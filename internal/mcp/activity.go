@@ -454,7 +454,10 @@ func (h toolHandlers) destructiveTarget(ctx context.Context, rawRef, confirm, ve
 	if err != nil {
 		return ProjectIdentity{}, "", "", err
 	}
-	includeDeleted := verb == "PURGE"
+	// Resolve soft-deleted rows for DELETE as well as PURGE so a retry
+	// after a lost response reaches the daemon's idempotent re-delete
+	// instead of failing this preflight with "not found".
+	includeDeleted := true
 	shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
 		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
 		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},

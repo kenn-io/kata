@@ -75,6 +75,8 @@ func TestWorkflowToolsRoundTripAgainstDaemon(t *testing.T) {
 	callWorkflowTool(t, session, "kata.delete", map[string]any{"ref": movedRef, "confirm": "DELETE " + movedRef})
 	callWorkflowTool(t, session, "kata.restore", map[string]any{"ref": movedRef})
 	callWorkflowTool(t, session, "kata.delete", map[string]any{"ref": movedRef, "confirm": "DELETE " + movedRef})
+	redeleted := callWorkflowTool(t, session, "kata.delete", map[string]any{"ref": movedRef, "confirm": "DELETE " + movedRef})
+	require.Equal(t, false, redeleted["changed"], "retrying a committed delete must reach the daemon's idempotent no-op")
 	purged := callWorkflowTool(t, session, "kata.purge", map[string]any{"ref": movedRef, "confirm": "PURGE " + movedRef})
 	require.Equal(t, true, purged["purged"])
 
