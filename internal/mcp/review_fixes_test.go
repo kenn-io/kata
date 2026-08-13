@@ -429,6 +429,41 @@ func TestEditFiltersLinkChangePeersOutsideScope(t *testing.T) {
 	require.Empty(t, output.Changes.RelatedAdded)
 }
 
+func TestEventRedactionPreservesOpaqueMetadataAndDiffValues(t *testing.T) {
+	var issueLookups int
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+			return
+		}
+		issueLookups++
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+	diff := map[string]any{
+		"from_uid":   map[string]any{"from": nil, "to": "user-value"},
+		"source_uid": map[string]any{"from": nil, "to": "build-123"},
+	}
+	metadata := map[string]any{"source_uid": "build-123", "to_short_id": "deploy-7"}
+	output := EventsOutput{Events: []StreamEvent{
+		{Type: "issue.metadata_updated", Payload: map[string]any{"diff": diff, "revision_new": float64(2)}},
+		{Type: "issue.created", Payload: map[string]any{"short_id": "abc1", "metadata": metadata}},
+	}}
+
+	require.NoError(t, handlers.redactEventsOutsideScope(t.Context(), &output))
+	updated := output.Events[0].Payload.(map[string]any)
+	require.Equal(t, diff, updated["diff"], "user metadata diff keys and values are opaque data")
+	created := output.Events[1].Payload.(map[string]any)
+	require.Equal(t, metadata, created["metadata"], "user metadata keys named like relationship fields survive")
+	require.Zero(t, issueLookups, "opaque values must not trigger peer resolution")
+}
+
 func TestEventRedactionScopesMovedProjectReferences(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/projects" {
@@ -507,11 +542,20 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 	require.Nil(t, output.Rows[2].Parent, "bare parent without link provenance must be blanked")
 
 	// A bounded limit truncates before the result can exceed the transport
-	// message cap, and truncation is reported so callers can page by time.
+	// message cap; the offset cursor pages the stable row order without
+	// skipping or repeating rows that share one timestamp.
 	_, limited, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2})
 	require.NoError(t, err)
 	require.Len(t, limited.Rows, 2)
 	require.True(t, limited.Truncated)
+	require.NotNil(t, limited.NextOffset)
+	require.EqualValues(t, 2, *limited.NextOffset)
+	_, page, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2, Offset: *limited.NextOffset})
+	require.NoError(t, err)
+	require.Len(t, page.Rows, 1)
+	require.False(t, page.Truncated)
+	require.Nil(t, page.NextOffset)
+	require.Equal(t, "jkl4", page.Rows[0].Issue)
 	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 101})
 	require.ErrorContains(t, err, "limit must be between 1 and 100")
 

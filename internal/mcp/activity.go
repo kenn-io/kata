@@ -141,14 +141,16 @@ type AuditClosesInput struct {
 	Parent     string `json:"parent,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	NoEvidence bool   `json:"no_evidence,omitempty"`
-	Limit      int64  `json:"limit,omitempty" jsonschema:"Maximum rows from 1 through 100; default 20. When truncated, advance since past the last returned row's time"`
+	Limit      int64  `json:"limit,omitempty" jsonschema:"Maximum rows from 1 through 100; default 20"`
+	Offset     int64  `json:"offset,omitempty" jsonschema:"Rows to skip; pass the previous result's next_offset to continue. Row order is stable and append-only"`
 }
 
 // AuditClosesOutput contains close audit records for one project.
 type AuditClosesOutput struct {
-	Project   ProjectIdentity           `json:"project"`
-	Rows      []generated.AuditCloseRow `json:"rows"`
-	Truncated bool                      `json:"truncated,omitempty"`
+	Project    ProjectIdentity           `json:"project"`
+	Rows       []generated.AuditCloseRow `json:"rows"`
+	Truncated  bool                      `json:"truncated,omitempty"`
+	NextOffset *int64                    `json:"next_offset,omitempty"`
 }
 
 // DigestInput defines an activity digest window.
@@ -550,6 +552,9 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if limit < 1 || limit > maximumResultLimit {
 		return nil, AuditClosesOutput{}, fmt.Errorf("limit must be between 1 and %d", maximumResultLimit)
 	}
+	if input.Offset < 0 {
+		return nil, AuditClosesOutput{}, errors.New("offset must not be negative")
+	}
 	response, err := h.options.Client.AuditCloses(ctx, &generated.AuditClosesRequestOptions{Query: &generated.AuditClosesQuery{
 		ProjectID: project.ID, Since: optionalString(input.Since), Until: optionalString(input.Until),
 		Actor: optionalString(input.Actor), Parent: optionalString(input.Parent), Reason: optionalString(input.Reason),
@@ -558,16 +563,28 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
+	// The daemon returns rows in stable ascending event order, so an
+	// offset cursor never skips or repeats rows even when many closes
+	// share one timestamp; new rows only append past the end.
 	rows := response.Rows
-	truncated := int64(len(rows)) > limit
-	if truncated {
+	if input.Offset >= int64(len(rows)) {
+		rows = nil
+	} else {
+		rows = rows[input.Offset:]
+	}
+	output := AuditClosesOutput{Project: project}
+	if int64(len(rows)) > limit {
 		rows = rows[:limit]
+		output.Truncated = true
+		next := input.Offset + limit
+		output.NextOffset = &next
 	}
 	rows, err = h.redactAuditParentsOutsideScope(ctx, project, rows)
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	return successResult(), AuditClosesOutput{Project: project, Rows: rows, Truncated: truncated}, nil
+	output.Rows = rows
+	return successResult(), output, nil
 }
 
 // validateAuditParentFilter stops fixed scopes from probing foreign refs
@@ -1191,9 +1208,30 @@ var eventProjectUIDKeys = map[string]struct{}{
 	"from_project_uid": {}, "to_project_uid": {}, "source_uid": {},
 }
 
-func collectEventPeerUIDs(value any, output map[string]struct{}) {
-	switch current := value.(type) {
-	case map[string]any:
+// Relationship references appear only in the top-level payload map and in
+// the objects of a top-level "links" array (issue.created / issue.snapshot).
+// Nested subtrees such as "metadata" and "diff" carry opaque user keys and
+// values, so they are never inspected: a user metadata key named source_uid
+// or from_uid is data, not a relationship reference.
+func forEachPeerBearingMap(payload any, visit func(map[string]any)) {
+	root, ok := payload.(map[string]any)
+	if !ok {
+		return
+	}
+	visit(root)
+	links, ok := root["links"].([]any)
+	if !ok {
+		return
+	}
+	for _, element := range links {
+		if link, isMap := element.(map[string]any); isMap {
+			visit(link)
+		}
+	}
+}
+
+func collectEventPeerUIDs(payload any, output map[string]struct{}) {
+	forEachPeerBearingMap(payload, func(current map[string]any) {
 		for key, nested := range current {
 			if _, peerKey := eventPeerUIDKeys[key]; peerKey {
 				if uid, ok := nested.(string); ok && uid != "" {
@@ -1209,18 +1247,12 @@ func collectEventPeerUIDs(value any, output map[string]struct{}) {
 					}
 				}
 			}
-			collectEventPeerUIDs(nested, output)
 		}
-	case []any:
-		for _, nested := range current {
-			collectEventPeerUIDs(nested, output)
-		}
-	}
+	})
 }
 
-func redactEventPayloadPeers(value any, allowed map[string]bool, allowedProjects map[string]bool) any {
-	switch current := value.(type) {
-	case map[string]any:
+func redactEventPayloadPeers(payload any, allowed map[string]bool, allowedProjects map[string]bool) any {
+	forEachPeerBearingMap(payload, func(current map[string]any) {
 		for key := range current {
 			if _, peerKey := eventPeerUIDKeys[key]; peerKey {
 				uid, ok := current[key].(string)
@@ -1258,15 +1290,8 @@ func redactEventPayloadPeers(value any, allowed map[string]bool, allowedProjects
 				delete(current, shortIDKey)
 			}
 		}
-		for key, nested := range current {
-			current[key] = redactEventPayloadPeers(nested, allowed, allowedProjects)
-		}
-	case []any:
-		for index, nested := range current {
-			current[index] = redactEventPayloadPeers(nested, allowed, allowedProjects)
-		}
-	}
-	return value
+	})
+	return payload
 }
 
 func redactEventPeerUIDList(payload map[string]any, uidsKey, displayKey string, allowed map[string]bool) {
