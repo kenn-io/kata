@@ -1293,6 +1293,8 @@ export interface components {
     }
     AuditCloseRow: {
       actor: string
+      /** Format: int64 */
+      event_id: number
       evidence_types?: string[] | null
       flags?: string[] | null
       issue: string
