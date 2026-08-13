@@ -46,7 +46,7 @@ func registerStorageTools(server *sdkmcp.Server, handlers toolHandlers) {
 	if handlers.options.StorageAdmin == nil {
 		return
 	}
-	addTool(server, "kata.storage_export", "Export storage", "Export Kata JSONL to an artifact under the operator-approved storage root.", toolHints(false, false, false), handlers.storageExport)
+	addTool(server, "kata.storage_export", "Export storage", "Export Kata JSONL to an artifact under the operator-approved storage root; force overwrites an existing artifact.", toolHints(false, true, false), handlers.storageExport)
 	addTool(server, "kata.storage_import", "Import storage", "Restore Kata JSONL to a startup-configured storage target alias.", toolHints(false, true, false), handlers.storageImport)
 }
 

@@ -131,9 +131,8 @@ type FederationQuarantineOutput struct {
 
 func registerLeaseTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, false)
-	additive := toolHints(false, false, false)
 	destructive := toolHints(false, true, false)
-	addTool(server, "kata.lease", "Manage lease", "Acquire, renew, or release the startup actor's federation write lease.", additive, handlers.lease)
+	addTool(server, "kata.lease", "Manage lease", "Acquire, renew, or release the startup actor's federation write lease.", destructive, handlers.lease)
 	addTool(server, "kata.lease_force_release", "Force-release lease", "Administratively release another lease with a reason.", destructive, handlers.leaseForceRelease)
 	addTool(server, "kata.lease_status", "Lease status", "Read the current federation write lease for an issue.", read, handlers.leaseStatus)
 	addTool(server, "kata.lease_steal", "Steal lease", "Resumably force-release and acquire a lease as the startup actor.", destructive, handlers.leaseSteal)
