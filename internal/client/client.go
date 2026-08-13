@@ -121,7 +121,7 @@ func runtimeRecordProcessAlive(record kitdaemon.RuntimeRecord) bool {
 	if !kitdaemon.ProcessAlive(record.PID) {
 		return false
 	}
-	return kitdaemon.CompareProcessIdentity(record.PID, record.ProcessIdentity) !=
+	return kitdaemon.CompareRuntimeProcessIdentity(record) !=
 		kitdaemon.ProcessIdentityMismatch
 }
 

@@ -401,18 +401,32 @@ func TestDiscoverIgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID:             os.Getpid(),
-		ProcessIdentity: kitdaemon.ProcessIdentity("1"),
-		Address:         "unix://" + filepath.Join(tmp, "missing.sock"),
-		StartedAt:       time.Now().UTC(),
+		PID:               os.Getpid(),
+		ProcessIdentity:   identity,
+		ProcessIdentityV2: mismatchedProcessIdentity(t, identity),
+		Address:           "unix://" + filepath.Join(tmp, "missing.sock"),
+		StartedAt:         time.Now().UTC(),
 	})
 	require.NoError(t, err)
 
-	_, ok, err := Discover(context.Background(), ns.DataDir)
+	_, ok, err = Discover(context.Background(), ns.DataDir)
 
 	require.NoError(t, err)
 	assert.False(t, ok)
+}
+
+func mismatchedProcessIdentity(t *testing.T, identity kitdaemon.ProcessIdentity) kitdaemon.ProcessIdentity {
+	t.Helper()
+	encoded := string(identity)
+	last := encoded[len(encoded)-1]
+	replacement := byte('0')
+	if last == replacement {
+		replacement = '1'
+	}
+	return kitdaemon.ProcessIdentity(encoded[:len(encoded)-1] + string(replacement))
 }
 
 func TestEnsureRunningAutoStartsWhenRuntimePIDWasReused(t *testing.T) {
@@ -420,11 +434,14 @@ func TestEnsureRunningAutoStartsWhenRuntimePIDWasReused(t *testing.T) {
 	ns, err := daemon.NewNamespace()
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
-		PID:             os.Getpid(),
-		ProcessIdentity: kitdaemon.ProcessIdentity("1"),
-		Address:         "unix://" + filepath.Join(tmp, "missing.sock"),
-		StartedAt:       time.Now().UTC(),
+		PID:               os.Getpid(),
+		ProcessIdentity:   identity,
+		ProcessIdentityV2: mismatchedProcessIdentity(t, identity),
+		Address:           "unix://" + filepath.Join(tmp, "missing.sock"),
+		StartedAt:         time.Now().UTC(),
 	})
 	require.NoError(t, err)
 	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
