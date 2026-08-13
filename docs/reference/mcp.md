@@ -62,8 +62,10 @@ it was launched for. Broader boundaries are explicit startup choices:
 
 Multi-project issue reads and writes use `project#ref`. Project-list tools can
 read all projects in scope. Issue creation and other project-selected writes
-require an explicit `project` in multi-project mode. Project creation is available
-only in daemon-wide mode.
+require an explicit `project` in multi-project mode. Project administration —
+create, rename, metadata, merge, archive, restore, and purge — requires the
+`--all-projects` daemon-wide scope; a scoped server can read its projects but
+cannot alter or destroy the catalog it was bound to.
 
 Tool calls cannot change the startup actor or expand the startup scope. The
 daemon remains authoritative for authentication, attribution, revision

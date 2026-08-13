@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -429,19 +430,25 @@ func (a *Admin) activeSQLitePath() (string, bool, error) {
 
 func (a *Admin) validateSQLiteTargets() error {
 	active, sourceIsSQLite, err := a.activeSQLitePath()
-	if err != nil || !sourceIsSQLite {
+	if err != nil {
 		return err
 	}
 	caseInsensitive := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
-	for alias, targetValue := range a.targets {
-		backend, backendErr := storeopen.BackendForDSN(targetValue)
+	aliases := make([]string, 0, len(a.targets))
+	for alias := range a.targets {
+		aliases = append(aliases, alias)
+	}
+	sort.Strings(aliases)
+	resolved := make(map[string]string, len(aliases))
+	for _, alias := range aliases {
+		backend, backendErr := storeopen.BackendForDSN(a.targets[alias])
 		if backendErr != nil {
 			return fmt.Errorf("resolve storage target %q: %w", alias, backendErr)
 		}
 		if backend != storeopen.BackendSQLite {
 			continue
 		}
-		targetName, targetErr := sqliteTargetName(targetValue)
+		targetName, targetErr := sqliteTargetName(a.targets[alias])
 		if targetErr != nil {
 			return fmt.Errorf("resolve storage target %q: %w", alias, targetErr)
 		}
@@ -449,9 +456,21 @@ func (a *Admin) validateSQLiteTargets() error {
 		if targetErr != nil {
 			return fmt.Errorf("resolve storage target %q: %w", alias, targetErr)
 		}
-		if sqliteFileSetsOverlap(target, active, caseInsensitive) {
+		if sourceIsSQLite && sqliteFileSetsOverlap(target, active, caseInsensitive) {
 			return fmt.Errorf("storage target %q overlaps active SQLite storage", alias)
 		}
+		// Force-importing one alias moves and deletes the target's whole
+		// sidecar set, so two aliases may not share any of those paths.
+		for _, otherAlias := range aliases {
+			other, seen := resolved[otherAlias]
+			if !seen {
+				continue
+			}
+			if sqliteFileSetsOverlap(target, other, caseInsensitive) {
+				return fmt.Errorf("storage targets %q and %q overlap", otherAlias, alias)
+			}
+		}
+		resolved[alias] = target
 	}
 	return nil
 }

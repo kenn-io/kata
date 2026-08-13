@@ -306,6 +306,29 @@ func TestAuditPaginationInvalidatesWhenHistoryBelowCursorChanges(t *testing.T) {
 	require.Equal(t, "ghi3", resumed.Rows[0].Issue)
 }
 
+func TestScopedServersCannotAdministerProjects(t *testing.T) {
+	var requests int
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		http.NotFound(writer, request)
+	})
+	scope, err := NewBoundScope(ProjectIdentity{ID: 1, Name: "spoke-project"})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, _, err = handlers.projectRemove(t.Context(), nil, ProjectRemoveInput{Project: "spoke-project"})
+	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	_, _, err = handlers.projectPurge(t.Context(), nil, ProjectPurgeInput{Project: "spoke-project", Confirm: "PURGE spoke-project"})
+	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	_, _, err = handlers.projectUpdate(t.Context(), nil, ProjectUpdateInput{Project: "spoke-project", Action: "rename", Name: "renamed"})
+	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	_, _, err = handlers.projectMerge(t.Context(), nil, ProjectMergeInput{Source: "spoke-project", Target: "spoke-project"})
+	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	_, _, err = handlers.projectRestore(t.Context(), nil, ProjectRestoreInput{Project: "spoke-project"})
+	require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope")
+	require.Zero(t, requests, "scoped project administration must fail before any daemon request")
+}
+
 func TestProjectsListingSurvivesMissingAllowlistMember(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/projects" {

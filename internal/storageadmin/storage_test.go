@@ -304,22 +304,41 @@ func TestStageSQLiteSetCleansMainFileWhenSidecarOpenFails(t *testing.T) {
 func TestImportRejectsArtifactOverlappingSQLiteTarget(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "backup.jsonl"), []byte("{}\n"), 0o600))
+	for _, targetValue := range []string{"backup.jsonl", "backup.jsonl-wal"} {
+		admin, err := New(Config{
+			Root: root, SourceDSN: filepath.Join(t.TempDir(), "active.db"),
+			Targets: map[string]string{"restore": targetValue},
+		})
+		require.NoError(t, err)
+		_, err = admin.Import(t.Context(), ImportOptions{
+			Artifact: "backup.jsonl", Target: "restore",
+			Force: true, Confirm: "REPLACE STORAGE restore",
+		})
+		require.ErrorContains(t, err, "artifact must differ from the SQLite target", targetValue)
+		require.NoError(t, admin.Close())
+	}
+	_, err := os.Stat(filepath.Join(root, "backup.jsonl"))
+	require.NoError(t, err, "the artifact must survive the refused import")
+}
+
+func TestNewRejectsPairwiseOverlappingSQLiteTargets(t *testing.T) {
+	root := t.TempDir()
+	// Pairwise overlap is enforced even when the active source is not
+	// SQLite, since force-importing one alias moves and deletes the whole
+	// sidecar set of its target.
+	for _, source := range []string{filepath.Join(t.TempDir(), "active.db"), "postgres://db.example/kata"} {
+		_, err := New(Config{
+			Root: root, SourceDSN: source,
+			Targets: map[string]string{"primary": "restore.db", "secondary": "restore.db-wal"},
+		})
+		require.ErrorContains(t, err, `storage targets "primary" and "secondary" overlap`, source)
+	}
 	admin, err := New(Config{
 		Root: root, SourceDSN: filepath.Join(t.TempDir(), "active.db"),
-		Targets: map[string]string{"restore": "backup.jsonl", "sidecar": "backup.jsonl-wal"},
+		Targets: map[string]string{"primary": "restore.db", "secondary": "other.db"},
 	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, admin.Close()) })
-
-	for _, target := range []string{"restore", "sidecar"} {
-		_, err = admin.Import(t.Context(), ImportOptions{
-			Artifact: "backup.jsonl", Target: target,
-			Force: true, Confirm: "REPLACE STORAGE " + target,
-		})
-		require.ErrorContains(t, err, "artifact must differ from the SQLite target", target)
-	}
-	_, err = os.Stat(filepath.Join(root, "backup.jsonl"))
-	require.NoError(t, err, "the artifact must survive the refused import")
+	require.NoError(t, err, "distinct targets remain accepted")
+	require.NoError(t, admin.Close())
 }
 
 func TestFailedPostgresImportRemovesFreshSchema(t *testing.T) {
