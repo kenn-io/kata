@@ -134,23 +134,23 @@ type WaitOutput struct {
 
 // AuditClosesInput filters close audit records.
 type AuditClosesInput struct {
-	Project    string `json:"project,omitempty"`
-	Since      string `json:"since,omitempty"`
-	Until      string `json:"until,omitempty"`
-	Actor      string `json:"actor,omitempty"`
-	Parent     string `json:"parent,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	NoEvidence bool   `json:"no_evidence,omitempty"`
-	Limit      int64  `json:"limit,omitempty" jsonschema:"Maximum rows from 1 through 100; default 20"`
-	Offset     int64  `json:"offset,omitempty" jsonschema:"Rows to skip; pass the previous result's next_offset to continue. Row order is stable and append-only"`
+	Project      string `json:"project,omitempty"`
+	Since        string `json:"since,omitempty"`
+	Until        string `json:"until,omitempty"`
+	Actor        string `json:"actor,omitempty"`
+	Parent       string `json:"parent,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	NoEvidence   bool   `json:"no_evidence,omitempty"`
+	Limit        int64  `json:"limit,omitempty" jsonschema:"Maximum rows from 1 through 100; default 20"`
+	AfterEventID int64  `json:"after_event_id,omitempty" jsonschema:"Return rows whose event_id is greater than this immutable cursor; pass the previous result's next_after_event_id to continue"`
 }
 
 // AuditClosesOutput contains close audit records for one project.
 type AuditClosesOutput struct {
-	Project    ProjectIdentity           `json:"project"`
-	Rows       []generated.AuditCloseRow `json:"rows"`
-	Truncated  bool                      `json:"truncated,omitempty"`
-	NextOffset *int64                    `json:"next_offset,omitempty"`
+	Project          ProjectIdentity           `json:"project"`
+	Rows             []generated.AuditCloseRow `json:"rows"`
+	Truncated        bool                      `json:"truncated,omitempty"`
+	NextAfterEventID *int64                    `json:"next_after_event_id,omitempty"`
 }
 
 // DigestInput defines an activity digest window.
@@ -552,8 +552,8 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if limit < 1 || limit > maximumResultLimit {
 		return nil, AuditClosesOutput{}, fmt.Errorf("limit must be between 1 and %d", maximumResultLimit)
 	}
-	if input.Offset < 0 {
-		return nil, AuditClosesOutput{}, errors.New("offset must not be negative")
+	if input.AfterEventID < 0 {
+		return nil, AuditClosesOutput{}, errors.New("after_event_id must not be negative")
 	}
 	response, err := h.options.Client.AuditCloses(ctx, &generated.AuditClosesRequestOptions{Query: &generated.AuditClosesQuery{
 		ProjectID: project.ID, Since: optionalString(input.Since), Until: optionalString(input.Until),
@@ -563,21 +563,21 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	// The daemon returns rows in stable ascending event order, so an
-	// offset cursor never skips or repeats rows even when many closes
-	// share one timestamp; new rows only append past the end.
-	rows := response.Rows
-	if input.Offset >= int64(len(rows)) {
-		rows = nil
-	} else {
-		rows = rows[input.Offset:]
+	// Rows are ordered by immutable close-event ID, so this cursor never
+	// repeats rows and never skips rows that existed when the page was
+	// requested — even across purges, merges, or shared timestamps.
+	rows := make([]generated.AuditCloseRow, 0, len(response.Rows))
+	for _, row := range response.Rows {
+		if row.EventID > input.AfterEventID {
+			rows = append(rows, row)
+		}
 	}
 	output := AuditClosesOutput{Project: project}
 	if int64(len(rows)) > limit {
 		rows = rows[:limit]
 		output.Truncated = true
-		next := input.Offset + limit
-		output.NextOffset = &next
+		next := rows[len(rows)-1].EventID
+		output.NextAfterEventID = &next
 	}
 	rows, err = h.redactAuditParentsOutsideScope(ctx, project, rows)
 	if err != nil {

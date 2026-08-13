@@ -85,6 +85,9 @@ components:
       properties:
         actor:
           type: string
+        event_id:
+          format: int64
+          type: integer
         evidence_types:
           items:
             type: string
@@ -112,6 +115,7 @@ components:
         - actor
         - issue
         - reason
+        - event_id
       type: object
     AuditClosesResponseBody:
       additionalProperties: true

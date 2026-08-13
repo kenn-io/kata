@@ -54,6 +54,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
   projection rules as `scheduled_on`.
 - Added schedule, deadline, and someday commands to generated agent guidance and
   public workflow documentation.
+- Added `event_id` to close-audit rows so audit results page with an
+  immutable cursor that purges, merges, and shared timestamps cannot skew.
+
+**Bug fixes**
+
+- Restored the `clear_owner` and `clear_priority` recurrence template fields
+  to the generated Go client; a stale template had silently dropped them from
+  `pkg/client` since their introduction.
 
 ## 0.14.3
 <small>2026-08-10</small>

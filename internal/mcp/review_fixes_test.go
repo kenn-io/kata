@@ -508,9 +508,9 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 		case "/api/v1/audit/closes":
 			auditRequests++
 			writeJSON(writer, map[string]any{"rows": []any{
-				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "abc1", "parent": "other-project#zz9"},
-				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "def2", "parent": "ghi3"},
-				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "jkl4", "parent": "gone5"},
+				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "abc1", "parent": "other-project#zz9", "event_id": 11},
+				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "def2", "parent": "ghi3", "event_id": 12},
+				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "jkl4", "parent": "gone5", "event_id": 13},
 			}})
 		case "/api/v1/projects/1/issues/def2":
 			issue := issueJSON(1, "spoke-project", "def2")
@@ -542,19 +542,19 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 	require.Nil(t, output.Rows[2].Parent, "bare parent without link provenance must be blanked")
 
 	// A bounded limit truncates before the result can exceed the transport
-	// message cap; the offset cursor pages the stable row order without
-	// skipping or repeating rows that share one timestamp.
+	// message cap; the immutable event-ID cursor pages without skipping
+	// or repeating rows even when every row shares one timestamp.
 	_, limited, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2})
 	require.NoError(t, err)
 	require.Len(t, limited.Rows, 2)
 	require.True(t, limited.Truncated)
-	require.NotNil(t, limited.NextOffset)
-	require.EqualValues(t, 2, *limited.NextOffset)
-	_, page, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2, Offset: *limited.NextOffset})
+	require.NotNil(t, limited.NextAfterEventID)
+	require.EqualValues(t, 12, *limited.NextAfterEventID)
+	_, page, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2, AfterEventID: *limited.NextAfterEventID})
 	require.NoError(t, err)
 	require.Len(t, page.Rows, 1)
 	require.False(t, page.Truncated)
-	require.Nil(t, page.NextOffset)
+	require.Nil(t, page.NextAfterEventID)
 	require.Equal(t, "jkl4", page.Rows[0].Issue)
 	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 101})
 	require.ErrorContains(t, err, "limit must be between 1 and 100")

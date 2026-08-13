@@ -62,12 +62,18 @@ func TestAdministrationToolsRoundTripAgainstDaemon(t *testing.T) {
 
 	recurrence := callAdministrationTool(t, session, "kata.recurrence_update", map[string]any{
 		"project": "renamed-project", "action": "create", "dtstart": "2026-09-01", "rrule": "FREQ=WEEKLY", "timezone": "UTC",
-		"template": map[string]any{"title": "Weekly review"},
+		"template": map[string]any{"title": "Weekly review", "owner": "example-agent"},
 	})["recurrence"].(map[string]any)
 	uid := recurrence["uid"].(string)
+	require.Equal(t, "example-agent", recurrence["template_owner"])
+	cleared := callAdministrationTool(t, session, "kata.recurrence_update", map[string]any{
+		"project": "renamed-project", "action": "patch", "uid": uid, "revision": recurrence["revision"],
+		"template_patch": map[string]any{"clear_owner": true},
+	})["recurrence"].(map[string]any)
+	require.NotContains(t, cleared, "template_owner", "template_patch clear_owner must reach the daemon")
 	listed := callAdministrationTool(t, session, "kata.recurrences", map[string]any{"project": "renamed-project"})
 	require.Len(t, listed["recurrences"], 1)
-	callAdministrationTool(t, session, "kata.recurrence_delete", map[string]any{"project": "renamed-project", "uid": uid, "revision": recurrence["revision"]})
+	callAdministrationTool(t, session, "kata.recurrence_delete", map[string]any{"project": "renamed-project", "uid": uid, "revision": cleared["revision"]})
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	imported := callAdministrationTool(t, session, "kata.import_issues", map[string]any{

@@ -211,6 +211,7 @@ func buildAuditRows(
 			Actor:   ev.Actor,
 			Reason:  p.Reason,
 			Message: p.Message,
+			EventID: ev.ID,
 		}
 		if ev.IssueShortID != nil {
 			row.Issue = *ev.IssueShortID

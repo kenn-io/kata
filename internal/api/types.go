@@ -1302,7 +1302,9 @@ type AuditClosesRequest struct {
 // throttle on this issue (sibling-burst or duplicate-message) before
 // the close eventually succeeded. EvidenceTypes lists the typed
 // evidence items from the close event payload (e.g. "commit", "pr").
-// Message is the close message verbatim.
+// Message is the close message verbatim. EventID is the close event's
+// immutable ID; rows are ordered by it, so it serves as a stable
+// pagination cursor.
 type AuditCloseRow struct {
 	Time          string   `json:"time"`
 	Actor         string   `json:"actor"`
@@ -1312,6 +1314,7 @@ type AuditCloseRow struct {
 	EvidenceTypes []string `json:"evidence_types,omitempty"`
 	Flags         []string `json:"flags,omitempty"`
 	Message       string   `json:"message,omitempty"`
+	EventID       int64    `json:"event_id"`
 }
 
 // AuditClosesResponse wraps the AuditCloseRow list. Rows is never nil

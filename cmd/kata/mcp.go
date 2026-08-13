@@ -146,10 +146,11 @@ func newMCPServeCmd() *cobra.Command {
 
 func parseMCPStorageTargets(values []string) (map[string]string, error) {
 	targets := make(map[string]string, len(values))
-	for _, value := range values {
+	for index, value := range values {
 		parts := strings.SplitN(value, "=", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-			return nil, fmt.Errorf("invalid --storage-target %q; expected alias=path-or-DSN", value)
+			// Never echo the raw value: a malformed DSN can carry credentials.
+			return nil, fmt.Errorf("invalid --storage-target at position %d; expected alias=path-or-DSN", index+1)
 		}
 		alias, target := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		if _, exists := targets[alias]; exists {

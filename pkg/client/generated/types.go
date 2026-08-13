@@ -110,6 +110,7 @@ func (a AssignRequestBody) Validate() error {
 
 type AuditCloseRow struct {
 	Actor         string   `json:"actor" validate:"required"`
+	EventID       int64    `json:"event_id"`
 	EvidenceTypes []string `json:"evidence_types,omitempty"`
 	Flags         []string `json:"flags,omitempty"`
 	Issue         string   `json:"issue" validate:"required"`
@@ -3110,12 +3111,14 @@ func (r RecurrenceTemplateInput) Validate() error {
 }
 
 type RecurrenceTemplateUpdateInput struct {
-	Body     *string         `json:"body,omitempty"`
-	Labels   *[]string       `json:"labels,omitempty"`
-	Metadata *map[string]any `json:"metadata,omitempty"`
-	Owner    *string         `json:"owner,omitempty"`
-	Priority *int64          `json:"priority,omitempty"`
-	Title    *string         `json:"title,omitempty"`
+	Body          *string         `json:"body,omitempty"`
+	ClearOwner    bool            `json:"clear_owner,omitempty"`
+	ClearPriority bool            `json:"clear_priority,omitempty"`
+	Labels        *[]string       `json:"labels,omitempty"`
+	Metadata      *map[string]any `json:"metadata,omitempty"`
+	Owner         *string         `json:"owner,omitempty"`
+	Priority      *int64          `json:"priority,omitempty"`
+	Title         *string         `json:"title,omitempty"`
 }
 
 type RemoveProjectResponseBody struct {

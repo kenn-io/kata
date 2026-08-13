@@ -94,8 +94,9 @@ func TestParseMCPStorageTargets(t *testing.T) {
 
 	_, err = parseMCPStorageTargets([]string{"restore=one.db", "restore=two.db"})
 	require.ErrorContains(t, err, "duplicate")
-	_, err = parseMCPStorageTargets([]string{"missing-separator"})
+	_, err = parseMCPStorageTargets([]string{"postgres://user:hunter2@db.example/kata"})
 	require.Error(t, err)
+	require.NotContains(t, err.Error(), "hunter2", "malformed target values may carry credentials and must not be echoed")
 }
 
 const currentMCPProtocolVersion = "2026-07-28"
