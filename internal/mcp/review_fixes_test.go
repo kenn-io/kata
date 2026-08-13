@@ -565,7 +565,14 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 	require.ErrorContains(t, err, "outside the MCP startup scope")
 	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Parent: "01HDDDDDDDDDDDDDDDDDDDDDDD"})
 	require.ErrorContains(t, err, "unscoped UID")
+	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Parent: "fed9"})
+	require.ErrorContains(t, err, "does not resolve in project", "unresolved bare filters must not probe stored parent snapshots")
 	require.Equal(t, before, auditRequests, "rejected parent filters must not reach the daemon")
+
+	// A bare filter that resolves in the audited project is forwarded.
+	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Parent: "def2"})
+	require.NoError(t, err)
+	require.Equal(t, before+1, auditRequests)
 }
 
 func TestEventPeerRedactionDropsShortIDsWithoutUIDs(t *testing.T) {

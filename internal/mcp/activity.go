@@ -542,7 +542,7 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	if err := h.validateAuditParentFilter(ctx, input.Parent); err != nil {
+	if err := h.validateAuditParentFilter(ctx, project, input.Parent); err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
 	limit := input.Limit
@@ -589,7 +589,7 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 
 // validateAuditParentFilter stops fixed scopes from probing foreign refs
 // through the daemon's global parent-filter resolution.
-func (h toolHandlers) validateAuditParentFilter(ctx context.Context, raw string) error {
+func (h toolHandlers) validateAuditParentFilter(ctx context.Context, project ProjectIdentity, raw string) error {
 	ref := strings.TrimSpace(raw)
 	if ref == "" || h.options.Scope.Mode() == ScopeAll {
 		return nil
@@ -605,6 +605,17 @@ func (h toolHandlers) validateAuditParentFilter(ctx context.Context, raw string)
 		return fmt.Errorf("parent filter %q uses an ambiguous full-length short ID; use a shorter project-qualified reference", ref)
 	}
 	if parsed.Project == "" {
+		// The daemon matches unresolved bare filters against stored parent
+		// snapshots, which can name purged foreign parents. Forward a bare
+		// filter only when it resolves in the audited project; otherwise
+		// fail closed instead of exposing a snapshot-matching oracle.
+		_, _, found, probeErr := h.issueLinksForVouching(ctx, project, parsed.ShortID)
+		if probeErr != nil {
+			return probeErr
+		}
+		if !found {
+			return fmt.Errorf("parent filter %q does not resolve in project %q; use a project-qualified reference to an in-scope parent", ref, project.Name)
+		}
 		return nil
 	}
 	_, err = h.options.Scope.Project(ctx, h.options.Client, parsed.Project, true)

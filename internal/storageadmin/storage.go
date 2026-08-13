@@ -514,6 +514,12 @@ func (a *Admin) Import(ctx context.Context, options ImportOptions) (ImportResult
 		config.DBHash(a.sourceDSN) == config.DBHash(target) {
 		return ImportResult{}, errors.New("storage import target must differ from the active daemon storage")
 	}
+	// Forced replacement moves the target set through a backup and deletes
+	// it; an artifact overlapping the target would destroy the only JSONL
+	// copy under a confirmation that covers target replacement only.
+	if sqliteFileSetsOverlap(target, filepath.Join(a.root, inputName), caseInsensitive) {
+		return ImportResult{}, errors.New("storage import artifact must differ from the SQLite target and its sidecar paths")
+	}
 	_, statErr := a.files.Lstat(targetName)
 	exists := statErr == nil
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {

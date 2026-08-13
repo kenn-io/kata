@@ -301,6 +301,27 @@ func TestStageSQLiteSetCleansMainFileWhenSidecarOpenFails(t *testing.T) {
 	require.Empty(t, entries)
 }
 
+func TestImportRejectsArtifactOverlappingSQLiteTarget(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "backup.jsonl"), []byte("{}\n"), 0o600))
+	admin, err := New(Config{
+		Root: root, SourceDSN: filepath.Join(t.TempDir(), "active.db"),
+		Targets: map[string]string{"restore": "backup.jsonl", "sidecar": "backup.jsonl-wal"},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, admin.Close()) })
+
+	for _, target := range []string{"restore", "sidecar"} {
+		_, err = admin.Import(t.Context(), ImportOptions{
+			Artifact: "backup.jsonl", Target: target,
+			Force: true, Confirm: "REPLACE STORAGE " + target,
+		})
+		require.ErrorContains(t, err, "artifact must differ from the SQLite target", target)
+	}
+	_, err = os.Stat(filepath.Join(root, "backup.jsonl"))
+	require.NoError(t, err, "the artifact must survive the refused import")
+}
+
 func TestFailedPostgresImportRemovesFreshSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
