@@ -188,17 +188,72 @@ func TestAutoStartAllowsDaemonStartupBeyondFiveSeconds(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		startedAt := time.Now()
-		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool) {
+		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool, error) {
 			if time.Since(startedAt) < 6*time.Second {
-				return "", false, false
+				return "", false, false, nil
 			}
-			return "http://127.0.0.1:27123", true, true
+			return "http://127.0.0.1:27123", true, true, nil
 		}
 
 		url, err := autoStart(t.Context(), dataDir)
 
 		require.NoError(t, err)
 		assert.Equal(t, "http://127.0.0.1:27123", url)
+	})
+}
+
+func TestAutoStartWaitsForUnreachableSpawnedDaemonToBecomeReady(t *testing.T) {
+	dataDir := setupKataEnv(t)
+	originalStart := startDetachedDaemonForEnsure
+	originalDiscover := discoverDaemonForAutoStart
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
+		return nil
+	}
+	t.Cleanup(func() {
+		startDetachedDaemonForEnsure = originalStart
+		discoverDaemonForAutoStart = originalDiscover
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		startedAt := time.Now()
+		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool, error) {
+			if time.Since(startedAt) < 6*time.Second {
+				return "", false, false, fmt.Errorf("%w: listener not ready", ErrLocalDaemonUnreachable)
+			}
+			return "http://127.0.0.1:27123", true, true, nil
+		}
+
+		url, err := autoStart(t.Context(), dataDir)
+
+		require.NoError(t, err)
+		assert.Equal(t, "http://127.0.0.1:27123", url)
+	})
+}
+
+func TestAutoStartReportsPersistentUnreachableDaemonAfterReadinessDeadline(t *testing.T) {
+	dataDir := setupKataEnv(t)
+	originalStart := startDetachedDaemonForEnsure
+	originalDiscover := discoverDaemonForAutoStart
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
+		return nil
+	}
+	t.Cleanup(func() {
+		startDetachedDaemonForEnsure = originalStart
+		discoverDaemonForAutoStart = originalDiscover
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		probeErr := fmt.Errorf("%w: daemon pid 123 at unix:///tmp/kata.sock", ErrLocalDaemonUnreachable)
+		discoverDaemonForAutoStart = func(context.Context, string) (string, bool, bool, error) {
+			return "", false, false, probeErr
+		}
+
+		_, err := autoStart(t.Context(), dataDir)
+
+		require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+		assert.ErrorIs(t, err, probeErr)
+		assert.Contains(t, err.Error(), "daemon pid 123")
+		assert.NotContains(t, err.Error(), "failed to start within")
 	})
 }
 
@@ -279,6 +334,34 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	assert.Equal(t, ns.DBHash, signaledDBHash)
 }
 
+func TestStopRunningDaemonsReportsUnreachableDaemonRemainingAfterSignal(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": "old-version",
+		"pid":     child.Process.Pid,
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, child.Process.Pid, addr))
+	unreachableAddress := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), unreachableAddress))
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+
+	origSignal := signalDaemonStopForEnsure
+	signalDaemonStopForEnsure = func(rec kitdaemon.RuntimeRecord, _ string) error {
+		return os.Remove(filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", rec.PID)))
+	}
+	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+
+	err = stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash)
+
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), unreachableAddress)
+}
+
 func TestStopRunningDaemonsReturnsSignalError(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	tmp := setupKataEnv(t)
@@ -324,6 +407,114 @@ func TestStopRunningDaemonsErrorsOnUnverifiableIncompatibleRuntime(t *testing.T)
 
 	_, err = os.Stat(filepath.Join(ns.DataDir, fmt.Sprintf("daemon.%d.json", os.Getpid())))
 	assert.NoError(t, err, "unverifiable reachable daemon runtime file should be preserved")
+}
+
+func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T) {
+	tmp := setupKataEnv(t)
+	address := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecord(t, tmp, address))
+	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+
+	_, err := EnsureRunning(context.Background())
+
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
+	assert.Contains(t, err.Error(), address)
+	assert.Contains(t, err.Error(), "missing.sock")
+	assert.Zero(t, restore.startCalls)
+}
+
+func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	child, _ := startLongLivedTestProcess(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": "old-version",
+		"pid":     child.Process.Pid,
+	})
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, child.Process.Pid, addr))
+	unreachableAddress := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), unreachableAddress))
+	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+
+	_, err := EnsureRunning(context.Background())
+
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	assert.Contains(t, err.Error(), unreachableAddress)
+	assert.Zero(t, restore.stopCalls)
+	assert.Zero(t, restore.startCalls)
+}
+
+func TestDiscoverIgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
+	tmp := setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID:               os.Getpid(),
+		ProcessIdentity:   identity,
+		ProcessIdentityV2: mismatchedProcessIdentity(t, identity),
+		Address:           "unix://" + filepath.Join(tmp, "missing.sock"),
+		StartedAt:         time.Now().UTC(),
+	})
+	require.NoError(t, err)
+
+	_, ok, err = Discover(context.Background(), ns.DataDir)
+
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func mismatchedProcessIdentity(t *testing.T, identity kitdaemon.ProcessIdentity) kitdaemon.ProcessIdentity {
+	t.Helper()
+	encoded := string(identity)
+	last := encoded[len(encoded)-1]
+	replacement := byte('0')
+	if last == replacement {
+		replacement = '1'
+	}
+	return kitdaemon.ProcessIdentity(encoded[:len(encoded)-1] + string(replacement))
+}
+
+func TestEnsureRunningAutoStartsWhenRuntimePIDWasReused(t *testing.T) {
+	tmp := setupKataEnv(t)
+	ns, err := daemon.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID:               os.Getpid(),
+		ProcessIdentity:   identity,
+		ProcessIdentityV2: mismatchedProcessIdentity(t, identity),
+		Address:           "unix://" + filepath.Join(tmp, "missing.sock"),
+		StartedAt:         time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+
+	url, err := EnsureRunning(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://new-daemon", url)
+	assert.Equal(t, 1, restore.startCalls)
+}
+
+func TestEnsureRunningAutoStartsWhenRuntimePIDIsDead(t *testing.T) {
+	tmp := setupKataEnv(t)
+	address := "unix://" + filepath.Join(tmp, "missing.sock")
+	require.NoError(t, writeRuntimeRecordForPID(t, tmp, 1<<30, address))
+	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
+
+	url, err := EnsureRunning(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "http://new-daemon", url)
+	assert.Equal(t, 1, restore.startCalls)
 }
 
 // setupKataEnv points KATA_HOME and KATA_DB at a fresh temp dir so the test

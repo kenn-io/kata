@@ -121,7 +121,7 @@ func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL string) 
 		return DiscoveredWebRuntime{}, fmt.Errorf("list daemon runtime records: %w", err)
 	}
 	for _, record := range records {
-		if !kitdaemon.ProcessAlive(record.PID) {
+		if !daemon.RuntimeProcessAlive(record) {
 			continue
 		}
 		candidate, _, ok := probeAddress(ctx, record.Endpoint().ConfigAddress())

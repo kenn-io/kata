@@ -81,7 +81,7 @@ var (
 	startDetachedDaemonForEnsure = kitdaemon.StartDetached
 	stopRunningDaemonsForEnsure  = stopRunningDaemons
 	signalDaemonStopForEnsure    = daemon.SignalDaemonStop
-	discoverDaemonForAutoStart   = discoverForEnsure
+	discoverDaemonForAutoStart   = discoverForEnsureWithError
 )
 
 // EnsureRunning returns a live daemon's base URL, auto-starting the daemon
@@ -160,7 +160,11 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if url, compatible, ok := discoverForEnsure(ctx, ns.DataDir); ok {
+	url, compatible, ok, err := discoverForEnsureWithError(ctx, ns.DataDir)
+	if err != nil {
+		return "", err
+	}
+	if ok {
 		if compatible {
 			return url, nil
 		}
@@ -172,31 +176,46 @@ func ensureLocalRunning(ctx context.Context) (string, error) {
 	return startDaemonForEnsure(ctx, ns.DataDir)
 }
 
-func discoverForEnsure(ctx context.Context, dataDir string) (string, bool, bool) {
+func discoverForEnsureWithError(ctx context.Context, dataDir string) (string, bool, bool, error) {
 	recs, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
 	if err != nil {
-		return "", false, false
+		return "", false, false, err
 	}
 	var staleURL string
+	var unreachable error
 	for _, r := range recs {
-		if !kitdaemon.ProcessAlive(r.PID) {
+		if !daemon.RuntimeProcessAlive(r) {
 			continue
 		}
-		url, info, ok := probeAddress(ctx, r.Endpoint().ConfigAddress())
-		if !ok {
+		address := r.Endpoint().ConfigAddress()
+		url, info, probeErr := probeAddressWithError(ctx, address)
+		if probeErr != nil {
+			if err := ctx.Err(); err != nil {
+				return "", false, false, err
+			}
+			if unreachable == nil {
+				unreachable = &localDaemonUnreachableError{
+					pid:     r.PID,
+					address: address,
+					cause:   probeErr,
+				}
+			}
 			continue
 		}
 		if daemonVersionCheckSkipped() || daemonVersionCompatible(info) {
-			return url, true, true
+			return url, true, true, nil
 		}
 		if staleURL == "" {
 			staleURL = url
 		}
 	}
-	if staleURL != "" {
-		return staleURL, false, true
+	if unreachable != nil {
+		return "", false, false, unreachable
 	}
-	return "", false, false
+	if staleURL != "" {
+		return staleURL, false, true, nil
+	}
+	return "", false, false, nil
 }
 
 func daemonVersionCheckSkipped() bool {
@@ -212,8 +231,9 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 	if err != nil {
 		return err
 	}
+	signaled := false
 	for _, r := range recs {
-		if !kitdaemon.ProcessAlive(r.PID) {
+		if !daemon.RuntimeProcessAlive(r) {
 			continue
 		}
 		address := r.Endpoint().ConfigAddress()
@@ -227,11 +247,19 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 		if err := signalDaemonStopForEnsure(r, dbhash); err != nil {
 			return fmt.Errorf("stop old daemon pid %d: %w", r.PID, err)
 		}
+		signaled = true
+	}
+	if !signaled {
+		return nil
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, _, ok := discoverForEnsure(ctx, dataDir); !ok {
+		_, _, ok, err := discoverForEnsureWithError(ctx, dataDir)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			return nil
 		}
 		select {
@@ -265,8 +293,16 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 		return "", fmt.Errorf("auto-start daemon: %w", err)
 	}
 	deadline := time.Now().Add(daemonStartupWait)
+	var unreachable error
 	for time.Now().Before(deadline) {
-		if url, compatible, ok := discoverDaemonForAutoStart(ctx, dataDir); ok && compatible {
+		url, compatible, ok, err := discoverDaemonForAutoStart(ctx, dataDir)
+		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
+			return "", err
+		}
+		if errors.Is(err, ErrLocalDaemonUnreachable) {
+			unreachable = err
+		}
+		if ok && compatible {
 			return url, nil
 		}
 		select {
@@ -274,6 +310,9 @@ func autoStart(ctx context.Context, dataDir string) (string, error) {
 			return "", ctx.Err()
 		case <-time.After(50 * time.Millisecond):
 		}
+	}
+	if unreachable != nil {
+		return "", unreachable
 	}
 	return "", fmt.Errorf("daemon failed to start within %s; inspect kata daemon status and kata daemon logs", daemonStartupWait)
 }

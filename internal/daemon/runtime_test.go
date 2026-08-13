@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemon"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
 
@@ -71,4 +72,21 @@ func TestRuntimeFile_AtomicViaTempRename(t *testing.T) {
 func TestProcessAlive_TrueForSelfFalseForGarbagePID(t *testing.T) {
 	assert.True(t, kitdaemon.ProcessAlive(os.Getpid()))
 	assert.False(t, kitdaemon.ProcessAlive(99999999))
+}
+
+func TestRuntimeProcessAliveRejectsReusedPID(t *testing.T) {
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	encoded := string(identity)
+	replacement := byte('0')
+	if encoded[len(encoded)-1] == replacement {
+		replacement = '1'
+	}
+	record := kitdaemon.RuntimeRecord{
+		PID:               os.Getpid(),
+		ProcessIdentity:   identity,
+		ProcessIdentityV2: kitdaemon.ProcessIdentity(encoded[:len(encoded)-1] + string(replacement)),
+	}
+
+	assert.False(t, daemon.RuntimeProcessAlive(record))
 }

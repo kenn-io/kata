@@ -209,7 +209,10 @@ func discoverNamedDaemonTarget(ctx context.Context, name string) (namedDaemonTar
 			if err != nil {
 				return namedDaemonTarget{}, false, err
 			}
-			baseURL, ok := Discover(ctx, ns.DataDir)
+			baseURL, ok, err := Discover(ctx, ns.DataDir)
+			if err != nil {
+				return namedDaemonTarget{}, false, err
+			}
 			if !ok {
 				return namedDaemonTarget{}, false, nil
 			}

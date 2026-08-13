@@ -618,6 +618,9 @@ transient startup overrides. Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
 `daemon status` reports the running daemon's address, web UI URL, PID, version,
 and uptime.
+When a live local daemon record exists but its endpoint cannot be reached,
+client commands report the PID, endpoint, and underlying connection error
+instead of treating the daemon as stopped or attempting to start another one.
 `kata agent-instructions` is an alias for `kata quickstart`.
 For TCP listener auth modes, including trusted private-network bearer auth,
 read-only experiments, and explicit tokenless private-network writes, see

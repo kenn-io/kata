@@ -30,7 +30,7 @@ require (
 	github.com/teambition/rrule-go v1.8.2
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
-	go.kenn.io/kit v0.19.1
+	go.kenn.io/kit v0.20.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
 	golang.org/x/text v0.38.0

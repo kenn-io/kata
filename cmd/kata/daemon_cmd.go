@@ -254,7 +254,7 @@ func liveDaemonRecord(dataDir string, pid int) (kitdaemon.RuntimeRecord, bool) {
 		if pid != 0 && rec.PID != pid {
 			continue
 		}
-		if kitdaemon.ProcessAlive(rec.PID) {
+		if daemon.RuntimeProcessAlive(rec) {
 			return rec, true
 		}
 	}
@@ -296,7 +296,7 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			out := daemonStatusOutput{Daemons: make([]daemonStatusEntry, 0, len(recs))}
 			for _, r := range recs {
-				if kitdaemon.ProcessAlive(r.PID) {
+				if daemon.RuntimeProcessAlive(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:       r.PID,
 						Version:   daemonRuntimeVersion(r),
@@ -386,7 +386,7 @@ func daemonStopCmd() *cobra.Command {
 			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
-				if !kitdaemon.ProcessAlive(r.PID) {
+				if !daemon.RuntimeProcessAlive(r) {
 					continue
 				}
 				// SignalDaemonStop is platform-specific: SIGTERM on Unix,
@@ -451,7 +451,7 @@ func daemonRestartCmd() *cobra.Command {
 			}
 			pids := make([]int, 0, len(recs))
 			for _, rec := range recs {
-				if !kitdaemon.ProcessAlive(rec.PID) {
+				if !daemon.RuntimeProcessAlive(rec) {
 					continue
 				}
 				if err := daemon.SignalDaemonStop(rec, ns.DBHash); err != nil {
@@ -660,7 +660,7 @@ func daemonReloadCmd() *cobra.Command {
 				return err
 			}
 			for _, r := range recs {
-				if !kitdaemon.ProcessAlive(r.PID) {
+				if !daemon.RuntimeProcessAlive(r) {
 					continue
 				}
 				// SignalDaemonReload is platform-specific: SIGHUP on Unix,
