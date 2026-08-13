@@ -1,13 +1,9 @@
 package mcpserver
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -88,28 +84,6 @@ type FederationEnrollmentRevokeOutput struct {
 	Revoked bool  `json:"revoked"`
 }
 
-// FederationJoinInput carries one hub enrollment into a spoke join.
-type FederationJoinInput struct {
-	ProjectName            string `json:"project_name"`
-	HubURL                 string `json:"hub_url"`
-	HubProjectID           int64  `json:"hub_project_id"`
-	HubProjectUID          string `json:"hub_project_uid"`
-	ReplayHorizonEventID   int64  `json:"replay_horizon_event_id,omitempty"`
-	BaselineThroughEventID int64  `json:"baseline_through_event_id,omitempty"`
-	Token                  string `json:"token,omitempty"`
-	Capabilities           string `json:"capabilities,omitempty"`
-	AllowInsecure          bool   `json:"allow_insecure,omitempty"`
-	PushEnabled            bool   `json:"push_enabled,omitempty"`
-	AdoptExisting          bool   `json:"adopt_existing,omitempty"`
-}
-
-// FederationJoinOutput reports the created or adopted spoke binding.
-type FederationJoinOutput struct {
-	Project ProjectSummary                 `json:"project"`
-	Binding generated.FederationBindingOut `json:"binding"`
-	Adopted bool                           `json:"adopted,omitempty"`
-}
-
 // FederationRebindInput selects a spoke and configured hub catalog entry.
 type FederationRebindInput struct {
 	Project    string `json:"project"`
@@ -168,10 +142,8 @@ func registerLeaseTools(server *sdkmcp.Server, handlers toolHandlers) {
 func registerFederationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	read := toolHints(true, false, true)
 	mutating := toolHints(false, true, true)
-	additive := toolHints(false, false, true)
 	addTool(server, "kata.federation_status", "Federation status", "Read in-scope federation, enrollment, replica, and quarantine status without secrets.", read, handlers.federationStatus)
 	addTool(server, "kata.federation_enrollment_revoke", "Revoke enrollment", "Revoke a federation enrollment by ID.", mutating, handlers.federationEnrollmentRevoke)
-	addTool(server, "kata.federation_join", "Join federation", "Join or adopt an enrolled hub project as a spoke.", additive, handlers.federationJoin)
 	addTool(server, "kata.federation_rebind", "Rebind federation", "Rebind a spoke to a configured hub catalog entry.", mutating, handlers.federationRebind)
 	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, or commit phase of resumable federation leave.", mutating, handlers.federationLeave)
 	addTool(server, "kata.federation_quarantine", "Resolve quarantine", "Retry or skip a federation quarantine batch after exact confirmation.", mutating, handlers.federationQuarantine)
@@ -371,39 +343,6 @@ func (h toolHandlers) federationEnrollmentRevoke(ctx context.Context, _ *sdkmcp.
 	return successResult(), FederationEnrollmentRevokeOutput{ID: response.ID, Revoked: response.Revoked}, nil
 }
 
-func (h toolHandlers) federationJoin(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationJoinInput) (*sdkmcp.CallToolResult, FederationJoinOutput, error) {
-	projectName := strings.TrimSpace(input.ProjectName)
-	if projectName == "" || strings.TrimSpace(input.HubURL) == "" || input.HubProjectID <= 0 || strings.TrimSpace(input.HubProjectUID) == "" {
-		return nil, FederationJoinOutput{}, errors.New("project_name, hub_url, hub_project_id, and hub_project_uid are required")
-	}
-	if h.options.Scope.Mode() != ScopeAll {
-		if _, err := h.options.Scope.Project(ctx, h.options.Client, projectName, false); err != nil {
-			return nil, FederationJoinOutput{}, err
-		}
-	}
-	body := generated.CreateFederationReplicaRequestBody{
-		Actor: &h.options.Actor, ProjectName: projectName, HubURL: input.HubURL, HubProjectID: input.HubProjectID,
-		HubProjectUID: input.HubProjectUID, ReplayHorizonEventID: input.ReplayHorizonEventID,
-		BaselineThroughEventID: optionalInt64(input.BaselineThroughEventID), Token: optionalString(input.Token),
-		Capabilities: optionalString(input.Capabilities), AllowInsecure: optionalTrue(input.AllowInsecure), PushEnabled: optionalTrue(input.PushEnabled), AdoptExisting: optionalTrue(input.AdoptExisting),
-	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return nil, FederationJoinOutput{}, err
-	}
-	response, err := h.options.Client.CreateFederationReplica(ctx, &generated.CreateFederationReplicaRequestOptions{}, func(_ context.Context, request *http.Request) error {
-		request.Body = io.NopCloser(bytes.NewReader(payload))
-		request.ContentLength = int64(len(payload))
-		request.Header.Set("Content-Type", "application/json")
-		return nil
-	})
-	if err != nil {
-		return nil, FederationJoinOutput{}, err
-	}
-	adopted := response.Adopted != nil && *response.Adopted
-	return successResult(), FederationJoinOutput{Project: projectSummaryOut(response.Project), Binding: response.Binding, Adopted: adopted}, nil
-}
-
 func (h toolHandlers) federationRebind(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationRebindInput) (*sdkmcp.CallToolResult, FederationRebindOutput, error) {
 	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, false)
 	if err != nil {
@@ -482,11 +421,4 @@ func (h toolHandlers) federationQuarantine(ctx context.Context, _ *sdkmcp.CallTo
 
 func federationEnrollmentSummary(enrollment generated.FederationEnrollmentOut) FederationEnrollmentSummary {
 	return FederationEnrollmentSummary{ID: enrollment.ID, ProjectID: enrollment.ProjectID, SpokeInstanceUID: enrollment.SpokeInstanceUID, Capabilities: enrollment.Capabilities, Actor: enrollment.Actor, Revoked: enrollment.RevokedAt != nil}
-}
-
-func optionalInt64(value int64) *int64 {
-	if value == 0 {
-		return nil
-	}
-	return &value
 }

@@ -29,7 +29,7 @@ func TestAdministrationToolsArePublished(t *testing.T) {
 	require.False(t, names["kata.federation_enroll"], "credential-minting enrollment must stay outside MCP")
 	for _, name := range []string{
 		"kata.digest", "kata.events", "kata.import_issues",
-		"kata.federation_enrollment_revoke", "kata.federation_join",
+		"kata.federation_enrollment_revoke",
 		"kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_status",
 		"kata.project_create", "kata.project_merge", "kata.project_purge", "kata.project_remove",
 		"kata.project_restore", "kata.project_update", "kata.projects", "kata.system",

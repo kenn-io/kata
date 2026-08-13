@@ -34,9 +34,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   sidecars, require exact confirmation before replacing an artifact or target,
   and install restores race-safely with owner-only permissions.
 - Gated daemon token administration behind the explicit `--enable-token-admin`
-  capability in daemon-wide scope, kept credential-minting federation
-  enrollment outside MCP entirely, and restricted enabling issue
-  synchronization — which selects the repository the daemon's GitHub
+  capability in daemon-wide scope, kept federation topology changes
+  (enrollment and spoke join) outside MCP entirely, and restricted enabling
+  issue synchronization — which selects the repository the daemon's GitHub
   credentials read — to the daemon-wide scope: scoped servers can only
   disable or run the operator-configured binding.
 - Redacted cross-scope relationship identities, including parent, link,

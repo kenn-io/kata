@@ -506,6 +506,15 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 	require.Equal(t, "ghi3", *output.Rows[1].Parent)
 	require.Nil(t, output.Rows[2].Parent, "bare parent without link provenance must be blanked")
 
+	// A bounded limit truncates before the result can exceed the transport
+	// message cap, and truncation is reported so callers can page by time.
+	_, limited, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, limited.Rows, 2)
+	require.True(t, limited.Truncated)
+	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Limit: 101})
+	require.ErrorContains(t, err, "limit must be between 1 and 100")
+
 	// Foreign or unprovable parent filters are rejected before any request.
 	before := auditRequests
 	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Parent: "other-project#abc9"})

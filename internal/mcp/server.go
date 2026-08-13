@@ -336,6 +336,8 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 		schema.OneOf = closeReasonSchemas()
 	case "kata.reopen":
 		setStringBounds("ref", 1, 256)
+	case "kata.audit_closes":
+		setNumberBounds("limit", 1, maximumResultLimit)
 	}
 	return schema
 }

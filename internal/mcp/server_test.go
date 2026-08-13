@@ -151,7 +151,6 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.edit_comment",
 		"kata.events",
 		"kata.federation_enrollment_revoke",
-		"kata.federation_join",
 		"kata.federation_leave",
 		"kata.federation_quarantine",
 		"kata.federation_rebind",
@@ -210,7 +209,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	}
 	openWorld := map[string]bool{
 		"kata.federation_enrollment_revoke": true,
-		"kata.federation_join":              true, "kata.federation_leave": true, "kata.federation_quarantine": true,
+		"kata.federation_leave":             true, "kata.federation_quarantine": true,
 		"kata.federation_rebind": true, "kata.federation_status": true, "kata.import_issues": true,
 		"kata.search": true, "kata.sync_once": true, "kata.sync_status": true, "kata.sync_update": true,
 	}
@@ -274,8 +273,8 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	}
 	additive := map[string]bool{
 		"kata.claim": true, "kata.comment": true, "kata.create": true,
-		"kata.federation_join": true, "kata.import_issues": true,
-		"kata.lease": true, "kata.project_create": true, "kata.project_restore": true,
+		"kata.import_issues": true,
+		"kata.lease":         true, "kata.project_create": true, "kata.project_restore": true,
 		"kata.recurrence_update": true, "kata.restore": true, "kata.sync_once": true,
 		"kata.token_create": true,
 	}

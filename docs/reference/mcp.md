@@ -74,7 +74,7 @@ checks, federation trust, claims, and mutation policy.
 The initial catalog contains 13 read-only section loaders. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
-typed tools needed for the current task instead of placing all 56 tools in the
+typed tools needed for the current task instead of placing all 55 tools in the
 model context at startup.
 
 | Loader | Detailed tools |
@@ -86,7 +86,7 @@ model context at startup.
 | `kata.load_projects` | `kata.projects`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
 | `kata.load_tokens` | `kata.tokens`, `kata.token_create`, `kata.token_revoke` when `--enable-token-admin` is set in daemon-wide mode |
 | `kata.load_system` | `kata.system` |
-| `kata.load_federation` | `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_join`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine` |
+| `kata.load_federation` | `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine` |
 | `kata.load_sync` | `kata.sync_status`, `kata.sync_update`, `kata.sync_once` |
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
@@ -98,8 +98,10 @@ startup dependency is absent. Loaded tools keep their individual input and
 output schemas and safety annotations; Kata does not combine unrelated actions
 into a generic command tool.
 
-The tools use structured input and output. List-like results default to 20 and
-are bounded at 100. `kata.show` returns at most 100 comments. Create and
+The tools use structured input and output. List-like results, including
+`kata.audit_closes` rows, default to 20 and are bounded at 100;
+`kata.audit_closes` reports `truncated` so a caller can advance `since` to
+page further. `kata.show` returns at most 100 comments. Create and
 comment require idempotency keys. `kata.token_create` and recurrence creation
 have no idempotency key, are annotated non-idempotent, and mint a new record
 on every identical retry. Destructive tools preserve Kata's exact
@@ -159,11 +161,11 @@ the explicit `--enable-token-admin` startup capability. A default workspace
 server, a one-project server, and a fixed-allowlist server cannot read, create,
 or revoke global daemon tokens.
 
-Federation enrollment credentials are never minted through MCP: creating an
-enrollment and reading its token stay CLI/operator workflows.
+Federation topology changes stay CLI/operator workflows: MCP has no tool to
+create an enrollment, read its token, or join a hub as a spoke.
 `kata.federation_status` lists secret-free enrollment records, and
-`kata.federation_enrollment_revoke` can revoke one, but no MCP tool creates or
-returns enrollment secrets.
+`kata.federation_enrollment_revoke` can revoke one, but no MCP tool creates,
+accepts, or returns enrollment secrets.
 
 Enabling issue synchronization selects which external repository the daemon's
 configured GitHub credentials read, so `kata.sync_update` with

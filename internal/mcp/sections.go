@@ -64,8 +64,8 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		},
 		{
 			loader: "kata.load_federation", section: "federation", title: "Load federation tools",
-			description: "Load typed federation status, enrollment revocation, replica, leave, and quarantine tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.federation_enrollment_revoke", "kata.federation_join", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_status"},
+			description: "Load typed federation status, enrollment revocation, rebind, leave, and quarantine tools, then refresh the MCP tool list.",
+			tools:       []string{"kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_status"},
 			available:   true, register: registerFederationTools,
 		},
 		{

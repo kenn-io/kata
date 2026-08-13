@@ -141,12 +141,14 @@ type AuditClosesInput struct {
 	Parent     string `json:"parent,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	NoEvidence bool   `json:"no_evidence,omitempty"`
+	Limit      int64  `json:"limit,omitempty" jsonschema:"Maximum rows from 1 through 100; default 20. When truncated, advance since past the last returned row's time"`
 }
 
 // AuditClosesOutput contains close audit records for one project.
 type AuditClosesOutput struct {
-	Project ProjectIdentity           `json:"project"`
-	Rows    []generated.AuditCloseRow `json:"rows"`
+	Project   ProjectIdentity           `json:"project"`
+	Rows      []generated.AuditCloseRow `json:"rows"`
+	Truncated bool                      `json:"truncated,omitempty"`
 }
 
 // DigestInput defines an activity digest window.
@@ -541,6 +543,13 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err := h.validateAuditParentFilter(ctx, input.Parent); err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
+	limit := input.Limit
+	if limit == 0 {
+		limit = defaultResultLimit
+	}
+	if limit < 1 || limit > maximumResultLimit {
+		return nil, AuditClosesOutput{}, fmt.Errorf("limit must be between 1 and %d", maximumResultLimit)
+	}
 	response, err := h.options.Client.AuditCloses(ctx, &generated.AuditClosesRequestOptions{Query: &generated.AuditClosesQuery{
 		ProjectID: project.ID, Since: optionalString(input.Since), Until: optionalString(input.Until),
 		Actor: optionalString(input.Actor), Parent: optionalString(input.Parent), Reason: optionalString(input.Reason),
@@ -549,11 +558,16 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	rows, err := h.redactAuditParentsOutsideScope(ctx, project, response.Rows)
+	rows := response.Rows
+	truncated := int64(len(rows)) > limit
+	if truncated {
+		rows = rows[:limit]
+	}
+	rows, err = h.redactAuditParentsOutsideScope(ctx, project, rows)
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
-	return successResult(), AuditClosesOutput{Project: project, Rows: rows}, nil
+	return successResult(), AuditClosesOutput{Project: project, Rows: rows, Truncated: truncated}, nil
 }
 
 // validateAuditParentFilter stops fixed scopes from probing foreign refs
