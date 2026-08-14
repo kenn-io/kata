@@ -28,6 +28,13 @@ type toolHandlers struct {
 	options Options
 }
 
+func (h toolHandlers) withLongRunningClient() toolHandlers {
+	if h.options.LongRunningClient != nil {
+		h.options.Client = h.options.LongRunningClient
+	}
+	return h
+}
+
 func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, input SearchInput) (*sdkmcp.CallToolResult, SearchOutput, error) {
 	query := strings.TrimSpace(input.Query)
 	if query == "" {

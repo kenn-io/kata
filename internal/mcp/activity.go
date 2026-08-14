@@ -498,6 +498,7 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	}
 	waitContext, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
+	h = h.withLongRunningClient()
 	// The deadline can expire while a lookup is in flight; that is the
 	// documented timeout outcome, not a tool error. States from the last
 	// complete round keep the output honest.
@@ -658,8 +659,18 @@ func (h toolHandlers) validateAuditParentFilter(ctx context.Context, project Pro
 		}
 		return nil
 	}
-	_, err = h.options.Scope.Project(ctx, h.options.Client, parsed.Project, true)
-	return err
+	qualifiedProject, err := h.options.Scope.Project(ctx, h.options.Client, parsed.Project, true)
+	if err != nil {
+		return err
+	}
+	found, err := h.issueResolvesInProject(ctx, qualifiedProject, parsed.ShortID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("parent filter %q does not resolve in project %q", ref, qualifiedProject.Name)
+	}
+	return nil
 }
 
 // redactAuditParentsOutsideScope authorizes parent display refs by the
@@ -669,7 +680,7 @@ func (h toolHandlers) validateAuditParentFilter(ctx context.Context, project Pro
 // no frozen identity behind a bare ref, fail closed. Qualified refs without a
 // UID keep the current-name check because the daemon renders them from
 // currently resolved projects.
-func (h toolHandlers) redactAuditParentsOutsideScope(ctx context.Context, project ProjectIdentity, rows []generated.AuditCloseRow) ([]generated.AuditCloseRow, error) {
+func (h toolHandlers) redactAuditParentsOutsideScope(ctx context.Context, _ ProjectIdentity, rows []generated.AuditCloseRow) ([]generated.AuditCloseRow, error) {
 	if h.options.Scope.Mode() == ScopeAll {
 		return rows, nil
 	}
@@ -869,6 +880,7 @@ func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if waitSeconds < 1 || waitSeconds > 300 {
 		return nil, EventsOutput{}, errors.New("wait_seconds must be between 1 and 300")
 	}
+	h = h.withLongRunningClient()
 	// One stream can filter one project or all projects. A fixed multi-project
 	// allowlist uses bounded polling so events outside its scope never leak.
 	if strings.TrimSpace(input.Project) == "" && h.options.Scope.Mode() == ScopeAllowlist {

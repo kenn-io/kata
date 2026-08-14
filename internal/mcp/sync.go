@@ -111,7 +111,8 @@ func (h toolHandlers) syncOnce(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		return nil, SyncOnceOutput{}, err
 	}
 	empty := generated.RunIssueSyncOnceBody{}
-	response, err := h.options.Client.RunIssueSyncOnce(ctx, &generated.RunIssueSyncOnceRequestOptions{PathParams: &generated.RunIssueSyncOncePath{ProjectID: project.ID, Provider: provider}, Body: &empty})
+	longRunning := h.withLongRunningClient()
+	response, err := longRunning.options.Client.RunIssueSyncOnce(ctx, &generated.RunIssueSyncOnceRequestOptions{PathParams: &generated.RunIssueSyncOncePath{ProjectID: project.ID, Provider: provider}, Body: &empty})
 	if err != nil {
 		return nil, SyncOnceOutput{}, err
 	}

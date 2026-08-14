@@ -727,13 +727,6 @@ func TestEventRedactionCoversThrottleAndEvidenceDisplayRefs(t *testing.T) {
 	require.Equal(t, "abc1234", evidence[2].(map[string]any)["sha"], "non-ref evidence is untouched")
 }
 
-func linkPeerJSON(project, shortID, uid string) map[string]any {
-	return map[string]any{
-		"project": project, "qualified_id": project + "#" + shortID,
-		"short_id": shortID, "status": "open", "uid": uid,
-	}
-}
-
 func TestEditFiltersLinkChangePeersOutsideScope(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch {
@@ -927,12 +920,16 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 	require.ErrorContains(t, err, "unscoped UID")
 	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Parent: "fed9"})
 	require.ErrorContains(t, err, "does not resolve in project", "unresolved bare filters must not probe stored parent snapshots")
+	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Parent: "spoke-project#fed9"})
+	require.ErrorContains(t, err, "does not resolve in project", "unresolved qualified filters must not probe stored parent snapshots")
 	require.Equal(t, before, auditRequests, "rejected parent filters must not reach the daemon")
 
-	// A bare filter that resolves in the audited project is forwarded.
+	// Bare and qualified filters that resolve in the nominated project are forwarded.
 	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Parent: "def2"})
 	require.NoError(t, err)
-	require.Equal(t, before+1, auditRequests)
+	_, _, err = handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project", Parent: "spoke-project#def2"})
+	require.NoError(t, err)
+	require.Equal(t, before+2, auditRequests)
 }
 
 func TestEventPeerRedactionDropsShortIDsWithoutUIDs(t *testing.T) {

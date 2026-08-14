@@ -76,18 +76,25 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// MCP tools include long-running calls whose response headers
-			// arrive only at completion (sync passes) as well as bounded
-			// event waits and SSE streams, so the client carries neither an
-			// overall timeout nor a response-header timeout; every handler
-			// bounds its own work with request contexts, and the events
-			// wait deadline covers its SSE handshake.
-			httpClient, err := longRunningClientFor(ctx, baseURL)
+			// Ordinary daemon calls retain the CLI request timeout so a
+			// stalled daemon cannot consume every MCP tool-call slot.
+			httpClient, err := httpClientFor(ctx, baseURL)
 			if err != nil {
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
 			apiClient, err := kataclient.NewWithHTTPClient(baseURL, httpClient)
+			if err != nil {
+				return err
+			}
+			// Sync passes, bounded waits, and SSE streams use their own
+			// request contexts and may legitimately outlive the ordinary
+			// request budget or delay response headers until completion.
+			longRunningHTTPClient, err := longRunningClientFor(ctx, baseURL)
+			if err != nil {
+				return err
+			}
+			longRunningAPIClient, err := kataclient.NewWithHTTPClient(baseURL, longRunningHTTPClient)
 			if err != nil {
 				return err
 			}
@@ -116,14 +123,15 @@ func newMCPServeCmd() *cobra.Command {
 				return fmt.Errorf("resolve MCP project scope: %w", err)
 			}
 			server, err := mcpserver.New(mcpserver.Options{
-				Client:           apiClient,
-				Scope:            scope,
-				ProjectID:        projectID,
-				ProjectName:      projectName,
-				Actor:            actor,
-				Version:          version.Version,
-				StorageAdmin:     storage,
-				EnableTokenAdmin: enableTokenAdmin,
+				Client:            apiClient,
+				LongRunningClient: longRunningAPIClient,
+				Scope:             scope,
+				ProjectID:         projectID,
+				ProjectName:       projectName,
+				Actor:             actor,
+				Version:           version.Version,
+				StorageAdmin:      storage,
+				EnableTokenAdmin:  enableTokenAdmin,
 			})
 			if err != nil {
 				return err
