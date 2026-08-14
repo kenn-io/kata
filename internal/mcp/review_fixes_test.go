@@ -329,6 +329,99 @@ func TestScopedServersCannotAdministerProjects(t *testing.T) {
 	require.Zero(t, requests, "scoped project administration must fail before any daemon request")
 }
 
+func TestMultiProjectSearchFusesByRankAndOmitsSingularProject(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+				projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project"),
+			}})
+		case "/api/v1/projects/1/search":
+			// Hybrid mode: request-local reciprocal-rank scores.
+			writeJSON(writer, map[string]any{"query": "work", "mode": "hybrid", "results": []any{
+				map[string]any{"issue": issueJSON(1, "spoke-project", "spk1"), "score": 0.03, "matched_in": []string{"title"}},
+				map[string]any{"issue": issueJSON(1, "spoke-project", "spk2"), "score": 0.02, "matched_in": []string{"title"}},
+			}})
+		case "/api/v1/projects/2/search":
+			// Lexical fallback: large corpus-local scores.
+			writeJSON(writer, map[string]any{"query": "work", "mode": "lexical", "results": []any{
+				map[string]any{"issue": issueJSON(2, "hub-project", "hub1"), "score": 9.0, "matched_in": []string{"title"}},
+				map[string]any{"issue": issueJSON(2, "hub-project", "hub2"), "score": 5.0, "matched_in": []string{"title"}},
+			}})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{
+		{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"},
+		{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "hub-project"},
+	})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := handlers.search(t.Context(), nil, SearchInput{Query: "work"})
+	require.NoError(t, err)
+	refs := make([]string, 0, len(output.Results))
+	for _, hit := range output.Results {
+		refs = append(refs, hit.Issue.QualifiedRef)
+	}
+	require.Equal(t, []string{"hub-project#hub1", "spoke-project#spk1", "hub-project#hub2", "spoke-project#spk2"}, refs,
+		"per-project ranks interleave instead of comparing request-local scores globally")
+	require.Equal(t, "mixed", output.Mode, "differing effective modes must not be mislabeled")
+	require.Nil(t, output.Project, "multi-project responses omit the singular project")
+	require.Len(t, output.Projects, 2)
+	serialized := mustJSON(t, output)
+	require.NotContains(t, string(serialized), `"project":{"id":0`)
+
+	_, single, err := handlers.search(t.Context(), nil, SearchInput{Query: "work", Project: "spoke-project"})
+	require.NoError(t, err)
+	require.NotNil(t, single.Project)
+	require.Equal(t, "spoke-project", single.Project.Name)
+	require.Equal(t, "hybrid", single.Mode)
+}
+
+func TestEventsResponsesSerializeEmptyCollections(t *testing.T) {
+	reset := false
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case "/api/v1/projects/1/events":
+			if reset {
+				writeJSON(writer, map[string]any{"events": []any{}, "next_after_id": 0, "reset_required": true, "reset_after_id": 7})
+				return
+			}
+			writeJSON(writer, map[string]any{"events": []any{}, "next_after_id": 0})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, empty, err := handlers.events(t.Context(), nil, EventsInput{Project: "spoke-project", Mode: "poll"})
+	require.NoError(t, err)
+	require.Contains(t, string(mustJSON(t, empty)), `"events":[]`, "empty poll must serialize an array, not null")
+
+	reset = true
+	_, resetOutput, err := handlers.events(t.Context(), nil, EventsInput{Project: "spoke-project", Mode: "poll"})
+	require.NoError(t, err)
+	require.True(t, resetOutput.ResetRequired)
+	require.Contains(t, string(mustJSON(t, resetOutput)), `"events":[]`, "reset responses must serialize an array, not null")
+
+	reset = false
+	_, timedOut, err := handlers.events(t.Context(), nil, EventsInput{Mode: "wait", WaitSeconds: 1})
+	require.NoError(t, err)
+	require.True(t, timedOut.TimedOut)
+	require.Contains(t, string(mustJSON(t, timedOut)), `"events":[]`, "timeouts must serialize an array, not null")
+}
+
 func TestProjectsListingSurvivesMissingAllowlistMember(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/projects" {

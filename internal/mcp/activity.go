@@ -867,7 +867,7 @@ func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 		if err != nil {
 			return nil, EventsOutput{}, err
 		}
-		return successResult(), output, nil
+		return successResult(), withEventsList(output), nil
 	}
 	waitSeconds := input.WaitSeconds
 	if waitSeconds == 0 {
@@ -894,7 +894,7 @@ func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	response, err := h.options.Client.StreamEventsRaw(waitContext, &generated.StreamEventsRequestOptions{Query: &generated.StreamEventsQuery{AfterID: &input.After, ProjectID: projectID}})
 	if err != nil {
 		if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-			return successResult(), EventsOutput{NextAfterID: input.After, TimedOut: true}, nil
+			return successResult(), withEventsList(EventsOutput{NextAfterID: input.After, TimedOut: true}), nil
 		}
 		return nil, EventsOutput{}, err
 	}
@@ -902,14 +902,24 @@ func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	output, err := readEventStream(waitContext, response.Body, input.After, limit)
 	if err != nil {
 		if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-			return successResult(), EventsOutput{NextAfterID: input.After, TimedOut: true}, nil
+			return successResult(), withEventsList(EventsOutput{NextAfterID: input.After, TimedOut: true}), nil
 		}
 		return nil, EventsOutput{}, err
 	}
 	if err := h.redactEventsOutsideScope(waitContext, &output); err != nil {
 		return nil, EventsOutput{}, err
 	}
-	return successResult(), output, nil
+	return successResult(), withEventsList(output), nil
+}
+
+// withEventsList upholds the required-collection contract: successful
+// responses, including empty polls, timeouts, and resets, serialize events
+// as an empty array rather than null.
+func withEventsList(output EventsOutput) EventsOutput {
+	if output.Events == nil {
+		output.Events = []StreamEvent{}
+	}
+	return output
 }
 
 func (h toolHandlers) activityProjects(ctx context.Context, name string) ([]ProjectIdentity, error) {
@@ -977,12 +987,12 @@ func (h toolHandlers) waitPollEvents(ctx context.Context, project string, after,
 			return nil, EventsOutput{}, err
 		}
 		if output.ResetRequired || len(output.Events) > 0 {
-			return successResult(), output, nil
+			return successResult(), withEventsList(output), nil
 		}
 		select {
 		case <-waitContext.Done():
 			if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-				return successResult(), EventsOutput{NextAfterID: after, TimedOut: true}, nil
+				return successResult(), withEventsList(EventsOutput{NextAfterID: after, TimedOut: true}), nil
 			}
 			return nil, EventsOutput{}, waitContext.Err()
 		case <-time.After(250 * time.Millisecond):

@@ -61,7 +61,10 @@ it was launched for. Broader boundaries are explicit startup choices:
   long-lived clients that need every project the daemon can access.
 
 Multi-project issue reads and writes use `project#ref`. Project-list tools can
-read all projects in scope. Issue creation and other project-selected writes
+read all projects in scope. Multi-project results carry a `projects` list and
+omit the singular `project` field; multi-project search interleaves each
+project's own ranking (per-project scores are not comparable) and reports
+`mode: "mixed"` when projects resolve different effective search modes. Issue creation and other project-selected writes
 require an explicit `project` in multi-project mode. Project administration —
 create, rename, metadata, merge, archive, restore, and purge — requires the
 `--all-projects` daemon-wide scope; a scoped server can read its projects but

@@ -80,25 +80,34 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if err := group.Wait(); err != nil {
 		return nil, SearchOutput{}, err
 	}
-	results := make([]SearchHit, 0)
+	type rankedHit struct {
+		hit  SearchHit
+		rank int
+	}
+	ranked := make([]rankedHit, 0)
 	truncated := false
 	degraded := false
 	degradedReasons := make([]string, 0)
 	effectiveMode := ""
 	for index, search := range searches {
 		response := search.response
-		if effectiveMode == "" {
+		switch {
+		case effectiveMode == "":
 			effectiveMode = response.Mode
+		case effectiveMode != response.Mode:
+			// Auto mode can fall back per project; a single mode label
+			// would misdescribe the merged results.
+			effectiveMode = "mixed"
 		}
 		if len(response.Results) > limit {
 			truncated = true
 		}
-		for _, hit := range response.Results {
-			results = append(results, SearchHit{
+		for rank, hit := range response.Results {
+			ranked = append(ranked, rankedHit{rank: rank, hit: SearchHit{
 				Issue:     h.summaryFromIssue(projects[index], hit.Issue),
 				Score:     hit.Score,
 				MatchedIn: nonNilStrings(hit.MatchedIn),
-			})
+			}})
 		}
 		if response.Degraded != nil && *response.Degraded {
 			degraded = true
@@ -107,12 +116,23 @@ func (h toolHandlers) search(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 			degradedReasons = append(degradedReasons, projects[index].Name+": "+*response.DegradedReason)
 		}
 	}
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].Score != results[j].Score {
-			return results[i].Score > results[j].Score
+	// Scores from independent per-project searches are request-local
+	// (hybrid uses reciprocal-rank values and auto can fall back per
+	// project), so fuse by each project's own ranking instead of
+	// comparing raw scores across projects.
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].rank != ranked[j].rank {
+			return ranked[i].rank < ranked[j].rank
 		}
-		return results[i].Issue.QualifiedRef < results[j].Issue.QualifiedRef
+		if ranked[i].hit.Score != ranked[j].hit.Score {
+			return ranked[i].hit.Score > ranked[j].hit.Score
+		}
+		return ranked[i].hit.Issue.QualifiedRef < ranked[j].hit.Issue.QualifiedRef
 	})
+	results := make([]SearchHit, 0, len(ranked))
+	for _, entry := range ranked {
+		results = append(results, entry.hit)
+	}
 	if len(results) > limit {
 		results = results[:limit]
 		truncated = true
@@ -1014,11 +1034,14 @@ func (h toolHandlers) relationshipRef(ctx context.Context, source ProjectIdentit
 	return parsed.Project + "#" + parsed.ShortID, nil
 }
 
-func outputProjectScope(projects []ProjectIdentity) (ProjectIdentity, []ProjectIdentity) {
+// outputProjectScope returns the singular project only when exactly one
+// project was queried; multi-project responses carry the projects list and
+// omit the singular field instead of populating an invalid zero identity.
+func outputProjectScope(projects []ProjectIdentity) (*ProjectIdentity, []ProjectIdentity) {
 	if len(projects) == 1 {
-		return projects[0], nil
+		return &projects[0], nil
 	}
-	return ProjectIdentity{}, projects
+	return nil, projects
 }
 
 func projectIDSet(projects []ProjectIdentity) map[int64]struct{} {

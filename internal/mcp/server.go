@@ -650,7 +650,7 @@ type IssueSummary struct {
 
 // IssueListOutput is a bounded collection without issue bodies or comments.
 type IssueListOutput struct {
-	Project   ProjectIdentity   `json:"project"`
+	Project   *ProjectIdentity  `json:"project,omitempty"`
 	Projects  []ProjectIdentity `json:"projects,omitempty"`
 	Issues    []IssueSummary    `json:"issues"`
 	Truncated bool              `json:"truncated"`
@@ -665,7 +665,7 @@ type SearchHit struct {
 
 // SearchOutput reports the effective mode and any semantic fallback.
 type SearchOutput struct {
-	Project        ProjectIdentity   `json:"project"`
+	Project        *ProjectIdentity  `json:"project,omitempty"`
 	Projects       []ProjectIdentity `json:"projects,omitempty"`
 	Query          string            `json:"query"`
 	Mode           string            `json:"mode"`
@@ -683,7 +683,7 @@ type LabelCount struct {
 
 // LabelsOutput is the project label catalog.
 type LabelsOutput struct {
-	Project  ProjectIdentity   `json:"project"`
+	Project  *ProjectIdentity  `json:"project,omitempty"`
 	Projects []ProjectIdentity `json:"projects,omitempty"`
 	Labels   []LabelCount      `json:"labels"`
 }
