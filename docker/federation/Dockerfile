@@ -1,4 +1,4 @@
-FROM golang:1.26.3-bookworm AS build
+FROM golang:1.26.6-bookworm AS build
 
 WORKDIR /src
 
