@@ -26,12 +26,19 @@ func TestStorageToolsRequireStartupOptIn(t *testing.T) {
 	require.Contains(t, toolNames(tools.Tools), "kata.storage_export")
 	require.Contains(t, toolNames(tools.Tools), "kata.storage_import")
 	for _, tool := range tools.Tools {
-		if tool.Name != "kata.storage_export" {
-			continue
+		switch tool.Name {
+		case "kata.storage_export":
+			properties := schemaObject(t, tool.InputSchema)["properties"].(map[string]any)
+			require.Contains(t, properties, "force")
+			require.Contains(t, properties, "confirm")
+			require.True(t, *tool.Annotations.DestructiveHint, tool.Name)
+			require.True(t, tool.Annotations.IdempotentHint, tool.Name)
+		case "kata.storage_import":
+			// A forced retry replaces the target again, and new_instance
+			// mints a fresh instance identity on every run.
+			require.True(t, *tool.Annotations.DestructiveHint, tool.Name)
+			require.False(t, tool.Annotations.IdempotentHint, tool.Name)
 		}
-		properties := schemaObject(t, tool.InputSchema)["properties"].(map[string]any)
-		require.Contains(t, properties, "force")
-		require.Contains(t, properties, "confirm")
 	}
 }
 

@@ -47,7 +47,7 @@ func registerStorageTools(server *sdkmcp.Server, handlers toolHandlers) {
 		return
 	}
 	addTool(server, "kata.storage_export", "Export storage", "Export Kata JSONL to an artifact under the operator-approved storage root; force overwrites an existing artifact.", toolHints(false, true, false), handlers.storageExport)
-	addTool(server, "kata.storage_import", "Import storage", "Restore Kata JSONL to a startup-configured storage target alias.", toolHints(false, true, false), handlers.storageImport)
+	addTool(server, "kata.storage_import", "Import storage", "Restore Kata JSONL to a startup-configured storage target alias; a forced retry replaces the target again, and new_instance mints a fresh instance identity each run.", nonIdempotent(toolHints(false, true, false)), handlers.storageImport)
 }
 
 func (h toolHandlers) storageExport(ctx context.Context, _ *sdkmcp.CallToolRequest, input StorageExportInput) (*sdkmcp.CallToolResult, StorageExportOutput, error) {
