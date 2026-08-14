@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -163,6 +164,42 @@ func TestProjectUpdateActionsReturnCompleteProjectSummary(t *testing.T) {
 		"project": project.Name, "action": "detach_alias", "alias_id": alias.ID, "force": true,
 	})
 	requireCompleteProject(detached)
+}
+
+func TestProjectUpdateDetachAliasReturnsArchivedProjectSummary(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "archived-project")
+	require.NoError(t, err)
+	archived, _, err := store.RemoveProject(t.Context(), db.RemoveProjectParams{
+		ProjectID: project.ID, Actor: "example-agent",
+	})
+	require.NoError(t, err)
+	alias, err := store.AttachAlias(t.Context(), project.ID, "host-a.example/archived-repository", "git")
+	require.NoError(t, err)
+
+	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
+	t.Cleanup(func() { require.NoError(t, daemonServer.Close()) })
+	httpServer := httptest.NewServer(daemonServer.Handler())
+	t.Cleanup(httpServer.Close)
+	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{
+		Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+	})
+
+	detached := callAdministrationTool(t, session, "kata.project_update", map[string]any{
+		"project": archived.Name, "action": "detach_alias", "alias_id": alias.ID, "force": true,
+	})
+	summary := detached["project"].(map[string]any)
+	require.EqualValues(t, archived.ID, summary["id"])
+	require.Equal(t, archived.UID, summary["uid"])
+	require.Equal(t, archived.Name, summary["name"])
+	require.EqualValues(t, archived.Revision, summary["revision"])
+	require.Equal(t, formatTime(archived.CreatedAt), summary["created_at"])
+	require.Equal(t, true, summary["archived"])
+	require.Equal(t, formatTime(*archived.DeletedAt), summary["deleted_at"])
 }
 
 func callAdministrationTool(t *testing.T, session *sdkmcp.ClientSession, name string, arguments map[string]any) map[string]any {

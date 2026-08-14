@@ -383,13 +383,19 @@ func projectSummaryOut(project generated.ProjectOut) ProjectSummary {
 }
 
 func (h toolHandlers) projectSummaryByID(ctx context.Context, projectID int64) (ProjectSummary, error) {
-	response, err := h.options.Client.ShowProject(ctx, &generated.ShowProjectRequestOptions{
-		PathParams: &generated.ShowProjectPath{ProjectID: projectID},
+	include := "archived"
+	response, err := h.options.Client.ListProjects(ctx, &generated.ListProjectsRequestOptions{
+		Query: &generated.ListProjectsQuery{Include: &include},
 	})
 	if err != nil {
 		return ProjectSummary{}, err
 	}
-	return projectSummaryOut(response.Project), nil
+	for _, project := range response.Projects {
+		if project.ID == projectID {
+			return projectSummaryOut(project), nil
+		}
+	}
+	return ProjectSummary{}, fmt.Errorf("project ID %d was not found after mutation", projectID)
 }
 
 func projectSummary(project generated.Project) ProjectSummary {

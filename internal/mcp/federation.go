@@ -45,6 +45,8 @@ type LeaseOutput struct {
 	Ref            string          `json:"ref"`
 	Held           bool            `json:"held"`
 	Granted        bool            `json:"granted,omitempty"`
+	Pending        bool            `json:"pending,omitempty"`
+	RequestUID     string          `json:"request_uid,omitempty"`
 	Holder         string          `json:"holder,omitempty"`
 	PreviousHolder string          `json:"previous_holder,omitempty"`
 	ClaimKind      string          `json:"claim_kind,omitempty"`
@@ -258,8 +260,15 @@ func (h toolHandlers) leaseActionBody(ttlSeconds int64, purpose string) (*genera
 
 func leaseMutationOutput(project ProjectIdentity, ref string, response *generated.ClaimActionResponseBody) LeaseOutput {
 	output := LeaseOutput{
-		Project: project, Ref: project.Name + "#" + ref, Held: response.Lease != nil,
+		Project: project, Ref: project.Name + "#" + ref,
+		Held:    response.Lease != nil && response.Lease.ReleasedAt == nil,
 		Granted: response.Granted, Holder: response.Holder.Holder, Event: eventSummary(response.Event),
+	}
+	if response.Pending != nil {
+		output.Pending = *response.Pending
+	}
+	if response.RequestUID != nil {
+		output.RequestUID = *response.RequestUID
 	}
 	fillLease(&output, response.Lease)
 	return output
