@@ -819,6 +819,13 @@ func TestScopedFederationLeaveCannotArchive(t *testing.T) {
 		})
 		require.NoError(t, err, "%s scope keeps the detach disposition", name)
 		require.Equal(t, before+1, mutations)
+
+		_, _, err = handlers.federationRebind(t.Context(), nil, FederationRebindInput{
+			Project: "spoke-project", HubCatalog: "other-hub",
+		})
+		require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope",
+			"%s scope must not route the enrollment token to a caller-selected catalog", name)
+		require.Equal(t, before+1, mutations)
 	}
 }
 

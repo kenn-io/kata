@@ -181,8 +181,10 @@ servers can still disable the operator-configured binding and run
 Federation leave exposes `preflight`, `prepare`, and `commit` phases so an
 operator can preserve the normal revoke-before-local-teardown order. The phase
 is required. A commit without external hub revocation also requires
-`COMMIT FEDERATION LEAVE <project>`. Replica credentials stay pinned to the hub
-origin by the daemon. Quarantine retry and skip require
+`COMMIT FEDERATION LEAVE <project>`. The `archive` disposition and
+`kata.federation_rebind` — which routes the replica's enrollment token to the
+selected catalog origin — require the `--all-projects` daemon-wide scope.
+Quarantine retry and skip require
 `RETRY FEDERATION BATCH <id>` or `SKIP FEDERATION BATCH <id>`.
 
 ## Host-storage opt-in

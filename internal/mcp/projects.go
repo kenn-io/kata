@@ -180,10 +180,10 @@ func (h toolHandlers) projectInFixedScope(project generated.ProjectOut) bool {
 	return false
 }
 
-// requireProjectAdminScope keeps catalog mutations a daemon-wide operator
-// action: a scoped server may read its projects but not rename, merge,
-// archive, restore, or purge them.
-func (h toolHandlers) requireProjectAdminScope(operation string) error {
+// requireAllProjectsScope keeps operator-tier operations — project catalog
+// mutations, archive-disposition federation leave, and credential-routing
+// federation rebind — out of scoped servers.
+func (h toolHandlers) requireAllProjectsScope(operation string) error {
 	if h.options.Scope.Mode() != ScopeAll {
 		return fmt.Errorf("%s requires the --all-projects daemon-wide scope", operation)
 	}
@@ -191,7 +191,7 @@ func (h toolHandlers) requireProjectAdminScope(operation string) error {
 }
 
 func (h toolHandlers) projectCreate(ctx context.Context, _ *sdkmcp.CallToolRequest, input ProjectCreateInput) (*sdkmcp.CallToolResult, ProjectMutationOutput, error) {
-	if err := h.requireProjectAdminScope("project creation"); err != nil {
+	if err := h.requireAllProjectsScope("project creation"); err != nil {
 		return nil, ProjectMutationOutput{}, err
 	}
 	name := strings.TrimSpace(input.Name)
@@ -206,7 +206,7 @@ func (h toolHandlers) projectCreate(ctx context.Context, _ *sdkmcp.CallToolReque
 }
 
 func (h toolHandlers) projectUpdate(ctx context.Context, _ *sdkmcp.CallToolRequest, input ProjectUpdateInput) (*sdkmcp.CallToolResult, ProjectMutationOutput, error) {
-	if err := h.requireProjectAdminScope("project update"); err != nil {
+	if err := h.requireAllProjectsScope("project update"); err != nil {
 		return nil, ProjectMutationOutput{}, err
 	}
 	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, true)
@@ -274,7 +274,7 @@ func (h toolHandlers) projectUpdate(ctx context.Context, _ *sdkmcp.CallToolReque
 }
 
 func (h toolHandlers) projectMerge(ctx context.Context, _ *sdkmcp.CallToolRequest, input ProjectMergeInput) (*sdkmcp.CallToolResult, ProjectMergeOutput, error) {
-	if err := h.requireProjectAdminScope("project merge"); err != nil {
+	if err := h.requireAllProjectsScope("project merge"); err != nil {
 		return nil, ProjectMergeOutput{}, err
 	}
 	source, err := h.options.Scope.Project(ctx, h.options.Client, input.Source, false)
@@ -296,7 +296,7 @@ func (h toolHandlers) projectMerge(ctx context.Context, _ *sdkmcp.CallToolReques
 }
 
 func (h toolHandlers) projectRemove(ctx context.Context, _ *sdkmcp.CallToolRequest, input ProjectRemoveInput) (*sdkmcp.CallToolResult, ProjectMutationOutput, error) {
-	if err := h.requireProjectAdminScope("project removal"); err != nil {
+	if err := h.requireAllProjectsScope("project removal"); err != nil {
 		return nil, ProjectMutationOutput{}, err
 	}
 	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, false)
@@ -314,7 +314,7 @@ func (h toolHandlers) projectRemove(ctx context.Context, _ *sdkmcp.CallToolReque
 }
 
 func (h toolHandlers) projectRestore(ctx context.Context, _ *sdkmcp.CallToolRequest, input ProjectRestoreInput) (*sdkmcp.CallToolResult, ProjectMutationOutput, error) {
-	if err := h.requireProjectAdminScope("project restore"); err != nil {
+	if err := h.requireAllProjectsScope("project restore"); err != nil {
 		return nil, ProjectMutationOutput{}, err
 	}
 	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, true)
@@ -332,7 +332,7 @@ func (h toolHandlers) projectRestore(ctx context.Context, _ *sdkmcp.CallToolRequ
 }
 
 func (h toolHandlers) projectPurge(ctx context.Context, _ *sdkmcp.CallToolRequest, input ProjectPurgeInput) (*sdkmcp.CallToolResult, ProjectPurgeOutput, error) {
-	if err := h.requireProjectAdminScope("project purge"); err != nil {
+	if err := h.requireAllProjectsScope("project purge"); err != nil {
 		return nil, ProjectPurgeOutput{}, err
 	}
 	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, true)

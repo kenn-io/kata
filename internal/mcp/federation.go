@@ -343,6 +343,12 @@ func (h toolHandlers) federationEnrollmentRevoke(ctx context.Context, _ *sdkmcp.
 }
 
 func (h toolHandlers) federationRebind(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationRebindInput) (*sdkmcp.CallToolResult, FederationRebindOutput, error) {
+	// Rebinding routes the replica's enrollment bearer token to whichever
+	// configured catalog origin the caller selects, so it stays an
+	// operator-tier action.
+	if err := h.requireAllProjectsScope("federation rebind"); err != nil {
+		return nil, FederationRebindOutput{}, err
+	}
 	project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, false)
 	if err != nil {
 		return nil, FederationRebindOutput{}, err
@@ -375,7 +381,7 @@ func (h toolHandlers) federationLeave(ctx context.Context, _ *sdkmcp.CallToolReq
 	if disposition == "archive" {
 		// Archiving through leave is project catalog administration; a
 		// scoped server may only detach.
-		if err := h.requireProjectAdminScope("federation leave with the archive disposition"); err != nil {
+		if err := h.requireAllProjectsScope("federation leave with the archive disposition"); err != nil {
 			return nil, FederationLeaveOutput{}, err
 		}
 	}
