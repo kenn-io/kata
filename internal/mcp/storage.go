@@ -54,17 +54,20 @@ func (h toolHandlers) storageExport(ctx context.Context, _ *sdkmcp.CallToolReque
 	if h.options.StorageAdmin == nil {
 		return nil, StorageExportOutput{}, errors.New("storage administration is not enabled")
 	}
+	// A project-filtered JSONL export still contains cross-project link
+	// rows and unredacted event payload references, so exporting is a
+	// daemon-wide operator action regardless of the project filter.
+	if err := h.requireAllProjectsScope("storage export"); err != nil {
+		return nil, StorageExportOutput{}, err
+	}
 	projectID := int64(0)
 	projectName := ""
-	switch {
-	case strings.TrimSpace(input.Project) != "" || h.options.Scope.Mode() == ScopeBound:
+	if strings.TrimSpace(input.Project) != "" {
 		project, err := h.options.Scope.Project(ctx, h.options.Client, input.Project, false)
 		if err != nil {
 			return nil, StorageExportOutput{}, err
 		}
 		projectID, projectName = project.ID, project.Name
-	case h.options.Scope.Mode() == ScopeAllowlist:
-		return nil, StorageExportOutput{}, errors.New("allowlist storage export requires an explicit project")
 	}
 	result, err := h.options.StorageAdmin.Export(ctx, storageadmin.ExportOptions{
 		Artifact: input.Artifact, ProjectID: projectID, IncludeDeleted: input.includeDeleted(),

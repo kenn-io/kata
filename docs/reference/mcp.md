@@ -72,7 +72,11 @@ cannot alter or destroy the catalog it was bound to.
 
 Tool calls cannot change the startup actor or expand the startup scope. The
 daemon remains authoritative for authentication, attribution, revision
-checks, federation trust, claims, and mutation policy.
+checks, federation trust, claims, and mutation policy. Scoped servers replace
+close-guard refusal messages (`parent_has_open_children`,
+`sibling_throttle`, `duplicate_message`) with scope-safe guidance because
+the daemon prose can name children, siblings, and prior closes in other
+projects.
 
 ## Progressive tool catalog
 
@@ -195,10 +199,15 @@ Quarantine retry and skip require
 JSONL storage access is absent by default. Enable it only on the daemon host:
 
 ```sh
-kata mcp serve \
+kata mcp serve --all-projects \
   --storage-root /srv/kata/exchange \
   --storage-target restore=restore.db
 ```
+
+`kata.storage_export` additionally requires the `--all-projects` daemon-wide
+scope even when a `project` filter is supplied: a project-filtered JSONL
+export still contains cross-project link rows and unredacted event payload
+references that scoped reads deliberately hide.
 
 `--storage-target alias=path-or-DSN` is repeatable. Tool calls select an alias;
 they cannot submit a database path or DSN. Artifact paths are relative to the

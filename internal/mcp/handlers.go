@@ -773,9 +773,33 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 		},
 	})
 	if err != nil {
-		return nil, MutationOutput{}, err
+		return nil, MutationOutput{}, h.scopedCloseError(err)
 	}
 	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+}
+
+// Close-guard refusals render child, sibling-cohort, and prior-close
+// identities that can live outside the startup scope (parent links span
+// projects), so scoped servers replace those messages with scope-safe
+// guidance instead of forwarding the daemon prose verbatim.
+var crossScopeCloseGuardMessages = map[string]string{
+	"parent_has_open_children": "issue still has open children; close, move, or detach them first (child identities outside the MCP startup scope are not listed)",
+	"sibling_throttle":         "close refused by the sibling close-burst throttle; wait before closing more children of this parent (sibling identities outside the MCP startup scope are not listed)",
+	"duplicate_message":        "close refused because the message matches your recent close of a sibling; write a message specific to this issue or close as duplicate-of/superseded-by",
+}
+
+func (h toolHandlers) scopedCloseError(err error) error {
+	if h.options.Scope.Mode() == ScopeAll {
+		return err
+	}
+	var envelope generated.ErrorEnvelope
+	if !errors.As(err, &envelope) {
+		return err
+	}
+	if message, guarded := crossScopeCloseGuardMessages[envelope.ErrorData.Code]; guarded {
+		return fmt.Errorf("%s: %s", envelope.ErrorData.Code, message)
+	}
+	return err
 }
 
 func (h toolHandlers) reopen(ctx context.Context, _ *sdkmcp.CallToolRequest, input ReopenInput) (*sdkmcp.CallToolResult, MutationOutput, error) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/storageadmin"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -420,6 +421,70 @@ func TestEventsResponsesSerializeEmptyCollections(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, timedOut.TimedOut)
 	require.Contains(t, string(mustJSON(t, timedOut)), `"events":[]`, "timeouts must serialize an array, not null")
+}
+
+func TestScopedCloseGuardErrorsHideForeignIdentities(t *testing.T) {
+	daemonMessage := `refusing close: 2 open children remain:
+  other-project#zz9  Secret roadmap item
+  abc1  Local child`
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case strings.HasSuffix(request.URL.Path, "/actions/close"):
+			writer.WriteHeader(http.StatusConflict)
+			writeJSON(writer, map[string]any{
+				"status": http.StatusConflict,
+				"error":  map[string]any{"code": "parent_has_open_children", "message": daemonMessage},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	scoped := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+
+	_, _, err = scoped.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#par1", Reason: "done", Message: "Completed all child work and verified the results.",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parent_has_open_children")
+	require.NotContains(t, err.Error(), "other-project", "foreign child refs must not leak through guard errors")
+	require.NotContains(t, err.Error(), "Secret roadmap item", "foreign child titles must not leak through guard errors")
+
+	wide := toolHandlers{options: Options{Client: client, Scope: NewAllScope(), Actor: "example-agent"}}
+	_, _, err = wide.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#par1", Reason: "done", Message: "Completed all child work and verified the results.",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Secret roadmap item", "daemon-wide servers keep the actionable daemon message")
+}
+
+func TestScopedStorageExportRequiresDaemonWideScope(t *testing.T) {
+	admin, err := storageadmin.New(storageadmin.Config{Root: t.TempDir(), SourceDSN: "source.db"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, admin.Close()) })
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		http.NotFound(writer, request)
+	})
+	bound, err := NewBoundScope(ProjectIdentity{ID: 1, Name: "spoke-project"})
+	require.NoError(t, err)
+	allowlist, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+
+	for name, scope := range map[string]*Scope{"bound": bound, "allowlist": allowlist} {
+		handlers := toolHandlers{options: Options{Client: client, Scope: scope, StorageAdmin: admin}}
+		_, _, err := handlers.storageExport(t.Context(), nil, StorageExportInput{Artifact: "backup.jsonl"})
+		require.ErrorContains(t, err, "requires the --all-projects daemon-wide scope",
+			"%s scope must not export cross-project link and payload data", name)
+	}
 }
 
 func TestProjectsListingSurvivesMissingAllowlistMember(t *testing.T) {
