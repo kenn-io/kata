@@ -232,17 +232,6 @@ func TestDigestRedactsForeignLinkActionTargets(t *testing.T) {
 					}},
 				}},
 			})
-		case "/api/v1/projects/1/issues/abc1":
-			issue := issueJSON(1, "spoke-project", "abc1")
-			issue["uid"] = "01HCCCCCCCCCCCCCCCCCCCCCCC"
-			writeJSON(writer, map[string]any{
-				"issue": issue, "labels": []any{}, "comments": []any{},
-				"links": []any{map[string]any{
-					"id": 1, "type": "blocks", "author": "example-agent", "created_at": "2026-08-11T00:00:00Z",
-					"from": linkPeerJSON("spoke-project", "abc1", "01HCCCCCCCCCCCCCCCCCCCCCCC"),
-					"to":   linkPeerJSON("spoke-project", "def2", "01HEEEEEEEEEEEEEEEEEEEEEEE"),
-				}},
-			})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -257,8 +246,8 @@ func TestDigestRedactsForeignLinkActionTargets(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, output.Digests, 1)
 	actions := output.Digests[0].Digest.Actors[0].Issues[0].Actions
-	require.Equal(t, []string{"created", "labeled:bug", "blocks:def2", "unparent", "related", "commented:2"}, actions,
-		"link-vouched peer survives; unvouched targets are stripped to their action type even when a same-short-ID issue exists")
+	require.Equal(t, []string{"created", "labeled:bug", "blocks", "unparent", "related", "commented:2"}, actions,
+		"historical link tokens carry no provable identity, so every target is stripped to its action type; a current same-short-ID link must not vouch a historical peer")
 }
 
 func TestAuditPaginationInvalidatesWhenHistoryBelowCursorChanges(t *testing.T) {
@@ -590,6 +579,42 @@ func TestScopedFederationStatusRedactsErrorText(t *testing.T) {
 		"daemon-wide servers keep the raw diagnostic")
 }
 
+func TestEventDisplayRefsUseOnlyOwnHistoricalProjectName(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+			return
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+	// Both events belong to the in-scope project; the first was stamped
+	// before a rename, and "former-name" may now belong to a foreign
+	// project.
+	output := EventsOutput{Events: []StreamEvent{
+		{Type: "close.throttled", ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA", ProjectName: "former-name",
+			Payload: map[string]any{"reason": "sibling-burst", "parent": "former-name#zz9"}},
+		{Type: "issue.closed", ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA", ProjectName: "spoke-project",
+			Payload: map[string]any{"reason": "duplicate", "evidence": []any{
+				map[string]any{"type": "duplicate-of", "issue_ref": "former-name#abc2"},
+			}}},
+	}}
+
+	require.NoError(t, handlers.redactEventsOutsideScope(t.Context(), &output))
+	first := output.Events[0].Payload.(map[string]any)
+	require.Equal(t, "former-name#zz9", first["parent"],
+		"an event's own historical project name vouches its refs")
+	evidence := output.Events[1].Payload.(map[string]any)["evidence"].([]any)
+	require.NotContains(t, evidence[0].(map[string]any), "issue_ref",
+		"another event's historical name must not vouch this event's refs; the name may now be foreign")
+}
+
 func TestProjectsListingSurvivesMissingAllowlistMember(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/projects" {
@@ -839,21 +864,21 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 			auditRequests++
 			writeJSON(writer, map[string]any{"rows": []any{
 				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "abc1", "parent": "other-project#zz9", "event_id": 11},
-				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "def2", "parent": "ghi3", "event_id": 12},
-				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "jkl4", "parent": "gone5", "event_id": 13},
+				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "def2", "parent": "ghi3", "parent_uid": "01HEEEEEEEEEEEEEEEEEEEEEEE", "event_id": 12},
+				map[string]any{"time": "2026-08-12T00:00:00Z", "actor": "example-agent", "reason": "done", "issue": "jkl4", "parent": "ghi3", "parent_uid": "01HDDDDDDDDDDDDDDDDDDDDDDD", "event_id": 13},
 			}})
-		case "/api/v1/projects/1/issues/def2":
-			issue := issueJSON(1, "spoke-project", "def2")
-			issue["uid"] = "01HCCCCCCCCCCCCCCCCCCCCCCC"
+		case "/api/v1/issues/01HEEEEEEEEEEEEEEEEEEEEEEE":
+			issue := issueJSON(1, "spoke-project", "ghi3")
+			issue["uid"] = "01HEEEEEEEEEEEEEEEEEEEEEEE"
 			writeJSON(writer, map[string]any{
-				"issue": issue, "labels": []any{}, "comments": []any{},
-				"links": []any{map[string]any{
-					"id": 1, "type": "parent", "author": "example-agent", "created_at": "2026-08-11T00:00:00Z",
-					"from": linkPeerJSON("spoke-project", "def2", "01HCCCCCCCCCCCCCCCCCCCCCCC"),
-					"to":   linkPeerJSON("spoke-project", "ghi3", "01HEEEEEEEEEEEEEEEEEEEEEEE"),
-				}},
+				"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{},
+			})
+		case "/api/v1/projects/1/issues/def2":
+			writeJSON(writer, map[string]any{
+				"issue": issueJSON(1, "spoke-project", "def2"), "labels": []any{}, "comments": []any{}, "links": []any{},
 			})
 		default:
+			// The purged frozen parent UID resolves nowhere.
 			http.NotFound(writer, request)
 		}
 	})
@@ -866,10 +891,12 @@ func TestAuditClosesRedactsForeignAndUnresolvedParents(t *testing.T) {
 	_, output, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project"})
 	require.NoError(t, err)
 	require.Len(t, output.Rows, 3)
-	require.Nil(t, output.Rows[0].Parent, "foreign qualified parent must be blanked")
-	require.NotNil(t, output.Rows[1].Parent, "parent vouched by the child's current in-scope parent link survives")
+	require.Nil(t, output.Rows[0].Parent, "foreign qualified parent without frozen identity must be blanked")
+	require.NotNil(t, output.Rows[1].Parent, "parent whose frozen UID resolves in scope survives")
 	require.Equal(t, "ghi3", *output.Rows[1].Parent)
-	require.Nil(t, output.Rows[2].Parent, "bare parent without link provenance must be blanked")
+	require.Nil(t, output.Rows[2].Parent,
+		"a purged frozen parent must be blanked even when its display short ID collides with an in-scope parent")
+	require.Nil(t, output.Rows[2].ParentUID)
 
 	// A bounded limit truncates before the result can exceed the transport
 	// message cap; the event-ID cursor pages without skipping or repeating

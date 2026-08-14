@@ -1300,6 +1300,7 @@ export interface components {
       issue: string
       message?: string
       parent?: string
+      parent_uid?: string
       reason: string
       time: string
     } & {

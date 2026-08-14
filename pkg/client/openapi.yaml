@@ -101,6 +101,8 @@ components:
           type: string
         parent:
           type: string
+        parent_uid:
+          type: string
         reason:
           type: string
         time:

@@ -1304,12 +1304,15 @@ type AuditClosesRequest struct {
 // evidence items from the close event payload (e.g. "commit", "pr").
 // Message is the close message verbatim. EventID is the close event's
 // immutable ID; rows are ordered by it, so it serves as a stable
-// pagination cursor.
+// pagination cursor. ParentUID is the close-time frozen parent UID when
+// the event recorded one, giving Parent's display ref immutable
+// provenance.
 type AuditCloseRow struct {
 	Time          string   `json:"time"`
 	Actor         string   `json:"actor"`
 	Issue         string   `json:"issue"`
 	Parent        string   `json:"parent,omitempty"`
+	ParentUID     string   `json:"parent_uid,omitempty"`
 	Reason        string   `json:"reason"`
 	EvidenceTypes []string `json:"evidence_types,omitempty"`
 	Flags         []string `json:"flags,omitempty"`

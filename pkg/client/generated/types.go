@@ -116,6 +116,7 @@ type AuditCloseRow struct {
 	Issue         string   `json:"issue" validate:"required"`
 	Message       *string  `json:"message,omitempty"`
 	Parent        *string  `json:"parent,omitempty"`
+	ParentUID     *string  `json:"parent_uid,omitempty"`
 	Reason        string   `json:"reason" validate:"required"`
 	Time          string   `json:"time" validate:"required"`
 }

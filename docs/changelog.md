@@ -55,8 +55,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   projection rules as `scheduled_on`.
 - Added schedule, deadline, and someday commands to generated agent guidance and
   public workflow documentation.
-- Added `event_id` to close-audit rows so audit results page with an
-  immutable cursor that purges, merges, and shared timestamps cannot skew.
+- Added `event_id` and the close-time frozen `parent_uid` to close-audit
+  rows so audit results page with an immutable cursor and parent display
+  refs carry provable provenance.
 
 **Bug fixes**
 
