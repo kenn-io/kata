@@ -4,6 +4,6 @@
   "packageManager": "bun@1.3.14",
   "overrides": {
     "js-yaml": "4.3.1",
-    "nanoid": "3.3.17"
+    "nanoid": "3.3.18"
   }
 }
