@@ -97,6 +97,12 @@ federation, and daemon operations safer and more observable.
 
 **Improvements**
 
+- Added the conventional `kata --version` root flag, which prints the same
+  build identity as `kata version` and honors `--json` and `--agent`.
+  As a result, global output flags are now validated on the bare `kata`
+  invocation too: `kata --json --agent` and `kata --format bogus` exit `2` with
+  a usage error instead of silently printing help. Plain `kata` still prints
+  help and exits `0`.
 - Centralized Claude Code and Codex hook configuration on kit's shared
   agent-hook manager while preserving the existing init flags, lifecycle
   matchers, attention behavior, unrelated configuration, and workspace
