@@ -102,6 +102,82 @@ func TestParseMCPStorageTargets(t *testing.T) {
 
 const currentMCPProtocolVersion = "2026-07-28"
 
+func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("holds a sync response past the 10s SSE handshake timeout")
+	}
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	workspace := t.TempDir()
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects/resolve":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"project":{"id":42,"name":"spoke-project"}}`))
+		case "/api/v1/projects":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"projects":[{"id":42,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`))
+		case "/api/v1/projects/42/issue-sync/github/once":
+			// A sync pass writes nothing, headers included, until it
+			// completes; hold past the 10s SSE handshake timeout.
+			select {
+			case <-request.Context().Done():
+				return
+			case <-time.After(10500 * time.Millisecond):
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{
+				"binding": {"id": 1, "project_id": 42, "provider": "github", "source_key": "github:node", "remote_id": "node", "display_name": "example/repo", "enabled": true, "interval_seconds": 900, "created_at": "2026-08-11T00:00:00Z", "updated_at": "2026-08-11T00:00:00Z"},
+				"import": {"source": "github", "created": 0, "updated": 0, "unchanged": 0, "comments": 0, "links": 0, "errors": [], "items": []},
+				"status": {"binding_id": 1, "project_id": 42, "provider": "github", "state": "idle", "enabled": true, "last_created": 0, "last_updated": 0, "last_unchanged": 0, "last_comments": 0}
+			}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(daemon.Close)
+
+	command := newRootCmd()
+	inputReader, inputWriter := io.Pipe()
+	outputReader, outputWriter := io.Pipe()
+	command.SetIn(inputReader)
+	command.SetOut(outputWriter)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"--workspace", workspace, "mcp", "serve"})
+	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
+
+	done := make(chan error, 1)
+	go func() { done <- command.Execute() }()
+	responses := bufio.NewReader(outputReader)
+	send := func(id int, method string, params map[string]any) map[string]any {
+		t.Helper()
+		requestBytes, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+		require.NoError(t, err)
+		_, err = inputWriter.Write(append(requestBytes, '\n'))
+		require.NoError(t, err)
+		line, err := responses.ReadBytes('\n')
+		require.NoError(t, err)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(line, &response))
+		require.NotContains(t, response, "error", string(line))
+		return response["result"].(map[string]any)
+	}
+
+	send(1, "server/discover", map[string]any{"_meta": map[string]any{
+		"io.modelcontextprotocol/protocolVersion":    currentMCPProtocolVersion,
+		"io.modelcontextprotocol/clientCapabilities": map[string]any{},
+	}})
+	send(2, "tools/call", map[string]any{"name": "kata.load_sync", "arguments": map[string]any{}})
+	result := send(3, "tools/call", map[string]any{"name": "kata.sync_once", "arguments": map[string]any{}})
+	require.NotEqual(t, true, result["isError"],
+		"a sync pass whose headers arrive after 10s must not be aborted by a response-header timeout: %v", result)
+	structured := result["structuredContent"].(map[string]any)
+	require.Equal(t, "idle", structured["status"].(map[string]any)["state"])
+
+	require.NoError(t, inputWriter.Close())
+	require.NoError(t, <-done)
+}
+
 func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("holds an event wait past the 5s default client timeout")

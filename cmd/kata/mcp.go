@@ -76,11 +76,13 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// MCP tools include bounded long-running calls (event waits up
-			// to 300s, sync passes) and SSE streams, so the client carries
-			// no overall timeout; every handler bounds its own work with
-			// request contexts and the SSE handshake header timeout.
-			httpClient, err := streamingClientFor(ctx, baseURL)
+			// MCP tools include long-running calls whose response headers
+			// arrive only at completion (sync passes) as well as bounded
+			// event waits and SSE streams, so the client carries neither an
+			// overall timeout nor a response-header timeout; every handler
+			// bounds its own work with request contexts, and the events
+			// wait deadline covers its SSE handshake.
+			httpClient, err := longRunningClientFor(ctx, baseURL)
 			if err != nil {
 				return err
 			}
