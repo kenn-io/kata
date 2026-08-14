@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -100,6 +101,81 @@ func TestParseMCPStorageTargets(t *testing.T) {
 }
 
 const currentMCPProtocolVersion = "2026-07-28"
+
+func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("holds an event wait past the 5s default client timeout")
+	}
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	workspace := t.TempDir()
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects/resolve":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"project":{"id":42,"name":"spoke-project"}}`))
+		case "/api/v1/projects":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{"projects":[{"id":42,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`))
+		case "/api/v1/events/stream":
+			// Send SSE headers immediately, then hold the stream open with
+			// no events past the 5s default client timeout.
+			writer.Header().Set("Content-Type", "text/event-stream")
+			writer.WriteHeader(http.StatusOK)
+			writer.(http.Flusher).Flush()
+			<-request.Context().Done()
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	t.Cleanup(daemon.Close)
+
+	command := newRootCmd()
+	inputReader, inputWriter := io.Pipe()
+	outputReader, outputWriter := io.Pipe()
+	command.SetIn(inputReader)
+	command.SetOut(outputWriter)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"--workspace", workspace, "mcp", "serve"})
+	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
+
+	done := make(chan error, 1)
+	go func() { done <- command.Execute() }()
+	responses := bufio.NewReader(outputReader)
+	send := func(id int, method string, params map[string]any) map[string]any {
+		t.Helper()
+		requestBytes, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+		require.NoError(t, err)
+		_, err = inputWriter.Write(append(requestBytes, '\n'))
+		require.NoError(t, err)
+		line, err := responses.ReadBytes('\n')
+		require.NoError(t, err)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(line, &response))
+		require.NotContains(t, response, "error", string(line))
+		return response["result"].(map[string]any)
+	}
+
+	send(1, "server/discover", map[string]any{"_meta": map[string]any{
+		"io.modelcontextprotocol/protocolVersion":    currentMCPProtocolVersion,
+		"io.modelcontextprotocol/clientCapabilities": map[string]any{},
+	}})
+	send(2, "tools/call", map[string]any{"name": "kata.load_activity", "arguments": map[string]any{}})
+	started := time.Now()
+	result := send(3, "tools/call", map[string]any{
+		"name":      "kata.events",
+		"arguments": map[string]any{"mode": "wait", "wait_seconds": 6},
+	})
+	require.GreaterOrEqual(t, time.Since(started), 5500*time.Millisecond,
+		"the wait must outlive the 5s default client timeout")
+	require.NotEqual(t, true, result["isError"], "%v", result)
+	structured := result["structuredContent"].(map[string]any)
+	require.Equal(t, true, structured["timed_out"],
+		"an event wait longer than the default client timeout must reach its own deadline")
+
+	require.NoError(t, inputWriter.Close())
+	require.NoError(t, <-done)
+}
 
 func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
 	setupKataEnv(t)

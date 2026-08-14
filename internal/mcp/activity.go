@@ -1093,10 +1093,8 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 	}
 	allowedProjects := make(map[int64]struct{}, len(projects))
 	allowedProjectUIDs := make(map[string]bool, len(projects))
-	allowedProjectNames := make(map[string]struct{}, len(projects))
 	for _, project := range projects {
 		allowedProjects[project.ID] = struct{}{}
-		allowedProjectNames[project.Name] = struct{}{}
 		if project.UID != "" {
 			allowedProjectUIDs[project.UID] = true
 		}
@@ -1139,27 +1137,19 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 			event.RelatedIssueShortID = ""
 		}
 		event.Payload = redactEventPayloadPeers(event.Payload, allowedPeers, allowedProjectUIDs)
-		redactEventTypedDisplayRefs(event, allowedProjectNames, event.ProjectName)
+		redactEventTypedDisplayRefs(event)
 	}
 	return nil
 }
 
 // redactEventTypedDisplayRefs removes event-type-specific display references
 // that carry no UID companion: close-throttle cohort refs span projects and
-// close-evidence refs are stored verbatim. Qualifiers are checked against
-// current scope names plus, at most, this event's own historical project
-// name — never other events' names, which may now belong to foreign projects.
-func redactEventTypedDisplayRefs(event *StreamEvent, inScope map[string]struct{}, eventProjectName string) {
-	if eventProjectName != "" {
-		if _, ok := inScope[eventProjectName]; !ok {
-			scoped := make(map[string]struct{}, len(inScope)+1)
-			for name := range inScope {
-				scoped[name] = struct{}{}
-			}
-			scoped[eventProjectName] = struct{}{}
-			inScope = scoped
-		}
-	}
+// close-evidence refs are stored verbatim. Historical text refs are
+// authorized only against this event's own stamped project name — current
+// scope names are unusable because a scoped project renamed to a previously
+// foreign name would retroactively vouch that foreign project's refs.
+func redactEventTypedDisplayRefs(event *StreamEvent) {
+	eventProjectName := event.ProjectName
 	payload, ok := event.Payload.(map[string]any)
 	if !ok {
 		return
@@ -1167,7 +1157,7 @@ func redactEventTypedDisplayRefs(event *StreamEvent, inScope map[string]struct{}
 	switch event.Type {
 	case "close.throttled":
 		for _, key := range []string{"parent", "prior"} {
-			if ref, isString := payload[key].(string); isString && ref != "" && !displayRefInScope(ref, inScope) {
+			if ref, isString := payload[key].(string); isString && ref != "" && !displayRefInScope(ref, eventProjectName) {
 				delete(payload, key)
 			}
 		}
@@ -1178,7 +1168,7 @@ func redactEventTypedDisplayRefs(event *StreamEvent, inScope map[string]struct{}
 		kept := make([]any, 0, len(cohort))
 		for _, element := range cohort {
 			ref, isString := element.(string)
-			if isString && displayRefInScope(ref, inScope) {
+			if isString && displayRefInScope(ref, eventProjectName) {
 				kept = append(kept, ref)
 			}
 		}
@@ -1197,7 +1187,7 @@ func redactEventTypedDisplayRefs(event *StreamEvent, inScope map[string]struct{}
 			if !isMap {
 				continue
 			}
-			if ref, isString := entry["issue_ref"].(string); isString && ref != "" && !displayRefInScope(ref, inScope) {
+			if ref, isString := entry["issue_ref"].(string); isString && ref != "" && !displayRefInScope(ref, eventProjectName) {
 				delete(entry, "issue_ref")
 			}
 		}
@@ -1205,13 +1195,14 @@ func redactEventTypedDisplayRefs(event *StreamEvent, inScope map[string]struct{}
 }
 
 // displayRefInScope applies the display-reference rendering contract:
-// qualified refs name their project, bare refs are same-project, and
-// full-length values are globally resolved and unprovable.
-func displayRefInScope(ref string, inScope map[string]struct{}) bool {
+// bare refs are same-project and full-length values are globally resolved
+// and unprovable. A qualified ref survives only when it names the event's
+// own stamped project — the one identity that provably matched an in-scope
+// project when the text was written.
+func displayRefInScope(ref, eventProjectName string) bool {
 	qualifier, _, qualified := strings.Cut(ref, "#")
 	if qualified {
-		_, ok := inScope[qualifier]
-		return ok
+		return eventProjectName != "" && qualifier == eventProjectName
 	}
 	return len(ref) < shortid.MaxLength
 }

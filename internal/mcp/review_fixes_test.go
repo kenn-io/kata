@@ -599,7 +599,7 @@ func TestEventDisplayRefsUseOnlyOwnHistoricalProjectName(t *testing.T) {
 	// project.
 	output := EventsOutput{Events: []StreamEvent{
 		{Type: "close.throttled", ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA", ProjectName: "former-name",
-			Payload: map[string]any{"reason": "sibling-burst", "parent": "former-name#zz9"}},
+			Payload: map[string]any{"reason": "sibling-burst", "parent": "former-name#zz9", "prior": "spoke-project#abc9"}},
 		{Type: "issue.closed", ProjectUID: "01HAAAAAAAAAAAAAAAAAAAAAAA", ProjectName: "spoke-project",
 			Payload: map[string]any{"reason": "duplicate", "evidence": []any{
 				map[string]any{"type": "duplicate-of", "issue_ref": "former-name#abc2"},
@@ -610,6 +610,8 @@ func TestEventDisplayRefsUseOnlyOwnHistoricalProjectName(t *testing.T) {
 	first := output.Events[0].Payload.(map[string]any)
 	require.Equal(t, "former-name#zz9", first["parent"],
 		"an event's own historical project name vouches its refs")
+	require.NotContains(t, first, "prior",
+		"a current in-scope name must not vouch an older event's ref: when the historical text was written, that name could have belonged to a foreign project")
 	evidence := output.Events[1].Payload.(map[string]any)["evidence"].([]any)
 	require.NotContains(t, evidence[0].(map[string]any), "issue_ref",
 		"another event's historical name must not vouch this event's refs; the name may now be foreign")
