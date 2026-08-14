@@ -366,6 +366,41 @@ func TestFailedPostgresImportRemovesFreshSchema(t *testing.T) {
 	require.Zero(t, version)
 }
 
+func TestPostgresImportRejectsInitializedTargetWithoutMutation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
+	dsn, cleanup := testenv.NewPostgresContainer(t, t.Context())
+	t.Cleanup(cleanup)
+	t.Setenv("KATA_HOME", t.TempDir())
+	t.Setenv("KATA_POSTGRES_SCHEMA", "mcp_restore_initialized")
+
+	// Initialize the target so it is a real, non-fresh Kata database that
+	// is not the active source.
+	initialized, err := storeopen.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	require.NoError(t, initialized.Close())
+	version, err := storeopen.PeekSchemaVersion(t.Context(), dsn)
+	require.NoError(t, err)
+	require.NotZero(t, version)
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "backup.jsonl"), []byte("{}\n"), 0o600))
+	sourcePath := filepath.Join(t.TempDir(), "active.db")
+	source, err := storeopen.Open(t.Context(), sourcePath)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	admin, err := New(Config{Root: root, SourceDSN: sourcePath, Targets: map[string]string{"restore": dsn}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, admin.Close()) })
+
+	_, err = admin.Import(t.Context(), ImportOptions{Artifact: "backup.jsonl", Target: "restore"})
+	require.ErrorContains(t, err, "already contains a Kata schema")
+	after, err := storeopen.PeekSchemaVersion(t.Context(), dsn)
+	require.NoError(t, err)
+	require.Equal(t, version, after, "the preflight rejection must not touch the initialized schema")
+}
+
 func TestPostgresImportRefusesActiveDatabaseByIdentity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")

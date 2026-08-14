@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/pgstore"
 	"go.kenn.io/kata/internal/db/storeopen"
 	"go.kenn.io/kata/internal/jsonl"
 )
@@ -513,7 +515,29 @@ func (a *Admin) Import(ctx context.Context, options ImportOptions) (ImportResult
 		if options.Force {
 			return ImportResult{}, errors.New("force replacement of PostgreSQL storage is not available through MCP")
 		}
-		return a.importFresh(ctx, input, targetValue, options, "postgres")
+		pgConfig, err := postgresRestoreConfig(ctx)
+		if err != nil {
+			return ImportResult{}, err
+		}
+		// Preflight without mutation: an initialized target is rejected
+		// before any schema work can touch it, and a missing schema is
+		// created under the explicit restore bootstrap configuration
+		// rather than the daemon's ambient schema mode.
+		version, err := pgstore.PeekSchemaVersionWithConfig(ctx, targetValue, pgConfig)
+		if err != nil {
+			return ImportResult{}, err
+		}
+		if version != 0 {
+			same, sameErr := a.targetIsActiveStorage(ctx, targetValue)
+			if sameErr != nil {
+				return ImportResult{}, sameErr
+			}
+			if same {
+				return ImportResult{}, errors.New("storage import target must differ from the active daemon storage")
+			}
+			return ImportResult{}, errors.New("storage target already contains a Kata schema; PostgreSQL restore requires a fresh target")
+		}
+		return a.importFresh(ctx, input, targetValue, options, "postgres", &pgConfig)
 	}
 	targetName, err := sqliteTargetName(targetValue)
 	if err != nil {
@@ -559,7 +583,7 @@ func (a *Admin) Import(ctx context.Context, options ImportOptions) (ImportResult
 	}
 	defer func() { _ = os.RemoveAll(privateDirectory) }() //nolint:gosec // directory was created above
 	temporary := filepath.Join(privateDirectory, "restore.db")
-	result, err := a.importFresh(ctx, input, temporary, options, "sqlite")
+	result, err := a.importFresh(ctx, input, temporary, options, "sqlite", nil)
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -603,8 +627,14 @@ func (a *Admin) Import(ctx context.Context, options ImportOptions) (ImportResult
 	return result, nil
 }
 
-func (a *Admin) importFresh(ctx context.Context, input io.Reader, target string, options ImportOptions, backend string) (ImportResult, error) {
-	store, err := storeopen.Open(ctx, target)
+func (a *Admin) importFresh(ctx context.Context, input io.Reader, target string, options ImportOptions, backend string, pgConfig *pgstore.Config) (ImportResult, error) {
+	var store db.Storage
+	var err error
+	if pgConfig != nil {
+		store, err = pgstore.OpenWithConfig(ctx, target, *pgConfig)
+	} else {
+		store, err = storeopen.Open(ctx, target)
+	}
 	if err != nil {
 		return ImportResult{}, err
 	}
@@ -612,25 +642,13 @@ func (a *Admin) importFresh(ctx context.Context, input io.Reader, target string,
 	instanceUID := store.InstanceUID()
 	fail := func(importErr error) (ImportResult, error) {
 		closeErr := store.Close()
-		if installedFreshPostgres {
+		if installedFreshPostgres && pgConfig != nil {
 			cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
-			cleanupErr := storeopen.RemoveFreshPostgresTarget(cleanupContext, target, instanceUID)
+			cleanupErr := pgstore.RemoveFreshSchemaWithConfig(cleanupContext, target, instanceUID, *pgConfig)
 			return ImportResult{}, errors.Join(importErr, closeErr, cleanupErr)
 		}
 		return ImportResult{}, errors.Join(importErr, closeErr)
-	}
-	if backend == "postgres" {
-		// The DSN-hash guard is textual; equivalent DSNs (localhost vs
-		// 127.0.0.1) hash differently, so compare the persisted instance
-		// identity of the opened target with the active source store.
-		sourceUID, sourceErr := a.sourceInstanceUID(ctx)
-		if sourceErr != nil {
-			return fail(sourceErr)
-		}
-		if sourceUID != "" && sourceUID == instanceUID {
-			return fail(errors.New("storage import target must differ from the active daemon storage"))
-		}
 	}
 	if err := jsonl.ImportWithOptions(ctx, input, store, jsonl.ImportOptions{RequireFreshTarget: true, NewInstance: options.NewInstance}); err != nil {
 		return fail(err)
@@ -641,20 +659,51 @@ func (a *Admin) importFresh(ctx context.Context, input io.Reader, target string,
 	return ImportResult{Artifact: options.Artifact, Target: options.Target, Backend: backend}, nil
 }
 
-// sourceInstanceUID reads the active daemon storage's persisted instance
-// identity so an import target can be compared by identity, not DSN text.
-func (a *Admin) sourceInstanceUID(ctx context.Context) (string, error) {
-	source, err := storeopen.OpenReadOnly(ctx, a.sourceDSN)
+// postgresRestoreConfig mirrors the CLI import flow: restore is an explicit
+// schema-owner operation that must prepare a fresh target even when the
+// daemon runtime is validation-only.
+func postgresRestoreConfig(ctx context.Context) (pgstore.Config, error) {
+	storageConfig, err := config.KataPostgresStorageConfig(ctx)
 	if err != nil {
-		return "", fmt.Errorf("open active storage identity: %w", err)
+		return pgstore.Config{}, err
 	}
-	defer func() { _ = source.Close() }()
-	uid := source.InstanceUID()
+	pgConfig := pgstore.ConfigFromValues(
+		storageConfig.Schema, storageConfig.Mode, storageConfig.SchemaOwner,
+		storageConfig.AllowInsecure,
+	)
+	pgConfig.SchemaMode = pgstore.SchemaModeBootstrap
+	return pgConfig, nil
+}
+
+// targetIsActiveStorage compares persisted instance identities so an
+// equivalent DSN spelling of the active database is named as such. Both
+// handles open read-only; nothing is mutated.
+func (a *Admin) targetIsActiveStorage(ctx context.Context, target string) (bool, error) {
+	sourceUID, err := instanceUIDOf(ctx, a.sourceDSN)
+	if err != nil || sourceUID == "" {
+		return false, err
+	}
+	targetUID, err := instanceUIDOf(ctx, target)
+	if err != nil {
+		return false, err
+	}
+	return targetUID != "" && targetUID == sourceUID, nil
+}
+
+// instanceUIDOf reads a storage target's persisted instance identity over a
+// read-only handle.
+func instanceUIDOf(ctx context.Context, dsn string) (string, error) {
+	store, err := storeopen.OpenReadOnly(ctx, dsn)
+	if err != nil {
+		return "", fmt.Errorf("open storage identity: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+	uid := store.InstanceUID()
 	if uid == "" {
 		// A read-only handle may not have cached the identity; a refresh
 		// failure means no persisted identity exists yet.
-		if refreshErr := source.RefreshInstanceUID(ctx); refreshErr == nil {
-			uid = source.InstanceUID()
+		if refreshErr := store.RefreshInstanceUID(ctx); refreshErr == nil {
+			uid = store.InstanceUID()
 		}
 	}
 	return uid, nil
