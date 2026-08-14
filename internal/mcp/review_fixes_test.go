@@ -487,6 +487,109 @@ func TestScopedStorageExportRequiresDaemonWideScope(t *testing.T) {
 	}
 }
 
+func TestWaitDeadlineDuringLookupReturnsTimeout(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+			return
+		}
+		// Hold every issue lookup past the wait deadline.
+		select {
+		case <-request.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := handlers.wait(t.Context(), nil, WaitInput{
+		Refs: []string{"spoke-project#abc1"}, Status: "closed", TimeoutSeconds: 1,
+	})
+	require.NoError(t, err, "a deadline expiring mid-lookup is the documented timeout outcome, not a tool error")
+	require.Equal(t, "timeout", output.Reason)
+	require.NotNil(t, output.States)
+}
+
+func TestEventsWaitDeadlineDuringPollReturnsTimeout(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+				projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project"),
+			}})
+			return
+		}
+		select {
+		case <-request.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{
+		{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"},
+		{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "hub-project"},
+	})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := handlers.events(t.Context(), nil, EventsInput{Mode: "wait", WaitSeconds: 1})
+	require.NoError(t, err, "a deadline expiring mid-poll is the documented timeout outcome, not a tool error")
+	require.True(t, output.TimedOut)
+	require.Contains(t, string(mustJSON(t, output)), `"events":[]`)
+}
+
+func TestScopedFederationStatusRedactsErrorText(t *testing.T) {
+	foreignUID := "01HDDDDDDDDDDDDDDDDDDDDDDD"
+	quarantineError := "apply batch: issue.linked references unknown issue " + foreignUID
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case "/api/v1/federation/status":
+			writeJSON(writer, map[string]any{"statuses": []any{map[string]any{
+				"project_id": 1, "enabled": true, "enrollment_count": 0,
+				"active_quarantine_count": 1,
+				"last_error":              "push failed: " + foreignUID,
+				"active_quarantines": []any{map[string]any{
+					"id": 4, "direction": "pull", "error": quarantineError,
+					"created_at": "2026-08-13T00:00:00Z", "first_event_id": 1, "last_event_id": 2,
+				}},
+			}}})
+		case "/api/v1/federation/enrollments":
+			writeJSON(writer, map[string]any{"enrollments": []any{}})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	scoped := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := scoped.federationStatus(t.Context(), nil, FederationStatusInput{})
+	require.NoError(t, err)
+	require.Len(t, output.Statuses, 1)
+	serialized := string(mustJSON(t, output))
+	require.NotContains(t, serialized, foreignUID, "stored federation errors must not leak foreign issue references to scoped servers")
+	require.Equal(t, scopedFederationErrorNotice, *output.Statuses[0].LastError)
+	require.Equal(t, scopedFederationErrorNotice, output.Statuses[0].ActiveQuarantines[0].ErrorData)
+
+	wide := toolHandlers{options: Options{Client: client, Scope: NewAllScope()}}
+	_, wideOutput, err := wide.federationStatus(t.Context(), nil, FederationStatusInput{})
+	require.NoError(t, err)
+	require.Equal(t, quarantineError, wideOutput.Statuses[0].ActiveQuarantines[0].ErrorData,
+		"daemon-wide servers keep the raw diagnostic")
+}
+
 func TestProjectsListingSurvivesMissingAllowlistMember(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/projects" {

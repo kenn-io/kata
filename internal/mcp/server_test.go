@@ -275,10 +275,8 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	// claims, lease release, recurrence patch) advertise destructive.
 	additive := map[string]bool{
 		"kata.comment": true, "kata.create": true,
-		"kata.import_issues":  true,
 		"kata.project_create": true, "kata.project_restore": true,
-		"kata.restore": true, "kata.sync_once": true,
-		"kata.token_create": true,
+		"kata.restore": true, "kata.token_create": true,
 	}
 	nonIdempotentTools := map[string]bool{
 		// Identical retries mint new records: no idempotency key or natural

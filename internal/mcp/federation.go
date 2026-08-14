@@ -313,7 +313,35 @@ func (h toolHandlers) federationStatus(ctx context.Context, _ *sdkmcp.CallToolRe
 		}
 		enrollments = append(enrollments, federationEnrollmentSummary(item))
 	}
-	return successResult(), FederationStatusOutput{Statuses: statuses, Enrollments: enrollments}, nil
+	return successResult(), FederationStatusOutput{Statuses: h.redactFederationErrors(statuses), Enrollments: enrollments}, nil
+}
+
+// Federation error text can quote refused events verbatim, including issue
+// references in other projects, so scoped servers replace it with a stable
+// notice instead of the raw daemon prose.
+const scopedFederationErrorNotice = "error detail withheld in scoped MCP mode; inspect with the CLI or a daemon-wide server"
+
+func (h toolHandlers) redactFederationErrors(statuses []generated.FederationProjectStatus) []generated.FederationProjectStatus {
+	if h.options.Scope.Mode() == ScopeAll {
+		return statuses
+	}
+	for index := range statuses {
+		if statuses[index].LastError != nil {
+			notice := scopedFederationErrorNotice
+			statuses[index].LastError = &notice
+		}
+		for quarantine := range statuses[index].ActiveQuarantines {
+			statuses[index].ActiveQuarantines[quarantine].ErrorData = scopedFederationErrorNotice
+		}
+	}
+	return statuses
+}
+
+func (h toolHandlers) redactQuarantineError(summary generated.FederationQuarantineSummary) generated.FederationQuarantineSummary {
+	if h.options.Scope.Mode() != ScopeAll {
+		summary.ErrorData = scopedFederationErrorNotice
+	}
+	return summary
 }
 
 func (h toolHandlers) federationEnrollmentRevoke(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationEnrollmentRevokeInput) (*sdkmcp.CallToolResult, FederationEnrollmentRevokeOutput, error) {
@@ -428,7 +456,7 @@ func (h toolHandlers) federationQuarantine(ctx context.Context, _ *sdkmcp.CallTo
 	if err != nil {
 		return nil, FederationQuarantineOutput{}, err
 	}
-	return successResult(), FederationQuarantineOutput{Project: project, Quarantine: *response}, nil
+	return successResult(), FederationQuarantineOutput{Project: project, Quarantine: h.redactQuarantineError(*response)}, nil
 }
 
 func federationEnrollmentSummary(enrollment generated.FederationEnrollmentOut) FederationEnrollmentSummary {

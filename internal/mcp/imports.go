@@ -25,7 +25,7 @@ type ImportIssuesOutput struct {
 }
 
 func registerImportTools(server *sdkmcp.Server, handlers toolHandlers) {
-	addTool(server, "kata.import_issues", "Import issues", "Import a bounded structured issue batch into an in-scope project.", toolHints(false, false, true), handlers.importIssues)
+	addTool(server, "kata.import_issues", "Import issues", "Import a bounded structured issue batch into an in-scope project; existing external_id matches are updated in place.", toolHints(false, true, true), handlers.importIssues)
 }
 
 func (h toolHandlers) importIssues(ctx context.Context, _ *sdkmcp.CallToolRequest, input ImportIssuesInput) (*sdkmcp.CallToolResult, ImportIssuesOutput, error) {

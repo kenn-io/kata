@@ -498,12 +498,19 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	}
 	waitContext, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
+	// The deadline can expire while a lookup is in flight; that is the
+	// documented timeout outcome, not a tool error. States from the last
+	// complete round keep the output honest.
+	lastStates := make([]WaitState, 0)
 	for {
 		states := make([]WaitState, 0, len(input.Refs))
 		matches := 0
 		for _, raw := range input.Refs {
 			project, ref, targetErr := h.options.Scope.IssueTarget(waitContext, h.options.Client, raw, false)
 			if targetErr != nil {
+				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
+				}
 				return nil, WaitOutput{}, targetErr
 			}
 			includeDeleted := true
@@ -512,6 +519,9 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
 			})
 			if showErr != nil {
+				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
+				}
 				return nil, WaitOutput{}, showErr
 			}
 			actual := shown.Issue.Status
@@ -527,6 +537,7 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		if input.Any && matches > 0 || !input.Any && matches == len(states) {
 			return successResult(), WaitOutput{Reason: "matched", States: states}, nil
 		}
+		lastStates = states
 		select {
 		case <-waitContext.Done():
 			if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
@@ -984,6 +995,9 @@ func (h toolHandlers) waitPollEvents(ctx context.Context, project string, after,
 	for {
 		output, err := h.pollScopedEvents(waitContext, project, after, limit)
 		if err != nil {
+			if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+				return successResult(), withEventsList(EventsOutput{NextAfterID: after, TimedOut: true}), nil
+			}
 			return nil, EventsOutput{}, err
 		}
 		if output.ResetRequired || len(output.Events) > 0 {
