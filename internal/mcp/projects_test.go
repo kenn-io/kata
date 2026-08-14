@@ -124,6 +124,47 @@ func TestAdministrationToolsRoundTripAgainstDaemon(t *testing.T) {
 	require.Equal(t, true, purged["purged"])
 }
 
+func TestProjectUpdateActionsReturnCompleteProjectSummary(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	alias, err := store.AttachAlias(t.Context(), project.ID, "host-a.example/repository", "git")
+	require.NoError(t, err)
+
+	daemonServer := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
+	t.Cleanup(func() { require.NoError(t, daemonServer.Close()) })
+	httpServer := httptest.NewServer(daemonServer.Handler())
+	t.Cleanup(httpServer.Close)
+	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{
+		Client: client, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+	})
+
+	requireCompleteProject := func(output map[string]any) {
+		t.Helper()
+		summary := output["project"].(map[string]any)
+		require.EqualValues(t, project.ID, summary["id"])
+		require.Equal(t, project.UID, summary["uid"])
+		require.Equal(t, project.Name, summary["name"])
+		require.EqualValues(t, project.Revision, summary["revision"])
+		require.Equal(t, formatTime(project.CreatedAt), summary["created_at"])
+		require.Equal(t, false, summary["archived"])
+	}
+
+	rewritten := callAdministrationTool(t, session, "kata.project_update", map[string]any{
+		"project": project.Name, "action": "rewrite_author", "from": "user-a", "to": "user-b",
+	})
+	requireCompleteProject(rewritten)
+
+	detached := callAdministrationTool(t, session, "kata.project_update", map[string]any{
+		"project": project.Name, "action": "detach_alias", "alias_id": alias.ID, "force": true,
+	})
+	requireCompleteProject(detached)
+}
+
 func callAdministrationTool(t *testing.T, session *sdkmcp.ClientSession, name string, arguments map[string]any) map[string]any {
 	t.Helper()
 	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: name, Arguments: arguments})

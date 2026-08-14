@@ -255,7 +255,11 @@ func (h toolHandlers) projectUpdate(ctx context.Context, _ *sdkmcp.CallToolReque
 		if rewriteErr != nil {
 			return nil, ProjectMutationOutput{}, rewriteErr
 		}
-		return successResult(), ProjectMutationOutput{Project: ProjectSummary{ID: project.ID, UID: project.UID, Name: project.Name}, Changed: response.Changed, Event: eventSummary(response.Event), Details: map[string]any{"total": response.Total, "issue_authors": response.IssueAuthors, "issue_owners": response.IssueOwners, "comment_authors": response.CommentAuthors, "link_authors": response.LinkAuthors}}, nil
+		current, showErr := h.projectSummaryByID(ctx, project.ID)
+		if showErr != nil {
+			return nil, ProjectMutationOutput{}, showErr
+		}
+		return successResult(), ProjectMutationOutput{Project: current, Changed: response.Changed, Event: eventSummary(response.Event), Details: map[string]any{"total": response.Total, "issue_authors": response.IssueAuthors, "issue_owners": response.IssueOwners, "comment_authors": response.CommentAuthors, "link_authors": response.LinkAuthors}}, nil
 	case "detach_alias":
 		if input.AliasID <= 0 {
 			return nil, ProjectMutationOutput{}, errors.New("detach_alias requires alias_id")
@@ -267,7 +271,11 @@ func (h toolHandlers) projectUpdate(ctx context.Context, _ *sdkmcp.CallToolReque
 		if detachErr != nil {
 			return nil, ProjectMutationOutput{}, detachErr
 		}
-		return successResult(), ProjectMutationOutput{Project: ProjectSummary{ID: project.ID, UID: project.UID, Name: project.Name}, Changed: true, Event: eventSummary(&response.Event), Details: map[string]any{"alias_id": response.Alias.ID, "alias_kind": response.Alias.AliasKind}}, nil
+		current, showErr := h.projectSummaryByID(ctx, project.ID)
+		if showErr != nil {
+			return nil, ProjectMutationOutput{}, showErr
+		}
+		return successResult(), ProjectMutationOutput{Project: current, Changed: true, Event: eventSummary(&response.Event), Details: map[string]any{"alias_id": response.Alias.ID, "alias_kind": response.Alias.AliasKind}}, nil
 	default:
 		return nil, ProjectMutationOutput{}, errors.New("action must be rename, metadata, rewrite_author, or detach_alias")
 	}
@@ -372,6 +380,16 @@ func projectSummaryOut(project generated.ProjectOut) ProjectSummary {
 		result.DeletedAt = formatTime(*project.DeletedAt)
 	}
 	return result
+}
+
+func (h toolHandlers) projectSummaryByID(ctx context.Context, projectID int64) (ProjectSummary, error) {
+	response, err := h.options.Client.ShowProject(ctx, &generated.ShowProjectRequestOptions{
+		PathParams: &generated.ShowProjectPath{ProjectID: projectID},
+	})
+	if err != nil {
+		return ProjectSummary{}, err
+	}
+	return projectSummaryOut(response.Project), nil
 }
 
 func projectSummary(project generated.Project) ProjectSummary {
