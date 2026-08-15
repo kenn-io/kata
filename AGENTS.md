@@ -174,10 +174,13 @@ authorization service. Review browser changes against these boundaries:
 - **Direct local browser authority trusts the loopback host.** On Unix, the daemon normally
   keeps its API on the owner-only socket and binds a separate ephemeral
   loopback browser listener. A direct tab on that listener creates its own
-  local-web session only when the request arrives directly from loopback, the
-  exact Host and Origin match, no forwarding headers are present, and daemon
-  token/identity/proxy authentication is unconfigured. This matches the
-  established keyless local-web convention; processes and
+  local-web session only when the exact Host matches, the request arrives
+  directly from loopback, no forwarding headers are present, and daemon
+  token/identity/proxy authentication is unconfigured. The mint normally
+  requires the exact Origin. An embedded owner-local browser may omit or send
+  an empty Origin only on this mint; exact Host validation remains the
+  DNS-rebinding boundary, and cross-site Fetch Metadata remains forbidden.
+  This matches the established keyless local-web convention; processes and
   users able to connect from the same host are inside this browser boundary.
   `kata ui` and the URL advertised by `kata daemon status` both open this
   origin directly; no launch credential or CLI authorization ceremony exists.
@@ -239,12 +242,12 @@ authorization service. Review browser changes against these boundaries:
   ordinary API reads with no browser markers. `allowed_hosts` is for explicit
   container/proxy/backend aliases, contains authorities rather than origins,
   and is never inferred from request headers. Browser routes and
-  browser-bearing mutations require the exact configured Origin even when the
-  header would otherwise be absent, while ordinary CLI, health, and federation
-  requests continue through daemon
-  bearer/private-network authentication. A bearer header never bypasses Host
-  validation. Bearer CLI event streams remain CLI traffic. Do not weaken one
-  boundary to make the other client class work.
+  browser-bearing mutations require the exact configured Origin. The sole
+  exception is an absent or empty Origin on the direct-loopback local-session
+  mint under the checks above. Ordinary CLI, health, and federation requests
+  continue through daemon bearer/private-network authentication. A bearer
+  header never bypasses Host validation. Bearer CLI event streams remain CLI
+  traffic. Do not weaken one boundary to make the other client class work.
 - **Plain HTTP is local or explicit private-network trust.** Loopback browser
   origins may use HTTP. A non-loopback HTTP public origin requires the same
   explicit `[auth].trust_private_network` opt-in used for plaintext private

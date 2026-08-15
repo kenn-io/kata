@@ -95,43 +95,106 @@ func TestBrowserOriginPolicy(t *testing.T) {
 }
 
 func TestLocalUISessionPolicyRequiresDirectLoopback(t *testing.T) {
-	newHandler := func(t *testing.T, allow bool) http.Handler {
-		t.Helper()
-		handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNoContent)
-		}), ListenerPolicy{
-			Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", AllowLocalSession: allow,
-		})
-		require.NoError(t, err)
-		return handler
+	tests := []struct {
+		name       string
+		allow      bool
+		host       string
+		remoteAddr string
+		headers    map[string]string
+		want       int
+	}{
+		{
+			name: "matching origin", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"Origin": "http://127.0.0.1:27123"}, want: http.StatusNoContent,
+		},
+		{
+			name: "absent origin", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123", want: http.StatusNoContent,
+		},
+		{
+			name: "empty origin", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"Origin": ""}, want: http.StatusNoContent,
+		},
+		{
+			name: "foreign host", allow: true,
+			host: "attacker.example:27123", remoteAddr: "127.0.0.1:40123", want: http.StatusBadRequest,
+		},
+		{
+			name: "mismatched origin", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"Origin": "https://attacker.example"}, want: http.StatusForbidden,
+		},
+		{
+			name: "opaque origin", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"Origin": "null"}, want: http.StatusForbidden,
+		},
+		{
+			name: "local sessions disabled",
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123", want: http.StatusNotFound,
+		},
+		{
+			name: "non-loopback peer", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "192.0.2.10:40123", want: http.StatusNotFound,
+		},
+		{
+			name: "Forwarded header", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"Forwarded": "for=192.0.2.10"}, want: http.StatusNotFound,
+		},
+		{
+			name: "X-Forwarded-For header", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"X-Forwarded-For": "192.0.2.10"}, want: http.StatusNotFound,
+		},
+		{
+			name: "X-Forwarded-Host header", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"X-Forwarded-Host": "daemon.example"}, want: http.StatusNotFound,
+		},
+		{
+			name: "X-Forwarded-Proto header", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"X-Forwarded-Proto": "https"}, want: http.StatusNotFound,
+		},
+		{
+			name: "X-Real-IP header", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"X-Real-IP": "192.0.2.10"}, want: http.StatusNotFound,
+		},
+		{
+			name: "cross-site fetch", allow: true,
+			host: "127.0.0.1:27123", remoteAddr: "127.0.0.1:40123",
+			headers: map[string]string{"Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden,
+		},
 	}
-	newRequest := func() *http.Request {
-		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/ui/session/local", nil)
-		request.Host = "127.0.0.1:27123"
-		request.RemoteAddr = "127.0.0.1:40123"
-		request.Header.Set("Origin", "http://127.0.0.1:27123")
-		return request
+
+	for _, kind := range []ListenerKind{ListenerBrowser, ListenerSharedTCP} {
+		for _, tt := range tests {
+			t.Run(string(kind)+"/"+tt.name, func(t *testing.T) {
+				handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				}), ListenerPolicy{
+					Kind: kind, Origin: "http://127.0.0.1:27123", AllowLocalSession: tt.allow,
+				})
+				require.NoError(t, err)
+
+				request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/ui/session/local", nil)
+				request.Host = tt.host
+				request.RemoteAddr = tt.remoteAddr
+				for name, value := range tt.headers {
+					request.Header.Set(name, value)
+				}
+				response := httptest.NewRecorder()
+
+				handler.ServeHTTP(response, request)
+
+				assert.Equal(t, tt.want, response.Code)
+			})
+		}
 	}
-
-	response := httptest.NewRecorder()
-	newHandler(t, true).ServeHTTP(response, newRequest())
-	assert.Equal(t, http.StatusNoContent, response.Code)
-
-	response = httptest.NewRecorder()
-	newHandler(t, false).ServeHTTP(response, newRequest())
-	assert.Equal(t, http.StatusNotFound, response.Code)
-
-	request := newRequest()
-	request.RemoteAddr = "192.0.2.10:40123"
-	response = httptest.NewRecorder()
-	newHandler(t, true).ServeHTTP(response, request)
-	assert.Equal(t, http.StatusNotFound, response.Code)
-
-	request = newRequest()
-	request.Header.Set("Forwarded", "for=192.0.2.10")
-	response = httptest.NewRecorder()
-	newHandler(t, true).ServeHTTP(response, request)
-	assert.Equal(t, http.StatusNotFound, response.Code)
 }
 
 func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {

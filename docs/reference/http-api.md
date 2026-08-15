@@ -160,8 +160,13 @@ payloads.
 
 The browser-session routes are deliberately outside the generated client
 contract. A fresh tab on a keyless direct-loopback origin uses
-`POST /api/v1/ui/session/local`; Host, Origin, peer address, forwarding-header,
+`POST /api/v1/ui/session/local`. Exact Host, peer address, forwarding-header,
 and daemon-auth policy gate that endpoint before it issues a local-web session.
+The mint normally requires the exact Origin; an embedded owner-local browser
+may omit or send an empty Origin only on this endpoint, while cross-site Fetch
+Metadata remains forbidden. Exact Host validation runs first and remains the
+DNS-rebinding boundary.
+
 The URL reported by `kata daemon status` and local `kata ui` both open that
 loopback origin directly. Configured origins exchange a bearer or identity
 token at `POST /api/v1/ui/session/login`. Logout is
@@ -177,12 +182,12 @@ browser origin. Request `Host`, `Origin`, and forwarding headers never supply
 authority, and origins with credentials, path prefixes, query strings, or
 fragments are unavailable rather than rewritten.
 
-Every browser data request requires both the instance cookie and
-`X-Kata-Web-Session`. Mutations additionally require the exact `Origin` and
-`X-Kata-CSRF`; the protected event stream carries the session header and
-`Last-Event-ID` through `fetch`. In unauthenticated `--insecure-readonly` mode,
-the UI advertises read-only authority and polls snapshots because the event
-stream remains protected.
+After session creation, every browser data request requires both the instance
+cookie and `X-Kata-Web-Session`. Browser data mutations additionally require
+the exact `Origin` and `X-Kata-CSRF`; the protected event stream carries the
+session header and `Last-Event-ID` through `fetch`. In unauthenticated
+`--insecure-readonly` mode, the UI advertises read-only authority and polls
+snapshots because the event stream remains protected.
 
 ## Federation Enrollment and Health Endpoints
 
