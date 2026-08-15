@@ -657,6 +657,30 @@ func TestEventsWaitDeadlineDuringPollReturnsTimeout(t *testing.T) {
 	require.Contains(t, string(mustJSON(t, output)), `"events":[]`)
 }
 
+// TestEventsWaitDeadlineBoundsScopeResolution covers a stalled project
+// catalog: the wait_seconds deadline must bound the scope lookup that
+// precedes the stream, not only the stream itself.
+func TestEventsWaitDeadlineBoundsScopeResolution(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		select {
+		case <-request.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, LongRunningClient: client, Scope: scope}}
+
+	started := time.Now()
+	_, output, err := handlers.events(t.Context(), nil, EventsInput{Mode: "wait", Project: "spoke-project", WaitSeconds: 1})
+	require.NoError(t, err, "a deadline expiring during scope resolution is the documented timeout outcome")
+	require.True(t, output.TimedOut)
+	require.Less(t, time.Since(started), 5*time.Second, "wait_seconds must bound the scope lookup")
+}
+
 func TestScopedFederationStatusRedactsErrorText(t *testing.T) {
 	foreignUID := "01HDDDDDDDDDDDDDDDDDDDDDDD"
 	quarantineError := "apply batch: issue.linked references unknown issue " + foreignUID

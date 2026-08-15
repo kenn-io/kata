@@ -878,20 +878,29 @@ func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if strings.TrimSpace(input.Project) == "" && h.options.Scope.Mode() != ScopeBound {
 		return h.waitPollEvents(ctx, input.Project, input.After, limit, waitSeconds)
 	}
+	// The wait deadline bounds the whole call, including the scope lookup
+	// that precedes the stream: the long-running client has no timeout of
+	// its own, so a stalled catalog must still honor wait_seconds.
+	waitContext, cancel := context.WithTimeout(ctx, time.Duration(waitSeconds)*time.Second)
+	defer cancel()
+	timedOut := func() (*sdkmcp.CallToolResult, EventsOutput, error) {
+		return successResult(), withEventsList(EventsOutput{NextAfterID: input.After, TimedOut: true}), nil
+	}
 	var projectID *int64
 	if strings.TrimSpace(input.Project) != "" || h.options.Scope.Mode() == ScopeBound {
-		projects, err := h.activityProjects(ctx, input.Project)
+		projects, err := h.activityProjects(waitContext, input.Project)
 		if err != nil {
+			if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+				return timedOut()
+			}
 			return nil, EventsOutput{}, err
 		}
 		projectID = &projects[0].ID
 	}
-	waitContext, cancel := context.WithTimeout(ctx, time.Duration(waitSeconds)*time.Second)
-	defer cancel()
 	response, err := h.options.Client.StreamEventsRaw(waitContext, &generated.StreamEventsRequestOptions{Query: &generated.StreamEventsQuery{AfterID: &input.After, ProjectID: projectID}})
 	if err != nil {
 		if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-			return successResult(), withEventsList(EventsOutput{NextAfterID: input.After, TimedOut: true}), nil
+			return timedOut()
 		}
 		return nil, EventsOutput{}, err
 	}
@@ -899,7 +908,7 @@ func (h toolHandlers) events(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	output, err := readEventStream(waitContext, response.Body, input.After, limit)
 	if err != nil {
 		if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
-			return successResult(), withEventsList(EventsOutput{NextAfterID: input.After, TimedOut: true}), nil
+			return timedOut()
 		}
 		return nil, EventsOutput{}, err
 	}
