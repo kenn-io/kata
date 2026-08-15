@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	internalclient "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/version"
 )
 
@@ -49,11 +51,25 @@ func TestMCPServeTokenAdminRequiresAllProjects(t *testing.T) {
 	}
 }
 
+// serveMCPTestHealth answers the startup API version handshake as a current
+// daemon so tests can exercise the rest of the fake daemon.
+func serveMCPTestHealth(writer http.ResponseWriter, request *http.Request) bool {
+	if request.URL.Path != "/api/v1/health" {
+		return false
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	_, _ = fmt.Fprintf(writer, `{"ok":true,"api_schema_version":%q}`, daemon.APISchemaVersion)
+	return true
+}
+
 func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	var requests int
-	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
 		requests++
 		http.Error(writer, "unexpected project resolution", http.StatusInternalServerError)
 	}))
@@ -70,11 +86,43 @@ func TestMCPServeAllProjectsServesDaemonWideScope(t *testing.T) {
 	require.Zero(t, requests, "daemon-wide startup must not resolve the current workspace")
 }
 
+func TestMCPServeRejectsDaemonBeforeRelationshipPinning(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_AUTHOR", "example-agent")
+	var otherRequests int
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/health" {
+			_, _ = writer.Write([]byte(`{"ok":true,"api_schema_version":"0.10.0"}`))
+			return
+		}
+		otherRequests++
+		http.NotFound(writer, request)
+	}))
+	t.Cleanup(daemon.Close)
+
+	command := newRootCmd()
+	command.SetIn(bytes.NewReader(nil))
+	command.SetOut(io.Discard)
+	command.SetErr(io.Discard)
+	command.SetArgs([]string{"mcp", "serve", "--all-projects"})
+	command.SetContext(context.WithValue(t.Context(), internalclient.BaseURLKey{}, daemon.URL))
+
+	err := command.Execute()
+	require.ErrorContains(t, err, "requires daemon API 0.11.0 or newer")
+	require.ErrorContains(t, err, "reports 0.10.0")
+	require.Zero(t, otherRequests, "an incompatible daemon must be rejected before any MCP traffic")
+}
+
 func TestMCPServeDefaultRequiresWorkspaceBinding(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	t.Chdir(t.TempDir())
-	daemon := httptest.NewServer(http.HandlerFunc(http.NotFound))
+	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
+		http.NotFound(writer, request)
+	}))
 	t.Cleanup(daemon.Close)
 
 	command := newRootCmd()
@@ -110,6 +158,9 @@ func TestMCPServeSyncOutlivesHandshakeTimeout(t *testing.T) {
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	workspace := t.TempDir()
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
 		switch request.URL.Path {
 		case "/api/v1/projects/resolve":
 			writer.Header().Set("Content-Type", "application/json")
@@ -186,6 +237,9 @@ func TestMCPServeEventWaitOutlivesDefaultClientTimeout(t *testing.T) {
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	workspace := t.TempDir()
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
 		switch request.URL.Path {
 		case "/api/v1/projects/resolve":
 			writer.Header().Set("Content-Type", "application/json")
@@ -258,6 +312,9 @@ func TestMCPServeOrdinaryRequestsUseDefaultClientTimeout(t *testing.T) {
 	t.Setenv("KATA_AUTHOR", "example-agent")
 	t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
 		if request.URL.Path != "/api/v1/instance" {
 			http.NotFound(writer, request)
 			return
@@ -321,6 +378,9 @@ func TestMCPServeBindsProjectAndUsesStdoutOnlyForProtocol(t *testing.T) {
 	var resolved bool
 	var cataloged bool
 	daemon := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveMCPTestHealth(writer, request) {
+			return
+		}
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/api/v1/projects/resolve":

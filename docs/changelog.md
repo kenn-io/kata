@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-08-12
+last_edited: 2026-08-15
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -58,6 +58,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Added `event_id` and the close-time frozen `parent_uid` to close-audit
   rows so audit results page with an immutable cursor and parent display
   refs carry provable provenance.
+- Bumped the HTTP API schema version to `0.11.0` for the pinned relationship
+  target fields (`to_project_uid`, `expected_project_uids`) and close-audit
+  `event_id`; `kata mcp serve` now checks the daemon API version at startup
+  and refuses older daemons instead of failing later inside tool calls.
 
 **Bug fixes**
 

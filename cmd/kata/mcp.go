@@ -82,6 +82,9 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := requireDaemonAPIVersion(ctx, httpClient, baseURL, apiVersionMCPServer, "kata mcp serve"); err != nil {
+				return err
+			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
 			apiClient, err := kataclient.NewWithHTTPClient(baseURL, httpClient)
 			if err != nil {

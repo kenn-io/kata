@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-08-12
+last_edited: 2026-08-15
 ---
 
 # Model Context Protocol server
@@ -43,7 +43,10 @@ A typical client command has this shape:
 
 Use `--daemon <name>` to select a configured daemon. The normal client
 settings also apply, including `KATA_SERVER`, bearer authentication,
-private-network checks, and Unix socket discovery.
+private-network checks, and Unix socket discovery. The server checks the
+daemon's `api_schema_version` once at startup and refuses to serve a daemon
+older than API `0.11.0` (see the [HTTP API version history](http-api.md));
+upgrade the daemon rather than the MCP client in that case.
 
 ## Project scope
 
