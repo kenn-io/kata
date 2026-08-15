@@ -225,7 +225,7 @@ func (h toolHandlers) leaseSteal(ctx context.Context, _ *sdkmcp.CallToolRequest,
 		return nil, LeaseOutput{}, err
 	}
 	previous := status.Holder
-	if status.Held && status.Holder != h.options.Actor {
+	if status.Held {
 		if _, _, err := h.leaseForceRelease(ctx, nil, LeaseForceReleaseInput{Ref: input.Ref, Reason: input.Reason}); err != nil {
 			return nil, LeaseOutput{}, err
 		}
@@ -237,6 +237,12 @@ func (h toolHandlers) leaseSteal(ctx context.Context, _ *sdkmcp.CallToolRequest,
 		return nil, LeaseOutput{}, err
 	}
 	acquired.PreviousHolder = previous
+	if !acquired.Granted && !acquired.Pending {
+		if !status.Held {
+			return nil, LeaseOutput{}, fmt.Errorf("lease steal acquisition was denied for %s", acquired.Ref)
+		}
+		return nil, LeaseOutput{}, fmt.Errorf("lease steal force-release succeeded but lease acquisition was denied for %s", acquired.Ref)
+	}
 	return successResult(), acquired, nil
 }
 
