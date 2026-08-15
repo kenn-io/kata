@@ -1199,46 +1199,78 @@ func linkPeerAndType(issueUID string, link generated.LinkOut) (generated.LinkPee
 	return peer, typeName
 }
 
-// scopedLinkChanges removes relationship-change peers in projects outside
-// the startup scope, such as a replaced parent that lived in a foreign
-// project, before the deltas reach the client.
+// scopedLinkChanges removes relationship-change peers outside the active
+// startup scope before the deltas reach the client. Live edit responses must
+// not retain archived allowlist members, and peer UIDs must resolve into an
+// active project authorized by immutable project identity.
 func (h toolHandlers) scopedLinkChanges(ctx context.Context, changes *generated.LinkChanges) (*generated.LinkChanges, error) {
 	if changes == nil || h.options.Scope.Mode() == ScopeAll {
 		return changes, nil
 	}
-	inScope, err := h.scopeProjectNames(ctx)
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
 	if err != nil {
 		return nil, err
 	}
-	keep := func(peers []generated.LinkPeer) []generated.LinkPeer {
+	activeProjectIDs := make(map[int64]struct{}, len(projects))
+	for _, project := range projects {
+		activeProjectIDs[project.ID] = struct{}{}
+	}
+	resolved := make(map[string]bool)
+	allowed := func(peer generated.LinkPeer) (bool, error) {
+		if cached, ok := resolved[peer.UID]; ok {
+			return cached, nil
+		}
+		inProject, resolveErr := h.issueUIDInScope(ctx, peer.UID, activeProjectIDs)
+		if resolveErr != nil {
+			return false, resolveErr
+		}
+		resolved[peer.UID] = inProject
+		return inProject, nil
+	}
+	keep := func(peers []generated.LinkPeer) ([]generated.LinkPeer, error) {
 		kept := make([]generated.LinkPeer, 0, len(peers))
 		for _, peer := range peers {
-			if _, ok := inScope[peer.Project]; ok {
+			ok, allowErr := allowed(peer)
+			if allowErr != nil {
+				return nil, allowErr
+			}
+			if ok {
 				kept = append(kept, peer)
 			}
 		}
 		if len(kept) == 0 {
-			return nil
+			return nil, nil
 		}
-		return kept
+		return kept, nil
 	}
-	keepOne := func(peer *generated.LinkPeer) *generated.LinkPeer {
+	keepOne := func(peer *generated.LinkPeer) (*generated.LinkPeer, error) {
 		if peer == nil {
-			return nil
+			return nil, nil
 		}
-		if _, ok := inScope[peer.Project]; !ok {
-			return nil
+		ok, allowErr := allowed(*peer)
+		if allowErr != nil || !ok {
+			return nil, allowErr
 		}
-		return peer
+		return peer, nil
 	}
-	changes.BlockedByAdded = keep(changes.BlockedByAdded)
-	changes.BlockedByRemoved = keep(changes.BlockedByRemoved)
-	changes.BlocksAdded = keep(changes.BlocksAdded)
-	changes.BlocksRemoved = keep(changes.BlocksRemoved)
-	changes.ParentRemoved = keepOne(changes.ParentRemoved)
-	changes.ParentSet = keepOne(changes.ParentSet)
-	changes.RelatedAdded = keep(changes.RelatedAdded)
-	changes.RelatedRemoved = keep(changes.RelatedRemoved)
+	for _, peers := range []*[]generated.LinkPeer{
+		&changes.BlockedByAdded, &changes.BlockedByRemoved,
+		&changes.BlocksAdded, &changes.BlocksRemoved,
+		&changes.RelatedAdded, &changes.RelatedRemoved,
+	} {
+		filtered, filterErr := keep(*peers)
+		if filterErr != nil {
+			return nil, filterErr
+		}
+		*peers = filtered
+	}
+	for _, peer := range []**generated.LinkPeer{&changes.ParentRemoved, &changes.ParentSet} {
+		filtered, filterErr := keepOne(*peer)
+		if filterErr != nil {
+			return nil, filterErr
+		}
+		*peer = filtered
+	}
 	return changes, nil
 }
 

@@ -771,20 +771,6 @@ func (h toolHandlers) issueResolvesInProject(ctx context.Context, project Projec
 	return false, errors.New("resolve scoped issue reference: daemon request failed")
 }
 
-// scopeProjectNames returns the startup scope's current project names,
-// including archived members, for display-reference checks.
-func (h toolHandlers) scopeProjectNames(ctx context.Context) (map[string]struct{}, error) {
-	projects, err := h.options.Scope.Projects(ctx, h.options.Client, true)
-	if err != nil {
-		return nil, err
-	}
-	names := make(map[string]struct{}, len(projects))
-	for _, project := range projects {
-		names[project.Name] = struct{}{}
-	}
-	return names, nil
-}
-
 func (h toolHandlers) digest(ctx context.Context, _ *sdkmcp.CallToolRequest, input DigestInput) (*sdkmcp.CallToolResult, DigestOutput, error) {
 	if strings.TrimSpace(input.Since) == "" {
 		return nil, DigestOutput{}, errors.New("since is required")

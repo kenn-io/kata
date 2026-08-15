@@ -734,6 +734,12 @@ func TestEditFiltersLinkChangePeersOutsideScope(t *testing.T) {
 			writeJSON(writer, map[string]any{"projects": []any{
 				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
 			}})
+		case request.URL.Path == "/api/v1/issues/01HCCCCCCCCCCCCCCCCCCCCCCC":
+			issue := issueJSON(1, "spoke-project", "def2")
+			issue["uid"] = "01HCCCCCCCCCCCCCCCCCCCCCCC"
+			writeJSON(writer, map[string]any{
+				"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{},
+			})
 		case request.Method == http.MethodPatch:
 			issue := issueJSON(1, "spoke-project", "abc1")
 			writeJSON(writer, map[string]any{
@@ -777,6 +783,53 @@ func TestEditFiltersLinkChangePeersOutsideScope(t *testing.T) {
 	require.NotNil(t, output.Changes.ParentSet)
 	require.Equal(t, "spoke-project#def2", output.Changes.ParentSet.QualifiedRef)
 	require.Empty(t, output.Changes.RelatedAdded)
+}
+
+func TestEditFiltersArchivedLinkChangePeerOutsideActiveScope(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			projects := []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}
+			if request.URL.Query().Get("include") == "archived" {
+				archived := projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "archived-project")
+				archived["deleted_at"] = "2026-08-12T00:00:00Z"
+				projects = append(projects, archived)
+			}
+			writeJSON(writer, map[string]any{"projects": projects})
+		case request.Method == http.MethodPatch:
+			writeJSON(writer, map[string]any{
+				"changed": true, "issue": issueJSON(1, "spoke-project", "abc1"),
+				"event": map[string]any{
+					"event_id": 7, "event_uid": "01HEEEEEEEEEEEEEEEEEEEEEE7", "type": "issue.links_changed",
+					"actor": "example-agent", "content_hash": "hash", "created_at": "2026-08-12T00:00:00Z",
+					"origin_instance_uid": "01HFFFFFFFFFFFFFFFFFFFFFFF", "payload": "{}",
+					"project_id": 1, "project_name": "spoke-project", "project_uid": "01HAAAAAAAAAAAAAAAAAAAAAAA",
+				},
+				"changes": map[string]any{
+					"parent_removed": map[string]any{
+						"project": "archived-project", "qualified_id": "archived-project#old1",
+						"short_id": "old1", "status": "closed", "uid": "01HCCCCCCCCCCCCCCCCCCCCCCC",
+					},
+				},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{
+		{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"},
+		{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "archived-project"},
+	})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	parent := "spoke-project#def2"
+	_, output, err := handlers.edit(t.Context(), nil, EditInput{Ref: "spoke-project#abc1", Parent: &parent})
+	require.NoError(t, err)
+	require.NotNil(t, output.Changes)
+	require.Nil(t, output.Changes.ParentRemoved, "archived relationship peer must not leak through edit changes")
 }
 
 func TestEventRedactionPreservesOpaqueMetadataAndDiffValues(t *testing.T) {

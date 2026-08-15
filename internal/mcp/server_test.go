@@ -579,6 +579,11 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 					require.Equal(t, map[string]any{"scheduled_on": "2026-09-01T09:30"}, body["patch"])
 				}
 			}
+			if tt.tool == "kata.edit" {
+				scopeRequest := <-requests
+				require.Equal(t, http.MethodGet, scopeRequest.Method)
+				require.Equal(t, "/api/v1/issues/01ARZ3NDEKTSV4RRFFQ69G5FAW", scopeRequest.Path)
+			}
 		})
 	}
 }
