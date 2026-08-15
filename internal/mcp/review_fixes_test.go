@@ -1283,27 +1283,14 @@ func TestShowFiltersLinksOutsideFixedProjectScope(t *testing.T) {
 				projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "other-project"),
 			}})
 		case "/api/v1/projects/1/issues/spk1":
-			issue := issueJSON(1, "spoke-project", "spk1")
-			peer := func(project, ref, uid string) map[string]any {
-				return map[string]any{
-					"project": project, "qualified_id": project + "#" + ref,
-					"short_id": ref, "status": "open", "uid": uid,
-				}
-			}
-			link := func(id int, to map[string]any) map[string]any {
-				return map[string]any{
-					"id": id, "type": "related", "author": "example-agent",
-					"created_at": "2026-08-11T00:00:00Z",
-					"from":       peer("spoke-project", "spk1", issue["uid"].(string)), "to": to,
-				}
-			}
-			writeJSON(writer, map[string]any{
-				"issue": issue, "labels": []any{}, "comments": []any{},
-				"links": []any{
-					link(1, peer("spoke-project", "in1", "01HCCCCCCCCCCCCCCCCCCCCCCC")),
-					link(2, peer("other-project", "out1", "01HDDDDDDDDDDDDDDDDDDDDDDD")),
-				},
-			})
+			writeJSON(writer, showLinksJSON(
+				showLinkPeerJSON("spoke-project", "in1", "01HCCCCCCCCCCCCCCCCCCCCCCC"),
+				showLinkPeerJSON("other-project", "out1", "01HDDDDDDDDDDDDDDDDDDDDDDD"),
+			))
+		case "/api/v1/issues/01HCCCCCCCCCCCCCCCCCCCCCCC":
+			writeJSON(writer, showByUIDJSON(1, "spoke-project", "in1", "01HCCCCCCCCCCCCCCCCCCCCCCC"))
+		case "/api/v1/issues/01HDDDDDDDDDDDDDDDDDDDDDDD":
+			writeJSON(writer, showByUIDJSON(2, "other-project", "out1", "01HDDDDDDDDDDDDDDDDDDDDDDD"))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -1317,6 +1304,98 @@ func TestShowFiltersLinksOutsideFixedProjectScope(t *testing.T) {
 	_, output, err := handlers.show(t.Context(), nil, ShowInput{Ref: "spoke-project#spk1"})
 	require.NoError(t, err)
 	require.Equal(t, []LinkSummary{{Type: "related", QualifiedRef: "spoke-project#in1", Status: "open"}}, output.Issue.Links)
+}
+
+// TestShowAuthorizesLinkPeersByImmutableProjectIdentity covers a project
+// rename that reuses a name between the show response and the scope catalog:
+// the peer whose display name matches an in-scope project but whose UID lives
+// in an out-of-scope project must be dropped, and the peer whose in-scope
+// project was renamed after the catalog was cached must be kept.
+func TestShowAuthorizesLinkPeersByImmutableProjectIdentity(t *testing.T) {
+	const reusedNamePeer = "01HCCCCCCCCCCCCCCCCCCCCCCC"
+	const renamedScopePeer = "01HDDDDDDDDDDDDDDDDDDDDDDD"
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+				projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "other-project"),
+			}})
+		case "/api/v1/projects/1/issues/spk1":
+			writeJSON(writer, showLinksJSON(
+				showLinkPeerJSON("spoke-project", "out1", reusedNamePeer),
+				showLinkPeerJSON("renamed-project", "in1", renamedScopePeer),
+			))
+		case "/api/v1/issues/" + reusedNamePeer:
+			writeJSON(writer, showByUIDJSON(2, "spoke-project", "out1", reusedNamePeer))
+		case "/api/v1/issues/" + renamedScopePeer:
+			writeJSON(writer, showByUIDJSON(1, "renamed-project", "in1", renamedScopePeer))
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, output, err := handlers.show(t.Context(), nil, ShowInput{Ref: "spoke-project#spk1"})
+	require.NoError(t, err)
+	require.Equal(t, []LinkSummary{{Type: "related", QualifiedRef: "renamed-project#in1", Status: "open"}}, output.Issue.Links,
+		"link peers must be authorized by the immutable project that owns the peer UID, not by display name")
+}
+
+func TestShowFailsClosedWhenLinkPeerScopeLookupFails(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+			}})
+		case "/api/v1/projects/1/issues/spk1":
+			writeJSON(writer, showLinksJSON(showLinkPeerJSON("spoke-project", "in1", "01HCCCCCCCCCCCCCCCCCCCCCCC")))
+		default:
+			http.Error(writer, "daemon unavailable", http.StatusInternalServerError)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+
+	_, _, err = handlers.show(t.Context(), nil, ShowInput{Ref: "spoke-project#spk1"})
+	require.Error(t, err, "a transient peer lookup failure must not silently publish or drop links")
+	require.NotContains(t, err.Error(), "daemon unavailable", "daemon error bodies must stay redacted")
+}
+
+func showLinkPeerJSON(project, ref, uid string) map[string]any {
+	return map[string]any{
+		"project": project, "qualified_id": project + "#" + ref,
+		"short_id": ref, "status": "open", "uid": uid,
+	}
+}
+
+// showLinksJSON builds a spoke-project#spk1 show response whose issue has one
+// related link to each peer.
+func showLinksJSON(peers ...map[string]any) map[string]any {
+	issue := issueJSON(1, "spoke-project", "spk1")
+	links := make([]any, 0, len(peers))
+	for index, peer := range peers {
+		links = append(links, map[string]any{
+			"id": index + 1, "type": "related", "author": "example-agent",
+			"created_at": "2026-08-11T00:00:00Z",
+			"from":       showLinkPeerJSON("spoke-project", "spk1", issue["uid"].(string)), "to": peer,
+		})
+	}
+	return map[string]any{"issue": issue, "labels": []any{}, "comments": []any{}, "links": links}
+}
+
+func showByUIDJSON(projectID int64, projectName, shortID, uid string) map[string]any {
+	issue := issueJSON(projectID, projectName, shortID)
+	issue["uid"] = uid
+	return map[string]any{"issue": issue, "labels": []any{}, "comments": []any{}, "links": []any{}}
 }
 
 func TestTokenAdministrationRequiresDaemonWideScope(t *testing.T) {

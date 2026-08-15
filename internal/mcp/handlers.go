@@ -410,26 +410,20 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	for _, label := range response.Labels {
 		labels = append(labels, label.Label)
 	}
-	links := make([]LinkSummary, 0, len(response.Links))
-	var allowedLinkProjects map[string]struct{}
-	if h.options.Scope.Mode() != ScopeAll {
-		projects, scopeErr := h.options.Scope.Projects(ctx, h.options.Client, false)
-		if scopeErr != nil {
-			return nil, ShowOutput{}, scopeErr
-		}
-		allowedLinkProjects = make(map[string]struct{}, len(projects))
-		for _, allowedProject := range projects {
-			allowedLinkProjects[allowedProject.Name] = struct{}{}
-		}
+	peerAllowed, err := h.linkPeerScopeFilter(ctx)
+	if err != nil {
+		return nil, ShowOutput{}, err
 	}
+	links := make([]LinkSummary, 0, len(response.Links))
 	for _, link := range response.Links {
 		peer, _ := linkPeerAndType(response.Issue.UID, link)
-		if allowedLinkProjects != nil {
-			if _, allowed := allowedLinkProjects[peer.Project]; !allowed {
-				continue
-			}
+		allowed, allowErr := peerAllowed(peer)
+		if allowErr != nil {
+			return nil, ShowOutput{}, allowErr
 		}
-		links = append(links, linkSummary(response.Issue.UID, link))
+		if allowed {
+			links = append(links, linkSummary(response.Issue.UID, link))
+		}
 	}
 	summary := h.summaryFromIssue(project, response.Issue)
 	metadata := response.Issue.Metadata
@@ -1257,13 +1251,15 @@ func linkPeerAndType(issueUID string, link generated.LinkOut) (generated.LinkPee
 	return peer, typeName
 }
 
-// scopedLinkChanges removes relationship-change peers outside the active
-// startup scope before the deltas reach the client. Live edit responses must
-// not retain archived allowlist members, and peer UIDs must resolve into an
-// active project authorized by immutable project identity.
-func (h toolHandlers) scopedLinkChanges(ctx context.Context, changes *generated.LinkChanges) (*generated.LinkChanges, error) {
-	if changes == nil || h.options.Scope.Mode() == ScopeAll {
-		return changes, nil
+// linkPeerScopeFilter returns a predicate reporting whether a relationship
+// peer may be published. Daemon-wide scope allows every peer. Otherwise the
+// peer's UID must resolve into an active project authorized by immutable
+// project identity; the peer's display project name is never consulted
+// because a concurrent rename can reuse an in-scope name. Lookups are cached
+// per predicate, so callers should build one per response.
+func (h toolHandlers) linkPeerScopeFilter(ctx context.Context) (func(generated.LinkPeer) (bool, error), error) {
+	if h.options.Scope.Mode() == ScopeAll {
+		return func(generated.LinkPeer) (bool, error) { return true, nil }, nil
 	}
 	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
 	if err != nil {
@@ -1274,7 +1270,7 @@ func (h toolHandlers) scopedLinkChanges(ctx context.Context, changes *generated.
 		activeProjectIDs[project.ID] = struct{}{}
 	}
 	resolved := make(map[string]bool)
-	allowed := func(peer generated.LinkPeer) (bool, error) {
+	return func(peer generated.LinkPeer) (bool, error) {
 		if cached, ok := resolved[peer.UID]; ok {
 			return cached, nil
 		}
@@ -1284,6 +1280,20 @@ func (h toolHandlers) scopedLinkChanges(ctx context.Context, changes *generated.
 		}
 		resolved[peer.UID] = inProject
 		return inProject, nil
+	}, nil
+}
+
+// scopedLinkChanges removes relationship-change peers outside the active
+// startup scope before the deltas reach the client. Live edit responses must
+// not retain archived allowlist members, and peer UIDs must resolve into an
+// active project authorized by immutable project identity.
+func (h toolHandlers) scopedLinkChanges(ctx context.Context, changes *generated.LinkChanges) (*generated.LinkChanges, error) {
+	if changes == nil || h.options.Scope.Mode() == ScopeAll {
+		return changes, nil
+	}
+	allowed, err := h.linkPeerScopeFilter(ctx)
+	if err != nil {
+		return nil, err
 	}
 	keep := func(peers []generated.LinkPeer) ([]generated.LinkPeer, error) {
 		kept := make([]generated.LinkPeer, 0, len(peers))
